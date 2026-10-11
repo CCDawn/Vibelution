@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="desk-en-title desk-en-desc">
+        <title id="desk-en-title">Vibelution capability overview</title>
+        <desc id="desk-en-desc">A local AI Agent workbench connects four capability groups: chat and coding, teams and research, knowledge and memory, and evaluation and evolution. Models, tools, Git, and runtime records are listed below.</desc>
+        <rect width="1200" height="540" fill="#f7f8fc"/>
+        <rect x="64" y="56" width="24" height="3" rx="1.5" fill="#5572e8"/>
+        <text x="100" y="68" fill="#30395f" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="650">Capability overview</text>
+        <path d="M364 174 H382 Q390 174 390 182 V228 Q390 236 398 236 H410" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M364 366 H382 Q390 366 390 358 V312 Q390 304 398 304 H410" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M790 236 H802 Q810 236 810 228 V182 Q810 174 818 174 H836" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M790 304 H802 Q810 304 810 312 V358 Q810 366 818 366 H836" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="64" y="112" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="153" width="5" height="42" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="169" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Chat &amp; coding</text>
+        <text x="112" y="196" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Chat · code · files</text>
+        <rect x="836" y="112" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="860" y="153" width="5" height="42" rx="2.5" fill="#2b9d98"/>
+        <text x="884" y="169" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Teams &amp; research</text>
+        <text x="884" y="196" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Agent collaboration · research</text>
+        <rect x="64" y="304" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="345" width="5" height="42" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="361" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Knowledge &amp; memory</text>
+        <text x="112" y="388" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Project knowledge · Agent memory</text>
+        <rect x="836" y="304" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="860" y="345" width="5" height="42" rx="2.5" fill="#5572e8"/>
+        <text x="884" y="361" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Evaluation &amp; evolution</text>
+        <text x="884" y="388" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Evaluation · review · improvement</text>
+        <rect x="410" y="200" width="380" height="140" rx="22" fill="#202951"/>
+        <circle cx="464" cy="270" r="29" fill="#344173"/>
+        <svg x="446" y="252" width="36" height="36" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M1.2 2.8h13.44L24 22.48 33.36 2.8H46.8L24 47.8Z M5.04 5.08 24 40.12 42.96 5.08 34.92 5.08 24 27.16 13.08 5.08Z"/>
+          <path fill="#ffffff" d="M9.12 8.32 14.68 8.32 24 27.16 33.32 8.32 38.88 8.32 24 34.12Z"/>
+        </svg>
+        <text x="510" y="278" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="650">Local AI Agent workbench</text>
+        <line x1="64" y1="440" x2="1136" y2="440" stroke="#dfe4ef" stroke-width="1"/>
+        <rect x="380" y="452" width="440" height="42" rx="21" fill="#edf0f8"/>
+        <text x="600" y="479" text-anchor="middle" fill="#3b456e" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="19" font-weight="550">Models · tools · Git · runtime records</text>
+      </svg>

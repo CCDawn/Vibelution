@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vibelution · Capability overview</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; color: #232b4d; background: #eef1f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; }
+    .frame { position: relative; width: min(100%, 1240px); margin: 0 auto; }
+    .language-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; }
+    .toolbar-title { margin: 0; color: #6c7593; font-size: 12px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
+    .language-switch { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid #dce2ef; border-radius: 999px; background: #fff; }
+    .language-switch label { padding: 6px 12px; border-radius: 999px; color: #69728e; font-size: 13px; cursor: pointer; }
+    #lang-zh:focus-visible ~ .toolbar label[for="lang-zh"], #lang-en:focus-visible ~ .toolbar label[for="lang-en"] { outline: 2px solid #5572e8; outline-offset: 2px; }
+    #lang-zh:checked ~ .toolbar label[for="lang-zh"], #lang-en:checked ~ .toolbar label[for="lang-en"] { color: #26315f; background: #eef1fb; font-weight: 650; }
+    .canvas { overflow: hidden; border: 1px solid #e0e5f0; border-radius: 18px; background: #f7f8fc; }
+    .canvas svg { display: block; width: 100%; height: auto; }
+    .canvas .mobile { display: none; }
+    #lang-en:checked ~ .canvas .zh, #lang-zh:checked ~ .canvas .en { display: none; }
+    @media (max-width: 620px) {
+      body { padding: 12px; }
+      .toolbar { margin-bottom: 8px; }
+      .toolbar-title { font-size: 10px; letter-spacing: .08em; }
+      .language-switch label { padding: 5px 9px; font-size: 12px; }
+      .canvas { border-radius: 12px; }
+      .canvas .desktop { display: none; }
+      .canvas .mobile { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <input class="language-input" id="lang-zh" type="radio" name="language" checked>
+    <input class="language-input" id="lang-en" type="radio" name="language">
+    <div class="toolbar">
+      <p class="toolbar-title">Vibelution · Product overview</p>
+      <div class="language-switch" role="group" aria-label="Language">
+        <label for="lang-zh">中文</label>
+        <label for="lang-en">English</label>
+      </div>
+    </div>
+    <div class="canvas">
+      <svg class="desktop zh" xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="desk-zh-title desk-zh-desc">
+        <title id="desk-zh-title">Vibelution 能力概览</title>
+        <desc id="desk-zh-desc">以本地 AI Agent 工作台为中心，连接对话与编码、团队与研究、知识与记忆、验证与进化四组能力；底部列出模型、工具、Git 与运行记录。</desc>
+        <rect width="1200" height="540" fill="#f7f8fc"/>
+        <rect x="64" y="56" width="24" height="3" rx="1.5" fill="#5572e8"/>
+        <text x="100" y="68" fill="#30395f" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="18" font-weight="650">能力概览</text>
+        <path d="M364 174 H382 Q390 174 390 182 V228 Q390 236 398 236 H410" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M364 366 H382 Q390 366 390 358 V312 Q390 304 398 304 H410" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M790 236 H802 Q810 236 810 228 V182 Q810 174 818 174 H836" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M790 304 H802 Q810 304 810 312 V358 Q810 366 818 366 H836" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="64" y="112" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="153" width="5" height="42" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="169" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="23" font-weight="650">对话与编码</text>
+        <text x="112" y="196" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="14.5">聊天 · 代码 · 文件</text>
+        <rect x="836" y="112" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="860" y="153" width="5" height="42" rx="2.5" fill="#2b9d98"/>
+        <text x="884" y="169" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="23" font-weight="650">团队与研究</text>
+        <text x="884" y="196" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="14.5">Agent 协作 · 研究任务</text>
+        <rect x="64" y="304" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="345" width="5" height="42" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="361" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="23" font-weight="650">知识与记忆</text>
+        <text x="112" y="388" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="14.5">项目知识 · Agent 记忆</text>
+        <rect x="836" y="304" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="860" y="345" width="5" height="42" rx="2.5" fill="#5572e8"/>
+        <text x="884" y="361" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="23" font-weight="650">验证与进化</text>
+        <text x="884" y="388" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="14.5">评估 · 复盘 · 改进</text>
+        <rect x="410" y="200" width="380" height="140" rx="22" fill="#202951"/>
+        <circle cx="464" cy="270" r="29" fill="#344173"/>
+        <svg x="446" y="252" width="36" height="36" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M1.2 2.8h13.44L24 22.48 33.36 2.8H46.8L24 47.8Z M5.04 5.08 24 40.12 42.96 5.08 34.92 5.08 24 27.16 13.08 5.08Z"/>
+          <path fill="#ffffff" d="M9.12 8.32 14.68 8.32 24 27.16 33.32 8.32 38.88 8.32 24 34.12Z"/>
+        </svg>
+        <text x="510" y="278" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="650">本地 AI Agent 工作台</text>
+        <line x1="64" y1="440" x2="1136" y2="440" stroke="#dfe4ef" stroke-width="1"/>
+        <rect x="380" y="452" width="440" height="42" rx="21" fill="#edf0f8"/>
+        <text x="600" y="479" text-anchor="middle" fill="#3b456e" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="19" font-weight="550">模型 · 工具 · Git · 运行记录</text>
+      </svg>
+      <svg class="desktop en" xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="desk-en-title desk-en-desc">
+        <title id="desk-en-title">Vibelution capability overview</title>
+        <desc id="desk-en-desc">A local AI Agent workbench connects four capability groups: chat and coding, teams and research, knowledge and memory, and evaluation and evolution. Models, tools, Git, and runtime records are listed below.</desc>
+        <rect width="1200" height="540" fill="#f7f8fc"/>
+        <rect x="64" y="56" width="24" height="3" rx="1.5" fill="#5572e8"/>
+        <text x="100" y="68" fill="#30395f" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="650">Capability overview</text>
+        <path d="M364 174 H382 Q390 174 390 182 V228 Q390 236 398 236 H410" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M364 366 H382 Q390 366 390 358 V312 Q390 304 398 304 H410" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M790 236 H802 Q810 236 810 228 V182 Q810 174 818 174 H836" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M790 304 H802 Q810 304 810 312 V358 Q810 366 818 366 H836" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="64" y="112" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="153" width="5" height="42" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="169" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Chat &amp; coding</text>
+        <text x="112" y="196" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Chat · code · files</text>
+        <rect x="836" y="112" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="860" y="153" width="5" height="42" rx="2.5" fill="#2b9d98"/>
+        <text x="884" y="169" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Teams &amp; research</text>
+        <text x="884" y="196" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Agent collaboration · research</text>
+        <rect x="64" y="304" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="345" width="5" height="42" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="361" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Knowledge &amp; memory</text>
+        <text x="112" y="388" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Project knowledge · Agent memory</text>
+        <rect x="836" y="304" width="300" height="124" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="860" y="345" width="5" height="42" rx="2.5" fill="#5572e8"/>
+        <text x="884" y="361" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Evaluation &amp; evolution</text>
+        <text x="884" y="388" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14.5">Evaluation · review · improvement</text>
+        <rect x="410" y="200" width="380" height="140" rx="22" fill="#202951"/>
+        <circle cx="464" cy="270" r="29" fill="#344173"/>
+        <svg x="446" y="252" width="36" height="36" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M1.2 2.8h13.44L24 22.48 33.36 2.8H46.8L24 47.8Z M5.04 5.08 24 40.12 42.96 5.08 34.92 5.08 24 27.16 13.08 5.08Z"/>
+          <path fill="#ffffff" d="M9.12 8.32 14.68 8.32 24 27.16 33.32 8.32 38.88 8.32 24 34.12Z"/>
+        </svg>
+        <text x="510" y="278" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="650">Local AI Agent workbench</text>
+        <line x1="64" y1="440" x2="1136" y2="440" stroke="#dfe4ef" stroke-width="1"/>
+        <rect x="380" y="452" width="440" height="42" rx="21" fill="#edf0f8"/>
+        <text x="600" y="479" text-anchor="middle" fill="#3b456e" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="19" font-weight="550">Models · tools · Git · runtime records</text>
+      </svg>
+      <svg class="mobile zh" xmlns="http://www.w3.org/2000/svg" width="480" height="620" viewBox="0 0 480 620" role="img" aria-labelledby="mob-zh-title mob-zh-desc">
+        <title id="mob-zh-title">Vibelution 能力概览（移动版）</title>
+        <desc id="mob-zh-desc">本地 AI Agent 工作台纵向连接对话与编码、团队与研究、知识与记忆、验证与进化四组能力；底部列出模型、工具、Git 与运行记录。</desc>
+        <rect width="480" height="620" fill="#f7f8fc"/>
+        <text x="40" y="56" fill="#30395f" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="17" font-weight="650">能力概览</text>
+        <path d="M240 168 V176 Q240 184 232 184 H52 Q44 184 44 192 V480" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="44" y1="228" x2="64" y2="228" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="44" y1="312" x2="64" y2="312" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="44" y1="396" x2="64" y2="396" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="44" y1="480" x2="64" y2="480" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <rect x="40" y="80" width="400" height="88" rx="18" fill="#202951"/>
+        <circle cx="80" cy="124" r="20" fill="#344173"/>
+        <svg x="68" y="112" width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M1.2 2.8h13.44L24 22.48 33.36 2.8H46.8L24 47.8Z M5.04 5.08 24 40.12 42.96 5.08 34.92 5.08 24 27.16 13.08 5.08Z"/>
+          <path fill="#ffffff" d="M9.12 8.32 14.68 8.32 24 27.16 33.32 8.32 38.88 8.32 24 34.12Z"/>
+        </svg>
+        <text x="112" y="132" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="21" font-weight="650">本地 AI Agent 工作台</text>
+        <rect x="64" y="192" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="210" width="5" height="36" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="224" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="650">对话与编码</text>
+        <text x="112" y="246" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13.5">聊天 · 代码 · 文件</text>
+        <rect x="64" y="276" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="294" width="5" height="36" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="308" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="650">团队与研究</text>
+        <text x="112" y="330" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13.5">Agent 协作 · 研究任务</text>
+        <rect x="64" y="360" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="378" width="5" height="36" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="392" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="650">知识与记忆</text>
+        <text x="112" y="414" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13.5">项目知识 · Agent 记忆</text>
+        <rect x="64" y="444" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="462" width="5" height="36" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="476" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="650">验证与进化</text>
+        <text x="112" y="498" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="13.5">评估 · 复盘 · 改进</text>
+        <rect x="40" y="536" width="400" height="44" rx="22" fill="#edf0f8"/>
+        <text x="240" y="564" text-anchor="middle" fill="#3b456e" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="16.5" font-weight="550">模型 · 工具 · Git · 运行记录</text>
+      </svg>
+      <svg class="mobile en" xmlns="http://www.w3.org/2000/svg" width="480" height="620" viewBox="0 0 480 620" role="img" aria-labelledby="mob-en-title mob-en-desc">
+        <title id="mob-en-title">Vibelution capability overview (mobile)</title>
+        <desc id="mob-en-desc">A local AI Agent workbench connects chat and coding, teams and research, knowledge and memory, and evaluation and evolution. Models, tools, Git, and runtime records are listed below.</desc>
+        <rect width="480" height="620" fill="#f7f8fc"/>
+        <text x="40" y="56" fill="#30395f" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="17" font-weight="650">Capability overview</text>
+        <path d="M240 168 V176 Q240 184 232 184 H52 Q44 184 44 192 V480" fill="none" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="44" y1="228" x2="64" y2="228" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="44" y1="312" x2="64" y2="312" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="44" y1="396" x2="64" y2="396" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="44" y1="480" x2="64" y2="480" stroke="#aab4ce" stroke-width="2.2" stroke-linecap="round"/>
+        <rect x="40" y="80" width="400" height="88" rx="18" fill="#202951"/>
+        <circle cx="80" cy="124" r="20" fill="#344173"/>
+        <svg x="68" y="112" width="24" height="24" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#ffffff" fill-rule="evenodd" d="M1.2 2.8h13.44L24 22.48 33.36 2.8H46.8L24 47.8Z M5.04 5.08 24 40.12 42.96 5.08 34.92 5.08 24 27.16 13.08 5.08Z"/>
+          <path fill="#ffffff" d="M9.12 8.32 14.68 8.32 24 27.16 33.32 8.32 38.88 8.32 24 34.12Z"/>
+        </svg>
+        <text x="112" y="132" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="650">Local AI Agent workbench</text>
+        <rect x="64" y="192" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="210" width="5" height="36" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="224" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Chat &amp; coding</text>
+        <text x="112" y="246" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5">Chat · code · files</text>
+        <rect x="64" y="276" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="294" width="5" height="36" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="308" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Teams &amp; research</text>
+        <text x="112" y="330" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5">Agent collaboration · research</text>
+        <rect x="64" y="360" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="378" width="5" height="36" rx="2.5" fill="#2b9d98"/>
+        <text x="112" y="392" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Knowledge &amp; memory</text>
+        <text x="112" y="414" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5">Project knowledge · Agent memory</text>
+        <rect x="64" y="444" width="376" height="72" rx="14" fill="#ffffff" stroke="#e0e5f0" stroke-width="1.4"/>
+        <rect x="88" y="462" width="5" height="36" rx="2.5" fill="#5572e8"/>
+        <text x="112" y="476" fill="#252e53" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="650">Evaluation &amp; evolution</text>
+        <text x="112" y="498" fill="#6a7390" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5">Evaluation · review · improvement</text>
+        <rect x="40" y="536" width="400" height="44" rx="22" fill="#edf0f8"/>
+        <text x="240" y="564" text-anchor="middle" fill="#3b456e" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16.5" font-weight="550">Models · tools · Git · runtime records</text>
+      </svg>
+    </div>
+  </main>
+</body>
+</html>

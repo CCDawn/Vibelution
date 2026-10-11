@@ -50,3 +50,56 @@ README 使用可点击动图和相对 MP4 链接。GitHub 的 Markdown 不依赖
 | 虚拟人状态、记忆与主动消息 | [虚拟人插件](../../../core/agent_plugins/virtual_human_life/README.md) |
 
 章节变化：取消重复能力表与长目录；快速开始移到演示后；五项能力各用图像、收益句与少量要点；配套工具、贡献、相关项目合并为页尾入口。中文为主版本，英文保持相同顺序与边界说明。
+
+## 2026-10-11 工作台导览
+
+首页定位更新为「本地 AI Agent 工作台」，先展示完整能力与单 Agent 上手，再介绍记忆、团队研究与进化。历史科研演示移入可展开案例；旧配置图退出首页，文件继续保留以兼容已有引用。中英文保持相同章节、能力与边界。
+
+| 素材 | 性质、来源与用途 |
+| --- | --- |
+| `product-overview.zh.svg` / `product-overview.en.svg` | 可编辑能力示意，四组主能力与模型、工具、Git、运行记录；复用项目 V 图标路径，无外部图像或字体依赖。不是产品窗口。 |
+| `product-overview.mobile.zh.svg` / `product-overview.mobile.en.svg` | 手机独立纵向排版，避免缩小桌面横图。与桌面图文字、颜色一致。 |
+| [product-overview.html](product-overview.html) | 四份 SVG 的内联可编辑预览，按语言和视口切换；独立 SVG 是 GitHub 使用的素材。 |
+| `conversation.zh.png` / `conversation.en.png` | 当前 `ConversationView` 局部组件的隔离截图，使用固定项目审查示例。外框是文档取景壳，不是完整 Chat 路由；未调用模型，未读取真实会话。 |
+| `conversation.mobile.zh.png` / `conversation.mobile.en.png` | 同一生产组件在 390px 视口中的截图，保留问题、回答和输入区。 |
+| `memory.zh.png` / `memory.en.png` | 当前 `MemoryAgentMemoryPanel` 局部组件的隔离截图，展示固定 `review-notes.json` 公开笔记；不是私人 Agent 记忆。 |
+| `memory.mobile.zh.png` / `memory.mobile.en.png` | 同一生产组件在 390px 视口中点击记忆文件后显示正文，使用正式阅读状态。 |
+
+截图组件版本取自本轮同步的本地 `main` 基线 `0b2d09edc5eec468b1f76cbfaa15edb864ed722f`；日期为 2026-10-11。截图只证明这些生产组件如何显示示例数据，不证明模型执行、检索命中、团队任务完成或已发布的完整窗口。文件快照与对话使用证据仍遵循当前产品边界。
+
+### 再生成界面图
+
+可编辑入口为 [capture.html](capture.html)、[capture.tsx](capture.tsx) 和 [capture.css](capture.css)。参数 `lang=zh|en`、`view=conversation|memory`。外框只负责取景排版，正文直接使用生产组件、VUI 与生产 tokens；请求默认返回 403。预览配置清空 backend proxy，并阻断 `/api/`。
+
+使用已有前端依赖，从仓库根目录启动独立取景服务：
+
+```powershell
+node web/node_modules/vite/bin/vite.js --config docs/assets/readme/capture.vite.config.mjs --configLoader native
+```
+
+打开 `http://127.0.0.1:5188/docs/assets/readme/capture.html`。该端口只服务隔离文档素材，发生冲突时退出；无需启动 Launcher 或后端。停止预览用 `Ctrl+C`。Vite 缓存写入系统临时目录的 `vibelution-readme-preview`，不改工作树。
+
+截图脚本 [capture.py](capture.py) 需要可选的 Python Playwright 与 Chromium。已有工具链可直接使用；若需准备，在开发虚拟环境执行 `python -m pip install playwright` 与 `python -m playwright install chromium`。然后：
+
+```powershell
+python docs/assets/readme/capture.py
+```
+
+可用 `--chromium <绝对路径>` 指定已安装的 Chromium。脚本固定浅色、Asia/Shanghai 时区与 2 倍像素，会话桌面 960 × 740、记忆桌面 960 × 660，手机会话 390 × 820、记忆 390 × 780；仅允许 `127.0.0.1:5188` 隔离预览，另行阻断 `/api/`，发现组件错误、水平溢出或对话内容无法完整放入画面时停止。默认重新生成上述八张 PNG，可用 `--view conversation|memory` 只更新一组；请在文档任务分支中运行。
+
+### 新增内容的事实来源
+
+| 首页内容 | 当前来源 |
+| --- | --- |
+| 单 Agent 上手、创建 Agent、开始会话、成功与排错 | [第一次对话](../../guides/first-conversation.md) 与其中列出的源码；[English](../../guides/first-conversation.en.md) |
+| 会话、编码、工作区文件与预览 | [Chat / Coding](../../../web/src/routes/chat/README.md)、[file_service.py](../../../core/web/services/file_service.py)、[ConversationView](../../../web/src/components/conversation/ConversationView.tsx) |
+| Agent、Skills 与 MCP 工具 | [Agent directory](../../../core/web/services/agent_directory/README.md)、[工具授权](../../agents/tool-authorization-entrypoints.md)、[MCP gateway](../../agents/mcp-managed-agent-gateway.md) |
+| 私有记忆与知识入口 | [MemoryAgentMemoryPanel](../../../web/src/routes/MemoryAgentMemoryPanel.tsx)、[memory_rag_services](../../../core/web/services/memory_rag_services.md)、[team_knowledge](../../../core/web/services/team_knowledge/README.md) |
+| Git 状态、差异与提交 | [GitRoute](../../../web/src/routes/GitRoute.tsx)、[Git 配置](../../ops/config/08-git-ui-user.md) |
+| 模型、用量、日志和诊断 | [配置索引](../../ops/config/INDEX.md)、[本地模型监控](../../ops/local-model-monitor.md)、[UsageRoute](../../../web/src/routes/UsageRoute.tsx)、[RuntimeScenesPane](../../../web/src/routes/RuntimeScenesPane.tsx) |
+| 金融专项扩展及部署边界 | [financial_research](../../../core/web/services/financial_research/README.md)、[财报服务接入](../../ops/config/financial-report-agent.md) |
+| 平台 Node.js 要求 | [Vite 锁定版本的 engines](../../../web/package-lock.json) 与 [Windows](../../guides/install-windows.md) / [macOS](../../guides/install-macos.md) / [Linux](../../guides/install-linux.md) 安装指南；文档推荐 22.12+，安装器旧版检查未在本轮改动 |
+
+### 本轮验证范围
+
+已用 GitHub Markdown API 的实际清洗结果核对 `picture/source` 保留情况，并在本地隔离浏览器检查桌面与 390px、浅色与深色的 README 排版。图片、内部链接及中英文能力对应分别检查。此验证不等于线上发布，也不等于本轮安装、真实模型对话或产品运行验收。

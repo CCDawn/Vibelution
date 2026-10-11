@@ -1,28 +1,43 @@
 <h1 align="center">Vibelution</h1>
 
-<p align="center"><strong>Build AI teams that communicate, collaborate, and evolve.</strong></p>
-<p align="center">Organize research in a local workbench, with traceable sources, discussions, and outputs.</p>
+<p align="center"><strong>Your local AI Agent workbench</strong></p>
+<p align="center">Start with a conversation. Bring coding, team research, knowledge, and continuous improvement together.</p>
 
 <p align="center">
   <a href="README.md">中文</a> · English<br>
-  <a href="#quick-start">Quick start</a> · <a href="docs/assets/readme/challenge-cup-demo.mp4">Watch demo</a> · <a href="docs/README.md">Documentation</a>
+  <a href="#quick-start">Quick start</a> · <a href="docs/guides/first-conversation.en.md">First conversation</a> · <a href="#what-you-can-do">Feature tour</a>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/CCDawn/Vibelution?style=flat-square" alt="MIT License"></a>
   <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows desktop workbench"></a>
-  <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-f2b36d?style=flat-square" alt="Feedback welcome"></a>
+  <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-2b9d98?style=flat-square" alt="Feedback welcome"></a>
 </p>
 
-[![Watch the research team demo: workflow canvas, discussions, and knowledge graph](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.en.svg">
+  <img src="docs/assets/readme/product-overview.en.svg" alt="Vibelution overview: a local workbench connects chat and coding, teams and research, knowledge and memory, evaluation and evolution, with models, tools, Git, and runtime records." width="1200">
+</picture>
 
-<p align="center"><a href="docs/assets/readme/challenge-cup-demo.mp4"><strong>▶ Full demo · 2m 37s · 1080p</strong></a> · <a href="docs/assets/readme/challenge-cup-demo.mp4?raw=true">Download MP4</a></p>
+*Capability diagram. Conversation and memory images use current production components with public example data; the research video and character lobby are labeled as historical material. [Media sources and reproduction](docs/assets/readme/README.md)*
 
-*Historical research-data replay recorded on 2026-09-08, with Chinese narration and subtitles. It illustrates the workflow, not live execution or experimental findings. [Media sources](docs/assets/readme/README.md)*
+## What you can do
+
+| Capability | What it helps you do |
+| --- | --- |
+| **Chat and coding** | Start tasks with one Agent, manage sessions, inspect answers and tool activity, browse workspace files, preview outputs, and use a terminal. |
+| **Agents and tools** | Configure identities, models, prompts, and permissions independently; manage Skills and MCP integration. |
+| **Teams and research** | Assign roles, use group chat and message handoffs, and connect sources, discussions, human checkpoints, and outputs on a research canvas. |
+| **Knowledge and memory** | Read each Agent's private memory, organize project and team material, and retrieve context for later work. |
+| **Evaluation and evolution** | Inspect and improve against a goal, or evaluate a candidate against a baseline; review validation and rollback records. |
+| **Git and versions** | Inspect repository status and diffs, manage commits, and track project changes in the workbench. |
+| **Models and runtime** | Configure models and usage, monitor local models, and inspect logs and runtime diagnostics. |
+
+The workbench runs on your machine. Models can use local or cloud services according to your configuration; cloud requests go to the chosen provider and may incur charges. Tool use, cross-Agent communication, and evolution follow permissions and environment constraints.
 
 ## Quick start
 
-The primary experience is a **local Windows desktop app**. Install **Python 3.11+ (3.12 recommended), Node.js 22.12+, and Git**, then run in PowerShell:
+Start with the **Windows desktop workbench**. Install **Python 3.11+ (3.12 recommended), Node.js 22.12+, and Git**, then run in PowerShell:
 
 ```powershell
 git clone https://github.com/CCDawn/Vibelution.git
@@ -30,92 +45,92 @@ cd Vibelution
 powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 ```
 
-Open **Vibelution Launcher** from your desktop and configure a provider and API key using the [model configuration guide](docs/ops/config/INDEX.md). Then: **create Agents → configure models and tools → assign team roles → submit a research question**.
+1. Open **Vibelution Launcher** from your desktop. Follow the [model configuration guide](docs/ops/config/INDEX.md) to set up a provider, model, and credential reference. The default config file is `%USERPROFILE%\Documents\Vibelution\config\config.toml`.
+2. Open `Chat`, create or select one Agent, and start a session.
+3. Send a text-only question. Once you see your message and the Agent's reply, try files, tools, or team tasks.
 
-[Windows installation](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)
+**[Follow the first-conversation guide →](docs/guides/first-conversation.en.md)**
 
-*On macOS / Linux, follow the platform guide to launch the browser workbench from a terminal. The workbench runs locally; cloud-model requests go to your chosen provider and may incur charges. Configuration and keys live outside the repository.*
+[Windows installation and troubleshooting](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md) · [Deploy with an AI Agent](docs/guides/agent-deploy-runbook.md)
 
-## 01 · Give each Agent a specialty
+On macOS / Linux, follow the platform guide to launch the browser workbench from a terminal. Installation currently requires the runtimes above; a portable package is still planned.
 
-**Configure different roles, models, and tools for research, analysis, coding, and review.**
+## From one task to ongoing collaboration
 
-![Historical Agent configuration interface showing identity, model, and runtime settings](docs/assets/readme/web-workbench-chat.png)
+### Read, discuss, and code in a conversation
 
-*Historical configuration example; the current interface may differ. Product captures use Chinese UI text.*
+Let one Agent understand the problem, inspect relevant files, propose an approach, and carry out authorized work. Answers, tool activity, and workspace outputs are available in the same workbench.
 
-- Manage identity, prompts, models, tool permissions, and personal memory independently.
-- Work with one Agent or assign members to reusable team roles.
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/conversation.mobile.en.png">
+  <img src="docs/assets/readme/conversation.en.png" alt="Isolated example of the current production ConversationView: a project-review question, structured answer, and message composer." width="960">
+</picture>
 
-[Agent management](core/web/services/agent_directory/README.md) · [Model configuration](docs/ops/config/INDEX.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md)
+*Production conversation component captured on 2026-10-11 with fixed public example data; no model was called. [First conversation](docs/guides/first-conversation.en.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md) · [MCP integration](docs/agents/mcp-managed-agent-gateway.md)*
 
-## 02 · Pass information between Agents
+### Track project changes in the workbench
 
-**Send sources, questions, and review feedback to another Agent’s specific session.**
+Open Git from the global navigation, inspect changed files and diffs, then choose the scope of your commit. Worktrees, branch status, and recent commits share one page so you can check what an Agent changed.
 
-![Communication diagram: send a message, deliver to a specific session, request processing, and inspect execution status; delivery does not mean completion](docs/assets/readme/agent-handoff.en.png)
+[Git configuration](docs/ops/config/08-git-ui-user.md)
 
-*Conceptual diagram, not a runtime capture. Cross-Agent communication follows permissions and team policies.*
+### Keep sources and experience for the next task
 
-- Exchange information through member messages, team broadcasts, and group chat.
-- Track delivery, wake requests, and execution separately to follow each handoff.
+Agents have separate private memory, alongside dedicated project-knowledge and team-material surfaces. Read file content, retrieve material, and check its sources to spend less time repeating context.
 
-[Communication model](docs/adr/0002-agent-collaboration-session-addressing.md) · [Session workbench](web/src/routes/chat/README.md)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/memory.mobile.en.png">
+  <img src="docs/assets/readme/memory.en.png" alt="Isolated example of the current production memory reader showing project-review notes." width="960">
+</picture>
 
-## 03 · Make the research process traceable
+*Production memory component captured on 2026-10-11 with public example notes. Stored does not mean used in a conversation; a current file snapshot is not a full revision history. [Memory and retrieval](core/web/services/memory_rag_services.md) · [Team knowledge](core/web/services/team_knowledge/README.md)*
 
-**See roles, task dependencies, human checkpoints, and intermediate outputs on one research canvas.**
+### Move research and review forward as a team
 
-![Historical research-canvas replay showing task dependencies and source collection](docs/assets/readme/research-workflow.png)
-
-*Historical replay; the lower portion enlarges the source-collection stage.*
-
-- **Collect and organize:** inspect papers, web pages, and code; distill material with source references.
-- **Discuss and review:** propose hypotheses, record feedback and revisions, and hand work to the next stage.
-- **Experiment and retain:** manage datasets, metrics, plan versions, run records, and team knowledge.
+Assign members to research, analysis, coding, and review. Exchange material through group chat, member messages, and team broadcasts. The research canvas shows dependencies, human checkpoints, and intermediate outputs; follow delivery and execution separately during handoffs.
 
 <details>
-<summary><strong>Explore the research knowledge graph</strong></summary>
+<summary><strong>Explore a research case: canvas, team discussion, and knowledge graph</strong></summary>
 
-[![Knowledge graph from the historical replay: material, relationships, and sources](docs/assets/readme/challenge-cup-graph.png)](docs/assets/readme/challenge-cup-graph.png)
+[![Historical research replay: workflow canvas, team discussion, and knowledge graph](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
 
-Click the image for the original. The graph organizes and traces material; scientific conclusions still require original sources and experiments. Execution depends on adapters, data, and environment. Passing a preliminary check does not validate an experiment.
+[▶ Full demo · 2m 37s · 1080p](docs/assets/readme/challenge-cup-demo.mp4) · [Download MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true)
+
+Historical research-data replay recorded on 2026-09-08, with Chinese narration and subtitles. It illustrates the workflow. Experiment execution depends on adapters, data, and environment; scientific conclusions require original sources and experimental results.
+
+[Research canvas original](docs/assets/readme/research-workflow.png) · [Knowledge graph original](docs/assets/readme/challenge-cup-graph.png)
 
 </details>
 
-[Research workflow](core/web/services/team_workflow/README.md) · [Team knowledge](core/web/services/team_knowledge/README.md) · [Memory and retrieval](core/web/services/memory_rag_services.md)
+[Research workflow](core/web/services/team_workflow/README.md) · [Communication model](docs/adr/0002-agent-collaboration-session-addressing.md)
 
-## 04 · Let validation guide improvement
+### Let validation guide improvement
 
-**Inspect and revise against a goal, or compare a candidate against an evaluated baseline.**
+Self-evolution inspects, revises, and validates against a goal. Supervised evolution evaluates a candidate against a baseline before an integration decision. Inspect changes, evaluations, and rollback records to preserve the basis for each decision.
 
-![Evolution diagram: goal-driven inspection, revision, and validation; supervised evaluation compares baseline and candidate before an integration decision](docs/assets/readme/evolution-paths.en.png)
+<details>
+<summary><strong>Explore the two evolution workflows</strong></summary>
 
-*Conceptual diagram, not an improvement report. A proposal or candidate does not establish a gain. Continuous self-evolution requires user approval and stopping conditions.*
+![Conceptual self-evolution and supervised-evolution workflows](docs/assets/readme/evolution-paths.en.png)
 
-- Inspect changes, validation evidence, audit trails, and rollback records.
-- Manage evaluation datasets and review candidates; use isolated validation before deciding whether to integrate.
+Conceptual diagram. A proposal or candidate does not establish a gain; continuous self-evolution requires user approval and stopping conditions.
+
+</details>
 
 [Evolution modes](core/web/services/evolution_services.md) · [Evolution configuration](docs/ops/config/06-agent-evolution.md)
 
-## 05 · Build continuity with virtual characters
+## Specialized extensions
 
-**Give an Agent a character identity whose schedule, mood, and memories carry into future conversations.**
+- **Financial research:** dedicated modules for market and report research, preferences, backtesting, and more. [Financial research](core/web/services/financial_research/README.md) · [Report-service integration](docs/ops/config/financial-report-agent.md). External services require separate deployment and validation; backtests are for historical research.
+- **Virtual characters and desktop companions:** configure identities, schedules, moods, and long-term memory for Agents with the plugin explicitly enabled. Life and conversation continuity are still being refined. [Virtual-life plugin](core/agent_plugins/virtual_human_life/README.md) · [Historical character-lobby capture](docs/assets/readme/companions.png) · [Desktop companion idle animation](docs/assets/readme/desktop-pet.gif)
 
-![Character lobby showing identities, life states, and schedules](docs/assets/readme/companions.png)
+## Documentation and participation
 
-*Lobby captured on 2026-09-08. Life and conversation continuity are still being refined; these capabilities apply only to Agents with the plugin explicitly enabled.*
+[Model and usage configuration](docs/ops/config/INDEX.md) · [Git configuration](docs/ops/config/08-git-ui-user.md) · [Local-model monitoring](docs/ops/local-model-monitor.md) · [Changelog](CHANGELOG.md)
 
-- Manage schedules, activities, goals, habits, diaries, and long-term memory.
-- Receive proactive messages based on character state; desktop companions offer session access and status cues.
+**Developer references:** [Contributing](CONTRIBUTING.md) · [Source and documentation map](docs/README.md) · [Tool implementation index](tools/README.md) · [Testing](tests/README.md) · [Security](SECURITY.md)
 
-[Virtual-life plugin](core/agent_plugins/virtual_human_life/README.md) · [Desktop companion idle animation](docs/assets/readme/desktop-pet.gif)
-
-## Explore further
-
-[Model and usage configuration](docs/ops/config/INDEX.md) · [Files, terminal, and tools](tools/README.md) · [MCP integration](docs/agents/mcp-managed-agent-gateway.md) · [Changelog](CHANGELOG.md)
-
-Report issues through [GitHub Issues](https://github.com/CCDawn/Vibelution/issues), or start with the [contributing guide](CONTRIBUTING.md). [Documentation map](docs/README.md) · [Testing](tests/README.md) · [Security](SECURITY.md)
+Report problems or suggest improvements through [GitHub Issues](https://github.com/CCDawn/Vibelution/issues). Include your platform, reproduction steps, and expected behavior to help locate the issue.
 
 **Related projects:** [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 
