@@ -34,6 +34,42 @@ afterEach(async () => {
 });
 
 describe("FinanceStockOverview cached refresh failure", () => {
+  it("retains chart preferences through period loading and retry while resetting the old viewport", async () => {
+    node = document.createElement("div");
+    document.body.appendChild(node);
+    root = createRoot(node);
+    const refetch = vi.fn();
+    const changePeriod = vi.fn();
+    const renderPanel = async (data: StockSnapshot | undefined, pending = false, error?: Error) => {
+      const query = { data, isPending: pending, isError: Boolean(error), error, refetch } as unknown as UseQueryResult<StockSnapshot, Error>;
+      await act(async () => root?.render(<FinanceMarketPanel query={query} period={data?.period ?? "week"} onPeriodChange={changePeriod} zh />));
+    };
+    const selectTab = async (label: string) => {
+      const target = [...node.querySelectorAll('[role="tab"]')].find(item => item.textContent === label)!;
+      await act(async () => target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    };
+    await renderPanel(snapshot);
+    await selectTab("RSI");
+    await selectTab("30 根");
+    await act(async () => node.querySelector<HTMLButtonElement>('button[aria-label="查看更早 K 线"]')!.click());
+    await selectTab("周 K");
+    expect(changePeriod).toHaveBeenCalledWith("week");
+    await renderPanel(undefined, true);
+    expect(node.querySelector('svg[role="img"]')).toBeNull();
+    const weekly: StockSnapshot = { ...snapshot, period: "week", candles: snapshot.candles.map((candle, index) => ({ ...candle, date: `week-${index + 1}` })) };
+    await renderPanel(weekly);
+    expect(node.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("周 K");
+    expect([...node.querySelectorAll('[role="tab"][aria-selected="true"]')].map(item => item.textContent)).toEqual(["周 K", "RSI", "30 根"]);
+    expect(node.querySelector('svg[role="img"]')?.textContent).toContain("week-11");
+    expect(node.querySelector('button[aria-label="查看较新 K 线"]')?.hasAttribute("disabled")).toBe(true);
+    await renderPanel(undefined, false, new Error("temporary chart failure"));
+    expect(node.textContent).toContain("行情加载失败");
+    await act(async () => [...node.querySelectorAll("button")].find(button => button.textContent === "重试")!.click());
+    expect(refetch).toHaveBeenCalledOnce();
+    await renderPanel(weekly);
+    expect([...node.querySelectorAll('[role="tab"][aria-selected="true"]')].map(item => item.textContent)).toEqual(["周 K", "RSI", "30 根"]);
+  });
+
   it("keeps compact report quotes and provenance without losing refresh or follow actions", async () => {
     const refetch = vi.fn().mockResolvedValue({});
     const follow = vi.fn();

@@ -8,10 +8,13 @@ import { financeChartIndicators } from "./financeChartIndicators";
 import { candleVolume, currencyName } from "./financeMarketDisplay";
 
 type Indicator = "ma" | "boll" | "macd" | "rsi";
+export type FinanceChartView = { indicator: Indicator; range: "30" | "60" | "all" };
 
-export function FinanceStockChart({ candles, period, onPeriodChange, zh, currency, adjustment = "qfq" }: { candles: StockCandle[]; period: StockPeriod; onPeriodChange: (period: StockPeriod) => void; zh: boolean; currency?: string | null; adjustment?: string }) {
+export function FinanceStockChart({ candles, period, onPeriodChange, zh, currency, adjustment = "qfq", view, onViewChange }: { candles: StockCandle[]; period: StockPeriod; onPeriodChange: (period: StockPeriod) => void; zh: boolean; currency?: string | null; adjustment?: string; view?: FinanceChartView; onViewChange?: (view: FinanceChartView) => void }) {
   const [hover, setHover] = useState<number | null>(null);
-  const [indicator, setIndicator] = useState<Indicator>("ma"), [range, setRange] = useState("all");
+  const [localView, setLocalView] = useState<FinanceChartView>({ indicator: "ma", range: "all" });
+  const { indicator, range } = view ?? localView;
+  const setView = onViewChange ?? setLocalView;
   const [offset, setOffset] = useState(0), [announcement, setAnnouncement] = useState("");
   const readoutId = useId(), drag = useRef<{ x: number; offset: number } | null>(null);
   useEffect(() => { setHover(null); setAnnouncement(""); }, [candles, range, offset]);
@@ -53,8 +56,8 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh, currenc
       <VTabs value={period} onValueChange={(value) => onPeriodChange(value as StockPeriod)} aria-label={zh ? "K 线周期" : "Chart period"} items={[{ id: "day", label: zh ? "日 K" : "Daily" }, { id: "week", label: zh ? "周 K" : "Weekly" }, { id: "month", label: zh ? "月 K" : "Monthly" }]} />
     </div>
     <div className={styles.controls}>
-      <VTabs value={indicator} onValueChange={(value) => setIndicator(value as Indicator)} aria-label={zh ? "技术指标" : "Indicators"} items={[{ id: "ma", label: "MA" }, { id: "boll", label: "BOLL" }, { id: "macd", label: "MACD" }, { id: "rsi", label: "RSI" }]} />
-      <div className={styles.rangeControls}><VTabs value={range} onValueChange={(value) => { setRange(value); setOffset(0); }} aria-label={zh ? "显示范围" : "Visible range"} items={[{ id: "30", label: zh ? "30 根" : "30 bars" }, { id: "60", label: zh ? "60 根" : "60 bars" }, { id: "all", label: zh ? "全部" : "All" }]} /><VIconButton label={zh ? "查看更早 K 线" : "Earlier candles"} icon={<ChevronLeft size={14} />} isDisabled={!maxOffset || effectiveOffset === maxOffset} onPress={() => move(Math.max(1, Math.round(size / 3)))} /><VIconButton label={zh ? "查看较新 K 线" : "Newer candles"} icon={<ChevronRight size={14} />} isDisabled={effectiveOffset === 0} onPress={() => move(-Math.max(1, Math.round(size / 3)))} /></div>
+      <VTabs value={indicator} onValueChange={(value) => setView({ indicator: value as Indicator, range })} aria-label={zh ? "技术指标" : "Indicators"} items={[{ id: "ma", label: "MA" }, { id: "boll", label: "BOLL" }, { id: "macd", label: "MACD" }, { id: "rsi", label: "RSI" }]} />
+      <div className={styles.rangeControls}><VTabs value={range} onValueChange={(value) => { setView({ indicator, range: value as FinanceChartView["range"] }); setOffset(0); }} aria-label={zh ? "显示范围" : "Visible range"} items={[{ id: "30", label: zh ? "30 根" : "30 bars" }, { id: "60", label: zh ? "60 根" : "60 bars" }, { id: "all", label: zh ? "全部" : "All" }]} /><VIconButton label={zh ? "查看更早 K 线" : "Earlier candles"} icon={<ChevronLeft size={14} />} isDisabled={!maxOffset || effectiveOffset === maxOffset} onPress={() => move(Math.max(1, Math.round(size / 3)))} /><VIconButton label={zh ? "查看较新 K 线" : "Newer candles"} icon={<ChevronRight size={14} />} isDisabled={effectiveOffset === 0} onPress={() => move(-Math.max(1, Math.round(size / 3)))} /></div>
     </div>
     <div className={styles.legend}>
       <span>{candle?.date ?? "—"}</span><span>{zh ? "开" : "O"} {quoteNumber(candle?.open)}</span><span>{zh ? "高" : "H"} {quoteNumber(candle?.high)}</span><span>{zh ? "低" : "L"} {quoteNumber(candle?.low)}</span><span>{zh ? "收" : "C"} {quoteNumber(candle?.close)}</span>

@@ -1,9 +1,10 @@
 import styles from "./FinanceStockOverview.styles";
+import { useState } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { RefreshCw, Star, TrendingDown, TrendingUp } from "lucide-react";
 import type { StockIdentity, StockPeriod, StockSnapshot } from "../../api/financialMarket";
 import { VButton, VChip, VIconButton, VSkeleton, VStateSurface, VSurface } from "../../components/vui";
-import { FinanceStockChart } from "./FinanceStockChart";
+import { FinanceStockChart, type FinanceChartView } from "./FinanceStockChart";
 import { quoteNumber } from "./stockResearchModel";
 import { quoteAmount, quoteCurrency } from "./financeMarketDisplay";
 
@@ -56,8 +57,9 @@ export function FinanceStockFacts({ quote, zh }: { quote: StockSnapshot["stock"]
     </dl>;
 }
 export function FinanceMarketPanel({ query, period, onPeriodChange, zh }: { query: UseQueryResult<StockSnapshot, Error>; period: StockPeriod; onPeriodChange: (period: StockPeriod) => void; zh: boolean }) {
+  const [view, setView] = useState<FinanceChartView>({ indicator: "ma", range: "all" });
   if (query.isPending) return <VSurface tone="panel" padding="normal" className={styles.loadingPanel} aria-busy="true"><span className={styles.chartTitle}>{zh ? "价格走势" : "Price chart"}</span><div className={styles.loadingSkeleton}><VSkeleton /><VSkeleton /><VSkeleton /></div></VSurface>;
   if (query.isError && !query.data) return <VStateSurface tone="error" title={zh ? "行情加载失败" : "Quotes unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>;
   if (!query.data?.candles.length) return <VStateSurface tone={query.data?.candleError ? "error" : "empty"} title={zh ? "暂无 K 线数据" : "No chart data"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.data?.candleError || undefined}</VStateSurface>;
-  return <FinanceStockChart key={`${query.data.stock.symbol}:${period}`} candles={query.data.candles} period={period} onPeriodChange={onPeriodChange} zh={zh} currency={query.data.stock.currency} adjustment={query.data.adjustment} />;
+  return <FinanceStockChart key={`${query.data.stock.symbol}:${period}`} candles={query.data.candles} period={period} onPeriodChange={onPeriodChange} zh={zh} currency={query.data.stock.currency} adjustment={query.data.adjustment} view={view} onViewChange={setView} />;
 }
