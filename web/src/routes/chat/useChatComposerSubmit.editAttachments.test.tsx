@@ -23,12 +23,15 @@ const apiMocks = vi.hoisted(() => ({
     sizeBytes: 5,
   })),
   submitSessionMessage: vi.fn(),
-  editResubmitSessionMessage: vi.fn(async (_sessionId: string, _payload: unknown) => ({
+  editResubmitSessionMessage: vi.fn(async (_sessionId: string, payload: { clientSubmissionId: string; content: string }) => ({
     id: "session-1",
     activeTurnId: "accepted-edit-turn",
     currentPhase: "running",
     status: "running",
-    messages: [],
+    messages: [{
+      id: "user-1", role: "user", content: payload.content,
+      metadata: { clientSubmissionId: payload.clientSubmissionId, turnId: "accepted-edit-turn" },
+    }],
     updatedAt: "2026-09-15T02:00:00Z",
   })),
   stopSessionTurn: vi.fn(async () => ({ id: "session-1", currentPhase: "stopping" })),
@@ -121,7 +124,9 @@ function Harness({ queryClient, sessionBusy = false, activeTurnId = "turn-1", ac
     chatWorkspaceCache,
     t: ((key: TranslationKey) => String(key)) as (key: TranslationKey) => string,
     describeError,
-    syncSessionDetail: () => undefined,
+    syncSessionDetail: (incoming) => {
+      queryClient.setQueryData(queryKeys.session(incoming.id), incoming);
+    },
     setActiveTurnLayersBySession,
     setSessionDrafts,
     setSessionComposerErrors,
