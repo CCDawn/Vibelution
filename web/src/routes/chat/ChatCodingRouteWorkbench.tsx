@@ -48,9 +48,16 @@ import {
 import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
 import { fetchFileContent } from "../../api/files";
 import { ArchivedSessionRail } from "./ArchivedSessionRail";
-import { ChatChangeRail } from "./ChatChangeRail";
-import { ChatSidePane, type ChatSidePaneTab } from "./ChatSidePane";
+import { ChatRightRail } from "./ChatRightRail";
 import { buildChatChangeRail } from "./chatChangeRailModel";
+import {
+  activeChatRightRailTab,
+  EMPTY_CHAT_RIGHT_RAIL,
+  noteReviewAutoOpen,
+  openChatRightRailTab,
+  type ChatRightRailModel,
+} from "./chatRightRailModel";
+import { subscribeChatRightRailOpen } from "./chatRightRailRequests";
 import { useChatChangePreview } from "./useChatChangePreview";
 import { useChatGitRail } from "./useChatGitRail";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -2000,8 +2007,22 @@ export function ChatCodingRouteWorkbench() {
 
   const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
   const [changeRailOpened, setChangeRailOpened] = useState(false);
-  const [sidePaneTab, setSidePaneTab] = useState<ChatSidePaneTab>("changes");
+  const [railsBySession, setRailsBySession] = useState<Record<string, ChatRightRailModel>>({});
+  const [reviewPick, setReviewPick] = useState<{ sessionId: string; source: "session" | "git"; path: string } | null>(null);
   const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
+  const railModel = activeSessionId ? (railsBySession[activeSessionId] ?? EMPTY_CHAT_RIGHT_RAIL) : EMPTY_CHAT_RIGHT_RAIL;
+  const activeRailTab = activeChatRightRailTab(railModel);
+  const updateRailModel = (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => {
+    if (!activeSessionId) {
+      return;
+    }
+    const sessionId = activeSessionId;
+    setRailsBySession((current) => {
+      const previous = current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
+      const next = typeof update === "function" ? update(previous) : update;
+      return { ...current, [sessionId]: next };
+    });
+  };
   const changeRail = useMemo(
     () => buildChatChangeRail({
       companion: verifiedCompanionMode,
@@ -2021,11 +2042,35 @@ export function ChatCodingRouteWorkbench() {
     ],
   );
   const gitRail = useChatGitRail(
-    ordinaryChangeRail && sidePaneTab === "git" && (changeRail.show || changeRailOpened),
+    ordinaryChangeRail && activeRailTab?.kind === "review" && (changeRail.show || changeRailOpened),
   );
+  const reviewPickForSession = reviewPick && reviewPick.sessionId === activeSessionId ? reviewPick : null;
+  const reviewSource = reviewPickForSession?.source ?? "session";
+  const sessionReviewPath = reviewSource === "session" && reviewPickForSession && changeRail.paths.includes(reviewPickForSession.path)
+    ? reviewPickForSession.path
+    : changeRail.selectedPath;
+  const gitReviewPath = reviewSource === "git" && reviewPickForSession && gitRail.paths.includes(reviewPickForSession.path)
+    ? reviewPickForSession.path
+    : null;
   const changePreview = useChatChangePreview(
-    sidePaneTab === "git" ? gitRail.selectedPath : changeRail.selectedPath,
+    activeRailTab?.kind === "review"
+      ? (reviewSource === "git" ? gitReviewPath : sessionReviewPath)
+      : null,
   );
+  useEffect(() => {
+    if (!ordinaryChangeRail || !activeSessionId || !changeRail.show) {
+      return;
+    }
+    const sessionId = activeSessionId;
+    setRailsBySession((current) => {
+      const model = current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
+      const noted = noteReviewAutoOpen(model, "审查");
+      if (noted.model === model) {
+        return current;
+      }
+      return { ...current, [sessionId]: noted.model };
+    });
+  }, [activeSessionId, changeRail.show, ordinaryChangeRail]);
   const {
     layoutRef,
     dragState,
@@ -2053,6 +2098,44 @@ export function ChatCodingRouteWorkbench() {
     statusRailEnabled: verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened)),
     indexRailEnabled: !financeSurface,
   });
+  useEffect(() => {
+    if (!ordinaryChangeRail) {
+      return undefined;
+    }
+    return subscribeChatRightRailOpen((request) => {
+      const requestSessionId = request.sessionId.trim();
+      if (!requestSessionId) {
+        return false;
+      }
+      setRailsBySession((current) => {
+        const model = current[requestSessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
+        return {
+          ...current,
+          [requestSessionId]: openChatRightRailTab(model, {
+            kind: request.kind,
+            title: request.title,
+            targetId: request.targetId,
+            filePath: request.filePath,
+          }),
+        };
+      });
+      if (requestSessionId === activeSessionId) {
+        setChangeRailOpened(true);
+        if (responsiveLayout.rightVisible) {
+          setRightPaneCollapsed(false);
+        } else {
+          setResponsiveOverlayPane("right");
+        }
+      }
+      return true;
+    });
+  }, [
+    activeSessionId,
+    ordinaryChangeRail,
+    responsiveLayout.rightVisible,
+    setResponsiveOverlayPane,
+    setRightPaneCollapsed,
+  ]);
   const changedFiles = new Set(changedFileList);
   const changedPathSet = new Set(
     changedFileList.map((path) => String(path || "").replace(/\\/g, "/").trim()),
@@ -4108,51 +4191,68 @@ export function ChatCodingRouteWorkbench() {
         }}
       />
       ) : ordinaryChangeRail && (changeRail.show || changeRailOpened) ? (
-      <ChatSidePane
+      <ChatRightRail
         className={statusRailClassName}
         lang={lang}
-        tab={sidePaneTab}
-        onTab={setSidePaneTab}
-      >
-      <ChatChangeRail
-        embedded
-        className=""
-        lang={lang}
-        title={sidePaneTab === "git"
-          ? (gitRail.branch
-            ? (lang === "zh" ? `仓库 · ${gitRail.branch}` : `Repository · ${gitRail.branch}`)
-            : (lang === "zh" ? "仓库" : "Repository"))
-          : undefined}
-        emptyLabel={sidePaneTab === "git"
-          ? (lang === "zh" ? "工作区是干净的" : "The worktree is clean")
-          : undefined}
-        pending={sidePaneTab === "git" && gitRail.pending}
-        pendingLabel={lang === "zh" ? "正在读取仓库" : "Reading the repository"}
-        unavailableLabel={sidePaneTab === "git" && gitRail.unavailable
-          ? (gitRail.errorText || describeError(gitRail.error, t("loadFailed")))
-          : ""}
-        paths={sidePaneTab === "git" ? gitRail.paths : changeRail.paths}
-        selectedPath={sidePaneTab === "git" ? gitRail.selectedPath : changeRail.selectedPath}
-        changedPaths={sidePaneTab === "git" ? new Set(gitRail.paths) : changedPathSet}
-        detailByPath={sidePaneTab === "git" ? gitRail.detailByPath : undefined}
-        diff={changePreview.diff}
-        diffLoading={changePreview.diffLoading}
-        hasDiff={changePreview.hasDiff}
-        file={changePreview.file}
-        fileLoading={changePreview.fileLoading}
-        fileError={changePreview.fileError ? describeError(changePreview.fileError, t("loadFailed")) : ""}
-        sourceLabel={detail?.title ?? t("currentSession")}
-        onSelect={(path) => {
-          if (sidePaneTab === "git") {
-            gitRail.selectPath(path);
-            return;
-          }
+        sessionId={activeSessionId ?? ""}
+        sessionKind={detail?.sessionKind}
+        model={railModel}
+        onModelChange={updateRailModel}
+        onCollapse={toggleChangeRail}
+        devtools={detail ? {
+          phase: detail.currentPhase,
+          status: detail.status,
+          messages: detail.messages,
+        } : null}
+        terminalRun={activeCliAgentRun ?? cliAgentRunTabs[0] ?? null}
+        terminalMountedInCenter={Boolean(activeCliAgentRun)}
+        onTerminalSessionChange={handleCliAgentTerminalSessionChange}
+        onOpenFile={(path) => {
           if (activeSessionId) {
             openPreviewTab(activeSessionId, path);
           }
         }}
+        review={{
+          sessionTitle: lang === "zh" ? "这次对话" : "This chat",
+          sessionEmptyLabel: lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet",
+          sessionPaths: changeRail.paths,
+          sessionSelectedPath: reviewSource === "git" ? null : sessionReviewPath,
+          sessionChangedPaths: changedPathSet,
+          gitTitle: gitRail.branch
+            ? (lang === "zh" ? `仓库 · ${gitRail.branch}` : `Repository · ${gitRail.branch}`)
+            : (lang === "zh" ? "仓库" : "Repository"),
+          gitEmptyLabel: lang === "zh" ? "工作区是干净的" : "The worktree is clean",
+          gitPending: gitRail.pending,
+          gitPendingLabel: lang === "zh" ? "正在读取仓库" : "Reading the repository",
+          gitUnavailableLabel: gitRail.unavailable
+            ? (gitRail.errorText || describeError(gitRail.error, t("loadFailed")))
+            : "",
+          gitPaths: gitRail.paths,
+          gitSelectedPath: gitReviewPath,
+          gitDetailByPath: gitRail.detailByPath,
+          diff: changePreview.diff,
+          diffLoading: changePreview.diffLoading,
+          hasDiff: changePreview.hasDiff,
+          file: changePreview.file,
+          fileLoading: changePreview.fileLoading,
+          fileError: changePreview.fileError ? describeError(changePreview.fileError, t("loadFailed")) : "",
+          sourceLabel: detail?.title ?? t("currentSession"),
+          onSelectSessionFile: (path) => {
+            if (!activeSessionId) {
+              return;
+            }
+            setReviewPick({ sessionId: activeSessionId, source: "session", path });
+            openPreviewTab(activeSessionId, path);
+          },
+          onSelectGitFile: (path) => {
+            if (!activeSessionId) {
+              return;
+            }
+            gitRail.selectPath(path);
+            setReviewPick({ sessionId: activeSessionId, source: "git", path });
+          },
+        }}
       />
-      </ChatSidePane>
       ) : null}
       leftResizeHandle={
       financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
@@ -4218,7 +4318,7 @@ export function ChatCodingRouteWorkbench() {
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
             statusRailAvailable={verifiedCompanionMode}
-            rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "改动" : "Changes") : undefined}
+            rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "侧栏" : "Side") : undefined}
             rightRailOpen={ordinaryChangeRail ? changeRailVisible : statusRailOverlayOpen}
             statusRailOverlayOpen={statusRailOverlayOpen}
             onActivateAgentFallbackTab={() => {

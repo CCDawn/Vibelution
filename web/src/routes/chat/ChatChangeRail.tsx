@@ -14,6 +14,8 @@ type ChatChangeRailProps = {
   lang: "zh" | "en";
   /** Omit the pane id when a parent tab shell already owns chat-status-pane. */
   embedded?: boolean;
+  /** Size to the list so a review tab can stack this chat and the repository. */
+  stacked?: boolean;
   title?: string;
   emptyLabel?: string;
   pending?: boolean;
@@ -41,6 +43,7 @@ export function ChatChangeRail({
   className,
   lang,
   embedded = false,
+  stacked = false,
   title,
   emptyLabel,
   pending = false,
@@ -81,13 +84,14 @@ export function ChatChangeRail({
     />
   ) : null;
 
+  const showBody = !stacked || paths.length === 0 || pending || Boolean(unavailableLabel) || Boolean(selectedPath);
   return (
-    <aside id={embedded ? undefined : "chat-status-pane"} className={`${styles.rail} ${className}`} aria-label={resolvedTitle}>
+    <aside id={embedded ? undefined : "chat-status-pane"} className={`${stacked ? styles.railStacked : styles.rail} ${className}`} aria-label={resolvedTitle}>
       <div className={styles.header}>
         <h2 className={styles.title}>{resolvedTitle}</h2>
         {paths.length > 0 ? <span className={styles.count}>{paths.length}</span> : null}
       </div>
-      {paths.length > 0 ? <ul className={styles.list}>
+      {paths.length > 0 ? <ul className={stacked ? styles.listStacked : styles.list}>
         {paths.map((path) => {
           const selected = path === selectedPath;
           const detail = detailByPath?.[path];
@@ -112,7 +116,7 @@ export function ChatChangeRail({
           );
         })}
       </ul> : null}
-      <div className={styles.body}>
+      {showBody ? <div className={stacked ? styles.bodyStacked : styles.body}>
         {pending && paths.length === 0 ? (
           <VStateSurface tone="loading" title={resolvedPendingLabel} fill role="status" />
         ) : unavailableLabel && paths.length === 0 ? (
@@ -126,7 +130,7 @@ export function ChatChangeRail({
             {preview}
           </Suspense>
         )}
-      </div>
+      </div> : null}
     </aside>
   );
 }

@@ -118,6 +118,37 @@ export function listSessionChildSessions(sessionId: string): Promise<SessionSumm
   );
 }
 
+export type SessionChildCreateResult = {
+  childSessionId: string;
+  parentSessionId: string;
+  status?: string;
+  autoStarted?: boolean;
+  switched?: boolean;
+};
+
+export function createSessionChild(
+  sessionId: string,
+  payload: {
+    userRequest: string;
+    taskTitle?: string;
+    autoStart?: boolean;
+    switchToChild?: boolean;
+    source?: string;
+    announceOnParent?: boolean;
+  },
+): Promise<SessionChildCreateResult> {
+  return fetchJson<SessionChildCreateResult>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/child-sessions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function querySessions(
   params: SessionQueryParams = {},
   init?: { signal?: AbortSignal },

@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 import type { GitFileDiff } from "../../api/types";
 import { ChatChangeRail } from "./ChatChangeRail";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
-import { ChatSidePane } from "./ChatSidePane";
+import { ChatRightRail } from "./ChatRightRail";
+import { EMPTY_CHAT_RIGHT_RAIL, openChatRightRailTab } from "./chatRightRailModel";
 import { buildChatChangeRail } from "./chatChangeRailModel";
 import { selectGitRailPath } from "./useChatGitRail";
 
@@ -210,9 +211,11 @@ describe("chat change rail wiring", () => {
     expect(workbench).toContain("workspaceActiveTab={conversationWorkspaceTab}");
     expect(workbench).toContain("activeTab={workspace.activeTab}");
     expect(workbench).toContain("openPreviewTab(activeSessionId, path)");
-    expect(workbench).toContain('rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "改动" : "Changes") : undefined}');
-    expect(workbench).toContain("ChatSidePane");
+    expect(workbench).toContain('rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "侧栏" : "Side") : undefined}');
+    expect(workbench).toContain("ChatRightRail");
+    expect(workbench).toContain('activeRailTab?.kind === "review"');
     expect(workbench).toContain("useChatGitRail");
+    expect(workbench).not.toContain("ChatSidePane");
   });
 });
 
@@ -223,20 +226,50 @@ describe("repository tab", () => {
     expect(selectGitRailPath([], "a.ts")).toBeNull();
   });
 
-  it("offers changes and the repository in the right column", () => {
+  it("offers this chat and the repository inside the review tab", () => {
     const html = renderToStaticMarkup(
-      React.createElement(ChatSidePane, {
+      React.createElement(ChatRightRail, {
         className: "rail",
         lang: "zh",
-        tab: "changes",
-        onTab: () => undefined,
-        children: "列表",
+        sessionId: "session-1",
+        model: openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "review", title: "审查" }),
+        onModelChange: () => undefined,
+        onCollapse: () => undefined,
+        devtools: null,
+        terminalRun: null,
+        terminalMountedInCenter: false,
+        onOpenFile: () => undefined,
+        review: {
+          sessionTitle: "这次对话",
+          sessionEmptyLabel: "这次对话还没有改动文件",
+          sessionPaths: [],
+          sessionSelectedPath: null,
+          sessionChangedPaths: new Set<string>(),
+          gitTitle: "仓库",
+          gitEmptyLabel: "工作区是干净的",
+          gitPending: false,
+          gitPendingLabel: "正在读取仓库",
+          gitUnavailableLabel: "",
+          gitPaths: [],
+          gitSelectedPath: null,
+          diff: undefined,
+          diffLoading: false,
+          hasDiff: false,
+          file: null,
+          fileLoading: false,
+          fileError: "",
+          sourceLabel: "当前会话",
+          onSelectSessionFile: () => undefined,
+          onSelectGitFile: () => undefined,
+        },
       }),
     );
     expect(html).toContain('id="chat-status-pane"');
-    expect(html).toContain("改动");
+    expect(html).toContain("审查");
+    expect(html).toContain("这次对话");
+    expect(html).toContain("这次对话还没有改动文件");
     expect(html).toContain("仓库");
-    expect(html).toContain("列表");
+    expect(html).toContain("工作区是干净的");
   });
 });
 

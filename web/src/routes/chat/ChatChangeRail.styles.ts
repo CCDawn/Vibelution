@@ -14,6 +14,10 @@ const styles = {
   fileStatus: "vui-routes-chatchangerail fileStatus shrink-0 text-[var(--fg-tertiary)]",
   filePath: "vui-routes-chatchangerail filePath block min-w-0 truncate text-[var(--fg-tertiary)]",
   body: "vui-routes-chatchangerail body min-h-0 flex-1 overflow-hidden border-t border-[var(--vui-border-subtle)]",
+  railStacked:
+    "vui-routes-chatchangerail railStacked flex h-auto min-h-0 shrink-0 flex-col overflow-hidden border-b border-[var(--vui-border-subtle)]",
+  listStacked: "vui-routes-chatchangerail listStacked m-0 flex max-h-40 min-h-0 shrink-0 list-none flex-col gap-1 overflow-auto px-2 pb-2",
+  bodyStacked: "vui-routes-chatchangerail bodyStacked max-h-64 min-h-0 overflow-auto border-t border-[var(--vui-border-subtle)]",
 } as const;
 
 export default styles;

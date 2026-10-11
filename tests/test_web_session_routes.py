@@ -3236,6 +3236,27 @@ def test_create_child_session_api_persists_root_child_relationship(tmp_path, mon
     assert parent["messages"][-1]["metadata"]["kind"] == "child_session_card"
     assert parent["messages"][-1]["metadata"]["childSessionId"] == child_id
 
+    silent = client.post(
+        "/api/sessions/session-live/child-sessions",
+        json={
+            "userRequest": "右栏辅助对话不写进主记录",
+            "taskTitle": "右栏辅助对话",
+            "autoStart": False,
+            "switchToChild": False,
+            "source": "side_pane",
+            "announceOnParent": False,
+        },
+    )
+    assert silent.status_code == 201, silent.text
+    silent_parent = silent.json()["parentSession"]
+    assert all(
+        (message.get("metadata") or {}).get("kind") != "child_session_card"
+        or (message.get("metadata") or {}).get("childSessionId") == child_id
+        for message in silent_parent["messages"]
+    )
+    assert silent.json()["childSession"]["sessionKind"] == "child"
+    assert silent.json()["switched"] is False
+
     monkeypatch.setattr(
         directory_bridge,
         "list_child_session_summaries",

@@ -337,6 +337,7 @@ class ChildSessionCreatePayload(BaseModel):
     autoStart: bool = True
     switchToChild: bool = False
     source: str = "agent_auto_split"
+    announceOnParent: bool = True
 
 
 class SessionToolApprovalDecisionPayload(BaseModel):
@@ -695,6 +696,7 @@ def session_create_child_session(session_id: str, payload: ChildSessionCreatePay
             auto_start=payload.autoStart,
             switch_to_child=payload.switchToChild,
             source=payload.source,
+            announce_on_parent=payload.announceOnParent,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -13,6 +13,7 @@ import { queryKeys } from "../../api/queryKeys";
 import { resolvePollingInterval, usePageVisibility } from "../../app/pollingPolicy";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { auxTaskKindLabel } from "../../routes/auxConversations/auxTaskPresentation";
+import { requestChatRightRailOpen } from "../../routes/chat/chatRightRailRequests";
 import { VButton, VChip, VConfirmDialog, VRouteLinkButton } from "../vui";
 import styles from "./ConversationRunningTasks.styles";
 import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresentation";
@@ -244,6 +245,17 @@ function RunningTaskRow({
           density="compact"
           className={styles.openLink}
           data-testid={`conversation-running-task-open-${task.taskId}`}
+          onClick={(event) => {
+            const captured = requestChatRightRailOpen({
+              sessionId: task.parentSessionId,
+              kind: childSessionId ? "subagent" : "directory",
+              title: task.title || task.taskId,
+              targetId: childSessionId || task.taskId,
+            });
+            if (captured) {
+              event.preventDefault();
+            }
+          }}
         >
           {copy.open}
         </VRouteLinkButton>

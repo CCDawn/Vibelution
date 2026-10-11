@@ -64,6 +64,7 @@ export const queryKeys = {
   sessionLlmOptions: (id: string) => ["sessions", id, "llm-options"] as const,
   sessionMessageCuration: (id: string) => ["sessions", id, "message-curation"] as const,
   sessionChildSessions: (id: string) => ["sessions", id, "child-sessions"] as const,
+  sessionRightRail: (id: string) => ["sessions", id, "right-rail"] as const,
   chatRooms: () => ["chat-rooms"] as const,
   chatRoom: (id: string) => ["chat-rooms", id] as const,
   // Group-room transcript authority. The key nests under chatRoom(id) so
