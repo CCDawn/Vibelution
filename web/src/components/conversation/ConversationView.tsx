@@ -3471,11 +3471,24 @@ export const ConversationView = React.memo(function ConversationView({
     return true;
   }
 
-  function handleSendAndFollowLatest() {
+  function handleSideChatCommand(): boolean {
     const sideCommand = onOpenSideChat ? parseSideSlashCommand(composerValue) : null;
     if (sideCommand) {
       onComposerChange("");
       onOpenSideChat?.(sideCommand.prompt, Boolean(sideCommand.prompt));
+      return true;
+    }
+    return false;
+  }
+
+  function handleQueueSubmit() {
+    if (!handleSideChatCommand()) {
+      onSubmit();
+    }
+  }
+
+  function handleSendAndFollowLatest() {
+    if (handleSideChatCommand()) {
       return;
     }
     exitComposerPromptHistoryBrowse();
@@ -6575,7 +6588,7 @@ export const ConversationView = React.memo(function ConversationView({
           isIconOnly={!primaryActionIsEditSubmit && !primaryActionIsQueueSubmit}
           isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled : resolvedActionDisabled}
           type="button"
-          onClick={runningGuidanceActionsEnabled ? onSubmit : handlePrimaryAction}
+          onClick={runningGuidanceActionsEnabled ? handleQueueSubmit : handlePrimaryAction}
           icon={
             primaryActionIsEditSubmit
               ? (
@@ -7451,14 +7464,14 @@ export const ConversationView = React.memo(function ConversationView({
                 ) {
                   handleSendAndFollowLatest();
                 } else if (composerEnterDelivery === "steer" && composerValue.trim() && onSafeGuidance) {
-                  if (!guidanceActionDisabled) {
+                  if (!guidanceActionDisabled && !handleSideChatCommand()) {
                     onSafeGuidance();
                   }
                 } else if (
                   (queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
                   && !guidanceActionDisabled
                 ) {
-                  onSubmit();
+                  handleQueueSubmit();
                 }
               }
             }}

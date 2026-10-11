@@ -62,6 +62,61 @@ def _rows(tmp_path, session_id: str = PARENT_ID):
     return queued_turns.session_queued_turn_rows(conversation)
 
 
+def test_busy_drain_preserves_user_turn_and_retries_with_same_submission(sessions, monkeypatch):
+    attachments = [{"artifactId": "image-probe", "name": "probe.png"}]
+    references = [{"referenceId": "ref-probe", "kind": "session", "sessionId": CHILD_ID}]
+    row = queued_turns.enqueue_session_queued_turn(
+        PARENT_ID,
+        content="保留排队消息",
+        attachments=attachments,
+        references=references,
+        mental_model_enabled=None,
+        runtime_status_enabled=None,
+        turn_mode="",
+        write_intent=False,
+        client_submission_id="busy-probe",
+    )
+    submitted = []
+
+    def _submit(session_id, content, **kwargs):
+        submitted.append({"session_id": session_id, "content": content, **kwargs})
+        if len(submitted) == 1:
+            raise session_service.SessionBusyError("Another turn started")
+        return {"accepted": True}
+
+    monkeypatch.setattr(session_service, "submit_session_message", _submit)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    remaining = _rows(sessions)
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == row["id"]
+    assert remaining[0]["status"] == "queued"
+    assert remaining[0]["lastError"] == ""
+    assert remaining[0]["attachments"] == attachments
+    assert remaining[0]["references"] == references
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    assert _rows(sessions) == []
+    assert [item["client_submission_id"] for item in submitted] == ["busy-probe", "busy-probe"]
+
+
+def test_busy_drain_preserves_all_batched_runtime_notices(sessions, monkeypatch):
+    for index in range(2):
+        queued_turns.enqueue_session_runtime_notice(
+            PARENT_ID,
+            kind="task_notification",
+            content=f"notice {index}",
+            source_id=f"task-{index}",
+            branch_generation=0,
+        )
+
+    def _busy(*args, **kwargs):
+        raise session_service.SessionBusyError("Another turn started")
+
+    monkeypatch.setattr(session_service, "submit_session_message", _busy)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    assert len(_rows(sessions)) == 2
+    assert all(row["status"] == "queued" for row in _rows(sessions))
+
+
 def test_runtime_notices_share_the_queue_and_background_notices_drain_together(sessions, monkeypatch):
     submitted: list[dict] = []
 

@@ -603,9 +603,13 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     });
     unmount(root);
 
-    // Frames arriving while parked only advance the ledger watermark.
+    // Journal replay frames arriving while parked only advance the ledger watermark.
     act(() => {
-      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 9 }));
+      FakeEventSource.instances[0].emit("session_journal_event", JSON.stringify({
+        type: "session_journal_event",
+        sessionId: "s1",
+        seq: 9,
+      }));
     });
     expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(9);
 

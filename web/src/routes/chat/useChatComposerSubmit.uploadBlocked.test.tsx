@@ -12,6 +12,7 @@ import type {
   SessionTurnAcceptedResponse,
 } from "../../api/types";
 import { submitSessionMessage, uploadSessionImageAttachment } from "../../api/chat";
+import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLife";
 import {
   createChatWorkspaceCache,
 } from "../chatWorkspaceCache";
@@ -20,8 +21,10 @@ import {
   useChatComposerSubmitActions,
   useChatComposerTurnMutations,
   type ChatComposerTurnMutations,
+  type SubmitTurnVariables,
 } from "./useChatComposerSubmit";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import { agentMessageContextSections } from "../../components/conversation/agentMessageSections";
 import { AgentContextSectionsView } from "../../components/conversation/AgentContextSectionsView";
@@ -57,6 +60,16 @@ vi.mock("../../api/chat", async (importOriginal) => {
     })),
   };
 });
+vi.mock("../../api/virtualHumanLife", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../api/virtualHumanLife")>(),
+  submitVirtualHumanConversationMessage: vi.fn(async () => {
+    throw new Error("companion mailbox rejected");
+  }),
+}));
+vi.mock("./chatSessionDetailHelpers", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./chatSessionDetailHelpers")>(),
+  fetchSessionDetailWindow: vi.fn(),
+}));
 
 /** Per-test gate to hold a successful upload in flight (interleave poll commits). */
 let uploadGate: ((attachment: ComposerImageAttachment) => Promise<{ artifactId: string }>) | null = null;
@@ -65,6 +78,12 @@ let uploadGate: ((attachment: ComposerImageAttachment) => Promise<{ artifactId: 
 
 const uploadSessionImageAttachmentMock = vi.mocked(uploadSessionImageAttachment);
 const submitSessionMessageMock = vi.mocked(submitSessionMessage);
+const submitVirtualHumanConversationMessageMock = vi.mocked(submitVirtualHumanConversationMessage);
+const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+let nextObjectUrlId = 0;
+const createObjectURLMock = vi.fn<(file: File) => string>();
+const revokeObjectURLMock = vi.fn<(url: string) => void>();
 
 function makeAttachment(filename: string): ComposerImageAttachment {
   return {
@@ -118,6 +137,8 @@ type HarnessProps = {
   draft?: string;
   attachments: ComposerImageAttachment[];
   nextReference?: SessionReferenceAttachment;
+  allowSessionSwitch?: boolean;
+  companionAgentId?: string;
   mutations: ChatComposerTurnMutations;
   onErrors?: (errors: Record<string, string>) => void;
   onDrafts?: (drafts: Record<string, string>) => void;
@@ -136,10 +157,13 @@ function Harness({
   draft = "带图提问",
   attachments,
   nextReference,
+  allowSessionSwitch = false,
+  companionAgentId,
   mutations,
   onErrors,
   onDrafts,
 }: HarnessProps) {
+  const [activeSessionId, setActiveSessionId] = useState(sessionId);
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({
     [sessionId]: draft,
   });
@@ -150,7 +174,7 @@ function Harness({
   if (!referenceState) throw new Error("Harness requires the session reference state provider.");
   const { references: sessionReferenceAttachments, setReferences: setSessionReferenceAttachments } = referenceState;
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
-  const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId));
+  const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId));
   const actions = useChatComposerSubmitActions({
     queryClient,
     lang: "zh",
@@ -180,11 +204,12 @@ function Harness({
     setSessionReferenceAttachments,
     setSessionImageUploadPending: () => undefined,
     setSessionEditTargets: () => undefined,
+    companionAgentId,
     imageUploadInFlightRef,
-    activeSessionId: sessionId,
-    activeDraftEffective: sessionDrafts[sessionId] ?? "",
-    activeImageAttachments: sessionImageAttachments[sessionId] ?? [],
-    activeReferenceAttachments: sessionReferenceAttachments[sessionId] ?? [],
+    activeSessionId,
+    activeDraftEffective: sessionDrafts[activeSessionId] ?? "",
+    activeImageAttachments: sessionImageAttachments[activeSessionId] ?? [],
+    activeReferenceAttachments: sessionReferenceAttachments[activeSessionId] ?? [],
     mentalModelEnabledForNextTurn: false,
     runtimeStatusEnabledForNextTurn: false,
     resolvedEditTarget: null,
@@ -203,11 +228,18 @@ function Harness({
   });
   return (
     <div>
-      <output data-testid="draft">{sessionDrafts[sessionId] ?? ""}</output>
-      <output data-testid="tray">{JSON.stringify((sessionImageAttachments[sessionId] ?? []).map(({ filename, uploadStatus, artifactId }) => ({ filename, uploadStatus, artifactId })))}</output>
-      <output data-testid="references">{JSON.stringify(sessionReferenceAttachments[sessionId] ?? [])}</output>
+      {allowSessionSwitch && <output data-testid="active-session">{activeSessionId}</output>}
+      <output data-testid="draft">{sessionDrafts[activeSessionId] ?? ""}</output>
+      <output data-testid="tray">{JSON.stringify((sessionImageAttachments[activeSessionId] ?? []).map(({ id, filename, previewUrl, uploadStatus, artifactId }) => ({ id, filename, previewUrl, uploadStatus, artifactId })))}</output>
+      <output data-testid="references">{JSON.stringify(sessionReferenceAttachments[activeSessionId] ?? [])}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>submit</button>
       <button type="button" data-testid="add-next" onClick={() => actions.handleAddComposerAttachments([new File(["next"], "next.png", { type: "image/png" })])}>add</button>
+      <button type="button" data-testid="add-later" onClick={() => actions.handleAddComposerAttachments([new File(["later"], "later.png", { type: "image/png" })])}>add later</button>
+      {allowSessionSwitch && <>
+        <button type="button" data-testid="write-b" onClick={() => actions.handleComposerChange("B 的消息")}>write B</button>
+        <button type="button" data-testid="switch-to-b" onClick={() => setActiveSessionId("session-2")}>switch to B</button>
+        <button type="button" data-testid="switch-to-a" onClick={() => setActiveSessionId(sessionId)}>switch to A</button>
+      </>}
       <button type="button" data-testid="add-reference" onClick={() => {
         if (nextReference) actions.handleAddComposerReference(nextReference);
       }}>add reference</button>
@@ -222,15 +254,24 @@ function Harness({
 function MutationsWire({
   queryClient,
   initialReferenceAttachments = {},
+  companionAgentId,
+  onSubmitVariables,
   children,
 }: {
   queryClient: QueryClient;
   initialReferenceAttachments?: Record<string, SessionReferenceAttachment[]>;
+  companionAgentId?: string;
+  onSubmitVariables?: (variables: SubmitTurnVariables) => void;
   children: (mutations: ChatComposerTurnMutations) => React.ReactNode;
 }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <MutationsInner queryClient={queryClient} initialReferenceAttachments={initialReferenceAttachments}>{children}</MutationsInner>
+      <MutationsInner
+        queryClient={queryClient}
+        initialReferenceAttachments={initialReferenceAttachments}
+        companionAgentId={companionAgentId}
+        onSubmitVariables={onSubmitVariables}
+      >{children}</MutationsInner>
     </QueryClientProvider>
   );
 }
@@ -238,10 +279,14 @@ function MutationsWire({
 function MutationsInner({
   queryClient,
   initialReferenceAttachments = {},
+  companionAgentId,
+  onSubmitVariables,
   children,
 }: {
   queryClient: QueryClient;
   initialReferenceAttachments?: Record<string, SessionReferenceAttachment[]>;
+  companionAgentId?: string;
+  onSubmitVariables?: (variables: SubmitTurnVariables) => void;
   children: (mutations: ChatComposerTurnMutations) => React.ReactNode;
 }) {
   const [layers, setLayers] = useState<Record<string, unknown>>({});
@@ -258,10 +303,21 @@ function MutationsInner({
     setSessionImageAttachments: () => undefined,
     setSessionReferenceAttachments: setReferences,
     setSessionEditTargets: () => undefined,
+    companionAgentId,
   });
+  const wiredMutations: ChatComposerTurnMutations = {
+    ...mutations,
+    submitTurnMutation: {
+      ...mutations.submitTurnMutation,
+      mutate: (...args: Parameters<typeof mutations.submitTurnMutation.mutate>) => {
+        onSubmitVariables?.(args[0]);
+        mutations.submitTurnMutation.mutate(...args);
+      },
+    },
+  };
   return (
     <SessionReferenceStateContext.Provider value={{ references, setReferences }}>
-      {children(mutations)}
+      {children(wiredMutations)}
     </SessionReferenceStateContext.Provider>
   );
 }
@@ -280,7 +336,14 @@ function mount(ui: React.ReactElement): HTMLElement {
 
 beforeEach(() => {
   uploadGate = null;
+  nextObjectUrlId = 0;
+  createObjectURLMock.mockReset().mockImplementation((file) => `blob:test-${file.name}-${++nextObjectUrlId}`);
+  revokeObjectURLMock.mockReset();
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURLMock });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURLMock });
   submitSessionMessageMock.mockResolvedValue({ turnId: "turn-accepted-1", acceptedAt: "2026-09-28T00:00:00.000Z" });
+  submitVirtualHumanConversationMessageMock.mockRejectedValue(new Error("companion mailbox rejected"));
+  vi.mocked(fetchSessionDetailWindow).mockReset().mockRejectedValue(new Error("readback unavailable"));
 });
 
 afterEach(() => {
@@ -288,6 +351,16 @@ afterEach(() => {
     act(() => {
       root.unmount();
     });
+  }
+  if (originalCreateObjectURL) {
+    Object.defineProperty(URL, "createObjectURL", originalCreateObjectURL);
+  } else {
+    Reflect.deleteProperty(URL, "createObjectURL");
+  }
+  if (originalRevokeObjectURL) {
+    Object.defineProperty(URL, "revokeObjectURL", originalRevokeObjectURL);
+  } else {
+    Reflect.deleteProperty(URL, "revokeObjectURL");
   }
   document.body.innerHTML = "";
   vi.clearAllMocks();
@@ -341,6 +414,153 @@ describe("useChatComposerSubmit blocked upload batch", () => {
     expect(optimisticRows(client, "session-1")).toHaveLength(0);
     expect(revoke).toHaveBeenCalledWith(preview);
     expect(client.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.messages.filter((message) => message.metadata?.clientSubmissionId === pending.metadata?.clientSubmissionId)).toHaveLength(1);
+    client.clear();
+  });
+
+  it("keeps Companion mailbox failures off the native Session acceptance readback path", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    seedSessionDetail(client, "session-1");
+    const mounted = mount(<MutationsWire queryClient={client} companionAgentId="agent-companion">{(mutations) =>
+      <Harness
+        queryClient={client}
+        draft="Companion 消息"
+        attachments={[]}
+        companionAgentId="agent-companion"
+        mutations={mutations}
+      />
+    }</MutationsWire>);
+
+    await act(async () => {
+      (mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(submitVirtualHumanConversationMessageMock).toHaveBeenCalledWith(
+      "agent-companion",
+      "session-1",
+      expect.objectContaining({ content: "Companion 消息" }),
+    );
+    expect(submitSessionMessageMock).not.toHaveBeenCalled();
+    expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+    expect(optimisticRows(client, "session-1")).toHaveLength(0);
+    client.clear();
+  });
+
+  it("releases each concurrent submit's own image owners and preserves a later draft image", async () => {
+    const client = new QueryClient();
+    seedSessionDetail(client, "session-1");
+    seedSessionDetail(client, "session-2");
+    let acceptSessionA!: (result: SessionTurnAcceptedResponse) => void;
+    let acceptSessionB!: (result: SessionTurnAcceptedResponse) => void;
+    submitSessionMessageMock.mockImplementation((sessionId) => new Promise((resolve) => {
+      if (sessionId === "session-1") {
+        acceptSessionA = resolve;
+      } else {
+        acceptSessionB = resolve;
+      }
+    }));
+    const releaseCallbacksBySession = new Map<string, ReturnType<typeof vi.fn>>();
+    const submittedVariablesBySession = new Map<string, SubmitTurnVariables>();
+    const mounted = mount(<MutationsWire
+      queryClient={client}
+      onSubmitVariables={(variables) => {
+        submittedVariablesBySession.set(variables.sessionId, variables);
+        const release = variables.releaseComposerAttachmentOwners;
+        if (release) {
+          const releaseSpy = vi.fn(release);
+          variables.releaseComposerAttachmentOwners = releaseSpy;
+          releaseCallbacksBySession.set(variables.sessionId, releaseSpy);
+        }
+      }}
+    >{(mutations) =>
+      <Harness
+        queryClient={client}
+        attachments={[makeAttachment("A.png")]}
+        allowSessionSwitch
+        mutations={mutations}
+      />
+    }</MutationsWire>);
+
+    await act(async () => {
+      (mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(submitSessionMessageMock).toHaveBeenCalledWith("session-1", expect.objectContaining({ attachmentIds: ["artifact-A.png"] }));
+
+    act(() => (mounted.querySelector('[data-testid="switch-to-b"]') as HTMLButtonElement).click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    act(() => (mounted.querySelector('[data-testid="write-b"]') as HTMLButtonElement).click());
+    const bImageCreateStart = createObjectURLMock.mock.calls.length;
+    act(() => (mounted.querySelector('[data-testid="add-next"]') as HTMLButtonElement).click());
+    const bSubmittedFile = createObjectURLMock.mock.calls.slice(bImageCreateStart).find(([file]) => file.name === "next.png")?.[0];
+    expect(bSubmittedFile).toBeInstanceOf(File);
+    const bSubmittedRows = JSON.parse(mounted.querySelector('[data-testid="tray"]')?.textContent ?? "[]") as Array<{ previewUrl: string }>;
+    const bSubmittedPreview = bSubmittedRows[0]?.previewUrl;
+    expect(bSubmittedPreview).toMatch(/^blob:/);
+    await act(async () => {
+      (mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(submitSessionMessageMock).toHaveBeenCalledWith("session-2", expect.objectContaining({
+      content: "B 的消息",
+      attachmentIds: ["artifact-next.png"],
+    }));
+    const variablesA = submittedVariablesBySession.get("session-1");
+    const variablesB = submittedVariablesBySession.get("session-2");
+    const releaseA = releaseCallbacksBySession.get("session-1");
+    const releaseB = releaseCallbacksBySession.get("session-2");
+    expect(variablesA?.releaseComposerAttachmentOwners).toBe(releaseA);
+    expect(variablesB?.releaseComposerAttachmentOwners).toBe(releaseB);
+    expect(releaseA).toEqual(expect.any(Function));
+    expect(releaseB).toEqual(expect.any(Function));
+    expect(releaseA).not.toBe(releaseB);
+    expect(acceptSessionA).toEqual(expect.any(Function));
+    expect(acceptSessionB).toEqual(expect.any(Function));
+    const aPreviewReleaseCountBeforeAcceptance = revokeObjectURLMock.mock.calls.filter(([url]) => url === "blob:A.png").length;
+
+    // B resolves first. Its mutation may release B's submitted owner once, but
+    // it must leave A's still-pending submission untouched.
+    await act(async () => {
+      acceptSessionB({ turnId: "turn-b", acceptedAt: new Date().toISOString() });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(releaseB).toHaveBeenCalledTimes(1);
+    expect(releaseA).not.toHaveBeenCalled();
+    expect(revokeObjectURLMock.mock.calls.filter(([url]) => url === bSubmittedPreview)).toHaveLength(1);
+    expect(revokeObjectURLMock.mock.calls.filter(([url]) => url === "blob:A.png")).toHaveLength(aPreviewReleaseCountBeforeAcceptance);
+
+    const createCallsBeforeLaterImage = createObjectURLMock.mock.calls.length;
+    act(() => (mounted.querySelector('[data-testid="add-later"]') as HTMLButtonElement).click());
+    const bLaterFile = createObjectURLMock.mock.calls.slice(createCallsBeforeLaterImage).find(([file]) => file.name === "later.png")?.[0];
+    expect(bLaterFile).toBeInstanceOf(File);
+    const beforeAcceptRows = JSON.parse(mounted.querySelector('[data-testid="tray"]')?.textContent ?? "[]") as Array<{ previewUrl: string }>;
+    const bLaterPreview = beforeAcceptRows[0]?.previewUrl;
+    expect(bLaterPreview).toMatch(/^blob:/);
+
+    // A completes after B. The callback captured by A's actual mutation must
+    // release A and must not release B's newly added draft owner again.
+    await act(async () => {
+      acceptSessionA({ turnId: "turn-a", acceptedAt: new Date().toISOString() });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(releaseA).toHaveBeenCalledTimes(1);
+    expect(releaseB).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURLMock.mock.calls.filter(([url]) => url === "blob:A.png")).toHaveLength(aPreviewReleaseCountBeforeAcceptance);
+    expect(revokeObjectURLMock.mock.calls.filter(([url]) => url === bSubmittedPreview)).toHaveLength(1);
+    expect(revokeObjectURLMock).not.toHaveBeenCalledWith(bLaterPreview);
+    expect(mounted.querySelector('[data-testid="active-session"]')?.textContent).toBe("session-2");
+    expect(mounted.querySelector('[data-testid="tray"]')?.textContent).toContain("later.png");
+
+    act(() => (mounted.querySelector('[data-testid="switch-to-a"]') as HTMLButtonElement).click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    act(() => (mounted.querySelector('[data-testid="switch-to-b"]') as HTMLButtonElement).click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(createObjectURLMock).toHaveBeenCalledWith(bLaterFile);
+    const restoredRows = JSON.parse(mounted.querySelector('[data-testid="tray"]')?.textContent ?? "[]") as Array<{ previewUrl: string }>;
+    expect(restoredRows[0]?.previewUrl).toMatch(/^blob:/);
+    expect(restoredRows[0]?.previewUrl).not.toBe(bLaterPreview);
+    expect(revokeObjectURLMock.mock.calls.filter(([url]) => url === bLaterPreview)).toHaveLength(1);
     client.clear();
   });
 

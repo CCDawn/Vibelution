@@ -87,6 +87,19 @@ export function setActiveTurnLayerForSession(
   return current[normalizedSessionId] === layer ? current : { ...current, [normalizedSessionId]: layer };
 }
 
+export function bindActiveTurnLayerToTurnId(
+  layer: ActiveTurnLayerState | undefined,
+  turnId: string,
+): ActiveTurnLayerState | undefined {
+  const normalizedTurnId = compactText(turnId);
+  if (!layer || !normalizedTurnId || layer.turnId === normalizedTurnId) return layer;
+  return {
+    ...layer,
+    id: activeTurnMessageId(layer.sessionId, normalizedTurnId),
+    turnId: normalizedTurnId,
+  };
+}
+
 export function latestUserTurnId(detail: SessionDetail | undefined) {
   const messages = detail?.messages ?? [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {

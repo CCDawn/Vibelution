@@ -59,6 +59,14 @@ function detailFrame(ledgerSeq: number) {
   return JSON.stringify({ type: "session_detail", sessionId: "s1", ledgerSeq, detail: { ledgerSeq } });
 }
 
+function journalFrame(seq: number) {
+  return JSON.stringify({ type: "session_journal_event", sessionId: "s1", seq });
+}
+
+function resumeFrame(toSeq: number) {
+  return JSON.stringify({ type: "stream_resume", sessionId: "s1", toSeq });
+}
+
 beforeEach(() => {
   FakeStream.created = [];
 });
@@ -154,12 +162,14 @@ describe("sessionStreamWarmRegistry", () => {
 
     acquired.stream.emit("assistant_delta", deltaFrame(4));
     acquired.stream.emit("session_detail", detailFrame(7));
+    acquired.stream.emit("session_journal_event", journalFrame(9));
+    acquired.stream.emit("stream_resume", resumeFrame(11));
     acquired.stream.emit("assistant_delta", deltaFrame(5));
     acquired.stream.emit("assistant_delta", "not-json");
-    expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(7);
+    expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(11);
 
     const reacquired = acquireSessionStream("s1", create);
-    expect(reacquired.parkedLedgerSeq).toBe(7);
+    expect(reacquired.parkedLedgerSeq).toBe(11);
     expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(0);
   });
 

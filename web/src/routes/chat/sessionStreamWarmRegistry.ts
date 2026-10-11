@@ -22,7 +22,13 @@ import type { SessionEventStream } from "./sessionEventStream";
 /** How long an unreferenced stream stays parked (open) after the last owner unmounts. */
 export const SESSION_STREAM_WARM_MS = 30_000;
 
-const PARKED_LEDGER_EVENT_TYPES = ["session_detail", "session_initial", "assistant_delta"] as const;
+const PARKED_LEDGER_EVENT_TYPES = [
+  "session_detail",
+  "session_initial",
+  "assistant_delta",
+  "session_journal_event",
+  "stream_resume",
+] as const;
 
 type WarmSessionStreamEntry = {
   stream: SessionEventStream;
@@ -52,8 +58,10 @@ function extractParkedLedgerSeq(rawData: string): number {
     const parsed = JSON.parse(rawData) as {
       ledgerSeq?: unknown;
       detail?: { ledgerSeq?: unknown };
+      seq?: unknown;
+      toSeq?: unknown;
     };
-    const candidates = [parsed.ledgerSeq, parsed.detail?.ledgerSeq];
+    const candidates = [parsed.ledgerSeq, parsed.detail?.ledgerSeq, parsed.seq, parsed.toSeq];
     let best = 0;
     for (const candidate of candidates) {
       const seq = Number(candidate ?? 0);

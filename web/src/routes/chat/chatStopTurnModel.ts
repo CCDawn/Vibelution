@@ -32,6 +32,8 @@ export type DeferredStopIntent = StopTurnOptimisticContext & {
    * another session's stop request is still in flight.
    */
   acceptedTurnId?: string;
+  /** Marks a turn that was confirmed by POST-error readback and needs a final live-turn check. */
+  recoveredAcceptedTurnId?: string;
 };
 
 export function resolveStopOptimisticTarget(

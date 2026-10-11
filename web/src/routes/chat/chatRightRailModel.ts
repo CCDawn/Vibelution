@@ -45,9 +45,15 @@ export type ChatRightRailTab = {
   targetId?: string;
   filePath?: string;
   url?: string;
-  /** Prefill for a freshly opened side chat. Cleared once the thread consumes it. */
+  /** Current composer draft, retained independently for each side-chat tab. */
   draft?: string;
+  /** Increments whenever the draft changes, so late send callbacks cannot clear newer edits. */
+  draftRevision?: number;
   sendDraft?: boolean;
+  /** Monotonic accepted-send generation used to reject stale readback callbacks. */
+  submissionGeneration?: number;
+  /** Latest accepted generation that still requires an authoritative detail readback. */
+  pendingReadbackGeneration?: number;
 };
 
 export type ChatRightRailModel = {
@@ -139,15 +145,25 @@ export function openChatRightRailTab(
 ): ChatRightRailModel {
   const id = tabIdentity(input);
   const existing = model.tabs.find((tab) => tab.id === id);
-  const title = (input.title || existing?.title || chatRightRailKindLabel(input.kind, "zh")).trim();
+  const recentlyClosed = model.closed.find((tab) => tab.id === id);
+  const retained = existing ?? recentlyClosed;
+  const title = (input.title || retained?.title || chatRightRailKindLabel(input.kind, "zh")).trim();
+  const retainedSideState = input.kind === "side" && retained?.kind === "side" ? retained : undefined;
   const tab: ChatRightRailTab = {
     id,
     kind: input.kind,
     title,
-    childSessionId: input.childSessionId ?? existing?.childSessionId,
-    targetId: input.targetId ?? existing?.targetId,
-    filePath: input.filePath ?? existing?.filePath,
-    url: input.url !== undefined ? input.url : existing?.url,
+    childSessionId: input.childSessionId ?? retained?.childSessionId,
+    targetId: input.targetId ?? retained?.targetId,
+    filePath: input.filePath ?? retained?.filePath,
+    url: input.url !== undefined ? input.url : retained?.url,
+    ...(retainedSideState ? {
+      draft: retainedSideState.draft,
+      draftRevision: retainedSideState.draftRevision,
+      sendDraft: retainedSideState.sendDraft,
+      submissionGeneration: retainedSideState.submissionGeneration,
+      pendingReadbackGeneration: retainedSideState.pendingReadbackGeneration,
+    } : {}),
   };
   const tabs = existing
     ? model.tabs.map((item) => (item.id === id ? tab : item))
@@ -253,14 +269,94 @@ export function consumeChatRightRailSideDraft(
     return model;
   }
   let changed = false;
-  const tabs = model.tabs.map((tab) => {
-    if (tab.id !== target || (!tab.draft && !tab.sendDraft)) {
+  const consume = (tab: ChatRightRailTab) => {
+    if (tab.id !== target || !tab.sendDraft) {
       return tab;
     }
     changed = true;
-    return { ...tab, draft: undefined, sendDraft: undefined };
-  });
-  return changed ? { ...model, tabs } : model;
+    return { ...tab, sendDraft: undefined };
+  };
+  const tabs = model.tabs.map(consume);
+  const closed = model.closed.map(consume);
+  return changed ? { ...model, tabs, closed } : model;
+}
+
+export function updateChatRightRailSideDraft(
+  model: ChatRightRailModel,
+  tabId: string,
+  draft: string,
+  expectedRevision?: number,
+): ChatRightRailModel {
+  const target = tabId.trim();
+  if (!target) {
+    return model;
+  }
+  let changed = false;
+  const update = (tab: ChatRightRailTab) => {
+    if (tab.id !== target || tab.kind !== "side") {
+      return tab;
+    }
+    const revision = tab.draftRevision ?? 0;
+    if ((expectedRevision !== undefined && revision !== expectedRevision) || tab.draft === draft) {
+      return tab;
+    }
+    changed = true;
+    return { ...tab, draft: draft || undefined, draftRevision: revision + 1 };
+  };
+  const tabs = model.tabs.map(update);
+  const closed = model.closed.map(update);
+  return changed ? { ...model, tabs, closed } : model;
+}
+
+export function trackChatRightRailSideSubmission(
+  model: ChatRightRailModel,
+  tabId: string,
+): ChatRightRailModel {
+  const target = tabId.trim();
+  if (!target) {
+    return model;
+  }
+  let changed = false;
+  const update = (tab: ChatRightRailTab) => {
+    if (tab.id !== target || tab.kind !== "side") {
+      return tab;
+    }
+    const generation = (tab.submissionGeneration ?? 0) + 1;
+    changed = true;
+    return {
+      ...tab,
+      submissionGeneration: generation,
+      pendingReadbackGeneration: generation,
+    };
+  };
+  const tabs = model.tabs.map(update);
+  const closed = model.closed.map(update);
+  return changed ? { ...model, tabs, closed } : model;
+}
+
+export function confirmChatRightRailSideReadback(
+  model: ChatRightRailModel,
+  tabId: string,
+  generation: number,
+): ChatRightRailModel {
+  const target = tabId.trim();
+  if (!target || !Number.isSafeInteger(generation) || generation <= 0) {
+    return model;
+  }
+  let changed = false;
+  const update = (tab: ChatRightRailTab) => {
+    if (tab.id !== target || tab.kind !== "side") {
+      return tab;
+    }
+    if (tab.pendingReadbackGeneration !== generation) {
+      return tab;
+    }
+    changed = true;
+    return { ...tab, pendingReadbackGeneration: undefined };
+  };
+  const tabs = model.tabs.map(update);
+  const closed = model.closed.map(update);
+  return changed ? { ...model, tabs, closed } : model;
 }
 
 export function rememberChatRightRailSideChild(
@@ -273,14 +369,21 @@ export function rememberChatRightRailSideChild(
   if (!id || !target) {
     return model;
   }
-  return {
-    ...model,
-    tabs: model.tabs.map((tab) => (
-      tab.id === target && tab.kind === "side"
-        ? { ...tab, childSessionId: id, targetId: id, draft: undefined, sendDraft: undefined }
-        : tab
-    )),
+  let changed = false;
+  const bind = (tab: ChatRightRailTab) => {
+    if (tab.id !== target || tab.kind !== "side" || tab.childSessionId === id) {
+      return tab;
+    }
+    changed = true;
+    return { ...tab, childSessionId: id, targetId: id, sendDraft: undefined };
   };
+  const tabs = model.tabs.map(bind);
+  const closed = model.closed.map(bind);
+  return changed ? {
+    ...model,
+    tabs,
+    closed,
+  } : model;
 }
 
 export function normalizeChatRightRailBrowserUrl(value: string): string | null {

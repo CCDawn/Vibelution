@@ -7,6 +7,8 @@ import {
   chatRightRailLauncherKinds,
   chatRightRailTranscriptLines,
   closeChatRightRailTab,
+  consumeChatRightRailSideDraft,
+  confirmChatRightRailSideReadback,
   normalizeChatRightRailBrowserUrl,
   noteReviewAutoOpen,
   openChatRightRailTab,
@@ -14,6 +16,8 @@ import {
   projectChatRightRailDevtools,
   rememberChatRightRailSideChild,
   searchChatRightRailTabs,
+  trackChatRightRailSideSubmission,
+  updateChatRightRailSideDraft,
 } from "./chatRightRailModel";
 
 describe("chat right rail model", () => {
@@ -32,8 +36,76 @@ describe("chat right rail model", () => {
     expect(second.tabs[1]).toEqual(expect.objectContaining({ draft: "只问这一句", sendDraft: true }));
     const bound = rememberChatRightRailSideChild(second, "side:2", "child-2");
     expect(bound.tabs[1]?.childSessionId).toBe("child-2");
-    expect(bound.tabs[1]?.draft).toBeUndefined();
+    expect(bound.tabs[1]?.draft).toBe("只问这一句");
     expect(bound.tabs[0]?.draft).toBe("> 这段");
+  });
+
+  it("keeps side drafts scoped to their tab and consumes only the one-shot send intent", () => {
+    const first = openFreshChatRightRailSideTab(EMPTY_CHAT_RIGHT_RAIL, {
+      titleBase: "辅助对话",
+      draft: "首条预填",
+      sendDraft: true,
+    });
+    const second = openFreshChatRightRailSideTab(first, {
+      titleBase: "辅助对话",
+      draft: "第二场草稿",
+    });
+    const consumed = consumeChatRightRailSideDraft(second, first.tabs[0]!.id);
+    const edited = updateChatRightRailSideDraft(consumed, second.tabs[1]!.id, "第二场修改后草稿");
+
+    expect(edited.tabs[0]).toEqual(expect.objectContaining({ draft: "首条预填", sendDraft: undefined }));
+    expect(edited.tabs[1]).toEqual(expect.objectContaining({ draft: "第二场修改后草稿" }));
+    expect(updateChatRightRailSideDraft(edited, "missing", "ignored")).toBe(edited);
+  });
+
+  it("uses draft revisions so a late send callback cannot clear a newer edit", () => {
+    const opened = openFreshChatRightRailSideTab(EMPTY_CHAT_RIGHT_RAIL, {
+      titleBase: "辅助对话",
+      draft: "同一段草稿",
+    });
+    const changed = updateChatRightRailSideDraft(opened, "side", "临时修改");
+    const restored = updateChatRightRailSideDraft(changed, "side", "同一段草稿");
+    const lateClear = updateChatRightRailSideDraft(restored, "side", "", 0);
+
+    expect(restored.tabs[0]).toEqual(expect.objectContaining({ draft: "同一段草稿", draftRevision: 2 }));
+    expect(lateClear).toBe(restored);
+  });
+
+  it("uses a monotonic readback generation and ignores stale confirmations", () => {
+    const opened = openFreshChatRightRailSideTab(EMPTY_CHAT_RIGHT_RAIL, { titleBase: "辅助对话" });
+    const first = trackChatRightRailSideSubmission(opened, "side");
+    const second = trackChatRightRailSideSubmission(first, "side");
+    expect(second.tabs[0]).toEqual(expect.objectContaining({
+      submissionGeneration: 2,
+      pendingReadbackGeneration: 2,
+    }));
+
+    const stale = confirmChatRightRailSideReadback(second, "side", 1);
+    expect(stale).toBe(second);
+    const confirmed = confirmChatRightRailSideReadback(second, "side", 2);
+    expect(confirmed.tabs[0]).toEqual(expect.objectContaining({
+      submissionGeneration: 2,
+      pendingReadbackGeneration: undefined,
+    }));
+  });
+
+  it("retains a closed side chat draft, child binding, and readback marker when reopened", () => {
+    let model = openFreshChatRightRailSideTab(EMPTY_CHAT_RIGHT_RAIL, {
+      titleBase: "辅助对话",
+      draft: "保留的草稿",
+    });
+    model = closeChatRightRailTab(model, "side");
+    model = rememberChatRightRailSideChild(model, "side", "child-late");
+    model = trackChatRightRailSideSubmission(model, "side");
+
+    const reopened = openChatRightRailTab(model, { kind: "side", title: "辅助对话" });
+    expect(reopened.tabs[0]).toEqual(expect.objectContaining({
+      id: "side",
+      childSessionId: "child-late",
+      draft: "保留的草稿",
+      submissionGeneration: 1,
+      pendingReadbackGeneration: 1,
+    }));
   });
 
   it("hides side chat when the current session is already a child", () => {

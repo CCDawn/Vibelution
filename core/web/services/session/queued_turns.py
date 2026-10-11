@@ -1111,7 +1111,7 @@ def _settle_claimed_queued_turn(
         for index, row in enumerate(rows):
             if row["id"] != queued_turn_id:
                 continue
-            if error is None:
+            if error is None and not keep_queued:
                 rows.pop(index)
             else:
                 rows[index] = {

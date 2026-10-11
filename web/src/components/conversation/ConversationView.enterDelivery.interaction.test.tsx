@@ -45,6 +45,8 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     actionMode: "send" | "stop";
     onSafeGuidance?: () => void;
     onSubmit: () => void;
+    onOpenSideChat?: (prompt: string, autoSend: boolean) => void;
+    withReference?: boolean;
   }) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -70,12 +72,19 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
             composerDisabled={false}
             composerPending={false}
             composerActionMode={options.actionMode}
+            composerReferences={options.withReference ? [{
+              referenceId: "side-ref",
+              kind: "session",
+              sessionId: "other-session",
+              title: "保留的主会话引用",
+            }] : undefined}
             onComposerChange={setValue}
             onSubmit={() => {
               options.onSubmit();
               setValue("");
             }}
             onSafeGuidance={options.onSafeGuidance}
+            onOpenSideChat={options.onOpenSideChat}
             onEditUserMessage={() => undefined}
           />
         </QueryClientProvider>
@@ -106,6 +115,44 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
       cancelable: true,
     }));
   }
+
+  it.each([
+    { actionMode: "send" as const, delivery: "enter", steer: false },
+    { actionMode: "stop" as const, delivery: "enter", steer: true },
+    { actionMode: "stop" as const, delivery: "enter", steer: false },
+    { actionMode: "stop" as const, delivery: "button", steer: true },
+    { actionMode: "stop" as const, delivery: "enter", steer: true, withReference: true },
+  ])("routes /side to the right rail in $actionMode mode via $delivery (steer=$steer)", async ({ actionMode, delivery, steer, withReference }) => {
+    const onSubmit = vi.fn();
+    const onSafeGuidance = vi.fn();
+    const onOpenSideChat = vi.fn();
+    const textarea = await renderEnterDeliveryComposer({
+      actionMode,
+      onSubmit,
+      onSafeGuidance: steer ? onSafeGuidance : undefined,
+      onOpenSideChat,
+      withReference,
+    });
+    await act(async () => typeIntoTextarea(textarea, "/side 查一下配置"));
+    await act(async () => {
+      if (delivery === "enter") {
+        pressEnter(textarea);
+      } else {
+        const queueButton = Array.from(container?.querySelectorAll<HTMLButtonElement>("button[title]") ?? [])
+          .find((button) => (button.title || "").includes("此按钮加入队列"));
+        expect(queueButton).toBeDefined();
+        queueButton?.click();
+      }
+    });
+    expect(onOpenSideChat).toHaveBeenCalledWith("查一下配置", true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSafeGuidance).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("");
+    if (withReference) {
+      // Side commands carry text, as in idle mode; parent payload stays in its composer.
+      expect(container?.textContent).toContain("保留的主会话引用");
+    }
+  });
 
   it("steers immediately on Enter while a turn runs, with or without modifiers", async () => {
     const onSubmit = vi.fn();

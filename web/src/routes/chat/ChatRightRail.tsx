@@ -1,10 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
 import { PanelRightClose, Plus, Search, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createSessionChild, fetchSessionDetail, submitSessionMessage } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
-import type { ConversationMessage, FileContent, GitFileDiff } from "../../api/types";
+import type { ConversationMessage, FileContent, GitFileDiff, SessionActiveTask, SessionQueuedTurn } from "../../api/types";
 import {
   VButton,
   VDropdownMenu,
@@ -13,6 +13,8 @@ import {
   VRouteLinkButton,
   VTextarea,
 } from "../../components/vui";
+import { assistantTurnIsInFlight } from "../chatTurnProtocol";
+import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { ChatChangeRail } from "./ChatChangeRail";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 import { encodeUtf8Base64 } from "./chatComposerSubmitModel";
@@ -34,6 +36,9 @@ import {
   type ChatRightRailKind,
   type ChatRightRailModel,
   type ChatRightRailTab,
+  confirmChatRightRailSideReadback,
+  trackChatRightRailSideSubmission,
+  updateChatRightRailSideDraft,
 } from "./chatRightRailModel";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import styles from "./ChatRightRail.styles";
@@ -63,6 +68,9 @@ export type ChatRightRailSideClient = {
   ) => Promise<{
     currentPhase?: string;
     status?: string;
+    lastTurnStatus?: string;
+    queuedTurns?: Array<Pick<SessionQueuedTurn, "kind" | "status">>;
+    activeTask?: Pick<SessionActiveTask, "status"> | null;
     messages: ConversationMessage[];
   }>;
 };
@@ -132,6 +140,31 @@ function failureText(error: unknown, fallback: string) {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
+type ChatRightRailSessionDetail = Awaited<ReturnType<ChatRightRailSideClient["fetchDetail"]>>;
+
+const SIDE_CHAT_EXTRA_ACTIVE_PHASES = new Set(["pending", "waiting", "in_progress"]);
+const SIDE_CHAT_QUEUED_PHASES = new Set(["queued", "starting", "draining", "paused"]);
+
+function sideChatPhaseIsInFlight(value: string | undefined): boolean {
+  const phase = String(value || "").trim().toLowerCase();
+  return isBusyPhase(phase) || SIDE_CHAT_EXTRA_ACTIVE_PHASES.has(phase);
+}
+
+function sideChatDetailIsInFlight(detail: ChatRightRailSessionDetail | undefined): boolean {
+  if (!detail) {
+    return false;
+  }
+  return sideChatPhaseIsInFlight(detail.currentPhase)
+    || sideChatPhaseIsInFlight(detail.status)
+    || sideChatPhaseIsInFlight(detail.lastTurnStatus)
+    || sideChatPhaseIsInFlight(detail.activeTask?.status)
+    || Boolean(detail.queuedTurns?.some((turn) => {
+      const status = String(turn.status || "").trim().toLowerCase();
+      return SIDE_CHAT_QUEUED_PHASES.has(status);
+    }))
+    || detail.messages.some(assistantTurnIsInFlight);
+}
+
 function RailThread({
   boundSessionId,
   parentSessionId,
@@ -140,8 +173,13 @@ function RailThread({
   onBound,
   client,
   initialDraft = "",
+  initialDraftRevision = 0,
+  pendingReadbackGeneration,
   autoSend = false,
   onDraftConsumed,
+  onDraftChange,
+  onSubmissionTracked,
+  onSubmissionReadback,
 }: {
   boundSessionId: string;
   parentSessionId: string;
@@ -150,17 +188,27 @@ function RailThread({
   onBound: (childSessionId: string) => void;
   client: ChatRightRailSideClient;
   initialDraft?: string;
+  initialDraftRevision?: number;
+  pendingReadbackGeneration?: number;
   autoSend?: boolean;
   onDraftConsumed?: () => void;
+  onDraftChange?: (draft: string, expectedRevision?: number) => void;
+  onSubmissionTracked?: () => void;
+  onSubmissionReadback?: (generation: number) => void;
 }) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const bootedDraft = useRef(false);
   const [pendingLine, setPendingLine] = useState("");
   const [sending, setSending] = useState(false);
-  const [awaiting, setAwaiting] = useState(false);
-  const [awaitingSince, setAwaitingSince] = useState(0);
   const [error, setError] = useState("");
+  const queryClient = useQueryClient();
+  const detailQueryKey = useMemo(
+    () => queryKeys.sessionRightRail(boundSessionId || "none"),
+    [boundSessionId],
+  );
+  const onSubmissionReadbackRef = useRef(onSubmissionReadback);
+  onSubmissionReadbackRef.current = onSubmissionReadback;
   const copy = lang === "zh"
     ? {
       placeholder: "问一句",
@@ -179,34 +227,49 @@ function RailThread({
       temp: "This chat is still being created.",
     };
   const detailQuery = useQuery({
-    queryKey: queryKeys.sessionRightRail(boundSessionId || "none"),
+    queryKey: detailQueryKey,
     enabled: Boolean(boundSessionId),
     queryFn: ({ signal }) => client.fetchDetail(boundSessionId, signal),
-    refetchInterval: () => {
-      if (!awaiting) {
-        return false;
-      }
-      if (awaitingSince > 0 && Date.now() - awaitingSince > 120_000) {
-        return false;
-      }
-      return 1200;
-    },
+    refetchOnMount: "always",
+    refetchInterval: (query) => (
+      pendingReadbackGeneration == null && sideChatDetailIsInFlight(query.state.data)
+        ? 1200
+        : false
+    ),
   });
   const detail = detailQuery.data;
-  const inflight = Boolean(detail?.messages.some((message) => (
-    message.role === "assistant" && (message.status === "pending" || message.status === "running")
-  )) || detail?.currentPhase === "running" || detail?.currentPhase === "stopping");
-  const sawAssistant = Boolean(detail?.messages.some((message) => message.role === "assistant"));
-  const failed = detail?.status === "failed" || detail?.currentPhase === "failed";
+
   useEffect(() => {
-    if (!awaiting) {
+    if (!boundSessionId || pendingReadbackGeneration == null) {
       return;
     }
-    const expired = awaitingSince > 0 && Date.now() - awaitingSince > 120_000;
-    if (failed || expired || (sawAssistant && !inflight)) {
-      setAwaiting(false);
-    }
-  }, [awaiting, awaitingSince, failed, inflight, sawAssistant]);
+    const generation = pendingReadbackGeneration;
+    let active = true;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const readback = async () => {
+      await queryClient.cancelQueries({ queryKey: detailQueryKey, exact: true });
+      if (!active) {
+        return;
+      }
+      const result = await detailQuery.refetch({ cancelRefetch: true });
+      if (!active) {
+        return;
+      }
+      if (result.isSuccess && result.data) {
+        onSubmissionReadbackRef.current?.(generation);
+        return;
+      }
+      retryTimer = setTimeout(() => void readback(), 1200);
+    };
+    void readback();
+    return () => {
+      active = false;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+      void queryClient.cancelQueries({ queryKey: detailQueryKey, exact: true });
+    };
+  }, [boundSessionId, detailQuery.refetch, detailQueryKey, pendingReadbackGeneration, queryClient]);
   const lines = chatRightRailTranscriptLines(detail?.messages ?? []);
   useEffect(() => {
     if (pendingLine && lines.some((line) => line.role === "user" && line.text === pendingLine)) {
@@ -219,6 +282,7 @@ function RailThread({
     if (!trimmed || sending || blocked) {
       return;
     }
+    const submittedDraftRevision = initialDraftRevision;
     setSending(true);
     setError("");
     try {
@@ -241,12 +305,11 @@ function RailThread({
       } else {
         throw new Error(copy.failed);
       }
+      onSubmissionTracked?.();
       setPendingLine(trimmed);
       setDraft("");
-      setAwaiting(true);
-      setAwaitingSince(Date.now());
+      onDraftChange?.("", submittedDraftRevision);
     } catch (sendError) {
-      setDraft(trimmed);
       setError(failureText(sendError, copy.failed));
     } finally {
       setSending(false);
@@ -258,17 +321,18 @@ function RailThread({
     if (bootedDraft.current) {
       return;
     }
+    bootedDraft.current = true;
     const text = initialDraft.trim();
     if (!text) {
       return;
     }
-    bootedDraft.current = true;
-    onDraftConsumed?.();
-    if (autoSend && !blocked) {
-      void sendTextRef.current(text);
-      return;
+    if (autoSend) {
+      onDraftConsumed?.();
+      if (!blocked) {
+        void sendTextRef.current(text);
+        return;
+      }
     }
-    setDraft(text);
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [autoSend, blocked, initialDraft, onDraftConsumed]);
   const onSubmit = async (event: FormEvent) => {
@@ -298,7 +362,11 @@ function RailThread({
           rows={2}
           value={draft}
           disabled={sending || blocked}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value;
+            setDraft(value);
+            onDraftChange?.(value);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
@@ -597,20 +665,35 @@ export function ChatRightRail({
         ) : null}
         {active?.kind === "side" ? (
           <RailThread
+            key={`${sessionId}:${active.id}`}
             boundSessionId={active.childSessionId || ""}
             parentSessionId={sessionId}
             createOnSend
             lang={lang}
             client={sideClient}
             initialDraft={active.draft || ""}
+            initialDraftRevision={active.draftRevision ?? 0}
+            pendingReadbackGeneration={active.pendingReadbackGeneration}
             autoSend={Boolean(active.sendDraft)}
             onDraftConsumed={() => {
               const tabId = active.id;
               onModelChange((current) => consumeChatRightRailSideDraft(current, tabId));
             }}
+            onDraftChange={(draft, expectedRevision) => {
+              const tabId = active.id;
+              onModelChange((current) => updateChatRightRailSideDraft(current, tabId, draft, expectedRevision));
+            }}
             onBound={(childSessionId) => {
               const tabId = active.id;
               onModelChange((current) => rememberChatRightRailSideChild(current, tabId, childSessionId));
+            }}
+            onSubmissionTracked={() => {
+              const tabId = active.id;
+              onModelChange((current) => trackChatRightRailSideSubmission(current, tabId));
+            }}
+            onSubmissionReadback={(generation) => {
+              const tabId = active.id;
+              onModelChange((current) => confirmChatRightRailSideReadback(current, tabId, generation));
             }}
           />
         ) : null}

@@ -37,9 +37,12 @@ import type {
 import type { RuntimeSummary } from "../../api/types/runtime";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { removeChatTurnFromRuntimeSummary } from "./chatActiveWorkCache";
+import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import {
+  bindActiveTurnLayerToTurnId,
   createOptimisticActiveTurnLayer,
   latestUserTurnId,
+  settleActiveTurnLayerFromDetail,
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
@@ -56,6 +59,7 @@ import {
   markSessionDetailRunning,
   markSessionDetailStopping,
   markSessionSummaryRunning,
+  mergeSessionDetailMessageWindow,
   removeOptimisticUserMessage,
   type OptimisticUserMessageInput,
 } from "../chatSessionState";
@@ -66,6 +70,7 @@ import {
   chatStreamPerformanceNowMs,
   describeChatSubmitError,
   isBusyPhase,
+  isRunningPhase,
 } from "./chatCodingRouteViewModel";
 import {
   MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
@@ -215,12 +220,153 @@ export type SubmitTurnVariables = {
   attachments?: ConversationAttachment[];
   composerAttachments?: ComposerImageAttachment[];
   restoreAttachmentsAfterFailure?: () => void;
+  releaseComposerAttachmentOwners?: () => void;
   references?: SessionReferenceAttachment[];
   requestStartedAtMs: number;
   queuedBehindActiveTurn?: boolean;
+  /** Set only when an error readback confirms this submission is the current running turn. */
+  recoveredAcceptedTurnId?: string;
   /** One-shot per-turn model override; null/undefined follows the session default. */
   modelSelection?: SessionModelSelection | null;
 };
+
+type SubmitAcceptanceEvidence = "canonical_message" | "queued_turn" | "active_task";
+
+type SubmitAcceptanceReadback = {
+  evidence: SubmitAcceptanceEvidence | null;
+  status: "cache_confirmed" | "readback_confirmed" | "not_found" | "readback_failed";
+};
+
+const SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS = 3_000;
+
+function findSubmitAcceptanceEvidence(
+  detail: SessionDetail | undefined,
+  clientSubmissionId: string,
+): SubmitAcceptanceEvidence | null {
+  if (!detail || !clientSubmissionId) return null;
+  if (detail.messages?.some((message) => (
+    message.role === "user"
+    && String(message.metadata?.clientSubmissionId ?? "").trim() === clientSubmissionId
+    && message.metadata?.optimisticUserMessage !== true
+  ))) {
+    return "canonical_message";
+  }
+  if (detail.queuedTurns?.some((turn) => (
+    String(turn.clientSubmissionId ?? "").trim() === clientSubmissionId
+  ))) {
+    return "queued_turn";
+  }
+  if (String(detail.activeTask?.metadata?.clientSubmissionId ?? "").trim() === clientSubmissionId) {
+    return "active_task";
+  }
+  return null;
+}
+
+function exactSubmitTurnId(detail: SessionDetail | undefined, clientSubmissionId: string): string {
+  const canonicalUserMessage = [...(detail?.messages ?? [])].reverse().find((message) => (
+    message.role === "user"
+    && String(message.metadata?.clientSubmissionId ?? "").trim() === clientSubmissionId
+    && message.metadata?.optimisticUserMessage !== true
+  ));
+  const rawTurnId = String(canonicalUserMessage?.metadata?.turnId ?? canonicalUserMessage?.metadata?.turn_id ?? "").trim();
+  return rawTurnId.startsWith("live:") ? rawTurnId.slice("live:".length) : rawTurnId;
+}
+
+function exactAcceptedSubmitTurnId(
+  detail: SessionDetail | undefined,
+  clientSubmissionId: string,
+  evidence: SubmitAcceptanceEvidence,
+): string {
+  if (evidence === "queued_turn") return "";
+  const canonicalTurnId = exactSubmitTurnId(detail, clientSubmissionId);
+  if (canonicalTurnId) return canonicalTurnId;
+  if (evidence !== "active_task") return "";
+  const task = detail?.activeTask;
+  if (String(task?.metadata?.clientSubmissionId ?? "").trim() !== clientSubmissionId) return "";
+  const taskTurnId = String(task?.metadata?.turnId ?? task?.metadata?.turn_id ?? "").trim();
+  return taskTurnId.startsWith("live:") ? taskTurnId.slice("live:".length) : taskTurnId;
+}
+
+function isCurrentRunningSessionTurn(
+  detail: SessionDetail | undefined,
+  sessionId: string,
+  turnId: string,
+): boolean {
+  const normalizedTurnId = String(turnId || "").trim();
+  if (!detail || String(detail.id || "").trim() !== sessionId || !normalizedTurnId) return false;
+  const turnLayer = createOptimisticActiveTurnLayer({ sessionId, turnId: normalizedTurnId, accepted: true });
+  if (turnLayer && !settleActiveTurnLayerFromDetail(turnLayer, detail)) return false;
+  const phase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
+  // Stop click optimistically changes the phase to "stopping" before the
+  // deferred request can be sent. Keep that exact, still-busy turn eligible.
+  if (!isRunningPhase(phase) && !(phase === "stopping" && detail.stopRequested)) return false;
+  const activeTurnId = String(detail.activeTurnId || "").trim().replace(/^live:/, "");
+  const activeTaskTurnId = String(
+    detail.activeTask?.metadata?.turnId ?? detail.activeTask?.metadata?.turn_id ?? "",
+  ).trim().replace(/^live:/, "");
+  if (activeTurnId && activeTurnId !== normalizedTurnId) return false;
+  if (activeTaskTurnId && activeTaskTurnId !== normalizedTurnId) return false;
+  if (activeTurnId || activeTaskTurnId) return true;
+  return latestUserTurnId(detail) === normalizedTurnId;
+}
+
+async function readbackSubmitAcceptance(
+  queryClient: QueryClient,
+  sessionId: string,
+  clientSubmissionId: string,
+): Promise<SubmitAcceptanceReadback> {
+  const queryKey = queryKeys.session(sessionId);
+  const cachedEvidence = findSubmitAcceptanceEvidence(
+    queryClient.getQueryData<SessionDetail>(queryKey),
+    clientSubmissionId,
+  );
+  if (cachedEvidence) {
+    return { evidence: cachedEvidence, status: "cache_confirmed" };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(
+    () => controller.abort(),
+    SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS,
+  );
+  try {
+    const readback = await fetchSessionDetailWindow(sessionId, {
+      includeSecondary: false,
+      signal: controller.signal,
+    });
+    if (String(readback.id ?? "").trim() !== sessionId) {
+      return { evidence: null, status: "not_found" };
+    }
+    queryClient.setQueryData<SessionDetail>(queryKey, (current) => {
+      const currentLedgerSeq = current?.ledgerSeq;
+      const readbackLedgerSeq = readback.ledgerSeq;
+      if (
+        current
+        && typeof currentLedgerSeq === "number"
+        && Number.isFinite(currentLedgerSeq)
+        && typeof readbackLedgerSeq === "number"
+        && Number.isFinite(readbackLedgerSeq)
+        && currentLedgerSeq > readbackLedgerSeq
+      ) {
+        return current;
+      }
+      return mergeSessionDetailMessageWindow(current, readback);
+    });
+    const evidence = findSubmitAcceptanceEvidence(
+      queryClient.getQueryData<SessionDetail>(queryKey) ?? readback,
+      clientSubmissionId,
+    ) ?? findSubmitAcceptanceEvidence(readback, clientSubmissionId);
+    return evidence
+      ? { evidence, status: "readback_confirmed" }
+      : { evidence: null, status: "not_found" };
+  } catch {
+    // The POST's original error remains the user-facing failure if this
+    // best-effort authority check also fails or is cancelled.
+    return { evidence: null, status: "readback_failed" };
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
 
 type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
   queued?: boolean;
@@ -556,6 +702,7 @@ export function useChatComposerTurnMutations({
     },
     onSuccess: (acceptedTurn, variables, context) => {
       releaseSessionDraftRecoveryGuard(variables.draftRecoveryGuard);
+      variables.releaseComposerAttachmentOwners?.();
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         clientSubmissionId: variables.clientSubmissionId,
@@ -664,7 +811,104 @@ export function useChatComposerTurnMutations({
           .catch(() => undefined);
       }
     },
-    onError: (error, variables, context) => {
+    onError: async (error, variables, context) => {
+      // The Companion mutation targets the plugin mailbox; its acceptance
+      // receipt is not represented by native Session detail or queued turns.
+      // Keep the native readback/cache recovery limited to ordinary sessions.
+      const readbackAcceptance = companionAgentId
+        ? null
+        : await readbackSubmitAcceptance(
+          queryClient,
+          variables.sessionId,
+          variables.clientSubmissionId,
+        );
+      // SSE can confirm this exact ordinary-session submission while the
+      // readback is pending. Recheck the newest cache after an unsuccessful
+      // readback, including failures and cancellations, before restoring draft.
+      const lateCacheEvidence = readbackAcceptance && !readbackAcceptance.evidence
+        ? findSubmitAcceptanceEvidence(
+          queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId)),
+          variables.clientSubmissionId,
+        )
+        : null;
+      const acceptance = readbackAcceptance
+        ? lateCacheEvidence
+          ? { evidence: lateCacheEvidence, status: "cache_confirmed" as const }
+          : readbackAcceptance
+        : null;
+      if (acceptance?.evidence) {
+        releaseSessionDraftRecoveryGuard(variables.draftRecoveryGuard);
+        variables.releaseComposerAttachmentOwners?.();
+        if (acceptance.evidence === "canonical_message" || acceptance.evidence === "queued_turn") {
+          removeOptimisticUserMessageFromCache(queryClient, variables.sessionId, variables);
+        }
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [variables.sessionId]: "",
+        }));
+        setSessionImageAttachments((current) => {
+          if (!variables.composerAttachments) return clearSessionImageAttachments(current, variables.sessionId);
+          const submittedIds = new Set(variables.composerAttachments.map((attachment) => attachment.id));
+          return {
+            ...current,
+            [variables.sessionId]: (current[variables.sessionId] ?? []).filter((attachment) => !submittedIds.has(attachment.id)),
+          };
+        });
+        setSessionReferenceAttachments((current) =>
+          clearSubmittedReferenceSnapshot(current, variables.sessionId, variables.references ?? []));
+        const acceptedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+        const recoveredTurnId = exactAcceptedSubmitTurnId(
+          acceptedDetail,
+          variables.clientSubmissionId,
+          acceptance.evidence,
+        );
+        if (isCurrentRunningSessionTurn(acceptedDetail, variables.sessionId, recoveredTurnId)) {
+          variables.recoveredAcceptedTurnId = recoveredTurnId;
+        }
+        setActiveTurnLayersBySession((current) => {
+          const layer = current[variables.sessionId];
+          if (layer?.clientSubmissionId !== variables.clientSubmissionId) return current;
+          if (acceptance.evidence === "queued_turn") {
+            return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
+          }
+          const rawTaskTurnId = acceptance.evidence === "active_task"
+            ? String(acceptedDetail?.activeTask?.metadata?.turnId ?? acceptedDetail?.activeTask?.metadata?.turn_id ?? "").trim()
+            : "";
+          const turnId = exactSubmitTurnId(acceptedDetail, variables.clientSubmissionId) || rawTaskTurnId;
+          const boundLayer = bindActiveTurnLayerToTurnId(layer, turnId);
+          const unsettledLayer = settleActiveTurnLayerFromDetail(boundLayer, acceptedDetail);
+          if (!unsettledLayer) {
+            return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
+          }
+          return setActiveTurnLayerForSession(current, variables.sessionId, {
+            ...unsettledLayer,
+            processStage: unsettledLayer.processStage === "sending"
+              ? "user_submit"
+              : unsettledLayer.processStage,
+          });
+        });
+        appendStoredPromptHistoryEntry(variables.content);
+        context?.telemetry?.succeeded({
+          sessionId: variables.sessionId,
+          clientSubmissionId: variables.clientSubmissionId,
+          acceptanceEvidence: acceptance.evidence,
+          confirmation: acceptance.status,
+          requestReturnedError: true,
+          durationMs: Math.max(0, Math.round(chatStreamPerformanceNowMs() - variables.requestStartedAtMs)),
+        });
+        postSubmitTelemetry(
+          "browser.chat_submit.accepted_after_request_error",
+          "The request reported an error after an exact accepted submission was confirmed.",
+          variables.sessionId,
+          {
+            clientSubmissionId: variables.clientSubmissionId,
+            durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
+            error,
+          },
+          "warning",
+        );
+        return;
+      }
       context?.telemetry?.failed(error, {
         sessionId: variables.sessionId,
         clientSubmissionId: variables.clientSubmissionId,
@@ -672,7 +916,7 @@ export function useChatComposerTurnMutations({
       });
       postSubmitTelemetry(
         "browser.chat_submit.request_failed",
-        "Direct chat submit request failed before the backend accepted the turn.",
+        "Direct chat submit failed and backend acceptance could not be confirmed.",
         variables.sessionId,
         {
           content: variables.content,
@@ -681,6 +925,7 @@ export function useChatComposerTurnMutations({
           mentalModelEnabled: variables.mentalModelEnabled,
           clientSubmissionId: variables.clientSubmissionId,
           durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
+          ...(acceptance ? { acceptanceReadback: acceptance.status } : {}),
           error,
         },
         "error",
@@ -1310,7 +1555,6 @@ export function useChatComposerSubmitActions({
   const pendingPreviewReleaseTokenBySessionRef = useRef(new Map<string, number>());
   const composerLifecycleTokenRef = useRef(0);
   const isMountedRef = useRef(false);
-  const clearedSubmitMutationVariablesRef = useRef<unknown>(null);
   const clearedEditMutationVariablesRef = useRef<unknown>(null);
   // Defect-① observability: a queued turn whose drain never fires (ghost
   // running marker) would sit silently forever. Surface one composer hint per
@@ -1555,23 +1799,6 @@ export function useChatComposerSubmitActions({
     restoreComposerAttachmentUrls,
     scheduleComposerPreviewRelease,
     setSessionImageAttachments,
-  ]);
-
-  useEffect(() => {
-    const variables = submitTurnMutation.variables;
-    if (submitTurnMutation.isSuccess && variables?.sessionId && variables !== clearedSubmitMutationVariablesRef.current) {
-      clearedSubmitMutationVariablesRef.current = variables;
-      if (variables.composerAttachments) {
-        variables.composerAttachments.forEach((attachment) => forgetComposerAttachmentUrl(variables.sessionId, attachment));
-      } else {
-        releaseComposerSessionPreviewUrls(variables.sessionId, true);
-      }
-    }
-  }, [
-    forgetComposerAttachmentUrl,
-    releaseComposerSessionPreviewUrls,
-    submitTurnMutation.isSuccess,
-    submitTurnMutation.variables,
   ]);
 
   useEffect(() => {
@@ -1951,6 +2178,9 @@ export function useChatComposerSubmitActions({
         return { ...current, [sessionId]: [...byId.values()] };
       });
     };
+    const releaseSubmittedComposerAttachmentOwners = () => {
+      submittedAttachments.forEach((attachment) => forgetComposerAttachmentUrl(sessionId, attachment));
+    };
     imageUploadInFlightRef.current[sessionId] = true;
     pendingUploadSubmissionRef.current.set(sessionId, clientSubmissionId);
     setSessionImageUploadPending((current) => ({
@@ -2105,6 +2335,7 @@ export function useChatComposerSubmitActions({
         attachments: previewAttachments,
         composerAttachments: submittedAttachments,
         restoreAttachmentsAfterFailure,
+        releaseComposerAttachmentOwners: releaseSubmittedComposerAttachmentOwners,
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
         queuedBehindActiveTurn,
@@ -2165,6 +2396,7 @@ export function useChatComposerSubmitActions({
     describeError,
     imageUploadInFlightRef,
     isComposerAttachmentOwned,
+    forgetComposerAttachmentUrl,
     retainOwnedComposerUploadOutcomes,
     lang,
     queryClient,
@@ -3018,6 +3250,46 @@ export function useChatComposerSubmitActions({
     submitTurnMutation.variables?.sessionId,
   ]);
 
+  const discardDeferredStop = useCallback((sessionId: string, pendingStop: DeferredStopIntent) => {
+    pendingStopAfterAcceptRef.current.delete(sessionId);
+    if (!pendingStop.stoppingAt) return;
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (current) => {
+      if (!current) return current;
+      return clearSessionDetailStopping(current, {
+        requestedAt: pendingStop.stoppingAt!,
+        previous: pendingStop.previousDetail,
+      });
+    });
+  }, [queryClient]);
+
+  const dispatchDeferredStop = useCallback((
+    sessionId: string,
+    pendingStop: DeferredStopIntent,
+    acceptedTurnId: string,
+    requireCurrentRunningCheck = false,
+  ) => {
+    const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId));
+    if (requireCurrentRunningCheck
+      && !isCurrentRunningSessionTurn(currentDetail, sessionId, acceptedTurnId)) {
+      discardDeferredStop(sessionId, pendingStop);
+      return;
+    }
+    if (stopTurnMutation.isPending) {
+      pendingStop.acceptedTurnId = acceptedTurnId;
+      if (requireCurrentRunningCheck) pendingStop.recoveredAcceptedTurnId = acceptedTurnId;
+      return;
+    }
+    pendingStopAfterAcceptRef.current.delete(sessionId);
+    stopTurnMutation.mutate({
+      sessionId,
+      turnId: acceptedTurnId,
+      deferredStop: {
+        previousDetail: pendingStop.previousDetail,
+        stoppingAt: pendingStop.stoppingAt,
+      },
+    });
+  }, [discardDeferredStop, queryClient, stopTurnMutation]);
+
   // Mutation observers only expose the most recently submitted mutation. A
   // late acceptance from session A can therefore disappear behind a newer
   // submission in session B. Subscribe to the cache so every mutation keeps
@@ -3030,6 +3302,7 @@ export function useChatComposerSubmitActions({
         sessionId?: unknown;
         clientSubmissionId?: unknown;
         messageId?: unknown;
+        recoveredAcceptedTurnId?: unknown;
       } | undefined;
       const sessionId = typeof variables?.sessionId === "string" ? variables.sessionId : "";
       const clientSubmissionId = typeof variables?.clientSubmissionId === "string"
@@ -3040,7 +3313,15 @@ export function useChatComposerSubmitActions({
       if (!pendingStop || pendingStop.clientSubmissionId !== clientSubmissionId) return;
 
       if (mutation.state.status === "error") {
-        pendingStopAfterAcceptRef.current.delete(sessionId);
+        const recoveredTurnId = typeof variables?.recoveredAcceptedTurnId === "string"
+          ? variables.recoveredAcceptedTurnId.trim()
+          : "";
+        if (recoveredTurnId) {
+          pendingStop.recoveredAcceptedTurnId = recoveredTurnId;
+          dispatchDeferredStop(sessionId, pendingStop, recoveredTurnId, true);
+        } else {
+          discardDeferredStop(sessionId, pendingStop);
+        }
         return;
       }
       if (mutation.state.status !== "success") return;
@@ -3055,23 +3336,10 @@ export function useChatComposerSubmitActions({
           ? String(data.turnId || "").trim()
           : "";
       if (!acceptedTurnId) return;
-
-      if (stopTurnMutation.isPending) {
-        pendingStop.acceptedTurnId = acceptedTurnId;
-        return;
-      }
-      pendingStopAfterAcceptRef.current.delete(sessionId);
-      stopTurnMutation.mutate({
-        sessionId,
-        turnId: acceptedTurnId,
-        deferredStop: {
-          previousDetail: pendingStop.previousDetail,
-          stoppingAt: pendingStop.stoppingAt,
-        },
-      });
+      dispatchDeferredStop(sessionId, pendingStop, acceptedTurnId);
     });
     return unsubscribe;
-  }, [queryClient, stopTurnMutation]);
+  }, [discardDeferredStop, dispatchDeferredStop, queryClient]);
 
   useEffect(() => {
     const acceptedSubmit = submitTurnMutation.data;
@@ -3088,21 +3356,22 @@ export function useChatComposerSubmitActions({
         && !editResubmitMutation.isPending
         && !editResubmitMutation.error
         && Boolean(acceptedEdit);
-      const acceptedTurnId = pendingStop.acceptedTurnId || (submitMatches
+      const recoveredSubmitTurnId = submitVariables?.sessionId === sessionId
+        && submitVariables.clientSubmissionId === pendingStop.clientSubmissionId
+        ? String(submitVariables.recoveredAcceptedTurnId || "").trim()
+        : "";
+      const acceptedTurnId = pendingStop.acceptedTurnId || recoveredSubmitTurnId || (submitMatches
         ? String(acceptedSubmit?.turnId || "").trim()
         : editMatches
           ? resolveSessionStopTurnId(acceptedEdit, "")
           : "");
-      if (acceptedTurnId && !stopTurnMutation.isPending) {
-        pendingStopAfterAcceptRef.current.delete(sessionId);
-        stopTurnMutation.mutate({
+      if (acceptedTurnId) {
+        dispatchDeferredStop(
           sessionId,
-          turnId: acceptedTurnId,
-          deferredStop: {
-            previousDetail: pendingStop.previousDetail,
-            stoppingAt: pendingStop.stoppingAt,
-          },
-        });
+          pendingStop,
+          acceptedTurnId,
+          Boolean(pendingStop.recoveredAcceptedTurnId || recoveredSubmitTurnId),
+        );
         return;
       }
       const submitFailed = submitVariables?.sessionId === sessionId
@@ -3116,7 +3385,7 @@ export function useChatComposerSubmitActions({
         && Boolean(editResubmitMutation.error)
         && !editMatches;
       if (submitFailed || editFailed) {
-        pendingStopAfterAcceptRef.current.delete(sessionId);
+        discardDeferredStop(sessionId, pendingStop);
       }
     }
 
@@ -3159,6 +3428,8 @@ export function useChatComposerSubmitActions({
     submitTurnMutation.data,
     submitTurnMutation.error,
     submitTurnMutation.variables,
+    dispatchDeferredStop,
+    discardDeferredStop,
     editResubmitMutation.data,
     editResubmitMutation.error,
     editResubmitMutation.variables,
