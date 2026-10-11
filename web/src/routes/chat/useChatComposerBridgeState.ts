@@ -62,6 +62,10 @@ export interface UseChatComposerBridgeStateParams {
     isPending: boolean;
     variables?: { sessionId?: string };
   };
+  regenerateMutation: {
+    isPending: boolean;
+    variables?: { sessionId?: string };
+  };
   stopTurnMutation: {
     isPending: boolean;
     variables?: { sessionId?: string };
@@ -113,6 +117,7 @@ export function useChatComposerBridgeState({
   t,
   submitTurnMutation,
   editResubmitMutation,
+  regenerateMutation,
   stopTurnMutation,
   sessionGuidanceMutation,
   activeTurnSettledByDetail,
@@ -161,6 +166,7 @@ export function useChatComposerBridgeState({
   const submitPending =
     (submitTurnMutation.isPending && submitMutationMatchesActiveSession)
     || (editResubmitMutation.isPending && editResubmitMutationMatchesActiveSession)
+    || (regenerateMutation.isPending && regenerateMutation.variables?.sessionId === activeSessionId)
     || activeImageUploadPending;
   const sessionRunning = isRunningPhase(detail?.currentPhase);
   const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
