@@ -246,7 +246,17 @@ def search_knowledge_items(
                     view["searchMode"] = normalized_search_mode
                     view["matchReason"] = s._search_match_reason(search_document, normalized_query, score)
                 results.append(view)
-    if normalized_search_mode in {"semantic", "hybrid"} and normalized_query:
+    if scanned_bases == 0:
+        # Early exit: every owner/base was excluded (ACL, owner filters, or no
+        # active base), so `results` is provably empty. Skip tokenization and
+        # ranking; semantic/hybrid queries still emit the same truthful
+        # empty-candidate retrieval report so the response shape is unchanged.
+        if normalized_search_mode in {"semantic", "hybrid"} and normalized_query:
+            from .semantic import rank_candidates
+
+            results, semantic_info = rank_candidates(results, normalized_query, mode=normalized_search_mode)
+            results = results[:bounded_limit]
+    elif normalized_search_mode in {"semantic", "hybrid"} and normalized_query:
         from .semantic import rank_candidates
         results, semantic_info = rank_candidates(results, normalized_query, mode=normalized_search_mode)
         results = results[:bounded_limit]

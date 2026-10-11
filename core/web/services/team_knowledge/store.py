@@ -19,6 +19,8 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 
+from . import read_cache
+
 
 _READ_DIAGNOSTICS: ContextVar[dict[str, dict[str, int]] | None] = ContextVar(
     "knowledge_jsonl_read_diagnostics", default=None
@@ -60,15 +62,37 @@ def _iter_existing_knowledge_roots() -> list[Path]:
     return roots
 
 
-def _load_knowledge_bases_state_from_path(path: Path) -> dict[str, Any]:
-    s = _service()
+def _read_parsed_knowledge_bases_payload(path: Path) -> dict[str, Any] | None:
+    """Parse ``knowledge_bases.json`` with stat-signature memoization.
+
+    A miss parses the file, hands the parsed object to the cache, and returns a
+    defensive copy to the caller; a hit serves the same defensive shape. The
+    registry is re-read once per changed file instead of once per base per call.
+    """
+
     if not path.exists():
-        return {"schemaVersion": s.SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+        return None
+    signature = read_cache.jsonl_signature(path)
+    if signature is not None:
+        cached = read_cache.cached_json_payload(path, signature)
+        if cached is not None:
+            return cached
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"schemaVersion": s.SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+        return None
     if not isinstance(payload, dict):
+        return None
+    if signature is not None:
+        read_cache.store_json_payload(path, signature, payload)
+        return read_cache.defensive_json_payload(payload)
+    return payload
+
+
+def _load_knowledge_bases_state_from_path(path: Path) -> dict[str, Any]:
+    s = _service()
+    payload = _read_parsed_knowledge_bases_payload(path)
+    if payload is None:
         return {"schemaVersion": s.SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
     knowledge_bases = [item for item in list(payload.get("knowledgeBases") or []) if isinstance(item, dict)]
     return {
@@ -81,13 +105,8 @@ def _load_knowledge_bases_state_from_path(path: Path) -> dict[str, Any]:
 def _load_bases_state_for_owner(owner_value: Any) -> dict[str, Any]:
     s = _service()
     path = s._knowledge_bases_path_for_owner(s._coerce_owner_context(owner_value))
-    if not path.exists():
-        return {"schemaVersion": s.SCHEMA_VERSION, "updatedAt": s.utc_now_iso(), "knowledgeBases": []}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"schemaVersion": s.SCHEMA_VERSION, "updatedAt": s.utc_now_iso(), "knowledgeBases": []}
-    if not isinstance(payload, dict):
+    payload = _read_parsed_knowledge_bases_payload(path)
+    if payload is None:
         return {"schemaVersion": s.SCHEMA_VERSION, "updatedAt": s.utc_now_iso(), "knowledgeBases": []}
     payload.setdefault("schemaVersion", s.SCHEMA_VERSION)
     payload.setdefault("updatedAt", "")
@@ -315,6 +334,16 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     s = _service()
     if not path.exists():
         return []
+    # Parsed rows are memoized per (mtime_ns, size); retrieval re-scans and
+    # re-scores on every call, only the file PARSE is shared. Served rows are
+    # per-item dict copies so mutation flows (patch-then-rewrite) cannot leak
+    # into later reads, and any write drops the entry eagerly.
+    signature = read_cache.jsonl_signature(path)
+    if signature is not None:
+        cached_items = read_cache.cached_jsonl(path, signature)
+        if cached_items is not None:
+            _record_read_diagnostics(path, corrupt_lines=read_cache.cached_jsonl_corrupt_lines(path, signature) or 0)
+            return cached_items
     items: list[dict[str, Any]] = []
     # 逐行容错：半写行/坏字节只丢该行，绝不把整份 index 读成空列表
     # （读空 + 全量重写的组合曾让一条坏输入静默清空 inbox registry）。
@@ -337,10 +366,18 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         else:
             corrupt_lines += 1
     _record_read_diagnostics(path, corrupt_lines=corrupt_lines)
+    if signature is not None:
+        read_cache.store_jsonl(path, signature, items, corrupt_lines=corrupt_lines)
+        # Serve a copy, not the freshly cached objects: patch-then-rewrite
+        # callers must not mutate the memoized rows even on the miss path.
+        return read_cache.defensive_jsonl_rows(items)
     return items
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
+    # Drop the parsed-read memo for this path before the swap so a failed write
+    # can never leave a stale entry keyed to the upcoming stat signature.
+    read_cache.invalidate_knowledge_read_cache(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
@@ -361,6 +398,7 @@ def _write_jsonl(path: Path, items: list[dict[str, Any]]) -> None:
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     s = _service()
+    read_cache.invalidate_knowledge_read_cache(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
