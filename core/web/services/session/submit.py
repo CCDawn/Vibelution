@@ -12,15 +12,18 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import json
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
-from core.chat.turn_journal import TurnJournalPostTerminalWriteError
+from core.chat.turn_journal import TERMINAL_EVENTS, TurnJournalPostTerminalWriteError
 
 from . import conversation_references
 from . import document_attachments
+from . import journal_bridge
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
     get_development_submission_admission_runtime,
@@ -148,6 +151,268 @@ class _SessionTurnQueued(Exception):
     def __init__(self, payload: dict[str, Any]) -> None:
         super().__init__("queued")
         self.payload = dict(payload or {})
+
+
+def _submission_fingerprint_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _submission_fingerprint_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_submission_fingerprint_value(item) for item in value]
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    return str(value)
+
+
+def _session_submission_fingerprint(
+    *,
+    content: str,
+    attachment_ids: list[str] | None,
+    references: list[dict[str, Any]] | None,
+    mental_model_enabled: bool | None,
+    runtime_status_enabled: bool | None,
+    turn_mode: str,
+    write_intent: bool | None,
+    message_metadata: Mapping[str, Any] | None,
+    message_source: str,
+    turn_status_tail: Mapping[str, Any] | None,
+    model_selection: Mapping[str, Any] | None,
+) -> str:
+    """Hash the semantic submit request without retaining its message payload."""
+
+    fingerprint_base = _session_submission_fingerprint_base(
+        attachment_ids=attachment_ids,
+        references=references,
+        mental_model_enabled=mental_model_enabled,
+        runtime_status_enabled=runtime_status_enabled,
+        turn_mode=turn_mode,
+        write_intent=write_intent,
+        message_metadata=message_metadata,
+        message_source=message_source,
+        turn_status_tail=turn_status_tail,
+        model_selection=model_selection,
+    )
+    return _session_submission_fingerprint_from_base(content, fingerprint_base)
+
+
+def _session_submission_fingerprint_base(
+    *,
+    attachment_ids: list[str] | None,
+    references: list[dict[str, Any]] | None,
+    mental_model_enabled: bool | None,
+    runtime_status_enabled: bool | None,
+    turn_mode: str,
+    write_intent: bool | None,
+    message_metadata: Mapping[str, Any] | None,
+    message_source: str,
+    turn_status_tail: Mapping[str, Any] | None,
+    model_selection: Mapping[str, Any] | None,
+) -> str:
+    payload = _submission_fingerprint_value(
+        {
+            "attachmentIds": list(attachment_ids or []),
+            "references": list(references or []),
+            "mentalModelEnabled": mental_model_enabled,
+            "runtimeStatusEnabled": runtime_status_enabled,
+            "turnMode": str(turn_mode or ""),
+            "writeIntent": write_intent,
+            "messageMetadata": dict(message_metadata or {}) if isinstance(message_metadata, Mapping) else {},
+            "messageSource": str(message_source or "raw"),
+            "turnStatusTail": dict(turn_status_tail or {}) if isinstance(turn_status_tail, Mapping) else None,
+            "modelSelection": dict(model_selection or {}) if isinstance(model_selection, Mapping) else None,
+        }
+    )
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _session_submission_fingerprint_from_base(content: str, fingerprint_base: str) -> str:
+    encoded = json.dumps(
+        {
+            "content": str(content or ""),
+            "base": str(fingerprint_base or ""),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _raise_submission_identity_conflict(service: Any, lang: str) -> None:
+    raise service.SessionValidationError(
+        service.text_for(
+            lang,
+            zh="此提交标识已用于不同内容，请使用新的提交标识重试。",
+            en="This submission id was already used for different content. Retry with a new submission id.",
+        )
+    )
+
+
+def _validate_submission_event_fingerprint(
+    service: Any,
+    event: Any,
+    *,
+    expected_fingerprint: str,
+    lang: str,
+    content: str,
+    attachment_ids: list[str] | None,
+    references: list[dict[str, Any]] | None,
+    mental_model_enabled: bool | None,
+    runtime_status_enabled: bool | None,
+    turn_mode: str,
+    write_intent: bool | None,
+    message_metadata: Mapping[str, Any] | None,
+    message_source: str,
+    model_selection: Mapping[str, Any] | None,
+    turn_status_tail: Mapping[str, Any] | None,
+) -> None:
+    payload = getattr(event, "payload", {})
+    payload = payload if isinstance(payload, Mapping) else {}
+    metadata = payload.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    stored_fingerprint = str(metadata.get("clientSubmissionFingerprint") or "").strip()
+    if stored_fingerprint:
+        if stored_fingerprint != expected_fingerprint:
+            _raise_submission_identity_conflict(service, lang)
+        return
+
+    # Older journals predate request fingerprints. Only replay a plainly
+    # equivalent text-only request; other legacy payloads do not carry enough
+    # facts to prove that a reused ID means the same submission.
+    legacy_text_only_match = (
+        str(payload.get("content") or "") == str(content or "")
+        and not list(payload.get("attachments") or [])
+        and not list(payload.get("references") or [])
+        and not list(attachment_ids or [])
+        and not list(references or [])
+        and mental_model_enabled is None
+        and runtime_status_enabled is None
+        and not str(turn_mode or "")
+        and write_intent is None
+        and not (message_metadata or {})
+        and str(payload.get("source") or "raw") == str(message_source or "raw")
+        and not model_selection
+        and not turn_status_tail
+    )
+    if not legacy_text_only_match:
+        _raise_submission_identity_conflict(service, lang)
+
+
+def _existing_submission_replay(
+    service: Any,
+    *,
+    session_id: str,
+    client_submission_id: str,
+    submission_fingerprint: str,
+    lang: str,
+    content: str,
+    attachment_ids: list[str] | None,
+    references: list[dict[str, Any]] | None,
+    mental_model_enabled: bool | None,
+    runtime_status_enabled: bool | None,
+    turn_mode: str,
+    write_intent: bool | None,
+    message_metadata: Mapping[str, Any] | None,
+    message_source: str,
+    model_selection: Mapping[str, Any] | None,
+    turn_status_tail: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    events = journal_bridge.load_session_conversation_events_by_correlation(
+        session_id,
+        event_type=service.EVENT_USER_MESSAGE,
+        correlation_id=client_submission_id,
+        project_root=service.PROJECT_ROOT,
+    )
+    if not events:
+        return None
+    event = events[-1]
+    _validate_submission_event_fingerprint(
+        service,
+        event,
+        expected_fingerprint=submission_fingerprint,
+        lang=lang,
+        content=content,
+        attachment_ids=attachment_ids,
+        references=references,
+        mental_model_enabled=mental_model_enabled,
+        runtime_status_enabled=runtime_status_enabled,
+        turn_mode=turn_mode,
+        write_intent=write_intent,
+        message_metadata=message_metadata,
+        message_source=message_source,
+        model_selection=model_selection,
+        turn_status_tail=turn_status_tail,
+    )
+    turn_id = str(getattr(event, "turn_id", "") or "").strip()
+    if not turn_id:
+        _raise_submission_identity_conflict(service, lang)
+    all_events = journal_bridge.load_session_conversation_events_cached(
+        session_id,
+        project_root=service.PROJECT_ROOT,
+    )
+    terminal = next(
+        (
+            candidate
+            for candidate in reversed(all_events)
+            if str(getattr(candidate, "turn_id", "") or "").strip() == turn_id
+            and str(getattr(candidate, "event_type", "") or "").strip() in TERMINAL_EVENTS
+        ),
+        None,
+    )
+    status = str(getattr(terminal, "status", "") or "").strip() if terminal is not None else "running"
+    return _accepted_session_turn_payload(
+        session_id,
+        turn_id,
+        status=status or ("completed" if terminal is not None else "running"),
+        client_submission_id=client_submission_id,
+    )
+
+
+def _existing_partial_submission_turn_id(
+    service: Any,
+    *,
+    session_id: str,
+    client_submission_id: str,
+) -> str:
+    """Return an open TURN_STARTED identity that has no accepted user event."""
+
+    started_events = journal_bridge.load_session_conversation_events_by_correlation(
+        session_id,
+        event_type=service.EVENT_TURN_STARTED,
+        correlation_id=client_submission_id,
+        project_root=service.PROJECT_ROOT,
+    )
+    if not started_events:
+        return ""
+    user_events = journal_bridge.load_session_conversation_events_by_correlation(
+        session_id,
+        event_type=service.EVENT_USER_MESSAGE,
+        correlation_id=client_submission_id,
+        project_root=service.PROJECT_ROOT,
+    )
+    if user_events:
+        return ""
+    events = journal_bridge.load_session_conversation_events_cached(
+        session_id,
+        project_root=service.PROJECT_ROOT,
+    )
+    terminal_turn_ids = {
+        str(getattr(event, "turn_id", "") or "").strip()
+        for event in events
+        if str(getattr(event, "event_type", "") or "").strip() in TERMINAL_EVENTS
+    }
+    return next(
+        (
+            str(getattr(event, "turn_id", "") or "").strip()
+            for event in reversed(started_events)
+            if str(getattr(event, "turn_id", "") or "").strip()
+            and str(getattr(event, "turn_id", "") or "").strip() not in terminal_turn_ids
+        ),
+        "",
+    )
 
 
 class SessionModelSelectionError(ValueError):
@@ -314,6 +579,8 @@ def _enqueue_busy_session_turn(
     turn_mode: str,
     write_intent: bool | None,
     client_submission_id: str,
+    client_submission_fingerprint: str,
+    client_submission_fingerprint_base: str,
     lang: str,
     model_selection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -391,6 +658,8 @@ def _enqueue_busy_session_turn(
         turn_mode=turn_mode,
         write_intent=write_intent,
         client_submission_id=client_submission_id,
+        client_submission_fingerprint=client_submission_fingerprint,
+        client_submission_fingerprint_base=client_submission_fingerprint_base,
         model_selection=model_selection,
         lang=lang,
     )
@@ -524,6 +793,7 @@ def _append_initial_session_journal_markers(
     source: str,
     leases: list[str],
     user_payload: dict[str, Any],
+    client_submission_fingerprint: str = "",
     turn_steer_promotion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Append/recover one journal-backed user submission.
@@ -537,34 +807,86 @@ def _append_initial_session_journal_markers(
     normalized_session_id = str(session_id or "").strip()
     normalized_turn_id = str(turn_id or "").strip()
     normalized_submission_id = str(client_submission_id or "").strip()
+    resolved_journal_turn_id = ""
 
     def matching_events(event_type: str) -> list[Any]:
         if not normalized_submission_id:
             return []
-        return [
-            event
-            for event in s._load_session_conversation_events_cached(normalized_session_id)
-            if str(getattr(event, "correlation_id", "") or "").strip()
-            == normalized_submission_id
-            and str(getattr(event, "event_type", "") or "") == event_type
-        ]
+        return journal_bridge.load_session_conversation_events_by_correlation(
+            normalized_session_id,
+            event_type=event_type,
+            correlation_id=normalized_submission_id,
+            project_root=s.PROJECT_ROOT,
+        )
+
+    def validate_existing_user_event(event: Any) -> None:
+        if not normalized_submission_id or not client_submission_fingerprint:
+            return
+        _validate_submission_event_fingerprint(
+            s,
+            event,
+            expected_fingerprint=client_submission_fingerprint,
+            lang=s.get_web_language(),
+            content=str(user_payload.get("content") or ""),
+            attachment_ids=[
+                str(item.get("artifactId") or "").strip()
+                for item in (user_payload.get("attachments") or [])
+                if isinstance(item, Mapping) and str(item.get("artifactId") or "").strip()
+            ],
+            references=[
+                dict(item)
+                for item in (user_payload.get("references") or [])
+                if isinstance(item, Mapping)
+            ],
+            mental_model_enabled=None,
+            runtime_status_enabled=None,
+            turn_mode="",
+            write_intent=None,
+            message_metadata={},
+            message_source=str(user_payload.get("source") or source or "raw"),
+            model_selection=None,
+            turn_status_tail=None,
+        )
 
     def lookup(record: dict[str, Any]) -> dict[str, Any] | None:
+        nonlocal resolved_journal_turn_id
         if not normalized_submission_id:
             return None
         events = matching_events(s.EVENT_USER_MESSAGE)
         if not events:
             return None
         event = events[-1]
+        validate_existing_user_event(event)
+        resolved_journal_turn_id = str(getattr(event, "turn_id", "") or "").strip()
         return {
             "journalSequence": int(getattr(event, "sequence", 0) or 0),
             "journalEventId": str(getattr(event, "event_id", "") or "").strip(),
         }
 
     def append(record: dict[str, Any]) -> dict[str, Any]:
-        record_turn_id = str(record.get("turnId") or normalized_turn_id).strip()
+        nonlocal resolved_journal_turn_id
+        existing_user_events = matching_events(s.EVENT_USER_MESSAGE)
+        if existing_user_events:
+            user_event = existing_user_events[-1]
+            validate_existing_user_event(user_event)
+            record_turn_id = str(getattr(user_event, "turn_id", "") or "").strip()
+            if not record_turn_id:
+                record_turn_id = str(record.get("turnId") or normalized_turn_id).strip()
+            resolved_journal_turn_id = record_turn_id
+            return {
+                "journalSequence": int(getattr(user_event, "sequence", 0) or 0),
+                "journalEventId": str(getattr(user_event, "event_id", "") or "").strip(),
+                "turnId": record_turn_id,
+            }
+
+        partial_turn_id = _existing_partial_submission_turn_id(
+            s,
+            session_id=normalized_session_id,
+            client_submission_id=normalized_submission_id,
+        )
+        record_turn_id = partial_turn_id or str(record.get("turnId") or normalized_turn_id).strip()
         timings: dict[str, float] = {}
-        if not matching_events(s.EVENT_TURN_STARTED):
+        if not partial_turn_id:
             turn_started_at = s._perf_counter()
             s._append_session_conversation_event(
                 normalized_session_id,
@@ -581,21 +903,27 @@ def _append_initial_session_journal_markers(
                 correlation_id=normalized_submission_id,
             )
             timings["turnStartedJournalMs"] = s._elapsed_ms(turn_started_at)
-        existing_user_events = matching_events(s.EVENT_USER_MESSAGE)
-        if existing_user_events:
-            user_event = existing_user_events[-1]
-        else:
-            user_message_started_at = s._perf_counter()
-            user_event = s._append_session_conversation_event(
-                normalized_session_id,
-                record_turn_id,
-                s.EVENT_USER_MESSAGE,
-                status="recorded",
-                payload=dict(user_payload),
-                source="submit_session_message",
-                correlation_id=normalized_submission_id,
-            )
-            timings["userMessageJournalMs"] = s._elapsed_ms(user_message_started_at)
+        event_payload = dict(user_payload)
+        event_metadata = event_payload.get("metadata")
+        event_metadata = dict(event_metadata) if isinstance(event_metadata, Mapping) else {}
+        if normalized_submission_id:
+            event_metadata.setdefault("clientSubmissionId", normalized_submission_id)
+        if client_submission_fingerprint:
+            event_metadata["clientSubmissionFingerprint"] = client_submission_fingerprint
+        if event_metadata:
+            event_payload["metadata"] = event_metadata
+        user_message_started_at = s._perf_counter()
+        user_event = s._append_session_conversation_event(
+            normalized_session_id,
+            record_turn_id,
+            s.EVENT_USER_MESSAGE,
+            status="recorded",
+            payload=event_payload,
+            source="submit_session_message",
+            correlation_id=normalized_submission_id,
+        )
+        timings["userMessageJournalMs"] = s._elapsed_ms(user_message_started_at)
+        resolved_journal_turn_id = record_turn_id
         _append_turn_steer_promotion(
             session_id=normalized_session_id,
             turn_id=record_turn_id,
@@ -606,6 +934,7 @@ def _append_initial_session_journal_markers(
         return {
             "journalSequence": int(getattr(user_event, "sequence", 0) or 0),
             "journalEventId": str(getattr(user_event, "event_id", "") or "").strip(),
+            "turnId": record_turn_id,
             **timings,
         }
 
@@ -620,7 +949,7 @@ def _append_initial_session_journal_markers(
         )
         return {
             **receipt,
-            "turnId": normalized_turn_id,
+            "turnId": str(receipt.get("turnId") or normalized_turn_id).strip(),
             "admissionDisposition": "disabled",
         }
 
@@ -636,7 +965,7 @@ def _append_initial_session_journal_markers(
     return {
         "journalSequence": int(admission.get("journalSequence") or 0),
         "journalEventId": str(admission.get("journalEventId") or "").strip(),
-        "turnId": str(admission.get("turnId") or "").strip(),
+        "turnId": resolved_journal_turn_id or str(admission.get("turnId") or "").strip(),
         "admissionDisposition": str(admission.get("journalDisposition") or ""),
     }
 
@@ -939,6 +1268,8 @@ def submit_session_message(
     model_selection: Mapping[str, Any] | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
     turn_steer_promotion: dict[str, Any] | None = None,
+    _client_submission_fingerprint: str = "",
+    _client_submission_fingerprint_base: str = "",
 ) -> dict:
     """Persist a user message and start a single web chat turn.
 
@@ -982,18 +1313,28 @@ def submit_session_message(
                 session_id=conversation_id,
                 client_submission_id=normalized_client_submission_id,
             )
-            if str((existing_development_admission or {}).get("state") or "") in {
-                "journaled",
-                "projected",
-            }:
-                return _accepted_session_turn_payload(
-                    conversation_id,
-                    str(existing_development_admission.get("turnId") or "").strip(),
-                    status="running",
-                    client_submission_id=normalized_client_submission_id,
-                )
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     normalized_message_source = str(message_source or "").strip() or "raw"
+    client_submission_fingerprint_base = str(_client_submission_fingerprint_base or "").strip()
+    if not client_submission_fingerprint_base:
+        client_submission_fingerprint_base = _session_submission_fingerprint_base(
+            attachment_ids=attachment_ids,
+            references=references,
+            mental_model_enabled=mental_model_enabled,
+            runtime_status_enabled=runtime_status_enabled,
+            turn_mode=turn_mode,
+            write_intent=write_intent,
+            message_metadata=message_metadata,
+            message_source=normalized_message_source,
+            turn_status_tail=turn_status_tail,
+            model_selection=normalized_model_selection,
+        )
+    client_submission_fingerprint = str(_client_submission_fingerprint or "").strip()
+    if not client_submission_fingerprint:
+        client_submission_fingerprint = _session_submission_fingerprint_from_base(
+            message,
+            client_submission_fingerprint_base,
+        )
     recent_image_reference_routing_enabled = normalized_message_source not in {
         "supervised_evolution",
         "self_observation",
@@ -1001,36 +1342,47 @@ def submit_session_message(
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
     s._validate_user_message_not_encoding_replacement(message, lang=lang)
-    if s._is_session_running(conversation_id):
-        if queue_if_busy:
-            return _enqueue_busy_session_turn(
-                s,
-                conversation_id,
-                message=message,
-                attachment_ids=attachment_ids,
-                references=references,
-                resolved_attachments=None,
-                resolved_references=None,
-                mental_model_enabled=mental_model_enabled,
-                runtime_status_enabled=runtime_status_enabled,
-                turn_mode=turn_mode,
-                write_intent=write_intent,
-                client_submission_id=normalized_client_submission_id,
-                model_selection=normalized_model_selection,
-                lang=lang,
-            )
-        raise _session_still_running_error(s, lang)
 
     # Ledger I/O is per-session. Holding _CHAT_STATE_LOCK across it serializes
     # every other session's 202 accept (measured 6-way wait ~20s).
     admit_lock = _session_submit_admit_lock(conversation_id)
     admit_lock_wait_started_at = s._perf_counter()
     admit_lock.acquire()
+    admit_lock_held = True
+
+    def release_admit_lock() -> None:
+        nonlocal admit_lock_held
+        if admit_lock_held:
+            admit_lock.release()
+            admit_lock_held = False
+
     submit_timing_fields["chatStateLockWaitMs"] = s._elapsed_ms(admit_lock_wait_started_at)
     prepared_agent: dict[str, Any] | None = None
     prepared_agent_id = ""
     prepared_context_limit_ok = False
     try:
+        if normalized_client_submission_id:
+            replay = _existing_submission_replay(
+                s,
+                session_id=conversation_id,
+                client_submission_id=normalized_client_submission_id,
+                submission_fingerprint=client_submission_fingerprint,
+                lang=lang,
+                content=message,
+                attachment_ids=attachment_ids,
+                references=references,
+                mental_model_enabled=mental_model_enabled,
+                runtime_status_enabled=runtime_status_enabled,
+                turn_mode=turn_mode,
+                write_intent=write_intent,
+                message_metadata=message_metadata,
+                message_source=normalized_message_source,
+                model_selection=normalized_model_selection,
+                turn_status_tail=turn_status_tail,
+            )
+            if replay is not None:
+                release_admit_lock()
+                return replay
         if s._is_session_running(conversation_id):
             if queue_if_busy:
                 raise _SessionTurnQueued(
@@ -1047,13 +1399,47 @@ def submit_session_message(
                         turn_mode=turn_mode,
                         write_intent=write_intent,
                         client_submission_id=normalized_client_submission_id,
+                        client_submission_fingerprint=client_submission_fingerprint,
+                        client_submission_fingerprint_base=client_submission_fingerprint_base,
                         model_selection=normalized_model_selection,
                         lang=lang,
                     )
                 )
             raise _session_still_running_error(s, lang)
+        partial_submission_turn_id = (
+            _existing_partial_submission_turn_id(
+                s,
+                session_id=conversation_id,
+                client_submission_id=normalized_client_submission_id,
+            )
+            if normalized_client_submission_id
+            else ""
+        )
+        existing_admission_turn_id = str(
+            (existing_development_admission or {}).get("turnId") or ""
+        ).strip()
+        if existing_admission_turn_id and not partial_submission_turn_id:
+            # A control receipt cannot reopen a terminal, unaccepted turn.
+            # Accepted user events have already returned through journal replay.
+            receipt_turn_ended = any(
+                str(getattr(event, "turn_id", "") or "").strip() == existing_admission_turn_id
+                and str(getattr(event, "event_type", "") or "").strip() in TERMINAL_EVENTS
+                for event in journal_bridge.load_session_conversation_events_cached(
+                    conversation_id, project_root=s.PROJECT_ROOT,
+                )
+            )
+            if receipt_turn_ended:
+                raise s.SessionValidationError(s.text_for(
+                    lang,
+                    zh="先前提交在消息接受前已结束，请重新发送消息（使用新的提交标识）。",
+                    en="The previous turn ended before accepting this message. Send again with a new submission id.",
+                ))
         ledger_started_at = s._perf_counter()
-        s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
+        s._reconcile_stale_session_ledger(
+            conversation_id,
+            active_turn_id=partial_submission_turn_id,
+            reason="new_turn_submitted",
+        )
         previous_messages = s._session_ledger_visible_messages(conversation_id)
         submit_timing_fields["ledgerReconcileMs"] = s._elapsed_ms(ledger_started_at)
         prepare_started_at = s._perf_counter()
@@ -1084,10 +1470,10 @@ def submit_session_message(
                 )
         submit_timing_fields["submitPrepareMs"] = s._elapsed_ms(prepare_started_at)
     except _SessionTurnQueued as queued:
-        admit_lock.release()
+        release_admit_lock()
         return queued.payload
     except BaseException:
-        admit_lock.release()
+        release_admit_lock()
         raise
 
     persist_started_at = s._perf_counter()
@@ -1190,7 +1576,7 @@ def submit_session_message(
 
         if s._is_session_running(conversation_id):
             if queue_if_busy:
-                return _enqueue_busy_session_turn(
+                queued_payload = _enqueue_busy_session_turn(
                     s,
                     conversation_id,
                     message=message,
@@ -1203,9 +1589,13 @@ def submit_session_message(
                     turn_mode=turn_mode,
                     write_intent=write_intent,
                     client_submission_id=normalized_client_submission_id,
+                    client_submission_fingerprint=client_submission_fingerprint,
+                    client_submission_fingerprint_base=client_submission_fingerprint_base,
                     model_selection=normalized_model_selection,
                     lang=lang,
                 )
+                release_admit_lock()
+                return queued_payload
             raise _session_still_running_error(s, lang)
 
         if normalized_message_source == "supervised_evolution":
@@ -1267,7 +1657,7 @@ def submit_session_message(
         )
         skill_command = s.parse_skill_slash_command(message)
         skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
-        reserved_turn_id = str(
+        reserved_turn_id = partial_submission_turn_id or str(
             (existing_development_admission or {}).get("turnId") or ""
         ).strip()
         turn_control = s._create_session_turn_control(
@@ -1386,8 +1776,9 @@ def submit_session_message(
             raise
         submit_timing_fields["workRunPersistMs"] = s._elapsed_ms(work_run_persist_started_at)
         submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(persist_started_at)
-    finally:
-        admit_lock.release()
+    except BaseException:
+        release_admit_lock()
+        raise
     # Acceptance window: the turn is already flagged running here, so any
     # failure before the worker is scheduled (journal lock timeout, disk I/O,
     # ...) must settle the turn exactly like a schedule failure below;
@@ -1426,11 +1817,13 @@ def submit_session_message(
                 "metadata": persisted_message_metadata,
                 "source": normalized_message_source,
             },
+            client_submission_fingerprint=client_submission_fingerprint,
             turn_steer_promotion=turn_steer_promotion,
         )
         admitted_turn_id = str(journal_receipt.get("turnId") or "").strip()
         if admitted_turn_id and admitted_turn_id != turn_control.turn_id:
             raise RuntimeError("Submission admission turn identity changed during journal append.")
+        release_admit_lock()
         submit_timing_fields["initialJournalMarkersMs"] = s._elapsed_ms(stage_started_at)
         submit_timing_fields.setdefault("turnStartedJournalMs", 0)
         submit_timing_fields.setdefault("userMessageJournalMs", 0)
@@ -1703,6 +2096,7 @@ def submit_session_message(
         s._record_session_turn_scheduled_event(context)
         submit_timing_fields["scheduledSceneLogMs"] = s._elapsed_ms(stage_started_at)
     except Exception as exc:
+        release_admit_lock()
         _settle_session_submit_admission_failure(
             session_id=conversation_id,
             turn_id=turn_control.turn_id,

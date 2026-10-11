@@ -241,6 +241,27 @@ describe("chatStreamApplyController", () => {
     expect(decision.telemetry.appliedCount).toBe(50);
   });
 
+  it("keeps draining after a stale-only batch without notifying it as applied", () => {
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "frame",
+      drain: drain([{
+        payload: assistantDelta({ ledgerSeq: 7 }),
+        payloadLength: 12,
+        receivedAtMs: 100,
+      }], { shouldContinue: true, pendingAfter: 1 }),
+      committedLayer: undefined,
+      stats: stats({ received: 1 }),
+      applyStartedAtMs: 150,
+      assistantDeltaSeqGate: () => ({ action: "drop-stale", seq: 4, lastAppliedSeq: 5 }),
+    });
+
+    expect(decision.applied).toBe(false);
+    expect(decision.stats.dropped).toBe(1);
+    expect(decision.appliedPayloads).toEqual([]);
+    expect(decision.shouldScheduleNextFrame).toBe(true);
+  });
+
   it("handles a canonical snapshot without committing a duplicate render", () => {
     const canonicalItems = [
       {

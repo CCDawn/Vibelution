@@ -27,6 +27,11 @@ import {
   type UseSessionDetailStreamOptions,
 } from "./useSessionDetailStream";
 
+vi.mock("../../app/browserTelemetry", () => ({
+  collectBrowserPageSnapshot: () => ({}),
+  postBrowserTelemetry: vi.fn(),
+}));
+
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   static reset() {
@@ -144,7 +149,12 @@ type SessionStreamDecisionSnapshotShape = {
   routeSwitchGraceMsRemaining: number;
 };
 
-function sessionDetailEvent(overrides: { id?: string; ledgerSeq?: number; currentPhase?: string } = {}) {
+function sessionDetailEvent(overrides: {
+  id?: string;
+  ledgerSeq?: number;
+  currentPhase?: string;
+  activeTurnId?: string;
+} = {}) {
   const id = overrides.id ?? "s1";
   const ledgerSeq = overrides.ledgerSeq ?? 1;
   return JSON.stringify({
@@ -155,6 +165,7 @@ function sessionDetailEvent(overrides: { id?: string; ledgerSeq?: number; curren
       id,
       ledgerSeq,
       currentPhase: overrides.currentPhase ?? "running",
+      ...(overrides.activeTurnId === undefined ? {} : { activeTurnId: overrides.activeTurnId }),
       title: "Session 1",
       messages: [],
     },
@@ -179,13 +190,14 @@ function assistantTurnItem(patch: Record<string, unknown> = {}) {
 }
 
 function assistantDeltaEvent(
-  overrides: { done?: boolean; ledgerSeq?: number; deltaSeq?: number } = {},
+  overrides: { done?: boolean; ledgerSeq?: number; deltaSeq?: number; turnId?: string } = {},
 ) {
   const done = overrides.done ?? false;
+  const turnId = overrides.turnId ?? "turn-1";
   return JSON.stringify({
     type: "assistant_delta",
     sessionId: "s1",
-    turnId: "turn-1",
+    turnId,
     ledgerSeq: overrides.ledgerSeq ?? 1,
     // deltaSeq is the frame's transport-continuity sequence; omit it for
     // legacy ungated frames.
@@ -195,7 +207,7 @@ function assistantDeltaEvent(
     stage: "responding",
     updatedAt: "2026-08-09T00:00:00Z",
     done,
-    turnItems: [assistantTurnItem(done ? { status: "completed" } : {})],
+    turnItems: [assistantTurnItem({ turnId, ...(done ? { status: "completed" } : {}) })],
   });
 }
 
@@ -563,7 +575,7 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
       FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 1 }));
     });
     expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
-    expect(handleAssistantDeltaNotifierSpy).toHaveBeenCalledTimes(1);
+    expect(handleAssistantDeltaNotifierSpy).not.toHaveBeenCalled();
 
     // Switch before the frame runs: the old stream closes and the frame is cancelled.
     rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
@@ -572,7 +584,7 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
       vi.advanceTimersByTime(64);
     });
     expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
-    expect(handleAssistantDeltaNotifierSpy).toHaveBeenCalledTimes(1);
+    expect(handleAssistantDeltaNotifierSpy).not.toHaveBeenCalled();
     unmount(root);
   });
 
@@ -726,6 +738,127 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     expect(syncSessionDetailSpy).toHaveBeenCalledWith(
       expect.objectContaining({ id: "s1", ledgerSeq: 3, currentPhase: "completed" }),
     );
+    unmount(root);
+  });
+
+  it("rejects a stale detail before notification but still accepts the cached ledger", () => {
+    const { options, queryClient } = baseOptions({});
+    queryClient.setQueryData(queryKeys.session("s1"), {
+      id: "s1",
+      ledgerSeq: 40,
+      activeTurnId: "turn-1",
+      currentPhase: "running",
+      messages: [],
+    } as SessionDetail);
+    const syncSessionDetailSpy = options.syncSessionDetail as ReturnType<typeof vi.fn>;
+    const detailNotifier = options.desktopConversationNotifierRef.current.handleSessionDetail as ReturnType<typeof vi.fn>;
+    const setLayersSpy = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    const stream = FakeEventSource.instances[0];
+
+    act(() => {
+      stream.emit("session_detail", sessionDetailEvent({ ledgerSeq: 19, currentPhase: "completed" }));
+    });
+
+    expect(syncSessionDetailSpy).not.toHaveBeenCalled();
+    expect(detailNotifier).not.toHaveBeenCalled();
+    expect(setLayersSpy).not.toHaveBeenCalled();
+
+    act(() => {
+      stream.emit("session_detail", sessionDetailEvent({
+        ledgerSeq: 40,
+        activeTurnId: "turn-1",
+        currentPhase: "completed",
+      }));
+    });
+
+    expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
+    expect(syncSessionDetailSpy).toHaveBeenCalledWith(expect.objectContaining({ ledgerSeq: 40 }));
+    expect(detailNotifier).toHaveBeenCalledTimes(1);
+    unmount(root);
+  });
+
+  it("drops queued stale-turn deltas before projection and notification", () => {
+    vi.useFakeTimers();
+    const { options, queryClient } = baseOptions({});
+    const setLayersSpy = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const deltaNotifier = options.desktopConversationNotifierRef.current.handleAssistantDelta as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    const stream = FakeEventSource.instances[0];
+
+    act(() => {
+      stream.emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 40, turnId: "turn-1" }));
+    });
+    expect(deltaNotifier).not.toHaveBeenCalled();
+
+    queryClient.setQueryData(queryKeys.session("s1"), {
+      id: "s1",
+      ledgerSeq: 41,
+      activeTurnId: "turn-2",
+      currentPhase: "running",
+      messages: [],
+    } as SessionDetail);
+    act(() => {
+      vi.advanceTimersByTime(64);
+    });
+    expect(setLayersSpy).not.toHaveBeenCalled();
+    expect(deltaNotifier).not.toHaveBeenCalled();
+
+    act(() => {
+      stream.emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 42, turnId: "turn-2" }));
+      vi.advanceTimersByTime(64);
+    });
+    expect(setLayersSpy).toHaveBeenCalledTimes(1);
+    expect(deltaNotifier).toHaveBeenCalledTimes(1);
+    expect(deltaNotifier.mock.calls[0][0]).toMatchObject({ turnId: "turn-2", ledgerSeq: 42 });
+    unmount(root);
+  });
+
+  it("seeds append-only deltas from the cached authoritative transcript", () => {
+    vi.useFakeTimers();
+    const { options, queryClient } = baseOptions({});
+    queryClient.setQueryData(queryKeys.session("s1"), {
+      id: "s1",
+      ledgerSeq: 40,
+      activeTurnId: "turn-1",
+      currentPhase: "running",
+      messages: [{
+        id: "s1-message-2",
+        role: "assistant",
+        turnId: "turn-1",
+        content: "hello",
+        timestamp: "2026-08-09T00:00:00Z",
+        metadata: { turnId: "turn-1" },
+        turnItems: [assistantTurnItem({ text: "hello" })],
+      }],
+    } as SessionDetail);
+    const deltaNotifier = options.desktopConversationNotifierRef.current.handleAssistantDelta as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", JSON.stringify({
+        type: "assistant_delta",
+        sessionId: "s1",
+        turnId: "turn-1",
+        ledgerSeq: 41,
+        stage: "responding",
+        turnItems: [],
+        turnItemAppends: [{
+          kind: "append",
+          itemId: "answer",
+          itemType: "agent_message",
+          baseLength: 5,
+          appendedLength: 6,
+          appendedText: " world",
+        }],
+        updatedAt: "2026-08-09T00:00:01Z",
+        done: false,
+      }));
+      vi.advanceTimersByTime(64);
+    });
+
+    expect(deltaNotifier).toHaveBeenCalledTimes(1);
+    expect(deltaNotifier.mock.calls[0][0].turnItems[0]).toMatchObject({ text: "hello world" });
     unmount(root);
   });
 });

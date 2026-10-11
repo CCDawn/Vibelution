@@ -561,6 +561,14 @@ def test_persist_turn_result_drops_result_when_turn_already_settled(
         payload={"reason": "detail_loaded_after_restart"},
         source="reconcile_stale_session_ledger",
     )
+    from core.web.services.session import live_output
+
+    with live_output._SESSION_LIVE_OUTPUTS_LOCK:
+        live_output._SESSION_LIVE_OUTPUTS["session-a"] = live_output.SessionLiveOutputState(
+            session_id="session-a",
+            turn_id="turn-b",
+            content="new turn still streaming",
+        )
 
     persist._persist_session_turn_result(
         "session-a",
@@ -582,6 +590,11 @@ def test_persist_turn_result_drops_result_when_turn_already_settled(
     assert [
         event for event in events if event.event_type == session_service.EVENT_ASSISTANT_MESSAGE
     ] == []
+    live_output = session_service._snapshot_session_live_output("session-a")
+    assert live_output is not None
+    assert live_output.turn_id == "turn-b"
+    assert live_output.content == "new turn still streaming"
+    session_service._clear_session_live_output("session-a", turn_id="turn-b")
 
 
 def test_persist_turn_failure_does_not_add_second_terminal(tmp_path, monkeypatch) -> None:

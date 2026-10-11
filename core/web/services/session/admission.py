@@ -149,14 +149,15 @@ class SessionSubmissionAdmissionService:
             )
             if current is None:
                 raise RuntimeError("Submission admission disappeared before journal append.")
-            if current["state"] != "reserved":
-                return {**current, "journalDisposition": "already_journaled"}
-
             receipt = journal_lookup(current)
-            disposition = "recovered"
+            disposition = "already_journaled"
             if receipt is None:
+                if current["state"] in {"rejected", "expired"}:
+                    raise ValueError(f"Cannot append a rejected or expired submission admission ({current['state']}).")
                 receipt = journal_append(current)
                 disposition = "appended"
+            elif current["state"] == "reserved":
+                disposition = "recovered"
             journal_sequence, journal_event_id = _journal_receipt(receipt)
             journaled = self.mark_journaled(
                 session_id=normalized_session_id,

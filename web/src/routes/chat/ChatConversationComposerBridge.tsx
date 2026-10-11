@@ -183,7 +183,9 @@ export function buildConversationComposerBridgeState(
   return {
     actionDisabled,
     actionMode,
-    attachmentInputDisabled: disabled || Boolean(input.editTargetMessageId) || input.imageInputUnsupported,
+    // Image capability applies to image files only. The route filters those
+    // files individually, while document attachments remain available.
+    attachmentInputDisabled: disabled || Boolean(input.editTargetMessageId),
     attachments: mapChatComposerImageAttachments(input.imageAttachments),
     disabled,
     editUserMessageDisabled: Boolean(input.readOnly) || input.submitPending,

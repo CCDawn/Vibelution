@@ -1,7 +1,11 @@
 import { ConversationAttachment, ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
 import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
-import { editMessageIndex, editMessageTurnId, mergeEditResubmitDetail } from "./chat/chatEditResubmitState";
+import {
+  editMessageIndex,
+  editMessageTurnId,
+  mergeEditResubmitDetailWithOutcome,
+} from "./chat/chatEditResubmitState";
 import { isSessionDeleteTombstoned } from "./sessionDeleteTombstone";
 
 export type OptimisticUserMessageInput = {
@@ -345,6 +349,15 @@ function messageLedgerSeq(detail: SessionDetail | undefined): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+function isOlderSessionDetail(previous: SessionDetail | undefined, next: SessionDetail): boolean {
+  if (!previous || previous.id !== next.id) {
+    return false;
+  }
+  const previousSeq = messageLedgerSeq(previous);
+  const nextSeq = messageLedgerSeq(next);
+  return previousSeq > 0 && nextSeq > 0 && nextSeq < previousSeq;
+}
+
 /**
  * Branch rebase and head switch re-project the transcript from the fork point,
  * which shortens the active tail. When the incoming detail carries a strictly
@@ -491,8 +504,116 @@ export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
-  return mergeEditResubmitDetail(previous, next, (before, incoming) =>
-    preserveSessionDetailStopIntent(before, mergeSessionDetailMessageWindowInner(before, incoming)));
+  return mergeSessionDetailMessageWindowWithOutcome(previous, next).detail;
+}
+
+export type SessionDetailMergeOutcome = {
+  detail: SessionDetail;
+  /** Whether this snapshot was allowed to replace authoritative control fields. */
+  authorityAccepted: boolean;
+  /** True when a stale, same-branch history page added earlier canonical messages. */
+  historyMerged: boolean;
+};
+
+/**
+ * Merge a session detail while keeping the ledger watermark authoritative.
+ * A lower-watermark snapshot may contribute only a provably earlier page from
+ * the active branch; its control fields can never replace the current detail.
+ */
+export function mergeSessionDetailMessageWindowWithOutcome(
+  previous: SessionDetail | undefined,
+  next: SessionDetail,
+): SessionDetailMergeOutcome {
+  const stale = isOlderSessionDetail(previous, next);
+  let historyMerged = false;
+  const editOutcome = mergeEditResubmitDetailWithOutcome(previous, next, (before, incoming) => {
+    if (stale) {
+      const history = mergeOlderSessionHistoryPage(before, incoming);
+      historyMerged ||= history.historyMerged;
+      return history.detail;
+    }
+    return preserveSessionDetailStopIntent(before, mergeSessionDetailMessageWindowInner(before, incoming));
+  });
+  const detail = editOutcome.detail;
+  if (!historyMerged && previous && detail !== previous) {
+    const knownIds = new Set(previous.messages.map((message) => String(message.id || "").trim()));
+    const previousOldest = Number(previous.messageWindow?.oldestMessageIndex ?? 0);
+    historyMerged = previousOldest > 0 && detail.messages.some((message) => (
+      !knownIds.has(String(message.id || "").trim()) && messageWindowIndex(message) < previousOldest
+    ));
+  }
+  return {
+    detail: stale ? preserveSessionDetailStopIntent(previous, detail) : detail,
+    authorityAccepted: !stale && editOutcome.authorityAccepted,
+    historyMerged,
+  };
+}
+
+function mergeOlderSessionHistoryPage(
+  previous: SessionDetail | undefined,
+  next: SessionDetail,
+): { detail: SessionDetail; historyMerged: boolean } {
+  const previousWindow = previous?.messageWindow;
+  const nextWindow = next.messageWindow;
+  if (
+    !previous
+    || previous.id !== next.id
+    || !Array.isArray(previous.messages)
+    || !Array.isArray(next.messages)
+    || !previousWindow
+    || !nextWindow
+    || nextWindow.hasLater !== true
+  ) {
+    return { detail: previous ?? next, historyMerged: false };
+  }
+
+  const previousBranchId = String(previous.activeBranchId ?? "").trim();
+  const nextBranchId = String(next.activeBranchId ?? "").trim();
+  if ((previousBranchId || nextBranchId) && previousBranchId !== nextBranchId) {
+    return { detail: previous, historyMerged: false };
+  }
+
+  const previousOldest = Number(previousWindow.oldestMessageIndex ?? 0);
+  const nextOldest = Number(nextWindow.oldestMessageIndex ?? 0);
+  const nextNewest = Number(nextWindow.newestMessageIndex ?? 0);
+  if (
+    !Number.isFinite(previousOldest)
+    || previousOldest <= 1
+    || !Number.isFinite(nextOldest)
+    || nextOldest <= 0
+    || !Number.isFinite(nextNewest)
+    || nextNewest < nextOldest
+    || nextOldest >= previousOldest
+  ) {
+    return { detail: previous, historyMerged: false };
+  }
+
+  const existingIds = new Set(previous.messages.map((message) => String(message.id || "").trim()));
+  const earlierMessages = next.messages.filter((message) => {
+    const id = String(message.id || "").trim();
+    const index = messageWindowIndex(message);
+    const messageBranchId = String(message.branch?.branchId ?? "").trim();
+    return Boolean(id)
+      && !existingIds.has(id)
+      && Number.isFinite(index)
+      && index >= nextOldest
+      && index <= nextNewest
+      && index < previousOldest
+      && !(previousBranchId && message.branch?.active === true && messageBranchId && messageBranchId !== previousBranchId);
+  });
+  if (earlierMessages.length === 0) {
+    return { detail: previous, historyMerged: false };
+  }
+
+  const messages = mergeConversationMessageWindows(previous.messages, earlierMessages);
+  return {
+    detail: {
+      ...previous,
+      messages,
+      messageWindow: mergedMessageWindow(previousWindow, nextWindow, messages),
+    },
+    historyMerged: messages.length > previous.messages.length,
+  };
 }
 
 /**
@@ -508,11 +629,18 @@ export function mergeSessionDetailHandoff(
   previous: SessionDetail | undefined,
   handoff: SessionDetail,
 ): SessionDetail {
+  return mergeSessionDetailHandoffWithOutcome(previous, handoff).detail;
+}
+
+export function mergeSessionDetailHandoffWithOutcome(
+  previous: SessionDetail | undefined,
+  handoff: SessionDetail,
+): SessionDetailMergeOutcome {
+  if (isOlderSessionDetail(previous, handoff)) {
+    return { detail: previous!, authorityAccepted: false, historyMerged: false };
+  }
   if (!previous || previous.id !== handoff.id) {
-    return {
-      ...handoff,
-      provisionalTranscript: true,
-    };
+    return { detail: { ...handoff, provisionalTranscript: true }, authorityAccepted: true, historyMerged: false };
   }
   const {
     messages: _handoffMessages,
@@ -520,10 +648,17 @@ export function mergeSessionDetailHandoff(
     provisionalTranscript: _handoffProvisional,
     ...handoffFields
   } = handoff;
-  return preserveSessionDetailStopIntent(previous, {
-    ...previous,
-    ...handoffFields,
-  });
+  const editOutcome = mergeEditResubmitDetailWithOutcome(previous, handoff, (before) =>
+    preserveSessionDetailStopIntent(before, {
+      ...before!,
+      ...handoffFields,
+    }),
+  );
+  return {
+    detail: editOutcome.detail,
+    authorityAccepted: editOutcome.authorityAccepted,
+    historyMerged: false,
+  };
 }
 
 /**
@@ -537,6 +672,21 @@ function preserveSessionDetailStopIntent(
 ): SessionDetail {
   if (!previous || previous.id !== next.id || !previous.stopRequested) {
     return next;
+  }
+  const previousTurnId = String(previous.activeTurnId ?? "").trim();
+  const nextTurnId = String(next.activeTurnId ?? "").trim();
+  const nextOwnsNewStopIntent = Boolean(
+    next.stopRequested
+      && next.stopRequestedAt
+      && next.stopRequestedAt !== previous.stopRequestedAt,
+  );
+  if (previousTurnId && nextTurnId && previousTurnId !== nextTurnId && !nextOwnsNewStopIntent) {
+    return {
+      ...next,
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    };
   }
   const phase = String(next.currentPhase || next.status || "").trim().toLowerCase();
   if (!isRunningPhase(phase)) {

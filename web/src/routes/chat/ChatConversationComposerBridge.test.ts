@@ -107,7 +107,7 @@ describe("ChatConversationComposerBridge", () => {
     expect(stoppingState.placeholder).toBe("message");
   });
 
-  it("disables image input in edit mode or when the active model cannot read images", () => {
+  it("disables attachments in edit mode but leaves document input available without vision", () => {
     const editingState = buildConversationComposerBridgeState({
       ...emptyStateInput(),
       editTargetMessageId: "message-1",
@@ -125,7 +125,7 @@ describe("ChatConversationComposerBridge", () => {
       ...emptyStateInput(),
       imageInputUnsupported: true,
     });
-    expect(unsupportedState.attachmentInputDisabled).toBe(true);
+    expect(unsupportedState.attachmentInputDisabled).toBe(false);
   });
 
   it("maps route-owned image attachments to the public ConversationView composer DTO", () => {

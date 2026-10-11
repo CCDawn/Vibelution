@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-import React, { act, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import React, { act, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { queryKeys } from "../../api/queryKeys";
-import type { SessionDetail } from "../../api/types";
+import type { SessionDetail, SessionTurnAcceptedResponse } from "../../api/types";
 import { stopSessionTurn, submitSessionMessage, uploadSessionImageAttachment } from "../../api/chat";
 import { createOptimisticActiveTurnLayer, type ActiveTurnLayerState } from "../chatActiveTurnLayer";
+import { createActiveTurnLayersStore } from "./activeTurnLayersStore";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { useChatComposerSubmitActions, useChatComposerTurnMutations } from "./useChatComposerSubmit";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
@@ -31,25 +32,99 @@ vi.mock("../../app/userActionTelemetry", () => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const sid = "draft-recovery-session";
 const secondSid = "draft-recovery-session-b";
+const rebasedSid = "draft-recovery-session-created";
 const originalDraft = "发送失败后仍需要保留的文字";
 let controls: {
   change: (value: string) => void;
   submit: () => void;
   stop: () => void;
+  cancelEdit: () => void;
   switchSession: (sessionId: string) => void;
   draft: string;
   error: string;
   activeTurnLayer?: ActiveTurnLayerState;
   setActiveTurnLayer: (layer: ActiveTurnLayerState | undefined) => void;
+  rebaseSession: (fromSessionId: string, toSessionId: string) => void;
   deferDraftUpdates: () => void;
   replayDeferredDraftUpdates: () => void;
 };
 const roots: Root[] = [];
 const clients: QueryClient[] = [];
 
-function Harness({ client, attachments }: { client: QueryClient; attachments: ComposerImageAttachment[] }) {
+function acceptedReceipt(sessionId: string, clientSubmissionId: string, turnId: string): SessionTurnAcceptedResponse {
+  return {
+    accepted: true,
+    sessionId,
+    clientSubmissionId,
+    turnId,
+    status: "accepted",
+    acceptedAt: "2026-10-12T00:00:00.000Z",
+  };
+}
+
+function terminalDetail(sessionId: string, clientSubmissionId: string, turnId: string): SessionDetail {
+  return {
+    id: sessionId,
+    status: "completed",
+    currentPhase: "completed",
+    activeTurnId: "",
+    ledgerSeq: 22,
+    messages: [
+      {
+        id: "canonical-user",
+        role: "user",
+        content: "accepted prompt",
+        timestamp: "2026-10-12T00:00:01.000Z",
+        metadata: { clientSubmissionId, turnId },
+      },
+      {
+        id: "canonical-assistant",
+        role: "assistant",
+        content: "done",
+        turnId,
+        status: "completed",
+        timestamp: "2026-10-12T00:00:02.000Z",
+        turnItems: [{
+          id: "final-answer",
+          itemId: "final-answer",
+          version: 3,
+          sessionId,
+          turnId,
+          type: "agent_message",
+          phase: "final_answer",
+          status: "completed",
+          revision: 1,
+          sequence: 1,
+          terminal: true,
+          text: "done",
+        }],
+      },
+    ],
+  } as SessionDetail;
+}
+
+async function unmountLatest() {
+  const root = roots.pop();
+  if (root) await act(async () => root.unmount());
+}
+
+async function flushMutationMicrotasks() {
+  await act(async () => {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  });
+}
+
+function Harness({
+  client,
+  attachments,
+  initialDraft = originalDraft,
+}: {
+  client: QueryClient;
+  attachments: ComposerImageAttachment[];
+  initialDraft?: string;
+}) {
   const [activeSessionId, setActiveSessionId] = useState(sid);
-  const [drafts, setDraftsState] = useState<Record<string, string>>({ [sid]: originalDraft, [secondSid]: "" });
+  const [drafts, setDraftsState] = useState<Record<string, string>>({ [sid]: initialDraft, [secondSid]: "" });
   const deferredDraftUpdatesRef = useRef<Array<(current: Record<string, string>) => Record<string, string>> | null>(null);
   const setDrafts: Dispatch<SetStateAction<Record<string, string>>> = (action) => {
     if (typeof action === "function" && deferredDraftUpdatesRef.current) {
@@ -60,16 +135,18 @@ function Harness({ client, attachments }: { client: QueryClient; attachments: Co
   };
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [images, setImages] = useState<Record<string, ComposerImageAttachment[]>>({ [sid]: attachments });
-  const [activeTurnLayers, setActiveTurnLayers] = useState<Record<string, ActiveTurnLayerState>>({});
+  const activeTurnLayersStore = useMemo(() => createActiveTurnLayersStore(), []);
   const uploadInFlight = useRef<Record<string, boolean>>({});
   const activeDetail = client.getQueryData<SessionDetail>(queryKeys.session(activeSessionId));
   const mutations = useChatComposerTurnMutations({
     queryClient: client,
     chatWorkspaceCache: createChatWorkspaceCache(client),
+    activeSessionId,
+    activeTurnLayersStore,
     t: ((key: string) => key) as never,
     describeError: (error, fallback) => error instanceof Error ? error.message : fallback,
-    syncSessionDetail: () => undefined,
-    setActiveTurnLayersBySession: setActiveTurnLayers,
+    syncSessionDetail: (incoming) => client.setQueryData(queryKeys.session(incoming.id), incoming),
+    setActiveTurnLayersBySession: activeTurnLayersStore.setActiveTurnLayersBySession,
     setSessionDrafts: setDrafts,
     setSessionComposerErrors: setErrors,
     setSessionImageAttachments: setImages,
@@ -89,24 +166,41 @@ function Harness({ client, attachments }: { client: QueryClient; attachments: Co
     turnModelSelection: null, resolvedEditTarget: null, activeEditTarget: null,
     composerDisabled: false, sessionBusy: false, sessionStopping: false, activePhase: "ready",
     activeAgentImageInputUnsupported: false, activeImageInputModelId: "model-1",
-    latestUserMessageId: "", activeTurnId: activeTurnLayers[activeSessionId]?.turnId, detail: activeDetail,
+    latestUserMessageId: "", activeTurnId: activeTurnLayersStore.getSnapshot()[activeSessionId]?.turnId, detail: activeDetail,
     setMentalModelEnabledForNextTurn: () => undefined, setRuntimeStatusEnabledForNextTurn: () => undefined,
   });
   controls = {
     change: actions.handleComposerChange,
     submit: actions.handleSubmitTurn,
     stop: actions.handleStopTurn,
+    cancelEdit: actions.handleCancelEditMessage,
     switchSession: setActiveSessionId,
     draft: drafts[activeSessionId] ?? "",
     error: errors[activeSessionId] ?? "",
-    activeTurnLayer: activeTurnLayers[activeSessionId],
-    setActiveTurnLayer: (layer) => setActiveTurnLayers((current) => {
+    get activeTurnLayer() { return activeTurnLayersStore.getSnapshot()[activeSessionId]; },
+    setActiveTurnLayer: (layer) => activeTurnLayersStore.setActiveTurnLayersBySession((current) => {
       if (!layer) {
         const { [activeSessionId]: _removed, ...remaining } = current;
         return remaining;
       }
       return { ...current, [activeSessionId]: layer };
     }),
+    rebaseSession: (fromSessionId, toSessionId) => {
+      actions.rebaseComposerPreviewOwners(fromSessionId, toSessionId);
+      setDraftsState((current) => {
+        const { [fromSessionId]: draft, ...remaining } = current;
+        return Object.hasOwn(current, fromSessionId) && !Object.hasOwn(remaining, toSessionId)
+          ? { ...remaining, [toSessionId]: draft }
+          : remaining;
+      });
+      setImages((current) => {
+        const { [fromSessionId]: sessionImages, ...remaining } = current;
+        return Object.hasOwn(current, fromSessionId) && !Object.hasOwn(remaining, toSessionId)
+          ? { ...remaining, [toSessionId]: sessionImages }
+          : remaining;
+      });
+      setActiveSessionId(toSessionId);
+    },
     deferDraftUpdates: () => { deferredDraftUpdatesRef.current = []; },
     replayDeferredDraftUpdates: () => {
       const updates = deferredDraftUpdatesRef.current ?? [];
@@ -117,17 +211,17 @@ function Harness({ client, attachments }: { client: QueryClient; attachments: Co
   return null;
 }
 
-function mount(attachments: ComposerImageAttachment[] = []) {
+function mount(attachments: ComposerImageAttachment[] = [], options: { initialDraft?: string; persistInitialDraft?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   clients.push(client);
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push(root);
-  act(() => root.render(<QueryClientProvider client={client}><Harness client={client} attachments={attachments} /></QueryClientProvider>));
-  act(() => controls.change(originalDraft));
+  act(() => root.render(<QueryClientProvider client={client}><Harness client={client} attachments={attachments} initialDraft={options.initialDraft} /></QueryClientProvider>));
+  if (options.persistInitialDraft !== false) act(() => controls.change(options.initialDraft ?? originalDraft));
   flushPendingSessionDraftWrites();
-  expect(readStoredSessionDrafts()[sid]).toBe(originalDraft);
+  if (options.persistInitialDraft !== false) expect(readStoredSessionDrafts()[sid]).toBe(options.initialDraft ?? originalDraft);
   return client;
 }
 
@@ -149,6 +243,7 @@ afterEach(() => {
   resetChatDraftPersistenceForTests();
   document.body.replaceChildren();
   onlineManager.setOnline(true);
+  vi.useRealTimers();
 });
 
 describe("failed composer draft recovery", () => {
@@ -524,6 +619,201 @@ describe("failed composer draft recovery", () => {
     flushPendingSessionDraftWrites();
     expect(controls.draft).toBe("");
     expect(readStoredSessionDrafts()[sid] ?? "").toBe("");
+  });
+
+  it("removes the persisted draft when the user cancels edit mode", () => {
+    mount();
+    expect(readStoredSessionDrafts()[sid]).toBe(originalDraft);
+
+    act(() => controls.cancelEdit());
+    flushPendingSessionDraftWrites();
+
+    expect(controls.draft).toBe("");
+    expect(readStoredSessionDrafts()[sid]).toBeUndefined();
+  });
+
+  it("does not resurrect a debounced draft on pagehide after edit cancellation", () => {
+    mount();
+    act(() => controls.change("尚未落盘的编辑草稿"));
+    act(() => controls.cancelEdit());
+    act(() => window.dispatchEvent(new Event("pagehide")));
+
+    expect(controls.draft).toBe("");
+    expect(readStoredSessionDrafts()[sid]).toBeUndefined();
+  });
+
+  it("keeps a flushed draft deleted across composer reload after edit cancellation", async () => {
+    mount();
+    act(() => controls.change("已经落盘的编辑草稿"));
+    flushPendingSessionDraftWrites();
+    expect(readStoredSessionDrafts()[sid]).toBe("已经落盘的编辑草稿");
+
+    act(() => controls.cancelEdit());
+    expect(readStoredSessionDrafts()[sid]).toBeUndefined();
+    await unmountLatest();
+
+    mount([], { initialDraft: readStoredSessionDrafts()[sid] ?? "", persistInitialDraft: false });
+    expect(controls.draft).toBe("");
+    expect(readStoredSessionDrafts()[sid]).toBeUndefined();
+  });
+
+  it("keeps the matching optimistic layer when an accepted receipt omits its turn id", async () => {
+    vi.mocked(submitSessionMessage).mockImplementation(async (sessionId, payload) => ({
+      accepted: true,
+      sessionId,
+      clientSubmissionId: payload.clientSubmissionId,
+      status: "accepted",
+      acceptedAt: "2026-10-12T00:00:00.000Z",
+    } as SessionTurnAcceptedResponse));
+    mount();
+
+    await act(async () => controls.submit());
+    await flushMutationMicrotasks();
+
+    const submissionId = vi.mocked(submitSessionMessage).mock.calls[0]?.[1].clientSubmissionId;
+    expect(controls.activeTurnLayer).toMatchObject({
+      clientSubmissionId: submissionId,
+      status: "pending",
+      processStage: "sending",
+    });
+  });
+
+  it("does not let a late accepted receipt roll a terminal detail or newer layer back", async () => {
+    let resolveReceipt!: (receipt: SessionTurnAcceptedResponse) => void;
+    vi.mocked(submitSessionMessage).mockImplementation(() => new Promise((resolve) => {
+      resolveReceipt = resolve;
+    }));
+    const client = mount();
+    client.setQueryData<SessionDetail>(queryKeys.session(sid), {
+      id: sid,
+      status: "ready",
+      currentPhase: "ready",
+      messages: [],
+    } as SessionDetail);
+
+    await act(async () => controls.submit());
+    await flushMutationMicrotasks();
+    const submissionId = vi.mocked(submitSessionMessage).mock.calls[0]?.[1].clientSubmissionId;
+    expect(submissionId).toBeTruthy();
+
+    act(() => client.setQueryData(queryKeys.session(sid), terminalDetail(sid, submissionId!, "accepted-turn")));
+    act(() => controls.setActiveTurnLayer(createOptimisticActiveTurnLayer({
+      sessionId: sid,
+      turnId: "newer-turn",
+      clientSubmissionId: "newer-submission",
+      accepted: false,
+    })));
+    await act(async () => {
+      resolveReceipt(acceptedReceipt(sid, submissionId!, "accepted-turn"));
+      await Promise.resolve();
+    });
+    await flushMutationMicrotasks();
+
+    expect(client.getQueryData<SessionDetail>(queryKeys.session(sid))).toMatchObject({
+      id: sid,
+      status: "completed",
+      currentPhase: "completed",
+      activeTurnId: "",
+    });
+    expect(controls.activeTurnLayer?.clientSubmissionId).toBe("newer-submission");
+  });
+
+  it("performs one delayed canonical readback and retires a terminal accepted layer", async () => {
+    vi.useFakeTimers();
+    vi.mocked(submitSessionMessage).mockImplementation(async (sessionId, payload) => (
+      acceptedReceipt(sessionId, payload.clientSubmissionId, "accepted-turn")
+    ));
+    vi.mocked(fetchSessionDetailWindow).mockImplementation(async (sessionId) => {
+      const submissionId = vi.mocked(submitSessionMessage).mock.calls[0]?.[1].clientSubmissionId ?? "";
+      return terminalDetail(sessionId, submissionId, "accepted-turn");
+    });
+    const client = mount();
+    client.setQueryData<SessionDetail>(queryKeys.session(sid), { id: sid, messages: [] } as SessionDetail);
+
+    await act(async () => controls.submit());
+    await flushMutationMicrotasks();
+    expect(controls.activeTurnLayer?.clientSubmissionId).toBeTruthy();
+    expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
+    expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await flushMutationMicrotasks();
+
+    expect(fetchSessionDetailWindow).toHaveBeenCalledExactlyOnceWith(sid, expect.objectContaining({
+      includeSecondary: false,
+      signal: expect.any(AbortSignal),
+    }));
+    expect(client.getQueryData<SessionDetail>(queryKeys.session(sid))?.status).toBe("completed");
+    expect(controls.activeTurnLayer).toBeUndefined();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(fetchSessionDetailWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["canonical", "terminal", "session switch", "unmount"] as const)(
+    "retires the accepted readback task before its timer when %s arrives",
+    async (settlement) => {
+      vi.useFakeTimers();
+      vi.mocked(submitSessionMessage).mockImplementation(async (sessionId, payload) => (
+        acceptedReceipt(sessionId, payload.clientSubmissionId, "accepted-turn")
+      ));
+      const client = mount();
+      client.setQueryData<SessionDetail>(queryKeys.session(sid), { id: sid, messages: [] } as SessionDetail);
+      await act(async () => controls.submit());
+      await flushMutationMicrotasks();
+      const submissionId = vi.mocked(submitSessionMessage).mock.calls[0]?.[1].clientSubmissionId;
+      expect(submissionId).toBeTruthy();
+
+      if (settlement === "canonical") {
+        act(() => client.setQueryData<SessionDetail>(queryKeys.session(sid), {
+          id: sid,
+          messages: [{
+            id: "canonical-user",
+            role: "user",
+            content: originalDraft,
+            timestamp: "2026-10-12T00:00:01.000Z",
+            metadata: { clientSubmissionId: submissionId, turnId: "accepted-turn" },
+          }],
+        } as SessionDetail));
+      } else if (settlement === "terminal") {
+        const layer = controls.activeTurnLayer;
+        expect(layer).toBeTruthy();
+        act(() => controls.setActiveTurnLayer({ ...layer!, status: "completed" }));
+      } else if (settlement === "session switch") {
+        act(() => controls.switchSession(secondSid));
+        await flushMutationMicrotasks();
+      } else {
+        await unmountLatest();
+      }
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+      expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not register accepted readback after unmount while the POST is pending", async () => {
+    vi.useFakeTimers();
+    let resolveReceipt!: (receipt: SessionTurnAcceptedResponse) => void;
+    vi.mocked(submitSessionMessage).mockImplementation(() => new Promise((resolve) => {
+      resolveReceipt = resolve;
+    }));
+    mount();
+    await act(async () => controls.submit());
+    await flushMutationMicrotasks();
+    expect(submitSessionMessage).toHaveBeenCalledTimes(1);
+
+    await unmountLatest();
+    const payload = vi.mocked(submitSessionMessage).mock.calls[0]?.[1];
+    expect(payload).toBeTruthy();
+    await act(async () => {
+      resolveReceipt(acceptedReceipt(sid, payload!.clientSubmissionId, "accepted-after-unmount"));
+      await Promise.resolve();
+    });
+    await flushMutationMicrotasks();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+
+    expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
   });
 
   it("does not let a replayed failure updater overwrite newer persisted input", async () => {

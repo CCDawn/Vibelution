@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.web.services.session.timebase import parse_timestamp_utc
@@ -50,9 +50,12 @@ MACHINE_NOTICE_KINDS = RUNTIME_NOTICE_KINDS | {KIND_CONTROL_NOTICE}
 # reset at that age cannot race a live claim, while the zombie row is
 # recovered on the next drain instead of blocking the queue permanently.
 STARTING_CLAIM_STALE_SECONDS = 600
+STARTING_RETRY_TIMER_MARGIN_SECONDS = 0.1
 
 _DRAIN_LOCK = threading.Lock()
 _DRAINING_SESSIONS: set[str] = set()
+_STARTING_RETRY_LOCK = threading.Lock()
+_PENDING_STARTING_RETRIES: dict[str, tuple[str, threading.Timer]] = {}
 
 
 def _service():
@@ -190,6 +193,8 @@ def enqueue_session_queued_turn(
     turn_mode: str,
     write_intent: bool | None,
     client_submission_id: str,
+    client_submission_fingerprint: str = "",
+    client_submission_fingerprint_base: str = "",
     model_selection: dict[str, Any] | None = None,
     lang: str = "",
     steer_id: str = "",
@@ -218,6 +223,16 @@ def enqueue_session_queued_turn(
         if normalized_client_submission_id:
             for row in rows:
                 if str(row.get("clientSubmissionId") or "").strip() == normalized_client_submission_id:
+                    expected_fingerprint = str(client_submission_fingerprint or "").strip()
+                    stored_fingerprint = str(row.get("clientSubmissionFingerprint") or "").strip()
+                    if expected_fingerprint and expected_fingerprint != stored_fingerprint:
+                        raise s.SessionValidationError(
+                            s.text_for(
+                                lang,
+                                zh="此提交标识已用于不同内容，请使用新的提交标识重试。",
+                                en="This submission id was already used for different content. Retry with a new submission id.",
+                            )
+                        )
                     return row
         if requested_steer_id:
             for row in rows:
@@ -250,6 +265,8 @@ def enqueue_session_queued_turn(
                 if isinstance(model_selection, dict) and model_selection
                 else None
             ),
+            "clientSubmissionFingerprint": str(client_submission_fingerprint or "").strip(),
+            "clientSubmissionFingerprintBase": str(client_submission_fingerprint_base or "").strip(),
             "status": "queued",
             "createdAt": s._now_timestamp(),
             "updatedAt": s._now_timestamp(),
@@ -406,6 +423,14 @@ def update_session_queued_turn(
                     )
                 )
             row["content"] = str(content or "")
+            fingerprint_base = str(row.get("clientSubmissionFingerprintBase") or "").strip()
+            if fingerprint_base:
+                from . import submit
+
+                row["clientSubmissionFingerprint"] = submit._session_submission_fingerprint_from_base(
+                    row["content"],
+                    fingerprint_base,
+                )
         if requested_status == "paused":
             row["status"] = "paused"
             # A paused row never drains, so a pending send-now pin is stale.
@@ -1262,6 +1287,8 @@ def drain_session_queued_turns(session_id: str) -> bool:
             drained_model_selection = head.get("modelSelection")
             submit_kwargs = {
                 "client_submission_id": str(head.get("clientSubmissionId") or ""),
+                "_client_submission_fingerprint": str(head.get("clientSubmissionFingerprint") or ""),
+                "_client_submission_fingerprint_base": str(head.get("clientSubmissionFingerprintBase") or ""),
                 "attachment_ids": [
                     str(attachment.get("artifactId") or "")
                     for attachment in list(head.get("attachments") or [])
@@ -1335,3 +1362,93 @@ def schedule_session_queued_turn_drain(session_id: str) -> None:
         s._SESSION_EXECUTOR.submit(s._drain_session_queued_turns, normalized_session_id)
     except Exception:  # noqa: BLE001 - shutdown or saturated executor: next settle retries
         return
+
+
+def schedule_session_queued_turn_stale_retry(session_id: str, *, updated_at: str) -> bool:
+    """Schedule one bounded retry for a fresh ``starting`` claim.
+
+    Startup recovery can encounter a claim that has not reached its stale TTL
+    yet. The immediate drain correctly leaves it alone; this one-shot timer
+    rechecks at the claim's expiry, with at most one pending timer per session.
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_updated_at = str(updated_at or "").strip()
+    claimed_at = parse_timestamp_utc(normalized_updated_at)
+    if not normalized_session_id or claimed_at is None:
+        return False
+    expires_at = claimed_at + timedelta(seconds=STARTING_CLAIM_STALE_SECONDS)
+    delay_seconds = (expires_at - datetime.now(timezone.utc)).total_seconds()
+    if delay_seconds <= 0:
+        return False
+
+    with _STARTING_RETRY_LOCK:
+        pending = _PENDING_STARTING_RETRIES.get(normalized_session_id)
+        if pending is not None:
+            pending_updated_at, pending_timer = pending
+            if pending_updated_at == normalized_updated_at:
+                return False
+            pending_claimed_at = parse_timestamp_utc(pending_updated_at)
+            if pending_claimed_at is not None:
+                pending_expires_at = pending_claimed_at + timedelta(seconds=STARTING_CLAIM_STALE_SECONDS)
+                if pending_expires_at <= expires_at:
+                    return False
+            pending_timer.cancel()
+
+        timer = threading.Timer(
+            delay_seconds + STARTING_RETRY_TIMER_MARGIN_SECONDS,
+            _retry_stale_starting_queue_drain,
+            args=(normalized_session_id, normalized_updated_at),
+        )
+        timer.daemon = True
+        _PENDING_STARTING_RETRIES[normalized_session_id] = (normalized_updated_at, timer)
+        try:
+            timer.start()
+        except Exception:  # noqa: BLE001 - timer creation failure leaves next natural drain available
+            if _PENDING_STARTING_RETRIES.get(normalized_session_id) == (normalized_updated_at, timer):
+                _PENDING_STARTING_RETRIES.pop(normalized_session_id, None)
+            return False
+    return True
+
+
+def _retry_stale_starting_queue_drain(session_id: str, scheduled_updated_at: str) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_updated_at = str(scheduled_updated_at or "").strip()
+    if not normalized_session_id:
+        return
+    with _STARTING_RETRY_LOCK:
+        pending = _PENDING_STARTING_RETRIES.get(normalized_session_id)
+        if pending is None or pending[0] != normalized_updated_at:
+            return
+        _PENDING_STARTING_RETRIES.pop(normalized_session_id, None)
+
+    s = _service()
+    try:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is None:
+            return
+        rows = s._session_queued_turn_rows(conversation)
+    except Exception:  # noqa: BLE001 - a later queue trigger can retry after transient state reads
+        return
+
+    now = datetime.now(timezone.utc)
+    stale_starting_found = False
+    fresh_timestamps: list[tuple[datetime, str]] = []
+    for row in rows:
+        if str(row.get("status") or "") != "starting":
+            continue
+        timestamp = str(row.get("updatedAt") or "").strip()
+        claimed_at = parse_timestamp_utc(timestamp)
+        if claimed_at is None or (now - claimed_at).total_seconds() >= STARTING_CLAIM_STALE_SECONDS:
+            stale_starting_found = True
+            continue
+        fresh_timestamps.append((claimed_at, timestamp))
+
+    if stale_starting_found:
+        s._schedule_session_queued_turn_drain(normalized_session_id)
+    if fresh_timestamps:
+        _claimed_at, earliest_updated_at = min(fresh_timestamps, key=lambda item: item[0])
+        schedule_session_queued_turn_stale_retry(
+            normalized_session_id,
+            updated_at=earliest_updated_at,
+        )

@@ -183,6 +183,23 @@ export function clearSessionImageAttachments(
   return remaining;
 }
 
+/** Remove only image files when the active dialogue model cannot read images. */
+export function clearUnsupportedSessionImageAttachments(
+  current: Record<string, ComposerImageAttachment[]>,
+  sessionId: string,
+) {
+  const attachments = current[sessionId] ?? [];
+  const images = attachments.filter((attachment) => attachment.kind === "image");
+  if (!images.length) return current;
+  images.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+  const documents = attachments.filter((attachment) => attachment.kind !== "image");
+  if (documents.length) {
+    return { ...current, [sessionId]: documents };
+  }
+  const { [sessionId]: _removed, ...remaining } = current;
+  return remaining;
+}
+
 export function clearSessionReferenceAttachments(
   current: Record<string, SessionReferenceAttachment[]>,
   sessionId: string,

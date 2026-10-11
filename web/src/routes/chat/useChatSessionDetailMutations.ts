@@ -1,5 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
-import type { Dispatch, SetStateAction } from "react";
+import { useRef, type Dispatch, type SetStateAction } from "react";
 
 import { resolveAgentToolGovernanceRequest } from "../../api/agents";
 import {
@@ -75,6 +75,8 @@ export function useChatSessionDetailMutations({
   activeSessionId,
   setSessionComposerErrors,
 }: UseChatSessionDetailMutationsOptions): UseChatSessionDetailMutationsResult {
+  const approvalOperationSequence = useRef(0);
+  const approvalOperations = useRef(new Map<string, number>());
   const sessionReasoningEffortMutation = useMutation({
     mutationFn: (variables: { sessionId: string; reasoningEffort: string }) =>
       updateSessionReasoningEffort(variables.sessionId, variables.reasoningEffort),
@@ -152,6 +154,9 @@ export function useChatSessionDetailMutations({
       resolveSessionToolApprovalDecision(request, decision),
     onMutate: async (variables) => {
       const key = queryKeys.sessionToolApprovals(variables.request.sessionId);
+      const operationKey = JSON.stringify([variables.request.sessionId, variables.request.requestId]);
+      const operation = ++approvalOperationSequence.current;
+      approvalOperations.current.set(operationKey, operation);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<SessionToolApprovalRequest[]>(key);
       // Drop the banner immediately so the operator is not blocked on network round-trips.
@@ -159,7 +164,12 @@ export function useChatSessionDetailMutations({
         key,
         (current) => (current ?? []).filter((item) => item.requestId !== variables.request.requestId),
       );
-      return { previous, sessionId: variables.request.sessionId };
+      return {
+        previousRequest: previous?.find((item) => item.requestId === variables.request.requestId),
+        sessionId: variables.request.sessionId,
+        operationKey,
+        operation,
+      };
     },
     onSuccess: (_payload, variables) => {
       void queryClient.invalidateQueries({
@@ -174,10 +184,13 @@ export function useChatSessionDetailMutations({
       });
     },
     onError: (error, variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionToolApprovals(variables.request.sessionId) });
+      if (context && approvalOperations.current.get(context.operationKey) !== context.operation) return;
+      if (context?.previousRequest && approvalOperations.current.get(context.operationKey) === context.operation) {
+        queryClient.setQueryData<SessionToolApprovalRequest[]>(
           queryKeys.sessionToolApprovals(context.sessionId),
-          context.previous,
+          (current) => (current ?? []).some((item) => item.requestId === variables.request.requestId)
+            ? current : [...(current ?? []), context.previousRequest!],
         );
       }
       setSessionComposerErrors((current) => ({
@@ -187,6 +200,11 @@ export function useChatSessionDetailMutations({
           lang === "zh" ? "处理本轮工具审批失败" : "Resolve session tool approval failed",
         ),
       }));
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context && approvalOperations.current.get(context.operationKey) === context.operation) {
+        approvalOperations.current.delete(context.operationKey);
+      }
     },
   });
 

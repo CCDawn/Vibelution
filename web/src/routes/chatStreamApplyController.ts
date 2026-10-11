@@ -90,8 +90,9 @@ export type AppliedAssistantDeltaDrainDecision =
     applied: false;
     stats: SessionStreamApplyStats;
     appliedPayloadCount: 0;
+    appliedPayloads: [];
     shouldLogApplied: false;
-    shouldScheduleNextFrame: false;
+    shouldScheduleNextFrame: boolean;
     shouldInvalidateSession: false;
     hold?: AssistantDeltaDrainHoldInfo;
   }
@@ -101,6 +102,7 @@ export type AppliedAssistantDeltaDrainDecision =
     shouldCommitRender: boolean;
     stats: SessionStreamApplyStats;
     appliedPayloadCount: number;
+    appliedPayloads: AssistantDeltaEvent[];
     finalDone: boolean;
     shouldLogApplied: boolean;
     shouldScheduleNextFrame: boolean;
@@ -118,6 +120,11 @@ export function normalizeSessionStreamApplyStats(
     applied: Math.max(0, Number(stats?.applied ?? 0)),
     dropped: Math.max(0, Number(stats?.dropped ?? 0)),
   };
+}
+
+function normalizedLedgerSeq(value: unknown): number {
+  const sequence = Number(value ?? 0);
+  return Number.isFinite(sequence) && sequence > 0 ? sequence : 0;
 }
 
 export function planQueuedSessionDetail(
@@ -197,11 +204,26 @@ export function planAppliedAssistantDeltaDrain(
 ): AppliedAssistantDeltaDrainDecision {
   let pendingLayer = input.committedLayer;
   let appliedPayloadCount = 0;
+  const appliedPayloads: AssistantDeltaEvent[] = [];
+  let droppedPayloadCount = 0;
   let finalDone = false;
   let holdInfo: AssistantDeltaDrainHoldInfo | null = null;
   const entries = input.drain.entries;
   for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
     const entry = entries[entryIndex];
+    const incomingLedgerSeq = normalizedLedgerSeq(entry.payload.ledgerSeq);
+    if (
+      pendingLayer
+      && pendingLayer.turnId === entry.payload.turnId
+      && pendingLayer.ledgerSeq > 0
+      && incomingLedgerSeq > 0
+      && incomingLedgerSeq < pendingLayer.ledgerSeq
+    ) {
+      // A lower journal watermark cannot roll back the private turn accumulator,
+      // even when this legacy frame has no deltaSeq continuity metadata.
+      droppedPayloadCount += 1;
+      continue;
+    }
     if (input.assistantDeltaSeqGate) {
       const gateDecision = input.assistantDeltaSeqGate(entry.payload);
       if (gateDecision.action === "hold-gap") {
@@ -216,11 +238,13 @@ export function planAppliedAssistantDeltaDrain(
         break;
       }
       if (gateDecision.action === "drop-stale") {
+        droppedPayloadCount += 1;
         continue;
       }
     }
     pendingLayer = mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload);
     appliedPayloadCount += 1;
+    appliedPayloads.push(entry.payload);
     finalDone = finalDone || entry.payload.done;
   }
 
@@ -229,12 +253,13 @@ export function planAppliedAssistantDeltaDrain(
   if (appliedPayloadCount === 0) {
     return {
       applied: false,
-      stats: heldCount > 0
-        ? { ...currentStats, dropped: currentStats.dropped + heldCount }
+      stats: heldCount > 0 || droppedPayloadCount > 0
+        ? { ...currentStats, dropped: currentStats.dropped + heldCount + droppedPayloadCount }
         : currentStats,
       appliedPayloadCount: 0,
+      appliedPayloads: [],
       shouldLogApplied: false,
-      shouldScheduleNextFrame: false,
+      shouldScheduleNextFrame: !holdInfo && input.drain.shouldContinue,
       shouldInvalidateSession: false,
       ...(holdInfo ? { hold: holdInfo } : {}),
     };
@@ -245,6 +270,7 @@ export function planAppliedAssistantDeltaDrain(
     ...currentStats,
     applied: currentStats.applied + (shouldCommitRender ? 1 : 0),
     dropped: currentStats.dropped
+      + droppedPayloadCount
       + (shouldCommitRender ? heldCount : appliedPayloadCount + heldCount),
   };
   const applyFinishedAtMs = input.applyFinishedAtMs ?? input.nowMs?.() ?? input.applyStartedAtMs;
@@ -274,6 +300,7 @@ export function planAppliedAssistantDeltaDrain(
     shouldCommitRender,
     stats: nextStats,
     appliedPayloadCount,
+    appliedPayloads,
     finalDone,
     shouldLogApplied,
     shouldScheduleNextFrame: input.drain.shouldContinue,

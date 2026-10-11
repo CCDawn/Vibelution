@@ -625,6 +625,7 @@ from core.web.services.session.queued_turns import (
     session_queued_turn_rows as _session_queued_turn_rows,
     drain_session_queued_turns as _drain_session_queued_turns,
     schedule_session_queued_turn_drain as _schedule_session_queued_turn_drain,
+    schedule_session_queued_turn_stale_retry as _schedule_session_queued_turn_stale_retry,
 )
 from core.web.services.session.events import (
     _record_session_cycle_message,

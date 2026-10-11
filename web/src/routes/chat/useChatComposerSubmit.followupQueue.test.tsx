@@ -9,6 +9,7 @@ import type {
   SessionDetail,
   SessionGuidanceMode,
   SessionQueuedTurn,
+  SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
 } from "../../api/types";
 import {
@@ -59,6 +60,7 @@ type HarnessProps = {
   draft: string;
   queues: Record<string, ComposerQueueItem[]>;
   imageAttachments?: ComposerImageAttachment[];
+  referenceAttachments?: SessionReferenceAttachment[];
   mutations: ChatComposerTurnMutations;
   onErrors?: (errors: Record<string, string>) => void;
   /** Tests observing optimistic cache writes pass their own client. */
@@ -89,6 +91,7 @@ function Harness({
   draft,
   queues,
   imageAttachments = [],
+  referenceAttachments = [],
   mutations,
   onErrors,
   queryClient: providedQueryClient,
@@ -115,6 +118,9 @@ function Harness({
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({
     [sessionId]: imageAttachments,
   });
+  const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({
+    [sessionId]: referenceAttachments,
+  });
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const actions = useChatComposerSubmitActions({
     queryClient,
@@ -135,14 +141,14 @@ function Harness({
       }
     },
     setSessionImageAttachments,
-    setSessionReferenceAttachments: () => undefined,
+    setSessionReferenceAttachments,
     setSessionImageUploadPending: () => undefined,
     setSessionEditTargets: () => undefined,
     imageUploadInFlightRef,
     activeSessionId: sessionId,
     activeDraftEffective: draft,
     activeImageAttachments: sessionImageAttachments[sessionId] ?? [],
-    activeReferenceAttachments: [],
+    activeReferenceAttachments: sessionReferenceAttachments[sessionId] ?? [],
     mentalModelEnabledForNextTurn: false,
     runtimeStatusEnabledForNextTurn: false,
     resolvedEditTarget: null,
@@ -466,6 +472,59 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     });
     expect(errors["session-1"] ?? "").not.toContain("仅支持文本");
   });
+
+  it.each(["image", "attachment", "reference"] as const)(
+    "queues an empty-text %s submission instead of steering the existing queue",
+    async (payloadKind) => {
+      const { mutations, submitTurn, guidance } = createMutations();
+      await mount({
+        busy: true,
+        draft: "",
+        queues: { "session-1": [{ id: "q-1", text: "已有排队消息" }] },
+        imageAttachments: payloadKind === "image" ? [{
+          id: "image-1",
+          file: new File(["image"], "image.png", { type: "image/png" }),
+          filename: "image.png",
+          previewUrl: "blob:image-1",
+          sizeBytes: 5,
+          contentType: "image/png",
+        }] : payloadKind === "attachment" ? [{
+          id: "document-1",
+          file: new File(["document"], "notes.md", { type: "text/markdown" }),
+          filename: "notes.md",
+          previewUrl: "blob:document-1",
+          sizeBytes: 8,
+          contentType: "text/markdown",
+          kind: "document",
+          uploadStatus: "uploaded",
+          artifactId: "artifact-document-1",
+        }] : [],
+        referenceAttachments: payloadKind === "reference" ? [{
+          referenceId: "session:referenced",
+          kind: "session",
+          sessionId: "referenced",
+        }] : [],
+        mutations,
+      });
+
+      await act(async () => {
+        container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(submitTurn).toHaveBeenCalledTimes(1);
+      expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
+        sessionId: "session-1",
+        content: "",
+        queuedBehindActiveTurn: true,
+        ...(payloadKind === "reference"
+          ? { references: [expect.objectContaining({ sessionId: "referenced" })] }
+          : { attachmentIds: [payloadKind === "image" ? "artifact-1" : "artifact-document-1"] }),
+      });
+      expect(guidance).not.toHaveBeenCalled();
+    },
+  );
 
   it("accepts images added while the turn is still running", async () => {
     const { mutations } = createMutations();

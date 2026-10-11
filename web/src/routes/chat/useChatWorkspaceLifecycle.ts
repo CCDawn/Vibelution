@@ -43,8 +43,6 @@ import {
   captureSessionIndexCacheSnapshots,
   reconcileAgentSessionDetailCache,
   removeSessionFromAgentSessionCaches,
-  restoreAgentSessionCacheSnapshots,
-  restoreSessionIndexCacheSnapshots,
   updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
@@ -98,6 +96,7 @@ import {
   type SessionCreateRecovery,
 } from "./chatSessionCreateRecovery";
 import { clearSessionCreateAttempt, markSessionCreateAttempt } from "./sessionCreateAttempt";
+import { restoreUndeletedSessionCaches } from "./chatSessionDeleteRollback";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -1172,7 +1171,6 @@ export function useChatWorkspaceLifecycle({
 
       // Instant handoff: remove workspace and leave the deleted tab before DELETE
       // returns. Compare-and-swap keeps the user's page when they already left.
-      clearSessionTransientUiState(variables.sessionId);
       removeSessionWorkspace(variables.sessionId);
       if (previousRouteSessionId === variables.sessionId) {
         const routeReplaced = chatRoute.replaceIfStillViewing(
@@ -1215,6 +1213,22 @@ export function useChatWorkspaceLifecycle({
       };
     },
     onSuccess: (deleteResult, variables, context) => {
+      if (!deleteResult.deleted) {
+        context?.telemetry?.blocked("delete_unconfirmed", { sessionId: variables.sessionId });
+        clearSessionDeleteTombstone(variables.sessionId);
+        if (context?.releasedCreatePreserve) pinSessionCreatePreserve(context.releasedCreatePreserve);
+        restoreUndeletedSessionCaches(queryClient, [variables.sessionId], context);
+        setSessionComposerErrors((current) => ({
+          ...current,
+          __sessions__: lang === "zh"
+            ? "会话未确认删除，草稿已保留。"
+            : "Session deletion was not confirmed; drafts were preserved.",
+        }));
+        void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
+        return;
+      }
+      markSessionDeleteTombstone(variables.sessionId, { confirmed: true });
+      clearSessionTransientUiState(variables.sessionId);
       const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
       const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
       const nextActiveSessionId = serverNextActiveSessionId || optimisticNextActiveSessionId;
@@ -1262,14 +1276,7 @@ export function useChatWorkspaceLifecycle({
       if (context?.releasedCreatePreserve) {
         pinSessionCreatePreserve(context.releasedCreatePreserve);
       }
-      if (context?.previousSessions) {
-        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
-      }
-      restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
-      restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
-      if (context?.previousAgents !== undefined) {
-        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
-      }
+      restoreUndeletedSessionCaches(queryClient, [variables.sessionId], context);
       // Failed delete keeps the current route; never roll back navigation.
       setSessionComposerErrors((current) => ({
         ...current,
@@ -1345,7 +1352,6 @@ export function useChatWorkspaceLifecycle({
         : "";
 
       deletedSessionIds.forEach((sessionId) => {
-        clearSessionTransientUiState(sessionId);
         removeSessionWorkspace(sessionId);
       });
       if (routeDeletedSessionId) {
@@ -1378,7 +1384,29 @@ export function useChatWorkspaceLifecycle({
       const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
       const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
       const nextActiveSessionId = serverNextActiveSessionId || optimisticNextActiveSessionId;
-      const deletedSessionIds = context?.deletedSessionIds ?? [];
+      const confirmedIds = new Set([
+        ...deleteResult.success.filter((item) => item.deleted !== false).map((item) => item.sessionId),
+        ...deleteResult.skipped.filter((item) => item.reason === "not_found").map((item) => item.sessionId),
+      ]);
+      const requestedIds = context?.deletedSessionIds ?? _variables.sessionIds;
+      const deletedSessionIds = requestedIds.filter((id) => confirmedIds.has(id));
+      const undeletedIds = requestedIds.filter((id) => !confirmedIds.has(id));
+      deletedSessionIds.forEach((sessionId) => markSessionDeleteTombstone(sessionId, { confirmed: true }));
+      undeletedIds.forEach(clearSessionDeleteTombstone);
+      for (const summary of context?.releasedCreatePreserves ?? []) {
+        if (undeletedIds.includes(summary.id)) pinSessionCreatePreserve(summary);
+      }
+      restoreUndeletedSessionCaches(queryClient, undeletedIds, context);
+      deletedSessionIds.forEach(clearSessionTransientUiState);
+      if (undeletedIds.length) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          __sessions__: lang === "zh"
+            ? `${undeletedIds.length} 个会话未删除，草稿已保留。`
+            : `${undeletedIds.length} sessions were not deleted; drafts were preserved.`,
+        }));
+        undeletedIds.forEach((sessionId) => { void chatWorkspaceCache.refreshSessionRuntime(sessionId); });
+      }
       const previousRouteSessionId = String(context?.previousRouteSessionId || "").trim();
       let routeReplaced = false;
 
@@ -1412,6 +1440,9 @@ export function useChatWorkspaceLifecycle({
 
       context?.telemetry?.succeeded({
         deletedCount: deleteResult.summary?.successCount ?? deletedSessionIds.length,
+        confirmedCount: deletedSessionIds.length,
+        restoredCount: undeletedIds.length,
+        status: deleteResult.status,
         skippedCount: deleteResult.summary?.skippedCount ?? 0,
         failedCount: deleteResult.summary?.failedCount ?? 0,
         previousRouteSessionId,
@@ -1438,14 +1469,7 @@ export function useChatWorkspaceLifecycle({
       for (const summary of context?.releasedCreatePreserves ?? []) {
         pinSessionCreatePreserve(summary);
       }
-      if (context?.previousSessions) {
-        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
-      }
-      restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
-      restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
-      if (context?.previousAgents !== undefined) {
-        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
-      }
+      restoreUndeletedSessionCaches(queryClient, context?.deletedSessionIds ?? variables.sessionIds, context);
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: describeError(error, t("deleteSessionFailed")),

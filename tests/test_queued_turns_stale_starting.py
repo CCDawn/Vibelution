@@ -241,3 +241,117 @@ def test_all_paused_queue_claims_nothing(tmp_path, published_sessions):
     ]
     # Nothing changed, so there is nothing to publish.
     assert published_sessions == []
+
+
+@pytest.fixture
+def retry_clock(monkeypatch):
+    class Clock(datetime):
+        moment = datetime.now(timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.moment if tz is not None else cls.moment.replace(tzinfo=None)
+
+    timers = []
+
+    class Timer:
+        def __init__(self, delay, callback, args=()):
+            self.delay = delay
+            self.callback = callback
+            self.args = args
+            self.daemon = False
+            self.started = False
+            self.cancelled = False
+            timers.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def fire(self):
+            if not self.cancelled:
+                self.callback(*self.args)
+
+    monkeypatch.setattr(queued_turns, "datetime", Clock)
+    monkeypatch.setattr(queued_turns.threading, "Timer", Timer)
+    monkeypatch.setattr(queued_turns, "_PENDING_STARTING_RETRIES", {})
+    return Clock, timers
+
+
+def test_fresh_starting_retry_waits_then_claims_once(tmp_path, published_sessions, retry_clock, monkeypatch):
+    clock, timers = retry_clock
+    row = _turn_row("orphan", status="starting", age=timedelta(minutes=1))
+    _seed_conversation(tmp_path, [row])
+    claimed = []
+    monkeypatch.setattr(
+        session_service, "_schedule_session_queued_turn_drain",
+        lambda session_id: claimed.append(queued_turns._claim_next_queued_turn(session_id)),
+    )
+    for _ in range(3):
+        queued_turns.schedule_session_queued_turn_stale_retry(SESSION_ID, updated_at=row["updatedAt"])
+    assert len(timers) == 1
+    assert timers[0].started and timers[0].daemon
+    assert 0 < timers[0].delay <= queued_turns.STARTING_CLAIM_STALE_SECONDS + 1
+    assert queued_turns._claim_next_queued_turn(SESSION_ID) is None
+    assert _persisted_rows(tmp_path)[0]["updatedAt"] == row["updatedAt"]
+
+    clock.moment += timedelta(seconds=queued_turns.STARTING_CLAIM_STALE_SECONDS + 2)
+    timers[0].fire()
+    timers[0].fire()
+    assert len(claimed) == 1
+    assert claimed[0]["id"] == "orphan"
+    assert queued_turns._PENDING_STARTING_RETRIES == {}
+
+
+def test_retry_does_not_reclaim_a_live_session(tmp_path, published_sessions, retry_clock, monkeypatch):
+    clock, timers = retry_clock
+    row = _turn_row("live", status="starting", age=timedelta(minutes=1))
+    _seed_conversation(tmp_path, [row])
+    monkeypatch.setattr(session_service, "_is_session_running", lambda session_id: True)
+    claims = []
+    monkeypatch.setattr(
+        session_service, "_schedule_session_queued_turn_drain",
+        lambda session_id: claims.append(queued_turns._claim_next_queued_turn(session_id)),
+    )
+    queued_turns.schedule_session_queued_turn_stale_retry(SESSION_ID, updated_at=row["updatedAt"])
+    clock.moment += timedelta(seconds=queued_turns.STARTING_CLAIM_STALE_SECONDS + 2)
+    timers[0].fire()
+    assert claims == [None]
+    assert _persisted_rows(tmp_path)[0]["updatedAt"] == row["updatedAt"]
+    assert published_sessions == []
+    assert queued_turns._PENDING_STARTING_RETRIES == {}
+
+
+def test_retry_retires_settled_claim_without_a_drain(tmp_path, published_sessions, retry_clock, monkeypatch):
+    clock, timers = retry_clock
+    row = _turn_row("settled", status="starting", age=timedelta(minutes=1))
+    _seed_conversation(tmp_path, [row])
+    drains = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", drains.append)
+    queued_turns.schedule_session_queued_turn_stale_retry(SESSION_ID, updated_at=row["updatedAt"])
+    _seed_conversation(tmp_path, [])
+    clock.moment += timedelta(seconds=queued_turns.STARTING_CLAIM_STALE_SECONDS + 2)
+    timers[0].fire()
+    assert drains == []
+    assert len(timers) == 1
+    assert queued_turns._PENDING_STARTING_RETRIES == {}
+
+
+def test_retry_rechecks_a_replaced_claim_at_its_new_expiry(tmp_path, published_sessions, retry_clock, monkeypatch):
+    clock, timers = retry_clock
+    old = _turn_row("old", status="starting", age=timedelta(minutes=1))
+    _seed_conversation(tmp_path, [old])
+    drains = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", drains.append)
+    queued_turns.schedule_session_queued_turn_stale_retry(SESSION_ID, updated_at=old["updatedAt"])
+    clock.moment += timedelta(seconds=queued_turns.STARTING_CLAIM_STALE_SECONDS + 2)
+    new = _turn_row("new", status="starting")
+    new["updatedAt"] = clock.moment.isoformat()
+    _seed_conversation(tmp_path, [new])
+    timers[0].fire()
+    assert drains == []
+    assert len(timers) == 2
+    assert queued_turns._PENDING_STARTING_RETRIES[SESSION_ID][0] == new["updatedAt"]
+    assert _persisted_rows(tmp_path)[0]["updatedAt"] == new["updatedAt"]

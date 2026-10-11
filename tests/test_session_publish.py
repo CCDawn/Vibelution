@@ -424,3 +424,167 @@ def test_assistant_delta_coalesce_keeps_legacy_frames_field_clean(monkeypatch) -
     assert dropped == 1
     assert "deltaSeq" not in merged
     assert "deltaSeqFrom" not in merged
+
+
+def test_session_detail_coalesce_rejects_older_ledger_snapshot(monkeypatch) -> None:
+    class Service:
+        _SESSION_STREAM_COALESCED_EVENT_TYPES = {"session_detail"}
+
+    monkeypatch.setattr(publish, "_service", lambda: Service())
+    subscriber = queue.Queue()
+    subscriber.put_nowait({"type": "session_detail", "ledgerSeq": 18, "detail": {"version": "new"}})
+
+    dropped, should_enqueue = publish._coalesce_session_stream_queue_with_outcome(
+        subscriber,
+        event_type="session_detail",
+        incoming_ledger_seq=17,
+    )
+
+    assert should_enqueue is False
+    assert dropped == 1
+    assert subscriber.get_nowait()["ledgerSeq"] == 18
+
+
+def test_session_detail_coalesce_orders_same_ledger_control_state_by_generation(monkeypatch) -> None:
+    class Service:
+        _SESSION_STREAM_COALESCED_EVENT_TYPES = {"session_detail"}
+
+    monkeypatch.setattr(publish, "_service", lambda: Service())
+    subscriber = queue.Queue()
+    subscriber.put_nowait(
+        {"type": "session_detail", "ledgerSeq": 18, "detail": {"currentPhase": "completed"}}
+    )
+    publish._remember_session_stream_detail_watermark(
+        subscriber,
+        session_id="session-a",
+        ledger_seq=18,
+        generation=10,
+    )
+
+    dropped, should_enqueue = publish._coalesce_session_stream_queue_with_outcome(
+        subscriber,
+        event_type="session_detail",
+        session_id="session-a",
+        incoming_ledger_seq=18,
+        incoming_generation=9,
+    )
+
+    assert should_enqueue is False
+    assert dropped == 1
+    assert subscriber.get_nowait()["detail"]["currentPhase"] == "completed"
+
+    dropped, should_enqueue = publish._coalesce_session_stream_queue_with_outcome(
+        subscriber,
+        event_type="session_detail",
+        session_id="session-a",
+        incoming_ledger_seq=18,
+        incoming_generation=11,
+    )
+
+    assert should_enqueue is True
+    assert dropped == 0
+    assert subscriber.empty()
+
+
+@pytest.mark.parametrize("old_seq", [19, 20])
+@pytest.mark.parametrize("new_finishes_first,consume_new", [(False, False), (True, False), (True, True)])
+def test_overlapping_detail_hydration_keeps_latest_snapshot(monkeypatch, old_seq, new_finishes_first, consume_new):
+    from core.web.services import session_service as service
+
+    session_id = "hydration-race"
+    subscriber = queue.Queue(maxsize=4)
+    entered = threading.Event()
+    release = threading.Event()
+    errors = []
+    old = {"ledgerSeq": old_seq, "activeTurnId": "old", "currentPhase": "completed"}
+    new = {"ledgerSeq": 20, "activeTurnId": "new", "currentPhase": "ready"}
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    monkeypatch.setattr(service, "_SESSION_STREAM_SUBSCRIBERS", {session_id: {subscriber}})
+    monkeypatch.setattr(service, "_is_session_running", lambda _id: False)
+    monkeypatch.setattr(service, "_record_session_detail_snapshot_published_event", lambda **kwargs: None)
+    monkeypatch.setattr(publish, "_clear_session_detail_snapshot_slot", lambda *args, **kwargs: 0)
+
+    def hydrate(_id, **kwargs):
+        entered.set()
+        assert release.wait(3), "test failed to release hydration"
+        return old
+
+    monkeypatch.setattr(service, "get_session_detail", hydrate)
+
+    def publish_old():
+        try:
+            publish._publish_session_detail_snapshot(session_id)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=publish_old)
+    thread.start()
+    try:
+        assert entered.wait(3)
+        if new_finishes_first:
+            publish._publish_session_detail_snapshot(session_id, detail=new)
+            if consume_new:
+                assert subscriber.get_nowait()["detail"] == new
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        if not new_finishes_first:
+            publish._publish_session_detail_snapshot(session_id, detail=new)
+        assert errors == []
+        if consume_new:
+            assert subscriber.empty()
+        else:
+            assert subscriber.qsize() == 1
+            assert subscriber.get_nowait()["detail"] == new
+    finally:
+        release.set()
+        thread.join(3)
+
+
+def test_subscriber_replacement_does_not_receive_an_old_hydration(monkeypatch):
+    from core.web.services import session_service as service
+
+    session_id = "subscriber-replacement"
+    old_subscriber = queue.Queue()
+    new_subscriber = queue.Queue()
+    entered = threading.Event()
+    release = threading.Event()
+    errors = []
+    registry = {session_id: {old_subscriber}}
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    monkeypatch.setattr(service, "_SESSION_STREAM_SUBSCRIBERS", registry)
+    monkeypatch.setattr(service, "_is_session_running", lambda _id: False)
+    monkeypatch.setattr(service, "_record_session_detail_snapshot_published_event", lambda **kwargs: None)
+    monkeypatch.setattr(publish, "_clear_session_detail_snapshot_slot", lambda *args, **kwargs: 0)
+
+    def hydrate(_id, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return {"ledgerSeq": 19, "currentPhase": "completed"}
+
+    monkeypatch.setattr(service, "get_session_detail", hydrate)
+
+    def publish_old():
+        try:
+            publish._publish_session_detail_snapshot(session_id)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=publish_old)
+    thread.start()
+    try:
+        assert entered.wait(3)
+        with service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+            registry[session_id] = {new_subscriber}
+        new = {"ledgerSeq": 20, "currentPhase": "ready"}
+        publish._publish_session_detail_snapshot(session_id, detail=new)
+        release.set()
+        thread.join(3)
+        assert not thread.is_alive()
+        assert errors == []
+        assert old_subscriber.empty()
+        assert new_subscriber.qsize() == 1
+        assert new_subscriber.get_nowait()["detail"] == new
+    finally:
+        release.set()
+        thread.join(3)

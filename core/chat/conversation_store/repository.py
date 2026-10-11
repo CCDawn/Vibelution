@@ -811,8 +811,6 @@ class SessionAdmissionDao:
         state = str(row["state"])
         if state in {"rejected", "expired"}:
             raise ValueError(f"Cannot journal an admission in {state} state.")
-        if state == "projected":
-            return _admission_row(row)
         incoming_sequence = int(journal_sequence)
         if incoming_sequence < 1:
             raise ValueError("Journal sequence must be positive.")
@@ -822,7 +820,8 @@ class SessionAdmissionDao:
         self._connection.execute(
             """
             UPDATE session_admissions
-            SET state='journaled', journal_sequence=?, journal_event_id=?, updated_at_ms=?
+            SET state=CASE WHEN state='projected' THEN 'projected' ELSE 'journaled' END,
+                journal_sequence=?, journal_event_id=?, updated_at_ms=?
             WHERE session_id=? AND client_submission_id=?
             """,
             (

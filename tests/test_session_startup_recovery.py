@@ -16,6 +16,7 @@ These tests lock the sweep contract:
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ from core.infrastructure import developer_sandbox
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.ui.chat_state import save_chat_state
 from core.web.services import session_service
-from core.web.services.session import startup_recovery
+from core.web.services.session import queued_turns, startup_recovery
 
 SESSION_ID = "session-a"
 ORIGINAL_TURN_ID = "turn-1"
@@ -540,6 +541,46 @@ def test_healthy_session_is_a_noop(recovery_env, tmp_path, submit_calls, drain_c
     assert summary["queuedDrainScheduledCount"] == 0
     assert submit_calls == []
     assert drain_calls == []
+
+
+def test_repeated_startup_sweeps_schedule_one_fresh_starting_retry(
+    recovery_env, tmp_path, submit_calls, drain_calls, monkeypatch,
+) -> None:
+    timers = []
+
+    class Timer:
+        def __init__(self, delay, callback, args=()):
+            self.delay = delay
+            self.callback = callback
+            self.args = args
+            self.daemon = False
+            self.started = False
+            timers.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            pass
+
+    monkeypatch.setattr(queued_turns.threading, "Timer", Timer)
+    monkeypatch.setattr(queued_turns, "_PENDING_STARTING_RETRIES", {})
+    timestamp = datetime.now(timezone.utc).isoformat()
+    _seed_conversation(tmp_path, queued_turns=[{
+        "id": "fresh-starting", "clientSubmissionId": "sub-fresh",
+        "content": "queued input", "status": "starting",
+        "createdAt": timestamp, "updatedAt": timestamp,
+    }])
+
+    for _ in range(3):
+        summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+        assert summary["queuedDrainScheduledCount"] == 1
+
+    assert drain_calls == [SESSION_ID] * 3
+    assert submit_calls == []
+    assert len(timers) == 1
+    assert timers[0].started and timers[0].daemon
+    assert 0 < timers[0].delay <= queued_turns.STARTING_CLAIM_STALE_SECONDS + 1
 
 
 def test_finished_work_run_is_not_recovered(

@@ -209,6 +209,67 @@ def load_session_conversation_events_snapshot(
     return load_session_conversation_events_cached(session_id, project_root=project_root)
 
 
+def _conversation_events_by_correlation(
+    events: list[Any] | tuple[Any, ...],
+) -> dict[tuple[str, str], tuple[Any, ...]]:
+    indexed: dict[tuple[str, str], list[Any]] = {}
+    for event in events:
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        correlation_id = str(getattr(event, "correlation_id", "") or "").strip()
+        if not event_type or not correlation_id:
+            continue
+        indexed.setdefault((event_type, correlation_id), []).append(event)
+    return {key: tuple(value) for key, value in indexed.items()}
+
+
+def load_session_conversation_events_by_correlation(
+    session_id: str,
+    *,
+    event_type: str,
+    correlation_id: str,
+    project_root: Path | None = None,
+) -> list[Any]:
+    """Return ledger events matching one exact event type and correlation id."""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_event_type = str(event_type or "").strip()
+    normalized_correlation_id = str(correlation_id or "").strip()
+    if not normalized_session_id or not normalized_event_type or not normalized_correlation_id:
+        return []
+
+    root = _resolve_project_root(project_root)
+    cache_key = _cache_key(root, normalized_session_id)
+    signature = session_conversation_events_signature(normalized_session_id, project_root=root)
+    with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
+        cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(cache_key)
+        if cached and cached.get("signature") == signature:
+            cached["last_access"] = _perf_counter()
+            index = cached.get("correlation_index")
+            if not isinstance(index, dict):
+                index = _conversation_events_by_correlation(cached.get("events") or ())
+                cached["correlation_index"] = index
+            return list(index.get((normalized_event_type, normalized_correlation_id), ()))
+
+    events = load_session_conversation_events_cached(normalized_session_id, project_root=root)
+    signature = session_conversation_events_signature(normalized_session_id, project_root=root)
+    with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
+        cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(cache_key)
+        if cached and cached.get("signature") == signature:
+            cached["last_access"] = _perf_counter()
+            index = cached.get("correlation_index")
+            if not isinstance(index, dict):
+                index = _conversation_events_by_correlation(cached.get("events") or events)
+                cached["correlation_index"] = index
+            return list(index.get((normalized_event_type, normalized_correlation_id), ()))
+
+    return [
+        event
+        for event in events
+        if str(getattr(event, "event_type", "") or "").strip() == normalized_event_type
+        and str(getattr(event, "correlation_id", "") or "").strip() == normalized_correlation_id
+    ]
+
+
 def session_ledger_sequence(
     session_id: str,
     *,

@@ -7,6 +7,7 @@ import {
   buildKnowledgeItemReferencePayload,
   buildMessageReferencePayload,
   clearSessionDraftForSubmittedTurn,
+  clearUnsupportedSessionImageAttachments,
   classifyComposerFiles,
   classifyComposerImageFiles,
   composerUploadedArtifactIds,
@@ -185,6 +186,48 @@ describe("chatComposerSubmitModel", () => {
     );
     // the newest image that breaks the per-image cap is dropped; docs always stay
     expect(overImages.map((item) => item.id)).toEqual(["i1", "i2", "i3", "i4", "d9"]);
+  });
+
+  it("removes unsupported images from the active session only and preserves its documents", () => {
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    const revoke = vi.fn();
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+    try {
+      const image = {
+        id: "image-1",
+        file: new File(["image"], "image.png", { type: "image/png" }),
+        filename: "image.png",
+        previewUrl: "blob:image",
+        sizeBytes: 5,
+        contentType: "image/png",
+        kind: "image" as const,
+      };
+      const document = {
+        id: "document-1",
+        file: new File(["text"], "notes.md", { type: "text/markdown" }),
+        filename: "notes.md",
+        previewUrl: "blob:document",
+        sizeBytes: 4,
+        contentType: "text/markdown",
+        kind: "document" as const,
+      };
+      const previousSessionImage = {
+        ...image,
+        id: "previous-image",
+        previewUrl: "blob:previous-image",
+      };
+      const current = { session: [image, document], "previous-session": [previousSessionImage] };
+      const next = clearUnsupportedSessionImageAttachments(current, "session");
+
+      expect(next.session).toEqual([document]);
+      expect(next["previous-session"]).toEqual([previousSessionImage]);
+      expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:image");
+      expect(revoke).not.toHaveBeenCalledWith("blob:document");
+      expect(revoke).not.toHaveBeenCalledWith("blob:previous-image");
+    } finally {
+      if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
+      else Reflect.deleteProperty(URL, "revokeObjectURL");
+    }
   });
 
   it("enforces the document cap and reports rejected attachments in order", () => {

@@ -18,6 +18,8 @@ export function submitTelemetryFields(
     clientSubmissionId?: string;
     turnId?: string;
     acceptedAt?: string;
+    result?: string;
+    timeoutMs?: number;
     durationMs?: number;
     submitToOptimisticPaintMs?: number;
     activeStatusSource?: "optimistic_submit" | "assistant_delta";
@@ -72,6 +74,12 @@ export function submitTelemetryFields(
   }
   if (options.acceptedAt !== undefined) {
     fields.acceptedAt = options.acceptedAt;
+  }
+  if (options.result !== undefined) {
+    fields.result = options.result;
+  }
+  if (options.timeoutMs !== undefined) {
+    fields.timeoutMs = options.timeoutMs;
   }
   if (options.durationMs !== undefined) {
     fields.durationMs = options.durationMs;

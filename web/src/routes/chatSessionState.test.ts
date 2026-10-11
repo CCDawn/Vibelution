@@ -13,7 +13,9 @@ import {
   markSessionSummaryRunning,
   markSessionDetailRunning,
   mergeSessionDetailHandoff,
+  mergeSessionDetailHandoffWithOutcome,
   mergeSessionDetailMessageWindow,
+  mergeSessionDetailMessageWindowWithOutcome,
   mergeSessionDetailIntoSummaries,
   pickOptimisticNextActiveSessionId,
   renameSessionDetail,
@@ -257,6 +259,42 @@ describe("chatSessionState", () => {
     const merged = mergeSessionDetailMessageWindow(optimistic, stale);
     expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-1"]);
     expect(merged.editResubmitProtection?.clientSubmissionId).toBe("submission-edit-2");
+  });
+
+  it.each([
+    [10, "same ledger sequence"],
+    [undefined, "sequence-less snapshot"],
+  ] as const)("does not accept an old terminal snapshot during a pending edit (%s): %s", (ledgerSeq) => {
+    const original = makeDetail({
+      ledgerSeq: 10,
+      currentPhase: "completed",
+      status: "completed",
+      messages: [
+        { id: "session-live-message-1", role: "user", content: "question", timestamp: "2026-05-22T10:00:00Z" },
+        assistantTerminalTurn("session-live-message-2", "turn-old", "2026-05-22T10:00:01Z"),
+      ],
+    });
+    const optimistic = applyOptimisticEditResubmit(original, {
+      messageId: "session-live-message-1",
+      content: "edited question",
+      clientSubmissionId: "submission-edit-pending",
+      supersededTurnId: "turn-old",
+    }) as SessionDetail;
+    const staleTerminal = makeDetail({
+      ledgerSeq: ledgerSeq ?? undefined,
+      currentPhase: "completed",
+      status: "completed",
+      activeTurnId: "turn-old",
+      messages: original.messages,
+    });
+
+    const outcome = mergeSessionDetailMessageWindowWithOutcome(optimistic, staleTerminal);
+
+    expect(outcome.authorityAccepted).toBe(false);
+    expect(outcome.detail.currentPhase).toBe("running");
+    expect(outcome.detail.editResubmitProtection?.phase).toBe("pending");
+    expect(outcome.detail.messages.map((message) => message.id)).toEqual(["session-live-message-1"]);
+    expect(outcome.detail.messages.some((message) => message.turnId === "turn-old")).toBe(false);
   });
 
   it("releases edit protection only when the committed target carries the submission id", () => {
@@ -688,6 +726,123 @@ describe("chatSessionState", () => {
       "session-live-message-3",
       "session-live-message-4",
     ]);
+  });
+
+  it("merges only provably earlier same-branch history from a stale snapshot", () => {
+    const previous = makeDetail({
+      ledgerSeq: 50,
+      activeBranchId: "branch-main",
+      activeTurnId: "turn-current",
+      currentPhase: "running",
+      title: "当前标题",
+      messages: [4, 5].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T10:00:00Z",
+      })),
+      messageWindow: makeWindow({
+        totalMessages: 5,
+        returnedMessages: 2,
+        oldestMessageIndex: 4,
+        newestMessageIndex: 5,
+        hasEarlier: true,
+      }),
+    });
+    const staleHistory = makeDetail({
+      ledgerSeq: 42,
+      activeBranchId: "branch-main",
+      activeTurnId: "turn-old",
+      currentPhase: "completed",
+      title: "过期标题",
+      messages: [2, 3, 4].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `history ${index}`,
+        timestamp: "2026-05-22T09:00:00Z",
+      })),
+      messageWindow: makeWindow({
+        totalMessages: 5,
+        returnedMessages: 3,
+        oldestMessageIndex: 2,
+        newestMessageIndex: 4,
+        hasEarlier: true,
+        hasLater: true,
+      }),
+    });
+
+    const outcome = mergeSessionDetailMessageWindowWithOutcome(previous, staleHistory);
+
+    expect(outcome).toMatchObject({ authorityAccepted: false, historyMerged: true });
+    expect(outcome.detail).toMatchObject({
+      ledgerSeq: 50,
+      activeBranchId: "branch-main",
+      activeTurnId: "turn-current",
+      currentPhase: "running",
+      title: "当前标题",
+    });
+    expect(outcome.detail.messages.map((message) => message.id)).toEqual([
+      "session-live-message-2",
+      "session-live-message-3",
+      "session-live-message-4",
+      "session-live-message-5",
+    ]);
+    expect(outcome.detail.messageWindow).toMatchObject({
+      totalMessages: 5,
+      oldestMessageIndex: 2,
+      newestMessageIndex: 5,
+      hasEarlier: true,
+      hasLater: false,
+    });
+  });
+
+  it("rejects stale history from another active branch", () => {
+    const previous = makeDetail({
+      ledgerSeq: 50,
+      activeBranchId: "branch-current",
+      messages: [{ id: "session-live-message-4", role: "user", content: "current", timestamp: "now" }],
+      messageWindow: makeWindow({ totalMessages: 4, returnedMessages: 1, oldestMessageIndex: 4, newestMessageIndex: 4, hasEarlier: true }),
+    });
+    const staleHistory = makeDetail({
+      ledgerSeq: 42,
+      activeBranchId: "branch-old",
+      currentPhase: "completed",
+      messages: [{ id: "session-live-message-2", role: "user", content: "other branch", timestamp: "then" }],
+      messageWindow: makeWindow({ totalMessages: 4, returnedMessages: 1, oldestMessageIndex: 2, newestMessageIndex: 2, hasEarlier: true, hasLater: true }),
+    });
+
+    const outcome = mergeSessionDetailMessageWindowWithOutcome(previous, staleHistory);
+
+    expect(outcome).toMatchObject({ authorityAccepted: false, historyMerged: false });
+    expect(outcome.detail).toBe(previous);
+  });
+
+  it("rejects stale history when a known active branch is omitted from the page", () => {
+    const previous = makeDetail({
+      ledgerSeq: 50,
+      activeBranchId: "branch-current",
+      messages: [{ id: "session-live-message-4", role: "user", content: "current", timestamp: "now" }],
+      messageWindow: makeWindow({ totalMessages: 4, returnedMessages: 1, oldestMessageIndex: 4, newestMessageIndex: 4, hasEarlier: true }),
+    });
+    const staleHistory = makeDetail({
+      ledgerSeq: 42,
+      messages: [{ id: "session-live-message-2", role: "user", content: "unproven branch", timestamp: "then" }],
+      messageWindow: makeWindow({ totalMessages: 4, returnedMessages: 1, oldestMessageIndex: 2, newestMessageIndex: 2, hasEarlier: true, hasLater: true }),
+    });
+
+    const outcome = mergeSessionDetailMessageWindowWithOutcome(previous, staleHistory);
+
+    expect(outcome).toMatchObject({ authorityAccepted: false, historyMerged: false });
+    expect(outcome.detail).toBe(previous);
+  });
+
+  it("reports a stale non-history snapshot as rejected without changing control state", () => {
+    const previous = makeDetail({ ledgerSeq: 50, currentPhase: "running", title: "current" });
+    const stale = makeDetail({ ledgerSeq: 42, currentPhase: "completed", title: "old" });
+
+    const outcome = mergeSessionDetailMessageWindowWithOutcome(previous, stale);
+
+    expect(outcome).toEqual({ detail: previous, authorityAccepted: false, historyMerged: false });
   });
 
   it("drops a stale live overlay when a strictly newer authoritative window truncated its turn", () => {
@@ -1668,6 +1823,45 @@ describe("chatSessionState", () => {
     expect(merged.stopRequested).toBe(false);
     expect(merged.stopRequestedAt).toBe("");
   });
+
+  it("retires an old stop intent when a newer active turn starts", () => {
+    const stopping = markSessionDetailStopping(makeDetail({ activeTurnId: "turn-old" }), {
+      requestedAt: "2026-01-01T00:00:05Z",
+    }) as SessionDetail;
+    const newTurn = makeDetail({
+      ledgerSeq: (stopping.ledgerSeq ?? 0) + 1,
+      activeTurnId: "turn-new",
+      currentPhase: "running",
+      stopRequested: false,
+      stopRequestedAt: "",
+      stopReason: "",
+    });
+
+    const merged = mergeSessionDetailMessageWindow(stopping, newTurn);
+
+    expect(merged.activeTurnId).toBe("turn-new");
+    expect(merged.currentPhase).toBe("running");
+    expect(merged.stopRequested).toBe(false);
+    expect(merged.stopRequestedAt).toBe("");
+  });
+
+  it("does not replace the stop intent when a different turn owns a newer stop request", () => {
+    const stopping = markSessionDetailStopping(makeDetail({ activeTurnId: "turn-old" }), {
+      requestedAt: "2026-01-01T00:00:05Z",
+    }) as SessionDetail;
+    const newTurnStop = makeDetail({
+      activeTurnId: "turn-new",
+      currentPhase: "stopping",
+      stopRequested: true,
+      stopRequestedAt: "2026-01-01T00:00:06Z",
+    });
+
+    const merged = mergeSessionDetailMessageWindow(stopping, newTurnStop);
+
+    expect(merged.activeTurnId).toBe("turn-new");
+    expect(merged.stopRequested).toBe(true);
+    expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:06Z");
+  });
 });
 
 describe("mergeSessionDetailHandoff", () => {
@@ -1723,5 +1917,14 @@ describe("mergeSessionDetailHandoff", () => {
 
     expect(merged.stopRequested).toBe(true);
     expect(merged.stopRequestedAt).toBe("2026-01-01T00:00:05Z");
+  });
+
+  it("rejects a handoff whose ledger sequence trails the cached detail", () => {
+    const current = makeDetail({ ledgerSeq: 50, title: "current" });
+    const stale = makeDetail({ ledgerSeq: 42, title: "old", currentPhase: "completed" });
+
+    const outcome = mergeSessionDetailHandoffWithOutcome(current, stale);
+
+    expect(outcome).toEqual({ detail: current, authorityAccepted: false, historyMerged: false });
   });
 });

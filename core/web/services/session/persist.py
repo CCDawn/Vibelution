@@ -424,7 +424,7 @@ def _persist_session_turn_result(
             summary=settled_summary,
             finished_at=s._now_timestamp(),
         )
-        s._clear_session_live_output(session_id)
+        s._clear_session_live_output(session_id, turn_id=turn_id)
         try:
             s.record_runtime_scene_event(
                 "conversation",

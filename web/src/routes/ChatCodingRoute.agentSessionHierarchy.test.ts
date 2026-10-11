@@ -61,11 +61,13 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(tabStripSource).not.toContain("MessageCircleHeart");
   });
 
-  it("optimistically removes deleted sessions from Agent tab caches with rollback", () => {
+  it("optimistically removes deleted sessions and restores only failed deletion membership", () => {
     expect(lifecycleSource).toContain("captureAgentSessionCacheSnapshots(queryClient)");
     expect(lifecycleSource).toContain("removeSessionFromAgentSessionCaches(queryClient, variables.sessionId)");
     expect(lifecycleSource).toContain(
-      "restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches)",
+      "restoreUndeletedSessionCaches(queryClient, [variables.sessionId], context)",
     );
+    // Callback and helper behavior suites verify preserving concurrent cache edits.
+    expect(lifecycleSource).not.toContain("restoreAgentSessionCacheSnapshots(");
   });
 });

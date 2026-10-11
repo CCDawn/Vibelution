@@ -267,6 +267,16 @@ export function createSessionStreamAppendReassembler() {
     itemsByTextId.clear();
   }
 
+  function rebase(sessionId: string, turnId: string, turnItems: SessionTurnItem[]): void {
+    turnKey = `${String(sessionId || "").trim()}\u001f${String(turnId || "").trim()}`;
+    reset();
+    for (const item of turnItems) {
+      if (APPENDABLE_STREAM_ITEM_TYPES.has(item.type)) {
+        itemsByTextId.set(item.itemId, item);
+      }
+    }
+  }
+
   function expand(payload: SessionAssistantDeltaStreamEvent): SessionStreamAppendExpansion {
     const nextTurnKey = `${payload.sessionId}\u001f${payload.turnId}`;
     if (nextTurnKey !== turnKey) {
@@ -324,5 +334,5 @@ export function createSessionStreamAppendReassembler() {
     return { payload: expandedPayload, gaps: [] };
   }
 
-  return { expand };
+  return { expand, rebase };
 }

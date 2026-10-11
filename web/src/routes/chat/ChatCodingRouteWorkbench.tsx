@@ -116,8 +116,9 @@ import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
-  mergeSessionDetailHandoff,
+  mergeSessionDetailHandoffWithOutcome,
   mergeSessionDetailMessageWindow,
+  mergeSessionDetailMessageWindowWithOutcome,
   mergeSessionDetailIntoSummaries,
 } from "../chatSessionState";
 import {
@@ -329,7 +330,6 @@ import {
   resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
-  isStaleLedgerUpdate,
   latestMentalSnapshot,
 } from "./chatSessionDetailHelpers";
 import {
@@ -358,6 +358,7 @@ import {
   buildSessionReferencePayload,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
+  clearUnsupportedSessionImageAttachments,
   readStoredMentalModelToggle,
   readStoredPromptSuggestionToggle,
   readStoredRuntimeStatusToggle,
@@ -678,6 +679,7 @@ export function ChatCodingRouteWorkbench() {
     ));
   }, []);
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({});
+  const rebaseComposerPreviewOwnersRef = useRef<((fromSessionId: string, toSessionId: string) => void) | null>(null);
   const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>(storedDraftState.referenceAttachments);
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
@@ -732,6 +734,7 @@ export function ChatCodingRouteWorkbench() {
     setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
   }, []);
   const rebaseSessionComposerState = useCallback((fromId: string, toId: string) => {
+    rebaseComposerPreviewOwnersRef.current?.(fromId, toId);
     moveStoredSessionDraft(fromId, toId);
     setSessionDrafts((current) => rekeySessionComposerEntry(current, fromId, toId));
     setSessionReferenceAttachments((current) => rekeySessionComposerEntry(current, fromId, toId));
@@ -1065,16 +1068,13 @@ export function ChatCodingRouteWorkbench() {
       let shouldSyncSummaries = true;
       let mergedDetail: SessionDetail = detail;
       queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
-        if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
-          shouldSyncSummaries = false;
-          return previous ?? detail;
-        }
-        const nextDetail = options?.transcript === "preserve"
-          ? mergeSessionDetailHandoff(previous, detail)
-          : mergeSessionDetailMessageWindow(previous, detail);
+        const outcome = options?.transcript === "preserve"
+          ? mergeSessionDetailHandoffWithOutcome(previous, detail)
+          : mergeSessionDetailMessageWindowWithOutcome(previous, detail);
+        const nextDetail = outcome.detail;
+        shouldSyncSummaries = outcome.authorityAccepted;
         mergedDetail = nextDetail;
         if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
-          shouldSyncSummaries = false;
           return previous;
         }
         return nextDetail;
@@ -1618,6 +1618,8 @@ export function ChatCodingRouteWorkbench() {
   } = useChatComposerTurnMutations({
     queryClient,
     chatWorkspaceCache,
+    activeSessionId: activeSessionId ?? undefined,
+    activeTurnLayersStore,
     t,
     describeError,
     syncSessionDetail,
@@ -2766,6 +2768,7 @@ export function ChatCodingRouteWorkbench() {
     handleRetryComposerAttachmentUploads,
     handleAddComposerReference,
     handleRemoveComposerReference,
+    rebaseComposerPreviewOwners,
   } = useChatComposerSubmitActions({
     queryClient,
     setActiveTurnLayersBySession,
@@ -2807,6 +2810,7 @@ export function ChatCodingRouteWorkbench() {
     setRuntimeStatusEnabledForNextTurn,
     companionAgentId: companionTransportAgentId,
   });
+  rebaseComposerPreviewOwnersRef.current = rebaseComposerPreviewOwners;
   const activePromptSuggestionEnabled = activeSessionId
     ? promptSuggestionEnabledBySession[activeSessionId] ?? readStoredPromptSuggestionToggle(activeSessionId)
     : false;
@@ -2925,7 +2929,7 @@ export function ChatCodingRouteWorkbench() {
     if (!activeSessionId || !activeAgentImageInputUnsupported || !activeImageAttachments.length) {
       return;
     }
-    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
+    setSessionImageAttachments((current) => clearUnsupportedSessionImageAttachments(current, activeSessionId));
   }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
 
   // Branch feature fork exit: ConversationView owns the scope dialog; this

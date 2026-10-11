@@ -4,9 +4,11 @@ import type { QueryClient } from "@tanstack/react-query";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { queryKeys } from "../../api/queryKeys";
-import type { SessionDetail, SessionStreamEvent } from "../../api/types";
+import type { SessionDetail, SessionStreamEvent, SessionTurnItem } from "../../api/types";
 import {
+  bindActiveTurnLayerToTurnId,
   isActiveTurnSettledByDetail,
+  latestUserTurnId,
   reconcileActiveTurnLayerItemsWithMessages,
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
@@ -33,7 +35,7 @@ import {
   createSessionStreamRecoveryController,
   SESSION_STREAM_RECOVERY_MAX_ATTEMPTS,
 } from "../chatStreamProjectionGate";
-import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import { mergeSessionDetailMessageWindowWithOutcome } from "../chatSessionState";
 import {
   SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS,
   SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
@@ -67,6 +69,33 @@ export function shouldDropSupersededEditDelta(
   ledgerSeq?: number,
 ): boolean {
   return supersededEditDelta(protection, turnId, ledgerSeq);
+}
+
+function normalizedLedgerSeq(value: unknown): number {
+  const sequence = Number(value ?? 0);
+  return Number.isFinite(sequence) && sequence > 0 ? sequence : 0;
+}
+
+function normalizedTurnId(value: unknown): string {
+  const turnId = String(value ?? "").trim();
+  return turnId.startsWith("live:") ? turnId.slice("live:".length) : turnId;
+}
+
+function sessionTurnIdForMessage(message: SessionDetail["messages"][number]): string {
+  return normalizedTurnId(message.metadata?.turnId || message.metadata?.turn_id);
+}
+
+function sessionTurnItemsForDetail(detail: SessionDetail, turnId: string): SessionTurnItem[] {
+  if (!turnId) {
+    return [];
+  }
+  return (detail.messages ?? []).flatMap((message) => (
+    message.role === "assistant"
+      && message.metadata?.kind !== "session_active_turn_layer"
+      && sessionTurnIdForMessage(message) === turnId
+      ? message.turnItems ?? []
+      : []
+  ));
 }
 
 /** Why a guarded stream was hard-closed by its owner (telemetry evidence). */
@@ -219,6 +248,88 @@ export function useSessionDetailStream({
       setSessionStreamConnected(false);
       return;
     }
+    const initialCachedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId));
+    let authoritativeLedgerSeq = normalizedLedgerSeq(initialCachedDetail?.ledgerSeq);
+    let authoritativePhase = String(initialCachedDetail?.currentPhase || initialCachedDetail?.status || "")
+      .trim()
+      .toLowerCase();
+    let authoritativeTurnId = normalizedTurnId(initialCachedDetail?.activeTurnId)
+      || (isBusyPhase(authoritativePhase) ? latestUserTurnId(initialCachedDetail) : "");
+    const noteAuthorityState = (snapshot: {
+      ledgerSeq?: number;
+      activeTurnId?: string;
+      currentPhase?: string;
+      status?: string;
+    }) => {
+      const incomingLedgerSeq = normalizedLedgerSeq(snapshot.ledgerSeq);
+      if (authoritativeLedgerSeq > 0 && (incomingLedgerSeq === 0 || incomingLedgerSeq < authoritativeLedgerSeq)) {
+        return;
+      }
+      authoritativeLedgerSeq = Math.max(authoritativeLedgerSeq, incomingLedgerSeq);
+      const phase = String(snapshot.currentPhase || snapshot.status || "").trim().toLowerCase();
+      if (snapshot.activeTurnId !== undefined) {
+        authoritativeTurnId = normalizedTurnId(snapshot.activeTurnId);
+      } else if (phase && isBusyPhase(phase)) {
+        authoritativeTurnId = latestUserTurnId(snapshot as SessionDetail) || authoritativeTurnId;
+      } else if (phase && !isBusyPhase(phase)) {
+        authoritativeTurnId = "";
+      }
+      if (phase) {
+        authoritativePhase = phase;
+      }
+    };
+    const currentAuthorityState = () => {
+      const cached = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId));
+      if (cached && normalizedLedgerSeq(cached.ledgerSeq) >= authoritativeLedgerSeq) {
+        noteAuthorityState(cached);
+      }
+      return {
+        ledgerSeq: authoritativeLedgerSeq,
+        turnId: authoritativeTurnId,
+        phase: authoritativePhase,
+      };
+    };
+    const shouldDropDeltaAgainstAuthority = (
+      payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
+    ) => {
+      const authority = currentAuthorityState();
+      const incomingLedgerSeq = normalizedLedgerSeq(payload.ledgerSeq);
+      const authorityIsTerminal = Boolean(authority.phase && !isBusyPhase(authority.phase));
+      if (
+        authorityIsTerminal
+        && authority.turnId
+        && payload.turnId === authority.turnId
+      ) {
+        return true;
+      }
+      if (
+        authorityIsTerminal
+        && !authority.turnId
+        && (!incomingLedgerSeq || !authority.ledgerSeq || incomingLedgerSeq <= authority.ledgerSeq)
+      ) {
+        return true;
+      }
+      if (
+        authority.turnId
+        && payload.turnId !== authority.turnId
+        && (!incomingLedgerSeq || !authority.ledgerSeq || incomingLedgerSeq <= authority.ledgerSeq)
+      ) {
+        return true;
+      }
+      if (!incomingLedgerSeq || !authority.ledgerSeq) {
+        return false;
+      }
+      if (incomingLedgerSeq < authority.ledgerSeq) {
+        return true;
+      }
+      if (incomingLedgerSeq > authority.ledgerSeq) {
+        return false;
+      }
+      if (authority.turnId && payload.turnId !== authority.turnId) {
+        return true;
+      }
+      return !authority.turnId && Boolean(authority.phase && !isBusyPhase(authority.phase));
+    };
     let pendingDetail: SessionDetail | null = null;
     let pendingDetailTrace: SessionStreamProtocolTrace | null = null;
     let applyTimer: number | null = null;
@@ -228,6 +339,19 @@ export function useSessionDetailStream({
     let appendGapLogged = false;
     let journalReplayLogged = false;
     const sessionStreamAppendReassembler = createSessionStreamAppendReassembler();
+    const initialDetailPhase = String(initialCachedDetail?.currentPhase || initialCachedDetail?.status || "")
+      .trim()
+      .toLowerCase();
+    const initialTurnId = String(initialCachedDetail?.activeTurnId || "").trim()
+      || (isBusyPhase(initialDetailPhase) ? latestUserTurnId(initialCachedDetail) : "");
+    const initialLayer = committedAssistantDeltaLayer;
+    const initialTurnItems = initialLayer?.turnId === initialTurnId
+      && initialLayer.ledgerSeq >= normalizedLedgerSeq(initialCachedDetail?.ledgerSeq)
+      ? initialLayer.turnItems
+      : initialCachedDetail
+        ? sessionTurnItemsForDetail(initialCachedDetail, initialTurnId)
+        : [];
+    sessionStreamAppendReassembler.rebase(streamSessionId, initialTurnId, initialTurnItems);
     const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
       nowMs: chatStreamPerformanceNowMs,
     });
@@ -417,7 +541,8 @@ export function useSessionDetailStream({
       if (!pendingDetail || disposed) {
         return;
       }
-      const detail = mergeSessionDetailMessageWindow(
+      const incomingDetail = pendingDetail;
+      const mergeOutcome = mergeSessionDetailMessageWindowWithOutcome(
         queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId)), pendingDetail);
       const trace = pendingDetailTrace;
       pendingDetail = null;
@@ -425,6 +550,28 @@ export function useSessionDetailStream({
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
+      }
+      if (!mergeOutcome.authorityAccepted) {
+        const stats = normalizeSessionStreamApplyStats(sessionStreamApplyStatsRef.current[streamSessionId]);
+        if (mergeOutcome.historyMerged) {
+          stats.applied += 1;
+          // Keep older history paging useful while leaving all live control
+          // decisions attached to the accepted cache generation.
+          syncSessionDetail(incomingDetail);
+        } else {
+          stats.dropped += 1;
+        }
+        sessionStreamApplyStatsRef.current[streamSessionId] = stats;
+        return;
+      }
+      syncSessionDetail(mergeOutcome.detail);
+      const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))
+        ?? mergeOutcome.detail;
+      noteAuthorityState(detail);
+      const authoritativeLedgerSeq = normalizedLedgerSeq(detail.ledgerSeq);
+      sessionProjectionGate.noteAuthoritative(authoritativeLedgerSeq);
+      if (authoritativeLedgerSeq > 0) {
+        sessionStreamRecovery.noteAuthoritative(authoritativeLedgerSeq);
       }
       lastAppliedAt = Date.now();
       const activeLayer = activeTurnLayersBySessionRef.current[streamSessionId];
@@ -448,7 +595,6 @@ export function useSessionDetailStream({
           fields: decision.telemetry,
         });
       }
-      syncSessionDetail(detail);
       desktopConversationNotifierRef.current.handleSessionDetail(detail, {
         sessionTitle: detail.title || detail.agentDisplayName || detail.id,
         viewedSessionId: viewedSessionIdRef.current,
@@ -459,30 +605,53 @@ export function useSessionDetailStream({
           setActiveTurnLayerForSession(current, streamSessionId, undefined)
         );
         sessionProjectionGate.noteTurnBoundary();
+        sessionStreamAppendReassembler.rebase(streamSessionId, "", []);
         return;
       }
       // Authoritative snapshot application: rewrites the projection from the
       // authority, which re-baselines the continuity gate and retires a
       // pending watermark recovery episode.
-      const authoritativeLedgerSeq = Number(detail.ledgerSeq ?? 0);
-      if (Number.isFinite(authoritativeLedgerSeq) && authoritativeLedgerSeq > 0) {
-        sessionProjectionGate.noteAuthoritative(authoritativeLedgerSeq);
-        sessionStreamRecovery.noteAuthoritative(authoritativeLedgerSeq);
-      }
       // Per-item overlay reconciliation (projection invariant c): overlay turn
       // items the canonical transcript already commits are dropped at item
       // granularity; whole-turn settlement above stays the coarse path.
-      if (activeLayer) {
-        const reconciledLayer = reconcileActiveTurnLayerItemsWithMessages(activeLayer, detail.messages);
-        if (reconciledLayer !== activeLayer) {
-          // Reconcile actually advanced the overlay: applied activity too.
-          stampStreamActivity();
-          committedAssistantDeltaLayer = reconciledLayer;
-          setActiveTurnLayersBySession((current) =>
-            setActiveTurnLayerForSession(current, streamSessionId, reconciledLayer)
-          );
+      const detailPhase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
+      const authoritativeTurnId = normalizedTurnId(detail.activeTurnId)
+        || (isBusyPhase(detailPhase) ? latestUserTurnId(detail) : "");
+      let rebasedLayer = activeLayer;
+      if (activeLayer && authoritativeTurnId && activeLayer.turnId !== authoritativeTurnId) {
+        const boundLayer = bindActiveTurnLayerToTurnId(activeLayer, authoritativeTurnId);
+        if (boundLayer) {
+          rebasedLayer = {
+            ...boundLayer,
+            turnItems: sessionTurnItemsForDetail(detail, authoritativeTurnId),
+            ledgerSeq: Math.max(boundLayer.ledgerSeq, normalizedLedgerSeq(detail.ledgerSeq)),
+          };
         }
       }
+      const reconciledLayer = rebasedLayer
+        ? reconcileActiveTurnLayerItemsWithMessages(rebasedLayer, detail.messages)
+        : undefined;
+      if (reconciledLayer !== activeLayer) {
+        if (
+          activeLayer
+          && reconciledLayer
+          && reconciledLayer.turnId === activeLayer.turnId
+          && reconciledLayer.turnItems.length < activeLayer.turnItems.length
+        ) {
+          // Reconcile actually advanced the overlay: applied activity too.
+          stampStreamActivity();
+        }
+        committedAssistantDeltaLayer = reconciledLayer;
+        setActiveTurnLayersBySession((current) =>
+          setActiveTurnLayerForSession(current, streamSessionId, reconciledLayer)
+        );
+      } else {
+        committedAssistantDeltaLayer = reconciledLayer;
+      }
+      const baselineTurnItems = reconciledLayer?.turnId === authoritativeTurnId
+        ? reconciledLayer.turnItems
+        : sessionTurnItemsForDetail(detail, authoritativeTurnId);
+      sessionStreamAppendReassembler.rebase(streamSessionId, authoritativeTurnId, baselineTurnItems);
     }
 
     function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace) {
@@ -559,8 +728,11 @@ export function useSessionDetailStream({
         stats: sessionStreamApplyStatsRef.current[streamSessionId],
         applyStartedAtMs,
         nowMs: chatStreamPerformanceNowMs,
-        assistantDeltaSeqGate: (payload) => sessionProjectionGate.decide(payload),
+        assistantDeltaSeqGate: (payload) => shouldDropDeltaAgainstAuthority(payload)
+          ? { action: "drop-stale" }
+          : sessionProjectionGate.decide(payload),
       });
+      sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
       const drainHold = decision.hold;
       if (drainHold) {
         postBrowserTelemetry({
@@ -578,6 +750,9 @@ export function useSessionDetailStream({
         sessionStreamRecovery.request(drainHold.watermark);
       }
       if (!decision.applied) {
+        if (decision.shouldScheduleNextFrame && !disposed) {
+          scheduleAssistantDeltaFrame();
+        }
         return;
       }
       // Any applied frame is stream activity, body delta or not (thinking /
@@ -591,7 +766,6 @@ export function useSessionDetailStream({
           setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)
         );
       }
-      sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
       if (decision.shouldCommitRender) {
         lastAssistantDeltaAppliedAtRef.current = {
           ...lastAssistantDeltaAppliedAtRef.current,
@@ -605,6 +779,12 @@ export function useSessionDetailStream({
           message: "Session assistant delta stream was applied to the active turn layer.",
           level: "info",
           fields: decision.telemetry,
+        });
+      }
+      for (const payload of decision.appliedPayloads) {
+        desktopConversationNotifierRef.current.handleAssistantDelta(payload, {
+          sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
+          viewedSessionId: viewedSessionIdRef.current,
         });
       }
       if (decision.shouldScheduleNextFrame && !disposed) {
@@ -638,13 +818,26 @@ export function useSessionDetailStream({
         stats.dropped += 1;
         return;
       }
+      if (shouldDropDeltaAgainstAuthority(payload)) {
+        stats.dropped += 1;
+        return;
+      }
       if (sessionStopIntentActive()) {
         stats.dropped += 1;
         logStopFrozenDeltas(1);
         return;
       }
       sessionStreamStopFrozenLoggedRef.current[streamSessionId] = false;
-      const queued = assistantDeltaScheduler.enqueue(payload, trace.payloadLength, trace);
+      const expansion = sessionStreamAppendReassembler.expand(payload);
+      if (expansion.gaps.length) {
+        stats.dropped += 1;
+        logAppendGaps(expansion.gaps, trace);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        forceCloseStream("append_gap");
+        return;
+      }
+      const expandedPayload = expansion.payload;
+      const queued = assistantDeltaScheduler.enqueue(expandedPayload, trace.payloadLength, trace);
       if (payload.done) {
         applyPendingAssistantDeltas("final");
         return;
@@ -658,8 +851,8 @@ export function useSessionDetailStream({
           level: "info",
           fields: {
             sessionId: streamSessionId,
-            turnId: payload.turnId,
-            stage: payload.stage,
+            turnId: expandedPayload.turnId,
+            stage: expandedPayload.stage,
             receivedCount: stats.received,
             appliedCount: stats.applied,
             droppedCount: stats.dropped,
@@ -668,7 +861,7 @@ export function useSessionDetailStream({
             thoughtDeltaLength: queued.thoughtDeltaLength,
             pendingTextLength: 0,
             batchSize: queued.pendingCount,
-            done: payload.done,
+            done: expandedPayload.done,
             receivedAtMs: Math.round(queued.receivedAtMs),
             frameScheduledAtMs: Math.round(frameScheduledAtMs),
             queuedForMs: Math.max(0, Math.round(frameScheduledAtMs - queued.receivedAtMs)),
@@ -783,6 +976,11 @@ export function useSessionDetailStream({
       // watermark may trail the latest commit until the detail readback below;
       // it is informational for the delta gate so new live frames can apply.
       const initialLedgerSeq = Number(routed.payload.ledgerSeq ?? 0);
+      noteAuthorityState({
+        ledgerSeq: routed.payload.ledgerSeq,
+        activeTurnId: routed.payload.activeTurnId,
+        currentPhase: routed.payload.currentPhase || (routed.payload.running ? "running" : ""),
+      });
       if (Number.isFinite(initialLedgerSeq) && initialLedgerSeq > 0) {
         sessionProjectionGate.noteAuthoritative(initialLedgerSeq);
         sessionStreamRecovery.noteAuthoritative(initialLedgerSeq);
@@ -831,24 +1029,7 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
-      // Append-only fragments splice onto this connection's cached item text;
-      // a broken chain means the cached baseline diverged from the server
-      // cursor, so nothing partial is applied: refresh the body and reconnect
-      // (a fresh stream restarts with full item snapshots).
-      const expansion = sessionStreamAppendReassembler.expand(routed.payload);
-      if (expansion.gaps.length) {
-        logAppendGaps(expansion.gaps, routed.trace);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
-        forceCloseStream("append_gap");
-        return;
-      }
-      const editGuard = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.editResubmitProtection;
-      if (shouldDropSupersededEditDelta(editGuard, expansion.payload.turnId, expansion.payload.ledgerSeq)) return;
-      desktopConversationNotifierRef.current.handleAssistantDelta(expansion.payload, {
-        sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
-        viewedSessionId: viewedSessionIdRef.current,
-      });
-      queueAssistantDelta(expansion.payload, routed.trace);
+      queueAssistantDelta(routed.payload, routed.trace);
     }
 
     function logAppendGaps(gaps: SessionStreamAppendGap[], trace: SessionStreamProtocolTrace) {

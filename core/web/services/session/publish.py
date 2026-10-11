@@ -13,7 +13,9 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import threading
 import time
+import weakref
 from typing import Any
 from uuid import uuid4
 
@@ -27,6 +29,11 @@ SESSION_STREAM_RESUME_MAX_EVENTS = 2000
 # Per-replayed-journal-event payload bound: resume replay exists to prove what
 # was missed and mark the handover watermark, not to re-ship whole bodies.
 SESSION_STREAM_RESUME_MAX_PAYLOAD_CHARS = 8192
+
+_SESSION_STREAM_PUBLISH_LOCKS_LOCK = threading.Lock()
+_SESSION_STREAM_PUBLISH_LOCKS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_SESSION_STREAM_DETAIL_WATERMARKS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_SESSION_DETAIL_PUBLISH_GENERATION = 0
 
 
 def _service():
@@ -576,6 +583,7 @@ def _session_stream_preview_message_components(raw: Any) -> dict[str, Any] | Non
 def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] | None = None) -> None:
     s = _service()
     started_at = s._perf_counter()
+    publication_generation = _next_session_detail_publish_generation()
     with s._SESSION_STREAM_SUBSCRIBERS_LOCK:
         subscribers = list(s._SESSION_STREAM_SUBSCRIBERS.get(session_id) or [])
     if not subscribers:
@@ -686,9 +694,29 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
-        dropped_count += s._coalesce_session_stream_queue(subscriber, event_type="session_detail")
-        delivered, dropped = s._put_session_stream_event(subscriber, event)
-        dropped_count += dropped
+        # Coalescing and enqueue must be one publisher-side critical section:
+        # otherwise an older detail can inspect an empty queue while a newer
+        # publisher is between its coalesce and put, then land after it.
+        with _session_stream_publish_lock(subscriber):
+            coalesced_dropped, should_enqueue = _coalesce_session_stream_queue_with_outcome(
+                subscriber,
+                event_type="session_detail",
+                session_id=session_id,
+                incoming_ledger_seq=event["ledgerSeq"],
+                incoming_generation=publication_generation,
+            )
+            dropped_count += coalesced_dropped
+            if not should_enqueue:
+                continue
+            delivered, dropped = s._put_session_stream_event(subscriber, event)
+            dropped_count += dropped
+            if delivered:
+                _remember_session_stream_detail_watermark(
+                    subscriber,
+                    session_id=session_id,
+                    ledger_seq=event["ledgerSeq"],
+                    generation=publication_generation,
+                )
         if delivered:
             delivered_count += 1
     s._record_session_detail_snapshot_published_event(
@@ -981,29 +1009,165 @@ def _coalesce_session_stream_queue(
     *,
     event_type: str,
 ) -> int:
-    """Drop stale status snapshots for one SSE subscriber before enqueuing a newer one."""
+    """Preserve the facade's drop-count contract for legacy callers."""
+    dropped_count, _should_enqueue = _coalesce_session_stream_queue_with_outcome(
+        subscriber, event_type=event_type,
+    )
+    return dropped_count
+
+
+def _coalesce_session_stream_queue_with_outcome(
+    subscriber: queue.Queue[dict[str, Any]],
+    *,
+    event_type: str,
+    session_id: str = "",
+    incoming_ledger_seq: int | None = None,
+    incoming_generation: int | None = None,
+) -> tuple[int, bool]:
+    """Coalesce queued status snapshots and reject an older detail snapshot.
+
+    The bool reports whether the caller should enqueue its incoming event. For
+    session_detail, the queue may already contain a newer journal watermark
+    when publishers overlap, so an older incoming snapshot must not replace it.
+    """
     s = _service()
 
     normalized_event_type = str(event_type or "").strip()
     if normalized_event_type not in s._SESSION_STREAM_COALESCED_EVENT_TYPES:
-        return 0
+        return 0, True
     kept: list[dict[str, Any]] = []
     dropped_count = 0
+    newest_queued_detail: dict[str, Any] | None = None
+    should_enqueue = True
+    same_seq_older_generation = False
+    normalized_session_id = str(session_id or "").strip()
+    normalized_incoming_seq = _session_stream_nonnegative_int(incoming_ledger_seq)
+    normalized_incoming_generation = (
+        _session_stream_nonnegative_int(incoming_generation)
+        if incoming_generation is not None
+        else None
+    )
+    if normalized_event_type == "session_detail" and incoming_ledger_seq is not None:
+        watermark = _session_stream_detail_watermark(subscriber, normalized_session_id)
+        if watermark is not None:
+            watermark_seq, watermark_generation = watermark
+            if normalized_incoming_generation is None:
+                should_enqueue = normalized_incoming_seq >= watermark_seq
+            else:
+                should_enqueue = (normalized_incoming_seq, normalized_incoming_generation) >= (
+                    watermark_seq,
+                    watermark_generation,
+                )
+                same_seq_older_generation = (
+                    normalized_incoming_seq == watermark_seq
+                    and normalized_incoming_generation < watermark_generation
+                )
     while True:
         try:
             existing = subscriber.get_nowait()
         except queue.Empty:
             break
         if str(existing.get("type") or "").strip() == normalized_event_type:
+            if normalized_event_type == "session_detail" and incoming_ledger_seq is not None:
+                existing_ledger_seq = _session_stream_nonnegative_int(existing.get("ledgerSeq"))
+                if existing_ledger_seq > normalized_incoming_seq or (
+                    same_seq_older_generation and existing_ledger_seq == normalized_incoming_seq
+                ):
+                    should_enqueue = False
+                    if newest_queued_detail is None:
+                        newest_queued_detail = existing
+                    else:
+                        newest_seq = _session_stream_nonnegative_int(newest_queued_detail.get("ledgerSeq"))
+                        if existing_ledger_seq > newest_seq:
+                            dropped_count += 1
+                            newest_queued_detail = existing
+                        else:
+                            dropped_count += 1
+                    continue
             dropped_count += 1
             continue
         kept.append(existing)
+    if newest_queued_detail is not None:
+        kept.append(newest_queued_detail)
+    if not should_enqueue:
+        # The incoming snapshot was skipped; include it in the drop telemetry.
+        dropped_count += 1
     for existing in kept:
         try:
             subscriber.put_nowait(existing)
         except queue.Full:
             dropped_count += 1
-    return dropped_count
+    return dropped_count, should_enqueue
+
+
+def _session_stream_publish_lock(subscriber: queue.Queue[dict[str, Any]]) -> threading.Lock:
+    """Return a weakly held per-subscriber lock for coalesce+enqueue ordering."""
+
+    with _SESSION_STREAM_PUBLISH_LOCKS_LOCK:
+        lock = _SESSION_STREAM_PUBLISH_LOCKS.get(subscriber)
+        if lock is None:
+            lock = threading.Lock()
+            _SESSION_STREAM_PUBLISH_LOCKS[subscriber] = lock
+        return lock
+
+
+def _next_session_detail_publish_generation() -> int:
+    """Assign an internal monotone order before detail hydration can overlap."""
+
+    global _SESSION_DETAIL_PUBLISH_GENERATION
+    with _SESSION_STREAM_PUBLISH_LOCKS_LOCK:
+        _SESSION_DETAIL_PUBLISH_GENERATION += 1
+        return _SESSION_DETAIL_PUBLISH_GENERATION
+
+
+def _session_stream_detail_watermark(
+    subscriber: queue.Queue[dict[str, Any]],
+    session_id: str,
+) -> tuple[int, int] | None:
+    if not session_id:
+        return None
+    with _SESSION_STREAM_PUBLISH_LOCKS_LOCK:
+        watermark = _SESSION_STREAM_DETAIL_WATERMARKS.get(subscriber)
+        if not isinstance(watermark, tuple) or len(watermark) != 3:
+            return None
+        watermark_session_id, ledger_seq, generation = watermark
+        if watermark_session_id != session_id:
+            return None
+        return _session_stream_nonnegative_int(ledger_seq), _session_stream_nonnegative_int(generation)
+
+
+def _remember_session_stream_detail_watermark(
+    subscriber: queue.Queue[dict[str, Any]],
+    *,
+    session_id: str,
+    ledger_seq: Any,
+    generation: Any,
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    watermark = (
+        normalized_session_id,
+        _session_stream_nonnegative_int(ledger_seq),
+        _session_stream_nonnegative_int(generation),
+    )
+    with _SESSION_STREAM_PUBLISH_LOCKS_LOCK:
+        previous = _SESSION_STREAM_DETAIL_WATERMARKS.get(subscriber)
+        if (
+            isinstance(previous, tuple)
+            and len(previous) == 3
+            and previous[0] == normalized_session_id
+            and (watermark[1], watermark[2]) < (_session_stream_nonnegative_int(previous[1]), _session_stream_nonnegative_int(previous[2]))
+        ):
+            return
+        _SESSION_STREAM_DETAIL_WATERMARKS[subscriber] = watermark
+
+
+def _session_stream_nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _register_session_stream_subscriber(session_id: str, subscriber: queue.Queue[dict[str, Any]]) -> None:

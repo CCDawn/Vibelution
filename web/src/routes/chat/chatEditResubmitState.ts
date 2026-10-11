@@ -3,6 +3,12 @@ import type { ConversationMessage, SessionDetail } from "../../api/types";
 type EditGuard = NonNullable<SessionDetail["editResubmitProtection"]>;
 type DetailMerge = (previous: SessionDetail | undefined, next: SessionDetail) => SessionDetail;
 
+export type EditResubmitDetailMergeOutcome = {
+  detail: SessionDetail;
+  /** False when the incoming snapshot was hidden behind an edit-generation boundary. */
+  authorityAccepted: boolean;
+};
+
 export function editMessageIndex(message: ConversationMessage): number {
   const index = Number(message.metadata?.messageIndex ?? /-message-(\d+)$/.exec(message.id)?.[1]);
   return Number.isFinite(index) && index > 0 ? index : Number.POSITIVE_INFINITY;
@@ -63,20 +69,26 @@ function hideTail(detail: SessionDetail, guard: EditGuard, target: ConversationM
 export function mergeEditResubmitDetail(
   previous: SessionDetail | undefined, next: SessionDetail, merge: DetailMerge,
 ): SessionDetail {
-  if (!previous || previous.id !== next.id) return merge(previous, next);
+  return mergeEditResubmitDetailWithOutcome(previous, next, merge).detail;
+}
+
+export function mergeEditResubmitDetailWithOutcome(
+  previous: SessionDetail | undefined, next: SessionDetail, merge: DetailMerge,
+): EditResubmitDetailMergeOutcome {
+  if (!previous || previous.id !== next.id) return { detail: merge(previous, next), authorityAccepted: true };
   const incoming = next.editResubmitProtection;
   const current = previous.editResubmitProtection;
   if (incoming?.phase === "rolled_back") {
     // Only the mutation callback creates this directive after checking identity.
-    return next;
+    return { detail: next, authorityAccepted: true };
   }
   const newEdit = incoming && pending(incoming) && (!current || incoming.clientSubmissionId !== current.clientSubmissionId);
   const guard = newEdit ? incoming : current ?? incoming;
-  if (!guard || guard.phase === "rolled_back") return merge(previous, next);
+  if (!guard || guard.phase === "rolled_back") return { detail: merge(previous, next), authorityAccepted: true };
 
   if (newEdit) {
     const target = next.messages.find((message) => message.id === guard.targetMessageId);
-    return target ? hideTail(next, guard, target) : next;
+    return { detail: target ? hideTail(next, guard, target) : next, authorityAccepted: false };
   }
 
   if (!pending(guard)) {
@@ -84,34 +96,44 @@ export function mergeEditResubmitDetail(
     // cannot overwrite the accepted generation. A newer branch switch is valid.
     const nextSeq = seq(next);
     const floor = Math.max(seq(previous), guard.acceptedLedgerSeq ?? 0);
-    if (nextSeq > 0 && nextSeq < floor) return previous;
+    if (nextSeq > 0 && nextSeq < floor) return { detail: previous, authorityAccepted: false };
     const oldTarget = next.messages?.find((message) => message.id === guard.targetMessageId);
     const otherBranch = oldTarget && oldTarget.metadata?.clientSubmissionId !== guard.clientSubmissionId;
-    if (otherBranch && nextSeq <= floor) return previous;
-    if (otherBranch && nextSeq > floor) return { ...merge(previous, next), editResubmitProtection: undefined };
-    if (!nextSeq && next.messages?.some((message) => supersededEditDelta(guard, editMessageTurnId(message)))) {
-      return previous;
+    if (otherBranch && nextSeq <= floor) return { detail: previous, authorityAccepted: false };
+    if (otherBranch && nextSeq > floor) {
+      return { detail: { ...merge(previous, next), editResubmitProtection: undefined }, authorityAccepted: true };
     }
-    return { ...merge(previous, next), editResubmitProtection: guard };
+    if (!nextSeq && next.messages?.some((message) => supersededEditDelta(guard, editMessageTurnId(message)))) {
+      return { detail: previous, authorityAccepted: false };
+    }
+    return { detail: { ...merge(previous, next), editResubmitProtection: guard }, authorityAccepted: true };
   }
 
   if (isEditAcknowledged(next, guard.clientSubmissionId)) {
     // Remove the superseded branch before even a non-windowed sticky union.
     const merged = merge({ ...previous, messages: prefix(previous, guard) }, next);
     return {
-      ...merged,
-      messageWindow: next.messageWindow ?? merged.messageWindow,
-      editResubmitProtection: { ...guard, phase: "accepted", acceptedLedgerSeq: seq(next) },
+      detail: {
+        ...merged,
+        messageWindow: next.messageWindow ?? merged.messageWindow,
+        editResubmitProtection: { ...guard, phase: "accepted", acceptedLedgerSeq: seq(next) },
+      },
+      authorityAccepted: true,
     };
   }
 
-  if (!Array.isArray(next.messages)) return { ...merge(previous, next), editResubmitProtection: guard };
+  if (!Array.isArray(next.messages)) {
+    return { detail: { ...merge(previous, next), editResubmitProtection: guard }, authorityAccepted: true };
+  }
   const target = previous.messages.find((message) => message.id === guard.targetMessageId);
-  if (!target) return previous;
+  if (!target) return { detail: previous, authorityAccepted: false };
   // Old polling/SSE snapshots may contribute earlier pages, never the edited
   // message, stale terminal status, or the superseded tail.
   const history = merge(previous, { ...next, messages: prefix(next, guard) });
-  return hideTail({ ...history, ...previous, messages: history.messages }, guard, target);
+  return {
+    detail: hideTail({ ...history, ...previous, messages: history.messages }, guard, target),
+    authorityAccepted: false,
+  };
 }
 
 export function rollbackEditResubmit(

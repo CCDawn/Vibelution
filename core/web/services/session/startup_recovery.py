@@ -446,6 +446,12 @@ def _recover_session_on_startup(
         # after a restart nothing else re-triggers it.
         s._schedule_session_queued_turn_drain(session_id)
         summary["queuedDrainScheduledCount"] += 1
+        for row in queued_rows:
+            if str(row.get("status") or "") == "starting":
+                s._schedule_session_queued_turn_stale_retry(
+                    session_id,
+                    updated_at=str(row.get("updatedAt") or ""),
+                )
     if s._is_session_running(session_id):
         return
     if _shutdown_requested(should_stop):

@@ -115,6 +115,39 @@ def test_only_journaled_admission_can_advance_to_projection_offset(tmp_path: Pat
         store.close()
 
 
+def test_projected_admission_receipt_accepts_newer_journal_without_regressing(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_bound_session(store)
+        admission = SessionSubmissionAdmissionService(store.repository)
+        admission.reserve(
+            session_id="session-a", agent_id="agent-a", agent_config_revision_id=revision,
+            client_submission_id="submission-a", turn_id="turn-a",
+        )
+        admission.mark_journaled(
+            session_id="session-a", client_submission_id="submission-a",
+            journal_sequence=1, journal_event_id="event-start",
+        )
+        admission.mark_projected(
+            session_id="session-a", client_submission_id="submission-a", journal_sequence=2,
+        )
+        newer = admission.mark_journaled(
+            session_id="session-a", client_submission_id="submission-a",
+            journal_sequence=3, journal_event_id="event-user",
+        )
+        assert newer["state"] == "projected"
+        assert newer["journalSequence"] == 3
+        assert newer["journalEventId"] == "event-user"
+        older = admission.mark_journaled(
+            session_id="session-a", client_submission_id="submission-a",
+            journal_sequence=1, journal_event_id="event-start",
+        )
+        assert older == newer
+        assert store.repository.get_session_projection_offset("session-a") == 2
+    finally:
+        store.close()
+
+
 def test_repository_has_no_transcript_write_or_read_facade(tmp_path: Path):
     store = _open_store(tmp_path)
     try:
@@ -263,14 +296,16 @@ def test_concurrent_journal_admission_uses_one_append_callback(tmp_path: Path):
         revision = _create_bound_session(store)
         admission = SessionSubmissionAdmissionService(store.repository)
         append_calls = 0
+        canonical_receipt: dict[str, object] | None = None
 
         def lookup(_record: dict[str, object]) -> dict[str, object] | None:
-            return None
+            return canonical_receipt
 
         def append(_record: dict[str, object]) -> dict[str, object]:
-            nonlocal append_calls
+            nonlocal append_calls, canonical_receipt
             append_calls += 1
-            return {"journalSequence": 1, "journalEventId": "event-a"}
+            canonical_receipt = {"journalSequence": 1, "journalEventId": "event-a"}
+            return canonical_receipt
 
         def admit(index: int) -> dict[str, object]:
             return admission.admit_to_journal(

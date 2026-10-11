@@ -201,6 +201,26 @@ describe("session stream append reassembler", () => {
     expect((expanded.payload.turnItems[0] as { text: string }).text).toBe("hello world");
   });
 
+  it("rebases append fragments from an authoritative detail baseline", () => {
+    const reassembler = createSessionStreamAppendReassembler();
+    reassembler.rebase("session-1", "turn-1", [messageItem("hello")]);
+
+    const expanded = reassembler.expand({
+      type: "assistant_delta",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      ledgerSeq: 9,
+      stage: "responding",
+      turnItems: [],
+      turnItemAppends: [appendEntry({})],
+      updatedAt: "2026-07-09T08:00:01Z",
+      done: false,
+    });
+
+    expect(expanded.gaps).toEqual([]);
+    expect((expanded.payload.turnItems[0] as { text: string }).text).toBe("hello world");
+  });
+
   it("reports a gap instead of guessing when the itemId is unknown", () => {
     const reassembler = createSessionStreamAppendReassembler();
     const expanded = reassembler.expand({

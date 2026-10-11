@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from core.chat.conversation_ledger import (
+    EVENT_TURN_COMPLETED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_conversation_event,
@@ -163,6 +165,67 @@ def test_development_submit_bridge_recovers_partial_marker_without_duplicate_tur
             EVENT_TURN_STARTED,
             EVENT_USER_MESSAGE,
         ]
+        assert [event.turn_id for event in events] == ["turn-a", "turn-a"]
+    finally:
+        admission.close_development_submission_admission_runtimes()
+
+
+def test_development_submit_bridge_starts_new_turn_after_partial_marker_was_terminal(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from core.web.services.session import admission
+
+    project_root = tmp_path / "project"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setenv(
+        "VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT",
+        str(tmp_path / "development-data"),
+    )
+    append_conversation_event(
+        project_root,
+        "session-a",
+        "turn-old",
+        EVENT_TURN_STARTED,
+        status="running",
+        correlation_id="submission-a",
+        visible_in_model=False,
+    )
+    append_conversation_event(
+        project_root,
+        "session-a",
+        "turn-old",
+        EVENT_TURN_COMPLETED,
+        status="completed",
+        correlation_id="submission-a",
+    )
+    try:
+        receipt = submit._append_initial_session_journal_markers(
+            session_id="session-a",
+            turn_id="turn-new",
+            client_submission_id="submission-a",
+            agent={"agentId": "agent-a", "displayName": "Agent A"},
+            conversation={"title": "Session A"},
+            source="raw",
+            leases=["readonly_chat"],
+            user_payload={"content": "hello", "metadata": {"clientSubmissionId": "submission-a"}},
+        )
+
+        events = load_conversation_events(project_root, "session-a")
+        correlated_events = [event for event in events if event.correlation_id == "submission-a"]
+        assert [event.event_type for event in correlated_events] == [
+            EVENT_TURN_STARTED,
+            EVENT_TURN_COMPLETED,
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert [event.turn_id for event in correlated_events] == [
+            "turn-old",
+            "turn-old",
+            "turn-new",
+            "turn-new",
+        ]
+        assert receipt["turnId"] == "turn-new"
     finally:
         admission.close_development_submission_admission_runtimes()
 
@@ -217,6 +280,7 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
             "development journal bridge",
             client_submission_id="submission-development-1",
             mental_model_enabled=False,
+            references=[{"kind": "knowledge_base", "knowledgeBaseId": "kb-test"}],
         )
 
         matching_events = [
@@ -238,6 +302,435 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
         ).is_file()
     finally:
         _reset_seeded_session_runtime(session_id)
+        admission.close_development_submission_admission_runtimes()
+
+
+def _prepare_default_submit_session(tmp_path: Path, monkeypatch) -> str:
+    from core.web.services import agent_directory_service
+
+    session_id = "session-live"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT", raising=False)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    return session_id
+
+
+@pytest.mark.parametrize("projected", [False, True])
+def test_terminal_partial_development_receipt_requires_a_new_submission(
+    tmp_path: Path, monkeypatch, projected: bool,
+) -> None:
+    from core.web.services.session import admission
+
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    monkeypatch.setenv("VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT", str(tmp_path / "development-data"))
+    runtime = admission.get_development_submission_admission_runtime(tmp_path)
+    assert runtime is not None
+    conversation = session_service.load_session_chat_state(tmp_path, session_id)
+    assert conversation is not None
+    submission_id = "submission-terminal-partial-receipt"
+    old_turn_id = "turn-terminal-partial-receipt"
+    scheduled: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled.append(dict(context)))
+
+    def append_only_start(record: dict) -> dict:
+        event = append_conversation_event(
+            tmp_path, session_id, record["turnId"], EVENT_TURN_STARTED,
+            status="running", correlation_id=submission_id, visible_in_model=False,
+        )
+        return {"journalSequence": event.sequence, "journalEventId": event.event_id}
+
+    try:
+        receipt = runtime.admit(
+            session_id=session_id, agent={"agentId": conversation["agent_id"]}, conversation=conversation,
+            client_submission_id=submission_id, turn_id=old_turn_id,
+            journal_lookup=lambda _record: None, journal_append=append_only_start,
+        )
+        if projected:
+            runtime.admission.mark_projected(
+                session_id=session_id, client_submission_id=submission_id,
+                journal_sequence=int(receipt["journalSequence"]),
+            )
+        append_conversation_event(tmp_path, session_id, old_turn_id, EVENT_TURN_COMPLETED, status="completed")
+        before = load_conversation_events(tmp_path, session_id)
+
+        with pytest.raises(session_service.SessionValidationError, match="重新发送|new submission"):
+            submit.submit_session_message_lightweight(
+                session_id, "not previously accepted", client_submission_id=submission_id,
+                mental_model_enabled=False,
+            )
+        assert not scheduled
+        assert not session_service._is_session_running(session_id)
+        assert load_conversation_events(tmp_path, session_id) == before
+    finally:
+        _reset_seeded_session_runtime(session_id)
+        admission.close_development_submission_admission_runtimes()
+
+
+def test_submit_reuses_open_partial_submission_turn_identity(tmp_path: Path, monkeypatch) -> None:
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    partial_turn_id = "turn-partial-submit"
+    submission_id = "submission-partial-submit"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        partial_turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        correlation_id=submission_id,
+        visible_in_model=False,
+    )
+    scheduled: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled.append(dict(context)),
+    )
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "retry the partial submission",
+            client_submission_id=submission_id,
+            mental_model_enabled=False,
+        )
+
+        correlated_events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.correlation_id == submission_id
+        ]
+        assert result["turnId"] == partial_turn_id
+        assert [event.event_type for event in correlated_events] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert [event.turn_id for event in correlated_events] == [
+            partial_turn_id,
+            partial_turn_id,
+        ]
+        assert [context["turn_id"] for context in scheduled] == [partial_turn_id]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_journal_correlation_index_hits_cache_and_refreshes_after_append(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.session import journal_bridge
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    journal_bridge.invalidate_session_conversation_events_cache("session-indexed")
+    build_calls: list[int] = []
+    original_build = journal_bridge._conversation_events_by_correlation
+
+    def track_build(events):
+        build_calls.append(len(events))
+        return original_build(events)
+
+    monkeypatch.setattr(journal_bridge, "_conversation_events_by_correlation", track_build)
+    session_service._append_session_conversation_event(
+        "session-indexed",
+        "turn-a",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "first"},
+        source="test",
+        correlation_id="submission-a",
+    )
+    first = journal_bridge.load_session_conversation_events_by_correlation(
+        "session-indexed",
+        event_type=EVENT_USER_MESSAGE,
+        correlation_id="submission-a",
+        project_root=tmp_path,
+    )
+    cached = journal_bridge.load_session_conversation_events_by_correlation(
+        "session-indexed",
+        event_type=EVENT_USER_MESSAGE,
+        correlation_id="submission-a",
+        project_root=tmp_path,
+    )
+    assert first == cached
+    assert len(build_calls) == 1
+
+    session_service._append_session_conversation_event(
+        "session-indexed",
+        "turn-b",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "second"},
+        source="test",
+        correlation_id="submission-b",
+    )
+    appended = journal_bridge.load_session_conversation_events_by_correlation(
+        "session-indexed",
+        event_type=EVENT_USER_MESSAGE,
+        correlation_id="submission-b",
+        project_root=tmp_path,
+    )
+    assert [event.turn_id for event in appended] == ["turn-b"]
+    assert len(build_calls) == 2
+
+
+def test_default_submit_replay_returns_original_turn_after_terminal(tmp_path: Path, monkeypatch) -> None:
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    scheduled: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled.append(dict(context)))
+    try:
+        first = submit.submit_session_message_lightweight(
+            session_id,
+            "native idempotent submit",
+            client_submission_id="submission-native-terminal",
+            mental_model_enabled=False,
+        )
+        session_service._append_session_conversation_event(
+            session_id,
+            first["turnId"],
+            EVENT_TURN_COMPLETED,
+            status="completed",
+            payload={"summary": "done"},
+            source="test",
+        )
+
+        retried = submit.submit_session_message_lightweight(
+            session_id,
+            "native idempotent submit",
+            client_submission_id="submission-native-terminal",
+            mental_model_enabled=False,
+        )
+
+        user_events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.event_type == EVENT_USER_MESSAGE
+            and event.correlation_id == "submission-native-terminal"
+        ]
+        assert retried["turnId"] == first["turnId"]
+        assert retried["status"] == "completed"
+        assert len(user_events) == 1
+        assert len(scheduled) == 1
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_default_submit_rejects_reused_id_with_different_content(tmp_path: Path, monkeypatch) -> None:
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    scheduled: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled.append(dict(context)))
+    try:
+        first = submit.submit_session_message_lightweight(
+            session_id,
+            "first content",
+            client_submission_id="submission-conflict",
+            mental_model_enabled=False,
+        )
+        with pytest.raises(session_service.SessionValidationError, match="不同内容|different content"):
+            submit.submit_session_message_lightweight(
+                session_id,
+                "different content",
+                client_submission_id="submission-conflict",
+                mental_model_enabled=False,
+            )
+
+        user_events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.event_type == EVENT_USER_MESSAGE and event.correlation_id == "submission-conflict"
+        ]
+        assert len(user_events) == 1
+        assert len(scheduled) == 1
+        assert scheduled[0]["turn_id"] == first["turnId"]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_concurrent_same_id_submit_appends_and_schedules_once(tmp_path: Path, monkeypatch) -> None:
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    scheduled: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled.append(dict(context)))
+    start = threading.Barrier(3)
+
+    def submit_once() -> dict:
+        start.wait(timeout=5)
+        return submit.submit_session_message_lightweight(
+            session_id,
+            "same concurrent submit",
+            client_submission_id="submission-concurrent",
+            mental_model_enabled=False,
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(submit_once) for _ in range(2)]
+            start.wait(timeout=5)
+            results = [future.result(timeout=20) for future in futures]
+
+        events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.event_type == EVENT_USER_MESSAGE and event.correlation_id == "submission-concurrent"
+        ]
+        assert results[0]["turnId"] == results[1]["turnId"]
+        assert len(events) == 1
+        assert len(scheduled) == 1
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_queued_submit_retry_after_drain_reuses_the_accepted_turn(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.session import queued_turns
+
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    scheduled: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled.append(dict(context)))
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda _session_id: None)
+    try:
+        active = submit.submit_session_message_lightweight(
+            session_id,
+            "active turn",
+            client_submission_id="submission-active",
+            mental_model_enabled=False,
+        )
+        queued = submit.submit_session_message_lightweight(
+            session_id,
+            "queued content",
+            client_submission_id="submission-queued",
+            mental_model_enabled=False,
+            queue_if_busy=True,
+        )
+        queued_retry = submit.submit_session_message_lightweight(
+            session_id,
+            "queued content",
+            client_submission_id="submission-queued",
+            mental_model_enabled=False,
+            queue_if_busy=True,
+        )
+        assert queued["status"] == queued_retry["status"] == "queued"
+        assert queued["queuedTurnId"] == queued_retry["queuedTurnId"]
+
+        session_service._set_session_running(session_id, False, turn_id=active["turnId"])
+        session_service._clear_session_turn_control(session_id, turn_id=active["turnId"])
+        assert queued_turns.drain_session_queued_turns(session_id) is True
+
+        queued_turn_id = scheduled[1]["turn_id"]
+        append_conversation_event(
+            tmp_path,
+            session_id,
+            queued_turn_id,
+            EVENT_TURN_COMPLETED,
+            status="completed",
+        )
+        session_service._set_session_running(session_id, False, turn_id=queued_turn_id)
+        session_service._clear_session_turn_control(session_id, turn_id=queued_turn_id)
+
+        retried_after_settle = submit.submit_session_message_lightweight(
+            session_id,
+            "queued content",
+            client_submission_id="submission-queued",
+            mental_model_enabled=False,
+            queue_if_busy=True,
+        )
+        queued_user_events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.event_type == EVENT_USER_MESSAGE and event.correlation_id == "submission-queued"
+        ]
+        assert retried_after_settle["turnId"] == queued_turn_id
+        assert retried_after_settle["status"] == "completed"
+        assert len(queued_user_events) == 1
+        assert len(scheduled) == 2
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_journaled_sqlite_turn_started_without_user_message_is_not_accepted(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.session import admission
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path / "project")
+    development_root = tmp_path / "development-data"
+    monkeypatch.setenv("VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT", str(development_root))
+    runtime = admission.get_development_submission_admission_runtime(session_service.PROJECT_ROOT)
+    assert runtime is not None
+    session_id = "session-partial-admission"
+
+    def append_only_turn_started(record: dict) -> dict:
+        event = session_service._append_session_conversation_event(
+            session_id,
+            str(record["turnId"]),
+            EVENT_TURN_STARTED,
+            status="running",
+            payload={},
+            source="test_partial_admission",
+            visible_in_model=False,
+            correlation_id="submission-partial",
+        )
+        return {"journalSequence": event.sequence, "journalEventId": event.event_id}
+
+    try:
+        partial_admission = runtime.admit(
+            session_id=session_id,
+            agent={"agentId": "agent-partial", "displayName": "Partial"},
+            conversation={"title": "Partial"},
+            client_submission_id="submission-partial",
+            turn_id="turn-partial",
+            journal_lookup=lambda _record: None,
+            journal_append=append_only_turn_started,
+        )
+        runtime.admission.mark_projected(
+            session_id=session_id,
+            client_submission_id="submission-partial",
+            journal_sequence=int(partial_admission["journalSequence"]) + 1,
+        )
+        fingerprint = submit._session_submission_fingerprint(
+            content="partial user input",
+            attachment_ids=None,
+            references=None,
+            mental_model_enabled=None,
+            runtime_status_enabled=None,
+            turn_mode="",
+            write_intent=None,
+            message_metadata=None,
+            message_source="raw",
+            turn_status_tail=None,
+            model_selection=None,
+        )
+        assert submit._existing_submission_replay(
+            session_service,
+            session_id=session_id,
+            client_submission_id="submission-partial",
+            submission_fingerprint=fingerprint,
+            lang="en",
+            content="partial user input",
+            attachment_ids=None,
+            references=None,
+            mental_model_enabled=None,
+            runtime_status_enabled=None,
+            turn_mode="",
+            write_intent=None,
+            message_metadata=None,
+            message_source="raw",
+            model_selection=None,
+            turn_status_tail=None,
+        ) is None
+
+        receipt = submit._append_initial_session_journal_markers(
+            session_id=session_id,
+            turn_id="turn-partial",
+            client_submission_id="submission-partial",
+            agent={"agentId": "agent-partial", "displayName": "Partial"},
+            conversation={"title": "Partial"},
+            source="raw",
+            leases=["readonly_chat"],
+            user_payload={"content": "partial user input", "metadata": {"clientSubmissionId": "submission-partial"}},
+            client_submission_fingerprint=fingerprint,
+        )
+        events = load_conversation_events(session_service.PROJECT_ROOT, session_id)
+        assert receipt["admissionDisposition"] == "appended"
+        assert runtime.existing(
+            session_id=session_id,
+            client_submission_id="submission-partial",
+        )["state"] == "projected"
+        assert [event.event_type for event in events] == [EVENT_TURN_STARTED, EVENT_USER_MESSAGE]
+        assert sum(event.event_type == EVENT_TURN_STARTED for event in events) == 1
+    finally:
         admission.close_development_submission_admission_runtimes()
 
 

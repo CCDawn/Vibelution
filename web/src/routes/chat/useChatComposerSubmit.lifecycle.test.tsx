@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionReferenceAttachment } from "../../api/types";
-import type { ChatEditTarget } from "../chatComposerState";
+import { rekeySessionComposerEntry, type ChatEditTarget } from "../chatComposerState";
 import type { ComposerImageAttachment } from "./chatComposerSubmitModel";
 import {
   useChatComposerSubmitActions,
@@ -37,6 +37,10 @@ type HarnessProps = {
   mutations: ChatComposerTurnMutations;
   initialAttachments: Record<string, ComposerImageAttachment[]>;
   actionsRef?: { current: UseChatComposerSubmitActionsResult | null };
+  sessionControlsRef?: { current: {
+    rebase: (fromId: string, toId: string) => void;
+    switchTo: (sessionId: string) => void;
+  } | null };
   imageSetterCallsRef?: { current: number };
   unsupportedImages?: boolean;
 };
@@ -82,6 +86,7 @@ function Harness({
   mutations,
   initialAttachments,
   actionsRef,
+  sessionControlsRef,
   imageSetterCallsRef,
   unsupportedImages = false,
 }: HarnessProps) {
@@ -140,11 +145,20 @@ function Harness({
   if (actionsRef) {
     actionsRef.current = actions;
   }
+  if (sessionControlsRef) {
+    sessionControlsRef.current = {
+      rebase: (fromId, toId) => {
+        actions.rebaseComposerPreviewOwners(fromId, toId);
+        setSessionImageAttachmentsState((current) => rekeySessionComposerEntry(current, fromId, toId));
+      },
+      switchTo: setActiveSessionId,
+    };
+  }
   return (
     <div>
       <output data-testid="session">{activeSessionId}</output>
       <output data-testid="attachments">
-        {JSON.stringify(sessionImageAttachments.map(({ id, previewUrl }) => ({ id, previewUrl })))}
+        {JSON.stringify(sessionImageAttachments.map(({ id, filename, kind, previewUrl, uploadStatus, artifactId }) => ({ id, filename, kind, previewUrl, uploadStatus, artifactId })))}
       </output>
       <button type="button" data-testid="switch-session" onClick={() => setActiveSessionId("session-b")}>
         switch
@@ -218,6 +232,103 @@ afterEach(() => {
 });
 
 describe("useChatComposerSubmit object URL lifecycle", () => {
+  it("moves preview ownership when a temporary session is rebased", async () => {
+    const attachment = makeAttachment("image-a", "blob:temporary-session");
+    const actionsRef = { current: null as UseChatComposerSubmitActionsResult | null };
+    const mounted = mount(
+      <Harness
+        queryClient={new QueryClient()}
+        mutations={makeMutations()}
+        initialAttachments={{ "session-a": [attachment] }}
+        actionsRef={actionsRef}
+      />,
+    );
+    await flushMicrotasks();
+
+    act(() => actionsRef.current?.rebaseComposerPreviewOwners("session-a", "session-created"));
+    expect(objectUrlMocks.revoke).not.toHaveBeenCalledWith("blob:temporary-session");
+
+    await unmount(mounted.root, mounted.container);
+    expect(objectUrlMocks.revoke).toHaveBeenCalledExactlyOnceWith("blob:temporary-session");
+  });
+
+  it("recreates a preview when a temporary session is rebased after its preview was released", async () => {
+    const attachment = makeAttachment("image-a", "blob:temporary-session");
+    const sessionControlsRef: NonNullable<HarnessProps["sessionControlsRef"]> = { current: null };
+    const mounted = mount(
+      <Harness
+        queryClient={new QueryClient()}
+        mutations={makeMutations()}
+        initialAttachments={{ "session-a": [attachment] }}
+        sessionControlsRef={sessionControlsRef}
+      />,
+    );
+    await flushMicrotasks();
+
+    act(() => {
+      (mounted.container.querySelector('[data-testid="switch-session"]') as HTMLButtonElement).click();
+    });
+    await flushMicrotasks();
+    expect(objectUrlMocks.revoke).toHaveBeenCalledExactlyOnceWith("blob:temporary-session");
+
+    act(() => sessionControlsRef.current?.rebase("session-a", "session-created"));
+    act(() => sessionControlsRef.current?.switchTo("session-created"));
+    await flushMicrotasks();
+
+    expect(objectUrlMocks.create).toHaveBeenCalledWith(attachment.file);
+    expect(mounted.container.querySelector('[data-testid="attachments"]')?.textContent)
+      .toContain("blob:restored-1");
+
+    await unmount(mounted.root, mounted.container);
+    expect(objectUrlMocks.revoke).toHaveBeenCalledWith("blob:restored-1");
+  });
+
+  it("settles a pending upload onto the new session id after temporary-session rebase", async () => {
+    let finishUpload: ((result: { artifactId: string }) => void) | undefined;
+    apiMocks.uploadSessionImageAttachment.mockImplementation(() => new Promise((resolve) => {
+      finishUpload = resolve;
+    }));
+    const attachment = makeAttachment("image-a", "blob:temporary-session");
+    const mutations = makeMutations();
+    const sessionControlsRef: NonNullable<HarnessProps["sessionControlsRef"]> = { current: null };
+    const mounted = mount(
+      <Harness
+        queryClient={new QueryClient()}
+        mutations={mutations}
+        initialAttachments={{ "session-a": [attachment] }}
+        sessionControlsRef={sessionControlsRef}
+      />,
+    );
+    await flushMicrotasks();
+
+    act(() => {
+      (mounted.container.querySelector('[data-testid="submit"]') as HTMLButtonElement).click();
+    });
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(1);
+
+    act(() => sessionControlsRef.current?.rebase("session-a", "session-created"));
+    act(() => sessionControlsRef.current?.switchTo("session-created"));
+    await act(async () => {
+      finishUpload?.({ artifactId: "artifact-after-rebase" });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mutations.submitTurnMutation.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-created",
+        attachmentIds: ["artifact-after-rebase"],
+      }),
+    );
+    expect(mounted.container.querySelector('[data-testid="attachments"]')?.textContent)
+      .toContain('"uploadStatus":"uploaded"');
+    expect(mounted.container.querySelector('[data-testid="attachments"]')?.textContent)
+      .toContain('"artifactId":"artifact-after-rebase"');
+
+    await unmount(mounted.root, mounted.container);
+  });
+
   it("releases previews on session switch, restores them from File, and survives StrictMode replay", async () => {
     const fileA = makeAttachment("image-a", "blob:session-a");
     const fileB = makeAttachment("image-b", "blob:session-b");
@@ -269,6 +380,62 @@ describe("useChatComposerSubmit object URL lifecycle", () => {
     expect(objectUrlMocks.revoke).toHaveBeenCalledWith("blob:restored-1");
     await unmount(mounted.root, mounted.container);
     expect(objectUrlMocks.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters only image files during classification when the active model lacks vision", async () => {
+    const actionsRef = { current: null as UseChatComposerSubmitActionsResult | null };
+    const mounted = mount(
+      <Harness
+        queryClient={new QueryClient()}
+        mutations={makeMutations()}
+        initialAttachments={{ "session-a": [] }}
+        unsupportedImages
+        actionsRef={actionsRef}
+      />,
+    );
+    const image = new File(["image"], "photo.png", { type: "image/png" });
+    const document = new File(["notes"], "notes.md", { type: "text/markdown" });
+
+    act(() => actionsRef.current?.handleAddComposerAttachments([image, document]));
+
+    const tray = mounted.container.querySelector('[data-testid="attachments"]')?.textContent ?? "[]";
+    expect(tray).toContain('"filename":"notes.md"');
+    expect(tray).not.toContain("photo.png");
+    expect(objectUrlMocks.revoke).toHaveBeenCalledExactlyOnceWith("blob:restored-1");
+    expect(objectUrlMocks.revoke).not.toHaveBeenCalledWith("blob:restored-2");
+
+    await unmount(mounted.root, mounted.container);
+  });
+
+  it("submits document attachments when the active model lacks vision", async () => {
+    const document: ComposerImageAttachment = {
+      ...makeAttachment("document-a", "blob:document-a"),
+      filename: "notes.md",
+      contentType: "text/markdown",
+      kind: "document",
+    };
+    const mutations = makeMutations();
+    const mounted = mount(
+      <Harness
+        queryClient={new QueryClient()}
+        mutations={mutations}
+        initialAttachments={{ "session-a": [document] }}
+        unsupportedImages
+      />,
+    );
+
+    await act(async () => {
+      (mounted.container.querySelector('[data-testid="submit"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(1);
+    expect(mutations.submitTurnMutation.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentIds: ["artifact-uploaded"] }),
+    );
+    await unmount(mounted.root, mounted.container);
   });
 
   it("does not submit a deleted attachment after its upload finishes late", async () => {

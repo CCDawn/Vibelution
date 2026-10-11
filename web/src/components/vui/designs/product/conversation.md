@@ -307,7 +307,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 桌面端 Chat composer 的统一扩展入口。单栏纵向分组菜单：每个分组带小节标题，动作行单行紧凑，能力开关行以内联勾选态直接展示；不出现二级面板或第三级菜单。打开后焦点落在首个可用项，↑/↓/Home/End 在可用项间循环，Escape 关闭。
 
 ### 信息架构
-- `添加与引用`：图片附件、会话引用；禁用行用 `disabledReason` 说明原因。
+- `添加与引用`：文件附件（图片、文档）、会话引用；禁用行用 `disabledReason` 说明原因。
 - `对话能力`：心智模型、运行状态注入；行尾勾选标记表示 `开启`，无标记表示 `关闭`（`role="menuitemcheckbox"` + `aria-checked`）。
 - `会话与陪伴`：仅当存在直接会话绑定时出现，当前提供打开直接会话。
 - `群聊与团队`：管理群聊、打开团队（团队归属可用时）。
@@ -316,6 +316,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ### 边界
 - 斜杠指令仍由输入框内联建议负责，不进入加号菜单。
 - 模型、权限、上下文用量、发送/停止仍位于 composer 工具栏。
+- 模型不支持图片时，文件入口仍允许文档；仅图片的添加与提交受能力限制，切换模型保留文档。忙碌会话的纯附件或纯引用输入按当前输入排队，不触发旧追问的快捷操作。
 - 缓存状态不在加号菜单或右栏展示；上下文详情仍由独立工具栏入口承载。
 - 仅定义桌面交互，不增加手机端变体。
 - 复用 `VPopover`、`VButton`、`VDialog`、`VNativeInput`，不新增第二套 primitive；菜单容器只允许一个 `role="menu"`，分组用 `role="group"`。

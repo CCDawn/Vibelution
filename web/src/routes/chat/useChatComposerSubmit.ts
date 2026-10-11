@@ -46,6 +46,7 @@ import {
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
+import type { ActiveTurnLayersStore } from "./activeTurnLayersStore";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { sessionCreateAttemptState, tempSessionSendBlockedMessage } from "./sessionCreateAttempt";
 import { useRerunFileChoice } from "./useRerunFileChoice";
@@ -79,6 +80,7 @@ import {
   classifyComposerFiles,
   clearSessionDraftForSubmittedTurn,
   clearSessionImageAttachments,
+  clearUnsupportedSessionImageAttachments,
   clearSessionReferenceAttachments,
   composerUploadedArtifactIds,
   encodeUtf8Base64,
@@ -308,6 +310,95 @@ function isCurrentRunningSessionTurn(
   if (activeTaskTurnId && activeTaskTurnId !== normalizedTurnId) return false;
   if (activeTurnId || activeTaskTurnId) return true;
   return latestUserTurnId(detail) === normalizedTurnId;
+}
+
+function reconcileAcceptedSubmitActiveTurnLayer(
+  current: Record<string, ActiveTurnLayerState>,
+  input: {
+    sessionId: string;
+    clientSubmissionId: string;
+    turnId: string;
+    queued: boolean;
+    detail: SessionDetail | undefined;
+    updatedAt: string;
+  },
+): Record<string, ActiveTurnLayerState> {
+  const layer = current[input.sessionId];
+  const submissionOwnsLayer = layer?.clientSubmissionId === input.clientSubmissionId;
+  const turnOwnsLayer = Boolean(layer && input.turnId && layer.turnId === input.turnId);
+  if (input.queued) {
+    return submissionOwnsLayer
+      ? setActiveTurnLayerForSession(current, input.sessionId, undefined)
+      : current;
+  }
+
+  // An acknowledgement can omit its turn id. In that case the optimistic
+  // layer still carries the exact submission identity and must stay visible.
+  if (!input.turnId) {
+    return current;
+  }
+
+  // A late receipt must not replace the layer for a later submission/turn.
+  if (layer && !submissionOwnsLayer && !turnOwnsLayer) return current;
+  const boundLayer = layer
+    ? bindActiveTurnLayerToTurnId(layer, input.turnId)
+    : undefined;
+  const matchingLayer = boundLayer ?? createOptimisticActiveTurnLayer({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    clientSubmissionId: input.clientSubmissionId,
+    updatedAt: input.updatedAt,
+    accepted: true,
+  });
+  if (!matchingLayer) return current;
+  if (!input.detail) {
+    return setActiveTurnLayerForSession(current, input.sessionId, matchingLayer);
+  }
+
+  const unsettledLayer = settleActiveTurnLayerFromDetail(matchingLayer, input.detail);
+  if (!unsettledLayer) {
+    return setActiveTurnLayerForSession(current, input.sessionId, undefined);
+  }
+
+  // Preserve streamed output (including a terminal frame) that arrived before
+  // the HTTP acknowledgement. The canonical detail path will retire it when
+  // the transcript has committed the matching turn.
+  if (boundLayer && (boundLayer.status === "completed" || boundLayer.status === "failed" || boundLayer.turnItems.length > 0)) {
+    return setActiveTurnLayerForSession(current, input.sessionId, boundLayer);
+  }
+  if (!isCurrentRunningSessionTurn(input.detail, input.sessionId, input.turnId)) {
+    return setActiveTurnLayerForSession(current, input.sessionId, undefined);
+  }
+  return setActiveTurnLayerForSession(current, input.sessionId, matchingLayer);
+}
+
+type AcceptedSubmitReadbackTask = {
+  key: string;
+  sessionId: string;
+  clientSubmissionId: string;
+  turnId: string;
+  timer: ReturnType<typeof globalThis.setTimeout> | null;
+  timeout: ReturnType<typeof globalThis.setTimeout> | null;
+  controller: AbortController | null;
+  unsubscribe: Array<() => void>;
+  cancelled: boolean;
+};
+
+function retireAcceptedSubmitReadbackTask(
+  tasks: Map<string, AcceptedSubmitReadbackTask>,
+  task: AcceptedSubmitReadbackTask,
+  abort = true,
+): void {
+  if (tasks.get(task.key) !== task) return;
+  tasks.delete(task.key);
+  task.cancelled = true;
+  if (task.timer !== null) globalThis.clearTimeout(task.timer);
+  if (task.timeout !== null) globalThis.clearTimeout(task.timeout);
+  task.timer = null;
+  task.timeout = null;
+  if (abort) task.controller?.abort();
+  task.controller = null;
+  task.unsubscribe.splice(0).forEach((unsubscribe) => unsubscribe());
 }
 
 async function readbackSubmitAcceptance(
@@ -553,6 +644,8 @@ export type ChatComposerTurnMutations = {
 export type UseChatComposerTurnMutationsOptions = {
   queryClient: QueryClient;
   chatWorkspaceCache: ChatWorkspaceCache;
+  activeSessionId?: string;
+  activeTurnLayersStore?: Pick<ActiveTurnLayersStore, "getSnapshot" | "subscribe">;
   t: (key: TranslationKey) => string;
   describeError: (error: unknown, fallback: string) => string;
   syncSessionDetail: (detail: SessionDetail) => void;
@@ -572,6 +665,8 @@ export type UseChatComposerTurnMutationsOptions = {
 export function useChatComposerTurnMutations({
   queryClient,
   chatWorkspaceCache,
+  activeSessionId,
+  activeTurnLayersStore,
   t,
   describeError,
   syncSessionDetail,
@@ -585,6 +680,200 @@ export function useChatComposerTurnMutations({
 }: UseChatComposerTurnMutationsOptions): ChatComposerTurnMutations {
   const latestRegenerateSubmissionBySession = useRef(new Map<string, string>());
   const latestEditSubmissionBySession = useRef(new Map<string, string>());
+  const acceptedSubmitReadbacksRef = useRef(new Map<string, AcceptedSubmitReadbackTask>());
+  const activeSessionIdRef = useRef(String(activeSessionId || "").trim());
+  const isMountedRef = useRef(false);
+
+  const retireAcceptedSubmitReadback = useCallback((task: AcceptedSubmitReadbackTask, abort = true) => {
+    retireAcceptedSubmitReadbackTask(acceptedSubmitReadbacksRef.current, task, abort);
+  }, []);
+
+  useEffect(() => {
+    activeSessionIdRef.current = String(activeSessionId || "").trim();
+    for (const task of acceptedSubmitReadbacksRef.current.values()) {
+      if (task.sessionId !== activeSessionIdRef.current) {
+        retireAcceptedSubmitReadback(task);
+      }
+    }
+  }, [activeSessionId, retireAcceptedSubmitReadback]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      for (const task of acceptedSubmitReadbacksRef.current.values()) {
+        retireAcceptedSubmitReadback(task);
+      }
+    };
+  }, [retireAcceptedSubmitReadback]);
+
+  const scheduleAcceptedSubmitReadback = useCallback((
+    sessionId: string,
+    clientSubmissionId: string,
+    acceptedTurnId: string,
+  ) => {
+    if (
+      !sessionId
+      || !clientSubmissionId
+      || companionAgentId
+      || !isMountedRef.current
+      || activeSessionIdRef.current !== sessionId
+    ) return;
+
+    const key = JSON.stringify([sessionId, clientSubmissionId]);
+    const previousTask = acceptedSubmitReadbacksRef.current.get(key);
+    if (previousTask) retireAcceptedSubmitReadback(previousTask);
+    const task: AcceptedSubmitReadbackTask = {
+      key,
+      sessionId,
+      clientSubmissionId,
+      turnId: acceptedTurnId,
+      timer: null,
+      timeout: null,
+      controller: null,
+      unsubscribe: [],
+      cancelled: false,
+    };
+    acceptedSubmitReadbacksRef.current.set(key, task);
+
+    const projectionHasSettled = () => {
+      if (activeSessionIdRef.current !== sessionId) return true;
+      const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId));
+      const evidence = findSubmitAcceptanceEvidence(detail, clientSubmissionId);
+      if (evidence === "canonical_message" || evidence === "queued_turn") return true;
+      const turnId = task.turnId || exactSubmitTurnId(detail, clientSubmissionId);
+      const layer = activeTurnLayersStore?.getSnapshot()[sessionId];
+      if (layer) {
+        const ownsLayer = layer.clientSubmissionId === clientSubmissionId
+          || Boolean(turnId && layer.turnId === turnId);
+        if (!ownsLayer) return true;
+        if (layer.status === "completed" || layer.status === "failed") return true;
+      }
+      if (turnId) {
+        const probe = createOptimisticActiveTurnLayer({
+          sessionId,
+          turnId,
+          clientSubmissionId,
+          accepted: true,
+        });
+        if (probe && !settleActiveTurnLayerFromDetail(probe, detail)) return true;
+      }
+      return false;
+    };
+    const retireIfSettled = () => {
+      if (projectionHasSettled()) retireAcceptedSubmitReadback(task);
+    };
+
+    const sessionKey = queryKeys.session(sessionId);
+    task.unsubscribe.push(queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated") return;
+      const changedKey = event.query.queryKey;
+      if (
+        changedKey.length !== sessionKey.length
+        || changedKey.some((part: unknown, index: number) => part !== sessionKey[index])
+      ) return;
+      retireIfSettled();
+    }));
+    if (activeTurnLayersStore) {
+      task.unsubscribe.push(activeTurnLayersStore.subscribe(retireIfSettled));
+    }
+
+    task.timer = globalThis.setTimeout(() => {
+      task.timer = null;
+      if (task.cancelled || projectionHasSettled()) {
+        retireAcceptedSubmitReadback(task);
+        return;
+      }
+      const controller = new AbortController();
+      task.controller = controller;
+      const readbackStartedAtMs = chatStreamPerformanceNowMs();
+      task.timeout = globalThis.setTimeout(
+        () => controller.abort(),
+        SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS,
+      );
+      void fetchSessionDetailWindow(sessionId, {
+        includeSecondary: false,
+        signal: controller.signal,
+      }).then((readback) => {
+        if (
+          task.cancelled
+          || controller.signal.aborted
+          || activeSessionIdRef.current !== sessionId
+          || String(readback.id || "").trim() !== sessionId
+        ) {
+          if (!task.cancelled && String(readback.id || "").trim() !== sessionId) {
+            postSubmitTelemetry(
+              "browser.chat_submit.accepted_projection_readback",
+              "One-shot canonical projection readback returned a different session.",
+              sessionId,
+              {
+                clientSubmissionId,
+                result: "session_mismatch",
+                timeoutMs: SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS,
+                durationMs: Math.max(0, chatStreamPerformanceNowMs() - readbackStartedAtMs),
+              },
+              "warning",
+            );
+          }
+          return;
+        }
+        // Remove this task's observers before writing the canonical snapshot;
+        // that write must settle the projection rather than cancel itself.
+        retireAcceptedSubmitReadback(task, false);
+        syncSessionDetail(readback);
+        const canonicalDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId)) ?? readback;
+        const canonicalTurnId = exactSubmitTurnId(canonicalDetail, clientSubmissionId) || task.turnId;
+        postSubmitTelemetry(
+          "browser.chat_submit.accepted_projection_readback",
+          "One-shot canonical projection readback completed.",
+          sessionId,
+          {
+            clientSubmissionId,
+            result: findSubmitAcceptanceEvidence(canonicalDetail, clientSubmissionId) ?? "missing_submission",
+            timeoutMs: SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS,
+            durationMs: Math.max(0, chatStreamPerformanceNowMs() - readbackStartedAtMs),
+          },
+          "info",
+        );
+        setActiveTurnLayersBySession((current) => reconcileAcceptedSubmitActiveTurnLayer(current, {
+          sessionId,
+          clientSubmissionId,
+          turnId: canonicalTurnId,
+          queued: false,
+          detail: canonicalDetail,
+          updatedAt: readback.updatedAt,
+        }));
+      }).catch(() => {
+        // The HTTP receipt already established acceptance. This is a single
+        // best-effort projection readback, never a retry or a second submit.
+        if (!task.cancelled && activeSessionIdRef.current === sessionId) {
+          const timedOut = controller.signal.aborted;
+          postSubmitTelemetry(
+            "browser.chat_submit.accepted_projection_readback",
+            "One-shot canonical projection readback did not complete.",
+            sessionId,
+            {
+              clientSubmissionId,
+              result: timedOut ? "timeout" : "failed",
+              timeoutMs: SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS,
+              durationMs: Math.max(0, chatStreamPerformanceNowMs() - readbackStartedAtMs),
+            },
+            "warning",
+          );
+        }
+      }).finally(() => {
+        retireAcceptedSubmitReadback(task, false);
+      });
+    }, SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS);
+  }, [
+    activeTurnLayersStore,
+    companionAgentId,
+    queryClient,
+    retireAcceptedSubmitReadback,
+    setActiveTurnLayersBySession,
+    syncSessionDetail,
+  ]);
+
   const submitTurnMutation = useMutation<
     ChatSubmitAcceptedResponse,
     Error,
@@ -743,7 +1032,7 @@ export function useChatComposerTurnMutations({
         : clearSubmittedReferenceSnapshot(current, variables.sessionId, variables.references ?? []));
       // Backend accepted the turn: the sent prompt becomes ArrowUp-recallable.
       appendStoredPromptHistoryEntry(variables.content);
-      const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
+      const responseTurnId = String(acceptedTurn.turnId || "").trim();
       // A queued acceptance must be projected as "queued", never as
       // "sent/running": the turn did not start, it joined the session queue.
       const isQueuedAcceptance = Boolean(
@@ -777,32 +1066,35 @@ export function useChatComposerTurnMutations({
           });
         }
       } else {
+        const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+        const acceptedTurnId = responseTurnId
+          || exactSubmitTurnId(currentDetail, variables.clientSubmissionId);
         queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
-          const acceptedDetail = markSessionDetailRunning(
-            markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId),
-          );
-          return acceptedTurnId && acceptedDetail
-            ? { ...acceptedDetail, activeTurnId: acceptedTurnId }
-            : acceptedDetail;
+          const acceptedDetail = markOptimisticUserMessageAccepted(detailState, variables, acceptedTurnId);
+          if (!acceptedTurnId || !isCurrentRunningSessionTurn(acceptedDetail, variables.sessionId, acceptedTurnId)) {
+            // SSE may have committed this turn (or a later one) before the HTTP
+            // receipt arrived. A receipt is acceptance evidence, not authority
+            // to put a terminal/newer session back into running.
+            return acceptedDetail;
+          }
+          const runningDetail = markSessionDetailRunning(acceptedDetail);
+          return runningDetail ? { ...runningDetail, activeTurnId: acceptedTurnId } : runningDetail;
         });
       }
-      setActiveTurnLayersBySession((current) =>
-        isQueuedAcceptance
-          ? current
-          : setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          acceptedTurnId
-            ? createOptimisticActiveTurnLayer({
-              sessionId: variables.sessionId,
-              turnId: acceptedTurn.turnId,
-              clientSubmissionId: variables.clientSubmissionId,
-              updatedAt: acceptedTurn.acceptedAt,
-              accepted: true,
-            })
-            : undefined,
-          )
-      );
+      const acceptedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const acceptedTurnId = responseTurnId
+        || exactSubmitTurnId(acceptedDetail, variables.clientSubmissionId);
+      setActiveTurnLayersBySession((current) => reconcileAcceptedSubmitActiveTurnLayer(current, {
+        sessionId: variables.sessionId,
+        clientSubmissionId: variables.clientSubmissionId,
+        turnId: acceptedTurnId,
+        queued: isQueuedAcceptance,
+        detail: acceptedDetail,
+        updatedAt: acceptedTurn.acceptedAt,
+      }));
+      if (!isQueuedAcceptance) {
+        scheduleAcceptedSubmitReadback(variables.sessionId, variables.clientSubmissionId, acceptedTurnId);
+      }
       // The optimistic detail/index updates above already expose the accepted turn.
       // SSE owns authoritative reconciliation when available; the existing polling
       // fallback does the same without competing with the first model request.
@@ -1505,6 +1797,8 @@ export type UseChatComposerSubmitActionsResult = {
   handleRetryComposerAttachmentUploads: () => void;
   /** Session-keyed retry core (tests and advanced callers). */
   retryComposerAttachmentUploads: (sessionId: string, onlyAttachmentId?: string) => Promise<void>;
+  /** Move preview URL ownership with a temporary session's attachment state. */
+  rebaseComposerPreviewOwners: (fromSessionId: string, toSessionId: string) => void;
   handleAddComposerReference: (reference: SessionReferenceAttachment) => void;
   handleRemoveComposerReference: (referenceId: string) => void;
   handleSubmitTurn: () => void;
@@ -1593,6 +1887,7 @@ export function useChatComposerSubmitActions({
     file: File;
     previewUrl: string | null;
   }>>>(new Map());
+  const composerSessionAliasesRef = useRef(new Map<string, string>());
   const pendingPreviewReleaseTokenBySessionRef = useRef(new Map<string, number>());
   const composerLifecycleTokenRef = useRef(0);
   const isMountedRef = useRef(false);
@@ -1602,6 +1897,18 @@ export function useChatComposerSubmitActions({
   // row once its wait exceeds the threshold; forget a row when it leaves the
   // queue so a re-queued row can be hinted again.
   const queuedStuckHintedIdsRef = useRef<Set<string>>(new Set());
+  const resolveComposerSessionId = useCallback((sessionId: string) => {
+    let resolved = String(sessionId || "").trim();
+    if (!resolved) return resolved;
+    const visited = new Set<string>();
+    while (!visited.has(resolved)) {
+      visited.add(resolved);
+      const next = composerSessionAliasesRef.current.get(resolved);
+      if (!next) break;
+      resolved = next;
+    }
+    return resolved;
+  }, []);
   const {
     rerunFileChoice,
     interceptRerun,
@@ -1649,6 +1956,7 @@ export function useChatComposerSubmitActions({
     return () => window.clearInterval(timer);
   }, [activeSessionId, lang, activeQueuedTurns, setSessionComposerErrors]);
   const restorePendingStopAfterUploadFailure = useCallback((sessionId: string) => {
+    sessionId = resolveComposerSessionId(sessionId);
     const pendingStop = pendingStopAfterAcceptRef.current.get(sessionId);
     if (pendingStop?.stoppingAt) {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (current) => {
@@ -1662,7 +1970,7 @@ export function useChatComposerSubmitActions({
       });
     }
     pendingStopAfterAcceptRef.current.delete(sessionId);
-  }, [queryClient]);
+  }, [queryClient, resolveComposerSessionId]);
   const attachmentSnapshotRef = useRef<{ sessionId: string | null | undefined; attachments: ComposerImageAttachment[] }>({
     sessionId: activeSessionId,
     attachments: activeImageAttachments,
@@ -1674,6 +1982,7 @@ export function useChatComposerSubmitActions({
   }
 
   const rememberComposerAttachmentUrls = useCallback((sessionId: string, attachments: ComposerImageAttachment[]) => {
+    sessionId = resolveComposerSessionId(sessionId);
     if (!sessionId || !attachments.length) {
       return;
     }
@@ -1687,9 +1996,10 @@ export function useChatComposerSubmitActions({
         owners.set(attachment.id, { file: attachment.file, previewUrl: attachment.previewUrl });
       }
     }
-  }, []);
+  }, [resolveComposerSessionId]);
 
   const restoreComposerAttachmentUrls = useCallback((sessionId: string, attachments: ComposerImageAttachment[]) => {
+    sessionId = resolveComposerSessionId(sessionId);
     if (!sessionId || !attachments.length) {
       return attachments;
     }
@@ -1715,9 +2025,10 @@ export function useChatComposerSubmitActions({
       return { ...attachment, previewUrl: owned.previewUrl };
     });
     return changed ? restored : attachments;
-  }, []);
+  }, [resolveComposerSessionId]);
 
   const releaseComposerSessionPreviewUrls = useCallback((sessionId: string, forgetFiles: boolean) => {
+    sessionId = resolveComposerSessionId(sessionId);
     const owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
     if (!owners) {
       return;
@@ -1735,12 +2046,13 @@ export function useChatComposerSubmitActions({
     if (forgetFiles || owners.size === 0) {
       composerPreviewUrlsBySessionRef.current.delete(sessionId);
     }
-  }, []);
+  }, [resolveComposerSessionId]);
 
   const forgetComposerAttachmentUrl = useCallback((
     sessionId: string,
     attachment: Pick<ComposerImageAttachment, "id" | "previewUrl">,
   ) => {
+    sessionId = resolveComposerSessionId(sessionId);
     const owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
     const owned = owners?.get(attachment.id);
     const previewUrl = owned ? owned.previewUrl : attachment.previewUrl;
@@ -1751,11 +2063,11 @@ export function useChatComposerSubmitActions({
     if (owners?.size === 0) {
       composerPreviewUrlsBySessionRef.current.delete(sessionId);
     }
-  }, []);
+  }, [resolveComposerSessionId]);
 
   const isComposerAttachmentOwned = useCallback((sessionId: string, attachmentId: string) => (
-    composerPreviewUrlsBySessionRef.current.get(sessionId)?.has(attachmentId) ?? false
-  ), []);
+    composerPreviewUrlsBySessionRef.current.get(resolveComposerSessionId(sessionId))?.has(attachmentId) ?? false
+  ), [resolveComposerSessionId]);
 
   const retainOwnedComposerUploadOutcomes = useCallback((
     sessionId: string,
@@ -1775,6 +2087,62 @@ export function useChatComposerSubmitActions({
     pendingPreviewReleaseTokenBySessionRef.current.set(sessionId, token + 1);
   }, []);
 
+  const rebaseComposerPreviewOwners = useCallback((fromSessionId: string, toSessionId: string) => {
+    const sourceId = resolveComposerSessionId(fromSessionId);
+    const targetId = resolveComposerSessionId(toSessionId);
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    cancelScheduledComposerPreviewRelease(sourceId);
+    cancelScheduledComposerPreviewRelease(targetId);
+    const sourceOwners = composerPreviewUrlsBySessionRef.current.get(sourceId);
+    // `rekeySessionComposerEntry` keeps an already-present target entry, so
+    // dispose the source owners in the same collision case.
+    if (composerPreviewUrlsBySessionRef.current.has(targetId)) {
+      releaseComposerSessionPreviewUrls(sourceId, true);
+      return;
+    }
+    if (sourceOwners) {
+      composerPreviewUrlsBySessionRef.current.set(targetId, sourceOwners);
+      composerPreviewUrlsBySessionRef.current.delete(sourceId);
+    }
+    // An in-flight upload still closes over the temporary id. Keep that id as
+    // an alias so settlement writes to the rekeyed attachment state and submits
+    // against the newly-created session instead of dropping its upload result.
+    composerSessionAliasesRef.current.set(sourceId, targetId);
+    if (imageUploadInFlightRef.current[sourceId]) {
+      imageUploadInFlightRef.current[targetId] = true;
+      delete imageUploadInFlightRef.current[sourceId];
+    }
+    const pendingUploadSubmission = pendingUploadSubmissionRef.current.get(sourceId);
+    if (pendingUploadSubmission) {
+      if (!pendingUploadSubmissionRef.current.has(targetId)) {
+        pendingUploadSubmissionRef.current.set(targetId, pendingUploadSubmission);
+      }
+      pendingUploadSubmissionRef.current.delete(sourceId);
+    }
+    const pendingStop = pendingStopAfterAcceptRef.current.get(sourceId);
+    if (pendingStop) {
+      if (!pendingStopAfterAcceptRef.current.has(targetId)) {
+        pendingStopAfterAcceptRef.current.set(targetId, pendingStop);
+      }
+      pendingStopAfterAcceptRef.current.delete(sourceId);
+    }
+    setSessionImageUploadPending((current) => {
+      if (!Object.hasOwn(current, sourceId)) return current;
+      const { [sourceId]: sourcePending, ...remaining } = current;
+      return Object.hasOwn(remaining, targetId)
+        ? remaining
+        : { ...remaining, [targetId]: sourcePending };
+    });
+  }, [
+    cancelScheduledComposerPreviewRelease,
+    imageUploadInFlightRef,
+    pendingStopAfterAcceptRef,
+    pendingUploadSubmissionRef,
+    releaseComposerSessionPreviewUrls,
+    resolveComposerSessionId,
+    setSessionImageUploadPending,
+  ]);
+
   const scheduleComposerPreviewRelease = useCallback((sessionId: string) => {
     const token = (pendingPreviewReleaseTokenBySessionRef.current.get(sessionId) ?? 0) + 1;
     pendingPreviewReleaseTokenBySessionRef.current.set(sessionId, token);
@@ -1791,6 +2159,7 @@ export function useChatComposerSubmitActions({
     for (const sessionId of [...composerPreviewUrlsBySessionRef.current.keys()]) {
       releaseComposerSessionPreviewUrls(sessionId, true);
     }
+    composerSessionAliasesRef.current.clear();
   }, [releaseComposerSessionPreviewUrls]);
 
   useEffect(() => {
@@ -2025,22 +2394,23 @@ export function useChatComposerSubmitActions({
       if (!isMountedRef.current) {
         return;
       }
-      const outcomes = retainOwnedComposerUploadOutcomes(sessionId, targets, settledOutcomes);
+      const uploadSessionId = resolveComposerSessionId(sessionId);
+      const outcomes = retainOwnedComposerUploadOutcomes(uploadSessionId, targets, settledOutcomes);
       setSessionImageAttachments((current) => ({
         ...current,
-        [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
+        [uploadSessionId]: applyComposerAttachmentUploadOutcomes(current[uploadSessionId] ?? [], outcomes),
       }));
       const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
       const remainingFailedChips = failedComposerAttachmentUploads(
         applyComposerAttachmentUploadOutcomes(tray.filter((attachment) => (
-          isComposerAttachmentOwned(sessionId, attachment.id)
+          isComposerAttachmentOwned(uploadSessionId, attachment.id)
         )), outcomes),
       ).length;
       if (failedOutcomes.length) {
         postSubmitTelemetry(
           "browser.chat_submit.upload_retry_failed",
           "Composer attachment upload retry finished with failures.",
-          sessionId,
+          uploadSessionId,
           {
             attachmentCount: targets.length,
             uploadedAttachmentCount: targets.length - failedOutcomes.length,
@@ -2050,7 +2420,7 @@ export function useChatComposerSubmitActions({
         );
         setSessionComposerErrors((current) => ({
           ...current,
-          [sessionId]: describeError(
+          [uploadSessionId]: describeError(
             failedOutcomes[0]?.error,
             lang === "zh" ? "图片上传失败" : "Image upload failed",
           ),
@@ -2059,7 +2429,7 @@ export function useChatComposerSubmitActions({
         postSubmitTelemetry(
           "browser.chat_submit.upload_retry_succeeded",
           "Composer attachment upload retry succeeded.",
-          sessionId,
+          uploadSessionId,
           {
             attachmentCount: targets.length,
             uploadedAttachmentCount: targets.length,
@@ -2070,16 +2440,17 @@ export function useChatComposerSubmitActions({
           // errors were already replaced by the submit failure branch.
           setSessionComposerErrors((current) => ({
             ...current,
-            [sessionId]: "",
+            [uploadSessionId]: "",
           }));
         }
       }
     } finally {
-      imageUploadInFlightRef.current[sessionId] = false;
+      const finishedSessionId = resolveComposerSessionId(sessionId);
+      imageUploadInFlightRef.current[finishedSessionId] = false;
       if (isMountedRef.current) {
         setSessionImageUploadPending((current) => ({
           ...current,
-          [sessionId]: false,
+          [finishedSessionId]: false,
         }));
       }
     }
@@ -2091,6 +2462,7 @@ export function useChatComposerSubmitActions({
     lang,
     rememberComposerAttachmentUrls,
     retainOwnedComposerUploadOutcomes,
+    resolveComposerSessionId,
     setSessionComposerErrors,
     setSessionImageAttachments,
     setSessionImageUploadPending,
@@ -2208,15 +2580,17 @@ export function useChatComposerSubmitActions({
     }
     rememberComposerAttachmentUrls(sessionId, attachments);
     let submittedAttachments = attachments;
+    let submittedSessionId = resolveComposerSessionId(sessionId);
     const restoreAttachmentsAfterFailure = () => {
       if (!isMountedRef.current || !attachments.length) return;
-      const restored = restoreComposerAttachmentUrls(sessionId, submittedAttachments);
+      const restoreSessionId = resolveComposerSessionId(sessionId);
+      const restored = restoreComposerAttachmentUrls(restoreSessionId, submittedAttachments);
       setSessionImageAttachments((current) => {
         const byId = new Map(restored.map((attachment) => [attachment.id, attachment]));
-        for (const attachment of current[sessionId] ?? []) {
+        for (const attachment of current[restoreSessionId] ?? []) {
           if (!byId.has(attachment.id)) byId.set(attachment.id, attachment);
         }
-        return { ...current, [sessionId]: [...byId.values()] };
+        return { ...current, [restoreSessionId]: [...byId.values()] };
       });
     };
     const releaseSubmittedComposerAttachmentOwners = () => {
@@ -2231,7 +2605,7 @@ export function useChatComposerSubmitActions({
     setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
     // The submitted draft must not resurrect from localStorage after a reload.
     removeStoredSessionDraft(sessionId);
-    const draftRecoveryGuard = beginSessionDraftRecoveryGuard(sessionId);
+    let draftRecoveryGuard = beginSessionDraftRecoveryGuard(sessionId);
     let mutationOwnsRecoveryGuard = false;
     setSessionComposerErrors((current) => ({
       ...current,
@@ -2289,23 +2663,29 @@ export function useChatComposerSubmitActions({
         if (!isMountedRef.current) {
           return;
         }
-        outcomes = retainOwnedComposerUploadOutcomes(sessionId, needUpload, settledOutcomes);
+        submittedSessionId = resolveComposerSessionId(sessionId);
+        if (draftRecoveryGuard?.sessionId !== submittedSessionId) {
+          releaseSessionDraftRecoveryGuard(draftRecoveryGuard);
+          draftRecoveryGuard = beginSessionDraftRecoveryGuard(submittedSessionId);
+        }
+        outcomes = retainOwnedComposerUploadOutcomes(submittedSessionId, needUpload, settledOutcomes);
         submittedAttachments = applyComposerAttachmentUploadOutcomes(attachments, outcomes);
         setSessionImageAttachments((current) => ({
           ...current,
-          [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
+          [submittedSessionId]: applyComposerAttachmentUploadOutcomes(current[submittedSessionId] ?? [], outcomes),
         }));
       }
       if (!isMountedRef.current) {
         return;
       }
+      submittedSessionId = resolveComposerSessionId(sessionId);
       const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
       if (failedOutcomes.length) {
         const firstFailure = failedOutcomes[0];
         postSubmitTelemetry(
           "browser.chat_submit.upload_failed",
           "Direct chat submit image upload failed before message POST.",
-          sessionId,
+          submittedSessionId,
           {
             content,
             attachmentCount: attachments.length,
@@ -2319,22 +2699,22 @@ export function useChatComposerSubmitActions({
         );
         setSessionComposerErrors((current) => ({
           ...current,
-          [sessionId]: describeError(firstFailure.error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
+          [submittedSessionId]: describeError(firstFailure.error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
         }));
         restoreAttachmentsAfterFailure();
         if (content || references.length || previewAttachments.length) {
-          removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
-          restoreSubmittedDraftAfterFailure(setSessionDrafts, sessionId, content, draftRecoveryGuard);
+          removeOptimisticUserMessageFromCache(queryClient, submittedSessionId, { sessionId: submittedSessionId, content, references, clientSubmissionId });
+          restoreSubmittedDraftAfterFailure(setSessionDrafts, submittedSessionId, content, draftRecoveryGuard);
         }
-        if (immediatePreview) setActiveTurnLayersBySession?.((current) => setActiveTurnLayerForSession(current, sessionId, undefined));
-        restorePendingStopAfterUploadFailure(sessionId);
+        if (immediatePreview) setActiveTurnLayersBySession?.((current) => setActiveTurnLayerForSession(current, submittedSessionId, undefined));
+        restorePendingStopAfterUploadFailure(submittedSessionId);
         return;
       }
       if (attachments.length) {
         postSubmitTelemetry(
           "browser.chat_submit.upload_succeeded",
           "Direct chat submit image upload succeeded.",
-          sessionId,
+          submittedSessionId,
           {
             content,
             attachmentCount: attachments.length,
@@ -2346,7 +2726,7 @@ export function useChatComposerSubmitActions({
         );
       }
       const stillOwnedAttachments = attachments.filter((attachment) => (
-        isComposerAttachmentOwned(sessionId, attachment.id)
+        isComposerAttachmentOwned(submittedSessionId, attachment.id)
       ));
       const uploadedAttachmentIds = composerUploadedArtifactIds(
         applyComposerAttachmentUploadOutcomes(stillOwnedAttachments, outcomes),
@@ -2354,7 +2734,7 @@ export function useChatComposerSubmitActions({
       postSubmitTelemetry(
         "browser.chat_submit.submit_mutate_requested",
         "Direct chat submit mutation was requested.",
-        sessionId,
+        submittedSessionId,
         {
           content,
           attachmentCount: attachments.length,
@@ -2365,13 +2745,13 @@ export function useChatComposerSubmitActions({
         },
       );
       submitTurnMutation.mutate({
-        sessionId,
+        sessionId: submittedSessionId,
         clientSubmissionId,
         content,
         draftRecoveryGuard,
         mentalModelEnabled,
         runtimeStatusEnabled,
-        turnStatusTail: loadTurnStatusTailConfig(sessionId),
+        turnStatusTail: loadTurnStatusTailConfig(submittedSessionId),
         attachmentIds: uploadedAttachmentIds,
         attachments: previewAttachments,
         composerAttachments: submittedAttachments,
@@ -2390,9 +2770,9 @@ export function useChatComposerSubmitActions({
       // Defense net only: attachment uploads settle per attachment above, so
       // this keeps any unexpected throw on the same failure semantics.
       postSubmitTelemetry(
-        "browser.chat_submit.upload_failed",
-        "Direct chat submit image upload failed before message POST.",
-        sessionId,
+          "browser.chat_submit.upload_failed",
+          "Direct chat submit image upload failed before message POST.",
+          submittedSessionId,
         {
           content,
           attachmentCount: attachments.length,
@@ -2405,27 +2785,28 @@ export function useChatComposerSubmitActions({
       );
       setSessionComposerErrors((current) => ({
         ...current,
-        [sessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
+        [submittedSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
       }));
       restoreAttachmentsAfterFailure();
       if (content || references.length || previewAttachments.length) {
-        removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
-        restoreSubmittedDraftAfterFailure(setSessionDrafts, sessionId, content, draftRecoveryGuard);
+        removeOptimisticUserMessageFromCache(queryClient, submittedSessionId, { sessionId: submittedSessionId, content, references, clientSubmissionId });
+        restoreSubmittedDraftAfterFailure(setSessionDrafts, submittedSessionId, content, draftRecoveryGuard);
       }
-      if (immediatePreview) setActiveTurnLayersBySession?.((current) => setActiveTurnLayerForSession(current, sessionId, undefined));
-      restorePendingStopAfterUploadFailure(sessionId);
+      if (immediatePreview) setActiveTurnLayersBySession?.((current) => setActiveTurnLayerForSession(current, submittedSessionId, undefined));
+      restorePendingStopAfterUploadFailure(submittedSessionId);
     } finally {
       if (!mutationOwnsRecoveryGuard) {
         releaseSessionDraftRecoveryGuard(draftRecoveryGuard);
       }
-      if (pendingUploadSubmissionRef.current.get(sessionId) === clientSubmissionId) {
-        pendingUploadSubmissionRef.current.delete(sessionId);
+      const finishedSessionId = resolveComposerSessionId(sessionId);
+      if (pendingUploadSubmissionRef.current.get(finishedSessionId) === clientSubmissionId) {
+        pendingUploadSubmissionRef.current.delete(finishedSessionId);
       }
-      imageUploadInFlightRef.current[sessionId] = false;
+      imageUploadInFlightRef.current[finishedSessionId] = false;
       if (isMountedRef.current) {
         setSessionImageUploadPending((current) => ({
           ...current,
-          [sessionId]: false,
+          [finishedSessionId]: false,
         }));
       }
     }
@@ -2439,6 +2820,7 @@ export function useChatComposerSubmitActions({
     isComposerAttachmentOwned,
     forgetComposerAttachmentUrl,
     retainOwnedComposerUploadOutcomes,
+    resolveComposerSessionId,
     lang,
     queryClient,
     rememberComposerAttachmentUrls,
@@ -2760,7 +3142,8 @@ export function useChatComposerSubmitActions({
     }
     if (sessionBusy && !resolvedEditTarget) {
       const content = activeDraftEffective.trim();
-      if (!content) {
+      const hasAttachmentsOrReferences = activeImageAttachments.length > 0 || activeReferenceAttachments.length > 0;
+      if (!content && !hasAttachmentsOrReferences) {
         // Codex-style steer: an empty submit on a running turn pushes the first
         // queued item into the active turn instead of waiting for the drain.
         const first = (sessionFollowupQueues[activeSessionId] ?? [])[0];
@@ -2812,11 +3195,12 @@ export function useChatComposerSubmitActions({
         clientSubmissionId,
       },
     );
-    if (activeImageAttachments.length && activeAgentImageInputUnsupported) {
+    const unsupportedImageAttachments = activeImageAttachments.filter((attachment) => attachment.kind === "image");
+    if (unsupportedImageAttachments.length && activeAgentImageInputUnsupported) {
       startUserAction("session_message_submit", {
         sessionId: activeSessionId,
         clientSubmissionId,
-        attachmentCount: activeImageAttachments.length,
+        attachmentCount: unsupportedImageAttachments.length,
       }).blocked("image_input_unsupported", {
         imageInputModelId: activeImageInputModelId,
       });
@@ -2826,7 +3210,7 @@ export function useChatComposerSubmitActions({
         activeSessionId,
         {
           content,
-          attachmentCount: activeImageAttachments.length,
+          attachmentCount: unsupportedImageAttachments.length,
           referenceCount: activeReferenceAttachments.length,
           mentalModelEnabled: mentalModelEnabledForNextTurn,
           editTargetId: resolvedEditTarget?.messageId,
@@ -2911,7 +3295,8 @@ export function useChatComposerSubmitActions({
           if (!isMountedRef.current) {
             return;
           }
-          if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
+          let editSessionId = resolveComposerSessionId(activeSessionId);
+          if (editAttachments.length && imageUploadInFlightRef.current[editSessionId]) {
             return;
           }
           let uploadedAttachmentIds: string[] = [];
@@ -2938,26 +3323,28 @@ export function useChatComposerSubmitActions({
                 if (!isMountedRef.current) {
                   return;
                 }
-                outcomes = retainOwnedComposerUploadOutcomes(activeSessionId, needUpload, settledOutcomes);
+                editSessionId = resolveComposerSessionId(activeSessionId);
+                outcomes = retainOwnedComposerUploadOutcomes(editSessionId, needUpload, settledOutcomes);
                 setSessionImageAttachments((current) => ({
                   ...current,
-                  [activeSessionId]: applyComposerAttachmentUploadOutcomes(current[activeSessionId] ?? [], outcomes),
+                  [editSessionId]: applyComposerAttachmentUploadOutcomes(current[editSessionId] ?? [], outcomes),
                 }));
               }
+              editSessionId = resolveComposerSessionId(activeSessionId);
               const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
               if (failedOutcomes.length) {
                 setSessionComposerErrors((current) => ({
                   ...current,
-                  [activeSessionId]: describeError(
+                  [editSessionId]: describeError(
                     failedOutcomes[0].error,
                     lang === "zh" ? "图片上传失败" : "Image upload failed",
                   ),
                 }));
-                restorePendingStopAfterUploadFailure(activeSessionId);
+                restorePendingStopAfterUploadFailure(editSessionId);
                 return;
               }
               const stillOwnedAttachments = editAttachments.filter((attachment) => (
-                isComposerAttachmentOwned(activeSessionId, attachment.id)
+                isComposerAttachmentOwned(editSessionId, attachment.id)
               ));
               uploadedAttachmentIds = composerUploadedArtifactIds(
                 applyComposerAttachmentUploadOutcomes(stillOwnedAttachments, outcomes),
@@ -2966,21 +3353,23 @@ export function useChatComposerSubmitActions({
               if (!isMountedRef.current) {
                 return;
               }
+              editSessionId = resolveComposerSessionId(activeSessionId);
               setSessionComposerErrors((current) => ({
                 ...current,
-                [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
+                [editSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
               }));
-              restorePendingStopAfterUploadFailure(activeSessionId);
+              restorePendingStopAfterUploadFailure(editSessionId);
               return;
             } finally {
-              if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
-                pendingUploadSubmissionRef.current.delete(activeSessionId);
+              const finishedSessionId = resolveComposerSessionId(activeSessionId);
+              if (pendingUploadSubmissionRef.current.get(finishedSessionId) === clientSubmissionId) {
+                pendingUploadSubmissionRef.current.delete(finishedSessionId);
               }
-              imageUploadInFlightRef.current[activeSessionId] = false;
+              imageUploadInFlightRef.current[finishedSessionId] = false;
               if (isMountedRef.current) {
                 setSessionImageUploadPending((current) => ({
                   ...current,
-                  [activeSessionId]: false,
+                  [finishedSessionId]: false,
                 }));
               }
             }
@@ -2988,8 +3377,9 @@ export function useChatComposerSubmitActions({
           if (!isMountedRef.current) {
             return;
           }
+          editSessionId = resolveComposerSessionId(activeSessionId);
           editResubmitMutation.mutate({
-            sessionId: activeSessionId,
+            sessionId: editSessionId,
             messageId: editTarget.messageId,
             ...(editTarget.nodeId ? { baseMessageId: editTarget.nodeId } : {}),
             clientSubmissionId,
@@ -2997,7 +3387,7 @@ export function useChatComposerSubmitActions({
             attachmentIds: [...carriedAttachmentIds, ...uploadedAttachmentIds],
             mentalModelEnabled: mentalModelEnabledForNextTurn,
             runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
-            turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+            turnStatusTail: loadTurnStatusTailConfig(editSessionId),
           });
         })();
       };
@@ -3035,6 +3425,7 @@ export function useChatComposerSubmitActions({
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
     restorePendingStopAfterUploadFailure,
+    resolveComposerSessionId,
     resolvedEditTarget,
     sessionBusy,
     sessionFollowupQueues,
@@ -3119,6 +3510,7 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: "",
     }));
+    removeStoredSessionDraft(activeSessionId);
     releaseComposerSessionPreviewUrls(activeSessionId, true);
     setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
     setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
@@ -3527,6 +3919,7 @@ export function useChatComposerSubmitActions({
     handleRetryComposerAttachmentUpload,
     handleRetryComposerAttachmentUploads,
     retryComposerAttachmentUploads,
+    rebaseComposerPreviewOwners,
     handleAddComposerReference,
     handleRemoveComposerReference,
     handleSubmitTurn,
