@@ -26,8 +26,9 @@ vi.mock("./ChatFilePreviewPanel", () => ({
     errorMessage: string;
     file?: { content: string } | null;
     loadingLabel: string;
+    compactHeader?: boolean;
   }) => (
-    <div data-testid="chat-file-preview-panel">
+    <div data-testid="chat-file-preview-panel" data-compact-header={props.compactHeader}>
       {props.errorMessage || props.file?.content || props.loadingLabel}
     </div>
   ),
@@ -179,7 +180,7 @@ describe("ChatGroupArtifactDialog", () => {
 
     const dialog = document.body.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain("当前任务改动");
-    expect(dialog?.textContent).toContain("不是历史版本");
+    expect(dialog?.textContent).toContain("非历史版本");
     expect(dialog?.textContent).toContain("更新工作台");
     expect(dialog?.textContent).toContain("还有 2 个文件未列出");
     expect(dialog?.querySelector('a[href]')).toBeNull();
@@ -196,6 +197,9 @@ describe("ChatGroupArtifactDialog", () => {
     expect(document.body.textContent).toContain("const currentWorkspace = true;");
     const backButton = document.body.querySelector<HTMLButtonElement>('[data-vui="chat-group-artifact-back"]');
     expect(backButton?.textContent).toContain("返回文件列表");
+    expect(backButton?.closest('[data-slot="dialog-footer"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="chat-group-artifact-body"]')?.contains(backButton!)).toBe(false);
+    expect(document.body.querySelector('[data-testid="chat-file-preview-panel"]')?.getAttribute("data-compact-header")).toBe("true");
     await act(async () => {
       backButton?.click();
       await Promise.resolve();

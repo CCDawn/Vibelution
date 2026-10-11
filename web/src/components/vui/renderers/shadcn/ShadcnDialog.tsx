@@ -124,7 +124,7 @@ export function ShadcnDialog({
                 data-vui="dialog-close"
                 data-slot="dialog-close"
                 className={cn(
-                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-control)]",
+                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-control)] max-[600px]:h-11 max-[600px]:w-11",
                   "border border-transparent text-[var(--fg-tertiary)]",
                   "hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted)] hover:text-[var(--fg-primary)]",
                   "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",

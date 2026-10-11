@@ -20,6 +20,8 @@ export type FilePreviewProps = {
   file: FileContent;
   changed: boolean;
   sourceLabel: string;
+  /** Keep a single path and source line when hosted in a compact task dialog. */
+  compactHeader?: boolean;
   headerActions?: ReactNode;
   highlightAsLog?: boolean;
   severityFilter?: LogSeverityFilter;
@@ -244,6 +246,7 @@ export function FilePreview({
   file,
   changed,
   sourceLabel,
+  compactHeader = false,
   headerActions,
   highlightAsLog = false,
   severityFilter = "all",
@@ -305,15 +308,17 @@ export function FilePreview({
 
   return (
     <div className={styles.surfaceClass}>
-      <div className={styles.headerClass}>
+      <div className={compactHeader ? styles.compactHeaderClass : styles.headerClass}>
         <div className={styles.headerCopyClass}>
-          <p className={styles.eyebrowClass}>{t("readonlyPreview")}</p>
-          <h2 className={styles.fileNameClass}>{file.path.split("/").at(-1)}</h2>
-          <p className={styles.filePathClass}>{file.path}</p>
+          {!compactHeader ? <p className={styles.eyebrowClass}>{t("readonlyPreview")}</p> : null}
+          <h2 className={compactHeader ? styles.compactFileNameClass : styles.fileNameClass} title={file.path}>
+            {compactHeader ? file.path.replace(/^\.worktrees\/[^/]+\//, "") : file.path.split("/").at(-1)}
+          </h2>
+          {!compactHeader ? <p className={styles.filePathClass}>{file.path}</p> : null}
         </div>
         <div className={styles.metaBlockClass}>
-          {changed ? <span className={styles.changedPillClass}>{t("changed")}</span> : null}
-          <span className={styles.sourcePillClass}>{sourceLabel}</span>
+          {changed && !compactHeader ? <span className={styles.changedPillClass}>{t("changed")}</span> : null}
+          <span className={compactHeader ? styles.compactSourceClass : styles.sourcePillClass}>{sourceLabel}</span>
           {isHtml ? (
             <div className={styles.previewModeGroupClass} role="group" aria-label={lang === "zh" ? "HTML 查看方式" : "HTML view"}>
               <VButton variant="ghost" aria-pressed={showHtml} onPress={() => setViewMode("structured")}>
