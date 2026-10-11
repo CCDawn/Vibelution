@@ -483,3 +483,31 @@ it("explains invalid imported fields without echoing backend payload or source m
   expect(node.textContent).not.toContain("Field required");
   expect(api.startAIBacktest).not.toHaveBeenCalled();
 });
+
+
+it("explains unsupported stock and invalid dates without sending a preview", async () => {
+  await render({ symbol: "hk00700", ticker: "00700", name: "腾讯控股", market: "港交所" });
+  expect(node.textContent).toContain("当前回测仅支持 A 股");
+  expect(button("检查数据与预算").disabled).toBe(true);
+  await render(stock);
+  await act(async () => { setInputValue("AI回测开始日期", "2026-09-02"); setInputValue("AI回测结束日期", "2026-09-01"); });
+  expect(node.textContent).toContain("开始日期必须早于结束日期");
+  expect(node.querySelector('[aria-label="AI回测开始日期"]')?.getAttribute("aria-invalid")).toBe("true");
+  expect(button("检查数据与预算").disabled).toBe(true);
+  expect(api.previewAIBacktest).not.toHaveBeenCalled();
+});
+
+it("preserves advanced values across disclosure and explains invalid numeric fields", async () => {
+  await render();
+  const toggle = button("高级设置 · 费用、撮合与预算");
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  await act(async () => toggle.click());
+  await act(async () => setInputValue("最多决策", "0"));
+  expect(node.querySelector('[aria-label="最多决策"]')?.getAttribute("aria-invalid")).toBe("true");
+  expect(node.textContent).toContain("请输入 1–500 的整数");
+  expect(button("检查数据与预算").disabled).toBe(true);
+  await act(async () => toggle.click());
+  await act(async () => toggle.click());
+  expect(node.querySelector<HTMLInputElement>('[aria-label="最多决策"]')?.value).toBe("0");
+  expect(api.previewAIBacktest).not.toHaveBeenCalled();
+});

@@ -227,7 +227,7 @@ describe("financial assistant page", () => {
     expect(views("行情")).toEqual(["自选行情", "股票筛选"]);
     expect(container.querySelector('[aria-label="公司或股票代码"]')).not.toBeNull();
     await chooseGroup("资产");
-    expect(views("资产")).toEqual(["模拟账户", "组合研究", "交易复盘"]);
+    expect(views("资产")).toEqual(["模拟账户", "组合研究", "历史回测", "交易复盘"]);
     await chooseGroup("资料");
     expect(views("资料")).toEqual(["报告中心", "研究记忆", "技能中心", "学习中心"]);
     await chooseGroup("研究");
@@ -633,4 +633,47 @@ describe("financial assistant page", () => {
     expect(container.textContent).not.toContain("finance-workspace");
     expect(createFinancialAssistant).not.toHaveBeenCalled();
   });
+});
+
+
+it("keeps a newly selected stock separate from the previous native research until returning to chat", async () => {
+  vi.mocked(fetchFinancialReportText).mockResolvedValue("## 结论\n腾讯历史研究");
+  nativeTitle = "腾讯控股 (00700) · 2026-10-10";
+  nativeMessages = [
+    { role: "user", id: "old-user", content: "请研究 腾讯控股（00700，港交所），分析日期 2026-10-10", timestamp: "" },
+    { role: "assistant", id: "old-answer", turnId: "old-turn", status: "completed", timestamp: "", turnItems: [
+      { type: "tool_call", itemId: "old-tool", toolName: "old_stock_tool", status: "completed", arguments: {}, output: "旧股票过程" },
+      { type: "agent_message", phase: "final_answer", status: "completed", text: "## 结论\n腾讯历史研究" },
+    ] },
+  ] as never;
+  await render("/finance?session=native-session&finance_tab=overview&finance_asideTab=process");
+  expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe("贵州茅台 (600519)");
+  expect(container.textContent).not.toContain("old_stock_tool");
+  expect(container.querySelector('[aria-label="研究辅助面板"] [aria-selected="true"]')?.textContent).toBe("过程");
+  await chooseTab("研究报告");
+  expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe("贵州茅台 (600519)");
+  expect(container.textContent).toContain("这只股票还没有研究报告");
+  await chooseTab("AI 研究");
+  await settle();
+  expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe(nativeTitle);
+  expect(container.querySelector('[aria-label="当前研究操作"]')?.textContent).toContain("00700");
+  expect(createChatSession).not.toHaveBeenCalled();
+  expect(nativeSubmit).not.toHaveBeenCalled();
+});
+
+it("opens backtests directly under assets with a stock picker and no irrelevant inspector", async () => {
+  await render("/finance?session=native-session&finance_area=backtest");
+  expect(container.querySelector('[aria-label="资产功能"] [aria-selected="true"]')?.textContent).toBe("历史回测");
+  expect(container.querySelector('[aria-label="公司或股票代码"]')).not.toBeNull();
+  expect(container.textContent).toContain("检查数据与预算");
+  expect(container.querySelector('[aria-label="辅助栏操作"]')).toBeNull();
+  expect(container.textContent).not.toContain("选择报告");
+});
+
+it("allows leaving the legacy backtest link for transaction review", async () => {
+  await render("/finance?session=native-session&finance_area=review&finance_reviewTab=backtest");
+  expect(container.textContent).toContain("检查数据与预算");
+  await chooseTab("交易复盘");
+  expect(container.querySelector('[aria-label="交易复盘内容"] [aria-selected="true"]')?.textContent).toBe("模拟交易复盘");
+  expect(container.textContent).not.toContain("检查数据与预算");
 });

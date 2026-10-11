@@ -656,7 +656,7 @@ backToBottomButton:
   markdownImageLink:
     "vui-components-conversationview markdownImageLink min-w-0",
   markdownTable:
-    "vui-components-conversationview markdownTable w-max min-w-full table-auto border-separate border-spacing-0 text-left [&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-b-[var(--vui-border-strong)] [&_th]:bg-[var(--vui-surface-row)] [&_th]:px-3 [&_th]:py-2 [&_th]:align-top [&_th]:text-[var(--fg-primary)] [&_th]:font-semibold [&_td]:max-w-[52ch] [&_td]:border-b [&_td]:border-b-[var(--vui-border-subtle)] [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--fg-secondary)] [&_td]:whitespace-normal [&_td]:break-words [&_td]:[overflow-wrap:anywhere]",
+    "vui-components-conversationview markdownTable w-max min-w-full table-auto border-separate border-spacing-0 text-left [&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-b-[var(--vui-border-strong)] [&_th]:bg-[var(--vui-surface-row)] [&_th]:px-3 [&_th]:py-2 [&_th]:align-top [&_th]:text-[var(--fg-primary)] [&_th]:font-semibold [&_td]:min-w-[10ch] [&_td]:max-w-[52ch] [&_td]:border-b [&_td]:border-b-[var(--vui-border-subtle)] [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--fg-secondary)] [&_td]:whitespace-normal [&_td]:break-words [&_td]:[overflow-wrap:anywhere]",
   markdownTableWrap:
     "vui-components-conversationview markdownTableWrap my-3 max-w-full overflow-x-auto overflow-y-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] [scrollbar-gutter:stable]",
   mentalBodyList:

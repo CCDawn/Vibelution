@@ -33,7 +33,11 @@ export function FinanceStockHeader({ stock, query, starred, onToggleStar, zh, co
       </div>
     </div>}
     {query.error && query.data ? <VStateSurface className={styles.refreshWarning} tone="error" density="compact" title={zh ? "刷新失败，当前仍显示上次成功获取的行情" : "Refresh failed; showing the last successfully fetched quotes"} actions={<VButton isDisabled={query.isFetching} onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface> : null}
-    {!compact ? <dl className={styles.facts}>
+    {!compact ? <FinanceStockFacts quote={quote} zh={zh} /> : null}
+  </div>;
+}
+export function FinanceStockFacts({ quote, zh }: { quote: StockSnapshot["stock"] | undefined; zh: boolean }) {
+  return <dl className={styles.facts}>
       {[
         { label: zh ? "今开" : "Open", values: [quoteNumber(quote?.open)] },
         { label: zh ? "最高 / 最低" : "High / Low", values: [quoteNumber(quote?.high), "/", quoteNumber(quote?.low)] },
@@ -49,8 +53,7 @@ export function FinanceStockHeader({ stock, query, starred, onToggleStar, zh, co
           </dd>
         </div>
       ))}
-    </dl> : null}
-  </div>;
+    </dl>;
 }
 export function FinanceMarketPanel({ query, period, onPeriodChange, zh }: { query: UseQueryResult<StockSnapshot, Error>; period: StockPeriod; onPeriodChange: (period: StockPeriod) => void; zh: boolean }) {
   if (query.isPending) return <VSurface tone="panel" padding="normal" className={styles.loadingPanel} aria-busy="true"><span className={styles.chartTitle}>{zh ? "价格走势" : "Price chart"}</span><div className={styles.loadingSkeleton}><VSkeleton /><VSkeleton /><VSkeleton /></div></VSurface>;

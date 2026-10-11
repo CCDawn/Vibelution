@@ -1065,3 +1065,8 @@
     display: grid;
   }
 }
+
+/* Finance owns its inner scroll regions; focusing a form must not scroll the shell. */
+:where(.vui-app-appshell).mainArea:has(> .finance-research-workspace) {
+  overflow: clip;
+}

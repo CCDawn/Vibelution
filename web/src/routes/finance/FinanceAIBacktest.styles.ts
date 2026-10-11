@@ -2,6 +2,8 @@ import evaluationStyles from "./FinanceEvaluation.styles";
 
 export default {
   ...evaluationStyles,
+  fieldError: "m-0 whitespace-normal text-xs leading-5 text-vui-state-error",
+  advancedToggle: "!justify-start whitespace-nowrap",
   frequency: "w-32",
   scopeSelect: "w-32",
   actionSelect: "w-40",

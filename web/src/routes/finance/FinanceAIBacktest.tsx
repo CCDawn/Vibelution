@@ -33,6 +33,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   const client = useQueryClient();
   const [form, setForm] = useState<BacktestForm>({ startDate: ago(90), endDate: ago(1), strategy: "只根据已完成的历史日线分析趋势和风险，控制回撤，选择下一交易日的目标仓位；证据不足时保持现金。", initialCash: 100000, maxPositionPct: 80, maxParticipationPct: 1, researchInput: "price_only", decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 500000 });
   const [scope, setScope] = useState<"single" | "portfolio">("single");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [limitDrafts, setLimitDrafts] = useState<AIBacktestDailyPriceLimits[]>([]);
   const [symbolsText, setSymbolsText] = useState(stock.symbol);
   const [preview, setPreview] = useState<AIBacktestPreview | null>(null), [selected, setSelected] = useState(""), [pending, setPending] = useState(""), [error, setError] = useState(""), [confirmRetry, setConfirmRetry] = useState(false), [forkOpen, setForkOpen] = useState(false);
@@ -45,6 +46,11 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   const portfolioError = parsed.invalid.length ? `${zh ? "无法识别代码" : "Invalid codes"}: ${parsed.invalid.slice(0, 3).join("、")}` : invalidMarketSymbols.length ? (zh ? "AI组合回测仅支持沪、深、北交所 A 股" : "AI basket backtests support Shanghai, Shenzhen and Beijing A-shares only") : hasDuplicateSymbols ? (zh ? "组合内不能重复选择同一股票" : "A basket cannot contain a symbol twice") : parsed.symbols.length < 2 ? (zh ? "组合回测至少选择 2 只 A 股" : "Choose at least 2 A-shares") : parsed.symbols.length > 10 ? (zh ? "组合回测最多选择 10 只 A 股" : "Choose no more than 10 A-shares") : "";
   const busy = Boolean(pending);
   const numericValid = (form.maxParticipationPct ?? 1) >= 0.1 && (form.maxParticipationPct ?? 1) <= 100 && form.initialCash >= 1000 && form.initialCash <= 100_000_000 && form.maxPositionPct >= 0 && form.maxPositionPct <= 100 && [1, 5, 20].includes(form.decisionInterval) && form.commissionBps >= 0 && form.commissionBps <= 100 && form.minimumCommission >= 0 && form.minimumCommission <= 100 && form.slippageBps >= 0 && form.slippageBps <= 100 && Number.isInteger(form.maxDecisions) && form.maxDecisions >= 1 && form.maxDecisions <= 500 && Number.isInteger(form.maxTokens) && form.maxTokens >= 1000 && form.maxTokens <= 2_000_000;
+  const dateError = !form.startDate || !form.endDate ? (zh ? "请选择开始和结束日期" : "Choose start and end dates") : form.startDate >= form.endDate ? (zh ? "开始日期必须早于结束日期" : "Start must precede end") : form.endDate >= ago(0) ? (zh ? "结束日期必须早于今天" : "End date must precede today") : "";
+  const holdoutError = form.outOfSampleStartDate && !(form.outOfSampleStartDate > form.startDate && form.outOfSampleStartDate <= form.endDate) ? (zh ? "样本外起点须晚于开始日期且不晚于结束日期" : "Holdout must fall after start and no later than end") : "";
+  const strategyError = !form.strategy.trim() ? (zh ? "请填写策略指令" : "Enter strategy instructions") : "";
+  const marketError = scope === "single" && !isAShare(stock.symbol) ? (zh ? "当前回测仅支持 A 股，请在上方搜索选择沪、深或北交所股票" : "Backtests support A-shares only. Select a Shanghai, Shenzhen or Beijing stock above") : "";
+  const blockingReason = disabled ? (zh ? "回测暂不可用" : "Backtest unavailable") : marketError || (scope === "portfolio" ? portfolioError : "") || dateError || holdoutError || strategyError || (!numericValid ? (zh ? "请修正数值设置；费用、撮合和预算字段位于高级设置" : "Correct numeric settings, including fees and budgets under advanced settings") : "") || (form.priceLimitModel === "supplied_daily_limits_v1" && !limitDrafts.length ? (zh ? "请在高级设置中导入逐日限价文件" : "Import a daily limit file under advanced settings") : "");
   const valid = Boolean(form.startDate && form.endDate && form.startDate < form.endDate && form.endDate < ago(0)) && (!form.outOfSampleStartDate || (form.outOfSampleStartDate > form.startDate && form.outOfSampleStartDate <= form.endDate)) && form.strategy.trim().length > 0 && form.strategy.length <= 2000 && numericValid && (scope === "single" ? isAShare(stock.symbol) : !portfolioError);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1; }; }, []);
@@ -95,7 +101,8 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
     await client.invalidateQueries({ queryKey: financialBacktestKeys.list(agentId) });
   }
   function number(key: keyof BacktestForm, title: string, min: number, max: number, step = 1) {
-    return <label className={styles.field}>{title}<VInput aria-label={title} type="number" min={min} max={max} step={step} value={String(form[key])} disabled={busy} onChange={event => edit(key, Number(event.target.value))} /></label>;
+    const invalid = !Number.isFinite(Number(form[key])) || Number(form[key]) < min || Number(form[key]) > max || ((key === "maxDecisions" || key === "maxTokens") && !Number.isInteger(Number(form[key])));
+    return <label className={styles.field}>{title}<VInput aria-invalid={invalid || undefined} aria-label={title} type="number" min={min} max={max} step={step} value={String(form[key])} disabled={busy} onChange={event => edit(key, Number(event.target.value))} />{invalid ? <span className={styles.fieldError} role="status">{zh ? `请输入 ${min}–${max}${key === "maxDecisions" || key === "maxTokens" ? " 的整数" : ""}` : `Enter ${min}–${max}${key === "maxDecisions" || key === "maxTokens" ? " as an integer" : ""}`}</span> : null}</label>;
   }
   function removeSymbol(symbol: string) {
     const tokens = symbolsText.trim().split(/[\s,，;；]+/).filter(Boolean);
@@ -136,12 +143,19 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {portfolioError ? <VStateSurface tone="error" density="compact" title={portfolioError} /> : null}
     </div> : null}
     <div className={styles.row}>
-      <label className={styles.field}>{zh ? "开始" : "From"}<VInput aria-label="AI回测开始日期" type="date" max={ago(1)} value={form.startDate} disabled={busy} onChange={event => edit("startDate", event.target.value)} /></label>
-      <label className={styles.field}>{zh ? "结束" : "To"}<VInput aria-label="AI回测结束日期" type="date" max={ago(1)} value={form.endDate} disabled={busy} onChange={event => edit("endDate", event.target.value)} /></label>
-      <label className={styles.field}>{zh ? "样本外起点（可选）" : "Holdout start (optional)"}<VInput aria-label="AI回测样本外起点" type="date" min={form.startDate} max={form.endDate} value={form.outOfSampleStartDate ?? ""} disabled={busy} onChange={event => edit("outOfSampleStartDate", event.target.value || undefined)} /></label>
+      <label className={styles.field}>{zh ? "开始" : "From"}<VInput aria-label="AI回测开始日期" type="date" aria-invalid={Boolean(dateError) || undefined} max={ago(1)} value={form.startDate} disabled={busy} onChange={event => edit("startDate", event.target.value)} /></label>
+      <label className={styles.field}>{zh ? "结束" : "To"}<VInput aria-label="AI回测结束日期" type="date" aria-invalid={Boolean(dateError) || undefined} max={ago(1)} value={form.endDate} disabled={busy} onChange={event => edit("endDate", event.target.value)} /></label>
+      <label className={styles.field}>{zh ? "样本外起点（可选）" : "Holdout start (optional)"}<VInput aria-label="AI回测样本外起点" type="date" aria-invalid={Boolean(holdoutError) || undefined} min={form.startDate} max={form.endDate} value={form.outOfSampleStartDate ?? ""} disabled={busy} onChange={event => edit("outOfSampleStartDate", event.target.value || undefined)} /></label>
       {number("initialCash", zh ? "初始资金" : "Initial cash", 1000, 100000000)}
       {number("maxPositionPct", scope === "portfolio" ? (zh ? "单股上限 %" : "Per-stock cap %") : (zh ? "仓位上限 %" : "Max position %"), 0, 100)}
       <label className={styles.field}>{zh ? "决策频率" : "Frequency"}<VSelect aria-label="AI回测决策频率" selectedKey={String(form.decisionInterval)} isDisabled={busy} className={styles.frequency} options={[{ id: "1", label: zh ? "每个交易日" : "Daily" }, { id: "5", label: zh ? "每5个交易日" : "Every 5 bars" }, { id: "20", label: zh ? "每20个交易日" : "Every 20 bars" }]} onSelectionChange={key => edit("decisionInterval", Number(key))} /></label>
+    </div>
+    {dateError || holdoutError ? <p className={styles.fieldError} role="status">{dateError || holdoutError}</p> : null}
+    <label className={styles.panel}><span className={styles.status}>{zh ? "策略指令" : "Strategy instruction"}</span><VTextarea aria-label="AI回测策略指令" aria-invalid={Boolean(strategyError) || undefined} value={form.strategy} maxLength={2000} disabled={busy} onChange={event => edit("strategy", event.target.value)} /></label>
+    {strategyError ? <p className={styles.fieldError} role="status">{strategyError}</p> : null}
+    <VButton variant="ghost" className={styles.advancedToggle} aria-expanded={advancedOpen} aria-controls="finance-backtest-advanced" icon={advancedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setAdvancedOpen(value => !value)}>{zh ? "高级设置 · 费用、撮合与预算" : "Advanced · fees, execution and budget"}</VButton>
+    <div id="finance-backtest-advanced" className={advancedOpen ? styles.panel : "hidden"}>
+      <div className={styles.row}>
       <label className={styles.field}>{zh ? "费用口径" : "Fee policy"}<VSelect aria-label="AI回测费用口径" selectedKey={form.feeModel ?? "legacy_commission_stamp_v1"} isDisabled={busy} options={[{ id: "legacy_commission_stamp_v1", label: zh ? "原有简化费用" : "Legacy simplified fees" }, { id: "verified_ashare_fees_v1", label: zh ? "沪深历史分项" : "Historical SH / SZ fees" }]} onSelectionChange={key => edit("feeModel", String(key) as "legacy_commission_stamp_v1" | "verified_ashare_fees_v1")} /></label>
       <label className={styles.field}>{zh ? "限价规则" : "Price limits"}<VSelect aria-label="AI回测限价规则" selectedKey={form.priceLimitModel ?? "candidate_bands_v1"} isDisabled={busy} options={[{ id: "candidate_bands_v1", label: zh ? "常见幅度估算" : "Candidate bands" }, { id: "supplied_daily_limits_v1", label: zh ? "导入逐日限价" : "Import daily limits" }]} onSelectionChange={key => edit("priceLimitModel", String(key) as "candidate_bands_v1" | "supplied_daily_limits_v1")} /></label>
       {number("commissionBps", form.feeModel === "verified_ashare_fees_v1" ? (zh ? "含规费佣金 bps" : "All-in commission bps") : (zh ? "佣金 bps" : "Commission bps"), 0, 100, 0.1)}
@@ -151,13 +165,15 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       <label className={styles.field}>{zh ? "研究输入" : "Research input"}<VSelect aria-label="AI回测研究输入" selectedKey={form.researchInput ?? "price_only"} isDisabled={busy} options={[{ id: "price_only", label: zh ? "仅行情" : "Prices only" }, { id: "announcements", label: zh ? "行情 + 历史公告" : "Prices + historical announcements" }, { id: "financial_reports", label: zh ? "行情 + 历史财报原文" : "Prices + historical filings" }]} onSelectionChange={key => edit("researchInput", String(key) as "price_only" | "announcements" | "financial_reports")} /></label>
       {number("maxDecisions", zh ? "最多决策" : "Decision limit", 1, 500)}
       {number("maxTokens", zh ? "Token预算" : "Token budget", 1000, 2000000, 1000)}
-    </div>
+      </div>
+
     <p className={styles.note}>{zh ? "样本外日期留空时按 80/20 切分；预检会冻结实际交易日边界。" : "Leave the holdout date empty for an 80/20 split; preview freezes the actual trading-day boundary."}</p>
     {form.priceLimitModel === "supplied_daily_limits_v1" ? <div className={styles.panel}>
       <label className={styles.field}>{zh ? "逐日限价文件" : "Daily limit file"}<VInput aria-label="AI回测逐日限价文件" type="file" accept=".json,application/json" disabled={busy} onChange={event => void importLimits(event.target.files?.[0])} /></label>
       <span className={styles.note}>{zh ? `已载入 ${limitDrafts.length} 只股票；须覆盖全部回测日期，导入来源未经独立核验。` : `${limitDrafts.length} assets loaded; every session is required. Imported sources are not independently verified.`}</span>
     </div> : null}
-    <label className={styles.panel}><span className={styles.status}>{zh ? "策略指令" : "Strategy instruction"}</span><VTextarea aria-label="AI回测策略指令" value={form.strategy} maxLength={2000} disabled={busy} onChange={event => edit("strategy", event.target.value)} /></label>
+    </div>
+    {blockingReason ? <p className={styles.fieldError} role="status">{blockingReason}</p> : null}
     <div className={styles.row}><VButton variant="secondary" isPending={pending === "preview"} isDisabled={busy || disabled || !valid || (form.priceLimitModel === "supplied_daily_limits_v1" && !limitDrafts.length)} onPress={() => void perform("preview", async () => {
       const expectedGeneration = generation.current, request = buildRequest(), expectedSymbols = requestSymbols(request);
       const data = await previewAIBacktest(agentId, request);

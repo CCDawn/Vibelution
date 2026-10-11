@@ -13,6 +13,7 @@ export const FINANCE_WORKSPACE_GROUPS = [
   { id: "assets", zh: "资产", en: "Assets", areas: [
     { id: "account", zh: "模拟账户", en: "Paper account" },
     { id: "portfolio", zh: "组合研究", en: "Portfolio" },
+    { id: "backtest", zh: "历史回测", en: "Backtest" },
     { id: "review", zh: "交易复盘", en: "Review" },
   ] },
   { id: "library", zh: "资料", en: "Library", areas: [
