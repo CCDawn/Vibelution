@@ -779,14 +779,24 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
-      // session_initial is authoritative on every (re)connect; applying it
-      // re-baselines the continuity gate (its ledgerSeq is journal-space and
-      // informational for the delta gate) so post-reconnect frames apply.
+      // Re-baseline continuity bookkeeping on each (re)connect. This journal
+      // watermark may trail the latest commit until the detail readback below;
+      // it is informational for the delta gate so new live frames can apply.
       const initialLedgerSeq = Number(routed.payload.ledgerSeq ?? 0);
       if (Number.isFinite(initialLedgerSeq) && initialLedgerSeq > 0) {
         sessionProjectionGate.noteAuthoritative(initialLedgerSeq);
         sessionStreamRecovery.noteAuthoritative(initialLedgerSeq);
       }
+      // The server captures the light bootstrap before registering this
+      // subscriber. A turn can settle in that gap without emitting any frame
+      // to us. Read the canonical body after receiving the initial frame,
+      // when the subscription is live; an open stream disables detail polling.
+      const sessionQuery = { queryKey: queryKeys.session(streamSessionId), exact: true };
+      // Invalidation alone can reuse an in-flight first fetch (no cached data
+      // yet). Cancel it first so the readback starts after the subscription.
+      void queryClient.cancelQueries(sessionQuery).then(() => {
+        if (!disposed) void queryClient.invalidateQueries(sessionQuery);
+      });
       postBrowserTelemetry({
         phase: "session_stream",
         eventCode: "browser.session_stream.initial_received",
@@ -798,6 +808,7 @@ export function useSessionDetailStream({
           ledgerSeq: routed.payload.ledgerSeq,
           currentPhase: routed.payload.currentPhase || "",
           running: routed.payload.running,
+          authoritativeRefreshRequested: true,
           latestMessageRole: routed.payload.latestMessage?.role || "",
           latestMessageContentLength: routed.payload.latestMessage?.contentLength ?? 0,
           latestMessageThoughtLength: routed.payload.latestMessage?.thoughtLength ?? 0,

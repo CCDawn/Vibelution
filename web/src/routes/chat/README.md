@@ -107,6 +107,7 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 - `chatComposerSubmitModel.ts` — composer draft/attachment/reference pure helpers, image classify, submit guards, mental-model toggle storage, optimistic turn id
 - `chatSubmittedAttachmentPreviews.ts` — submission-owned local previews; composer cleanup cannot revoke them, and authoritative message replacement or session cache removal releases them
 - `useChatComposerSubmit.ts` — `useChatComposerTurnMutations` (submit/edit/stop/guidance) + `useChatComposerSubmitActions` (handlers/upload pipeline); no second EventSource
+  Ordinary submit success removes only references in its submitted snapshot; references added or re-quoted while pending remain in the next draft.
 
 ## Phase E (done for structure ROI)
 
@@ -161,6 +162,7 @@ Prefer pure modules there over growing `ConversationView.tsx`.
 | Session switch shell + cancel foreign detail fetches | `chatSessionDetailHelpers.ts` (`resolveSessionDetailPlaceholder`, `isForeignSessionDetailQueryKey`) |
 
 Do not suppress polling on connect *intent* alone — wait for EventSource `onopen`.
+Each validated `session_initial` triggers one canonical detail readback after subscription, covering terminal events between bootstrap capture and subscriber registration even while SSE owns polling.
 
 ## Perf program (scope A)
 

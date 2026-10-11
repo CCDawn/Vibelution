@@ -164,6 +164,45 @@ function restoreSubmittedDraftAfterFailure(
   setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
 }
 
+function sameSubmittedReferenceSnapshot(
+  current: SessionReferenceAttachment,
+  submitted: SessionReferenceAttachment,
+): boolean {
+  if (sessionReferenceId(current) !== sessionReferenceId(submitted)) {
+    return false;
+  }
+  // A message reference's id names the source message, while its quote is the
+  // actual payload. Preserve a re-quoted reference added during the request.
+  if (current.kind === "message" || submitted.kind === "message") {
+    return current.kind === submitted.kind
+      && current.sourceSessionId === submitted.sourceSessionId
+      && current.sourceMessageId === submitted.sourceMessageId
+      && current.quote === submitted.quote;
+  }
+  return true;
+}
+
+function clearSubmittedReferenceSnapshot(
+  current: Record<string, SessionReferenceAttachment[]>,
+  sessionId: string,
+  submittedReferences: readonly SessionReferenceAttachment[],
+): Record<string, SessionReferenceAttachment[]> {
+  if (!submittedReferences.length) {
+    return current;
+  }
+  const existing = current[sessionId] ?? [];
+  const remaining = existing.filter((reference) =>
+    !submittedReferences.some((submitted) => sameSubmittedReferenceSnapshot(reference, submitted)),
+  );
+  if (remaining.length === existing.length) {
+    return current;
+  }
+  if (!remaining.length) {
+    return clearSessionReferenceAttachments(current, sessionId);
+  }
+  return { ...current, [sessionId]: remaining };
+}
+
 export type SubmitTurnVariables = {
   sessionId: string;
   clientSubmissionId: string;
@@ -547,7 +586,9 @@ export function useChatComposerTurnMutations({
         const submittedIds = new Set(variables.composerAttachments.map((attachment) => attachment.id));
         return { ...current, [variables.sessionId]: (current[variables.sessionId] ?? []).filter((attachment) => !submittedIds.has(attachment.id)) };
       });
-      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
+      setSessionReferenceAttachments((current) => companionAgentId
+        ? clearSessionReferenceAttachments(current, variables.sessionId)
+        : clearSubmittedReferenceSnapshot(current, variables.sessionId, variables.references ?? []));
       // Backend accepted the turn: the sent prompt becomes ArrowUp-recallable.
       appendStoredPromptHistoryEntry(variables.content);
       const acceptedTurnId = String(acceptedTurn.turnId || "").trim();

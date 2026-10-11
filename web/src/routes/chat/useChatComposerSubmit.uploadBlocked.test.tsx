@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import React, { act, useRef, useState } from "react";
+import React, { act, createContext, useContext, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -117,16 +117,25 @@ type HarnessProps = {
   sessionId?: string;
   draft?: string;
   attachments: ComposerImageAttachment[];
+  nextReference?: SessionReferenceAttachment;
   mutations: ChatComposerTurnMutations;
   onErrors?: (errors: Record<string, string>) => void;
   onDrafts?: (drafts: Record<string, string>) => void;
 };
+
+type SessionReferenceState = {
+  references: Record<string, SessionReferenceAttachment[]>;
+  setReferences: Dispatch<SetStateAction<Record<string, SessionReferenceAttachment[]>>>;
+};
+
+const SessionReferenceStateContext = createContext<SessionReferenceState | null>(null);
 
 function Harness({
   queryClient,
   sessionId = "session-1",
   draft = "带图提问",
   attachments,
+  nextReference,
   mutations,
   onErrors,
   onDrafts,
@@ -137,6 +146,9 @@ function Harness({
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({
     [sessionId]: attachments,
   });
+  const referenceState = useContext(SessionReferenceStateContext);
+  if (!referenceState) throw new Error("Harness requires the session reference state provider.");
+  const { references: sessionReferenceAttachments, setReferences: setSessionReferenceAttachments } = referenceState;
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId));
   const actions = useChatComposerSubmitActions({
@@ -165,14 +177,14 @@ function Harness({
       }
     },
     setSessionImageAttachments,
-    setSessionReferenceAttachments: () => undefined,
+    setSessionReferenceAttachments,
     setSessionImageUploadPending: () => undefined,
     setSessionEditTargets: () => undefined,
     imageUploadInFlightRef,
     activeSessionId: sessionId,
     activeDraftEffective: sessionDrafts[sessionId] ?? "",
     activeImageAttachments: sessionImageAttachments[sessionId] ?? [],
-    activeReferenceAttachments: [],
+    activeReferenceAttachments: sessionReferenceAttachments[sessionId] ?? [],
     mentalModelEnabledForNextTurn: false,
     runtimeStatusEnabledForNextTurn: false,
     resolvedEditTarget: null,
@@ -193,34 +205,47 @@ function Harness({
     <div>
       <output data-testid="draft">{sessionDrafts[sessionId] ?? ""}</output>
       <output data-testid="tray">{JSON.stringify((sessionImageAttachments[sessionId] ?? []).map(({ filename, uploadStatus, artifactId }) => ({ filename, uploadStatus, artifactId })))}</output>
+      <output data-testid="references">{JSON.stringify(sessionReferenceAttachments[sessionId] ?? [])}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>submit</button>
       <button type="button" data-testid="add-next" onClick={() => actions.handleAddComposerAttachments([new File(["next"], "next.png", { type: "image/png" })])}>add</button>
+      <button type="button" data-testid="add-reference" onClick={() => {
+        if (nextReference) actions.handleAddComposerReference(nextReference);
+      }}>add reference</button>
+      <button type="button" data-testid="replace-reference" onClick={() => {
+        actions.handleRemoveComposerReference("message:source-1");
+        if (nextReference) actions.handleAddComposerReference(nextReference);
+      }}>replace reference</button>
     </div>
   );
 }
 
 function MutationsWire({
   queryClient,
+  initialReferenceAttachments = {},
   children,
 }: {
   queryClient: QueryClient;
+  initialReferenceAttachments?: Record<string, SessionReferenceAttachment[]>;
   children: (mutations: ChatComposerTurnMutations) => React.ReactNode;
 }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <MutationsInner queryClient={queryClient}>{children}</MutationsInner>
+      <MutationsInner queryClient={queryClient} initialReferenceAttachments={initialReferenceAttachments}>{children}</MutationsInner>
     </QueryClientProvider>
   );
 }
 
 function MutationsInner({
   queryClient,
+  initialReferenceAttachments = {},
   children,
 }: {
   queryClient: QueryClient;
+  initialReferenceAttachments?: Record<string, SessionReferenceAttachment[]>;
   children: (mutations: ChatComposerTurnMutations) => React.ReactNode;
 }) {
   const [layers, setLayers] = useState<Record<string, unknown>>({});
+  const [references, setReferences] = useState(initialReferenceAttachments);
   const mutations = useChatComposerTurnMutations({
     queryClient,
     chatWorkspaceCache: createChatWorkspaceCache(queryClient),
@@ -231,10 +256,14 @@ function MutationsInner({
     setSessionDrafts: () => undefined,
     setSessionComposerErrors: () => undefined,
     setSessionImageAttachments: () => undefined,
-    setSessionReferenceAttachments: () => undefined,
+    setSessionReferenceAttachments: setReferences,
     setSessionEditTargets: () => undefined,
   });
-  return <>{children(mutations)}</>;
+  return (
+    <SessionReferenceStateContext.Provider value={{ references, setReferences }}>
+      {children(mutations)}
+    </SessionReferenceStateContext.Provider>
+  );
 }
 
 const roots: Root[] = [];
@@ -312,6 +341,64 @@ describe("useChatComposerSubmit blocked upload batch", () => {
     expect(optimisticRows(client, "session-1")).toHaveLength(0);
     expect(revoke).toHaveBeenCalledWith(preview);
     expect(client.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.messages.filter((message) => message.metadata?.clientSubmissionId === pending.metadata?.clientSubmissionId)).toHaveLength(1);
+    client.clear();
+  });
+
+  it.each([
+    ["same message with a new quote", "requoted"],
+    ["a different reference", "different"],
+  ] as const)("clears only the submitted snapshot when %s is added during send", async (_description, mode) => {
+    const client = new QueryClient();
+    seedSessionDetail(client, "session-1");
+    const submittedReference: SessionReferenceAttachment = {
+      referenceId: "message:source-1",
+      kind: "message",
+      sourceSessionId: "source-session",
+      sourceMessageId: "source-1",
+      quote: "the quote included in this send",
+      title: "the quote included in this send",
+    };
+    const newlyAddedReference: SessionReferenceAttachment = mode === "requoted"
+      ? {
+          ...submittedReference,
+          quote: "a newer quote added while sending",
+          title: "a newer quote added while sending",
+        }
+      : {
+          referenceId: "file:artifact-2",
+          kind: "file",
+          artifactId: "artifact-2",
+          title: "new file reference",
+        };
+    let accept!: (result: SessionTurnAcceptedResponse) => void;
+    submitSessionMessageMock.mockImplementationOnce(async (_sessionId, payload) => {
+      expect(payload.references).toEqual([submittedReference]);
+      return await new Promise((resolve) => { accept = resolve; });
+    });
+    const mounted = mount(<MutationsWire queryClient={client} initialReferenceAttachments={{ "session-1": [submittedReference] }}>{(mutations) =>
+      <Harness
+        queryClient={client}
+        attachments={[]}
+        nextReference={newlyAddedReference}
+        mutations={mutations}
+      />
+    }</MutationsWire>);
+
+    await act(async () => {
+      (mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(submitSessionMessageMock).toHaveBeenCalledTimes(1);
+    act(() => (mounted.querySelector(`[data-testid="${mode === "requoted" ? "replace-reference" : "add-reference"}"]`) as HTMLButtonElement).click());
+    expect(JSON.parse(mounted.querySelector('[data-testid="references"]')?.textContent ?? "[]"))
+      .toEqual(mode === "requoted" ? [newlyAddedReference] : [submittedReference, newlyAddedReference]);
+
+    await act(async () => {
+      accept({ turnId: "accepted", acceptedAt: new Date().toISOString() });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(JSON.parse(mounted.querySelector('[data-testid="references"]')?.textContent ?? "[]"))
+      .toEqual([newlyAddedReference]);
     client.clear();
   });
 

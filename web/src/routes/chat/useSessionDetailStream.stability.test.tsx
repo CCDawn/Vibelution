@@ -10,7 +10,7 @@
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
@@ -233,6 +233,108 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     disposeSessionStreams();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("reads back a terminal turn missed between the initial snapshot and subscribing", async () => {
+    const { options, queryClient } = baseOptions({});
+    const sessionKey = queryKeys.session("s1");
+    const completed = {
+      id: "s1", ledgerSeq: 11, currentPhase: "completed",
+      messages: [{ id: "answer", role: "assistant", content: "Done" }],
+    } as SessionDetail;
+    const readDetail = vi.fn().mockResolvedValue(completed);
+    const observer = new QueryObserver(queryClient, {
+      queryKey: sessionKey,
+      queryFn: readDetail,
+      initialData: { id: "s1", ledgerSeq: 10, currentPhase: "running", messages: [] } as SessionDetail,
+      staleTime: Infinity,
+      refetchInterval: false,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const root = mount(options);
+    try {
+      act(() => FakeEventSource.instances[0].open());
+      // The HTTP bootstrap was captured before the terminal journal write.
+      // Its stale state is delivered only after the subscription is ready;
+      // there is no later delta/detail event to rescue this client.
+      act(() => FakeEventSource.instances[0].emit("session_initial", JSON.stringify({
+        type: "session_initial", sessionId: "s1", ledgerSeq: 10,
+        running: true, currentPhase: "running",
+      })));
+      await vi.waitFor(() => {
+        expect(queryClient.getQueryData<SessionDetail>(sessionKey)?.currentPhase).toBe("completed");
+      });
+      expect(readDetail).toHaveBeenCalledTimes(1);
+      expect(queryClient.getQueryData<SessionDetail>(sessionKey)?.messages).toEqual(completed.messages);
+      expect(hookResults.at(-1)?.sessionStreamConnected).toBe(true);
+      expect(FakeEventSource.instances).toHaveLength(1);
+    } finally {
+      unmount(root);
+      unsubscribe();
+      queryClient.clear();
+    }
+  });
+
+  it("replaces an in-flight first detail fetch captured before subscribing", async () => {
+    const { options, queryClient } = baseOptions({});
+    const sessionKey = queryKeys.session("s1");
+    let preConnectSignal: AbortSignal | undefined;
+    const completed = { id: "s1", ledgerSeq: 11, currentPhase: "completed", messages: [] } as SessionDetail;
+    const readDetail = vi.fn(({ signal }: { signal: AbortSignal }) => {
+      if (readDetail.mock.calls.length === 1) {
+        preConnectSignal = signal;
+        return new Promise<SessionDetail>(() => {});
+      }
+      return Promise.resolve(completed);
+    });
+    const observer = new QueryObserver(queryClient, {
+      queryKey: sessionKey, queryFn: readDetail, refetchInterval: false,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const root = mount(options);
+    try {
+      act(() => FakeEventSource.instances[0].emit("session_initial", JSON.stringify({
+        type: "session_initial", sessionId: "s1", ledgerSeq: 10, running: true,
+      })));
+      await vi.waitFor(() => {
+        expect(queryClient.getQueryData<SessionDetail>(sessionKey)?.currentPhase).toBe("completed");
+      });
+      expect(preConnectSignal?.aborted).toBe(true);
+      expect(readDetail).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount(root);
+      unsubscribe();
+      queryClient.clear();
+    }
+  });
+
+  it("refreshes on reconnect initial state but rejects another session's initial", async () => {
+    const { options, invalidateSpy } = baseOptions({});
+    const root = mount(options);
+    const stream = FakeEventSource.instances[0];
+    const emitInitial = (sessionId: string) => stream.emit("session_initial", JSON.stringify({
+      type: "session_initial", sessionId, ledgerSeq: 10, running: false,
+    }));
+    act(() => emitInitial("foreign"));
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    act(() => { stream.open(); emitInitial("s1"); });
+    await vi.waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(1));
+    act(() => { stream.open(); emitInitial("s1"); });
+    await vi.waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(2));
+    expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: queryKeys.session("s1"), exact: true });
+    unmount(root);
+  });
+
+  it("does not start a queued initial readback after leaving the session", async () => {
+    const { options, invalidateSpy } = baseOptions({});
+    const root = mount(options);
+    act(() => FakeEventSource.instances[0].emit("session_initial", JSON.stringify({
+      type: "session_initial", sessionId: "s1", ledgerSeq: 10, running: true,
+    })));
+    unmount(root);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   it("keeps the open stream across shouldConnect flapping on the same session", () => {
