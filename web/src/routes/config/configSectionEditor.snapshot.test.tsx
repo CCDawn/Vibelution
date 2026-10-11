@@ -7,7 +7,9 @@
  * and edit modes into committed vitest snapshots. Phase 2 moves the component
  * out of ConfigRoute.tsx; these snapshots must stay byte-identical afterwards
  * (only import paths may differ). React useId markers are normalized so the
- * baseline survives module moves.
+ * baseline survives module moves. Subsequent approved VUI visual migrations
+ * may update classes and icon dimensions after confirming that structure,
+ * content and aria remain identical.
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
