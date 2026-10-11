@@ -150,7 +150,49 @@ def _crossref_search_url(query_text: str, *, rows: int) -> str:
 
 
 _ARXIV_QUERY_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_ARXIV_QUERY_MAX_TOKENS = 8
+# Search-plan queries are composed as "{seed} {source-type suffix} {perspective
+# suffix}" (see ``_source_collection_perspective_query_text``), and challenge-cup
+# plans fan every seed out across all four perspectives.  The perspective /
+# suffix vocabulary appended there never discriminates papers on arXiv, so
+# AND-joining it alongside the seed over-tightens the conjunctive query into a
+# guaranteed zero-hit search.  The zh suffixes (论文/机制/因果路径/…) cannot
+# reach this filter because the tokenizer only extracts ASCII tokens.
+_ARXIV_QUERY_PERSPECTIVE_FILLER_TERMS = {
+    "mechanism",
+    "causal",
+    "pathway",
+    "supporting",
+    "evidence",
+    "independent",
+    "baseline",
+    "replication",
+    "comparison",
+    "limitation",
+    "limitations",
+    "failure",
+    "failures",
+    "null",
+    "negative",
+    "finding",
+    "findings",
+    "falsification",
+    "contradictory",
+    "alternative",
+    "explanation",
+    "independent_baseline",
+    "limitation_or_null",
+    "perspective",
+    "perspectives",
+    "empirical",
+    "theoretical",
+    "mechanistic",
+    "viewpoint",
+}
+# Conjunctive ``all:`` terms beyond this count match almost nothing on arXiv;
+# seed topic tokens arrive first in the composed query text (before the
+# appended suffixes), so keeping the leading tokens preserves the most
+# topic-specific ones.
+_ARXIV_QUERY_MAX_TOKENS = 5
 
 
 def _arxiv_search_query(query_text: str) -> str:
@@ -158,24 +200,44 @@ def _arxiv_search_query(query_text: str) -> str:
 
     Query tokens are AND-joined behind the ``all:`` field prefix so the
     arXiv API treats them as conjunctive keyword filters, mirroring how the
-    Crossref branch posts the raw query text.
+    Crossref branch posts the raw query text.  Generic filler and the
+    perspective/source-type suffix vocabulary appended by the search-plan
+    builders are dropped first, and the conjunctive term count stays capped
+    so the filter does not over-tighten.  A fully filtered or CJK-only seed
+    degrades through fallbacks instead of collapsing into an empty query.
     """
     s = _service()
     text = s._trim_text(query_text, max_length=1000)
-    tokens: list[str] = []
+    raw_tokens: list[str] = []
     for match in _ARXIV_QUERY_TOKEN_PATTERN.finditer(text):
         token = match.group(0).strip("._-")
-        if len(token) < 2:
-            continue
-        if token.lower() in s._SOURCE_COLLECTION_GENERIC_SEARCH_TERMS:
-            continue
-        if token not in tokens:
-            tokens.append(token)
-        if len(tokens) >= _ARXIV_QUERY_MAX_TOKENS:
-            break
+        if len(token) >= 2 and token not in raw_tokens:
+            raw_tokens.append(token)
+
+    def _is_filler(token: str) -> bool:
+        lowered = token.lower()
+        return lowered in s._SOURCE_COLLECTION_GENERIC_SEARCH_TERMS or lowered in _ARXIV_QUERY_PERSPECTIVE_FILLER_TERMS
+
+    tokens = [token for token in raw_tokens if not _is_filler(token)]
     if not tokens:
-        return s._trim_text(text, max_length=400)
-    return " AND ".join(f"all:{token}" for token in tokens)
+        # CJK-only seeds yield no ASCII tokens at all (arXiv is an English
+        # corpus); translating the known zh research terms keeps the fallback
+        # searching English keywords instead of posting guaranteed-zero-hit
+        # CJK text.
+        for cjk_term, translations in s._SOURCE_COLLECTION_QUERY_TERM_TRANSLATIONS.items():
+            if cjk_term not in text:
+                continue
+            for translation in translations:
+                for word in str(translation).split():
+                    if len(word) >= 2 and not _is_filler(word) and word not in tokens:
+                        tokens.append(word)
+    if not tokens:
+        # Last resort: the raw seed's own tokens keep the query non-empty
+        # even when every token is generic/perspective filler.
+        tokens = raw_tokens
+    if tokens:
+        return " AND ".join(f"all:{token}" for token in tokens[:_ARXIV_QUERY_MAX_TOKENS])
+    return s._trim_text(text, max_length=400)
 
 
 def _arxiv_search_url(query_text: str, *, start: int, max_results: int) -> str:

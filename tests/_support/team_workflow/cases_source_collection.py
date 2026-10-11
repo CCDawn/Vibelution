@@ -7198,6 +7198,76 @@ def test_execute_arxiv_source_collection_query_runs_through_service_namespace(tm
     assert "Platt and Trudgian" in (results[0]["summary"] or "")
 
 
+def test_arxiv_search_query_drops_perspective_suffix_tokens():
+    # Challenge-cup plans append perspective/source-type suffixes to every
+    # seed (``{seed} peer reviewed paper mechanism causal pathway supporting
+    # evidence``); AND-joining that filler alongside the topic tokens used to
+    # over-tighten the query into a guaranteed zero-hit arXiv search.
+    from core.web.services import team_workflow_orchestration_service as s
+
+    query = s._arxiv_search_query(
+        "predictive coding empirical perspective peer reviewed paper mechanism causal pathway supporting evidence"
+    )
+
+    assert query == "all:predictive AND all:coding"
+    assert len(query.split(" AND ")) <= 5
+
+
+def test_arxiv_search_query_keeps_clean_english_topic_query_stable():
+    from core.web.services import team_workflow_orchestration_service as s
+
+    assert (
+        s._arxiv_search_query("Platt Trudgian zeta zeros")
+        == "all:Platt AND all:Trudgian AND all:zeta AND all:zeros"
+    )
+
+
+def test_arxiv_search_query_caps_conjunctive_terms_for_long_topic_seeds():
+    from core.web.services import team_workflow_orchestration_service as s
+
+    query = s._arxiv_search_query(
+        "spiking neural networks energy efficient event driven neuromorphic"
+    )
+
+    terms = query.split(" AND ")
+    assert len(terms) == 5
+    assert terms[0] == "all:spiking"
+
+
+def test_arxiv_search_query_falls_back_to_translations_for_cjk_perspective_seed():
+    # zh perspective queries carry no ASCII tokens (the tokenizer only
+    # extracts ASCII), so the fallback must translate the CJK topic terms to
+    # English keywords instead of posting guaranteed-zero-hit CJK text, and
+    # no perspective/generic zh suffix may leak into the result.
+    from core.web.services import team_workflow_orchestration_service as s
+
+    query = s._arxiv_search_query("预测编码 实证视角 论文 机制 因果路径 支持证据")
+
+    assert query.startswith("all:")
+    assert " AND " in query
+    assert len(query.split(" AND ")) <= 5
+    for term in ("predictive", "coding"):
+        assert f"all:{term}" in query
+    for banned in ("实证视角", "论文", "机制", "因果路径", "支持证据"):
+        assert banned not in query
+
+
+def test_arxiv_search_query_falls_back_to_raw_seed_tokens_when_all_tokens_are_filler():
+    from core.web.services import team_workflow_orchestration_service as s
+
+    query = s._arxiv_search_query("empirical perspective peer reviewed paper")
+
+    assert query == "all:empirical AND all:perspective AND all:peer AND all:reviewed AND all:paper"
+
+
+def test_arxiv_search_query_keeps_non_empty_raw_fallback_for_untranslatable_cjk_seed():
+    from core.web.services import team_workflow_orchestration_service as s
+
+    query = s._arxiv_search_query("高考 志愿填报")
+
+    assert query == "高考 志愿填报"
+
+
 def test_execute_source_collection_search_accepts_arxiv_provider_and_rejects_unknown(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
