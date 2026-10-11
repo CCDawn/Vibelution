@@ -10,8 +10,9 @@ import { describe, expect, it } from "vitest";
  * font-size/radius slots onto the vui ladder inside `@theme inline` so
  * off-system class names (text-sm, rounded-lg, ...) still resolve inside the
  * design system. This gate fails if a future edit silently drops or retargets
- * one of those redefinitions, or if the underlying token values drift away
- * from the approved zero-drift mapping (only text-xl may shift: 20px -> 19px).
+ * one of those redefinitions. Font values keep the approved zero-drift mapping
+ * (only text-xl shifts: 20px -> 19px); radii follow the subsequently approved
+ * native desktop visual baseline.
  *
  * Mapping (approved):
  *   text-xs -> var(--vui-font-2xs)   12px -> 12px
@@ -19,8 +20,8 @@ import { describe, expect, it } from "vitest";
  *   text-base -> var(--vui-font-md)  16px -> 16px
  *   text-lg -> var(--vui-font-lg)    18px -> 18px
  *   text-xl -> var(--vui-font-title) 20px -> 19px (only shift)
- *   rounded-lg -> var(--radius-control)            8px -> 8px
- *   rounded-xl -> var(--vui-radius-panel-soft)    12px -> 12px
+ *   rounded-lg -> var(--radius-control)            5px
+ *   rounded-xl -> var(--vui-radius-panel-soft)      8px
  *
  * Value-literal expectations mirror tokens.css; className usage counts are
  * deliberately NOT asserted here — that is the ratchet's job
@@ -58,7 +59,7 @@ const TOKEN_VALUE_LITERALS: Record<string, string> = {
   "--vui-font-md": "var(--vui-font-base)",
   "--vui-font-lg": "calc(var(--vui-font-base) + 2px)",
   "--vui-font-title": "calc(var(--vui-font-base) + 3px)",
-  "--radius-control": "8px",
+  "--radius-control": "5px",
 };
 
 function readThemeBlock(source: string): string {
@@ -105,7 +106,7 @@ describe("P0-a theme slot takeover contract", () => {
       const definition = tokensSource.match(new RegExp(`${token}\\s*:\\s*([^;]+);`))?.[1]?.trim();
       expect(definition, `${token} drifted from the approved value`).toBe(literal);
     }
-    // The light theme re-declares the panel radius; it must stay 12px too.
+    // Both themes share the approved native desktop panel radius.
     const lightBlock = tokensSource.split('[data-theme="light"]')[1] ?? "";
     expect(lightBlock).toContain("--vui-radius-panel-soft: 8px");
   });
