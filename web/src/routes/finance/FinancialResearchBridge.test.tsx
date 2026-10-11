@@ -77,6 +77,21 @@ describe("financial native composer bridge", () => {
     expect(focus).toHaveBeenCalledExactlyOnceWith("research");
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "research", busy: true }));
   });
+  it("preserves an unsent user draft when preparing research evidence or a stage report", async () => {
+    const root = setup();
+    const existing = "请重点说明现金流。\n保留这条补充要求。";
+    await act(async () => root.render(<React.StrictMode><FinancialResearchBridgeContext.Provider value={value()}><Consumer busy={false} composerValue={existing} /></FinancialResearchBridgeContext.Provider></React.StrictMode>));
+    expect(change).toHaveBeenCalledExactlyOnceWith(`${existing}\n\n请核对财报证据`);
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it("does not append the same prepared prompt again on another explicit draft request", async () => {
+    const root = setup();
+    const existing = "请重点说明现金流。\n\n请核对财报证据";
+    await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={value()}><Consumer busy={false} composerValue={existing} /></FinancialResearchBridgeContext.Provider>));
+    expect(change).not.toHaveBeenCalled();
+    expect(focus).toHaveBeenCalledWith("research");
+    expect(submit).not.toHaveBeenCalled();
+  });
   it("waits for the requested session and refuses another agent", async () => {
     const root = setup();
     await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={value()}><Consumer sessionId="other" /></FinancialResearchBridgeContext.Provider>));

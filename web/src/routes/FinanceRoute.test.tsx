@@ -391,6 +391,25 @@ describe("financial assistant page", () => {
     expect(button("生成阶段报告")).toBeUndefined();
   });
 
+  it("keeps unsent requirements when preparing a stage report and avoids duplicating it on a second click", async () => {
+    nativeTerminalReason = "paused_limit";
+    nativeMessages = stageResearchMessages();
+    await render("/finance?session=native-session");
+    const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="native draft"]')!;
+    const requirements = "请保留我的现金流核验要求。";
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, requirements);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("生成阶段报告")!.click()); await settle();
+    const prepared = field.value;
+    expect(prepared).toMatch(/^请保留我的现金流核验要求。\n\n请基于当前会话/);
+    await act(async () => button("生成阶段报告")!.click()); await settle();
+    expect(field.value).toBe(prepared);
+    expect(nativeSubmit).not.toHaveBeenCalled();
+    expect(createChatSession).not.toHaveBeenCalled();
+  });
+
   it("starts a topic in its own native session without sending duplicate turns", async () => {
     await render("/finance?session=native-session");
     await chooseTab("主题研究");

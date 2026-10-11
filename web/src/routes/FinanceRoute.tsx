@@ -33,8 +33,10 @@ export function FinanceRoute() {
   const assistant = assistants.data?.find((row) => row.status === "active" && row.setupStatus === "ready" && row.directSessionId === sessionId)
     ?? assistants.data?.find((row) => row.status === "active" && row.setupStatus === "ready");
   // Keep native lifecycle reconciliation mounted while the viewed research
-  // is archived, restored, or deleted. Archive does not replace the workspace.
-  const lifecycle = useFinanceSessionLifecycle(assistant?.agentId ?? "", zh);
+  // is archived, restored, or deleted, including the temporary session_missing
+  // state when deleting the owner's last direct session.
+  const lifecycleOwner = assistant ?? assistants.data?.find((row) => row.status === "active" && row.setupStatus === "session_missing");
+  const lifecycle = useFinanceSessionLifecycle(lifecycleOwner?.agentId ?? "", zh);
   const direct = Boolean(sessionId && assistant?.directSessionId === sessionId);
   const binding = useQuery({
     queryKey: ["finance", "session-binding", assistant?.agentId, sessionId],

@@ -143,8 +143,8 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
         ) : null}
         <SelectPrimitive.Root
           value={
-            controlled && resolvedSelectedKey !== undefined
-              ? optionValue(resolvedSelectedKey)
+            controlled
+              ? resolvedSelectedKey !== undefined ? optionValue(resolvedSelectedKey) : ""
               : undefined
           }
           defaultValue={

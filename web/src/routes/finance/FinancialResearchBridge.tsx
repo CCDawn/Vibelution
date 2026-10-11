@@ -180,9 +180,16 @@ export function useFinancialResearchSessionBridge({
         }
       }
     }
-    onComposerChange(request.text);
+    // Preparing evidence must not discard an unsent native composer draft.
+    // Automatic research submission still waits for its exact requested text.
+    const existing = composerValue ?? "";
+    const alreadyPrepared = existing === request.text || existing.endsWith(`\n\n${request.text}`);
+    const text = !request.submit && existing.trim()
+      ? alreadyPrepared ? existing : `${existing}\n\n${request.text}`
+      : request.text;
+    if (text !== composerValue) onComposerChange(text);
     onFocusComposer(sessionId);
-  }, [authorized, onComposerChange, onFocusComposer, onTurnModelSelectionChange, request, sessionId, sessionLlmOptions, sessionLlmOptionsError, sessionLlmOptionsLoading, turnModelSelection]);
+  }, [authorized, composerValue, onComposerChange, onFocusComposer, onTurnModelSelectionChange, request, sessionId, sessionLlmOptions, sessionLlmOptionsError, sessionLlmOptionsLoading, turnModelSelection]);
   useEffect(() => {
     const pending = pendingModelSelection.current;
     if (!pending?.waitingForOptions || !authorized || !request || request.id !== pending.requestId || request.sessionId !== sessionId

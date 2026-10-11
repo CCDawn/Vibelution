@@ -17,6 +17,7 @@ export type FinanceSessionLifecycle = ReturnType<typeof useFinanceSessionLifecyc
 
 type LifecycleResult = { changed: boolean; archiveChanged?: boolean; error?: string; skippedRunning?: boolean };
 type DeleteConfirmation = { records: SessionSummary[]; skippedRunning: number; isBatch: boolean; initialErrors: string[] };
+type LifecycleOperation = { agentId: string; generation: number };
 
 class RunningResearchError extends Error {}
 
@@ -37,6 +38,9 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
   const route = useChatRouteSelection();
   const routeRef = useRef(route); routeRef.current = route;
   const gate = useRef(false);
+  const owner = useRef(agentId), generation = useRef(0);
+  if (owner.current !== agentId) generation.current += 1;
+  owner.current = agentId;
   const verifiedDeletes = useRef(new Set<string>());
   const mounted = useRef(false);
   const returnFocusTarget = useRef<HTMLElement | null>(null);
@@ -47,8 +51,21 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
   const [notice, setNotice] = useState("");
   const [canUndoBatchArchive, setCanUndoBatchArchive] = useState(false);
   const [deleting, setDeleting] = useState<DeleteConfirmation | null>(null);
+  useEffect(() => {
+    gate.current = false;
+    verifiedDeletes.current.clear();
+    undoableArchives.current = [];
+    returnFocusTarget.current = null;
+    setPending(false); setError(""); setNotice(""); setDeleting(null); setCanUndoBatchArchive(false);
+  }, [agentId]);
 
-  async function performRecord(record: SessionSummary, action: FinanceSessionAction, expected: typeof route.selection): Promise<LifecycleResult> {
+  function operation(): LifecycleOperation { return { agentId, generation: generation.current }; }
+  function isCurrent(request: LifecycleOperation) {
+    return mounted.current && owner.current === request.agentId && generation.current === request.generation;
+  }
+
+  async function performRecord(record: SessionSummary, action: FinanceSessionAction, expected: typeof route.selection, request: LifecycleOperation): Promise<LifecycleResult> {
+    if (!isCurrent(request)) return { changed: false };
     const deletionKey = `${agentId}:${record.id}`;
     let changed = false;
     let archiveChanged: boolean | undefined;
@@ -64,6 +81,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         // a previously verified deletion may reconcile native NotFound here.
         if (action !== "delete" || !verifiedDeletes.current.has(deletionKey) || !isSessionNotFoundError(cause)) throw cause;
       }
+      if (!isCurrent(request)) return { changed: false };
       if (action === "delete") {
         verifiedDeletes.current.add(deletionKey);
         const result = await deleteChatSession(record.id);
@@ -78,7 +96,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         if (result.sessionId !== record.id) throw new Error(zh ? "会话操作返回了其他研究" : "Session operation identity mismatch");
       }
       changed = true;
-      setDeleting(null);
+      if (isCurrent(request)) setDeleting(null);
       await Promise.all([
         client.cancelQueries({ queryKey: ["sessions", "finance", agentId] }),
         client.cancelQueries({ queryKey: ["finance", "report-catalog", agentId] }),
@@ -97,7 +115,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         const assistants = await listFinancialAssistants();
         client.setQueryData(queryKeys.financialAssistants(), assistants);
         const owner = assistants.find((row) => row.agentId === agentId);
-        if (owner?.status === "active" && owner.setupStatus === "session_missing") {
+        if (isCurrent(request) && owner?.status === "active" && owner.setupStatus === "session_missing") {
           const repaired = (await createFinancialAssistant()).assistant;
           if (repaired.agentId !== agentId || !repaired.directSessionId || repaired.setupStatus !== "ready") throw new Error(zh ? "研究已删除，助手会话恢复失败" : "Research deleted; assistant session recovery failed");
           client.setQueryData(queryKeys.financialAssistants(), assistants.map((row) => row.agentId === agentId ? repaired : row));
@@ -105,7 +123,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
       }
       void client.invalidateQueries({ queryKey: ["sessions", "finance-archived", agentId] });
       void client.invalidateQueries({ queryKey: queryKeys.sessionArchive() });
-      if (mounted.current && action !== "restore" && expected.kind === "session" && expected.sessionId === record.id && routeRef.current.matchesSelection(expected)) {
+      if (isCurrent(request) && action !== "restore" && expected.kind === "session" && expected.sessionId === record.id && routeRef.current.matchesSelection(expected)) {
         // The native deletion response may point to another Agent. Pick only a
         // verified surviving research owned by this financial assistant.
         const page = await querySessions({ agentId, limit: 30 });
@@ -114,15 +132,15 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
           const replacement = await fetchSessionDetail(next.id, { transcriptScope: "none", includeSecondary: false });
           if (replacement.id !== next.id || !isFinancialSession(replacement, agentId)) throw new Error(zh ? "下一条研究尚未准备好" : "Next research is unavailable");
           client.setQueryData(["finance", "session-binding", agentId, next.id], replacement);
-          if (mounted.current) routeRef.current.replaceIfStillViewing(expected, { kind: "session", sessionId: next.id });
-        } else if (mounted.current) routeRef.current.replaceIfStillViewing(expected, { kind: "bare" });
+          if (isCurrent(request)) routeRef.current.replaceIfStillViewing(expected, { kind: "session", sessionId: next.id });
+        } else if (isCurrent(request)) routeRef.current.replaceIfStillViewing(expected, { kind: "bare" });
       }
     } catch (cause) {
       if (cause instanceof RunningResearchError) skippedRunning = true;
       else {
         const message = errorMessage(cause, zh ? "会话操作失败，请重试" : "Session operation failed");
         failure = changed ? (zh ? `研究记录已更新；页面刷新失败：${message}` : `Research updated; refresh failed: ${message}`) : message;
-        if (mounted.current && changed && expected.kind === "session" && expected.sessionId === record.id) routeRef.current.replaceIfStillViewing(expected, { kind: "bare" });
+        if (isCurrent(request) && changed && expected.kind === "session" && expected.sessionId === record.id) routeRef.current.replaceIfStillViewing(expected, { kind: "bare" });
       }
     } finally {
       if (changed) {
@@ -135,22 +153,23 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
 
   async function apply(record: SessionSummary, action: FinanceSessionAction) {
     if (gate.current) return;
+    const request = operation();
     gate.current = true; setPending(true); setError(""); setNotice("");
     try {
-      const result = await performRecord(record, action, routeRef.current.selection);
-      if (result.error && mounted.current) setError(result.error);
-      if (result.skippedRunning && mounted.current) {
+      const result = await performRecord(record, action, routeRef.current.selection, request);
+      if (result.error && isCurrent(request)) setError(result.error);
+      if (result.skippedRunning && isCurrent(request)) {
         setDeleting(null);
         setNotice(zh ? "研究正在运行或停止，已跳过操作。" : "Research is running or stopping; action skipped.");
       }
     } finally {
-      gate.current = false;
-      if (mounted.current) setPending(false);
+      if (isCurrent(request)) { gate.current = false; setPending(false); }
     }
   }
 
   async function applyBatch(records: SessionSummary[], action: FinanceSessionAction, skippedRunning: number, initialErrors: string[] = []) {
     if (gate.current) return;
+    const request = operation();
     gate.current = true; setPending(true); setError(""); setNotice("");
     if (action === "archive") {
       undoableArchives.current = [];
@@ -162,7 +181,8 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
     let skippedCount = skippedRunning;
     try {
       for (const record of records) {
-        const result = await performRecord(record, action, routeRef.current.selection);
+        if (!isCurrent(request)) break;
+        const result = await performRecord(record, action, routeRef.current.selection, request);
         if (result.skippedRunning) { skippedCount += 1; continue; }
         if (result.changed) {
           successes.push(record);
@@ -170,20 +190,19 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         }
         if (result.error) failures.push(`${researchLabel(record)}：${result.error}`);
       }
-      if (action === "archive") {
+      if (action === "archive" && isCurrent(request)) {
         undoableArchives.current = undoable;
-        if (mounted.current) setCanUndoBatchArchive(undoable.length > 0);
+        setCanUndoBatchArchive(undoable.length > 0);
       }
       const actionLabel = action === "delete" ? (zh ? "删除" : "Deleted") : action === "archive" ? (zh ? "归档" : "Archived") : (zh ? "恢复" : "Restored");
       const runningLabel = skippedCount ? (zh ? `，跳过 ${skippedCount} 条运行中的研究` : `, skipped ${skippedCount} running research sessions`) : "";
       const failureLabel = failures.length ? (zh ? `，${failures.length} 条未完成` : `, ${failures.length} failed`) : "";
-      if (mounted.current) {
+      if (isCurrent(request)) {
         setNotice(zh ? `已${actionLabel} ${successes.length} 条研究${failureLabel}${runningLabel}。` : `${actionLabel} ${successes.length} research sessions${failureLabel}${runningLabel}.`);
         setError(failures.join("\n"));
       }
     } finally {
-      gate.current = false;
-      if (mounted.current) setPending(false);
+      if (isCurrent(request)) { gate.current = false; setPending(false); }
     }
   }
 
@@ -222,6 +241,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
   async function confirmDelete() {
     const request = deleting;
     if (!request || gate.current) return;
+    const currentOperation = operation();
     if (request.isBatch) {
       setDeleting(null);
       await applyBatch(request.records, "delete", request.skippedRunning, request.initialErrors);
@@ -231,27 +251,28 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
     try {
       const record = request.records[0];
       if (!record) return;
-      const result = await performRecord(record, "delete", routeRef.current.selection);
-      if (result.error && mounted.current) setError(result.error);
-      if (result.skippedRunning && mounted.current) {
+      const result = await performRecord(record, "delete", routeRef.current.selection, currentOperation);
+      if (result.error && isCurrent(currentOperation)) setError(result.error);
+      if (result.skippedRunning && isCurrent(currentOperation)) {
         setDeleting(null);
         setNotice(zh ? "研究正在运行或停止，已跳过删除。" : "Research is running or stopping; deletion skipped.");
       }
     } finally {
-      gate.current = false;
-      if (mounted.current) setPending(false);
+      if (isCurrent(currentOperation)) { gate.current = false; setPending(false); }
     }
   }
 
   async function undoBatchArchive() {
     if (gate.current || !undoableArchives.current.length) return;
+    const request = operation();
     gate.current = true; setPending(true); setError(""); setNotice("");
     const remaining: SessionSummary[] = [];
     const failures: string[] = [];
     let restored = 0;
     try {
       for (const record of undoableArchives.current) {
-        const result = await performRecord(record, "restore", routeRef.current.selection);
+        if (!isCurrent(request)) break;
+        const result = await performRecord(record, "restore", routeRef.current.selection, request);
         if (result.changed) restored += 1;
         else {
           remaining.push(record);
@@ -259,15 +280,14 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         }
         if (result.changed && result.error) failures.push(`${researchLabel(record)}：${result.error}`);
       }
-      undoableArchives.current = remaining;
-      if (mounted.current) {
+      if (isCurrent(request)) {
+        undoableArchives.current = remaining;
         setCanUndoBatchArchive(remaining.length > 0);
         setNotice(zh ? `已撤销归档，恢复 ${restored} 条研究${remaining.length ? `，仍有 ${remaining.length} 条可重试` : ""}。` : `Undid archive for ${restored} research sessions${remaining.length ? `; ${remaining.length} can be retried` : ""}.`);
         setError(failures.join("\n"));
       }
     } finally {
-      gate.current = false;
-      if (mounted.current) setPending(false);
+      if (isCurrent(request)) { gate.current = false; setPending(false); }
     }
   }
 

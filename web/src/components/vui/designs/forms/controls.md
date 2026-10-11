@@ -138,6 +138,8 @@ import { VNativeTextarea } from "@/components/vui";
 
 ## VSelect
 
+受控选择为空、选项加载中或所选项失效时显示占位文字，并保持受控状态；选项恢复不会触发用户选择回调。省略 `selectedKey` 时仍使用非受控的 `defaultSelectedKey`。
+
 ### 功能
 可访问选择器（Radix Select / shadcn）：支持 description、portal 下拉、非 string key。
 

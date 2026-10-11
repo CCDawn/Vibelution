@@ -25,7 +25,9 @@ const catalogKey = ["finance", "report-catalog", "finance-a", {}];
 const exactKey = ["finance", "exact-report", "finance-a", "current", "report-turn"];
 let state: ReturnType<typeof useFinanceSessionLifecycle>;
 let client: QueryClient, router: Router, root: Root, container: HTMLElement;
-function Host() { state = useFinanceSessionLifecycle("finance-a", true); return <>{state.dialog}<output aria-label="lifecycle error">{state.error}</output><output aria-label="lifecycle notice">{state.notice}</output><output aria-label="batch undo available">{String(state.canUndoBatchArchive)}</output></>; }
+const OwnerContext = React.createContext("finance-a");
+function Host() { state = useFinanceSessionLifecycle(React.useContext(OwnerContext), true); return <>{state.dialog}<output aria-label="lifecycle error">{state.error}</output><output aria-label="lifecycle notice">{state.notice}</output><output aria-label="batch undo available">{String(state.canUndoBatchArchive)}</output></>; }
+async function switchOwner(agentId = "finance-b") { await act(async () => root.render(<QueryClientProvider client={client}><OwnerContext.Provider value={agentId}><RouterProvider router={router} /></OwnerContext.Provider></QueryClientProvider>)); }
 async function settle() { await act(async () => new Promise((resolve) => setTimeout(resolve, 15))); }
 beforeEach(async () => {
   vi.resetAllMocks(); resetSessionDeleteTombstonesForTests();
@@ -41,7 +43,7 @@ beforeEach(async () => {
   client.setQueryData(exactKey, { content: "deleted research report" });
   router = createMemoryRouter([{ path: "*", element: <Host /> }], { initialEntries: ["/finance?session=current"] });
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
-  await act(async () => root.render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><OwnerContext.Provider value="finance-a"><RouterProvider router={router} /></OwnerContext.Provider></QueryClientProvider>));
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); resetSessionDeleteTombstonesForTests(); });
 function indexedIds() { return (client.getQueryData(indexKey) as { pages: { items: SessionSummary[] }[] }).pages.flatMap((page) => page.items.map((row) => row.id)); }
@@ -221,6 +223,62 @@ describe("native financial research lifecycle", () => {
     expect(state.canUndoBatchArchive).toBe(false);
     await act(async () => state.undoBatchArchive()); await settle();
     expect(unarchiveChatSession).not.toHaveBeenCalled();
+  });
+  it("clears the previous assistant's delete confirmation and archive undo on an owner change", async () => {
+    await act(async () => state.requestBatchAction([current], "archive")); await settle();
+    expect(state.canUndoBatchArchive).toBe(true);
+    await act(async () => state.requestAction(next, "delete"));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await switchOwner();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(state.canUndoBatchArchive).toBe(false);
+    expect(state.notice).toBe("");
+    await act(async () => state.undoBatchArchive());
+    expect(unarchiveChatSession).not.toHaveBeenCalled();
+    expect(deleteChatSession).not.toHaveBeenCalled();
+  });
+  it("does not send an archive after its ownership check returns for an assistant that was switched away", async () => {
+    let release!: (detail: SessionDetail) => void;
+    vi.mocked(fetchSessionDetail).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await act(async () => state.requestAction(current, "archive"));
+    await switchOwner();
+    await act(async () => release({ ...current, messages: [] } as SessionDetail)); await settle();
+    expect(archiveChatSession).not.toHaveBeenCalled();
+    expect(state.pending).toBe(false);
+    expect(state.error).toBe("");
+    expect(router.state.location.search).toBe("?session=current");
+  });
+  it("does not revive an old action after switching away and back to the same assistant", async () => {
+    let release!: (detail: SessionDetail) => void;
+    vi.mocked(fetchSessionDetail).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await act(async () => state.requestAction(current, "archive"));
+    await switchOwner(); await switchOwner("finance-a");
+    await act(async () => release({ ...current, messages: [] } as SessionDetail)); await settle();
+    expect(archiveChatSession).not.toHaveBeenCalled();
+    expect(state.pending).toBe(false);
+  });
+  it("keeps an already-sent archive in its owner's cache without continuing the batch or resetting the new owner's action", async () => {
+    let releaseArchive!: (result: Awaited<ReturnType<typeof archiveChatSession>>) => void;
+    let releaseDetail!: (detail: SessionDetail) => void;
+    vi.mocked(archiveChatSession).mockImplementationOnce(() => new Promise(resolve => { releaseArchive = resolve; }));
+    await act(async () => state.requestBatchAction([current, next], "archive"));
+    expect(archiveChatSession).toHaveBeenCalledExactlyOnceWith("current");
+    await switchOwner();
+    const other = { ...current, id: "other", agentId: "finance-b" };
+    vi.mocked(fetchSessionDetail).mockImplementationOnce(() => new Promise(resolve => { releaseDetail = resolve; }));
+    await act(async () => state.requestAction(other, "archive"));
+    expect(state.pending).toBe(true);
+    await act(async () => releaseArchive({ sessionId: current.id, status: "archived", changed: true })); await settle();
+    expect(archiveChatSession).toHaveBeenCalledTimes(1);
+    expect(indexedIds()).toEqual(["next"]);
+    expect(state.pending).toBe(true);
+    expect(state.canUndoBatchArchive).toBe(false);
+    expect(state.notice).toBe("");
+    expect(router.state.location.search).toBe("?session=current");
+    vi.mocked(archiveChatSession).mockResolvedValue({ sessionId: other.id, status: "archived", changed: true });
+    await act(async () => releaseDetail({ ...other, messages: [] } as SessionDetail)); await settle();
+    expect(archiveChatSession).toHaveBeenLastCalledWith(other.id);
+    expect(state.pending).toBe(false);
   });
   it("returns focus to the invoking batch control when delete confirmation is canceled", async () => {
     const returnFocus = document.createElement("button");
