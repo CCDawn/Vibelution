@@ -974,15 +974,12 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(chatRouteSource).toContain(
       "sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,",
     );
-    // Both markdown surfaces (segment bodies + assistant transcript cell) must
-    // forward the root and the chrome language together (two joined instances;
-    // tool detail surfaces already pass language={lang} separately). The third
-    // joined instance is the settled file-reference chip row helper, which
-    // shares the root with the markdown surfaces on purpose.
+    // Segment bodies, the assistant transcript cell, and the settled file-reference
+    // chip row each forward the root and the chrome language together.
     expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(3);
     expect(
       conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
-    ).toBe(2);
+    ).toBe(3);
     // Prop lives on the shared view contract so the composer bridge passes it
     // through its ConversationViewProps-derived spread.
     expect(conversationViewTypesSource).toContain("sessionWorkspacePath?: string");
@@ -990,6 +987,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // markdown subtree (settled answers render through the same renderer).
     expect(conversationStreamingResponseContentSource).toContain("workspaceRoot={workspaceRoot}");
     expect(conversationStreamingResponseContentSource).toContain("language={language}");
+    expect(conversationViewSource).toContain("onOpenRailFile={onOpenRailFile}");
+    expect(conversationStreamingResponseContentSource).toContain("onOpenRailFile={onOpenRailFile}");
+    expect(chatRouteSource).toContain("onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== \"child\" ? openOrdinaryRailFile : undefined");
   });
 
   it("keeps tool detail expansion work off collapsed renders", () => {

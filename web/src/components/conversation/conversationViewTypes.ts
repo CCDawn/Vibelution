@@ -175,6 +175,8 @@ export type ConversationViewProps = {
    * A non-empty prompt is sent there when `send` is true, and only prefilled when false.
    */
   onOpenSideChat?: (draft: string, send: boolean) => void;
+  /** Ordinary chat only. Opens this workspace file in the right column. */
+  onOpenRailFile?: (path: string) => void;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;

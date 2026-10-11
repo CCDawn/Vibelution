@@ -40,6 +40,7 @@ const styles = {
   metricLabel: "vui-routes-chatrightrail metricLabel [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   metricValue: "vui-routes-chatrightrail metricValue m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-primary)]",
   plain: "vui-routes-chatrightrail plain flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3",
+  fileBody: "vui-routes-chatrightrail fileBody m-0 min-w-0 whitespace-pre-wrap break-words font-[var(--font-mono)] [font-size:var(--vui-font-xs)] text-[var(--fg-primary)]",
   terminal: "vui-routes-chatrightrail terminal min-h-0 flex-1 overflow-hidden",
 } as const;
 

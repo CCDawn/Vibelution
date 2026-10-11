@@ -33,6 +33,7 @@ type ConversationStreamingResponseContentProps = {
   workspaceRoot?: string;
   /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
   language?: "zh" | "en";
+  onOpenRailFile?: (path: string) => void;
 };
 
 /**
@@ -46,6 +47,7 @@ const StreamingStableMarkdown = memo(function StreamingStableMarkdown({
   renderImage,
   workspaceRoot,
   language,
+  onOpenRailFile,
 }: {
   content: string;
   classNames: ConversationMarkdownClassNames;
@@ -53,6 +55,7 @@ const StreamingStableMarkdown = memo(function StreamingStableMarkdown({
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => ReactNode;
   workspaceRoot?: string;
   language?: "zh" | "en";
+  onOpenRailFile?: (path: string) => void;
 }) {
   return (
     <LazyConversationMarkdownRenderer
@@ -62,6 +65,7 @@ const StreamingStableMarkdown = memo(function StreamingStableMarkdown({
       renderImage={renderImage}
       workspaceRoot={workspaceRoot}
       language={language}
+      onOpenRailFile={onOpenRailFile}
     />
   );
 });
@@ -74,6 +78,7 @@ export function ConversationStreamingResponseContent({
   classNames = styles,
   workspaceRoot,
   language,
+  onOpenRailFile,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");
   const streamProjection = useMemo(() => {
@@ -132,6 +137,7 @@ export function ConversationStreamingResponseContent({
           renderImage={renderImage}
           workspaceRoot={workspaceRoot}
           language={language}
+          onOpenRailFile={onOpenRailFile}
         />
       ) : null}
       {liveBlocks.length ? (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { Copy, ExternalLink, FolderOpen } from "lucide-react";
+import { Copy, ExternalLink, FolderOpen, PanelRight } from "lucide-react";
 
 import { VDropdownMenu, type VDropdownMenuItem } from "../vui";
 import {
@@ -15,6 +15,8 @@ export type ConversationMarkdownWorkspaceFileLinkProps = {
   /** Host-provided inline link style (same map as ordinary markdown anchors). */
   className: string;
   language: "zh" | "en";
+  /** Ordinary chat only. Opens the file in the right column. */
+  onOpenInRail?: (path: string) => void;
   children: ReactNode;
 };
 
@@ -32,6 +34,7 @@ export function ConversationMarkdownWorkspaceFileLink({
   path,
   className,
   language,
+  onOpenInRail,
   children,
 }: ConversationMarkdownWorkspaceFileLinkProps) {
   const zh = language === "zh";
@@ -94,6 +97,12 @@ export function ConversationMarkdownWorkspaceFileLink({
   };
 
   const menuItems: VDropdownMenuItem[] = [
+    ...(onOpenInRail ? [{
+      id: "rail",
+      icon: <PanelRight size={14} aria-hidden="true" />,
+      label: zh ? "在右栏查看" : "View in the side column",
+      onSelect: () => onOpenInRail(path),
+    }] : []),
     {
       id: "open",
       icon: <ExternalLink size={14} aria-hidden="true" />,

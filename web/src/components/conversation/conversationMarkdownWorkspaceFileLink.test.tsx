@@ -7,6 +7,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { VuiProvider } from "../vui";
 import styles from "./ConversationView.styles";
 import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
 import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
@@ -72,6 +73,50 @@ describe("ConversationMarkdownWorkspaceFileLink", () => {
       expect(host.querySelector('[role="status"]')).toBeNull();
     } finally {
       unmount();
+    }
+  });
+
+  it("opens the file in the side column from the menu and leaves the system open unused", async () => {
+    const onOpenInRail = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => {
+      root.render(
+        <VuiProvider>
+          <ConversationMarkdownWorkspaceFileLink
+            path="notes/a.md"
+            className="lnk"
+            language="zh"
+            onOpenInRail={onOpenInRail}
+          >
+            a.md
+          </ConversationMarkdownWorkspaceFileLink>
+        </VuiProvider>,
+      );
+    });
+    try {
+      const anchor = host.querySelector("a");
+      await act(async () => {
+        anchor?.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 12,
+          clientY: 16,
+        }));
+      });
+      const item = Array.from(document.querySelectorAll('[role="menuitem"]')).find((node) => (
+        node.textContent === "在右栏查看"
+      ));
+      expect(item).toBeTruthy();
+      await act(async () => {
+        item?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      expect(onOpenInRail).toHaveBeenCalledWith("notes/a.md");
+      expect(actions.openWorkspaceFile).not.toHaveBeenCalled();
+    } finally {
+      act(() => root.unmount());
+      host.remove();
     }
   });
 

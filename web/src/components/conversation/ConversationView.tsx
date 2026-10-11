@@ -1102,6 +1102,7 @@ export const ConversationView = React.memo(function ConversationView({
   onOpenComposerContextDetail,
   onCreateSession,
   onOpenSideChat,
+  onOpenRailFile,
   turnError,
   submitLabel,
   submitPendingLabel,
@@ -6421,6 +6422,7 @@ export const ConversationView = React.memo(function ConversationView({
         renderImage={renderMarkdownImage}
         workspaceRoot={sessionWorkspacePath}
         language={lang}
+        onOpenRailFile={onOpenRailFile}
       />
     );
   }
@@ -6473,6 +6475,7 @@ export const ConversationView = React.memo(function ConversationView({
         renderImage={renderMarkdownImage}
         workspaceRoot={sessionWorkspacePath}
         language={lang}
+        onOpenRailFile={onOpenRailFile}
       />
     );
   }
@@ -6491,7 +6494,10 @@ export const ConversationView = React.memo(function ConversationView({
     }
     return (
       <ConversationFileReferenceChips
-        text={text} workspaceRoot={sessionWorkspacePath} language={lang}
+        text={text}
+        workspaceRoot={sessionWorkspacePath}
+        language={lang}
+        onOpenInRail={onOpenRailFile}
       />
     );
   }

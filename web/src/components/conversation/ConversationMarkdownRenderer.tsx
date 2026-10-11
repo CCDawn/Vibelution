@@ -49,6 +49,8 @@ export type ConversationMarkdownRendererProps = {
   workspaceRoot?: string;
   /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
   language?: "zh" | "en";
+  /** Ordinary chat only. Opens a workspace file in the right column. */
+  onOpenRailFile?: (path: string) => void;
   /** Decorate prose text without changing code, link labels/URLs or math. */
   renderText?: (text: string) => React.ReactNode;
 };
@@ -84,6 +86,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
   renderImage,
   workspaceRoot,
   language = "zh",
+  onOpenRailFile,
   renderText,
 }: ConversationMarkdownRendererProps) {
   const normalized = normalizeConversationMarkdown(content);
@@ -98,7 +101,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
         remarkPlugins={markdownPlugins}
         rehypePlugins={markdownRehypePlugins}
         skipHtml
-        components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language, renderText)}
+        components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language, renderText, onOpenRailFile)}
       >
         {guarded}
       </ReactMarkdown>
@@ -186,6 +189,7 @@ function markdownComponents(
   workspaceRoot?: string,
   language: "zh" | "en" = "zh",
   renderText?: (text: string) => React.ReactNode,
+  onOpenRailFile?: (path: string) => void,
 ) {
   const prose = (children: React.ReactNode) => renderText
     ? <MarkdownProse renderText={renderText}>{children}</MarkdownProse>
@@ -204,6 +208,7 @@ function markdownComponents(
             path={target.absolutePath}
             className={classNames.inlineLink}
             language={language}
+            onOpenInRail={onOpenRailFile}
           >
             {literalChildren}
           </ConversationMarkdownWorkspaceFileLink>

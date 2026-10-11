@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
+import { queryKeys } from "../../api/queryKeys";
 import { VuiProvider } from "../../components/vui";
 import { ChatRightRail, type ChatRightRailSideClient } from "./ChatRightRail";
 import {
@@ -13,6 +14,17 @@ import {
   openFreshChatRightRailSideTab,
   type ChatRightRailModel,
 } from "./chatRightRailModel";
+
+const filesApi = vi.hoisted(() => ({
+  fetchFileContent: vi.fn(async (path: string) => ({
+    path,
+    language: "markdown",
+    content: "文件正文",
+    truncated: false,
+  })),
+}));
+
+vi.mock("../../api/files", () => filesApi);
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -85,11 +97,16 @@ describe("chat right rail interaction", () => {
     vi.restoreAllMocks();
   });
 
-  async function mount(client: ChatRightRailSideClient, initialModel = EMPTY_CHAT_RIGHT_RAIL) {
+  async function mount(
+    client: ChatRightRailSideClient,
+    initialModel = EMPTY_CHAT_RIGHT_RAIL,
+    prepare?: (queryClient: QueryClient) => void,
+  ) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    prepare?.(queryClient);
     await act(async () => {
       root?.render(
         <VuiProvider>
@@ -572,5 +589,30 @@ describe("chat right rail interaction", () => {
       }));
     });
     expect(host.textContent).toContain("打开标签页");
+  });
+
+  it("shows a file tab's text and keeps the center-open action", async () => {
+    const client: ChatRightRailSideClient = {
+      createChild: async () => ({ childSessionId: "child-1", parentSessionId: "parent-1" }),
+      submit: async () => undefined,
+      fetchDetail: async () => ({ currentPhase: "idle", status: "ready", messages: [] }),
+    };
+    const model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, {
+      kind: "file",
+      title: "a.md",
+      filePath: "C:/repo/a.md",
+    });
+    const host = await mount(client, model, (queryClient) => {
+      queryClient.setQueryData(queryKeys.fileContent("C:/repo/a.md"), {
+        path: "C:/repo/a.md",
+        language: "markdown",
+        content: "文件正文",
+        truncated: true,
+      });
+    });
+    expect(host.textContent).toContain("文件正文");
+    expect(host.textContent).toContain("只显示了前面一部分");
+    expect(host.textContent).toContain("在对话中打开");
+    expect(host.textContent).toContain("C:/repo/a.md");
   });
 });

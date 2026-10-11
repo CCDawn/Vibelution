@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createSessionChild, fetchSessionDetail, submitSessionMessage } from "../../api/chat";
+import { fetchFileContent } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
 import type { ConversationMessage, FileContent, GitFileDiff, SessionActiveTask, SessionQueuedTurn } from "../../api/types";
 import {
@@ -443,6 +444,10 @@ export function ChatRightRail({
       browserSystem: "在系统浏览器打开",
       devtoolsEmpty: "还没有这场对话的数据",
       fileOpen: "在对话中打开",
+      fileLoading: "正在读取文件",
+      fileError: "这个文件打不开",
+      fileEmpty: "这个文件是空的",
+      fileTruncated: "只显示了前面一部分",
       contextualEmpty: "这场对话还没有打开这项内容",
       directory: "这项任务的详情在辅助对话中心。",
       directoryOpen: "打开辅助对话中心",
@@ -470,11 +475,21 @@ export function ChatRightRail({
       browserSystem: "Open in the system browser",
       devtoolsEmpty: "This chat has no data yet",
       fileOpen: "Open in the chat",
+      fileLoading: "Reading the file",
+      fileError: "This file could not be opened",
+      fileEmpty: "This file is empty",
+      fileTruncated: "Showing the first part only",
       contextualEmpty: "This chat has not opened that yet",
       directory: "Details for this task are in the side-chat center.",
       directoryOpen: "Open the side-chat center",
     };
   const active = activeChatRightRailTab(model);
+  const filePath = active?.kind === "file" ? (active.filePath || "") : "";
+  const fileQuery = useQuery({
+    queryKey: queryKeys.fileContent(filePath),
+    queryFn: () => fetchFileContent(filePath),
+    enabled: Boolean(filePath),
+  });
   const launcher = chatRightRailLauncherKinds(sessionKind);
   const matches = searchChatRightRailTabs(model, searchQuery);
   const devtoolsView = projectChatRightRailDevtools(devtools);
@@ -903,6 +918,11 @@ export function ChatRightRail({
             <VButton type="button" density="compact" onClick={() => onOpenFile(active.filePath || "")}>
               {copy.fileOpen}
             </VButton>
+            {fileQuery.isPending ? <p className={styles.note}>{copy.fileLoading}</p> : null}
+            {fileQuery.isError ? <p className={styles.error} role="alert">{copy.fileError}</p> : null}
+            {fileQuery.data?.truncated ? <p className={styles.note}>{copy.fileTruncated}</p> : null}
+            {fileQuery.data && !fileQuery.data.content ? <p className={styles.note}>{copy.fileEmpty}</p> : null}
+            {fileQuery.data?.content ? <pre className={styles.fileBody}>{fileQuery.data.content}</pre> : null}
           </div>
         ) : null}
         {active?.kind === "directory" ? (

@@ -7,6 +7,7 @@ import {
   Film,
   FolderOpen,
   Image as ImageIcon,
+  PanelRight,
 } from "lucide-react";
 
 import { VButton, VDropdownMenu, type VDropdownMenuItem } from "../vui";
@@ -43,6 +44,8 @@ export type ConversationFileReferenceChipsProps = {
   /** Session workspace root; relative references resolve against it. */
   workspaceRoot?: string;
   language: "zh" | "en";
+  /** Ordinary chat only. Opens the file in the right column. */
+  onOpenInRail?: (path: string) => void;
 };
 
 /**
@@ -58,6 +61,7 @@ export function ConversationFileReferenceChips({
   text,
   workspaceRoot,
   language,
+  onOpenInRail,
 }: ConversationFileReferenceChipsProps) {
   const zh = language === "zh";
   const references = extractConversationFileReferences(text, workspaceRoot);
@@ -112,6 +116,12 @@ export function ConversationFileReferenceChips({
 
   const menuItems: VDropdownMenuItem[] = menu
     ? [
+      ...(onOpenInRail ? [{
+        id: "rail",
+        icon: <PanelRight size={14} aria-hidden="true" />,
+        label: zh ? "在右栏查看" : "View in the side column",
+        onSelect: () => onOpenInRail(menu.path),
+      }] : []),
       {
         id: "open",
         icon: <ExternalLink size={14} aria-hidden="true" />,

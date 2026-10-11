@@ -13,6 +13,7 @@ export type LazyConversationMarkdownRendererProps = {
   workspaceRoot?: string;
   /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
   language?: "zh" | "en";
+  onOpenRailFile?: (path: string) => void;
   renderText?: (text: string) => ReactNode;
 };
 

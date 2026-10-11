@@ -58,7 +58,7 @@ import {
   openFreshChatRightRailSideTab,
   type ChatRightRailModel,
 } from "./chatRightRailModel";
-import { subscribeChatRightRailOpen } from "./chatRightRailRequests";
+import { requestChatRightRailOpen, subscribeChatRightRailOpen } from "./chatRightRailRequests";
 import { useChatChangePreview } from "./useChatChangePreview";
 import { useChatGitRail } from "./useChatGitRail";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -3908,6 +3908,21 @@ export function ChatCodingRouteWorkbench() {
     setRightPaneCollapsed,
   ]);
 
+  const openOrdinaryRailFile = useCallback((path: string) => {
+    const requestSessionId = activeSessionId?.trim() || "";
+    const filePath = path.trim();
+    if (!ordinaryChangeRail || !requestSessionId || detail?.sessionKind === "child" || !filePath) {
+      return;
+    }
+    const title = filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
+    requestChatRightRailOpen({
+      sessionId: requestSessionId,
+      kind: "file",
+      title,
+      filePath,
+    });
+  }, [activeSessionId, detail?.sessionKind, ordinaryChangeRail]);
+
   // Conversation surface model, memoized so unrelated workbench renders (rails,
   // dialogs, composer state) do not re-render ConversationView: the memo gate
   // lives on ConversationView and needs stable prop references. The streaming
@@ -4028,6 +4043,7 @@ export function ChatCodingRouteWorkbench() {
       onOpenComposerContextDetail: !financeSurface && !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
       onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
       onOpenSideChat: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinarySideChat : undefined,
+      onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinaryRailFile : undefined,
       slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
       slashSkillsCatalogState: verifiedCompanionMode ? "ready" : slashSkillsCatalogState,
       composerReferenceOptions: verifiedCompanionMode ? [] : composerKnowledgeReferenceOptions,
@@ -4136,6 +4152,7 @@ export function ChatCodingRouteWorkbench() {
       mentalModelEnabledForNextTurn,
       navigate,
       openCacheDetail,
+      openOrdinaryRailFile,
       openOrdinarySideChat,
       ordinaryChangeRail,
       regenerateMutation,
