@@ -947,9 +947,8 @@ describe("ConversationView native Codex transcript surface", () => {
     };
 
     const withWork = renderConversation([base]);
-    expect(withWork).toContain('data-testid="conversation-turn-work-header"');
+    expect(withWork).toContain('data-codex-process-disclosure="true"');
     expect(withWork).toContain("已工作 2 分 1 秒");
-    expect(withWork).toContain('data-turn-work-basis="turn_span"');
     // Collapsed by default: no open attribute (hiding is UA behavior for
     // details, so the body markup exists but starts collapsed).
     expect(withWork).not.toMatch(/<details[^>]*\sopen[=\s>]/);
@@ -964,11 +963,11 @@ describe("ConversationView native Codex transcript surface", () => {
           : item
       )),
     }]);
-    expect(short).not.toContain('data-testid="conversation-turn-work-header"');
+    expect(short).not.toContain("已工作");
 
     // In-flight turns stay quiet too.
     const streaming = renderConversation([{ ...base, id: "assistant-work-header-live", status: "running" as const }]);
-    expect(streaming).not.toContain('data-testid="conversation-turn-work-header"');
+    expect(streaming).not.toContain("已工作");
   });
 
   it("offers a copy action on a settled assistant answer", () => {

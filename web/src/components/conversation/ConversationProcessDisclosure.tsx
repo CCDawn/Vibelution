@@ -14,6 +14,11 @@ import {
   codexTranscriptToolRawName,
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
+import {
+  formatConversationTurnWorkBreakdown,
+  formatConversationTurnWorkDuration,
+  type ConversationTurnWorkSummary,
+} from "./conversationTurnWorkStatus";
 import styles from "./ConversationProcessDisclosure.styles";
 import {
   type ConversationProcessUserToggle,
@@ -32,6 +37,12 @@ type ConversationProcessDisclosureProps = {
    * the process rail collapses to "已处理" mid-turn and hides the trail.
    */
   turnStreaming?: boolean;
+  /**
+   * Settled-turn work summary (ZCode AssistantHistoryStatus parity): supplies
+   * the authoritative worked time and lets the same trigger degrade to 「已处理」
+   * when no duration is derivable.
+   */
+  workSummary?: ConversationTurnWorkSummary | null;
 };
 
 const PROCESS_ROW_STAGGER_MS = 28;
@@ -138,20 +149,42 @@ export function processLabel(
   language: "zh" | "en",
   messageOrder?: ReadonlyMap<string, number>,
   turnStreaming = false,
+  workSummary?: ConversationTurnWorkSummary | null,
 ) {
   const state = processState(cells, messageOrder, turnStreaming);
   const labels = language === "zh"
-    ? { completed: "已处理", failed: "工具失败", running: "处理中" }
-    : { completed: "Processed", failed: "Tool failed", running: "Processing" };
+    ? {
+      completed: "已处理",
+      completedWithDuration: "已工作",
+      failed: "工具失败",
+      running: "处理中",
+      runningWithDuration: "工作中",
+    }
+    : {
+      completed: "Processed",
+      completedWithDuration: "Worked for",
+      failed: "Tool failed",
+      running: "Processing",
+      runningWithDuration: "Working for",
+    };
   const duration = processDuration(cells);
+  // Turn-level worked time outranks the tool-duration sum: it is the fact the
+  // backend measured, and it is what makes 「已工作」 possible at all.
+  const durationLabel = workSummary
+    ? formatConversationTurnWorkDuration(workSummary.durationMs, language)
+    : (duration === null ? "" : formatCodexTranscriptDuration(duration));
   // Codex shows model retries only as a live status heartbeat; the settled
   // process summary never carries a retry row or a retry note.
   const retryFreeCells = cells.filter((cell) => !isRetryCell(cell));
   const traceLength = retryFreeCells.length;
-  const parts = [
-    labels[state],
-    duration === null ? "" : formatCodexTranscriptDuration(duration),
-  ];
+  const headline = durationLabel
+    ? state === "completed"
+      ? labels.completedWithDuration
+      : state === "running"
+        ? labels.runningWithDuration
+        : labels.failed
+    : labels[state];
+  const parts = [headline, durationLabel];
   if (state === "failed") {
     const toolIdentity = firstFailedToolIdentity(retryFreeCells, messageOrder);
     if (toolIdentity) {
@@ -215,6 +248,7 @@ export function ConversationProcessDisclosure({
   messageOrder,
   onUserToggle,
   turnStreaming = false,
+  workSummary = null,
 }: ConversationProcessDisclosureProps) {
   const state = processState(cells, messageOrder, turnStreaming);
   const running = state === "running";
@@ -232,7 +266,7 @@ export function ConversationProcessDisclosure({
       summaryRef.current?.focus({ preventScroll: true });
     }
   }, [expanded]);
-  const label = processLabel(cells, language, messageOrder, turnStreaming);
+  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary);
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
     : "Expand or collapse process details";
@@ -298,6 +332,11 @@ export function ConversationProcessDisclosure({
                   {row}
                 </div>
               ))}
+              {workSummary ? (
+                <div className={styles.workBreakdown}>
+                  {formatConversationTurnWorkBreakdown(workSummary, language)}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
