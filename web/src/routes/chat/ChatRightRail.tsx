@@ -2,10 +2,10 @@ import { PanelRightClose, Plus, Search, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { createSessionChild, fetchSessionDetail, submitSessionMessage } from "../../api/chat";
+import { createSessionChild, fetchSessionDetail, listSessionChildSessions, submitSessionMessage } from "../../api/chat";
 import { fetchFileContent } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
-import type { ConversationMessage, FileContent, GitFileDiff, SessionActiveTask, SessionQueuedTurn } from "../../api/types";
+import type { ConversationMessage, FileContent, GitFileDiff, SessionActiveTask, SessionQueuedTurn, SessionSummary } from "../../api/types";
 import {
   VButton,
   VDropdownMenu,
@@ -14,6 +14,7 @@ import {
   VRouteLinkButton,
   VTextarea,
 } from "../../components/vui";
+import { auxTaskStatusLabel } from "../auxConversations/auxTaskPresentation";
 import { assistantTurnIsInFlight } from "../chatTurnProtocol";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { ChatChangeRail } from "./ChatChangeRail";
@@ -432,6 +433,95 @@ function ChatRightRailFileBody({
   );
 }
 
+type DirectoryRow = {
+  id: string;
+  title: string;
+  status: string;
+  summary: string;
+};
+
+function directoryRows(sessions: SessionSummary[]): DirectoryRow[] {
+  return sessions.flatMap((session) => {
+    const id = String(session.id || "").trim();
+    if (!id) {
+      return [];
+    }
+    return [{
+      id,
+      title: String(session.taskTitle || session.title || id).trim() || id,
+      status: String(session.childStatus || session.status || session.currentPhase || "").trim(),
+      summary: String(session.resultCard?.summary || session.taskSummary || "").trim(),
+    }];
+  });
+}
+
+function ChatRightRailDirectoryBody({
+  sessionId,
+  lang,
+  copy,
+  onOpenItem,
+}: {
+  sessionId: string;
+  lang: "zh" | "en";
+  copy: {
+    directory: string;
+    directoryOpen: string;
+    directoryLoading: string;
+    directoryError: string;
+    directoryRunning: string;
+    directoryEnded: string;
+    directoryRunningEmpty: string;
+    directoryEndedEmpty: string;
+  };
+  onOpenItem: (item: DirectoryRow) => void;
+}) {
+  const directoryQuery = useQuery({
+    queryKey: queryKeys.sessionChildSessions(sessionId || "none"),
+    queryFn: () => listSessionChildSessions(sessionId),
+    enabled: Boolean(sessionId),
+  });
+  const rows = directoryRows(directoryQuery.data ?? []);
+  const running = rows.filter((row) => sideChatPhaseIsInFlight(row.status));
+  const ended = rows.filter((row) => !sideChatPhaseIsInFlight(row.status));
+  const section = (title: string, items: DirectoryRow[], empty: string) => (
+    <>
+      <p className={styles.searchHeading}>{`${title} · ${items.length}`}</p>
+      {items.length ? (
+        <ul className={styles.launcherList}>
+          {items.map((item) => (
+            <li key={item.id}>
+              <VButton
+                type="button"
+                variant="ghost"
+                contentLayout="plain"
+                className={styles.launcherButton}
+                onClick={() => onOpenItem(item)}
+              >
+                {`${item.title} · ${auxTaskStatusLabel(item.status, lang)}`}
+              </VButton>
+              {item.summary ? <p className={styles.note}>{item.summary}</p> : null}
+            </li>
+          ))}
+        </ul>
+      ) : directoryQuery.isPending ? null : (
+        <p className={styles.note}>{empty}</p>
+      )}
+    </>
+  );
+  return (
+    <div className={styles.plain}>
+      {directoryQuery.isPending ? <p className={styles.note}>{copy.directoryLoading}</p> : null}
+      {directoryQuery.isError ? <p className={styles.error} role="alert">{copy.directoryError}</p> : null}
+      {section(copy.directoryRunning, running, copy.directoryRunningEmpty)}
+      {section(copy.directoryEnded, ended, copy.directoryEndedEmpty)}
+      <p className={styles.note}>{copy.directory}</p>
+      <VRouteLinkButton to="/aux" variant="ghost" density="compact">
+        {copy.directoryOpen}
+      </VRouteLinkButton>
+    </div>
+  );
+}
+
 export function ChatRightRail({
   className,
   lang,
@@ -486,6 +576,12 @@ export function ChatRightRail({
       contextualEmpty: "这场对话还没有打开这项内容",
       directory: "这项任务的详情在辅助对话中心。",
       directoryOpen: "打开辅助对话中心",
+      directoryLoading: "正在读取子会话",
+      directoryError: "子会话列表没有读出来",
+      directoryRunning: "进行中",
+      directoryEnded: "已结束",
+      directoryRunningEmpty: "现在没有正在进行的子会话",
+      directoryEndedEmpty: "还没有结束的子会话",
     }
     : {
       rail: "Right column",
@@ -517,6 +613,12 @@ export function ChatRightRail({
       contextualEmpty: "This chat has not opened that yet",
       directory: "Details for this task are in the side-chat center.",
       directoryOpen: "Open the side-chat center",
+      directoryLoading: "Reading side sessions",
+      directoryError: "The side-session list could not be loaded",
+      directoryRunning: "Running",
+      directoryEnded: "Finished",
+      directoryRunningEmpty: "Nothing is running",
+      directoryEndedEmpty: "Nothing has finished",
     };
   const active = activeChatRightRailTab(model);
   const launcher = chatRightRailLauncherKinds(sessionKind);
@@ -948,7 +1050,21 @@ export function ChatRightRail({
             onOpenFile={onOpenFile}
           />
         ) : null}
-        {active?.kind === "directory" ? (
+        {active?.kind === "directory" && sessionKind !== "child" ? (
+          <ChatRightRailDirectoryBody
+            sessionId={sessionId}
+            lang={lang}
+            copy={copy}
+            onOpenItem={(item) => {
+              onModelChange((current) => openChatRightRailTab(current, {
+                kind: "subagent",
+                title: item.title,
+                targetId: item.id,
+              }));
+            }}
+          />
+        ) : null}
+        {active?.kind === "directory" && sessionKind === "child" ? (
           <div className={styles.plain}>
             <p className={styles.note}>{active.title}</p>
             <p className={styles.note}>{copy.directory}</p>

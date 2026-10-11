@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
@@ -52,9 +53,10 @@ const emptyReview = {
   onSelectGitFile: () => undefined,
 };
 
-function Harness({ client, initialModel = EMPTY_CHAT_RIGHT_RAIL }: {
+function Harness({ client, initialModel = EMPTY_CHAT_RIGHT_RAIL, sessionKind }: {
   client: ChatRightRailSideClient;
   initialModel?: ChatRightRailModel;
+  sessionKind?: string;
 }) {
   const [model, setModel] = useState<ChatRightRailModel>(initialModel);
   const activeSideTab = model.tabs.find((tab) => tab.id === model.activeId && tab.kind === "side");
@@ -66,6 +68,7 @@ function Harness({ client, initialModel = EMPTY_CHAT_RIGHT_RAIL }: {
         className="rail"
         lang="zh"
         sessionId="parent-1"
+        sessionKind={sessionKind}
         model={model}
         onModelChange={setModel}
         onCollapse={() => undefined}
@@ -101,6 +104,7 @@ describe("chat right rail interaction", () => {
     client: ChatRightRailSideClient,
     initialModel = EMPTY_CHAT_RIGHT_RAIL,
     prepare?: (queryClient: QueryClient) => void,
+    sessionKind?: string,
   ) {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -111,7 +115,9 @@ describe("chat right rail interaction", () => {
       root?.render(
         <VuiProvider>
           <QueryClientProvider client={queryClient}>
-            <Harness client={client} initialModel={initialModel} />
+            <MemoryRouter>
+              <Harness client={client} initialModel={initialModel} sessionKind={sessionKind} />
+            </MemoryRouter>
           </QueryClientProvider>
         </VuiProvider>,
       );
@@ -614,5 +620,72 @@ describe("chat right rail interaction", () => {
     expect(host.textContent).toContain("只显示了前面一部分");
     expect(host.textContent).toContain("在对话中打开");
     expect(host.textContent).toContain("C:/repo/a.md");
+  });
+
+  it("lists running and finished side sessions and opens one in the column", async () => {
+    const client: ChatRightRailSideClient = {
+      createChild: async () => ({ childSessionId: "unused", parentSessionId: "parent-1" }),
+      submit: async () => undefined,
+      fetchDetail: async () => ({ currentPhase: "idle", status: "ready", messages: [] }),
+    };
+    const model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "directory", title: "子智能体目录" });
+    const host = await mount(client, model, (queryClient) => {
+      queryClient.setQueryData(queryKeys.sessionChildSessions("parent-1"), [
+        {
+          id: "child-run",
+          title: "正在查",
+          taskTitle: "正在查",
+          status: "running",
+          currentPhase: "running",
+          taskSummary: "",
+          lastActive: "",
+          updatedAt: "",
+        },
+        {
+          id: "child-done",
+          title: "已经好了",
+          taskTitle: "已经好了",
+          status: "completed",
+          currentPhase: "idle",
+          taskSummary: "写完了",
+          lastActive: "",
+          updatedAt: "",
+        },
+      ]);
+    });
+    expect(host.textContent).toContain("进行中 · 1");
+    expect(host.textContent).toContain("正在查 · 运行中");
+    expect(host.textContent).toContain("已结束 · 1");
+    expect(host.textContent).toContain("已经好了 · 已完成");
+    expect(host.textContent).toContain("写完了");
+    expect(host.textContent).toContain("打开辅助对话中心");
+
+    const openRunning = Array.from(host.querySelectorAll("button")).find((button) => (
+      button.textContent === "正在查 · 运行中"
+    ));
+    await act(async () => {
+      openRunning?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const stored = JSON.parse(host.querySelector('[data-testid="model-state"]')?.textContent || "{}") as ChatRightRailModel;
+    expect(stored.activeId).toBe("subagent:child-run");
+    expect(stored.tabs.find((tab) => tab.id === "subagent:child-run")).toMatchObject({
+      kind: "subagent",
+      targetId: "child-run",
+      title: "正在查",
+    });
+    expect(stored.tabs.some((tab) => tab.kind === "directory")).toBe(true);
+  });
+
+  it("keeps a child session's directory as a link to the side-chat center", async () => {
+    const client: ChatRightRailSideClient = {
+      createChild: async () => ({ childSessionId: "unused", parentSessionId: "parent-1" }),
+      submit: async () => undefined,
+      fetchDetail: async () => ({ currentPhase: "idle", status: "ready", messages: [] }),
+    };
+    const model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "directory", title: "子智能体目录" });
+    const host = await mount(client, model, undefined, "child");
+    expect(host.textContent).toContain("这项任务的详情在辅助对话中心。");
+    expect(host.textContent).toContain("打开辅助对话中心");
+    expect(host.textContent).not.toContain("进行中");
   });
 });
