@@ -53,23 +53,30 @@ README 使用可点击动图和相对 MP4 链接。GitHub 的 Markdown 不依赖
 
 ## 2026-10-11 工作台导览
 
-首页定位更新为「本地 AI Agent 工作台」，先展示完整能力与单 Agent 上手，再介绍记忆、团队研究与进化。历史科研演示移入可展开案例；旧配置图退出首页，文件继续保留以兼容已有引用。中英文保持相同章节、能力与边界。
+首页定位更新为「本地 AI Agent 工作台」。第二轮把完整工作台放在标题后，随后是单 Agent 上手与能力导览；能力示意和局部对话图折叠，记忆图展示同一公开任务的约定、来源与下一步。历史科研演示仍放在可展开案例中。中英文保持相同章节、能力与边界。
 
 | 素材 | 性质、来源与用途 |
 | --- | --- |
+| `workbench.zh.png` / `workbench.en.png` | 生产 `App` → `AppShell` → `/chat` 路由的紧凑取景，展示公开 task-board 示例的 Agent 列表、问题、工具过程、完整回答和输入区。首屏使用原生 18px 字号偏好，提高 GitHub 正文宽度下的可读性；右栏由产品收起。 |
+| `workbench.mobile.zh.png` / `workbench.mobile.en.png` | 同一生产路由在 390px 视口中的原生窄屏状态，保留问题、工具过程、完整回答和输入区；侧栏由产品收起。 |
+| `workbench-overview.zh.png` / `workbench-overview.en.png` | 同一任务在原生宽屏三栏停靠布局中的完整截图，额外展示文件 diff 与仓库改动，放在首页可展开区域，并链接原图。 |
 | `product-overview.zh.svg` / `product-overview.en.svg` | 可编辑能力示意，四组主能力与模型、工具、Git、运行记录；复用项目 V 图标路径，无外部图像或字体依赖。不是产品窗口。 |
 | `product-overview.mobile.zh.svg` / `product-overview.mobile.en.svg` | 手机独立纵向排版，避免缩小桌面横图。与桌面图文字、颜色一致。 |
 | [product-overview.html](product-overview.html) | 四份 SVG 的内联可编辑预览，按语言和视口切换；独立 SVG 是 GitHub 使用的素材。 |
 | `conversation.zh.png` / `conversation.en.png` | 当前 `ConversationView` 局部组件的隔离截图，使用固定项目审查示例。外框是文档取景壳，不是完整 Chat 路由；未调用模型，未读取真实会话。 |
 | `conversation.mobile.zh.png` / `conversation.mobile.en.png` | 同一生产组件在 390px 视口中的截图，保留问题、回答和输入区。 |
-| `memory.zh.png` / `memory.en.png` | 当前 `MemoryAgentMemoryPanel` 局部组件的隔离截图，展示固定 `review-notes.json` 公开笔记；不是私人 Agent 记忆。 |
+| `memory.zh.png` / `memory.en.png` | 当前 `MemoryAgentMemoryPanel` 局部组件的隔离截图，展示 task-board 的三份公开笔记及选中笔记的完整正文；不是私人 Agent 记忆。 |
 | `memory.mobile.zh.png` / `memory.mobile.en.png` | 同一生产组件在 390px 视口中点击记忆文件后显示正文，使用正式阅读状态。 |
 
-截图组件版本取自本轮同步的本地 `main` 基线 `0b2d09edc5eec468b1f76cbfaa15edb864ed722f`；日期为 2026-10-11。截图只证明这些生产组件如何显示示例数据，不证明模型执行、检索命中、团队任务完成或已发布的完整窗口。文件快照与对话使用证据仍遵循当前产品边界。
+局部对话图沿用第一轮源码基线 `0b2d09edc5eec468b1f76cbfaa15edb864ed722f`；第二轮工作台和记忆图取自固定基线 `3a466cd5fae82eabe9556a859cafcb44b6b10774`，日期均为 2026-10-11。截图证明生产界面如何显示示例数据，不证明模型执行、检索命中、团队任务完成或当前发布版本。示例中的任务、文件内容与工具结果都是固定公开数据；不会在磁盘上创建 task-board 项目。英文图保留生产组件现有的中文工具动作标签，未改图替换文字。
 
 ### 再生成界面图
 
-可编辑入口为 [capture.html](capture.html)、[capture.tsx](capture.tsx) 和 [capture.css](capture.css)。参数 `lang=zh|en`、`view=conversation|memory`。外框只负责取景排版，正文直接使用生产组件、VUI 与生产 tokens；请求默认返回 403。预览配置清空 backend proxy，并阻断 `/api/`。
+局部组件入口为 [capture.html](capture.html)、[capture.tsx](capture.tsx) 和 [capture.css](capture.css)，参数 `lang=zh|en`、`view=conversation|memory`；文档壳负责取景，正文使用生产组件、VUI 与生产 tokens，请求统一返回 403。
+
+完整工作台入口为 [workbench-capture.html](workbench-capture.html)、[workbench-capture.tsx](workbench-capture.tsx) 和 [workbench-capture.css](workbench-capture.css)，参数 `lang=zh|en`。它直接加载生产 App 与路由，没有手绘导航或替换产品布局。精确的同源 GET 请求由静态表返回，流为无事件的本地流；唯一的 `POST /api/sessions/showcase-session/select` 返回固定会话，不修改任何状态。其他写操作、未知请求和跨域请求返回 403。Vite 无 backend proxy 且阻断 `/api/`；截图浏览器再次阻断真实 API 与跨域访问。
+
+主图使用产品 `compact` 布局，通过原生 `vibelution.workbench.font-base-px=18` 字号偏好提高阅读清晰度。完整三栏图使用 `wide` 布局；宽度均通过正式 `vibelution.pane-layouts.v1` 的 `chat.left/right` 设置为 260/340，没有覆盖产品断点或增加产品 CSS。公开示例的 Agent 头像复用仓库 [Vibelution 图标](../../../web/public/vibelution-icon-192.png)。两种取景的回答内容相同，主图以列表呈现按键，宽屏图用表格。截图使用原生展开控件显示工具摘要，并滚动文件差异到新增行。取景不启动、停止或刷新共享产品。
 
 使用已有前端依赖，从仓库根目录启动独立取景服务：
 
@@ -77,7 +84,7 @@ README 使用可点击动图和相对 MP4 链接。GitHub 的 Markdown 不依赖
 node web/node_modules/vite/bin/vite.js --config docs/assets/readme/capture.vite.config.mjs --configLoader native
 ```
 
-打开 `http://127.0.0.1:5188/docs/assets/readme/capture.html`。该端口只服务隔离文档素材，发生冲突时退出；无需启动 Launcher 或后端。停止预览用 `Ctrl+C`。Vite 缓存写入系统临时目录的 `vibelution-readme-preview`，不改工作树。
+打开 `http://127.0.0.1:5188/docs/assets/readme/workbench-capture.html` 看完整工作台，或打开 `capture.html` 看局部组件。该端口只服务隔离文档素材，发生冲突时退出；无需启动 Launcher 或后端。停止预览用 `Ctrl+C`。Vite 缓存写入系统临时目录的 `vibelution-readme-preview`，不改工作树。
 
 截图脚本 [capture.py](capture.py) 需要可选的 Python Playwright 与 Chromium。已有工具链可直接使用；若需准备，在开发虚拟环境执行 `python -m pip install playwright` 与 `python -m playwright install chromium`。然后：
 
@@ -85,7 +92,7 @@ node web/node_modules/vite/bin/vite.js --config docs/assets/readme/capture.vite.
 python docs/assets/readme/capture.py
 ```
 
-可用 `--chromium <绝对路径>` 指定已安装的 Chromium。脚本固定浅色、Asia/Shanghai 时区与 2 倍像素，会话桌面 960 × 740、记忆桌面 960 × 660，手机会话 390 × 820、记忆 390 × 780；仅允许 `127.0.0.1:5188` 隔离预览，另行阻断 `/api/`，发现组件错误、水平溢出或对话内容无法完整放入画面时停止。默认重新生成上述八张 PNG，可用 `--view conversation|memory` 只更新一组；请在文档任务分支中运行。
+可用 `--chromium <绝对路径>` 指定已安装的 Chromium。脚本固定浅色、Asia/Shanghai 时区与 2 倍像素。工作台主图桌面 960 × 820、手机 390 × 900；完整三栏图 1440 × 900；局部会话桌面 960 × 740、手机 390 × 820；记忆桌面 960 × 660、手机 390 × 780。脚本仅允许 `127.0.0.1:5188`，另行阻断真实 API；遇组件错误、水平溢出、对话不能完整入镜或选中记忆笔记被裁切时停止。默认生成十四张 PNG，可用 `--view workbench|workbench-overview|conversation|memory` 更新一组；请在文档任务分支中运行。
 
 ### 新增内容的事实来源
 

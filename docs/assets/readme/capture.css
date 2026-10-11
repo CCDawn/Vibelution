@@ -17,4 +17,7 @@ html, body, #root { height: 100%; margin: 0; }
 .capture > main { display: flex; flex: 1; min-height: 0; min-width: 0; }
 .capture > main > * { flex: 1; min-height: 0; }
 .capture > footer { padding: 8px 20px; font-size: 11px; color: var(--fg-secondary); border-top: 1px solid var(--vui-border-subtle); }
+.capture-memory > header { padding-block: 10px; }
+.capture-memory > header small { font-size: 12px; }
 @media (max-width: 600px) { .capture > header { flex-wrap: wrap; gap: 8px 12px; padding: 12px; } .capture > header small { flex-basis: 100%; margin: 0; } }
+@media (max-width: 600px) { .capture-memory > header { flex-wrap: nowrap; gap: 12px; } .capture-memory > header small { flex-basis: auto; margin-left: auto; white-space: nowrap; } }

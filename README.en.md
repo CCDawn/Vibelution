@@ -15,25 +15,22 @@
 </p>
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.en.svg">
-  <img src="docs/assets/readme/product-overview.en.svg" alt="Vibelution overview: a local workbench connects chat and coding, teams and research, knowledge and memory, evaluation and evolution, with models, tools, Git, and runtime records." width="1200">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/workbench.mobile.en.png">
+  <img src="docs/assets/readme/workbench.en.png" alt="A public task in the production workbench: navigation, Agent list, question, tool activity, complete answer, and composer." width="960">
 </picture>
 
-*Capability diagram. Conversation and memory images use current production components with public example data; the research video and character lobby are labeled as historical material. [Media sources and reproduction](docs/assets/readme/README.md)*
+*An isolated workbench-route showcase using fixed public task data; no model was called. [Media sources and reproduction](docs/assets/readme/README.md)*
 
-## What you can do
+<details>
+<summary><strong>View the full three-pane workbench and file review</strong></summary>
 
-| Capability | What it helps you do |
-| --- | --- |
-| **Chat and coding** | Start tasks with one Agent, manage sessions, inspect answers and tool activity, browse workspace files, preview outputs, and use a terminal. |
-| **Agents and tools** | Configure identities, models, prompts, and permissions independently; manage Skills and MCP integration. |
-| **Teams and research** | Assign roles, use group chat and message handoffs, and connect sources, discussions, human checkpoints, and outputs on a research canvas. |
-| **Knowledge and memory** | Read each Agent's private memory, organize project and team material, and retrieve context for later work. |
-| **Evaluation and evolution** | Inspect and improve against a goal, or evaluate a candidate against a baseline; review validation and rollback records. |
-| **Git and versions** | Inspect repository status and diffs, manage commits, and track project changes in the workbench. |
-| **Models and runtime** | Configure models and usage, monitor local models, and inspect logs and runtime diagnostics. |
+[![The same public task in the full desktop workbench: conversation, tool activity, file diff, and repository changes](docs/assets/readme/workbench-overview.en.png)](docs/assets/readme/workbench-overview.en.png)
 
-The workbench runs on your machine. Models can use local or cloud services according to your configuration; cloud requests go to the chosen provider and may incur charges. Tool use, cross-Agent communication, and evolution follow permissions and environment constraints.
+A wide capture of the same production route. Click the image to view the original.
+
+</details>
+
+Start with one conversation: an Agent can read the project, use authorized tools, and keep its answer, activity, and file changes in one workspace. Follow what it did as the task progresses, then extend the work into team research and reusable knowledge.
 
 ## Quick start
 
@@ -55,18 +52,49 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 On macOS / Linux, follow the platform guide to launch the browser workbench from a terminal. Installation currently requires the runtimes above; a portable package is still planned.
 
+## What you can do
+
+| Capability | What it helps you do |
+| --- | --- |
+| **Chat and coding** | Start tasks with one Agent, manage sessions, inspect answers and tool activity, browse workspace files, preview outputs, and use a terminal. |
+| **Agents and tools** | Configure identities, models, prompts, and permissions independently; manage Skills and MCP integration. |
+| **Teams and research** | Assign roles, use group chat and message handoffs, and connect sources, discussions, human checkpoints, and outputs on a research canvas. |
+| **Knowledge and memory** | Read each Agent's private memory, organize project and team material, and retrieve context for later work. |
+| **Evaluation and evolution** | Inspect and improve against a goal, or evaluate a candidate against a baseline; review validation and rollback records. |
+| **Git and versions** | Inspect repository status and diffs, manage commits, and track project changes in the workbench. |
+| **Models and runtime** | Configure models and usage, monitor local models, and inspect logs and runtime diagnostics. |
+
+The workbench runs on your machine. Models can use local or cloud services according to your configuration; cloud requests go to the chosen provider and may incur charges. Tool use, cross-Agent communication, and evolution follow permissions and environment constraints.
+
+<details>
+<summary><strong>Expand the capability map</strong></summary>
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.en.svg">
+  <img src="docs/assets/readme/product-overview.en.svg" alt="Vibelution overview: a local workbench connects chat and coding, teams and research, knowledge and memory, evaluation and evolution, with models, tools, Git, and runtime records." width="1200">
+</picture>
+
+</details>
+
 ## From one task to ongoing collaboration
 
 ### Read, discuss, and code in a conversation
 
 Let one Agent understand the problem, inspect relevant files, propose an approach, and carry out authorized work. Answers, tool activity, and workspace outputs are available in the same workbench.
 
+<details>
+<summary><strong>View the conversation interface</strong></summary>
+
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/conversation.mobile.en.png">
-  <img src="docs/assets/readme/conversation.en.png" alt="Isolated example of the current production ConversationView: a project-review question, structured answer, and message composer." width="960">
+  <img src="docs/assets/readme/conversation.en.png" alt="Isolated production ConversationView example: a project-review question, structured answer, and message composer." width="960">
 </picture>
 
-*Production conversation component captured on 2026-10-11 with fixed public example data; no model was called. [First conversation](docs/guides/first-conversation.en.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md) · [MCP integration](docs/agents/mcp-managed-agent-gateway.md)*
+*Production conversation component captured on 2026-10-11 with fixed public example data; no model was called.*
+
+</details>
+
+[First conversation](docs/guides/first-conversation.en.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md) · [MCP integration](docs/agents/mcp-managed-agent-gateway.md)
 
 ### Track project changes in the workbench
 
@@ -80,7 +108,7 @@ Agents have separate private memory, alongside dedicated project-knowledge and t
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/memory.mobile.en.png">
-  <img src="docs/assets/readme/memory.en.png" alt="Isolated example of the current production memory reader showing project-review notes." width="960">
+  <img src="docs/assets/readme/memory.en.png" alt="Isolated memory-reader example showing project conventions, source references, and next steps." width="960">
 </picture>
 
 *Production memory component captured on 2026-10-11 with public example notes. Stored does not mean used in a conversation; a current file snapshot is not a full revision history. [Memory and retrieval](core/web/services/memory_rag_services.md) · [Team knowledge](core/web/services/team_knowledge/README.md)*

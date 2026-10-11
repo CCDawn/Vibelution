@@ -1,0 +1,10 @@
+/* Full production route, with its own production styles and Tailwind sources. */
+@import "../../../web/src/design/tokens.css";
+@import "../../../web/src/design/base.css";
+@import "../../../web/src/design/tailwind.css";
+@import "../../../web/src/design/vui-provider-theme.css";
+@import "../../../web/src/design/vui-native-controls.css";
+@import "../../../web/src/design/workbench-shell.css";
+@source "./workbench-capture.tsx";
+@source "../../../web/src/**/*.{ts,tsx}";
+html, body, #root { height: 100%; margin: 0; }

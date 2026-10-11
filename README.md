@@ -15,25 +15,22 @@
 </p>
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.zh.svg">
-  <img src="docs/assets/readme/product-overview.zh.svg" alt="Vibelution 能力概览：本地工作台连接对话与编码、团队与研究、知识与记忆、验证与进化，配套模型、工具、Git 和运行记录。" width="1200">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/workbench.mobile.zh.png">
+  <img src="docs/assets/readme/workbench.zh.png" alt="生产工作台的公开任务示例：导航、Agent 列表、问题、工具过程、完整回答与输入区。" width="960">
 </picture>
 
-*能力示意。对话与记忆图使用当前生产组件和公开示例数据；科研视频与人物大厅另标为历史素材。[素材来源与再生成](docs/assets/readme/README.md)*
+*工作台路由的隔离展示，使用固定公开任务数据，未调用模型。[素材来源与再生成](docs/assets/readme/README.md)*
 
-## 工作台里能做什么
+<details>
+<summary><strong>查看完整三栏工作台与文件审查</strong></summary>
 
-| 能力 | 你可以做什么 |
-| --- | --- |
-| **对话与编码** | 与单个 Agent 开始任务，管理会话，查看回答与工具过程；浏览工作区文件、预览产物并使用终端。 |
-| **Agent 与工具** | 分别配置身份、模型、提示词与工具权限，管理 Skills 和 MCP 接入。 |
-| **团队与研究** | 组织成员分工、群聊与消息交接，用研究画布串起资料、讨论、人工确认和阶段产物。 |
-| **知识与记忆** | 阅读各 Agent 的私有记忆，整理项目知识与团队资料，结合检索继续工作。 |
-| **验证与进化** | 围绕目标检查和改进，或对照基线评估候选，查看验证、审核与回滚记录。 |
-| **Git 与版本** | 在工作台检查仓库状态与差异，管理提交，追踪项目改动。 |
-| **模型与运行** | 配置模型与用量，监控本地模型，查看日志与运行诊断。 |
+[![同一公开任务的完整桌面工作台：会话、工具过程、文件差异与仓库改动](docs/assets/readme/workbench-overview.zh.png)](docs/assets/readme/workbench-overview.zh.png)
 
-工作台在本机运行。模型可以按配置接入本地或云端服务；云端请求会发给所选服务商并可能产生费用。工具调用、跨 Agent 通信和进化执行受授权与环境约束。
+同一生产路由的宽屏取景；点击图片可查看原图。
+
+</details>
+
+从一次会话开始，Agent 可以阅读项目、执行获准的工具操作，并把回答、过程和文件改动留在同一工作区里。你能在任务推进时核对它做了什么，再按需要延伸到团队研究与知识复用。
 
 ## 快速开始
 
@@ -55,18 +52,49 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 macOS / Linux 按对应指南从终端启动浏览器工作台。当前安装需要上述运行环境，便携安装包仍在规划中。
 
+## 工作台里能做什么
+
+| 能力 | 你可以做什么 |
+| --- | --- |
+| **对话与编码** | 与单个 Agent 开始任务，管理会话，查看回答与工具过程；浏览工作区文件、预览产物并使用终端。 |
+| **Agent 与工具** | 分别配置身份、模型、提示词与工具权限，管理 Skills 和 MCP 接入。 |
+| **团队与研究** | 组织成员分工、群聊与消息交接，用研究画布串起资料、讨论、人工确认和阶段产物。 |
+| **知识与记忆** | 阅读各 Agent 的私有记忆，整理项目知识与团队资料，结合检索继续工作。 |
+| **验证与进化** | 围绕目标检查和改进，或对照基线评估候选，查看验证、审核与回滚记录。 |
+| **Git 与版本** | 在工作台检查仓库状态与差异，管理提交，追踪项目改动。 |
+| **模型与运行** | 配置模型与用量，监控本地模型，查看日志与运行诊断。 |
+
+工作台在本机运行。模型可以按配置接入本地或云端服务；云端请求会发给所选服务商并可能产生费用。工具调用、跨 Agent 通信和进化执行受授权与环境约束。
+
+<details>
+<summary><strong>展开查看整体能力关系图</strong></summary>
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.zh.svg">
+  <img src="docs/assets/readme/product-overview.zh.svg" alt="Vibelution 能力概览：本地工作台连接对话与编码、团队与研究、知识与记忆、验证与进化，配套模型、工具、Git 和运行记录。" width="1200">
+</picture>
+
+</details>
+
 ## 从一个任务到持续协作
 
 ### 在对话里阅读、讨论与编码
 
 让一个 Agent 先理解问题，再阅读相关文件、提出方案和完成授权的操作。回答、工具过程与工作区产物可以在同一工作台中查看。
 
+<details>
+<summary><strong>查看会话界面示例</strong></summary>
+
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/conversation.mobile.zh.png">
-  <img src="docs/assets/readme/conversation.zh.png" alt="当前 ConversationView 生产组件的隔离示例：项目审查问题、结构化回答与消息输入区。" width="960">
+  <img src="docs/assets/readme/conversation.zh.png" alt="ConversationView 生产组件隔离示例：项目审查问题、结构化回答与消息输入区。" width="960">
 </picture>
 
-*2026-10-11 生产会话组件的隔离示例，使用固定公开数据，未调用模型。[第一次对话](docs/guides/first-conversation.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md) · [MCP 接入](docs/agents/mcp-managed-agent-gateway.md)*
+*2026-10-11 生产会话组件的隔离示例，使用固定公开数据，未调用模型。*
+
+</details>
+
+[第一次对话](docs/guides/first-conversation.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md) · [MCP 接入](docs/agents/mcp-managed-agent-gateway.md)
 
 ### 在工作台中追踪项目改动
 
@@ -80,7 +108,7 @@ macOS / Linux 按对应指南从终端启动浏览器工作台。当前安装需
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/memory.mobile.zh.png">
-  <img src="docs/assets/readme/memory.zh.png" alt="当前记忆阅读组件的隔离示例：阅读项目审查笔记。" width="960">
+  <img src="docs/assets/readme/memory.zh.png" alt="记忆阅读组件隔离示例：项目约定、资料来源与下一步安排。" width="960">
 </picture>
 
 *2026-10-11 生产记忆组件的隔离示例，展示公开笔记。保存过不等于已在对话中使用过；当前文件快照也不代表完整修改历史。[记忆与检索](core/web/services/memory_rag_services.md) · [团队知识库](core/web/services/team_knowledge/README.md)*
