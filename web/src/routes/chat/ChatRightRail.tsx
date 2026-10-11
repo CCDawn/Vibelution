@@ -24,13 +24,16 @@ import {
   chatRightRailLauncherKinds,
   chatRightRailTabLabel,
   chatRightRailTranscriptLines,
+  closeAllChatRightRailTabs,
   closeChatRightRailTab,
+  closeOtherChatRightRailTabs,
   consumeChatRightRailSideDraft,
   normalizeChatRightRailBrowserUrl,
   openChatRightRailTab,
   openFreshChatRightRailSideTab,
   projectChatRightRailDevtools,
   rememberChatRightRailSideChild,
+  reorderChatRightRailTab,
   searchChatRightRailTabs,
   type ChatRightRailDevtoolsInput,
   type ChatRightRailKind,
@@ -413,6 +416,9 @@ export function ChatRightRail({
   const [searchQuery, setSearchQuery] = useState("");
   const [browserDraft, setBrowserDraft] = useState("");
   const [browserError, setBrowserError] = useState("");
+  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const suppressClickTabId = useRef<string | null>(null);
+  const draggingTabId = useRef<string | null>(null);
   const copy = lang === "zh"
     ? {
       rail: "右侧栏",
@@ -421,6 +427,10 @@ export function ChatRightRail({
       search: "搜索标签",
       collapse: "收起侧栏",
       close: "关闭",
+      closeCurrent: "关闭标签",
+      closeOthers: "关闭其他标签",
+      closeAll: "关闭所有标签",
+      tabMenu: "标签操作",
       reopen: "重新打开",
       closed: "最近关闭",
       none: "没有匹配的标签",
@@ -444,6 +454,10 @@ export function ChatRightRail({
       search: "Search tabs",
       collapse: "Collapse column",
       close: "Close",
+      closeCurrent: "Close tab",
+      closeOthers: "Close other tabs",
+      closeAll: "Close all tabs",
+      tabMenu: "Tab actions",
       reopen: "Reopen",
       closed: "Recently closed",
       none: "No matching tabs",
@@ -487,13 +501,76 @@ export function ChatRightRail({
                 key={tab.id}
                 role="tab"
                 aria-selected={selected}
+                data-chat-right-rail-tab={tab.id}
+                draggable
                 className={selected ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+                onMouseDown={(event) => {
+                  if (event.button === 1) {
+                    event.preventDefault();
+                    suppressClickTabId.current = tab.id;
+                  }
+                }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) {
+                    return;
+                  }
+                  event.preventDefault();
+                  suppressClickTabId.current = tab.id;
+                  onModelChange((current) => closeChatRightRailTab(current, tab.id));
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setTabMenu({ id: tab.id, x: event.clientX, y: event.clientY });
+                }}
+                onDragStart={(event) => {
+                  const target = event.target;
+                  if (target instanceof Element && target.closest("[data-chat-right-rail-close]")) {
+                    event.preventDefault();
+                    return;
+                  }
+                  draggingTabId.current = tab.id;
+                  suppressClickTabId.current = tab.id;
+                  event.dataTransfer?.setData("text/plain", tab.id);
+                  if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = "move";
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (!draggingTabId.current || draggingTabId.current === tab.id) {
+                    return;
+                  }
+                  event.preventDefault();
+                  if (event.dataTransfer) {
+                    event.dataTransfer.dropEffect = "move";
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const from = draggingTabId.current || event.dataTransfer?.getData("text/plain") || "";
+                  draggingTabId.current = null;
+                  if (!from || from === tab.id) {
+                    return;
+                  }
+                  onModelChange((current) => reorderChatRightRailTab(current, from, tab.id));
+                }}
+                onDragEnd={() => {
+                  draggingTabId.current = null;
+                }}
               >
                 <VButton
                   type="button"
                   contentLayout="plain"
+                  draggable
                   className={styles.tabLabel}
-                  onClick={() => onModelChange({ ...model, activeId: tab.id })}
+                  onClick={(event) => {
+                    if (event.button !== 0 || suppressClickTabId.current === tab.id) {
+                      suppressClickTabId.current = null;
+                      return;
+                    }
+                    onModelChange((current) => (
+                      current.activeId === tab.id ? current : { ...current, activeId: tab.id }
+                    ));
+                  }}
                 >
                   {label}
                 </VButton>
@@ -502,7 +579,11 @@ export function ChatRightRail({
                   isIconOnly
                   aria-label={`${copy.close}${label}`}
                   className={styles.tabClose}
-                  onClick={() => onModelChange(closeChatRightRailTab(model, tab.id))}
+                  data-chat-right-rail-close=""
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onModelChange((current) => closeChatRightRailTab(current, tab.id));
+                  }}
                 >
                   <X size={12} aria-hidden="true" />
                 </VButton>
@@ -547,6 +628,36 @@ export function ChatRightRail({
           </VButton>
         </div>
       </div>
+      {tabMenu ? (
+        <VDropdownMenu
+          open
+          position={{ x: tabMenu.x, y: tabMenu.y }}
+          aria-label={copy.tabMenu}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTabMenu(null);
+            }
+          }}
+          items={[
+            {
+              id: "close-current",
+              label: copy.closeCurrent,
+              onSelect: () => onModelChange((current) => closeChatRightRailTab(current, tabMenu.id)),
+            },
+            {
+              id: "close-others",
+              label: copy.closeOthers,
+              disabled: model.tabs.length < 2,
+              onSelect: () => onModelChange((current) => closeOtherChatRightRailTabs(current, tabMenu.id)),
+            },
+            {
+              id: "close-all",
+              label: copy.closeAll,
+              onSelect: () => onModelChange((current) => closeAllChatRightRailTabs(current)),
+            },
+          ]}
+        />
+      ) : null}
       {searchOpen ? (
         <div className={styles.search}>
           <VInput

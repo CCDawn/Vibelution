@@ -190,6 +190,54 @@ export function closeChatRightRailTab(model: ChatRightRailModel, id: string): Ch
   return { ...model, tabs, activeId, closed };
 }
 
+export function closeOtherChatRightRailTabs(
+  model: ChatRightRailModel,
+  keepId: string,
+): ChatRightRailModel {
+  if (!model.tabs.some((tab) => tab.id === keepId)) {
+    return model;
+  }
+  const closing = model.tabs.filter((tab) => tab.id !== keepId);
+  if (closing.length === 0) {
+    return model;
+  }
+  let next = model;
+  for (const tab of closing) {
+    next = closeChatRightRailTab(next, tab.id);
+  }
+  return next.activeId === keepId ? next : { ...next, activeId: keepId };
+}
+
+export function closeAllChatRightRailTabs(model: ChatRightRailModel): ChatRightRailModel {
+  let next = model;
+  for (const tab of model.tabs) {
+    next = closeChatRightRailTab(next, tab.id);
+  }
+  return next;
+}
+
+export function reorderChatRightRailTab(
+  model: ChatRightRailModel,
+  movingId: string,
+  overId: string,
+): ChatRightRailModel {
+  if (!movingId || movingId === overId) {
+    return model;
+  }
+  const from = model.tabs.findIndex((tab) => tab.id === movingId);
+  const to = model.tabs.findIndex((tab) => tab.id === overId);
+  if (from < 0 || to < 0) {
+    return model;
+  }
+  const tabs = [...model.tabs];
+  const [moved] = tabs.splice(from, 1);
+  if (!moved) {
+    return model;
+  }
+  tabs.splice(to, 0, moved);
+  return { ...model, tabs };
+}
+
 export function searchChatRightRailTabs(model: ChatRightRailModel, query: string): {
   open: ChatRightRailTab[];
   closed: ChatRightRailTab[];

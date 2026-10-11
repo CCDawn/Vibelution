@@ -6,7 +6,9 @@ import {
   EMPTY_CHAT_RIGHT_RAIL,
   chatRightRailLauncherKinds,
   chatRightRailTranscriptLines,
+  closeAllChatRightRailTabs,
   closeChatRightRailTab,
+  closeOtherChatRightRailTabs,
   consumeChatRightRailSideDraft,
   confirmChatRightRailSideReadback,
   normalizeChatRightRailBrowserUrl,
@@ -15,6 +17,7 @@ import {
   openFreshChatRightRailSideTab,
   projectChatRightRailDevtools,
   rememberChatRightRailSideChild,
+  reorderChatRightRailTab,
   searchChatRightRailTabs,
   trackChatRightRailSideSubmission,
   updateChatRightRailSideDraft,
@@ -147,6 +150,30 @@ describe("chat right rail model", () => {
     const reopened = openChatRightRailTab(model, newest);
     expect(reopened.activeId).toBe(newest.id);
     expect(reopened.closed.some((tab) => tab.id === newest.id)).toBe(false);
+  });
+
+  it("closes other tabs, closes every tab, and reorders without changing the active tab", () => {
+    let model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "side", title: "辅助对话" });
+    model = openChatRightRailTab(model, { kind: "review", title: "审查" });
+    model = openChatRightRailTab(model, { kind: "terminal", title: "终端" });
+    const others = closeOtherChatRightRailTabs(model, "review");
+    expect(others.tabs.map((tab) => tab.id)).toEqual(["review"]);
+    expect(others.activeId).toBe("review");
+    expect(others.closed.map((tab) => tab.id)).toEqual(["terminal", "side"]);
+    expect(closeOtherChatRightRailTabs(others, "missing")).toBe(others);
+    expect(closeOtherChatRightRailTabs(others, "review")).toBe(others);
+
+    const reordered = reorderChatRightRailTab(model, "side", "terminal");
+    expect(reordered.tabs.map((tab) => tab.id)).toEqual(["review", "terminal", "side"]);
+    expect(reordered.activeId).toBe("terminal");
+    expect(reorderChatRightRailTab(model, "side", "side")).toBe(model);
+    expect(reorderChatRightRailTab(model, "missing", "side")).toBe(model);
+
+    const closed = closeAllChatRightRailTabs(model);
+    expect(closed.tabs).toEqual([]);
+    expect(closed.activeId).toBeNull();
+    expect(closed.closed.map((tab) => tab.id)).toEqual(["terminal", "review", "side"]);
+    expect(closeAllChatRightRailTabs(closed)).toBe(closed);
   });
 
   it("opens review once when files appear and does not steal an existing tab", () => {

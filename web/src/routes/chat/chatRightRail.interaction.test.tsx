@@ -522,4 +522,55 @@ describe("chat right rail interaction", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(fetchesAfterSubmit).toBe(1);
   });
+
+  it("closes other tabs from the menu, closes a tab on middle click, and reorders by drag", async () => {
+    const client: ChatRightRailSideClient = {
+      createChild: async () => ({ childSessionId: "child-1", parentSessionId: "parent-1" }),
+      submit: async () => undefined,
+      fetchDetail: async () => ({ currentPhase: "idle", status: "ready", messages: [] }),
+    };
+    let model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "side", title: "辅助对话" });
+    model = openChatRightRailTab(model, { kind: "review", title: "审查" });
+    model = openChatRightRailTab(model, { kind: "terminal", title: "终端" });
+    const host = await mount(client, model);
+    const moving = host.querySelector<HTMLElement>('[data-chat-right-rail-tab="side"]');
+    const over = host.querySelector<HTMLElement>('[data-chat-right-rail-tab="terminal"]');
+    const data = typeof DataTransfer === "undefined" ? undefined : new DataTransfer();
+    await act(async () => {
+      moving?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: data }));
+      over?.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: data }));
+    });
+    const stored = JSON.parse(host.querySelector('[data-testid="model-state"]')?.textContent || "{}") as ChatRightRailModel;
+    expect(stored.tabs.map((tab) => tab.id)).toEqual(["review", "terminal", "side"]);
+    expect(stored.activeId).toBe("terminal");
+
+    const reviewTab = host.querySelector<HTMLElement>('[data-chat-right-rail-tab="review"]');
+    await act(async () => {
+      reviewTab?.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 24,
+        clientY: 32,
+      }));
+    });
+    const closeOthers = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => (
+      item.textContent === "关闭其他标签"
+    ));
+    expect(closeOthers).toBeTruthy();
+    await act(async () => {
+      closeOthers?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host.querySelector('[data-chat-right-rail-tab="review"]')).toBeTruthy();
+    expect(host.querySelector('[data-chat-right-rail-tab="side"]')).toBeNull();
+    expect(host.querySelector('[data-chat-right-rail-tab="terminal"]')).toBeNull();
+
+    await act(async () => {
+      host.querySelector('[data-chat-right-rail-tab="review"]')?.dispatchEvent(new MouseEvent("auxclick", {
+        bubbles: true,
+        cancelable: true,
+        button: 1,
+      }));
+    });
+    expect(host.textContent).toContain("打开标签页");
+  });
 });
