@@ -22,6 +22,8 @@ def _prepare_ingestion_writeback_case(
     *,
     include_ingestor_in_team: bool,
     recorded_by_agent: str,
+    extra_members: list[dict[str, Any]] | None = None,
+    source_summary: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -55,6 +57,7 @@ def _prepare_ingestion_writeback_case(
                 "agentName": "资料入库",
             }
         )
+    members.extend(extra_members or [])
     team = team_service.create_team(name="挑战杯科研团队", members=members)
 
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -74,7 +77,7 @@ def _prepare_ingestion_writeback_case(
             "title": "Predictive coding cortical hierarchy neural network paper",
             "sourceUrl": "https://doi.org/10.0000/ingestion-actor-authority",
             "sourceKind": "paper",
-            "summary": "Neural predictive coding evidence for a governed knowledge item.",
+            "summary": source_summary or "Neural predictive coding evidence for a governed knowledge item.",
             "tags": ["neuroscience", "algorithm"],
             "allowedForAnalysis": True,
             "metadata": {

@@ -1833,19 +1833,100 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         return _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(team_id, run_id, task, writeback)
 
 
+def _steward_pack_fingerprint_value(value: Any) -> Any:
+    """Idempotent mirror of the storage clipping applied to ``metadata.output``.
+
+    ``record_local_research_model_output`` persists pack outputs through
+    ``_normalize_metadata``, whose string clip (``strip()[:1000]``) is not
+    idempotent: when the 1000-char cut lands on whitespace, the persisted copy
+    keeps a trailing space that a re-run strips.  Comparing the stored form
+    against a rebuilt pre-persist form therefore needs a canonicalizer that
+    reaches the same fixpoint from both shapes: strip, clip, strip again.
+    """
+    s = _service()
+    if isinstance(value, str):
+        return s._trim_text(value, max_length=1000).strip()
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return [_steward_pack_fingerprint_value(item) for item in value[:24]]
+    if isinstance(value, dict):
+        return {
+            s._trim_text(key, max_length=80): _steward_pack_fingerprint_value(item)
+            for key, item in value.items()
+            if s._trim_text(key, max_length=80)
+        }
+    return _steward_pack_fingerprint_value(s._trim_text(value, max_length=1000))
+
+
+def _steward_pack_reuse_fingerprint(output: Any) -> dict[str, Any]:
+    """Canonical comparison form of a per-source steward pack output.
+
+    Storage clips the persisted ``metadata.output`` through
+    ``_normalize_metadata`` (string values capped at 1000 chars, list items at
+    24, object keys at 80), while each replay rebuilds the pre-persist shape,
+    so byte equality never holds once the pack content exceeds those caps
+    (long candidate summaries clipped at 4000 in ``proposalPayload.summary``
+    are the observed case).  Both sides run through the same idempotent
+    canonicalizer, which compares the pack semantically: the fingerprint
+    covers every output field (claims, proposalPayload, evidenceRefs,
+    sourceTrace, scope keys, sourceIdentityHash, ...) under storage clipping
+    and stays sensitive to real content edits such as changed claims.  Record
+    bookkeeping kept outside ``metadata.output`` (candidateId, timestamps,
+    validation) is not part of the comparison.
+    """
+    s = _service()
+    if not isinstance(output, dict):
+        return {}
+    return _steward_pack_fingerprint_value(s._normalize_metadata(output))
+
+
+def _steward_pack_ingestion_progress_rank(candidate: dict[str, Any]) -> int:
+    """Ingestion progress tier used to pick between semantically equal packs.
+
+    Higher is more advanced: an approved ``official_synced`` pack (formal
+    knowledge already applied) outranks ``pending_review``, which outranks
+    every earlier state (``pending_source_review`` or not yet submitted).
+    Replay must converge on the ingested original instead of reusing a
+    duplicate pending copy left behind by a defect round.
+    """
+    metadata = candidate.get("metadata") or {}
+    ingestion = metadata.get("knowledgeIngestion") or {}
+    official = metadata.get("officialSyncRecord") or {}
+    if (ingestion.get("status") == "official_synced"
+            and official.get("decision") == "approved" and official.get("knowledgeItemIds")):
+        return 3
+    if ingestion.get("status") == "pending_review":
+        return 2
+    return 1
+
+
 def _reusable_source_ingestion_pack(team_id, run_id, output, knowledge_base_id):
-    """Reuse this exact source payload, including completed application receipts."""
+    """Reuse a semantically equal source payload, including completed application receipts."""
     s = _service()
     store = s._load_candidate_store(team_id, run_id=run_id)
+    canonical_output = _steward_pack_reuse_fingerprint(output)
+    reusable = None
+    reusable_rank = 0
+    # Newest record first; a strictly higher ingestion progress tier wins, so
+    # equal tiers keep the newest match and replays settle on the already
+    # ingested original rather than a newer pending duplicate.
     for candidate in reversed(list(store.get("candidates") or [])):
         metadata = candidate.get("metadata") or {}
         ingestion = metadata.get("knowledgeIngestion") or {}
         if (metadata.get("taskType") == "steward_pack_draft"
                 and not s._candidate_is_archived(candidate)
-                and metadata.get("output") == output
+                and _steward_pack_reuse_fingerprint(metadata.get("output")) == canonical_output
                 and ingestion.get("knowledgeBaseId", knowledge_base_id) == knowledge_base_id):
-            return candidate
-    return None
+            rank = _steward_pack_ingestion_progress_rank(candidate)
+            if rank > reusable_rank:
+                reusable = candidate
+                reusable_rank = rank
+                if rank == 3:
+                    # Nothing outranks an approved official_synced receipt, and
+                    # the newest such record was just seen.
+                    break
+    return reusable
 
 
 def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
