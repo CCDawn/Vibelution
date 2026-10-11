@@ -2,7 +2,8 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import React, { act, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -21,6 +22,9 @@ import {
   type ChatComposerTurnMutations,
 } from "./useChatComposerSubmit";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
+import { agentMessageContextSections } from "../../components/conversation/agentMessageSections";
+import { AgentContextSectionsView } from "../../components/conversation/AgentContextSectionsView";
 
 /** Mirrors ChatCodingRouteWorkbench.sessionDetailStructuralSharing without importing the workbench. */
 function structuralSharing(previous: unknown, next: unknown): SessionDetail {
@@ -29,6 +33,9 @@ function structuralSharing(previous: unknown, next: unknown): SessionDetail {
 
 vi.mock("./chatSubmitTelemetry", () => ({
   postSubmitTelemetry: vi.fn(),
+}));
+vi.mock("../../app/userActionTelemetry", () => ({
+  startUserAction: () => ({ succeeded: vi.fn(), failed: vi.fn(), blocked: vi.fn() }),
 }));
 
 vi.mock("../../api/chat", async (importOriginal) => {
@@ -185,7 +192,9 @@ function Harness({
   return (
     <div>
       <output data-testid="draft">{sessionDrafts[sessionId] ?? ""}</output>
+      <output data-testid="tray">{JSON.stringify((sessionImageAttachments[sessionId] ?? []).map(({ filename, uploadStatus, artifactId }) => ({ filename, uploadStatus, artifactId })))}</output>
       <button type="button" data-testid="submit" onClick={() => actions.handleSubmitTurn()}>submit</button>
+      <button type="button" data-testid="add-next" onClick={() => actions.handleAddComposerAttachments([new File(["next"], "next.png", { type: "image/png" })])}>add</button>
     </div>
   );
 }
@@ -240,6 +249,11 @@ function mount(ui: React.ReactElement): HTMLElement {
   return container;
 }
 
+beforeEach(() => {
+  uploadGate = null;
+  submitSessionMessageMock.mockResolvedValue({ turnId: "turn-accepted-1", acceptedAt: "2026-09-28T00:00:00.000Z" });
+});
+
 afterEach(() => {
   for (const root of roots.splice(0)) {
     act(() => {
@@ -248,9 +262,76 @@ afterEach(() => {
   }
   document.body.innerHTML = "";
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe("useChatComposerSubmit blocked upload batch", () => {
+  it("moves an image-only submission into the conversation before upload resolves", async () => {
+    const client = new QueryClient();
+    seedSessionDetail(client, "session-1");
+    let finish!: (result: { artifactId: string }) => void;
+    uploadGate = () => new Promise((resolve) => { finish = resolve; });
+    const mounted = mount(<MutationsWire queryClient={client}>{(mutations) =>
+      <Harness queryClient={client} draft="" attachments={[makeAttachment("good.png")]} mutations={mutations} />
+    }</MutationsWire>);
+    act(() => (mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement).click());
+    const row = optimisticRows(client, "session-1")[0];
+    expect(row?.content).toBe("");
+    expect(row?.attachments?.[0]).toMatchObject({ filename: "good.png", kind: "user_image", imageUrl: expect.stringMatching(/^blob:/) });
+    const html = renderToStaticMarkup(<AgentContextSectionsView sections={agentMessageContextSections(conversationMessageToAgentMessage(row))} lang="zh" />);
+    expect(html).toContain('alt="good.png"');
+    expect(html).toContain(row.attachments![0].imageUrl);
+    expect(mounted.querySelector('[data-testid="tray"]')?.textContent).toBe("[]");
+    expect(submitSessionMessageMock).not.toHaveBeenCalled();
+    await act(async () => { finish({ artifactId: "uploaded-1" }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(submitSessionMessageMock).toHaveBeenCalledWith("session-1", expect.objectContaining({ attachmentIds: ["uploaded-1"] }));
+    client.clear();
+  });
+
+  it("keeps message previews until canonical reconciliation and preserves newly added draft images", async () => {
+    const client = new QueryClient();
+    seedSessionDetail(client, "session-1");
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    let accept!: (result: SessionTurnAcceptedResponse) => void;
+    submitSessionMessageMock.mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; }));
+    const mounted = mount(<MutationsWire queryClient={client}>{(mutations) =>
+      <Harness queryClient={client} attachments={[makeAttachment("good.png")]} mutations={mutations} />
+    }</MutationsWire>);
+    await act(async () => { (mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement).click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const pending = optimisticRows(client, "session-1")[0];
+    const preview = pending.attachments![0].imageUrl;
+    expect(pending.metadata?.pending).toBe(true);
+    act(() => (mounted.querySelector('[data-testid="add-next"]') as HTMLButtonElement).click());
+    await act(async () => { accept({ turnId: "accepted", acceptedAt: new Date().toISOString() }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(optimisticRows(client, "session-1")[0].metadata?.pending).toBe(false);
+    expect(revoke).not.toHaveBeenCalledWith(preview);
+    expect(mounted.querySelector('[data-testid="tray"]')?.textContent).toContain("next.png");
+    const current = client.getQueryData<SessionDetail>(queryKeys.session("session-1"))!;
+    const canonical = { ...pending, id: "canonical-user", metadata: { clientSubmissionId: pending.metadata?.clientSubmissionId }, attachments: [{ ...pending.attachments![0], artifactId: "stored", imageUrl: "/stored.png", url: "/stored.png" }] };
+    act(() => client.setQueryData(queryKeys.session("session-1"), mergeSessionDetailMessageWindow(current, { ...current, messages: [canonical] })));
+    expect(optimisticRows(client, "session-1")).toHaveLength(0);
+    expect(revoke).toHaveBeenCalledWith(preview);
+    expect(client.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.messages.filter((message) => message.metadata?.clientSubmissionId === pending.metadata?.clientSubmissionId)).toHaveLength(1);
+    client.clear();
+  });
+
+  it("restores uploaded artifacts after a message POST failure and reuses them on retry", async () => {
+    const client = new QueryClient();
+    seedSessionDetail(client, "session-1");
+    submitSessionMessageMock.mockRejectedValueOnce(new Error("network disconnected"));
+    const mounted = mount(<MutationsWire queryClient={client}>{(mutations) =>
+      <Harness queryClient={client} attachments={[makeAttachment("good.png")]} mutations={mutations} />
+    }</MutationsWire>);
+    const send = mounted.querySelector('[data-testid="submit"]') as HTMLButtonElement;
+    await act(async () => { send.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(optimisticRows(client, "session-1")).toHaveLength(0);
+    expect(mounted.querySelector('[data-testid="tray"]')?.textContent).toContain('"uploadStatus":"uploaded"');
+    await act(async () => { send.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(uploadSessionImageAttachmentMock).toHaveBeenCalledTimes(1);
+    expect(submitSessionMessageMock).toHaveBeenCalledTimes(2);
+    client.clear();
+  });
+
   it("removes the optimistic user row when a batch upload failure blocks the submit", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     seedSessionDetail(queryClient, "session-1");
@@ -288,6 +369,9 @@ describe("useChatComposerSubmit blocked upload batch", () => {
     expect(optimisticRows(queryClient, "session-1")).toHaveLength(0);
     // 失败提示出现。
     expect(Object.values(latestErrors).some((value) => value.includes("bad.png"))).toBe(true);
+    const tray = document.querySelector('[data-testid="tray"]')?.textContent ?? "";
+    expect(tray).toContain('"uploadStatus":"uploaded"');
+    expect(tray).toContain('"uploadStatus":"failed"');
 
     void mutationsRef;
   });

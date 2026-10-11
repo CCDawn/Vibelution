@@ -1,4 +1,4 @@
-import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+import { ConversationAttachment, ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
 import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
 import { editMessageIndex, editMessageTurnId, mergeEditResubmitDetail } from "./chat/chatEditResubmitState";
@@ -9,6 +9,7 @@ export type OptimisticUserMessageInput = {
   clientSubmissionId: string;
   content: string;
   attachmentIds?: string[];
+  attachments?: ConversationAttachment[];
   references?: SessionReferenceAttachment[];
   createdAt?: string;
 };
@@ -161,6 +162,7 @@ export function appendOptimisticUserMessage(
     id: optimisticUserMessageId(input),
     role: "user",
     content: input.content,
+    attachments: input.attachments ?? [],
     timestamp: createdAt,
     metadata: {
       [OPTIMISTIC_USER_MESSAGE_METADATA_KEY]: true,

@@ -181,6 +181,7 @@ export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageL
 
 export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase | "other" {
   switch (normalizeStage(stage)) {
+    case "sending":
     case "user_submit":
       return "sent";
     case "context_prepare":
@@ -234,6 +235,8 @@ export function activeTurnStageBarPhaseLabel(
 export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) {
   const zh = lang !== "en";
   switch (normalizeStage(stage)) {
+    case "sending":
+      return zh ? "发送中" : "Sending";
     case "user_submit":
       return zh ? "已发送" : "Sent";
     case "context_prepare":
@@ -281,6 +284,8 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
 export function activeTurnOptimisticStageSummary(stage: string, lang: "zh" | "en" | string = "zh") {
   const zh = lang !== "en";
   switch (normalizeStage(stage)) {
+    case "sending":
+      return zh ? "正在发送消息" : "Sending message";
     case "user_submit":
       return zh ? "已发送，正在连接" : "Sent, connecting";
     case "context_prepare":

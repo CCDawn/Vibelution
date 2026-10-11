@@ -28,6 +28,7 @@ export type OptimisticActiveTurnLayerInput = {
   clientSubmissionId?: string;
   updatedAt?: string;
   summary?: string;
+  accepted?: boolean;
 };
 
 function compactText(value: unknown) {
@@ -64,7 +65,7 @@ export function createOptimisticActiveTurnLayer(
     turnId,
     updatedAt,
     status: "pending",
-    processStage: "user_submit",
+    processStage: input.accepted === false ? "sending" : "user_submit",
     turnItems: [],
     ledgerSeq: 0,
   };

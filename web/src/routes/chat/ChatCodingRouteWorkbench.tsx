@@ -2683,6 +2683,7 @@ export function ChatCodingRouteWorkbench() {
     handleRemoveComposerReference,
   } = useChatComposerSubmitActions({
     queryClient,
+    setActiveTurnLayersBySession,
     lang,
     describeError,
     submitTurnMutation,

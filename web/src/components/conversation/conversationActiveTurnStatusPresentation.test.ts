@@ -25,6 +25,9 @@ import {
 describe("conversationActiveTurnStatusPresentation", () => {
   it("maps stage labels and optimistic summaries", () => {
     expect(activeTurnStageLabel("user_submit", "zh")).toBe("已发送");
+    expect(activeTurnStageLabel("sending", "zh")).toBe("发送中");
+    expect(activeTurnStageLabel("sending", "en")).toBe("Sending");
+    expect(activeTurnOptimisticStageSummary("sending", "zh")).toBe("正在发送消息");
     expect(activeTurnStageLabel("model_thinking", "zh")).toBe("思考中");
     expect(activeTurnStageLabel("server_thinking", "en")).toBe("Thinking");
     expect(activeTurnStageLabel("model_request", "zh")).toBe("请求模型");

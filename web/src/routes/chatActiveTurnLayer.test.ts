@@ -42,6 +42,10 @@ function assistantDelta(
 }
 
 describe("chat active turn layer", () => {
+  it("shows sending before admission and sent only after acceptance", () => {
+    expect(createOptimisticActiveTurnLayer({ sessionId: "session-1", accepted: false })?.processStage).toBe("sending");
+    expect(createOptimisticActiveTurnLayer({ sessionId: "session-1", accepted: true })?.processStage).toBe("user_submit");
+  });
   it("selects each running tool once for first-paint telemetry", () => {
     const first = {
       id: "tool-a:1",

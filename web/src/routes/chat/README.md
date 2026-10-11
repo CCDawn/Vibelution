@@ -105,6 +105,7 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 
 - `useChatWorkbenchLayout.ts` — panel widths, resize drag/keyboard, responsive collapse/overlay, layout CSS vars/class names
 - `chatComposerSubmitModel.ts` — composer draft/attachment/reference pure helpers, image classify, submit guards, mental-model toggle storage, optimistic turn id
+- `chatSubmittedAttachmentPreviews.ts` — submission-owned local previews; composer cleanup cannot revoke them, and authoritative message replacement or session cache removal releases them
 - `useChatComposerSubmit.ts` — `useChatComposerTurnMutations` (submit/edit/stop/guidance) + `useChatComposerSubmitActions` (handlers/upload pipeline); no second EventSource
 
 ## Phase E (done for structure ROI)
