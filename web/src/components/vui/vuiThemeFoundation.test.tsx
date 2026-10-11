@@ -87,9 +87,9 @@ describe("VUI dual-theme foundation", () => {
       expect(tokensSource).toContain(token);
     }
 
-    expect(tokensSource).toContain("--vui-radius-panel-soft: 12px;");
-    expect(tokensSource).toContain("--vui-radius-overlay: 12px;");
-    expect(tokensSource).toContain("--radius-control: 8px;");
+    expect(tokensSource).toContain("--vui-radius-panel-soft: 8px;");
+    expect(tokensSource).toContain("--vui-radius-overlay: 8px;");
+    expect(tokensSource).toContain("--radius-control: 5px;");
     expect(tokensSource).toContain("--radius-panel: var(--vui-radius-panel-soft);");
     expect(tokensSource).toContain("--radius-card: var(--vui-radius-panel-soft);");
     expect(tokensSource).toContain("--vui-elevation-panel: var(--vui-elevation-1-sheen);");
@@ -121,9 +121,9 @@ describe("VUI dual-theme foundation", () => {
     expect(tokensSource).toContain("--vui-select-chevron");
     expect(lightThemeBlock).toContain("--vui-select-chevron");
     expect(tokensSource).toContain("--vui-surface-toolbar: var(--vui-surface-raised);");
-    expect(tokensSource).toContain("--vui-surface-row: rgb(24 30 40);");
+    expect(tokensSource).toContain("--vui-surface-row: #303135;");
     // VUI owns literals; legacy --surface-* aliases are deleted (no reverse deps either).
-    expect(lightThemeBlock).toContain("--vui-surface-row: #f4f7fb;");
+    expect(lightThemeBlock).toContain("--vui-surface-row: #f5f5f5;");
     expect(tokensSource).not.toContain("--surface-page:");
     expect(tokensSource).not.toContain("--surface-panel:");
     expect(tokensSource).not.toContain("--surface-card:");

@@ -25,6 +25,7 @@ export function VuiComponentPreviewApp() {
   return (
     <main
       data-vui-preview
+      data-vui-app
       className="min-h-screen bg-vui-bg-canvas px-5 py-5 text-vui-fg-primary sm:px-8 lg:px-12"
     >
       <div className="mx-auto grid w-full max-w-[92rem] gap-10">

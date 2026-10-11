@@ -150,7 +150,8 @@ import { VDialog } from "@/components/vui";
 
 ### 视觉与状态
 - 居中由 Content 的 `left/top` 与 Tailwind `translate` 定位；CSS 动效只过渡透明度和缩放，避免在 keyframes 写入 `translate()` 覆盖定位。抽屉 recipe 保留 `!transform-none`。
-- 600px 及以下视口，内置关闭按钮的点击区域至少 44×44px；桌面保持紧凑尺寸，保留 Radix 关闭与焦点恢复行为。
+- 内容面跟随主题 surface，浮层圆角 8px；header/footer 使用细 hairline 分隔，长内容只在正文区滚动。
+- 保留 Radix Escape、键盘焦点约束、关闭后的焦点恢复与 scroll 行为。600px 及以下视口，内置关闭按钮的点击区域至少 44×44px；桌面保持紧凑尺寸。
 
 ### 非职责
 - 不做抽屉；不做动作菜单（`VDropdownMenu`）。
@@ -200,6 +201,9 @@ import { VConfirmDialog } from "@/components/vui";
 ### 非职责
 - 不做复杂多步表单。
 
+### 视觉与状态
+- 复用 `VDialog` 的 8px 浮层外形、细分隔线、键盘关闭和焦点恢复；危险 tone 只改变危险操作表达，不改动对话框层级。
+
 ### 实现落点
 - 与 `VDialog` 同文件族
 
@@ -243,6 +247,9 @@ import { VDropdownMenu } from "@/components/vui";
 
 坐标锚定菜单按 Escape 关闭后，焦点返回打开菜单前的控件，不聚焦虚拟 anchor。选择菜单动作或点击外部控件时，由目标控件接管焦点，关闭菜单不抢回。
 
+### 视觉与状态
+- 菜单项行高 28px，使用常规控件字号，不缩成微标注；菜单面采用 8px 浮层圆角、细边线和轻微控制面高光。
+
 ### 非职责
 - 不做路由级导航本体；不做多级树 Sub（未暴露）。
 
@@ -282,6 +289,9 @@ import { VPopover, VButton } from "@/components/vui";
 | --- | --- | --- |
 | `trigger` / children | 触发与面板内容 | trigger 需可 focus |
 | `side` / `align` / `open` | 定位与受控 | 避免挡住主 CTA |
+
+### 视觉与状态
+- 面板沿用主题内容面、8px 浮层圆角与细边线；内部交互控件仍用对应 VUI primitive。
 
 ### 非职责
 - 不做动作列表；不做打断确认；不做纯 tip。
@@ -329,6 +339,9 @@ import { VHoverCard, VButton } from "@/components/vui";
 | `side` / `align` / `sideOffset` | 定位 | 默认 bottom/center/8；轨道场景常用 side |
 | `openDelay` / `closeDelay` | 停留 120ms 才开、离开 80ms 收 | 密集列表必须有延迟，避免扫过即闪 |
 | `width` | `default`（max-w-80）/ `wide`（min(26rem, 100vw-1.5rem)） | 正文两段以内用 default |
+
+### 视觉与状态
+- 预览面沿用主题浮层 surface、8px 圆角和细边线；正文使用常规可读文本，不以微型字号制造密度。
 
 ### 非职责
 - 不做可交互面板（点击、表单）——那是 `VPopover`；不做纯短 tip。

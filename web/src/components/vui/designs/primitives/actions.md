@@ -31,7 +31,7 @@ import { VButton } from "@/components/vui";
 | Prop / 变体 | 说明 | 设计注意 |
 | --- | --- | --- |
 | `variant` | primary / secondary / ghost / danger | 一页一个 primary 焦点 |
-| `density` | 高度/内边距密度 | 工具条可 compact |
+| `density` | 高度/内边距密度 | compact = `26px + (fontBase - 16px)`；normal = `30px + (fontBase - 16px)`；两者随字号偏好缩放 |
 | `isDisabled` / `isPending` | 禁用 / 异步中 | pending 自带 spinner，勿只改文案 |
 | `icon` / `title` | 图标与原生短提示 | `title` 不创建 overlay，适合已有可见文案的轻量补充 |
 | `tooltip` / `disabledReason` | 显式浮层说明 | 只有这两个契约创建 Radix tooltip；disabled 要能说清原因 |
@@ -40,7 +40,8 @@ import { VButton } from "@/components/vui";
 - 不负责路由导航语义；不做纯图标方钮；不做密集零浮层命中条。
 
 ### 视觉与状态
-- **primary**：高对比实心主 CTA；**secondary**：描边；**ghost**：透明；**danger**：错误色。
+- **primary**：蓝色渐变面与边框由 `--vui-primary-face` / `--vui-primary-border` 提供，白字对比度至少 4.5:1；**secondary**：轻微面渐变和内高光；**ghost**：透明；**danger**：错误语义色。
+- 常规文字 400，标题 500；控件与短标签 13px。控件圆角 5px。表面、边线、内高光与阴影使用全局语义 token，不在按钮变体中重写主题色。
 - focus ring；disabled opacity；长中文允许调用方控制换行。
 
 ### 实现落点
@@ -85,6 +86,7 @@ import { VIconButton } from "@/components/vui";
 
 ### 反冗余
 - 不要为每个图标各建一个 `VRefreshButton`。
+- 图标按钮沿用所属按钮变体的面、边框、对比度与焦点状态，不另立一组样式 token。
 
 ---
 

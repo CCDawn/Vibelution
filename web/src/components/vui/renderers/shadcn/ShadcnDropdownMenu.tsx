@@ -46,14 +46,14 @@ export type ShadcnDropdownMenuProps = {
 const contentBaseClass = [
   "z-[100] min-w-[11.5rem] max-w-[min(100vw-1.5rem,16rem)]",
   "grid content-start gap-1 p-1",
-  "rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)]",
+  "rounded-[var(--vui-radius-soft)] border border-[var(--vui-control-border)]",
   "bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-[var(--vui-elevation-overlay)]",
   "outline-none",
 ].join(" ");
 
 const itemBaseClass = [
   "relative flex w-full min-w-0 cursor-default select-none items-center gap-2",
-  "rounded-[calc(var(--radius-control)-2px)] px-2 py-1.5 text-left [font-size:var(--vui-type-control-size)] font-semibold",
+  "min-h-[calc(var(--vui-control-height-sm)+2px)] rounded-[calc(var(--radius-control)-1px)] px-2 py-1 text-left [font-size:var(--vui-type-control-size)] font-normal leading-tight",
   "text-[var(--fg-secondary)] outline-none",
   "data-[highlighted]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]",
   "data-[highlighted]:text-[var(--fg-primary)]",

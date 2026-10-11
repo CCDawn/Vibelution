@@ -1,31 +1,29 @@
-/** Shared visual slots for VButton — shadcn-aligned, renderer-agnostic Tailwind contracts. */
+/** Shared visual slots for VButton — renderer-agnostic Tailwind contracts. */
 
 import type { VuiButtonVariant } from "./buttonVariants";
 
 /**
- * Base outline/muted control chrome (secondary default).
- * Hover uses semantic control tokens so light/dark themes stay consistent.
+ * Native-feeling secondary control chrome: a fine edge, quiet face, and soft inset shadow.
  */
 export const vuiButtonBaseClass =
-  "border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
+  "border border-[var(--vui-control-border)] text-vui-fg-secondary [background:var(--vui-control-face)] shadow-[var(--vui-control-shadow)]";
 
 export const vuiButtonHoverClass =
-  "transition-[color,background-color,border-color,box-shadow,opacity] duration-150 ease-out motion-reduce:transition-none hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] hover:shadow-[var(--vui-control-hover-shadow)]";
+  "transition-[color,background,border-color,box-shadow,opacity] duration-150 ease-out motion-reduce:transition-none hover:border-[color-mix(in_srgb,var(--vui-control-border)_78%,var(--fg-primary))] hover:[background:linear-gradient(180deg,color-mix(in_srgb,var(--vui-surface-panel)_94%,var(--accent-cool))_0%,var(--vui-control-muted)_100%)] hover:text-[var(--fg-primary)]";
 
 /**
- * Solid primary — shadcn-style high-contrast CTA (ink fill, not washed border).
- * Works in light/dark via fg-primary / surface-base inversion.
+ * Solid blue primary — visually clear default action in both themes.
  */
 export const vuiButtonPrimaryClass =
-  "border-[var(--fg-primary)] bg-[var(--fg-primary)] text-[var(--vui-surface-base)] shadow-none hover:border-[var(--fg-primary)] hover:bg-[color-mix(in_srgb,var(--fg-primary)_88%,var(--vui-surface-base))] hover:text-[var(--vui-surface-base)] hover:shadow-none active:bg-[color-mix(in_srgb,var(--fg-primary)_80%,var(--vui-surface-base))]";
+  "border border-[var(--vui-primary-border)] text-white [background:var(--vui-primary-face)] shadow-[0_1px_2px_rgb(0_0_0_/_14%)] hover:brightness-[0.97] active:brightness-90";
 
-/** Danger outline — readable on workbench surfaces without full solid wash. */
+/** Quiet danger treatment keeps both the error meaning and label readable. */
 export const vuiButtonDangerClass =
-  "border-[color-mix(in_srgb,var(--state-error)_42%,var(--vui-border-subtle))] bg-[var(--vui-status-danger-bg)] text-[var(--vui-status-danger-fg)] hover:border-[color-mix(in_srgb,var(--state-error)_55%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--state-error)_12%,var(--vui-status-danger-bg))]";
+  "border border-[color-mix(in_srgb,var(--state-error)_42%,var(--vui-control-border))] bg-[var(--vui-status-danger-bg)] text-[var(--vui-status-danger-fg)] shadow-none hover:border-[color-mix(in_srgb,var(--state-error)_55%,var(--vui-control-border))] hover:bg-[color-mix(in_srgb,var(--state-error)_12%,var(--vui-status-danger-bg))]";
 
-/** Ghost — transparent idle; soft hover fill (shadcn ghost). */
+/** Ghost — transparent idle with a quiet hover tint. */
 export const vuiButtonGhostClass =
-  "border border-transparent bg-transparent text-vui-fg-secondary shadow-none hover:border-transparent hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] hover:text-[var(--fg-primary)] hover:shadow-none";
+  "border border-transparent bg-transparent text-vui-fg-secondary shadow-none hover:border-transparent hover:bg-[color-mix(in_srgb,var(--fg-primary)_6%,transparent)] hover:text-[var(--fg-primary)] hover:shadow-none";
 
 /**
  * Focus ring: shadcn-like ring + project focus shadow token for theme compatibility.
@@ -42,7 +40,7 @@ export function vuiButtonVariantClass(variant: VuiButtonVariant | undefined): st
     return vuiButtonPrimaryClass;
   }
   if (variant === "danger") {
-    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonDangerClass}`;
+    return vuiButtonDangerClass;
   }
   if (variant === "ghost") {
     return vuiButtonGhostClass;

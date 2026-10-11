@@ -14,6 +14,7 @@
 [data-vui-provider="shadcn"] {
   color: var(--fg-primary);
   font-family: var(--font-body);
+  font-synthesis: none;
 }
 
 [data-vui-provider="shadcn"] [data-focus-visible="true"] {
@@ -26,11 +27,10 @@
 [data-vui-provider="shadcn"] button[data-vui="icon-button"] {
   min-height: var(--vui-control-height-sm);
   font-size: var(--vui-type-control-size);
-  font-weight: var(--vui-weight-semibold);
+  font-weight: var(--vui-weight-regular);
   line-height: var(--vui-type-control-line);
   border-width: 1px;
   border-style: solid;
-  border-color: var(--vui-component-border);
   border-radius: var(--radius-control);
   transition:
     background 0.16s ease,

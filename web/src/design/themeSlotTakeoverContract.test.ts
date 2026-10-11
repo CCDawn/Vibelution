@@ -107,7 +107,7 @@ describe("P0-a theme slot takeover contract", () => {
     }
     // The light theme re-declares the panel radius; it must stay 12px too.
     const lightBlock = tokensSource.split('[data-theme="light"]')[1] ?? "";
-    expect(lightBlock).toContain("--vui-radius-panel-soft: 12px");
+    expect(lightBlock).toContain("--vui-radius-panel-soft: 8px");
   });
 
   it("keeps the shell .text-xs compatibility rule that pins live behavior", () => {

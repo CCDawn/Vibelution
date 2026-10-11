@@ -29,6 +29,10 @@ import { VSurface } from "@/components/vui";
 | `tone` | panel / rail / row / workspace 等 | 跟语义选 tone，勿硬编码色值 |
 | `elevation` / `padding` / `as` | 高度与内边距 / 根元素 | 嵌套时 elevation 递减 |
 
+### 视觉与状态
+- 主题 surface 只在 `tokens.css` 映射：`workspace` / `rail` / `panel` / `toolbar` / `row` 对应 `--vui-surface-workspace` / `--vui-surface-rail` / `--vui-surface-panel` / `--vui-surface-toolbar` / `--vui-surface-row`。调用方按 `tone` 表达语义，不硬编码主题色；完整色阶见本目录 README。
+- 表面以细边线和层次差表达分区；选中行使用中性 `--vui-selection-bg`，状态色仍只表达状态语义。紧凑控件圆角 5px，popover/dialog 等浮层圆角 8px。
+
 ### 非职责
 - 不做页面级 layout recipe；不做业务字段布局。
 
@@ -64,6 +68,9 @@ import { VPanel } from "@/components/vui";
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
 | `className` / 子节点 | 内容与域几何 | 新设计优先迁 Surface |
+
+### 视觉与状态
+- 既有 `VPanel` 跟随 `VSurface` 的主题表面 token 与细分隔线，不额外增加卡片阴影或第二套圆角。
 
 ### 非职责
 - 不成为第二套表面 API。

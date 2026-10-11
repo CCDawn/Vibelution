@@ -80,11 +80,11 @@ export function VTabs({
             title={item.title}
             className={cn(
               "inline-flex min-w-0 max-w-full items-center justify-center gap-1.5 rounded-[calc(var(--radius-control)-2px)]",
-              "px-2.5 font-semibold text-[var(--fg-secondary)] outline-none transition-colors duration-150 motion-reduce:transition-none",
+              "border border-transparent px-2 font-normal leading-tight text-[var(--fg-secondary)] outline-none transition-colors duration-150 motion-reduce:transition-none",
               "hover:text-[var(--fg-primary)]",
               "focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
-              "data-[state=active]:bg-[var(--vui-surface-panel)] data-[state=active]:text-[var(--fg-primary)]",
-              "data-[state=active]:shadow-none data-[state=active]:border data-[state=active]:border-[var(--vui-border-subtle)]",
+              "data-[state=active]:bg-[image:var(--vui-control-face)] data-[state=active]:text-[var(--fg-primary)]",
+              "data-[state=active]:shadow-[var(--vui-control-shadow)] data-[state=active]:border-[var(--vui-control-border)]",
               "disabled:pointer-events-none disabled:opacity-45",
               dense
                 ? "min-h-[calc(var(--vui-control-height-sm)-2px)] [font-size:var(--vui-type-caption-size)]"

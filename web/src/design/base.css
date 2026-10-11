@@ -21,11 +21,14 @@ body {
   overflow: hidden;
 }
 
-button,
-input,
-textarea,
-select {
-  font: inherit;
+/* Native reset lives below renderer utilities so font/face variants can win. */
+@layer base {
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
 }
 
 button {
@@ -90,6 +93,7 @@ pre {
   letter-spacing: 0;
 }
 
+@layer base {
 :where(
   [class*="Surface"],
   [class*="surface"],
@@ -115,6 +119,7 @@ pre {
 
 :where(button:disabled, input:disabled, textarea:disabled, select:disabled) {
   cursor: not-allowed;
+}
 }
 
 /*

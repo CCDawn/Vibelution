@@ -113,6 +113,10 @@ import { VTabs } from "@/components/vui";
 | value / onValueChange | 受控 | 固定分段，非无限列表 |
 | density / listClassName | 密度与域几何 | 选中用 data-state，勿 twin Active class |
 
+### 视觉与状态
+- 桌面分段切换沿用原生 segmented control 的低对比外框、轻微内高光和清晰选中态；不把每个 tab 画成独立胶囊或强调色按钮。
+- 选中状态按 `data-state=active` 呈现，保留 Radix 键盘与焦点语义；同一组只允许一个当前分段。
+
 ### 非职责
 - 不做路由导航；不做 wizard。
 
@@ -151,6 +155,10 @@ import { VToolbar, VButton } from "@/components/vui";
 | --- | --- | --- |
 | ariaLabel / children | 分组与操作 | 子节点用 V* 控件 |
 | `wrap` | 默认 `true`（`flex-wrap`） | 单行密集 chrome 传 `false`，用截断而不是折行 |
+
+### 视觉与状态
+- 作为工作台顶端的操作带时，背景使用 `--vui-surface-toolbar`，以细分隔线与内容区区分；单纯语义分组不强制增加卡片背景或固定高度。
+- 子操作沿用统一控件面与 compact/normal 密度，窄屏按 recipe 收缩，不把预览窗口尺寸写成生产 toolbar 尺寸。
 
 ### 实现落点
 - `layout/VToolbar.tsx`

@@ -104,13 +104,13 @@ export const ShadcnSwitch = forwardRef<HTMLInputElement, ShadcnSwitchProps>(
             data-slot="switch-track"
             aria-hidden="true"
             className={[
-              "pointer-events-none relative inline-block h-[18px] w-8 shrink-0 rounded-full border",
-              "border-[var(--vui-border-strong)] bg-[color-mix(in_srgb,var(--vui-control-muted)_80%,transparent)]",
+              "pointer-events-none relative inline-block h-[18px] w-[30px] shrink-0 rounded-full border",
+              "border-[var(--vui-control-border)] bg-[color-mix(in_srgb,var(--fg-primary)_12%,transparent)] shadow-[inset_0_1px_1px_rgb(0_0_0_/_6%)]",
               "transition-[background-color,border-color] duration-150 motion-reduce:transition-none",
               "peer-checked:border-[var(--accent-cool)] peer-checked:bg-[var(--accent-cool)]",
               // peer variants only reach siblings of the input, so the thumb move
               // hangs off the track as a descendant arbitrary variant.
-              "peer-checked:[&_[data-slot=switch-thumb]]:[translate:16px_-50%]",
+              "peer-checked:[&_[data-slot=switch-thumb]]:[translate:14px_-50%]",
               "peer-focus-visible:ring-2 peer-focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
               "peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--vui-surface-panel)]",
             ].join(" ")}
@@ -118,8 +118,8 @@ export const ShadcnSwitch = forwardRef<HTMLInputElement, ShadcnSwitchProps>(
             <span
               data-slot="switch-thumb"
               className={[
-                "absolute top-1/2 left-px block size-3.5 -translate-y-1/2 rounded-full",
-                "bg-[var(--vui-surface-panel)] shadow-sm",
+                "absolute top-1/2 left-0 block size-3.5 -translate-y-1/2 rounded-full",
+                "bg-[var(--vui-switch-thumb)] shadow-[0_1px_2px_rgb(0_0_0_/_16%)]",
                 "transition-[translate] duration-150 motion-reduce:transition-none",
               ].join(" ")}
             />

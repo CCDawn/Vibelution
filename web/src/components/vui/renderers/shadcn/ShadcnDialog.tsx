@@ -85,7 +85,7 @@ export function ShadcnDialog({
           className={cn(
             "fixed left-1/2 top-1/2 z-[91] max-h-[min(88dvh,52rem)] -translate-x-1/2 -translate-y-1/2",
             "grid min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden",
-            "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]",
+            "rounded-[var(--vui-radius-overlay)] border border-[var(--vui-control-border)]",
             "bg-[var(--vui-surface-panel)]",
             "shadow-[var(--vui-elevation-overlay)] outline-none",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)]",
@@ -96,12 +96,12 @@ export function ShadcnDialog({
         >
           <header
             data-slot="dialog-header"
-            className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[var(--vui-border-subtle)] px-3 py-2.5"
+            className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-vui-border-hairline px-3 py-2.5"
           >
             <div className="grid min-w-0 gap-0.5">
               <DialogPrimitive.Title
                 data-slot="dialog-title"
-                className="m-0 min-w-0 truncate [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]"
+                className="m-0 min-w-0 truncate [font-size:var(--vui-type-control-size)] font-medium leading-tight text-[var(--fg-primary)]"
               >
                 {title}
               </DialogPrimitive.Title>
@@ -146,7 +146,7 @@ export function ShadcnDialog({
           {footer ? (
             <footer
               data-slot="dialog-footer"
-              className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 border-t border-[var(--vui-border-subtle)] px-3 py-2"
+              className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 border-t border-vui-border-hairline px-3 py-2"
             >
               {footer}
             </footer>

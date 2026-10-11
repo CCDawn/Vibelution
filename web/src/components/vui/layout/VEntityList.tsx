@@ -31,8 +31,8 @@ export function VEntityList<TItem extends VEntityListItem>({
       role="list"
       aria-label={ariaLabel}
       className={[
-        "grid min-w-0 content-start gap-1 rounded-md border border-vui-border-subtle",
-        "bg-vui-surface-glass p-1 backdrop-blur-md",
+        "grid min-w-0 content-start gap-1 rounded-[var(--radius-control)] border border-vui-border-subtle",
+        "bg-vui-surface-panel p-1",
         className,
       ]
         .filter(Boolean)
@@ -50,10 +50,10 @@ export function VEntityList<TItem extends VEntityListItem>({
             data-vui="entity-list-item"
             role="listitem"
             className={[
-              "min-w-0 rounded-md border border-transparent px-2 py-1.5 text-vui-xs",
+              "min-w-0 rounded-[calc(var(--radius-control)-1px)] border border-transparent px-2 py-1.5 [font-size:var(--vui-type-control-size)]",
               "text-vui-fg-secondary transition-colors motion-reduce:transition-none",
               activeId === item.id
-                ? "border-vui-accent-cool bg-[var(--vui-status-info-bg)] text-vui-fg-primary"
+                ? "bg-[var(--vui-selection-bg)] text-vui-fg-primary"
                 : "hover:border-vui-border-subtle hover:bg-vui-control-muted",
             ].join(" ")}
           >

@@ -77,7 +77,7 @@ export const VRouteLinkButton = forwardRef<HTMLAnchorElement, VRouteLinkButtonPr
               ]
             : [
                 "inline-flex max-w-full shrink-0 items-center justify-center justify-self-start",
-                "rounded-[var(--radius-control)] px-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight",
+                "rounded-[var(--radius-control)] px-2 [font-size:var(--vui-type-control-size)] font-normal leading-tight",
                 vuiButtonDensityClass(density),
                 vuiButtonVariantClass(variant),
                 vuiButtonFocusClass,

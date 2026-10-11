@@ -1,7 +1,7 @@
 # Component: 字号刻度 `text-vui-*`
 
 > 设计基元（非组件）：本文件描述 VUI 的排版尺度契约，不新增 `V*` 导出。
-> 权威：本文件 + [`../../design/tokens.css`](../../design/tokens.css)（尺度来源） + [`../../design/theme.tailwind.css`](../../design/theme.tailwind.css)（工具类暴露）。
+> 权威：本文件 + [`../../../../design/tokens.css`](../../../../design/tokens.css)（尺度来源） + [`../../../../design/theme.tailwind.css`](../../../../design/theme.tailwind.css)（工具类暴露）。
 
 ## 字号刻度 `text-vui-*`
 
@@ -21,6 +21,7 @@
 | 对话可读正文 | `text-vui-chat` |
 | 区块/路由标题 | `text-vui-title` |
 | 罕见的页面级标题 | `text-vui-xl` |
+| 原生控件、菜单项、短标签 | `text-vui-micro-13` / `--vui-type-control` |
 | 密集元信息（少用） | `text-vui-2xs` |
 | 代码 / Diff / 终端内容 | 该渲染器自带的等宽字号，不用 `text-vui-*` |
 
@@ -29,7 +30,7 @@
 ```tsx
 // 工具类由 design/theme.tailwind.css 的 @theme 注册，来自 tokens.css 的 --vui-font-*。
 <p className="text-vui-md text-[color:var(--fg-primary)]">正文</p>
-<span className="text-vui-xs text-[color:var(--fg-tertiary)]">元信息</span>
+<span className="text-vui-2xs text-[color:var(--fg-tertiary)]">元信息</span>
 <h2 className="text-vui-title font-medium">区块标题</h2>
 ```
 
@@ -38,10 +39,10 @@
 | `text-vui-micro-9` | `--vui-font-micro-9` (9px) | 极密微标注（角标/点），罕用 |
 | `text-vui-micro-10` | `--vui-font-micro-10` (10px) | 微标注 |
 | `text-vui-micro-11` | `--vui-font-micro-11` (11px) | 微标注 / eyebrow |
-| `text-vui-micro-13` | `--vui-font-micro-13` (13px) | 微标注 / 密集 label |
-| `text-vui-2xs` | `--vui-font-2xs` (12px) | 密集元信息，少用 |
-| `text-vui-xs` | `--vui-font-xs` (14px) | caption / chip / toolbar |
-| `text-vui-sm` | `--vui-font-sm` (15px) | 控件 / 列表次要文字 |
+| `text-vui-micro-13` | `--vui-font-micro-13` (13px) | 控件与短标签 |
+| `text-vui-2xs` | `--vui-font-2xs` (12px) | caption / 密集元信息，后者少用 |
+| `text-vui-xs` | `--vui-font-xs` (14px) | 一般辅助文字 / chip / toolbar |
+| `text-vui-sm` | `--vui-font-sm` (15px) | 次级正文 / 列表辅助文字 |
 | `text-vui-md` | `--vui-font-md` (16px) | 正文默认 |
 | `text-vui-chat` | `--vui-font-chat` (17px) | 对话可读正文 |
 | `text-vui-lg` | `--vui-font-lg` (18px) | 强调正文 / 空状态 |
@@ -51,19 +52,20 @@
 ### 非职责
 
 - 不负责行高、字重、字距：分别用已有的 `--vui-line-*` / `--vui-weight-*` / `--vui-tracking-*`（或语义角色 `--vui-type-*` 组合）。
-- 不做字号缩放开关：`--vui-font-*` 目前是固定阶梯，不提供“外观设置改字号”的能力。
+- 不新增第二套字号偏好开关：沿用现有 `--vui-font-base` 用户偏好与相对阶梯，避免密度或局部组件覆盖用户字号。
 - 不接管代码 / Diff / 终端的内容字号。
 
 ### 视觉与状态
 
 - 无交互状态；刻度是静态的。
-- 语义角色（`--vui-type-caption/-label/-control/-body/-chat/-emphasis/-title/-display`）是“尺寸 + 行高”的组合，优先用于新 UI；需要精细控制时才直接用 `--vui-font-*`。
+- 语义角色（`--vui-type-caption/-label/-control/-body/-chat/-emphasis/-title/-display`）是“尺寸 + 行高”的组合，优先用于新 UI；需要精细控制时才直接用 `--vui-font-*`。当前原生控件与短标签采用 13px，caption 12px；常规字重 400，标题 500。
+- 控件密度与用户字号偏好联动：compact 高度 `26px + (fontBase - 16px)`，normal 高度 `30px + (fontBase - 16px)`。密度变化不另造一组字号刻度。
 
 ### 实现落点
 
-- 尺度来源：`web/src/design/tokens.css`（`--vui-font-2xs…xl`、`--vui-line-*`、`--vui-weight-*`、`--vui-tracking-*`、`--vui-type-*`）。
+- 尺度来源：[`web/src/design/tokens.css`](../../../../design/tokens.css)（`--vui-font-2xs…xl`、`--vui-line-*`、`--vui-weight-*`、`--vui-tracking-*`、`--vui-type-*`）。
 - 工具类注册：`web/src/design/theme.tailwind.css`（`@theme inline` 的 `--text-vui-*`）。
-- 机器门：`../vuiTypeScaleContract.test.ts`（VUI 目录禁止内置字号与任意字号，存量只减不增）。
+- 机器门：[`vuiTypeScaleContract.test.ts`](../../vuiTypeScaleContract.test.ts)（VUI 目录禁止内置字号与任意字号，存量只减不增）。
 
 ### 反冗余
 

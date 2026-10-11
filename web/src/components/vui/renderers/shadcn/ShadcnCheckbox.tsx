@@ -73,13 +73,13 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     return (
       <label
         className={[
-          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] text-vui-xs text-vui-fg-secondary",
+          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] [font-size:var(--vui-type-control-size)] text-vui-fg-secondary",
           hasLabel
             ? `${vuiControlMinHeightClass(density)} px-1`
             : "size-8 justify-center",
-          "transition-[color,background-color] duration-150 motion-reduce:transition-none",
+          "transition-colors duration-150 motion-reduce:transition-none",
           "has-[:checked]:text-vui-fg-primary",
-          "hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)]",
+          "hover:text-vui-fg-primary",
           isDisabledResolved ? "cursor-not-allowed opacity-55" : "cursor-pointer",
           className,
         ]
@@ -94,7 +94,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
         <span data-slot="checkbox-content" className="inline-flex min-w-0 items-center gap-2">
           <span
             data-slot="checkbox-control"
-            className="relative inline-grid size-5 shrink-0 place-items-center"
+            className="relative inline-grid size-4 shrink-0 place-items-center"
           >
             <input
               {...props}
@@ -116,17 +116,16 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
               data-slot="checkbox-indicator"
               aria-hidden="true"
               className={[
-                "pointer-events-none grid size-5 place-items-center rounded-[var(--radius-control)] border",
-                "border-[var(--vui-border-strong)] bg-[var(--vui-surface-panel)] text-[var(--vui-surface-base)]",
-                "shadow-[inset_0_1px_0_color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
+                "pointer-events-none grid size-4 place-items-center rounded-[3px] border",
+                "border-[var(--vui-control-border)] text-white [background:var(--vui-control-face)] shadow-[var(--vui-field-shadow)]",
                 "transition-[background-color,border-color,box-shadow] duration-150 motion-reduce:transition-none",
-                "peer-checked:border-[var(--accent-cool)] peer-checked:bg-[var(--accent-cool)]",
+                "peer-checked:border-[var(--accent-cool)] peer-checked:[background:var(--accent-cool)] peer-checked:shadow-none",
                 "peer-focus-visible:ring-2 peer-focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
                 "peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--vui-surface-panel)]",
                 "[&_svg]:opacity-0 peer-checked:[&_svg]:opacity-100",
               ].join(" ")}
             >
-              <Check size={14} strokeWidth={2.5} aria-hidden="true" />
+              <Check size={12} strokeWidth={2.5} aria-hidden="true" />
             </span>
           </span>
           {children ? <span className="min-w-0">{children}</span> : null}

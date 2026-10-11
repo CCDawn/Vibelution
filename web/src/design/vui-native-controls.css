@@ -18,13 +18,14 @@
   --vui-native-control-padding-x: 8px;
   --vui-native-field-padding-x: 9px;
   --vui-native-control-gap: 6px;
-  --vui-native-control-font-size: var(--font-size-caption);
-  --vui-native-control-font-weight: 650;
-  --vui-native-field-font-size: var(--font-size-small);
+  --vui-native-control-font-size: var(--vui-type-control-size);
+  --vui-native-control-font-weight: var(--vui-weight-regular);
+  --vui-native-field-font-size: var(--vui-type-control-size);
   --vui-native-focus-ring: var(--vui-focus-ring);
 }
 
-[data-vui-app] :is(button, [role="button"], input, select, textarea) {
+/* Legacy native chrome must not override VUI renderer variants or elevation. */
+[data-vui-app] :is(button, [role="button"], input, select, textarea):not([data-vui]):not([data-renderer]) {
   border-width: var(--vui-native-control-border-width);
   box-shadow: none;
 }
@@ -125,7 +126,7 @@
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea
-) {
+):not([data-renderer]) {
   min-width: 0;
   border-style: solid;
   border-color: var(--vui-native-control-border);
@@ -141,12 +142,12 @@
     opacity 0.16s ease;
 }
 
-[data-vui-app] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select) {
+[data-vui-app] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select):not([data-renderer]) {
   min-height: var(--vui-native-field-height);
   padding-inline: var(--vui-native-field-padding-x);
 }
 
-[data-vui-app] textarea {
+[data-vui-app] textarea:not([data-renderer]) {
   min-height: var(--vui-native-field-textarea-min-height);
   padding: 7px var(--vui-native-field-padding-x);
   resize: vertical;
@@ -161,12 +162,12 @@
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover:not(:disabled),
   select:hover:not(:disabled),
   textarea:hover:not(:disabled)
-) {
+):not([data-renderer]) {
   border-color: var(--vui-native-control-border-hover);
   background-color: var(--vui-native-field-bg-hover);
 }
 
-[data-vui-app] :is(input:focus-visible, select:focus-visible, textarea:focus-visible) {
+[data-vui-app] :is(input:focus-visible, select:focus-visible, textarea:focus-visible):not([data-renderer]) {
   outline: none;
   border-color: var(--accent-cool);
   box-shadow: var(--vui-native-focus-ring);
@@ -190,9 +191,6 @@
   textarea[data-renderer="shadcn"]
 ) {
   color-scheme: inherit;
-  background-color: var(--vui-control-muted);
-  color: var(--fg-primary);
-  border-color: var(--vui-border-subtle);
 }
 
 [data-vui-app] select[data-renderer="shadcn"] option,
@@ -206,15 +204,4 @@
   textarea[data-renderer="shadcn"]
 )::placeholder {
   color: var(--fg-tertiary);
-}
-
-[data-vui-app] label[data-vui="checkbox"][data-renderer="shadcn"] {
-  color: var(--fg-secondary);
-  border-color: var(--vui-border-subtle);
-  background-color: var(--vui-control-muted);
-}
-
-[data-vui-app] label[data-vui="checkbox"][data-renderer="shadcn"][data-selected="true"] {
-  color: var(--fg-primary);
-  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--vui-border-subtle));
 }
