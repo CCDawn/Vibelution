@@ -1,6 +1,9 @@
 import { memo } from "react";
 
-import { renderConversationInlineMarkdown } from "./conversationInlineMarkdown";
+import {
+  renderConversationInlineMarkdown,
+  type ConversationInlineLinkContext,
+} from "./conversationInlineMarkdown";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import {
   LIVE_CODE_MAX_VISIBLE_LINES,
@@ -17,6 +20,10 @@ import { conversationMarkdownCodeBlockStyles as codeStyles } from "./Conversatio
 export type StreamingLiveMarkdownBlocksProps = {
   blocks: MarkdownBlock[];
   classNames: ConversationMarkdownClassNames;
+  workspaceRoot?: string;
+  language?: "zh" | "en";
+  /** Ordinary chat only. Workspace file links in this live tail use the same menu. */
+  onOpenRailFile?: (path: string) => void;
 };
 
 function headingLevelClass(
@@ -40,17 +47,25 @@ function LiveBlock({
   block,
   blockIndex,
   classNames,
+  linkContext,
 }: {
   block: MarkdownBlock;
   blockIndex: number;
   classNames: ConversationMarkdownClassNames;
+  linkContext?: ConversationInlineLinkContext;
 }) {
+  const inline = (text: string, key: string) => renderConversationInlineMarkdown(
+    text,
+    classNames,
+    key,
+    linkContext,
+  );
   switch (block.type) {
     case "heading": {
       const Tag = (block.level <= 2 ? "h3" : "h4") as "h3" | "h4";
       return (
         <Tag className={`${classNames.markdownHeading} ${headingLevelClass(classNames, block.level)}`}>
-          {block.content}
+          {inline(block.content, `h-${blockIndex}`)}
         </Tag>
       );
     }
@@ -60,7 +75,7 @@ function LiveBlock({
       // paints as bare backticks and the settle flip keeps one visual.
       return (
         <p className={classNames.messageBody}>
-          {renderConversationInlineMarkdown(block.content, classNames, blockIndex)}
+          {inline(block.content, `p-${blockIndex}`)}
         </p>
       );
     case "code": {
@@ -94,7 +109,7 @@ function LiveBlock({
               <thead>
                 <tr>
                   {block.headers.map((cell, cellIndex) => (
-                    <th key={`h-${blockIndex}-${cellIndex}`}>{cell}</th>
+                    <th key={`h-${blockIndex}-${cellIndex}`}>{inline(cell, `th-${blockIndex}-${cellIndex}`)}</th>
                   ))}
                 </tr>
               </thead>
@@ -102,7 +117,7 @@ function LiveBlock({
                 {rows.visible.map((row, rowIndex) => (
                   <tr key={`r-${blockIndex}-${rowIndex}`}>
                     {row.map((cell, cellIndex) => (
-                      <td key={`c-${blockIndex}-${rowIndex}-${cellIndex}`}>{cell}</td>
+                      <td key={`c-${blockIndex}-${rowIndex}-${cellIndex}`}>{inline(cell, `td-${blockIndex}-${rowIndex}-${cellIndex}`)}</td>
                     ))}
                   </tr>
                 ))}
@@ -119,7 +134,7 @@ function LiveBlock({
       return (
         <ul className={classNames.responseSegmentList}>
           {block.items.map((item, itemIndex) => (
-            <li key={`u-${blockIndex}-${itemIndex}`}>{item}</li>
+            <li key={`u-${blockIndex}-${itemIndex}`}>{inline(item, `u-${blockIndex}-${itemIndex}`)}</li>
           ))}
         </ul>
       );
@@ -127,12 +142,12 @@ function LiveBlock({
       return (
         <ol className={classNames.responseSegmentList}>
           {block.items.map((item, itemIndex) => (
-            <li key={`o-${blockIndex}-${itemIndex}`}>{item}</li>
+            <li key={`o-${blockIndex}-${itemIndex}`}>{inline(item, `o-${blockIndex}-${itemIndex}`)}</li>
           ))}
         </ol>
       );
     case "blockquote":
-      return <blockquote className={classNames.markdownBlockquote}>{block.content}</blockquote>;
+      return <blockquote className={classNames.markdownBlockquote}>{inline(block.content, `q-${blockIndex}`)}</blockquote>;
     case "divider":
       return <hr className={classNames.markdownDivider} />;
     case "image": {
@@ -165,10 +180,16 @@ function LiveBlock({
 export const StreamingLiveMarkdownBlocks = memo(function StreamingLiveMarkdownBlocks({
   blocks,
   classNames,
+  workspaceRoot,
+  language,
+  onOpenRailFile,
 }: StreamingLiveMarkdownBlocksProps) {
   if (!blocks.length) {
     return null;
   }
+  const linkContext = workspaceRoot || onOpenRailFile || language
+    ? { workspaceRoot, language, onOpenRailFile }
+    : undefined;
   return (
     <div data-streaming-live-blocks="1">
       {blocks.map((block, blockIndex) => (
@@ -177,6 +198,7 @@ export const StreamingLiveMarkdownBlocks = memo(function StreamingLiveMarkdownBl
           block={block}
           blockIndex={blockIndex}
           classNames={classNames}
+          linkContext={linkContext}
         />
       ))}
     </div>

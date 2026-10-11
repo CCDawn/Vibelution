@@ -150,7 +150,13 @@ export function ConversationStreamingResponseContent({
             does per-frame work (Cursor/ChatGPT-style stable+live split).
             Incomplete open fences/tables are repaired then held here by design.
           */}
-          <StreamingLiveMarkdownBlocks blocks={liveBlocks} classNames={classNames} />
+          <StreamingLiveMarkdownBlocks
+            blocks={liveBlocks}
+            classNames={classNames}
+            workspaceRoot={workspaceRoot}
+            language={language}
+            onOpenRailFile={onOpenRailFile}
+          />
         </div>
       ) : null}
     </div>

@@ -4,7 +4,9 @@ import {
   conversationImageDownloadName,
   isLikelyConversationImageUrl,
 } from "./conversationImagePreview";
+import { classifyConversationMarkdownLinkTarget } from "./conversationMarkdownLinkTargets";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
 import styles from "./conversationInlineMarkdown.styles";
 
 export type ConversationInlineMarkdownClassNames = {
@@ -13,10 +15,18 @@ export type ConversationInlineMarkdownClassNames = {
   inlineStrong: string;
 };
 
+/** Present only on the streaming live tail. Group transcripts omit it. */
+export type ConversationInlineLinkContext = {
+  workspaceRoot?: string;
+  language?: "zh" | "en";
+  onOpenRailFile?: (path: string) => void;
+};
+
 export function renderConversationInlineMarkdown(
   content: string,
   classNames: ConversationInlineMarkdownClassNames = styles,
   partIndex: number | string = "inline",
+  context?: ConversationInlineLinkContext,
 ): ReactNode {
   const nodes: ReactNode[] = [];
   const inlinePattern = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)\)|(\*\*|__)(?=\S)([\s\S]*?\S)\4/g;
@@ -36,7 +46,22 @@ export function renderConversationInlineMarkdown(
       const label = match[2];
       const href = match[3];
       const safeHref = safeConversationMarkdownUrl(href);
-      if (safeHref) {
+      const workspaceFile = context
+        ? classifyConversationMarkdownLinkTarget(href, context.workspaceRoot)
+        : null;
+      if (workspaceFile?.kind === "workspace-file") {
+        nodes.push(
+          <ConversationMarkdownWorkspaceFileLink
+            key={`file-${partIndex}-${match.index}`}
+            path={workspaceFile.absolutePath}
+            className={classNames.inlineLink}
+            language={context?.language ?? "zh"}
+            onOpenInRail={context?.onOpenRailFile}
+          >
+            {label}
+          </ConversationMarkdownWorkspaceFileLink>,
+        );
+      } else if (safeHref) {
         nodes.push(
           <a
             key={`link-${partIndex}-${match.index}`}
@@ -56,7 +81,7 @@ export function renderConversationInlineMarkdown(
       const strongContent = match[5] ?? "";
       nodes.push(
         <strong key={`strong-${partIndex}-${match.index}`} className={classNames.inlineStrong}>
-          {renderConversationInlineMarkdown(strongContent, classNames, `${partIndex}-strong-${match.index}`)}
+          {renderConversationInlineMarkdown(strongContent, classNames, `${partIndex}-strong-${match.index}`, context)}
         </strong>,
       );
     }

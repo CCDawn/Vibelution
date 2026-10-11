@@ -88,6 +88,8 @@ describe("ConversationStreamingResponseContent", () => {
     expect(source).toContain("repairIncompleteMarkdown");
     expect(source).toContain("parseStreamingMarkdownBlocks");
     expect(source).toContain("<StreamingLiveMarkdownBlocks");
+    expect(source).toContain("onOpenRailFile={onOpenRailFile}");
+    expect(source).toMatch(/<StreamingLiveMarkdownBlocks[\s\S]*onOpenRailFile=\{onOpenRailFile\}/);
     expect(source).toContain("data-streaming-live-tail");
     expect(source).not.toContain("from \"react-markdown\"");
     expect(source).not.toContain("remarkGfm");
