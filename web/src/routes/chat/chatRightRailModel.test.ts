@@ -10,12 +10,32 @@ import {
   normalizeChatRightRailBrowserUrl,
   noteReviewAutoOpen,
   openChatRightRailTab,
+  openFreshChatRightRailSideTab,
   projectChatRightRailDevtools,
   rememberChatRightRailSideChild,
   searchChatRightRailTabs,
 } from "./chatRightRailModel";
 
 describe("chat right rail model", () => {
+  it("opens a new side tab for each explicit request and keeps the child on that tab", () => {
+    const first = openFreshChatRightRailSideTab(EMPTY_CHAT_RIGHT_RAIL, {
+      titleBase: "辅助对话",
+      draft: "> 这段",
+    });
+    const second = openFreshChatRightRailSideTab(first, {
+      titleBase: "辅助对话",
+      draft: "只问这一句",
+      sendDraft: true,
+    });
+    expect(second.tabs.map((tab) => tab.id)).toEqual(["side", "side:2"]);
+    expect(second.activeId).toBe("side:2");
+    expect(second.tabs[1]).toEqual(expect.objectContaining({ draft: "只问这一句", sendDraft: true }));
+    const bound = rememberChatRightRailSideChild(second, "side:2", "child-2");
+    expect(bound.tabs[1]?.childSessionId).toBe("child-2");
+    expect(bound.tabs[1]?.draft).toBeUndefined();
+    expect(bound.tabs[0]?.draft).toBe("> 这段");
+  });
+
   it("hides side chat when the current session is already a child", () => {
     expect(chatRightRailLauncherKinds("main")).toEqual([
       "side",
@@ -101,7 +121,7 @@ describe("chat right rail model", () => {
 
   it("remembers the side-chat child and reads a final answer", () => {
     const side = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "side", title: "辅助对话" });
-    const remembered = rememberChatRightRailSideChild(side, "child-1");
+    const remembered = rememberChatRightRailSideChild(side, "side", "child-1");
     expect(remembered.tabs[0]?.childSessionId).toBe("child-1");
     const messages = [
       { id: "u1", role: "user", timestamp: "", content: "你好" },

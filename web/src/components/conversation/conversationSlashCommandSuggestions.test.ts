@@ -15,6 +15,7 @@ import {
   insertSlashCommandSuggestion,
   mergeSlashCommandSuggestions,
   moveSlashCommandActiveIndex,
+  parseSideSlashCommand,
   shouldShowSlashCommandSuggestions,
   type BuiltinSlashCommand,
 } from "./conversationSlashCommandSuggestions";
@@ -230,6 +231,15 @@ describe("conversation slash command suggestions", () => {
     expect(conversationViewSource).toContain("executeBuiltinSlashCommand(suggestion.builtinId)");
     expect(conversationViewSource).toContain('data-vui="slash-builtin-badge"');
     expect(conversationViewSource).toContain("groupSlashCommandSuggestionsBySection(slashSuggestions)");
+  });
+});
+
+describe("parseSideSlashCommand", () => {
+  it("accepts /side and /btw, including a prompt, and leaves other text alone", () => {
+    expect(parseSideSlashCommand("/side")).toEqual({ prompt: "" });
+    expect(parseSideSlashCommand("/btw  只在右栏问")).toEqual({ prompt: "只在右栏问" });
+    expect(parseSideSlashCommand("/sidebar")).toBeNull();
+    expect(parseSideSlashCommand("请 /side")).toBeNull();
   });
 });
 

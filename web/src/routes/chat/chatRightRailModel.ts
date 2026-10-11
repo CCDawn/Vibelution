@@ -45,6 +45,9 @@ export type ChatRightRailTab = {
   targetId?: string;
   filePath?: string;
   url?: string;
+  /** Prefill for a freshly opened side chat. Cleared once the thread consumes it. */
+  draft?: string;
+  sendDraft?: boolean;
 };
 
 export type ChatRightRailModel = {
@@ -62,6 +65,7 @@ export const EMPTY_CHAT_RIGHT_RAIL: ChatRightRailModel = {
 };
 
 export type ChatRightRailOpenInput = {
+  id?: string;
   kind: ChatRightRailKind;
   title?: string;
   childSessionId?: string;
@@ -107,7 +111,7 @@ export function chatRightRailKindLabel(kind: ChatRightRailKind, lang: "zh" | "en
 }
 
 export function chatRightRailTabLabel(tab: ChatRightRailTab, lang: "zh" | "en"): string {
-  if (CONTEXT_TITLE_KINDS.has(tab.kind) && tab.title.trim()) {
+  if ((CONTEXT_TITLE_KINDS.has(tab.kind) || tab.kind === "side") && tab.title.trim()) {
     return tab.title.trim();
   }
   return chatRightRailKindLabel(tab.kind, lang);
@@ -118,6 +122,10 @@ export function activeChatRightRailTab(model: ChatRightRailModel): ChatRightRail
 }
 
 function tabIdentity(input: ChatRightRailOpenInput): string {
+  const explicit = input.id?.trim();
+  if (explicit) {
+    return explicit;
+  }
   if (SINGLETON_KINDS.has(input.kind)) {
     return input.kind;
   }
@@ -203,18 +211,74 @@ export function noteReviewAutoOpen(
   return { model: opened, opened: true };
 }
 
+function sideOrdinal(id: string): number {
+  if (id === "side") {
+    return 1;
+  }
+  const match = /^side:(\d+)$/.exec(id);
+  return match ? Number(match[1]) : 0;
+}
+
+export function openFreshChatRightRailSideTab(
+  model: ChatRightRailModel,
+  input: { titleBase: string; draft?: string; sendDraft?: boolean },
+): ChatRightRailModel {
+  const used = [...model.tabs, ...model.closed].reduce(
+    (max, tab) => Math.max(max, sideOrdinal(tab.id)),
+    0,
+  );
+  const ordinal = used + 1;
+  const id = ordinal === 1 ? "side" : `side:${ordinal}`;
+  const draft = (input.draft || "").trim();
+  const tab: ChatRightRailTab = {
+    id,
+    kind: "side",
+    title: ordinal === 1 ? input.titleBase : `${input.titleBase} ${ordinal}`,
+    ...(draft ? { draft, sendDraft: Boolean(input.sendDraft) } : {}),
+  };
+  return {
+    ...model,
+    tabs: [...model.tabs, tab],
+    activeId: id,
+    closed: model.closed.filter((item) => item.id !== id),
+  };
+}
+
+export function consumeChatRightRailSideDraft(
+  model: ChatRightRailModel,
+  tabId: string,
+): ChatRightRailModel {
+  const target = tabId.trim();
+  if (!target) {
+    return model;
+  }
+  let changed = false;
+  const tabs = model.tabs.map((tab) => {
+    if (tab.id !== target || (!tab.draft && !tab.sendDraft)) {
+      return tab;
+    }
+    changed = true;
+    return { ...tab, draft: undefined, sendDraft: undefined };
+  });
+  return changed ? { ...model, tabs } : model;
+}
+
 export function rememberChatRightRailSideChild(
   model: ChatRightRailModel,
+  tabId: string,
   childSessionId: string,
 ): ChatRightRailModel {
   const id = childSessionId.trim();
-  if (!id) {
+  const target = tabId.trim();
+  if (!id || !target) {
     return model;
   }
   return {
     ...model,
     tabs: model.tabs.map((tab) => (
-      tab.kind === "side" ? { ...tab, childSessionId: id, targetId: id } : tab
+      tab.id === target && tab.kind === "side"
+        ? { ...tab, childSessionId: id, targetId: id, draft: undefined, sendDraft: undefined }
+        : tab
     )),
   };
 }

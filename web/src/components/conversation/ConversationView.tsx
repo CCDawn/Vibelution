@@ -129,6 +129,7 @@ import {
   groupSlashCommandSuggestionsBySection,
   mergeSlashCommandSuggestions,
   moveSlashCommandActiveIndex,
+  parseSideSlashCommand,
   shouldShowSlashCommandSuggestions,
   type BuiltinSlashCommand,
   type BuiltinSlashCommandId,
@@ -1100,6 +1101,7 @@ export const ConversationView = React.memo(function ConversationView({
   composerContextRing = null,
   onOpenComposerContextDetail,
   onCreateSession,
+  onOpenSideChat,
   turnError,
   submitLabel,
   submitPendingLabel,
@@ -1375,6 +1377,15 @@ export const ConversationView = React.memo(function ConversationView({
       timeline?.removeEventListener("scroll", handleTimelineScroll);
     };
   }, []);
+  const handleSelectionSideChat = useCallback(() => {
+    if (!selectionQuoteMenu || !onOpenSideChat) {
+      return;
+    }
+    onOpenSideChat(buildQuotedDraftText("", selectionQuoteMenu.text), false);
+    setSelectionQuoteMenu(null);
+    selectionQuoteDismissedTextRef.current = null;
+    window.getSelection()?.removeAllRanges();
+  }, [onOpenSideChat, selectionQuoteMenu]);
   const handleSelectionQuoteToComposer = useCallback(() => {
     if (!selectionQuoteMenu) {
       return;
@@ -1558,6 +1569,14 @@ export const ConversationView = React.memo(function ConversationView({
       description: t("slashBuiltinCompressDescription"),
     });
   }
+  if (onOpenSideChat) {
+    builtinSlashCommands.push({
+      id: "side",
+      command: t("slashBuiltinSideCommand"),
+      aliases: String(t("slashBuiltinSideAliases")).split(/\s+/).filter(Boolean),
+      description: t("slashBuiltinSideDescription"),
+    });
+  }
   const slashSuggestions = mergeSlashCommandSuggestions(
     builtinSlashCommands,
     slashCommandSuggestions,
@@ -1698,6 +1717,9 @@ export const ConversationView = React.memo(function ConversationView({
         break;
       case "compress_context":
         onOpenComposerContextDetail?.();
+        break;
+      case "side":
+        onOpenSideChat?.("", false);
         break;
     }
   }
@@ -3450,6 +3472,12 @@ export const ConversationView = React.memo(function ConversationView({
   }
 
   function handleSendAndFollowLatest() {
+    const sideCommand = onOpenSideChat ? parseSideSlashCommand(composerValue) : null;
+    if (sideCommand) {
+      onComposerChange("");
+      onOpenSideChat?.(sideCommand.prompt, Boolean(sideCommand.prompt));
+      return;
+    }
     exitComposerPromptHistoryBrowse();
     pinFollowLatestForSubmit();
     onSubmit();
@@ -6846,6 +6874,8 @@ export const ConversationView = React.memo(function ConversationView({
           quoteLabel={lang === "zh" ? "引用到输入框" : "Quote to composer"}
           referenceLabel={lang === "zh" ? "作为引用" : "As reference"}
           copyLabel={lang === "zh" ? "复制" : "Copy"}
+          sideLabel={lang === "zh" ? "辅助对话" : "Side chat"}
+          onSideChat={onOpenSideChat ? handleSelectionSideChat : undefined}
           onQuote={handleSelectionQuoteToComposer}
           onReference={selectionQuoteMenu.sourceMessageId && onAddComposerReference
             ? handleSelectionReferenceToComposer

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { PanelRightClose, Plus, Search, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { createSessionChild, fetchSessionDetail, submitSessionMessage } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
@@ -23,8 +23,10 @@ import {
   chatRightRailTabLabel,
   chatRightRailTranscriptLines,
   closeChatRightRailTab,
+  consumeChatRightRailSideDraft,
   normalizeChatRightRailBrowserUrl,
   openChatRightRailTab,
+  openFreshChatRightRailSideTab,
   projectChatRightRailDevtools,
   rememberChatRightRailSideChild,
   searchChatRightRailTabs,
@@ -137,6 +139,9 @@ function RailThread({
   lang,
   onBound,
   client,
+  initialDraft = "",
+  autoSend = false,
+  onDraftConsumed,
 }: {
   boundSessionId: string;
   parentSessionId: string;
@@ -144,8 +149,13 @@ function RailThread({
   lang: "zh" | "en";
   onBound: (childSessionId: string) => void;
   client: ChatRightRailSideClient;
+  initialDraft?: string;
+  autoSend?: boolean;
+  onDraftConsumed?: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const bootedDraft = useRef(false);
   const [pendingLine, setPendingLine] = useState("");
   const [sending, setSending] = useState(false);
   const [awaiting, setAwaiting] = useState(false);
@@ -204,10 +214,9 @@ function RailThread({
     }
   }, [lines, pendingLine]);
   const blocked = isTempSessionId(parentSessionId);
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text || sending || blocked) {
+  const sendText = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || sending || blocked) {
       return;
     }
     setSending(true);
@@ -215,8 +224,8 @@ function RailThread({
     try {
       if (createOnSend && !boundSessionId) {
         const created = await client.createChild(parentSessionId, {
-          userRequest: text,
-          taskTitle: text.slice(0, 80),
+          userRequest: trimmed,
+          taskTitle: trimmed.slice(0, 80),
           autoStart: true,
           switchToChild: false,
           source: "side_pane",
@@ -228,19 +237,43 @@ function RailThread({
         }
         onBound(childSessionId);
       } else if (boundSessionId) {
-        await client.submit(boundSessionId, text);
+        await client.submit(boundSessionId, trimmed);
       } else {
         throw new Error(copy.failed);
       }
-      setPendingLine(text);
+      setPendingLine(trimmed);
       setDraft("");
       setAwaiting(true);
       setAwaitingSince(Date.now());
     } catch (sendError) {
+      setDraft(trimmed);
       setError(failureText(sendError, copy.failed));
     } finally {
       setSending(false);
     }
+  };
+  const sendTextRef = useRef(sendText);
+  sendTextRef.current = sendText;
+  useEffect(() => {
+    if (bootedDraft.current) {
+      return;
+    }
+    const text = initialDraft.trim();
+    if (!text) {
+      return;
+    }
+    bootedDraft.current = true;
+    onDraftConsumed?.();
+    if (autoSend && !blocked) {
+      void sendTextRef.current(text);
+      return;
+    }
+    setDraft(text);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [autoSend, blocked, initialDraft, onDraftConsumed]);
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    await sendText(draft);
   };
   return (
     <form className={styles.thread} onSubmit={(event) => void onSubmit(event)}>
@@ -260,6 +293,7 @@ function RailThread({
       </div>
       <div className={styles.composer}>
         <VTextarea
+          ref={composerRef}
           aria-label={copy.placeholder}
           rows={2}
           value={draft}
@@ -364,7 +398,13 @@ export function ChatRightRail({
   const devtoolsView = projectChatRightRailDevtools(devtools);
   const browserUrl = active?.kind === "browser" ? normalizeChatRightRailBrowserUrl(active.url || "") : null;
   const activate = (kind: ChatRightRailKind) => {
-    onModelChange(openKind(model, kind, lang));
+    if (kind === "side") {
+      onModelChange((current) => openFreshChatRightRailSideTab(current, {
+        titleBase: chatRightRailKindLabel("side", lang),
+      }));
+    } else {
+      onModelChange(openKind(model, kind, lang));
+    }
     setSearchOpen(false);
   };
   return (
@@ -562,7 +602,16 @@ export function ChatRightRail({
             createOnSend
             lang={lang}
             client={sideClient}
-            onBound={(childSessionId) => onModelChange((current) => rememberChatRightRailSideChild(current, childSessionId))}
+            initialDraft={active.draft || ""}
+            autoSend={Boolean(active.sendDraft)}
+            onDraftConsumed={() => {
+              const tabId = active.id;
+              onModelChange((current) => consumeChatRightRailSideDraft(current, tabId));
+            }}
+            onBound={(childSessionId) => {
+              const tabId = active.id;
+              onModelChange((current) => rememberChatRightRailSideChild(current, tabId, childSessionId));
+            }}
           />
         ) : null}
         {active?.kind === "subagent" && active.targetId ? (

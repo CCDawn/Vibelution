@@ -22,6 +22,9 @@ export type ConversationSelectionQuoteMenuProps = {
    */
   referenceLabel?: string;
   onReference?: () => void;
+  /** Opens the selected text in the ordinary right-column side chat. */
+  sideLabel?: string;
+  onSideChat?: () => void;
 };
 
 /**
@@ -38,6 +41,8 @@ export function ConversationSelectionQuoteMenu({
   onCopy,
   referenceLabel,
   onReference,
+  sideLabel,
+  onSideChat,
 }: ConversationSelectionQuoteMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -87,6 +92,16 @@ export function ConversationSelectionQuoteMenu({
       data-conversation-selection-menu="1"
       onMouseDown={handleMouseDown}
     >
+      {onSideChat ? (
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={styles.selectionQuoteMenuItem}
+          onClick={onSideChat}
+        >
+          {sideLabel}
+        </VButton>
+      ) : null}
       <VButton
         type="button"
         contentLayout="plain"

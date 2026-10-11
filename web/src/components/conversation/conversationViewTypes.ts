@@ -170,6 +170,11 @@ export type ConversationViewProps = {
   onOpenComposerContextDetail?: () => void;
   /** Client-side /新会话 builtin: create a session and navigate to it. */
   onCreateSession?: () => void;
+  /**
+   * Ordinary-chat side column. Empty prompt opens a new side chat.
+   * A non-empty prompt is sent there when `send` is true, and only prefilled when false.
+   */
+  onOpenSideChat?: (draft: string, send: boolean) => void;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;

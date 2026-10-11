@@ -4,7 +4,7 @@ import { rankByScore, scoreMatch } from "./conversationFuzzyMatch";
 const MAX_SLASH_COMMAND_SUGGESTIONS = 8;
 
 /** Client-only builtin commands; the backend slash protocol is untouched. */
-export type BuiltinSlashCommandId = "new_session" | "model" | "compress_context";
+export type BuiltinSlashCommandId = "new_session" | "model" | "compress_context" | "side";
 
 export type BuiltinSlashCommand = {
   id: BuiltinSlashCommandId;
@@ -37,6 +37,17 @@ function leadingSlashToken(value: string): string | null {
 
 export function shouldShowSlashCommandSuggestions(value: string): boolean {
   return leadingSlashToken(value) !== null;
+}
+
+const SIDE_SLASH_COMMAND = /^\/(side|btw)(?:\s+([\s\S]*))?$/i;
+
+/** `/side` and `/btw` open a side chat. A trailing prompt is sent there, not to the center. */
+export function parseSideSlashCommand(value: string): { prompt: string } | null {
+  const match = String(value || "").trim().match(SIDE_SLASH_COMMAND);
+  if (!match) {
+    return null;
+  }
+  return { prompt: (match[2] || "").trim() };
 }
 
 export function composerSlashCommandQuery(value: string): string {
