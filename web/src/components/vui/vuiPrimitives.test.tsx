@@ -34,13 +34,13 @@ describe("VUI foundation primitives", () => {
     );
 
     expect(sharedSlotsSource).toContain("vuiButtonHoverClass");
-    expect(sharedSlotsSource).toContain("hover:border-[var(--vui-control-hover-border)]");
-    expect(sharedSlotsSource).toContain("hover:bg-[var(--vui-control-hover-bg)]");
-    expect(sharedSlotsSource).toContain("hover:text-[var(--vui-control-hover-fg)]");
-    // shadcn-aligned solid primary (ink fill), not washed border-only primary.
+    expect(sharedSlotsSource).toContain("hover:border-[color-mix(in_srgb,var(--vui-control-border)");
+    expect(sharedSlotsSource).toContain("hover:[background:linear-gradient(");
+    expect(sharedSlotsSource).toContain("hover:text-[var(--fg-primary)]");
+    // The approved native desktop baseline gives the primary CTA a blue face.
     expect(sharedSlotsSource).toContain("vuiButtonPrimaryClass");
-    expect(sharedSlotsSource).toContain("bg-[var(--fg-primary)]");
-    expect(sharedSlotsSource).toContain("text-[var(--vui-surface-base)]");
+    expect(sharedSlotsSource).toContain("[background:var(--vui-primary-face)]");
+    expect(sharedSlotsSource).toContain("text-white");
     expect(sharedSlotsSource).toContain("focus-visible:ring-2");
     expect(sharedSlotsSource).not.toContain("hover:border-[var(--border-strong)]");
     expect(sharedSlotsSource).not.toContain("hover:bg-[var(--vui-control-muted-hover)]");
@@ -48,14 +48,14 @@ describe("VUI foundation primitives", () => {
     expect(buttonSource).toContain("ShadcnButton");
   });
 
-  it("renders solid primary CTA and skeleton pulse tokens", () => {
+  it("renders the native primary CTA and skeleton pulse tokens", () => {
     const markup = renderToStaticMarkup(
       <VuiProvider>
         <VButton variant="primary">Save</VButton>
       </VuiProvider>,
     );
     expect(markup).toContain('data-variant="primary"');
-    expect(markup).toContain("bg-[var(--fg-primary)]");
+    expect(markup).toContain("[background:var(--vui-primary-face)]");
 
     const skeleton = renderToStaticMarkup(<VSkeleton shape="line" className="w-24" />);
     expect(skeleton).toContain('data-vui="skeleton"');
