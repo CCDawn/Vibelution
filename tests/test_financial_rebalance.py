@@ -21,7 +21,7 @@ from tests.test_financial_paper_service import paper_env as _paper_env
 
 finance_env = _finance_env
 paper_env = _paper_env
-NOW = datetime(2026, 10, 5, 7, 0, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 9, 2, 0, 30, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -206,9 +206,13 @@ def test_risk_refuses_missing_stale_quotes_and_locked_shares(proposal_env):
     targets = [{"symbol": "sh600519", "weightPct": 0.0, "reason": "清仓"}]
     assert not build_plan(context, targets, {}, DEFAULT_POLICY, now=NOW)["canApprove"]
     quotes = service._quotes(["sh600519"])
-    plan = build_plan(context, targets, quotes, DEFAULT_POLICY, now=NOW + timedelta(days=5))
-    failed = {row["code"] for row in plan["riskChecks"] if not row["passed"]}
-    assert {"quote_freshness", "sellable"} <= failed
+    stale_plan = build_plan(context, targets, quotes, DEFAULT_POLICY, now=NOW + timedelta(days=5))
+    stale_failed = {row["code"] for row in stale_plan["riskChecks"] if not row["passed"]}
+    assert "quote_freshness" in stale_failed
+
+    locked_plan = build_plan(context, targets, quotes, DEFAULT_POLICY, now=NOW)
+    locked_failed = {row["code"] for row in locked_plan["riskChecks"] if not row["passed"]}
+    assert "sellable" in locked_failed
 
 
 @pytest.mark.parametrize("weights", [[True], [float("nan")], [float("inf")], [-1], [101]])
@@ -255,6 +259,118 @@ def test_build_plan_exposes_deterministic_current_account_valuation():
             "weightPct": "29.56",
         }
     ]
+
+
+def test_plan_uses_shared_board_quantity_and_verified_fee_rules():
+    context = {"cashYuan": "1000000.00", "positions": []}
+    targets = [
+        {"symbol": "sh600519", "weightPct": 20.0, "reason": "主板规则"},
+        {"symbol": "sh688001", "weightPct": 20.0, "reason": "科创板规则"},
+    ]
+    quotes = {
+        symbol: {
+            "name": "测试股票",
+            "priceYuan": "10.00",
+            "timestamp": NOW.isoformat(),
+            "fetchedAt": NOW.isoformat(),
+        }
+        for symbol in ("sh600519", "sh688001")
+    }
+
+    plan = build_plan(context, targets, quotes, DEFAULT_POLICY, now=NOW)
+    orders = {row["symbol"]: row for row in plan["orders"]}
+
+    assert plan["canApprove"] is True
+    assert orders["sh600519"]["quantity"] == 19_900
+    assert orders["sh600519"]["feeYuan"] == "61.69"
+    assert orders["sh688001"]["quantity"] == 19_980
+    assert orders["sh688001"]["feeYuan"] == "61.94"
+    assert next(row for row in plan["riskChecks"] if row["code"] == "order_size")["passed"] is True
+
+
+def test_plan_blocks_target_that_requires_an_illegal_partial_main_board_sale():
+    context = {
+        "cashYuan": "0.00",
+        "positions": [{"symbol": "sh600519", "quantity": 150, "sellableQuantity": 150}],
+    }
+    quotes = {
+        "sh600519": {
+            "name": "测试股票",
+            "priceYuan": "10.00",
+            "timestamp": NOW.isoformat(),
+            "fetchedAt": NOW.isoformat(),
+        }
+    }
+
+    plan = build_plan(
+        context,
+        [{"symbol": "sh600519", "weightPct": 66.75, "reason": "测试主板不足一手卖出"}],
+        quotes,
+        DEFAULT_POLICY,
+        now=NOW,
+    )
+
+    checks = {row["code"]: row for row in plan["riskChecks"]}
+    assert plan["orders"] == []
+    assert checks["order_size"]["passed"] is False
+    assert checks["orders"]["passed"] is False
+    assert "股数规则" in checks["orders"]["detail"]
+    assert plan["canApprove"] is False
+
+
+def test_plan_blocks_unverified_board_and_non_executable_quote_dates():
+    context = {"cashYuan": "1000000.00", "positions": []}
+    targets = [{"symbol": "bj832000", "weightPct": 20.0, "reason": "北交所等待费用核验"}]
+    current_quote = {
+        "bj832000": {
+            "name": "测试股票",
+            "priceYuan": "10.00",
+            "timestamp": NOW.isoformat(),
+            "fetchedAt": NOW.isoformat(),
+        }
+    }
+
+    beijing = build_plan(context, targets, current_quote, DEFAULT_POLICY, now=NOW)
+    assert beijing["canApprove"] is False
+    assert beijing["orders"] == []
+    assert next(row for row in beijing["riskChecks"] if row["code"] == "fee_support")["passed"] is False
+
+    weekend_now = datetime(2026, 10, 10, 2, 0, 30, tzinfo=timezone.utc)
+    weekend_quote = {
+        "sh600519": {
+            "name": "测试股票",
+            "priceYuan": "10.00",
+            "timestamp": weekend_now.isoformat(),
+            "fetchedAt": weekend_now.isoformat(),
+        }
+    }
+    weekend = build_plan(
+        context,
+        [{"symbol": "sh600519", "weightPct": 20.0, "reason": "休市日不得生成可执行计划"}],
+        weekend_quote,
+        DEFAULT_POLICY,
+        now=weekend_now,
+    )
+    assert weekend["canApprove"] is False
+    assert next(row for row in weekend["riskChecks"] if row["code"] == "execution_date")["passed"] is False
+
+    future_quote = {
+        "sh600519": {
+            "name": "测试股票",
+            "priceYuan": "10.00",
+            "timestamp": (NOW + timedelta(minutes=1)).isoformat(),
+            "fetchedAt": NOW.isoformat(),
+        }
+    }
+    future = build_plan(
+        context,
+        [{"symbol": "sh600519", "weightPct": 20.0, "reason": "未来报价不得用于成交"}],
+        future_quote,
+        DEFAULT_POLICY,
+        now=NOW,
+    )
+    assert future["canApprove"] is False
+    assert next(row for row in future["riskChecks"] if row["code"] == "execution_quotes")["passed"] is False
 
 
 def test_model_receives_build_plan_account_valuation_instead_of_raw_context(

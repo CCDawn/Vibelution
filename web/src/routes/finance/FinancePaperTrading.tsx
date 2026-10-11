@@ -12,7 +12,7 @@ import {
 } from "../../api/financialPaper";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 import type { StockIdentity } from "../../api/types/financialMarket";
-import type { PaperAccountSnapshot, PaperOrder, PaperPosition, PaperReviewDay, PaperSide } from "../../api/types/financialPaper";
+import type { PaperAccountSnapshot, PaperFeePolicy, PaperOrder, PaperOrderQuantityRule, PaperPosition, PaperReviewDay, PaperSide } from "../../api/types/financialPaper";
 import { VButton, VChip, VDenseTable, VInput, VMetricStrip, VSelect, VSkeleton, VStateSurface, VSurface } from "../../components/vui";
 import styles from "./FinancePaperTrading.styles";
 
@@ -66,19 +66,74 @@ function signedTone(value: string | null | undefined): string {
   return amount > 0 ? styles.positive : styles.negative;
 }
 
-function estimatePaperTrade(priceYuan: number, quantity: number, side: PaperSide) {
+function estimatePaperTrade(
+  priceYuan: number,
+  quantity: number,
+  side: PaperSide,
+  feePolicy: PaperFeePolicy | undefined,
+) {
   if (!Number.isFinite(priceYuan) || !Number.isSafeInteger(quantity) || quantity < 1) return null;
+  const commissionRate = Number(feePolicy?.commissionRate);
+  const minimumCommissionYuan = Number(feePolicy?.minimumCommissionYuan);
+  const transferFeeRate = Number(feePolicy?.transferFeeRate);
+  const stampDutyRate = side === "sell" ? Number(feePolicy?.sellStampDutyRate) : 0;
+  if (![commissionRate, minimumCommissionYuan, transferFeeRate, stampDutyRate].every(Number.isFinite)) return null;
   const priceFen = Math.round(priceYuan * 100);
   const grossFen = priceFen * quantity;
-  const commissionFen = Math.max(Math.round(grossFen * 0.0003), 500);
-  const stampFen = side === "sell" ? Math.round(grossFen * 0.0005) : 0;
-  const feesFen = commissionFen + stampFen;
+  const commissionFen = Math.max(Math.round(grossFen * commissionRate), Math.round(minimumCommissionYuan * 100));
+  const transferFen = Math.round(grossFen * transferFeeRate);
+  const stampFen = Math.round(grossFen * stampDutyRate);
+  const feesFen = commissionFen + transferFen + stampFen;
   const cashImpactFen = side === "buy" ? -(grossFen + feesFen) : grossFen - feesFen;
   return {
     gross: (grossFen / 100).toFixed(2),
     fees: (feesFen / 100).toFixed(2),
     cashImpact: (cashImpactFen / 100).toFixed(2),
   };
+}
+
+function orderQuantityRuleText(rule: PaperOrderQuantityRule, zh: boolean): string {
+  const board = zh
+    ? ({ main_board: "主板", star_market: "科创板", chinext: "创业板", beijing: "北交所", legacy_100: "A 股" }[rule.board] ?? "A 股")
+    : ({ main_board: "Main board", star_market: "STAR Market", chinext: "ChiNext", beijing: "Beijing Stock Exchange", legacy_100: "A-share" }[rule.board] ?? "A-share");
+  const cap = new Intl.NumberFormat(zh ? "zh-CN" : "en-US").format(rule.maximumOrderShares);
+  if (!rule.supportedForSimulation) {
+    return rule.unsupportedReason || (zh ? `${board}费用规则尚未核验，暂不能模拟成交` : `Verified fees are unavailable for ${board}; paper trading is paused`);
+  }
+  return zh
+    ? `${board}规则：买入至少 ${rule.minimumBuyShares} 股，之后每 ${rule.buyIncrement} 股递增；卖出至少 ${rule.minimumSellShares} 股、每 ${rule.sellIncrement} 股递增，余股可整仓卖出；单笔上限 ${cap} 股。`
+    : `${board} rules: buy at least ${rule.minimumBuyShares} shares, then in steps of ${rule.buyIncrement}; sell at least ${rule.minimumSellShares} shares in steps of ${rule.sellIncrement}, with residual shares allowed in a full exit; per-order cap ${cap}.`;
+}
+
+function validOrderQuantity(
+  quantity: number,
+  side: PaperSide,
+  rule: PaperOrderQuantityRule | null | undefined,
+  heldQuantity: number,
+): boolean {
+  if (!rule || !rule.supportedForSimulation || quantity > rule.maximumOrderShares) return false;
+  if (side === "buy") {
+    return quantity >= rule.minimumBuyShares
+      && (quantity - rule.minimumBuyShares) % rule.buyIncrement === 0;
+  }
+  if (quantity === heldQuantity) return true;
+  return quantity >= rule.minimumSellShares
+    && quantity % rule.sellIncrement === 0;
+}
+
+function beijingQuoteDate(timestamp: string): string {
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(parsed);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return values.year && values.month && values.day
+    ? `${values.year}-${values.month}-${values.day}`
+    : "";
 }
 
 function errorText(error: unknown, zh: boolean): string {
@@ -173,8 +228,8 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
   const pendingOrder = useRef<{ fingerprint: string; clientOrderId: string } | null>(null);
 
   const accountQuery = useQuery({
-    queryKey: financialPaperKeys.account(assistant.agentId),
-    queryFn: ({ signal }) => fetchFinancialPaperAccount(assistant.agentId, { signal, orderLimit: RECENT_ORDER_LIMIT }),
+    queryKey: financialPaperKeys.account(assistant.agentId, stock.symbol),
+    queryFn: ({ signal }) => fetchFinancialPaperAccount(assistant.agentId, { signal, orderLimit: RECENT_ORDER_LIMIT, orderSymbol: stock.symbol }),
     enabled: mode === "account",
     staleTime: 20_000,
     retry: false,
@@ -196,14 +251,18 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
   const openMutation = useMutation({
     mutationFn: () => openFinancialPaperAccount(assistant.agentId),
     onSuccess: (value) => {
-      queryClient.setQueryData(financialPaperKeys.account(assistant.agentId), value);
+      const key = financialPaperKeys.account(assistant.agentId, stock.symbol);
+      queryClient.setQueryData<PaperAccountSnapshot>(key, (current) => ({ ...value, orderQuantityRule: value.orderQuantityRule ?? current?.orderQuantityRule }));
+      void queryClient.invalidateQueries({ queryKey: financialPaperKeys.account(assistant.agentId) });
       void queryClient.invalidateQueries({ queryKey: ["financial-paper", assistant.agentId, "review"] });
     },
   });
   const orderMutation = useMutation({
     mutationFn: (payload: Parameters<typeof submitFinancialPaperOrder>[1]) => submitFinancialPaperOrder(assistant.agentId, payload),
     onSuccess: (value) => {
-      queryClient.setQueryData(financialPaperKeys.account(assistant.agentId), value);
+      const key = financialPaperKeys.account(assistant.agentId, stock.symbol);
+      queryClient.setQueryData<PaperAccountSnapshot>(key, (current) => ({ ...value, orderQuantityRule: value.orderQuantityRule ?? current?.orderQuantityRule }));
+      void queryClient.invalidateQueries({ queryKey: financialPaperKeys.account(assistant.agentId) });
       void queryClient.invalidateQueries({ queryKey: ["financial-paper", assistant.agentId, "review"] });
       setOrderError("");
       pendingOrder.current = null;
@@ -215,8 +274,26 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
   const review = mode === "review" ? reviewQuery.data : undefined;
   const currentQuote = quoteQuery.data?.stock;
   const orderShares = Number(quantity);
-  const tradeEstimate = currentQuote ? estimatePaperTrade(currentQuote.price, orderShares, side) : null;
-  const orderDisabled = !account || !stock.symbol || !reason.trim() || !Number.isSafeInteger(orderShares) || orderShares < 100 || orderShares > 1_000_000 || orderShares % 100 !== 0 || orderMutation.isPending;
+  const currentPosition = account?.positions.find((position) => position.symbol === stock.symbol);
+  const quantityRule = account?.orderQuantityRule;
+  const quantityRuleMatchesStock = quantityRule?.symbol === stock.symbol;
+  const sellableQuantity = currentPosition?.availableQuantity ?? 0;
+  const quoteMatchesTradeDate = Boolean(
+    currentQuote && account?.tradeDate && beijingQuoteDate(currentQuote.timestamp) === account.tradeDate,
+  );
+  const tradeDateReady = account?.isTradingDay === true && Boolean(account.tradeDate);
+  const invalidOrderQuantity = !Number.isSafeInteger(orderShares) || orderShares < 1 || orderShares > 1_000_000;
+  const invalidBoardQuantity = !invalidOrderQuantity && !validOrderQuantity(
+    orderShares,
+    side,
+    quantityRule,
+    currentPosition?.quantity ?? 0,
+  );
+  const sellQuantityUnavailable = side === "sell" && (sellableQuantity <= 0 || orderShares > sellableQuantity);
+  const tradeEstimate = currentQuote
+    ? estimatePaperTrade(currentQuote.price, orderShares, side, account?.feePolicy)
+    : null;
+  const orderDisabled = !account || !stock.symbol || !reason.trim() || invalidOrderQuantity || invalidBoardQuantity || !quantityRuleMatchesStock || !tradeDateReady || !quoteMatchesTradeDate || sellQuantityUnavailable || accountQuery.isError || accountQuery.isFetching || quoteQuery.isError || quoteQuery.isFetching || orderMutation.isPending;
 
   async function openAccount() {
     if (openGate.current || openMutation.isPending) return;
@@ -234,8 +311,8 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
     event?.preventDefault();
     if (submitGate.current || orderDisabled) return;
     const numericQuantity = Number(quantity);
-    if (!Number.isSafeInteger(numericQuantity) || numericQuantity > 1_000_000) {
-      setOrderError(zh ? "股数须为 100 的整数倍，且不超过 1,000,000 股" : "Shares must be a 100-share lot up to 1,000,000.");
+    if (!Number.isSafeInteger(numericQuantity) || numericQuantity < 1 || numericQuantity > 1_000_000) {
+      setOrderError(zh ? "股数须为正整数，且不超过 1,000,000 股" : "Shares must be a positive whole number up to 1,000,000.");
       return;
     }
     const intent = { symbol: stock.symbol, side, quantity: numericQuantity, reason: reason.trim() };
@@ -325,10 +402,10 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
         <h3 className={styles.sectionHeading}><span>{zh ? `模拟交易 · ${stock.name}（${stock.ticker}）` : `Paper order · ${stock.name} (${stock.ticker})`}</span><span>{currentQuote ? <span className={styles.quotePrice}>{formatYuan(String(currentQuote.price), zh)}</span> : (zh ? "报价不可用" : "Quote unavailable")}</span></h3>
         <form className={styles.controls} onSubmit={(event) => void submitOrder(event)}>
           <label className={styles.field}>{zh ? "交易方向" : "Side"}
-            <VSelect selectedKey={side} onSelectionChange={(key) => setSide(String(key) as PaperSide)} aria-label={zh ? "交易方向" : "Side"} options={[{ id: "buy", label: zh ? "买入" : "Buy" }, { id: "sell", label: zh ? "卖出" : "Sell" }]} />
+            <VSelect selectedKey={side} onSelectionChange={(key) => { setSide(String(key) as PaperSide); setOrderError(""); }} aria-label={zh ? "交易方向" : "Side"} options={[{ id: "buy", label: zh ? "买入" : "Buy" }, { id: "sell", label: zh ? "卖出" : "Sell" }]} />
           </label>
           <label className={styles.field}>{zh ? "股数" : "Shares"}
-            <VInput type="number" inputMode="numeric" min={100} max={1_000_000} step={100} value={quantity} className={styles.input} aria-label={zh ? "模拟交易股数" : "Paper order shares"} onChange={(event) => setQuantity(event.target.value)} />
+            <VInput type="number" inputMode="numeric" min={1} max={1_000_000} step={1} value={quantity} className={styles.input} aria-label={zh ? "模拟交易股数" : "Paper order shares"} onChange={(event) => setQuantity(event.target.value)} />
           </label>
           <label className={styles.field}>{zh ? "理由" : "Reason"}
             <VInput value={reason} maxLength={500} className={styles.input} aria-label={zh ? "模拟交易理由" : "Paper order reason"} placeholder={zh ? "记录本次模拟决策" : "Record the simulated decision"} onChange={(event) => setReason(event.target.value)} />
@@ -342,6 +419,17 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
           </VButton>
         </form>
         <div className={styles.orderMeta}>
+          {!tradeDateReady ? <span role="status">{account.tradeDate ? `${account.tradeDate} · ${zh ? "非 A 股交易日，模拟下单已暂停" : "A-share market closed; paper orders are paused"}` : (zh ? "交易日状态不可用，模拟下单已暂停" : "Trading-day status unavailable; paper orders are paused")}</span> : null}
+          {tradeDateReady && currentQuote && !quoteMatchesTradeDate ? <span role="status">{zh ? `当前报价日期 ${beijingQuoteDate(currentQuote.timestamp) || "未知"}，不是交易日 ${account.tradeDate} 行情，暂不能模拟成交` : `Quote date ${beijingQuoteDate(currentQuote.timestamp) || "unknown"} does not match trading date ${account.tradeDate}; paper execution is paused`}</span> : null}
+          {quantityRule ? <span role="status">{orderQuantityRuleText(quantityRule, zh)}</span> : <span role="status">{zh ? "正在读取该股票的板块股数规则" : "Loading this stock's board quantity rules"}</span>}
+          {quantityRule?.supportedForSimulation && invalidBoardQuantity ? <span role="status">{zh ? "股数不符合该板块的起始数量、递增单位或单笔上限" : "Quantity does not meet this board's minimum, increment, or per-order cap"}</span> : null}
+          {side === "sell" ? <span role="status">{!currentPosition || currentPosition.quantity <= 0
+            ? (zh ? "当前没有该股票持仓" : "There is no position in this stock")
+            : sellableQuantity > 0
+              ? (zh ? `当前可卖 ${sellableQuantity} 股` : `${sellableQuantity} shares currently sellable`)
+              : currentPosition.frozenQuantity > 0 && tradeDateReady
+                ? (zh ? "当前可卖 0 股；持仓股份处于 A 股 T+1 冻结状态" : "0 shares currently sellable; the position is locked by A-share T+1 settlement")
+                : (zh ? "当前可卖 0 股" : "0 shares currently sellable")}{orderShares > sellableQuantity && sellableQuantity > 0 ? (zh ? `，本次股数超过可卖数量` : "; order exceeds sellable shares") : ""}</span> : null}
           {tradeEstimate ? <span>{zh ? "预估成交额" : "Est. amount"} {formatYuan(tradeEstimate.gross, zh)} · {zh ? "预估费用" : "Est. fees"} {formatYuan(tradeEstimate.fees, zh)} · {zh ? "现金变化" : "Cash change"} {formatYuan(tradeEstimate.cashImpact, zh)} · {zh ? "成交采用服务端最新报价" : "Execution uses the server quote"}</span> : null}
           <span>{account.feePolicy.description}</span>
           <span>{account.tPlusOneRule}</span>
@@ -366,7 +454,7 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
           getRowKey={(row) => row.symbol}
           emptyText={zh ? "暂无持仓" : "No positions"}
         />
-        {account.positions.some((position) => position.frozenQuantity > 0) ? <p className={styles.helper}>{zh ? "可卖数量按北京时间自然日计算；买入当日持仓被冻结。" : "Sellable shares follow Beijing calendar days; shares bought today remain frozen."}</p> : null}
+        {account.positions.some((position) => position.frozenQuantity > 0) ? <p className={styles.helper}>{zh ? "可卖数量按 A 股交易日计算；买入当日持仓冻结至下一交易日。" : "Sellable shares follow A-share trading days; shares bought today unlock on the next trading day."}</p> : null}
       </section>
 
       <section className={styles.section}>

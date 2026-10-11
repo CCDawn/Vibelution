@@ -40,6 +40,26 @@ vi.mock("./conversationMarkdownMermaidBlock", () => ({
 }));
 
 describe("ConversationMarkdownRenderer", () => {
+  it("keeps Chinese punctuation and adjacent stock prose outside bare URL links", () => {
+    const html = renderToStaticMarkup(<ConversationMarkdownRenderer content="来源（https://vip.stock.finance.sina.com.cn/mkt/#hs_a），沪深京行情。" />);
+    expect(html).toMatch(/href="https:\/\/vip\.stock\.finance\.sina\.com\.cn\/mkt\/#hs_a"[^>]*>https:\/\/vip\.stock\.finance\.sina\.com\.cn\/mkt\/#hs_a<\/a>），沪深京行情。/);
+    expect(html).not.toContain("%EF%BC%89");
+  });
+
+  it("preserves explicit Chinese URL paths, autolinks and literal code", () => {
+    const html = renderToStaticMarkup(<ConversationMarkdownRenderer content={[
+      "[公告](https://example.com/公告（修订）.pdf)",
+      "<https://example.com/公告（修订）.pdf>",
+      "`https://example.com/行情），说明`",
+      "https://example.com/中文路径；正文 https://example.org/a?x=1&y=2，尾文",
+    ].join("\n\n")} />);
+    expect((html.match(/href="https:\/\/example.com\/%E5%85%AC%E5%91%8A%EF%BC%88%E4%BF%AE%E8%AE%A2%EF%BC%89.pdf"/g) ?? []).length).toBe(2);
+    expect(html).toContain("https://example.com/行情），说明</code>");
+    expect(html).toContain("</a>；正文");
+    expect(html).toContain('href="https://example.org/a?x=1&amp;y=2"');
+    expect(html).toContain("</a>，尾文");
+  });
+
   it("normalizes common agent markdown glitches into readable blocks", async () => {
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer

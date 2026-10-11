@@ -2,10 +2,15 @@ export type PaperSide = "buy" | "sell";
 export type PaperValuationStatus = "fresh" | "stale" | "unavailable";
 
 export type PaperFeePolicy = {
+  feeModel?: string | null;
+  effectiveDate?: string | null;
   commissionRate: string;
   minimumCommissionYuan: string;
+  commissionIncludes?: string[];
+  transferFeeRate?: string | null;
   sellStampDutyRate: string;
   transferFeeIncluded: boolean;
+  roundingStatus?: string | null;
   description: string;
 };
 
@@ -30,6 +35,20 @@ export type PaperPosition = {
   sourceUrl: string;
 };
 
+export type PaperOrderQuantityRule = {
+  symbol: string;
+  version: string;
+  board: string;
+  minimumBuyShares: number;
+  buyIncrement: number;
+  minimumSellShares: number;
+  sellIncrement: number;
+  residualSellThreshold: number;
+  maximumOrderShares: number;
+  supportedForSimulation: boolean;
+  unsupportedReason: string | null;
+};
+
 export type PaperOrder = {
   orderId: string;
   clientOrderId: string;
@@ -43,6 +62,11 @@ export type PaperOrder = {
   grossAmountYuan: string;
   commissionYuan: string;
   stampDutyYuan: string;
+  transferFeeYuan?: string;
+  handlingFeeYuan?: string;
+  regulatoryFeeYuan?: string;
+  brokerCommissionYuan?: string;
+  feeModel?: string;
   totalFeeYuan: string;
   cashChangeYuan: string;
   realizedPnlYuan: string;
@@ -61,6 +85,8 @@ export type PaperAccountSnapshot = {
   agentId: string;
   accountId: string;
   openedAt: string;
+  tradeDate?: string | null;
+  isTradingDay?: boolean | null;
   initialCashYuan: string;
   cashYuan: string;
   marketValueYuan: string;
@@ -73,6 +99,7 @@ export type PaperAccountSnapshot = {
   valuationNotice: string;
   positions: PaperPosition[];
   orders: PaperOrder[];
+  orderQuantityRule?: PaperOrderQuantityRule | null;
   ordersTotal: number;
   ordersLimit: number;
   ordersTruncated: boolean;

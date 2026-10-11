@@ -40,6 +40,8 @@ def test_explicit_setup_uses_native_identity_session_and_private_read_policy(ent
     assert agent["roleKey"] == service.ROLE
     assert agent["personaProfile"]["identityNotes"] == service.PERSONA["identityNotes"]
     assert agent["taskProfile"]["constraints"] == service.TASK["constraints"]
+    assert "同一报告期和同一检索问题不得重复调用" in agent["taskProfile"]["responsibilities"]
+    assert "保留最终交付的调用预算" in agent["taskProfile"]["responsibilities"]
     assert set(agent["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
     assert "news_search_tool" in agent["toolPolicy"]["allowedTools"]
     assert service.MARKET_TOOL in agent["toolPolicy"]["allowedTools"]
@@ -255,6 +257,64 @@ def test_native_executor_reads_new_own_library_and_denies_stage(entry_env):
             {"evidence_json": "{}", "excerpt": "unreviewed"},
         )
         assert any(word in str(raw) for word in ("blocked", "拒绝", "权限", "授权"))
+
+
+@pytest.mark.parametrize(
+    ("requested_period", "canonical_period"),
+    [
+        ("2026年半年度报告", "2026H1"),
+        ("2025年年度报告", "2025FY"),
+        ("2025年第三季度报告", "2025Q3"),
+    ],
+)
+def test_financial_evidence_search_normalizes_exact_report_period_aliases(
+    entry_env, monkeypatch, requested_period, canonical_period
+):
+    row = service.create_financial_assistant()["assistant"]
+    searched_periods = []
+
+    def search_financial_evidence(**kwargs):
+        searched_periods.append(kwargs["report_period"])
+        return {"status": "insufficient_evidence", "results": [], "citations": []}
+
+    monkeypatch.setattr(knowledge, "search_financial_evidence", search_financial_evidence)
+    with authorized_agent_tool_executor(
+        row["agentId"],
+        session_id=row["directSessionId"],
+        executable_tools=service.READ_TOOLS,
+    ) as execute:
+        raw, _ = execute(
+            "financial_evidence_search_tool",
+            {"query": "营业收入", "ticker": "600519", "report_period": requested_period},
+        )
+
+    result = json.loads(raw)
+    assert result["status"] == "insufficient_evidence"
+    assert result["reportPeriodNormalization"] == {
+        "requested": requested_period,
+        "canonical": canonical_period,
+    }
+    assert searched_periods == [canonical_period]
+
+
+def test_financial_evidence_search_gives_canonical_period_feedback(entry_env, monkeypatch):
+    row = service.create_financial_assistant()["assistant"]
+    searched_periods = []
+    monkeypatch.setattr(
+        knowledge,
+        "search_financial_evidence",
+        lambda **kwargs: searched_periods.append(kwargs["report_period"]),
+    )
+    from tools import financial_memory_tools
+
+    result = json.loads(financial_memory_tools.financial_evidence_search_tool(
+        "营业收入", "600519", "2026Q5"
+    ))
+
+    assert result["status"] == "invalid_request"
+    assert "YYYYFY" in result["message"] and "2025H1" in result["message"]
+    assert result["requestedReportPeriod"] == "2026Q5"
+    assert searched_periods == []
 
 
 def test_created_assistant_policy_executes_authorized_market_screen(

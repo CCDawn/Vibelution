@@ -131,6 +131,14 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
     if (teamSelectedRun?.coordinationStatus === "completed" && teamSelectedRun.synthesis.turnId) void client.invalidateQueries({ queryKey: ["finance", "report-catalog", assistant.agentId] });
   }, [client, assistant.agentId, teamSelectedRun?.coordinationStatus, teamSelectedRun?.synthesis.turnId]);
   const busy = Boolean(currentView?.busy || currentView?.submitPending);
+  const latestOutcome = currentView?.terminalReason || currentView?.lastTurnStatus || "";
+  const canOfferStageReport = nativeReady && currentView?.status === "idle" && !busy && !currentView?.stopping
+    && !currentView?.transcriptPending && messages.length > 1 && ["needs_continue", "paused_limit"].includes(latestOutcome);
+  const stageReportPrompt = [
+    "请基于当前会话已经获得的证据整理阶段报告。",
+    "不要再次调用工具或请求新数据；只使用当前对话中已经出现的证据。",
+    "列出已核实事实、仍缺的证据和待继续事项；证据不足时明确说明，不作推断补齐。",
+  ].join("\n\n");
   const marketUpgradeDisabled = busy || creating || launching || Boolean(currentView?.stopping);
   const reflection = useQuery({ queryKey: financialEvaluationKeys.lessons(assistant.agentId, stocks.selected.symbol, config.date), queryFn: ({ signal }) => fetchFinancialReflection(assistant.agentId, stocks.selected.symbol, config.date, signal), enabled: isValidResearchDate(config.date), staleTime: 0, retry: false });
   const readyForResearch = nativeReady && !currentView?.transcriptPending && !currentView?.stopping;
@@ -303,7 +311,12 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
     meta={area === "workspace" && researchKind === "stock" ? researchStock?.ticker : undefined}
     actions={area === "workspace" ? <><VDropdownMenu align="end" trigger={<VIconButton variant="ghost" className={styles.workspacePaneAction} label={zh ? "股票资料与研究设置" : "Stock data and research settings"} icon={<Settings2 size={15} />} />} items={[{ id: "overview", label: researchKind === "topic" ? (zh ? "研究设置" : "Research settings") : (zh ? "股票概览与研究设置" : "Overview and settings"), onSelect: () => setTab("overview") }, ...(researchKind === "stock" ? [{ id: "news", label: zh ? "新闻公告" : "News", onSelect: () => setTab("news") }, { id: "fundamentals", label: zh ? "财务指标" : "Financials", onSelect: () => setTab("fundamentals") }] : [])]} />{tab !== "report" ? <VButton variant="ghost" className={styles.workspacePaneAction} icon={<FileText size={14} />} onPress={() => setTab("report")}>{zh ? "报告" : "Report"}</VButton> : null}</> : undefined}>
     {createError || lifecycle.error ? <VStateSurface tone="error" title={zh ? "操作未完成" : "Could not complete action"}><span className={styles.workspaceErrorText}>{createError || lifecycle.error}</span></VStateSurface> : null}
-    {nativeReady && modelGateIssue && !currentView?.sessionLlmOptionsLoading && (currentView?.sessionLlmOptionsError || currentView?.sessionLlmOptions) && area !== "workspace" && !isBacktest ? <VStateSurface tone="error" density="compact" title={zh ? "研究模型暂不可用" : "Research model unavailable"} actions={<VRouteLinkButton to={agentCenterConfigRoute({ agentId: assistant.agentId, returnTo, returnLabel: zh ? "炒股智能体" : "Investment assistant" })}>{zh ? "检查助手配置" : "Check assistant settings"}</VRouteLinkButton>}>{zh ? "请检查助手默认模型后重新开始研究。" : "Check the assistant's default model before starting research."}</VStateSurface> : null}
+    {nativeReady && modelGateIssue && !currentView?.sessionLlmOptionsLoading && (currentView?.sessionLlmOptionsError || currentView?.sessionLlmOptions) && area !== "workspace" && !isBacktest ? <VStateSurface tone="error" density="compact" title={currentView?.sessionLlmOptionsError ? (zh ? "模型选项读取失败" : "Could not read model options") : (zh ? "研究模型暂不可用" : "Research model unavailable")} actions={currentView?.sessionLlmOptionsError
+      ? <VButton onPress={() => void client.invalidateQueries({ queryKey: queryKeys.sessionLlmOptions(sessionId), exact: true })}>{zh ? "重试读取" : "Retry"}</VButton>
+      : <VRouteLinkButton to={agentCenterConfigRoute({ agentId: assistant.agentId, returnTo, returnLabel: zh ? "炒股智能体" : "Investment assistant" })}>{zh ? "检查助手配置" : "Check assistant settings"}</VRouteLinkButton>}>{currentView?.sessionLlmOptionsError
+        ? (zh ? "无法从服务端读取模型选项，请重试。" : "Could not load session model options. Retry.")
+        : (zh ? "请检查助手默认模型后重新开始研究。" : "Check the assistant's default model before starting research.")}</VStateSurface> : null}
+    {canOfferStageReport ? <VStateSurface tone="unavailable" density="compact" title={zh ? "研究待继续" : "Research needs continuation"} actions={<VButton onPress={() => prepareResearchPrompt(stageReportPrompt)}>{zh ? "生成阶段报告" : "Draft stage report"}</VButton>}>{zh ? "本轮受额度或预算限制，可先整理已获得的证据。" : "This turn reached a quota or budget limit. Draft a report from evidence already collected."}</VStateSurface> : null}
     {lifecycle.dialog}
     {area === "workspace" && tab === "report" ? null : <VTabs className={styles.workspaceGroupTabs} listClassName={styles.workspaceGroupTabList} value={isBacktest ? "backtest" : area} onValueChange={navigateArea} aria-label={zh ? `${activeGroup.zh}功能` : `${activeGroup.en} views`} items={activeGroup.areas.map(item => ({ id: item.id, label: zh ? item.zh : item.en }))} />}
     {activeGroup.id === "market" || preparing || isBacktest ? stockLookup : null}

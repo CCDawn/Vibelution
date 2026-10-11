@@ -1,9 +1,9 @@
 export default {
   surface: "border border-[var(--vui-border-subtle)] rounded-lg min-w-0",
   heading: "flex min-w-0 flex-nowrap items-center justify-between gap-2 mb-2 [&_button]:whitespace-nowrap",
-  title: "flex items-center gap-2 text-sm",
-  actions: "flex min-w-0 items-center gap-2 overflow-x-auto",
-  timestamp: "text-xs text-[var(--fg-tertiary)]",
+  title: "flex shrink-0 items-center gap-2 whitespace-nowrap text-sm",
+  actions: "flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto [&>*]:shrink-0",
+  timestamp: "shrink-0 whitespace-nowrap text-xs text-[var(--fg-tertiary)]",
   parameters: "flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto mb-3 text-xs text-[var(--fg-secondary)]",
   parameter: "inline-flex shrink-0 max-w-full items-center whitespace-nowrap rounded-md border border-[var(--vui-border-subtle)] px-2 py-1",
   summary: "text-sm leading-7 font-medium text-[var(--fg-primary)] mt-0 mb-4",

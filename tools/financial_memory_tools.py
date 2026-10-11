@@ -4,12 +4,58 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 
 from core.web.services.financial_research.as_of import active_cutoff, on_or_before
 from tools.team_knowledge_tools import _current_runtime, _policy_ids
 
 MAX_RESULT_CHARS = 3_200
+_REPORT_PERIOD = re.compile(r"^20\d{2}(?:FY|Q[1-4]|H[12])$")
+_REPORT_PERIOD_ALIASES = (
+    (re.compile(r"^(20\d{2})年年度报告$"), "FY"),
+    (re.compile(r"^(20\d{2})年度报告$"), "FY"),
+    (re.compile(r"^(20\d{2})年年报$"), "FY"),
+    (re.compile(r"^(20\d{2})年半年度报告$"), "H1"),
+    (re.compile(r"^(20\d{2})年半年报$"), "H1"),
+    (re.compile(r"^(20\d{2})年上半年报告$"), "H1"),
+    (re.compile(r"^(20\d{2})年下半年报告$"), "H2"),
+    (re.compile(r"^(20\d{2})年第一季度报告$"), "Q1"),
+    (re.compile(r"^(20\d{2})年一季报$"), "Q1"),
+    (re.compile(r"^(20\d{2})年第二季度报告$"), "Q2"),
+    (re.compile(r"^(20\d{2})年二季报$"), "Q2"),
+    (re.compile(r"^(20\d{2})年第三季度报告$"), "Q3"),
+    (re.compile(r"^(20\d{2})年三季报$"), "Q3"),
+    (re.compile(r"^(20\d{2})年第四季度报告$"), "Q4"),
+    (re.compile(r"^(20\d{2})年四季报$"), "Q4"),
+)
+
+
+def _normalize_report_period(value: object) -> tuple[str, bool]:
+    """Accept canonical periods and only exact, unambiguous Chinese aliases."""
+    if not isinstance(value, str):
+        return "", False
+    candidate = value.strip()
+    if _REPORT_PERIOD.fullmatch(candidate):
+        return candidate, False
+    for pattern, suffix in _REPORT_PERIOD_ALIASES:
+        match = pattern.fullmatch(candidate)
+        if match:
+            return f"{match.group(1)}{suffix}", True
+    return "", False
+
+
+def _invalid_report_period(value: object) -> str:
+    requested = value.strip()[:80] if isinstance(value, str) else ""
+    payload = {
+        "ok": False,
+        "status": "invalid_request",
+        "message": "报告期格式无效。请使用 YYYYFY、YYYYQ1–YYYYQ4 或 YYYYH1–YYYYH2，例如 2025FY、2025Q3、2025H1。",
+        "expectedFormat": ["YYYYFY", "YYYYQ1", "YYYYQ2", "YYYYQ3", "YYYYQ4", "YYYYH1", "YYYYH2"],
+    }
+    if requested:
+        payload["requestedReportPeriod"] = requested
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _run(action: str, callback: Callable) -> str:
@@ -190,19 +236,36 @@ def financial_evidence_search_tool(
     query: str, ticker: str, report_period: str, limit: int = 5
 ) -> str:
     """Read only reviewed financial excerpts through existing local RAG; no remote model."""
-    return _run(
+    normalized_period, was_alias = _normalize_report_period(report_period)
+    if not normalized_period:
+        return _invalid_report_period(report_period)
+    output = _run(
         "read",
         lambda knowledge, actor, allowed: _compact_search(
             knowledge.search_financial_evidence(
                 agent_id=actor,
                 query=query,
                 ticker=ticker,
-                report_period=report_period,
+                report_period=normalized_period,
                 allowed_knowledge_base_ids=allowed,
                 limit=limit,
             )
         ),
     )
+    if not was_alias:
+        return output
+    try:
+        payload = json.loads(output)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return output
+    if not isinstance(payload, dict):
+        return output
+    payload["reportPeriodNormalization"] = {
+        "requested": report_period.strip()[:80],
+        "canonical": normalized_period,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+    return encoded if len(encoded) <= MAX_RESULT_CHARS else output
 
 
 def financial_evidence_stage_tool(evidence_json: str, excerpt: str) -> str:

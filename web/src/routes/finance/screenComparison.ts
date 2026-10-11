@@ -49,7 +49,7 @@ export function projectScreeningComparison(reportText: string, requestText: stri
   if (!rows.length) return block;
   const body = original.trim();
   if (!body) return block;
-  return `${block}\n## 模型原文\n\n候选、公告原文和财报页码以上表为准。\n\n${body}\n`;
+  return `${block}\n## 模型正文（未经工具候选校验）\n\n${body}\n`;
 }
 
 function analysisDate(requestText: string): string {

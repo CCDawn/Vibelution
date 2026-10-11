@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceResearchReport } from "./FinanceResearchReport";
 import { projectStockReport, stockResearchPrompt } from "./stockResearchModel";
 import { fetchFinancialReportText } from "../../api/financialReports";
+import styles from "./FinanceResearchReport.styles";
 
 vi.mock("../../api/financialReports", async (original) => ({ ...await original<typeof import("../../api/financialReports")>(), fetchFinancialReportText: vi.fn() }));
 vi.mock("../../components/conversation/LazyConversationMarkdownRenderer", () => ({ LazyConversationMarkdownRenderer: ({ content }: { content: string }) => <div data-markdown>{content}</div> }));
@@ -35,6 +36,15 @@ describe("FinanceResearchReport research metadata", () => {
     await act(async () => root?.render(<QueryClientProvider client={new QueryClient()}><FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-1" zh onCitation={() => {}} onResearch={() => {}} {...props} /></QueryClientProvider>));
     return container;
   }
+
+  it("keeps the report title and header actions on one line in a narrow desktop rail", () => {
+    expect(styles.heading).toContain("flex-nowrap");
+    expect(styles.title).toContain("shrink-0");
+    expect(styles.title).toContain("whitespace-nowrap");
+    expect(styles.actions).toContain("overflow-x-auto");
+    expect(styles.actions).toContain("[&>*]:shrink-0");
+    expect(styles.timestamp).toContain("whitespace-nowrap");
+  });
 
   it("shows the original report's known stock and research settings in one metadata row", async () => {
     const container = await render();

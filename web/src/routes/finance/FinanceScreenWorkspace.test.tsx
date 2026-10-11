@@ -80,6 +80,7 @@ describe("FinanceScreenWorkspace", () => {
     expect(onResearchPrompt).toHaveBeenCalledWith(expect.stringContaining("financial_market_screen_tool"));
     expect(onResearchPrompt).toHaveBeenCalledWith(expect.stringContaining("已加载数量/行情池总数"));
     expect(onResearchPrompt).toHaveBeenCalledWith(expect.stringContaining("不得虚构或补齐股票数据"));
+    expect(onResearchPrompt).toHaveBeenCalledWith(expect.stringContaining("Markdown 链接 [来源标题](https://...)"));
     expect(explorer.props).toHaveLength(0);
   });
 

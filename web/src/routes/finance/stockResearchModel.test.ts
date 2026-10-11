@@ -154,6 +154,10 @@ describe("stock research projections", () => {
     expect(stockIdentityFromUnknown({ ...stock, symbol: "https://example.com" })).toBeNull();
     expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("贵州茅台（600519，上交所）");
     expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("分析日期 2026-10-04，报告期 2024FY");
+    expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("来源统一用 Markdown 链接 [来源标题](https://...) 展示，不要只给裸 URL");
+    expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("某字段返回 insufficient_evidence 后，停止仅换期别格式重试，也不猜测或穷举报告期");
+    expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("核验同一期其他指标时，使用独立具体的检索问题");
+    expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("保留调用预算完成最终交付");
   });
   it("canonicalizes known US exchange suffixes from search and quotes without stripping share classes", () => {
     const searchResult = { symbol: "usNVDA", ticker: "NVDA.OQ", name: "英伟达", market: "NASDAQ", marketCode: "US", currency: "USD" };
@@ -218,20 +222,27 @@ describe("stock research projections", () => {
         { type: "tool_call", toolName: "financial_market_screen_tool", status: "completed", output: screen },
         { type: "tool_call", toolName: "financial_evidence_search_tool", status: "completed", input: JSON.stringify({ ticker: "sh600519", query: "营收", report_period: "2024FY" }), output: evidence },
         { type: "tool_call", toolName: "financial_report_query_tool", status: "completed", output: "{\"page\":7}" },
-        { ...final, text: "模型说明工具不支持市值。毛利率 91.93%。" },
+        { ...final, text: "## 结论\n模型说明工具不支持市值。毛利率 91.93%。\n## 风险\n当前筛选结果覆盖不完整。" },
       ]),
     ])!;
     const emptyFilings = "年报：没有这一项；半年报：没有这一项；一季报：没有这一项；三季报：没有这一项";
     expect(report.text).toContain(`| 贵州茅台 | 600519 | ${emptyFilings} | 第 42 页 |`);
     expect(report.text).toContain(`| 平安银行 | 000001 | ${emptyFilings} | 没有这一项 |`);
     expect(report.text).toContain("覆盖不完整，结果仅基于已加载范围。");
-    expect(report.text).toContain("候选、公告原文和财报页码以上表为准");
+    expect(report.text).toContain("模型正文（未经工具候选校验）");
     expect(report.text).toContain("公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接");
     expect(report.text).toContain("工具不支持市值");
     expect(report.text).not.toContain("1258.62");
     expect(report.text).not.toContain("91.93");
     expect(report.text).not.toContain("第 7 页");
     expect(researchTablePreview(report.text)).toContain("600519");
+    const modelBody = report.sections.find((section) => section.title === "模型正文（未经工具候选校验）");
+    expect(modelBody?.text).toContain("## 结论");
+    expect(modelBody?.text).toContain("## 风险");
+    expect(modelBody?.text).toContain("模型说明工具不支持市值。");
+    expect(modelBody?.text).toContain("毛利率 没有这一项。");
+    expect(report.sections).toHaveLength(2);
+    expect(report.sections.some((section) => section.title === "结论")).toBe(false);
     const cleared = JSON.stringify({
       ok: true, status: "partial", source: "新浪财经", fetchedAt: "2026-10-06T10:00:00+08:00",
       coverage: { providerTotal: 5000, loaded: 120, complete: false, totalFiltered: 0 }, returnedCount: 0, items: [],

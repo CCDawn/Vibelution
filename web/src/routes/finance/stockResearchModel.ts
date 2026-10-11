@@ -195,9 +195,27 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
 export function stockResearchReportFromText(identity: Pick<StockResearchReport, "turnId" | "timestamp" | "researchParameters" | "originalText">, text: string): StockResearchReport {
   const sections: StockResearchReport["sections"] = [];
   const headings = [...text.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
-  headings.forEach((heading, index) => sections.push({ id: `section-${index}`, title: cleanResearchPreview(heading[1], 25), text: text.slice(heading.index, headings[index + 1]?.index ?? text.length).trim() }));
+  const modelBodyMarker = headings.findIndex((heading) => /^(?:模型原文|模型正文(?:（未经工具候选校验）)?)$/.test(heading[1].trim()));
+  const visibleHeadings = modelBodyMarker < 0 ? headings : headings.slice(0, modelBodyMarker + 1);
+  visibleHeadings.forEach((heading, index) => {
+    const isModelBody = index === modelBodyMarker;
+    const contentStart = (heading.index ?? 0) + (isModelBody ? heading[0].length : 0);
+    sections.push({
+      id: `section-${index}`,
+      title: cleanResearchPreview(heading[1], 25),
+      text: text.slice(contentStart, isModelBody ? text.length : headings[index + 1]?.index ?? text.length).trim(),
+    });
+  });
   const intro = text.slice(0, headings[0]?.index ?? text.length).trim();
-  const conclusion = sections.find((section) => /结论|摘要|简报|summary|conclusion/i.test(section.title))?.text || intro || sections[0]?.text || text;
+  const modelBodySection = modelBodyMarker >= 0 ? sections.at(-1)?.text ?? "" : "";
+  const modelBodyHeadings = [...modelBodySection.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
+  const modelConclusionHeading = modelBodyHeadings.find((heading) => /结论|摘要|简报|summary|conclusion/i.test(heading[1]));
+  const modelConclusion = modelConclusionHeading
+    ? modelBodySection.slice(modelConclusionHeading.index, modelBodyHeadings[modelBodyHeadings.indexOf(modelConclusionHeading) + 1]?.index ?? modelBodySection.length).trim()
+    : modelBodySection;
+  const conclusion = modelBodyMarker >= 0
+    ? modelConclusion
+    : sections.find((section) => /结论|摘要|简报|summary|conclusion/i.test(section.title))?.text || intro || sections[0]?.text || text;
   const conclusions = [...conclusion.matchAll(/^\s*[-*]\s+(.+)$/gm)].slice(0, 2).map((match) => match[1]).join(" ");
   const citations: ReportCitation[] = [];
   for (const match of text.matchAll(/https?:\/\/[^\s<>"\])。，；、）]+/g)) {
@@ -240,7 +258,7 @@ export function stockResearchPrompt(stock: StockIdentity, period: string, date: 
   const currency = snapshot?.stock.currency ?? (stock.symbol.startsWith("hk") ? "HKD" : stock.symbol.startsWith("us") ? "USD" : "CNY");
   const unit = currency === "HKD" ? "港元" : currency === "USD" ? "美元" : "元";
   const quote = snapshot?.stock.symbol === stock.symbol ? `\n行情快照（${snapshot.source}，可能延迟）：${snapshot.stock.timestamp}，价格 ${snapshot.stock.price} ${unit}，涨跌 ${snapshot.stock.changePercent}%。这是带时点的报价，不是已审核财报证据。` : "";
-  return `请研究 ${subject}，分析日期 ${date}${period.trim() ? `，报告期 ${period.trim()}` : ""}，重点检查${task}。${RESEARCH_DEPTH_INSTRUCTIONS[depth]}，使用 Markdown 二级标题“结论、市场与技术、基本面、新闻与催化剂、行业与大盘、多空论证、情景分析、风险、证据来源”组织结果；不适用的章节简要说明缺失证据。财报数值只用已审核原始 PDF 证据，注明报告期、页码和官方链接；新闻注明来源与日期。区分事实、推论和缺失数据，不编造行情、指标或买卖建议。${quote}`;
+  return `请研究 ${subject}，分析日期 ${date}${period.trim() ? `，报告期 ${period.trim()}` : ""}，重点检查${task}。${RESEARCH_DEPTH_INSTRUCTIONS[depth]}，使用 Markdown 二级标题“结论、市场与技术、基本面、新闻与催化剂、行业与大盘、多空论证、情景分析、风险、证据来源”组织结果；不适用的章节简要说明缺失证据。报告期使用 YYYYFY、YYYYQ1–YYYYQ4 或 YYYYH1–YYYYH2 格式；同一报告期和同一检索问题不得重复调用。某字段返回 insufficient_evidence 后，停止仅换期别格式重试，也不猜测或穷举报告期；核验同一期其他指标时，使用独立具体的检索问题。基于已有证据完成答复，明确列出无法核验的项目，保留调用预算完成最终交付。财报数值只用已审核原始 PDF 证据，注明报告期、页码和官方链接；新闻注明来源与日期，来源统一用 Markdown 链接 [来源标题](https://...) 展示，不要只给裸 URL。区分事实、推论和缺失数据，不编造行情、指标或买卖建议。${quote}`;
 }
 export function movingAverage(candles: readonly StockCandle[], length: number): (number | null)[] {
   let sum = 0;

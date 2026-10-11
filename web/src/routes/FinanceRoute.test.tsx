@@ -15,11 +15,18 @@ import { fetchFinancialStock, searchFinancialStocks } from "../api/financialMark
 import { listArchivedChatSessions, unarchiveChatSession } from "../api/sessionArchive";
 import { fetchFinancialReportText } from "../api/financialReports";
 import { fetchFinancialReflection } from "../api/financialEvaluation";
+import { queryKeys } from "../api/queryKeys";
 
 const nativeSubmit = vi.fn();
 let nativeMessages: SessionDetail["messages"] = [];
 let nativeTitle = "原生研究";
 let modelContextWindow = 128_000;
+let modelOptionsError = false;
+let nativeStatus = "idle";
+let nativeBusy = false;
+let nativeStopping = false;
+let nativeTerminalReason = "";
+let nativeLastTurnStatus = "";
 const researchModel: SessionLlmModelOption = { modelId: "research", modelRef: "provider/research", model: "research", label: "研究模型", providerId: "provider", providerLabel: "Provider", providerKind: "openai", apiKeyConfigured: true, missingApiKey: false, supportsReasoningEffort: true, reasoningEffortValues: ["low", "medium", "high"], reasoningEffortOptions: [], defaultReasoningEffort: "medium", isDefault: true };
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
@@ -46,9 +53,10 @@ vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => {
   const onSelectionChange = React.useCallback((_id: string, next: SessionModelSelection | null) => setSelection(next), []);
   const options = React.useMemo(() => ({ sessionId: id, currentModelId: researchModel.modelRef, currentReasoningEffort: "medium", model: { ...researchModel, contextWindow: modelContextWindow, runtimeSelectable: true, providerHealthy: true }, choices: [{ ...researchModel, contextWindow: modelContextWindow, runtimeSelectable: true, providerHealthy: true }] }), [id]);
   useFinancialResearchSessionBridge({
-    sessionId: id, agentId: "finance-a", title: nativeTitle, status: "idle", busy: false, stopping: false,
+    sessionId: id, agentId: "finance-a", title: nativeTitle, status: nativeStatus, busy: nativeBusy, stopping: nativeStopping,
+    terminalReason: nativeTerminalReason, lastTurnStatus: nativeLastTurnStatus,
     messages: nativeMessages,
-    sessionLlmOptions: options, turnModelSelection: selection, onTurnModelSelectionChange: onSelectionChange,
+    sessionLlmOptions: options, sessionLlmOptionsError: modelOptionsError, turnModelSelection: selection, onTurnModelSelectionChange: onSelectionChange,
     onComposerChange: setDraft, onFocusComposer: () => {},
     composerValue: draft, onSubmit: () => nativeSubmit(draft),
   });
@@ -73,6 +81,12 @@ beforeEach(() => {
   nativeMessages = [];
   nativeTitle = "原生研究";
   modelContextWindow = 128_000;
+  modelOptionsError = false;
+  nativeStatus = "idle";
+  nativeBusy = false;
+  nativeStopping = false;
+  nativeTerminalReason = "";
+  nativeLastTurnStatus = "";
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -115,6 +129,14 @@ async function openResearchSettings() {
 }
 function nativeSession(id: string): SessionDetail {
   return { id, agentId: "finance-a", title: "原生研究", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "", messages: [], defaultFileContext: "", previewTabs: [], activePreviewPath: "", changedFiles: [], readFiles: [] };
+}
+function stageResearchMessages(): SessionDetail["messages"] {
+  return [
+    { role: "user", id: "stage-request", timestamp: "", content: "请核对贵州茅台的公开资料。" },
+    { role: "assistant", id: "stage-answer", turnId: "stage-turn", status: "completed", timestamp: "", turnItems: [
+      { type: "agent_message", phase: "final_answer", status: "completed", text: "已核实：当前会话有一项阶段性证据。" },
+    ] },
+  ];
 }
 async function input(label: string, value: string) {
   const field = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
@@ -319,6 +341,54 @@ describe("financial assistant page", () => {
     expect(container.textContent).not.toContain("研究模型暂不可用");
     expect(button("检查数据与预算")?.disabled).toBe(false);
     expect(nativeSubmit).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes session model-options request failures from assistant configuration and retries that request", async () => {
+    modelOptionsError = true;
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await render("/finance?session=native-session&finance_area=screen");
+
+    expect(container.textContent).toContain("模型选项读取失败");
+    expect(container.textContent).not.toContain("请检查助手默认模型");
+    expect(container.textContent).toContain("无法从服务端读取模型选项，请重试。");
+    await act(async () => button("重试读取")!.click());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessionLlmOptions("native-session"), exact: true });
+  });
+
+  it.each(["needs_continue", "paused_limit"]) (
+    "offers a user-confirmed stage report draft for the latest %s outcome without submitting or creating a session",
+    async (outcome) => {
+      nativeTerminalReason = outcome;
+      nativeLastTurnStatus = outcome;
+      nativeMessages = stageResearchMessages();
+      await render("/finance?session=native-session&finance_area=screen");
+
+      expect(container.textContent).toContain("额度或预算限制");
+      await act(async () => button("生成阶段报告")!.click());
+      await settle();
+
+      const draft = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="native draft"]')?.value ?? "";
+      expect(draft).toContain("请基于当前会话已经获得的证据整理阶段报告");
+      expect(draft).toContain("不要再次调用工具");
+      expect(container.querySelector("output")?.textContent).toContain("session=native-session");
+      expect(nativeSubmit).not.toHaveBeenCalled();
+      expect(createChatSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not offer the stage report action for a user-stopped or still-running turn", async () => {
+    nativeTerminalReason = "stopped_by_user";
+    nativeLastTurnStatus = "stopped_by_user";
+    nativeMessages = stageResearchMessages();
+    await render("/finance?session=native-session");
+    expect(button("生成阶段报告")).toBeUndefined();
+
+    nativeBusy = true;
+    nativeTerminalReason = "needs_continue";
+    nativeLastTurnStatus = "needs_continue";
+    nativeMessages = stageResearchMessages();
+    await render("/finance?session=native-session&finance_area=screen");
+    expect(button("生成阶段报告")).toBeUndefined();
   });
 
   it("starts a topic in its own native session without sending duplicate turns", async () => {

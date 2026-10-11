@@ -4,6 +4,7 @@ export type {
   PaperAccountSnapshot,
   PaperFeePolicy,
   PaperOrder,
+  PaperOrderQuantityRule,
   PaperOrderRequest,
   PaperPosition,
   PaperReviewDay,
@@ -13,7 +14,9 @@ export type {
 } from "./types/financialPaper";
 
 export const financialPaperKeys = {
-  account: (agentId: string) => ["financial-paper", agentId, "account"] as const,
+  account: (agentId: string, orderSymbol?: string) => orderSymbol
+    ? ["financial-paper", agentId, "account", orderSymbol] as const
+    : ["financial-paper", agentId, "account"] as const,
   review: (agentId: string, month: string) => ["financial-paper", agentId, "review", month] as const,
 };
 
@@ -29,9 +32,10 @@ function agentPath(agentId: string) {
 
 export function fetchFinancialPaperAccount(
   agentId: string,
-  options?: { signal?: AbortSignal; orderLimit?: number },
+  options?: { signal?: AbortSignal; orderLimit?: number; orderSymbol?: string },
 ): Promise<PaperAccountSnapshot> {
   const query = new URLSearchParams({ orderLimit: String(options?.orderLimit ?? 50) });
+  if (options?.orderSymbol) query.set("orderSymbol", options.orderSymbol);
   return fetchJson<PaperAccountSnapshot>(`${agentPath(agentId)}?${query.toString()}`, { signal: options?.signal });
 }
 

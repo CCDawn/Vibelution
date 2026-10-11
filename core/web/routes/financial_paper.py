@@ -21,10 +21,15 @@ _EMPTY_ACCOUNT_OPEN_BODY = Body(default=None)
 
 class PaperFeePolicyResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    feeModel: str | None = None
+    effectiveDate: str | None = None
     commissionRate: str
     minimumCommissionYuan: str
+    commissionIncludes: list[str] = Field(default_factory=list)
+    transferFeeRate: str | None = None
     sellStampDutyRate: str
     transferFeeIncluded: bool
+    roundingStatus: str | None = None
     description: str
 
 
@@ -50,6 +55,21 @@ class PaperPositionResponse(BaseModel):
     sourceUrl: str
 
 
+class PaperOrderQuantityRuleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    symbol: str
+    version: str
+    board: str
+    minimumBuyShares: int
+    buyIncrement: int
+    minimumSellShares: int
+    sellIncrement: int
+    residualSellThreshold: int
+    maximumOrderShares: int
+    supportedForSimulation: bool
+    unsupportedReason: str | None
+
+
 class PaperOrderResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     orderId: str
@@ -64,6 +84,11 @@ class PaperOrderResponse(BaseModel):
     grossAmountYuan: str
     commissionYuan: str
     stampDutyYuan: str
+    transferFeeYuan: str = "0.00"
+    handlingFeeYuan: str = "0.00"
+    regulatoryFeeYuan: str = "0.00"
+    brokerCommissionYuan: str = "0.00"
+    feeModel: str = "legacy_unverified"
     totalFeeYuan: str
     cashChangeYuan: str
     realizedPnlYuan: str
@@ -83,6 +108,8 @@ class PaperAccountResponse(BaseModel):
     agentId: str
     accountId: str
     openedAt: str
+    tradeDate: str | None = None
+    isTradingDay: bool | None = None
     initialCashYuan: str
     cashYuan: str
     marketValueYuan: str
@@ -98,6 +125,7 @@ class PaperAccountResponse(BaseModel):
     ordersTotal: int
     ordersLimit: int
     ordersTruncated: bool
+    orderQuantityRule: PaperOrderQuantityRuleResponse | None = None
     feePolicy: PaperFeePolicyResponse
     tPlusOneRule: str
     simulationOnly: Literal[True]
@@ -114,7 +142,7 @@ class PaperOrderRequest(BaseModel):
     clientOrderId: UUID
     symbol: str = Field(min_length=6, max_length=8)
     side: Literal["buy", "sell"]
-    quantity: int = Field(ge=100, le=1_000_000, multiple_of=100)
+    quantity: int = Field(strict=True, ge=1, le=1_000_000)
     reason: str = Field(min_length=1, max_length=500)
 
     @field_validator("reason")
@@ -186,9 +214,12 @@ def _http_error(exc: Exception) -> HTTPException:
 def financial_paper_account(
     agentId: str,
     orderLimit: int = Query(default=50, ge=1, le=200),
+    orderSymbol: str | None = Query(default=None, min_length=6, max_length=8),
 ) -> dict:
     try:
-        return paper.get_account_snapshot(agentId, order_limit=orderLimit)
+        return paper.get_account_snapshot(
+            agentId, order_limit=orderLimit, order_symbol=orderSymbol
+        )
     except Exception as exc:
         raise _http_error(exc) from exc
 

@@ -32,25 +32,29 @@ def _agent() -> dict:
     )
 
 
-def _quote(symbol: str, price: str = "10.00") -> dict:
+def _quote(
+    symbol: str,
+    price: str = "10.00",
+    trade_date: str = "2026-10-12",
+) -> dict:
     return {
         "symbol": symbol,
         "ticker": symbol[2:],
         "name": "贵州茅台" if symbol == "sh600519" else "平安银行",
         "market": "上交所" if symbol.startswith("sh") else "深交所",
         "priceYuan": price,
-        "timestamp": "2026-10-06T15:00:00+08:00",
-        "fetchedAt": "2026-10-06T07:00:02+00:00",
+        "timestamp": f"{trade_date}T15:00:00+08:00",
+        "fetchedAt": f"{trade_date}T08:00:00+00:00",
         "source": "腾讯财经",
         "sourceUrl": f"https://gu.qq.com/{symbol}/gp",
     }
 
 
-def _quote_batch(symbols: list[str]) -> dict:
+def _quote_batch(symbols: list[str], trade_date: str = "2026-10-12") -> dict:
     return {
         "source": "腾讯财经",
         "sourceUrl": "https://gu.qq.com/",
-        "fetchedAt": "2026-10-06T07:00:02+00:00",
+        "fetchedAt": f"{trade_date}T08:00:00+00:00",
         "items": [
             {
                 "symbol": symbol,
@@ -60,7 +64,7 @@ def _quote_batch(symbols: list[str]) -> dict:
                     "name": "贵州茅台" if symbol == "sh600519" else "平安银行",
                     "market": "上交所" if symbol.startswith("sh") else "深交所",
                     "price": 10.0,
-                    "timestamp": "2026-10-06T15:00:00+08:00",
+                    "timestamp": f"{trade_date}T15:00:00+08:00",
                 },
                 "error": None,
             }
@@ -131,9 +135,14 @@ def _execute(agent_id: str, context: dict, *, batch_id: str | None = None, **cha
 
 def _buy_old_holding(agent_id: str, monkeypatch):
     monkeypatch.setattr(
+        research,
+        "batch_quotes",
+        lambda symbols: _quote_batch(symbols, "2026-10-09"),
+    )
+    monkeypatch.setattr(
         ledger,
         "_utc_now",
-        lambda: datetime(2026, 10, 5, 3, 0, tzinfo=timezone.utc),
+        lambda: datetime(2026, 10, 9, 8, 0, tzinfo=timezone.utc),
     )
     paper.submit_order(
         agent_id,
@@ -143,10 +152,11 @@ def _buy_old_holding(agent_id: str, monkeypatch):
         quantity=200,
         reason="准备次日可卖的持仓",
     )
+    monkeypatch.setattr(research, "batch_quotes", _quote_batch)
     monkeypatch.setattr(
         ledger,
         "_utc_now",
-        lambda: datetime(2026, 10, 6, 3, 0, tzinfo=timezone.utc),
+        lambda: datetime(2026, 10, 12, 8, 0, tzinfo=timezone.utc),
     )
 
 
@@ -161,7 +171,7 @@ def test_read_context_returns_stable_fingerprint_and_sellable_quantities(
 
     assert first == second
     assert first["accountId"] == paper.get_account_snapshot(agent_id)["accountId"]
-    assert first["cashYuan"] == "997995.00"
+    assert first["cashYuan"] == "997994.98"
     assert first["positions"] == [
         {
             "symbol": "sh600519",
@@ -194,10 +204,10 @@ def test_rebalance_applies_sells_before_buys_and_writes_once(rebalance_env, monk
     assert len(writes) == 1
     assert [order["side"] for order in batch["orders"]] == ["sell", "buy"]
     assert [order["side"] for order in account["orders"][:2]] == ["buy", "sell"]
-    assert batch["beforeCashYuan"] == "997995.00"
-    assert batch["afterCashYuan"] == "998084.45"
-    assert account["cashYuan"] == "998084.45"
-    assert account["totalFeesYuan"] == "15.55"
+    assert batch["beforeCashYuan"] == "997994.98"
+    assert batch["afterCashYuan"] == "998084.41"
+    assert account["cashYuan"] == "998084.41"
+    assert account["totalFeesYuan"] == "15.59"
     assert batch["accountId"] == account["accountId"]
     assert batch["ledgerFingerprint"] == context["ledgerFingerprint"]
     assert batch["metadata"] == _metadata()
@@ -364,6 +374,11 @@ def test_quote_expiry_is_checked_after_waiting_for_ledger_lock(
 
 def test_stale_ledger_fingerprint_rejects_without_mutation(rebalance_env, monkeypatch):
     agent_id = rebalance_env["agent"]["agentId"]
+    monkeypatch.setattr(
+        ledger,
+        "_utc_now",
+        lambda: datetime(2026, 10, 12, 8, 0, tzinfo=timezone.utc),
+    )
     stale_context = rebalance.read_rebalance_context(agent_id)
     paper.submit_order(
         agent_id,

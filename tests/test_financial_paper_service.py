@@ -32,7 +32,11 @@ def _agent(label: str = "Paper account") -> dict:
     )
 
 
-def _snapshot(symbol: str = "sh600519", price: float = 10.0) -> dict:
+def _snapshot(
+    symbol: str = "sh600519",
+    price: float = 10.0,
+    timestamp: str = "2026-10-09T10:00:00+08:00",
+) -> dict:
     ticker = symbol[2:]
     return {
         "stock": {
@@ -41,7 +45,7 @@ def _snapshot(symbol: str = "sh600519", price: float = 10.0) -> dict:
             "name": "贵州茅台",
             "market": "上交所",
             "price": price,
-            "timestamp": "2026-10-05T15:00:00+08:00",
+            "timestamp": timestamp,
         },
         "source": "腾讯财经",
         "sourceUrl": f"https://gu.qq.com/{symbol}/gp",
@@ -49,15 +53,19 @@ def _snapshot(symbol: str = "sh600519", price: float = 10.0) -> dict:
     }
 
 
-def _batch(symbols: list[str], price: float = 10.0) -> dict:
+def _batch(
+    symbols: list[str],
+    price: float = 10.0,
+    timestamp: str = "2026-10-09T10:00:00+08:00",
+) -> dict:
     return {
         "source": "腾讯财经",
         "sourceUrl": "https://gu.qq.com/",
-        "fetchedAt": "2026-10-05T07:00:02+00:00",
+        "fetchedAt": "2026-10-09T02:00:02+00:00",
         "items": [
             {
                 "symbol": symbol,
-                "quote": _snapshot(symbol, price)["stock"],
+                "quote": _snapshot(symbol, price, timestamp)["stock"],
                 "error": None,
             }
             for symbol in symbols
@@ -68,11 +76,16 @@ def _batch(symbols: list[str], price: float = 10.0) -> dict:
 @pytest.fixture
 def paper_env(finance_env, monkeypatch):
     agent = _agent()
-    quote = {"price": 10.0}
+    quote = {"price": 10.0, "timestamp": "2026-10-09T10:00:00+08:00"}
     monkeypatch.setattr(
         research,
         "batch_quotes",
-        lambda symbols: _batch(symbols, quote["price"]),
+        lambda symbols: _batch(symbols, quote["price"], quote["timestamp"]),
+    )
+    monkeypatch.setattr(
+        ledger,
+        "_utc_now",
+        lambda: datetime(2026, 10, 9, 2, 0, tzinfo=timezone.utc),
     )
     return {**finance_env, "agent": agent, "quote": quote}
 
@@ -124,7 +137,7 @@ def test_concurrent_identical_order_is_recorded_once(paper_env):
     assert all(row["ordersTotal"] == 1 for row in rows)
     account = paper.get_account_snapshot(agent_id)
     assert account["ordersTotal"] == 1
-    assert account["cashYuan"] == "998995.00"
+    assert account["cashYuan"] == "998994.99"
 
 
 def test_insufficient_cash_does_not_mutate_the_ledger(paper_env):
@@ -150,8 +163,8 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
 ):
     agent_id = paper_env["agent"]["agentId"]
     paper.open_account(agent_id)
-    now = {"value": datetime(2026, 10, 5, 3, 0, tzinfo=timezone.utc)}
-    day = {"value": datetime(2026, 10, 5, tzinfo=timezone.utc).date()}
+    now = {"value": datetime(2026, 10, 9, 2, 0, tzinfo=timezone.utc)}
+    day = {"value": datetime(2026, 10, 9, tzinfo=timezone.utc).date()}
     monkeypatch.setattr(ledger, "_utc_now", lambda: now["value"])
     monkeypatch.setattr(ledger, "_beijing_date", lambda _value=None: day["value"])
     key = str(uuid4())
@@ -163,13 +176,15 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
         quantity=200,
         reason="核对公开行情后的模拟买入",
     )
-    assert bought["cashYuan"] == "997995.00"
+    assert bought["cashYuan"] == "997994.98"
     assert bought["positions"][0]["quantity"] == 200
     assert bought["positions"][0]["availableQuantity"] == 0
     assert bought["orders"][0]["priceYuan"] == "10.00"
-    assert bought["orders"][0]["quoteDate"] == "2026-10-05"
+    assert bought["orders"][0]["quoteDate"] == "2026-10-09"
     assert bought["orders"][0]["commissionYuan"] == "5.00"
     assert bought["orders"][0]["stampDutyYuan"] == "0.00"
+    assert bought["orders"][0]["transferFeeYuan"] == "0.02"
+    assert bought["orders"][0]["totalFeeYuan"] == "5.02"
 
     paper_env["quote"]["price"] = 11.0
     with pytest.raises(paper.InsufficientSharesError, match=r"T\+1"):
@@ -182,8 +197,21 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
             reason="尝试当日卖出",
         )
 
-    day["value"] = datetime(2026, 10, 6, tzinfo=timezone.utc).date()
-    now["value"] += timedelta(days=1)
+    day["value"] = datetime(2026, 10, 10, tzinfo=timezone.utc).date()
+    now["value"] = datetime(2026, 10, 10, 2, 0, tzinfo=timezone.utc)
+    with pytest.raises(paper.InvalidPaperOrderError, match="不是 A 股交易日"):
+        paper.submit_order(
+            agent_id,
+            client_order_id=str(uuid4()),
+            symbol="sh600519",
+            side="sell",
+            quantity=100,
+            reason="周末不得模拟成交",
+        )
+
+    day["value"] = datetime(2026, 10, 12, tzinfo=timezone.utc).date()
+    now["value"] = datetime(2026, 10, 12, 2, 0, tzinfo=timezone.utc)
+    paper_env["quote"]["timestamp"] = "2026-10-12T10:00:00+08:00"
     sell_key = str(uuid4())
     sold = paper.submit_order(
         agent_id,
@@ -191,13 +219,15 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
         symbol="sh600519",
         side="sell",
         quantity=100,
-        reason="次日按北京时间自然日模拟卖出",
+        reason="下一 A 股交易日模拟卖出",
     )
     sale = sold["orders"][0]
     assert sale["grossAmountYuan"] == "1100.00"
     assert sale["commissionYuan"] == "5.00"
     assert sale["stampDutyYuan"] == "0.55"
-    assert sale["realizedPnlYuan"] == "91.95"
+    assert sale["transferFeeYuan"] == "0.01"
+    assert sale["totalFeeYuan"] == "5.56"
+    assert sale["realizedPnlYuan"] == "91.93"
     assert sold["positions"][0]["quantity"] == 100
     assert sold["positions"][0]["availableQuantity"] == 100
 
@@ -207,7 +237,7 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
         symbol="sh600519",
         side="sell",
         quantity=100,
-        reason="次日按北京时间自然日模拟卖出",
+        reason="下一 A 股交易日模拟卖出",
     )
     assert replayed["ordersTotal"] == 2
     with pytest.raises(paper.IdempotencyConflictError):
@@ -222,16 +252,16 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
 
     review = paper.get_review_snapshot(agent_id, month="2026-10")
     assert review["summary"]["totalTradeCount"] == 2
-    assert review["summary"]["allTimeRealizedPnlYuan"] == "91.95"
-    assert review["summary"]["allTimeFeesYuan"] == "10.55"
+    assert review["summary"]["allTimeRealizedPnlYuan"] == "91.93"
+    assert review["summary"]["allTimeFeesYuan"] == "10.58"
     assert review["summary"]["monthTradeCount"] == 2
-    assert review["summary"]["monthRealizedPnlYuan"] == "91.95"
+    assert review["summary"]["monthRealizedPnlYuan"] == "91.93"
     assert len(review["days"]) == 2
     assert [order["side"] for order in review["account"]["orders"]] == [
         "sell",
         "buy",
     ]
-    assert review["account"]["orders"][0]["reason"] == "次日按北京时间自然日模拟卖出"
+    assert review["account"]["orders"][0]["reason"] == "下一 A 股交易日模拟卖出"
     assert review["account"]["ordersLimit"] == 20
     assert review["account"]["ordersTruncated"] is False
     assert "requestFingerprint" not in review["account"]["orders"][0]
@@ -253,7 +283,7 @@ def test_agents_cannot_read_or_spend_each_others_virtual_balance(paper_env):
     )
     first = paper.get_account_snapshot(first_id)
     other = paper.get_account_snapshot(second_id)
-    assert first["cashYuan"] == "998995.00"
+    assert first["cashYuan"] == "998994.99"
     assert other["cashYuan"] == "1000000.00"
     assert other["positions"] == [] and other["ordersTotal"] == 0
     assert first["accountId"] != other["accountId"]
@@ -316,6 +346,89 @@ def test_paper_orders_reject_hk_us_before_requesting_quotes(paper_env, monkeypat
     assert calls == []
     account = paper.get_account_snapshot(agent_id)
     assert account["ordersTotal"] == 0 and account["positions"] == []
+
+
+def test_quote_date_must_match_current_trade_date(paper_env):
+    agent_id = paper_env["agent"]["agentId"]
+    paper.open_account(agent_id)
+    paper_env["quote"]["timestamp"] = "2026-10-08T15:00:00+08:00"
+
+    with pytest.raises(paper.InvalidPaperOrderError, match="与模拟交易日 2026-10-09 不一致"):
+        paper.submit_order(
+            agent_id,
+            client_order_id=str(uuid4()),
+            symbol="sh600519",
+            side="buy",
+            quantity=100,
+            reason="旧交易日行情不能作为今日模拟成交价",
+        )
+
+    account = paper.get_account_snapshot(agent_id)
+    assert account["ordersTotal"] == 0
+    assert account["cashYuan"] == "1000000.00"
+
+
+def test_board_quantity_rules_apply_to_main_and_star_market(paper_env):
+    agent_id = paper_env["agent"]["agentId"]
+    paper.open_account(agent_id)
+
+    with pytest.raises(paper.InvalidPaperOrderError, match="科创板买入须至少 200 股"):
+        paper.submit_order(
+            agent_id,
+            client_order_id=str(uuid4()),
+            symbol="sh688001",
+            side="buy",
+            quantity=100,
+            reason="科创板买入须符合最小申报数量",
+        )
+    with pytest.raises(paper.InvalidPaperOrderError, match="主板买入须至少 100 股"):
+        paper.submit_order(
+            agent_id,
+            client_order_id=str(uuid4()),
+            symbol="sh600519",
+            side="buy",
+            quantity=101,
+            reason="主板买入须按一手递增",
+        )
+
+    paper_env["quote"]["price"] = 10.0
+    accepted = paper.submit_order(
+        agent_id,
+        client_order_id=str(uuid4()),
+        symbol="sh688001",
+        side="buy",
+        quantity=200,
+        reason="科创板按 200 股起始数量买入",
+    )
+    assert accepted["positions"][0]["symbol"] == "sh688001"
+    assert accepted["positions"][0]["quantity"] == 200
+    assert accepted["orders"][0]["feeModel"] == "verified_ashare_fees_v1"
+
+
+def test_beijing_exchange_is_rejected_before_quote_request(paper_env, monkeypatch):
+    agent_id = paper_env["agent"]["agentId"]
+    paper.open_account(agent_id)
+    calls = []
+    monkeypatch.setattr(
+        research,
+        "batch_quotes",
+        lambda symbols: calls.append(symbols) or _batch(symbols),
+    )
+
+    with pytest.raises(paper.InvalidPaperOrderError, match="北交所费用规则尚未核验"):
+        paper.submit_order(
+            agent_id,
+            client_order_id=str(uuid4()),
+            symbol="bj832000",
+            side="buy",
+            quantity=100,
+            reason="未核验北交所费用，不得模拟成交",
+        )
+
+    assert calls == []
+    account = paper.get_account_snapshot(agent_id)
+    assert account["ordersTotal"] == 0
+    assert account["cashYuan"] == "1000000.00"
 
 
 def test_legacy_foreign_holding_is_never_valued_as_yuan(paper_env, monkeypatch):
@@ -383,6 +496,29 @@ def test_financial_paper_routes_are_typed_read_only_until_explicit_open(
     assert opened.status_code == 200, opened.text
     assert opened.json()["simulationOnly"] is True
     assert opened.json()["initialCashYuan"] == "1000000.00"
+    star_rules = client.get(
+        f"/api/financial-paper/{agent_id}?orderSymbol=sh688001"
+    )
+    assert star_rules.status_code == 200, star_rules.text
+    assert star_rules.json()["orderQuantityRule"] == {
+        "symbol": "sh688001",
+        "version": "ashare_quantity_v2",
+        "board": "star_market",
+        "minimumBuyShares": 200,
+        "buyIncrement": 1,
+        "minimumSellShares": 200,
+        "sellIncrement": 1,
+        "residualSellThreshold": 200,
+        "maximumOrderShares": 100000,
+        "supportedForSimulation": True,
+        "unsupportedReason": None,
+    }
+    beijing_rules = client.get(
+        f"/api/financial-paper/{agent_id}?orderSymbol=bj832000"
+    )
+    assert beijing_rules.status_code == 200, beijing_rules.text
+    assert beijing_rules.json()["orderQuantityRule"]["supportedForSimulation"] is False
+    assert "北交所费用规则尚未核验" in beijing_rules.json()["orderQuantityRule"]["unsupportedReason"]
     assert (
         client.post(
             f"/api/financial-paper/{agent_id}/account",
@@ -411,6 +547,20 @@ def test_financial_paper_routes_are_typed_read_only_until_explicit_open(
     assert malformed.status_code == 422
     assert market_calls == []
 
+    for invalid_quantity in (True, 100.0):
+        invalid_size = client.post(
+            f"/api/financial-paper/{agent_id}/orders",
+            json={
+                "clientOrderId": str(uuid4()),
+                "symbol": "sh600519",
+                "side": "buy",
+                "quantity": invalid_quantity,
+                "reason": "数量必须是 JSON 整数",
+            },
+        )
+        assert invalid_size.status_code == 422
+    assert market_calls == []
+
     placed = client.post(
         f"/api/financial-paper/{agent_id}/orders",
         json={
@@ -424,8 +574,9 @@ def test_financial_paper_routes_are_typed_read_only_until_explicit_open(
     assert placed.status_code == 200, placed.text
     body = placed.json()
     assert body["positions"][0]["source"] == "腾讯财经"
-    assert body["positions"][0]["quoteTimestamp"] == "2026-10-05T15:00:00+08:00"
-    assert body["orders"][0]["quoteFetchedAt"] == "2026-10-05T07:00:02+00:00"
+    assert body["positions"][0]["quoteTimestamp"] == "2026-10-09T10:00:00+08:00"
+    assert body["orders"][0]["quoteFetchedAt"] == "2026-10-09T02:00:02+00:00"
+    assert body["orders"][0]["feeModel"] == "verified_ashare_fees_v1"
     assert "requestFingerprint" not in body["orders"][0]
 
     rejected = client.post(
@@ -465,3 +616,24 @@ def test_financial_paper_routes_are_typed_read_only_until_explicit_open(
         if "financial-market" in path
         for method in methods
     )
+
+    stored = ledger._load_ledger(path, agent_id)
+    assert stored is not None
+    for field in (
+        "transferFeeYuan",
+        "handlingFeeYuan",
+        "regulatoryFeeYuan",
+        "brokerCommissionYuan",
+        "feeModel",
+    ):
+        stored["orders"][0].pop(field, None)
+    ledger._write_ledger(path, stored)
+    legacy_readback = client.get(f"/api/financial-paper/{agent_id}")
+    assert legacy_readback.status_code == 200, legacy_readback.text
+    old_order = legacy_readback.json()["orders"][0]
+    assert old_order["transferFeeYuan"] == "0.00"
+    assert old_order["handlingFeeYuan"] == "0.00"
+    assert old_order["regulatoryFeeYuan"] == "0.00"
+    assert old_order["brokerCommissionYuan"] == "0.00"
+    assert old_order["feeModel"] == "legacy_unverified"
+    assert legacy_readback.json()["cashYuan"] == body["cashYuan"]

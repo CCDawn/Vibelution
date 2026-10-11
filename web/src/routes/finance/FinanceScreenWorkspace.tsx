@@ -19,6 +19,7 @@ export function financeScreenAgentPrompt(criteria: string, date = localResearchD
     "请调用 financial_market_screen_tool 获取真实候选，不得虚构或补齐股票数据。",
     "回答需列出行情来源、抓取时间、已加载数量/行情池总数、覆盖是否完整和符合条件数量；覆盖不完整时明确结果仅基于已加载范围。",
     "若工具不支持某项条件或调用失败，说明具体缺项，不要用猜测替代。",
+    "公告和其他来源用 Markdown 链接 [来源标题](https://...) 展示，链接必须来自工具结果，不要只给裸 URL。",
   ].join("\n\n");
 }
 

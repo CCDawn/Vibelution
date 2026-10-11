@@ -380,7 +380,8 @@ def test_screening_export_lists_tool_candidates_and_only_matching_filing_pages(r
     assert f"| 贵州茅台 | 600519 | {EMPTY_FILINGS} | 第 42 页 |" in content
     assert f"| 平安银行 | 000001 | {EMPTY_FILINGS} | 没有这一项 |" in content
     assert "覆盖不完整，结果仅基于已加载范围。" in content
-    assert "候选、公告原文和财报页码以上表为准。" in content
+    assert "## 模型正文（未经工具候选校验）" in content
+    assert "模型说明工具不支持市值。毛利率 没有这一项。" in content
     assert "公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接。" in content
     assert "工具不支持市值" in content
     assert "1258.62" not in content
@@ -388,6 +389,114 @@ def test_screening_export_lists_tool_candidates_and_only_matching_filing_pages(r
     assert "第 7 页" not in content
     assert "第 99 页" not in content
     assert _export("markdown")["content"] == content
+
+
+def test_screening_export_keeps_distinct_filter_batches_and_latest_same_snapshot_retry(report_env):
+    original_filters = {
+        "max_pe": 20,
+        "max_pb": 3,
+        "min_turnover_yuan": 1_000_000_000,
+    }
+    positive_pe_filters = {**original_filters, "min_pe": 0.01}
+    first_retry = _screen_output(
+        [{"ticker": "600001", "name": "过期重试结果"}],
+        coverage={"providerTotal": 5572, "loaded": 5412, "complete": False, "totalFiltered": 50},
+        returnedCount=1,
+        requestedFilters=original_filters,
+        requestedLimit=20,
+        requestedPage=1,
+    )
+    latest_retry = _screen_output(
+        [
+            {"ticker": "600002", "name": "基准筛选候选1"},
+            {"ticker": "600003", "name": "基准筛选候选2"},
+        ],
+        coverage={"providerTotal": 5572, "loaded": 5412, "complete": False, "totalFiltered": 50},
+        returnedCount=2,
+        requestedFilters=original_filters,
+        requestedLimit=20,
+        requestedPage=1,
+    )
+    positive_pe = _screen_output(
+        [{"ticker": "600004", "name": "正市盈筛选候选"}],
+        coverage={"providerTotal": 5572, "loaded": 5412, "complete": False, "totalFiltered": 41},
+        returnedCount=1,
+        requestedFilters=positive_pe_filters,
+        requestedLimit=20,
+        requestedPage=1,
+    )
+    shorter_window = _screen_output(
+        [{"ticker": "600007", "name": "小窗口候选"}],
+        coverage={"providerTotal": 5572, "loaded": 5412, "complete": False, "totalFiltered": 50},
+        returnedCount=1,
+        requestedFilters=original_filters,
+        requestedLimit=8,
+        requestedPage=1,
+    )
+    turnover_subset = _screen_output(
+        [{"ticker": "600005", "name": "成交额子集候选1"}],
+        coverage={"providerTotal": 5572, "loaded": 5412, "complete": False, "totalFiltered": 34},
+        returnedCount=1,
+        requestedFilters={**positive_pe_filters, "max_turnover_yuan": 2_406_076_599},
+        requestedLimit=20,
+        requestedPage=1,
+    )
+    narrower_subset = _screen_output(
+        [{"ticker": "600006", "name": "成交额子集候选2"}],
+        coverage={"providerTotal": 5572, "loaded": 5412, "complete": False, "totalFiltered": 32},
+        returnedCount=1,
+        requestedFilters={**positive_pe_filters, "max_turnover_yuan": 2_231_787_606},
+        requestedLimit=20,
+        requestedPage=1,
+    )
+    report_env[:] = _screen_turn(
+        "全范围筛选有 50 只；排除负市盈率后为 41 只。",
+        [
+            {"id": "screen-1", "name": "financial_market_screen_tool", "output": first_retry},
+            {"id": "screen-2", "name": "financial_market_screen_tool", "output": latest_retry},
+            {"id": "screen-2b", "name": "financial_market_screen_tool", "output": shorter_window},
+            {"id": "screen-3", "name": "financial_market_screen_tool", "output": positive_pe},
+            {"id": "screen-4", "name": "financial_market_screen_tool", "output": turnover_subset},
+            {"id": "screen-5", "name": "financial_market_screen_tool", "output": narrower_subset},
+        ],
+    )
+
+    content = _export("markdown")["content"]
+
+    assert content.count("### 筛选批次") == 5
+    assert "过期重试结果" not in content
+    assert "基准筛选候选1" in content and "基准筛选候选2" in content
+    assert "小窗口候选" in content
+    assert "市盈率下限 ≥ 0.01倍" in content
+    assert "成交额上限 ≤ 2,406,076,599元" in content
+    assert "成交额上限 ≤ 2,231,787,606元" in content
+    assert "符合条件 50 只；本批次返回 2 只。" in content
+    assert "请求上限 8 条" in content
+    assert "符合条件 41 只；本批次返回 1 只。" in content
+    assert "符合条件 34 只；本批次返回 1 只。" in content
+    assert "符合条件 32 只；本批次返回 1 只。" in content
+    assert "不同的批次分别展示，不合并为一个候选集合。" in content
+    assert "全范围筛选有 50 只；排除负市盈率后为 41 只。" in content
+    assert "候选、公告原文和财报页码以上表为准。" not in content
+
+
+def test_screening_export_falls_back_to_original_tool_filters_when_payload_omits_them(report_env):
+    report_env[:] = _screen_turn("按工具筛选结果列出候选。", [
+        {
+            "id": "screen-input-fallback",
+            "name": "financial_market_screen_tool",
+            "input": json.dumps({"min_pe": 0.01, "max_pe": 20, "min_turnover_yuan": 1_000_000_000, "limit": 8}),
+            "output": _screen_output(
+                [{"ticker": "600008", "name": "参数回退候选"}],
+                requestedLimit=None,
+            ),
+        },
+    ])
+
+    content = _export("markdown")["content"]
+
+    assert "筛选条件：市盈率下限 ≥ 0.01倍；市盈率上限 ≤ 20倍；成交额下限 ≥ 1,000,000,000元" in content
+    assert "请求上限 8 条" in content
 
 
 def test_screening_export_cites_allowlisted_periodic_filings(report_env):
@@ -440,10 +549,10 @@ def test_cleared_screen_export_does_not_keep_invented_candidates(report_env):
     content = _export("markdown")["content"]
 
     assert message in content
-    assert "没有符合条件的候选。" in content
+    assert "本批次没有返回可核验的候选明细，不能据此断定完整股票池内没有符合条件的股票。" in content
     assert "虚构股份" not in content
     assert "999999" not in content
-    assert "## 模型原文" not in content
+    assert "## 模型正文（未经工具候选校验）" not in content
 
 
 def test_screen_projection_ignores_a_missing_or_failed_payload():
@@ -480,8 +589,8 @@ def test_screen_page_matches_symbol_prefix_and_not_a_longer_number():
     items = [{"type": "tool_call", "toolName": "financial_market_screen_tool", "status": "completed", "output": output}]
     content = project_screening_comparison("原文", SCREEN_REQUEST, items, [event])
     assert "已加载 10 / 行情池 10。覆盖完整。" in content
-    assert "符合条件 8，本次返回 2。" in content
-    assert "工具输出已截断，未列入被省略的候选。" in content
+    assert "符合条件 8 只；本批次返回 2 只。" in content
+    assert "工具输出受长度限制，候选详情不完整。" in content
     assert f"| 贵州茅台 | 600519 | {EMPTY_FILINGS} | 第 12 页、第 40 页 |" in content
     assert content == project_screening_comparison(content, SCREEN_REQUEST, items, [event])
     glued = [{"type": "tool_call", "toolName": "financial_evidence_search_tool", "status": "completed", "input": json.dumps({"ticker": "1600519"}), "output": evidence_output}]

@@ -74,17 +74,42 @@ def project_screening_comparison(
     if original.startswith(HEADING + "\n"):
         return original
     records = _tool_records(items, events)
-    payload = _last_screen_payload(records)
-    if payload is None:
+    batches = _screen_batches(records)
+    if not batches:
         return original
-    rows = _rows(payload, _analysis_day(request_text))
-    block = _render(payload, rows, _pages_by_code(records, {code for _name, code, _filing in rows}))
-    if not rows:
+    cutoff = _analysis_day(request_text)
+    rendered = []
+    has_rows = False
+    for index, (raw_input, payload, _output) in enumerate(batches, start=1):
+        rows = _rows(payload, cutoff)
+        has_rows = has_rows or bool(rows)
+        rendered.append(
+            _render_batch(
+                payload,
+                rows,
+                _pages_by_code(records, {code for _name, code, _filing in rows}),
+                batch_number=index,
+                raw_input=raw_input,
+            )
+        )
+    block_lines = [HEADING, ""]
+    if len(batches) > 1:
+        block_lines.extend(
+            [
+                f"本轮包含 {len(batches)} 个独立筛选快照。筛选条件或抓取时间不同的批次分别展示，不合并为一个候选集合。",
+                "",
+            ]
+        )
+    block_lines.extend("\n".join(rendered).splitlines())
+    block = "\n".join(block_lines).rstrip() + "\n"
+    if not has_rows:
+        # An unusable or cleared screen must not preserve model-invented stock
+        # candidates. The screen source's warning remains the visible result.
         return block
     body = original.strip()
     if not body:
         return block
-    return f"{block}\n## 模型原文\n\n候选、公告原文和财报页码以上表为准。\n\n{body}\n"
+    return f"{block}\n## 模型正文（未经工具候选校验）\n\n{body}\n"
 
 
 def _tool_records(items: list | None, events: list | None) -> list[tuple[str, str, str, str]]:
@@ -126,18 +151,96 @@ def _tool_records(items: list | None, events: list | None) -> list[tuple[str, st
             raw_input = str(arguments or "")
         status = str(tool_call.get("status") or getattr(event, "status", "") or "")
         records.append((name, raw_input, output, status))
-    return records
+    deduplicated: list[tuple[str, str, str, str]] = []
+    positions: dict[tuple[str, str, str], int] = {}
+    for record in records:
+        key = record[:3]
+        previous_index = positions.get(key)
+        if previous_index is None:
+            positions[key] = len(deduplicated)
+            deduplicated.append(record)
+            continue
+        previous = deduplicated[previous_index]
+        if _failed(previous[3]) and not _failed(record[3]):
+            deduplicated[previous_index] = record
+        elif not _failed(record[3]):
+            deduplicated[previous_index] = record
+    return deduplicated
 
 
-def _last_screen_payload(records: list[tuple[str, str, str, str]]) -> dict | None:
-    found: dict | None = None
+def _screen_batches(
+    records: list[tuple[str, str, str, str]],
+) -> list[tuple[str, dict, str]]:
+    found: list[tuple[str, dict, str]] = []
+    positions: dict[str, int] = {}
     for name, _raw_input, output, status in records:
         if name != "financial_market_screen_tool" or _failed(status):
             continue
         payload = _screen_payload(output)
-        if payload is not None:
-            found = payload
+        if payload is None:
+            continue
+        criteria = _screen_criteria_key(payload, _raw_input)
+        snapshot = _screen_snapshot_key(payload, output)
+        batch_key = json.dumps([criteria, snapshot], ensure_ascii=True, sort_keys=True)
+        previous_index = positions.get(batch_key)
+        record = (_raw_input, payload, output)
+        if previous_index is None:
+            positions[batch_key] = len(found)
+            found.append(record)
+        else:
+            # A retry for the same filters and same source snapshot is one
+            # observation; the latest returned payload is authoritative.
+            found[previous_index] = record
     return found
+
+
+def _screen_criteria_key(payload: dict, raw_input: str) -> dict:
+    arguments = _screen_arguments(raw_input)
+    filters = payload.get("requestedFilters")
+    if not isinstance(filters, dict):
+        filters = _requested_filter_arguments(arguments)
+    return {
+        "filters": {key: filters[key] for key in sorted(filters)},
+        "sortBy": payload.get("sortBy") or arguments.get("sort_by"),
+        "direction": payload.get("direction") or arguments.get("direction"),
+        "page": payload.get("requestedPage") or payload.get("page") or arguments.get("page", 1),
+        # Limit is part of the request: different page sizes can return distinct
+        # windows from the same filter set and market snapshot.
+        "limit": payload.get("requestedLimit") or arguments.get("limit"),
+    }
+
+
+def _screen_arguments(raw_input: str) -> dict:
+    try:
+        arguments = json.loads(raw_input)
+    except (json.JSONDecodeError, TypeError, ValueError, UnicodeError):
+        return {}
+    return arguments if isinstance(arguments, dict) else {}
+
+
+def _requested_filter_arguments(arguments: dict) -> dict:
+    return {
+        key: arguments[key]
+        for key, _label in _FILTER_LABELS
+        if key in arguments and arguments[key] is not None
+    }
+
+
+def _screen_snapshot_key(payload: dict, output: str) -> dict:
+    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
+    fetched_at = payload.get("fetchedAt")
+    if not isinstance(fetched_at, str) or not fetched_at.strip():
+        return {"exactOutput": output}
+    return {
+        "fetchedAt": fetched_at,
+        "source": payload.get("source"),
+        "dataDate": payload.get("dataDate"),
+        "dataTime": payload.get("dataTime"),
+        "providerTotal": coverage.get("providerTotal"),
+        "loaded": coverage.get("loaded"),
+        "complete": coverage.get("complete"),
+        "totalFiltered": coverage.get("totalFiltered"),
+    }
 
 
 def _screen_payload(output: str) -> dict | None:
@@ -219,20 +322,81 @@ def _filing_cell(row: dict, cutoff: date) -> str:
     return "；".join(parts)
 
 
-def _render(payload: dict, rows: list[tuple[str, str, str]], pages: dict[str, str]) -> str:
-    lines = [HEADING, ""]
+_FILTER_LABELS = (
+    ("min_price", "最低股价"),
+    ("max_price", "最高股价"),
+    ("min_change_percent", "最小涨幅"),
+    ("max_change_percent", "最大涨幅"),
+    ("min_pe", "市盈率下限"),
+    ("max_pe", "市盈率上限"),
+    ("min_volume_lots", "成交量下限"),
+    ("min_pb", "市净率下限"),
+    ("max_pb", "市净率上限"),
+    ("min_turnover_yuan", "成交额下限"),
+    ("max_turnover_yuan", "成交额上限"),
+)
+_FILTER_UNITS = {
+    "min_price": "元",
+    "max_price": "元",
+    "min_change_percent": "%",
+    "max_change_percent": "%",
+    "min_pe": "倍",
+    "max_pe": "倍",
+    "min_volume_lots": "手",
+    "min_pb": "倍",
+    "max_pb": "倍",
+    "min_turnover_yuan": "元",
+    "max_turnover_yuan": "元",
+}
+
+
+def _render_batch(
+    payload: dict,
+    rows: list[tuple[str, str, str]],
+    pages: dict[str, str],
+    *,
+    batch_number: int,
+    raw_input: str = "",
+) -> str:
+    arguments = _screen_arguments(raw_input)
+    lines = [f"### 筛选批次 {batch_number}", f"筛选条件：{_filter_line(payload, arguments)}"]
+    sort_by = _plain(payload.get("sortBy"), 50)
+    direction = _plain(payload.get("direction"), 20)
+    if not sort_by:
+        sort_by = _plain(arguments.get("sort_by"), 50)
+    if not direction:
+        direction = _plain(arguments.get("direction"), 20)
+    requested_page = payload.get("requestedPage") or payload.get("page") or arguments.get("page", 1)
+    requested_limit = payload.get("requestedLimit") or arguments.get("limit")
+    page_text = f"第 {requested_page} 页" if _positive_int(requested_page) else "页码未提供"
+    limit_text = f"请求上限 {requested_limit} 条" if _positive_int(requested_limit) else "请求上限未提供"
+    if sort_by or direction:
+        sort_labels = {"changePercent": "涨跌幅", "peRatio": "市盈率", "pbRatio": "市净率", "turnoverYuan": "成交额", "volumeLots": "成交量", "price": "价格"}
+        direction_label = {"asc": "升序", "desc": "降序"}.get(direction, direction)
+        sort_text = f"排序：{sort_labels.get(sort_by, sort_by or '未提供')} {direction_label}".strip()
+    else:
+        sort_text = "排序：未提供"
+    lines.append(f"{sort_text}；{page_text}；{limit_text}。")
     source = _plain(payload.get("source"), 100)
     fetched = _plain(payload.get("fetchedAt"), 64)
     if source:
         lines.append(f"来源：{source}")
     if fetched:
         lines.append(f"抓取时间：{fetched}")
+    data_date = _plain(payload.get("dataDate"), 40)
+    data_time = _plain(payload.get("dataTime"), 40)
+    if data_date or data_time:
+        lines.append(f"行情时间：{' '.join(value for value in (data_date, data_time) if value)}")
     lines.append(_coverage_line(payload))
     count = _count_line(payload)
     if count:
         lines.append(count)
     if payload.get("outputTruncated") is True:
-        lines.append("工具输出已截断，未列入被省略的候选。")
+        omitted = payload.get("omittedCount")
+        if _nonnegative_int(omitted) and omitted:
+            lines.append(f"工具输出受长度限制，本次请求另有 {omitted} 只候选未列出。")
+        else:
+            lines.append("工具输出受长度限制，候选详情不完整。")
     message = _plain(payload.get("message"), 240)
     notice = _plain(payload.get("notice"), 240)
     if message:
@@ -241,7 +405,11 @@ def _render(payload: dict, rows: list[tuple[str, str, str]], pages: dict[str, st
         lines.append(notice)
     lines.append("")
     if not rows:
-        lines.append("没有符合条件的候选。")
+        total = (payload.get("coverage") or {}).get("totalFiltered") if isinstance(payload.get("coverage"), dict) else None
+        if total == 0 and (payload.get("coverage") or {}).get("complete") is True:
+            lines.append("完整股票池内没有符合条件的候选。")
+        else:
+            lines.append("本批次没有返回可核验的候选明细，不能据此断定完整股票池内没有符合条件的股票。")
         return "\n".join(lines).rstrip() + "\n"
     lines.append("| 股票 | 代码 | 公告原文 | 财报页码 |")
     lines.append("| --- | --- | --- | --- |")
@@ -251,6 +419,31 @@ def _render(payload: dict, rows: list[tuple[str, str, str]], pages: dict[str, st
     lines.append("行情价格、市盈率和市净率不是财报，不列入本表。")
     lines.append("公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接。")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _filter_line(payload: dict, arguments: dict | None = None) -> str:
+    filters = payload.get("requestedFilters")
+    if not isinstance(filters, dict):
+        filters = _requested_filter_arguments(arguments or {})
+    if not filters:
+        if "requestedFilters" in payload or arguments:
+            return "无额外阈值（从工具请求参数确认）。"
+        return "工具未提供可核对的筛选阈值。"
+    parts: list[str] = []
+    for key, label in _FILTER_LABELS:
+        value = filters.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            rendered = _plain(str(value), 60)
+        elif isinstance(value, int):
+            rendered = f"{value:,}"
+        else:
+            rendered = f"{value:,.8f}".rstrip("0").rstrip(".")
+        unit = _FILTER_UNITS.get(key, "")
+        operator = "≥" if key.startswith("min_") else "≤"
+        parts.append(f"{label} {operator} {rendered}{unit}")
+    return "；".join(parts) if parts else "无额外阈值（按工具股票池查询）。"
 
 
 def _coverage_line(payload: dict) -> str:
@@ -271,8 +464,8 @@ def _count_line(payload: dict) -> str:
     coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
     filtered = coverage.get("totalFiltered")
     if _nonnegative_int(filtered) and filtered != returned:
-        return f"符合条件 {filtered}，本次返回 {returned}。"
-    return f"符合条件 {returned}。"
+        return f"符合条件 {filtered} 只；本批次返回 {returned} 只。"
+    return f"符合条件 {returned} 只；本批次返回 {returned} 只。"
 
 
 def _identity(row: dict) -> tuple[str, str]:
@@ -333,6 +526,10 @@ def _plain(value: object, limit: int) -> str:
 
 def _nonnegative_int(value: object) -> bool:
     return type(value) is int and value >= 0
+
+
+def _positive_int(value: object) -> bool:
+    return type(value) is int and value > 0
 
 
 def _failed(status: str) -> bool:

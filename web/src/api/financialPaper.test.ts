@@ -18,6 +18,12 @@ describe("financial paper API", () => {
     expect(fetchJson).toHaveBeenCalledWith("/api/financial-paper/agent%2Fone?orderLimit=50", { signal: undefined });
   });
 
+  it("requests the selected stock's board quantity rules without changing ledger identity", async () => {
+    fetchJson.mockResolvedValueOnce({});
+    await fetchFinancialPaperAccount("agent-one", { orderLimit: 50, orderSymbol: "sh688001" });
+    expect(fetchJson).toHaveBeenCalledWith("/api/financial-paper/agent-one?orderLimit=50&orderSymbol=sh688001", { signal: undefined });
+  });
+
   it("opens the fixed virtual account without accepting a client balance", async () => {
     fetchJson.mockResolvedValueOnce({});
     await openFinancialPaperAccount("agent-one");

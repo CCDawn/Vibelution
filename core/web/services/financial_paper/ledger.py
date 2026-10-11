@@ -9,7 +9,7 @@ import re
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
@@ -21,6 +21,10 @@ from core.infrastructure.file_lock import cross_process_file_lock
 from core.web.services import agent_directory_service as directory
 from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as research
+from core.web.services.financial_backtest import fees as backtest_fees
+from core.web.services.financial_backtest import quantity_rules
+from core.web.services.financial_backtest.data import BacktestInputError
+from core.web.services.financial_market import trading_calendar
 from core.web.services.financial_assistant_service import PROFILE, ROLE
 from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
 
@@ -29,7 +33,6 @@ _INITIAL_CASH = Decimal("1000000.00")
 _CENTS = Decimal("0.01")
 _COMMISSION_RATE = Decimal("0.0003")
 _MIN_COMMISSION = Decimal("5.00")
-_SELL_STAMP_DUTY_RATE = Decimal("0.0005")
 _MAX_ORDER_QUANTITY = 1_000_000
 _MAX_OPEN_POSITIONS = 20
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -222,17 +225,87 @@ def _new_ledger(agent_id: str) -> dict[str, Any]:
 
 
 def _fee_policy() -> dict[str, Any]:
+    day = _beijing_date().isoformat()
+    audit = backtest_fees.fee_model_audit(
+        {
+            "feeModel": backtest_fees.VERIFIED_FEE_MODEL,
+            "commissionBps": _COMMISSION_RATE * Decimal("10000"),
+            "minimumCommission": _MIN_COMMISSION,
+        },
+        ["sh600519"],
+        day,
+        day,
+    )
+    rates = (audit or {}).get("rates", [])
+    transfer = next(
+        (row for row in rates if row.get("component") == "transferFee"), {}
+    )
+    stamp = next(
+        (row for row in rates if row.get("component") == "stampDuty"), {}
+    )
     return {
+        "feeModel": backtest_fees.VERIFIED_FEE_MODEL,
+        "effectiveDate": day,
         "commissionRate": "0.0003",
         "minimumCommissionYuan": _money_text(_MIN_COMMISSION),
-        "sellStampDutyRate": "0.0005",
+        "commissionIncludes": (audit or {}).get("commissionIncludes", []),
+        "transferFeeRate": str(transfer.get("rate") or "0"),
+        "sellStampDutyRate": str(stamp.get("sellerRate") or "0"),
         "transferFeeIncluded": False,
-        "description": "模拟口径：佣金按成交额 0.03%，每笔最低 5 元；卖出印花税按成交额 0.05%；暂不计过户费。",
+        "roundingStatus": (audit or {}).get("roundingStatus", "unverified_broker_settlement"),
+        "description": (audit or {}).get(
+            "notice",
+            "模拟费用按成交日期使用已核验的 A 股历史费率；实际券商清算取分规则未核实。",
+        ),
     }
 
 
 def _t_plus_one_rule() -> str:
-    return "模拟 T+1：买入日之后的北京时间自然日可卖出；不判断交易日、周末或节假日。"
+    return "模拟 A 股 T+1：买入后下一 A 股交易日方可卖出；周末、节假日及未覆盖日期不成交。交易日历已核验至 2026 年。"
+
+
+def _is_a_share_trading_day(value: date) -> bool:
+    try:
+        return trading_calendar.is_a_share_trading_day(value)
+    except trading_calendar.TradingCalendarUnavailable:
+        return False
+
+
+def _require_a_share_trading_day(value: date) -> None:
+    try:
+        is_trading_day = trading_calendar.is_a_share_trading_day(value)
+    except trading_calendar.TradingCalendarUnavailable as exc:
+        raise InvalidPaperOrderError(str(exc) + "，模拟下单已停止") from exc
+    if not is_trading_day:
+        raise InvalidPaperOrderError(
+            f"{value.isoformat()} 不是 A 股交易日，模拟订单未成交"
+        )
+
+
+def _next_sellable_trading_day(acquired_day: date) -> date:
+    try:
+        return trading_calendar.next_a_share_trading_day(
+            acquired_day + timedelta(days=1)
+        )
+    except trading_calendar.TradingCalendarUnavailable as exc:
+        raise InvalidPaperOrderError(str(exc) + "，无法核验 T+1 可卖日期") from exc
+
+
+def _validate_execution_quote(
+    quote_timestamp: str, order_time: datetime, trade_day: date
+) -> None:
+    try:
+        quoted_at = _parse_datetime(quote_timestamp)
+    except (TypeError, ValueError) as exc:
+        raise InvalidPaperOrderError("行情报价时间无效，无法模拟成交") from exc
+    quoted_day = quoted_at.astimezone(_SHANGHAI).date()
+    if quoted_day != trade_day:
+        raise InvalidPaperOrderError(
+            f"报价日期为 {quoted_day.isoformat()}，与模拟交易日 {trade_day.isoformat()} 不一致；"
+            "请等本交易日行情更新后再下单"
+        )
+    if quoted_at.astimezone(timezone.utc) > order_time.astimezone(timezone.utc):
+        raise InvalidPaperOrderError("报价时间晚于下单时间，模拟成交已停止")
 
 
 def open_account(agent_id: str) -> dict[str, Any]:
@@ -269,12 +342,6 @@ def _load_existing(agent_id: str) -> tuple[dict[str, Any], Path, dict[str, Any]]
     return agent, path, ledger
 
 
-def get_account_snapshot(agent_id: str, *, order_limit: int = 50) -> dict[str, Any]:
-    _, _, ledger = _load_existing(agent_id)
-    bounded_limit = max(1, min(int(order_limit), 200))
-    return _account_snapshot_from_ledger(ledger, order_limit=bounded_limit)
-
-
 def _canonical_paper_symbol(symbol: str) -> bool:
     try:
         return market.normalize_a_share_symbol(symbol) == symbol
@@ -283,7 +350,7 @@ def _canonical_paper_symbol(symbol: str) -> bool:
 
 
 def _account_snapshot_from_ledger(
-    ledger: dict[str, Any], *, order_limit: int
+    ledger: dict[str, Any], *, order_limit: int, order_symbol: str | None = None
 ) -> dict[str, Any]:
     account = ledger["account"]
     positions: list[dict[str, Any]] = []
@@ -419,10 +486,18 @@ def _account_snapshot_from_ledger(
         for order in reversed(ledger["orders"][-max(1, order_limit) :])
     ]
     order_count = len(ledger["orders"])
+    trade_day = _beijing_date()
+    order_quantity_rule = (
+        _project_order_quantity_rule(order_symbol, trade_day)
+        if order_symbol
+        else None
+    )
     return {
         "agentId": ledger["agentId"],
         "accountId": account["accountId"],
         "openedAt": account["openedAt"],
+        "tradeDate": trade_day.isoformat(),
+        "isTradingDay": _is_a_share_trading_day(trade_day),
         "initialCashYuan": _money_text(initial_cash),
         "cashYuan": _money_text(cash),
         "marketValueYuan": _money_text(total_market_value),
@@ -440,6 +515,7 @@ def _account_snapshot_from_ledger(
         "ordersTotal": order_count,
         "ordersLimit": order_limit,
         "ordersTruncated": order_count > len(latest),
+        "orderQuantityRule": order_quantity_rule,
         "feePolicy": _fee_policy(),
         "tPlusOneRule": _t_plus_one_rule(),
         "simulationOnly": True,
@@ -448,6 +524,8 @@ def _account_snapshot_from_ledger(
 
 def _available_quantity(lots: list[dict[str, Any]]) -> int:
     today = _beijing_date()
+    if not _is_a_share_trading_day(today):
+        return 0
     total = 0
     for lot in lots:
         remaining = int(lot.get("remainingQuantity") or 0)
@@ -455,7 +533,12 @@ def _available_quantity(lots: list[dict[str, Any]]) -> int:
             acquired_day = date.fromisoformat(str(lot.get("acquiredBeijingDate") or ""))
         except ValueError:
             continue
-        if acquired_day < today:
+        try:
+            sellable_day = _next_sellable_trading_day(acquired_day)
+        except InvalidPaperOrderError:
+            # Unknown calendar coverage must not unlock a legacy lot.
+            continue
+        if sellable_day <= today:
             total += remaining
     return total
 
@@ -498,11 +581,10 @@ def _normalize_order(
     if (
         isinstance(quantity, bool)
         or not isinstance(quantity, int)
-        or quantity < 100
+        or quantity < 1
         or quantity > _MAX_ORDER_QUANTITY
-        or quantity % 100
     ):
-        raise InvalidPaperOrderError("数量须为 100 股的整数倍，且不超过 1,000,000 股")
+        raise InvalidPaperOrderError("数量须为正整数，且不超过 1,000,000 股")
     normalized_reason = " ".join(str(reason or "").split()).strip()
     if not normalized_reason or len(normalized_reason) > 500:
         raise InvalidPaperOrderError("请填写 1–500 字的模拟交易理由")
@@ -512,12 +594,112 @@ def _normalize_order(
     return key, normalized_symbol, quantity, normalized_reason, fingerprint
 
 
-def _calculate_fee(gross: Decimal, side: str) -> tuple[Decimal, Decimal]:
-    commission = max(_money(gross * _COMMISSION_RATE), _MIN_COMMISSION)
-    stamp_duty = (
-        _money(gross * _SELL_STAMP_DUTY_RATE) if side == SELL else Decimal("0.00")
+def _quantity_rule(symbol: str, trade_day: date) -> quantity_rules.QuantityRule:
+    try:
+        return quantity_rules.resolve_quantity_rule(
+            symbol,
+            trade_day.isoformat(),
+            quantity_rules.ASHARE_QUANTITY_V2,
+        )
+    except ValueError as exc:
+        raise InvalidPaperOrderError(f"无法核验该股票的 A 股板块股数规则：{exc}") from exc
+
+
+def _quantity_limit(rule: quantity_rules.QuantityRule) -> int:
+    return min(
+        _MAX_ORDER_QUANTITY,
+        quantity_rules.maximum_order_quantity(rule) or _MAX_ORDER_QUANTITY,
     )
-    return commission, stamp_duty
+
+
+def _fee_support_error(symbol: str, trade_day: date) -> str | None:
+    try:
+        backtest_fees.validate_fee_window(
+            symbol,
+            trade_day.isoformat(),
+            trade_day.isoformat(),
+            {
+                "feeModel": backtest_fees.VERIFIED_FEE_MODEL,
+                "commissionBps": _COMMISSION_RATE * Decimal("10000"),
+                "minimumCommission": _MIN_COMMISSION,
+            },
+        )
+    except BacktestInputError as exc:
+        if symbol.startswith("bj"):
+            return "北交所费用规则尚未核验，暂不能模拟成交"
+        return f"该股票暂不支持已核验的沪深 A 股模拟费用：{exc}"
+    return None
+
+
+def _project_order_quantity_rule(symbol: str, trade_day: date) -> dict[str, Any]:
+    try:
+        normalized = market.normalize_a_share_symbol(symbol)
+    except market.MarketDataError as exc:
+        raise InvalidPaperOrderError(str(exc)) from exc
+    rule = _quantity_rule(normalized, trade_day)
+    maximum = _quantity_limit(rule)
+    unsupported_reason = _fee_support_error(normalized, trade_day)
+    return {
+        "symbol": normalized,
+        "version": quantity_rules.ASHARE_QUANTITY_V2,
+        "board": rule.board,
+        "minimumBuyShares": rule.minimum_buy_shares,
+        "buyIncrement": rule.buy_increment,
+        "minimumSellShares": rule.minimum_sell_shares,
+        "sellIncrement": rule.sell_increment,
+        "residualSellThreshold": rule.residual_sell_threshold,
+        "maximumOrderShares": maximum,
+        "supportedForSimulation": unsupported_reason is None,
+        "unsupportedReason": unsupported_reason,
+    }
+
+
+def get_account_snapshot(
+    agent_id: str, *, order_limit: int = 50, order_symbol: str | None = None
+) -> dict[str, Any]:
+    _, _, ledger = _load_existing(agent_id)
+    bounded_limit = max(1, min(int(order_limit), 200))
+    return _account_snapshot_from_ledger(
+        ledger, order_limit=bounded_limit, order_symbol=order_symbol
+    )
+
+
+def _quantity_rule_error(
+    rule: quantity_rules.QuantityRule, side: str, maximum: int
+) -> str:
+    board_names = {
+        "main_board": "主板",
+        "star_market": "科创板",
+        "chinext": "创业板",
+        "beijing": "北交所",
+        "legacy_100": "A 股",
+    }
+    board = board_names.get(rule.board, "A 股")
+    minimum = rule.minimum_buy_shares if side == BUY else rule.minimum_sell_shares
+    increment = rule.buy_increment if side == BUY else rule.sell_increment
+    if side == BUY:
+        return f"{board}买入须至少 {minimum} 股，并按 {increment} 股递增；单笔上限 {maximum} 股"
+    return (
+        f"{board}卖出须符合至少 {minimum} 股、按 {increment} 股递增的规则；"
+        f"不足最小单位的余股仅可整仓卖出；单笔上限 {maximum} 股"
+    )
+
+
+def _calculate_fee(
+    gross: Decimal, trade_day: date, side: str, symbol: str
+) -> dict[str, Decimal]:
+    try:
+        return backtest_fees.calculate_fees(
+            gross,
+            trade_day.isoformat(),
+            side,
+            symbol,
+            _COMMISSION_RATE,
+            _MIN_COMMISSION,
+            backtest_fees.VERIFIED_FEE_MODEL,
+        )
+    except BacktestInputError as exc:
+        raise InvalidPaperOrderError(f"模拟费用核算失败：{exc}") from exc
 
 
 def _quote_from_batch(symbol: str, batch: dict[str, Any] | None) -> dict[str, Any]:
@@ -610,11 +792,38 @@ def apply_order_to_ledger(
     ):
         raise InvalidPaperOrderError("模拟成交报价信息不完整")
 
+    trade_day = _beijing_date(order_time)
+    _require_a_share_trading_day(trade_day)
+    fee_support_error = _fee_support_error(normalized_symbol, trade_day)
+    if fee_support_error:
+        raise InvalidPaperOrderError(fee_support_error)
+    _validate_execution_quote(quote_timestamp, order_time, trade_day)
+    rule = _quantity_rule(normalized_symbol, trade_day)
+    quantity_limit = _quantity_limit(rule)
+    if normalized_quantity > quantity_limit:
+        raise InvalidPaperOrderError(
+            _quantity_rule_error(rule, normalized_side, quantity_limit)
+        )
+    if normalized_side == BUY and quantity_rules.floor_buy_quantity(
+        normalized_quantity, rule
+    ) != normalized_quantity:
+        raise InvalidPaperOrderError(
+            _quantity_rule_error(rule, normalized_side, quantity_limit)
+        )
+
     gross = _money(price * normalized_quantity)
-    commission, stamp_duty = _calculate_fee(gross, normalized_side)
-    total_fee = _money(commission + stamp_duty)
+    fee_breakdown = _calculate_fee(
+        gross, trade_day, normalized_side, normalized_symbol
+    )
+    commission = fee_breakdown["commission"]
+    stamp_duty = fee_breakdown["stampDuty"]
+    transfer_fee = fee_breakdown["transferFee"]
+    handling_fee = fee_breakdown.get("handlingFee", Decimal("0.00"))
+    regulatory_fee = fee_breakdown.get("regulatoryFee", Decimal("0.00"))
+    broker_commission = fee_breakdown.get("brokerCommission", commission)
+    total_fee = _money(fee_breakdown["fee"])
     order_time_text = _utc_text(order_time)
-    local_order_day = _beijing_date(order_time).isoformat()
+    local_order_day = trade_day.isoformat()
 
     positions: dict[str, Any] = ledger["positions"]
     position = positions.get(normalized_symbol)
@@ -669,14 +878,28 @@ def apply_order_to_ledger(
                 )
             except ValueError:
                 continue
-            if acquired_day < _beijing_date(order_time):
+            try:
+                sellable_day = _next_sellable_trading_day(acquired_day)
+            except InvalidPaperOrderError:
+                continue
+            if trade_day >= sellable_day:
                 available_lots.append(lot)
         available = sum(
             int(lot.get("remainingQuantity") or 0) for lot in available_lots
         )
         if normalized_quantity > available:
             raise InsufficientSharesError(
-                f"可卖 {available} 股；模拟 T+1 按北京时间自然日，今日买入股份次日才可卖"
+                f"可卖 {available} 股；模拟 A 股 T+1 按下一交易日解冻，买入当日股份不可卖"
+            )
+        held = sum(
+            int(lot.get("remainingQuantity") or 0)
+            for lot in position.get("lots", [])
+        )
+        if quantity_rules.floor_sell_quantity(
+            normalized_quantity, held, available, rule
+        ) != normalized_quantity:
+            raise InvalidPaperOrderError(
+                _quantity_rule_error(rule, normalized_side, quantity_limit)
             )
         needed = normalized_quantity
         allocated_cost = Decimal("0.00")
@@ -726,6 +949,11 @@ def apply_order_to_ledger(
         "grossAmountYuan": _money_text(gross),
         "commissionYuan": _money_text(commission),
         "stampDutyYuan": _money_text(stamp_duty),
+        "transferFeeYuan": _money_text(transfer_fee),
+        "handlingFeeYuan": _money_text(handling_fee),
+        "regulatoryFeeYuan": _money_text(regulatory_fee),
+        "brokerCommissionYuan": _money_text(broker_commission),
+        "feeModel": backtest_fees.VERIFIED_FEE_MODEL,
         "totalFeeYuan": _money_text(total_fee),
         "cashChangeYuan": _money_text(cash_change),
         "realizedPnlYuan": _money_text(realized),
@@ -761,8 +989,15 @@ def submit_order(
     if existing:
         return _account_snapshot_from_ledger(ledger_before_quote, order_limit=50)
 
+    request_time = _utc_now()
+    request_day = _beijing_date(request_time)
+    _require_a_share_trading_day(request_day)
+    fee_support_error = _fee_support_error(normalized_symbol, request_day)
+    if fee_support_error:
+        raise InvalidPaperOrderError(fee_support_error)
     quote = _get_quote(normalized_symbol)
     order_time = _utc_now()
+    _require_a_share_trading_day(_beijing_date(order_time))
 
     with _transaction_lock(path):
         ledger = _load_ledger(path, normalized_id)

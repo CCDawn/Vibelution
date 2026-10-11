@@ -17,6 +17,7 @@ import {
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import { classifyConversationMarkdownLinkTarget } from "./conversationMarkdownLinkTargets";
 import { guardConversationMarkdownMath } from "./conversationMarkdownMathGuard";
+import { remarkConversationAutolinks } from "./conversationMarkdownAutolinks";
 import { ConversationMarkdownMermaidBlock } from "./conversationMarkdownMermaidBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
@@ -59,7 +60,7 @@ export type ConversationMarkdownRendererProps = {
 // `$…$` inline math; KaTeX runs on the rehype tree (rehype-katex degrades a
 // failed formula to its LaTeX source instead of throwing — a ParseError falls
 // back to a `.katex-error` span carrying the source text).
-const markdownPlugins = [remarkGfm, remarkMath];
+const markdownPlugins = [remarkGfm, remarkMath, remarkConversationAutolinks];
 const markdownRehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [
   [
     rehypeKatex,

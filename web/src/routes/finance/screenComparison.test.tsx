@@ -68,6 +68,8 @@ describe("screening comparison report", () => {
     expect(container.textContent).toContain("贵州茅台2026年半年度报告");
     expect(container.textContent).toContain("三季报：没有这一项");
     expect(container.textContent).toContain("第 42 页");
+    expect(container.textContent).toContain("模型正文（未经工具候选校验）");
+    expect(container.textContent).toContain("模型原文保留限制说明。");
     expect(container.innerHTML).toContain("https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF");
     expect(container.textContent).not.toContain("1258.62");
     expect(container.querySelector("[data-finance-report-body]")?.textContent).toContain("筛选对照");
