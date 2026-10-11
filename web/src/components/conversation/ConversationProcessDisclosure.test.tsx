@@ -59,7 +59,8 @@ describe("ConversationProcessDisclosure", () => {
 
     expect(html).toContain('data-codex-process-disclosure="true"');
     expect(html).not.toContain('open=""');
-    expect(html).toContain("已处理 2.9s");
+    // ZCode parity: a derivable duration upgrades the headline to 「已工作」.
+    expect(html).toContain("已工作 2.9s");
     expect(html).not.toContain("个阶段");
     // Single-step trails do not append "· N 步".
     expect(html).not.toContain("· 1 步");
@@ -84,7 +85,7 @@ describe("ConversationProcessDisclosure", () => {
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("处理中 2.9s");
+    expect(html).toContain("工作中 2.9s");
     expect(html).not.toContain("个阶段");
     expect(html).toContain('open=""');
     expect(html).toContain('data-codex-process-expanded="true"');
@@ -103,7 +104,7 @@ describe("ConversationProcessDisclosure", () => {
     ];
     expect(processState(settledTools)).toBe("completed");
     expect(processState(settledTools, undefined, true)).toBe("running");
-    expect(processLabel(settledTools, "zh", undefined, true)).toContain("处理中");
+    expect(processLabel(settledTools, "zh", undefined, true)).toContain("工作中");
     expect(processLabel(settledTools, "zh", undefined, true)).toContain("3 步");
 
     const html = renderToStaticMarkup(
@@ -114,7 +115,7 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('data-codex-process-state="running"');
     expect(html).toContain('data-codex-process-turn-streaming="true"');
     expect(html).toContain("完整流程步骤");
-    expect(html).toContain("处理中");
+    expect(html).toContain("工作中");
   });
 
   it("keeps retry heartbeats out of the same process summary", () => {
@@ -149,7 +150,7 @@ describe("ConversationProcessDisclosure", () => {
       </ConversationProcessDisclosure>,
     );
     expect(html).toContain('data-codex-process-state="completed"');
-    expect(html).toContain("已处理");
+    expect(html).toContain("已工作");
     expect(html).toContain("3 步");
     expect(html).toContain('data-codex-process-expanded="false"');
     // SSR keeps content inspectable; client remounts on click-expand with animation.
@@ -206,7 +207,7 @@ describe("ConversationProcessDisclosure", () => {
     };
 
     expect(processState([failed, recovered])).toBe("completed");
-    expect(processLabel([failed, recovered], "zh")).toContain("已处理");
+    expect(processLabel([failed, recovered], "zh")).toContain("已工作");
     expect(processLabel([failed, recovered], "zh")).not.toContain("工具失败");
   });
 
@@ -229,7 +230,7 @@ describe("ConversationProcessDisclosure", () => {
     ]);
 
     expect(processState([laterSuccess, olderFailure], messageOrder)).toBe("completed");
-    expect(processLabel([laterSuccess, olderFailure], "zh", messageOrder)).toContain("已处理");
+    expect(processLabel([laterSuccess, olderFailure], "zh", messageOrder)).toContain("已工作");
   });
 
   it("keeps a failure visible when only another tool succeeds later", () => {

@@ -27,6 +27,11 @@ const styles = {
     "content",
     "grid min-w-0 content-start gap-0 pb-1 pt-3",
   ),
+  // Expanded-tail line: what the worked time is made of (ZCode parity).
+  workBreakdown: cx(
+    "work-breakdown",
+    "min-w-0 pt-1 text-vui-xs text-[var(--fg-tertiary)]",
+  ),
   row: cx(
     "row",
     "min-w-0 transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",

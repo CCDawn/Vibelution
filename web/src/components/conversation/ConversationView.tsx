@@ -168,12 +168,7 @@ import {
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
 import { ConversationRunningTasks } from "./ConversationRunningTasks";
-import {
-  formatConversationTurnWorkBreakdown,
-  formatConversationTurnWorkedFor,
-  resolveConversationTurnWorkSummary,
-  type ConversationTurnWorkSummary,
-} from "./conversationTurnWorkStatus";
+import { resolveConversationTurnWorkSummary } from "./conversationTurnWorkStatus";
 import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
@@ -648,50 +643,6 @@ function progressTextExceedsClamp(text: string) {
   }
   return lines > PROGRESS_CLAMP_LINES;
 }
-
-/**
- * Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin
- * bottom rule with a collapsible 「已工作 N 分钟」 trigger at the turn tail.
- * Expanded, it shows only what the turn data can honestly back — tool call
- * count and tool time when measurable (see conversationTurnWorkStatus.ts for
- * the duration口径).
- */
-const ConversationTurnWorkHeader = React.memo(function ConversationTurnWorkHeader({
-  summary,
-  lang,
-}: {
-  summary: ConversationTurnWorkSummary;
-  lang: "zh" | "en" | string;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details
-      className={styles.turnWorkHeader}
-      data-testid="conversation-turn-work-header"
-      data-turn-work-basis={summary.basis}
-      data-turn-work-duration-ms={summary.durationMs}
-      open={open}
-      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
-    >
-      <summary
-        className={styles.turnWorkHeaderSummary}
-        aria-label={formatConversationTurnWorkedFor(summary, lang)}
-      >
-        <ChevronDown
-          size={14}
-          aria-hidden="true"
-          className={`${styles.turnWorkHeaderChevron} ${open ? "rotate-90" : "rotate-0"}`}
-        />
-        <span className={styles.turnWorkHeaderLabel}>
-          {formatConversationTurnWorkedFor(summary, lang)}
-        </span>
-      </summary>
-      <div className={styles.turnWorkHeaderBody}>
-        {formatConversationTurnWorkBreakdown(summary, lang)}
-      </div>
-    </details>
-  );
-});
 
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
@@ -2760,18 +2711,6 @@ export const ConversationView = React.memo(function ConversationView({
                 statusLabel={lang === "zh" ? "状态" : "Status"}
               />
             ) : null;
-            // Turn-tail work header: settled assistant turns only (companion,
-            // inbox and group-transcript shells stay minimal by contract).
-            const turnWorkSummary = message.role === "assistant"
-              && !companionMode
-              && !agentInboxMessage
-              && !groupTranscriptMessage
-              && !assistantTurnIsStreaming(message)
-              ? resolveConversationTurnWorkSummary(message)
-              : null;
-            const turnWorkHeaderNode = turnWorkSummary ? (
-              <ConversationTurnWorkHeader summary={turnWorkSummary} lang={lang} />
-            ) : null;
             // Turn-envelope dividers above the row: model switches ride the
             // turn-opening user row; the fork-provenance marker is a dormant
             // hook until the backend projects per-message fork metadata.
@@ -3143,7 +3082,6 @@ export const ConversationView = React.memo(function ConversationView({
                   ) : null}
 
                   {!answerOnlyProcessMode ? responseSectionNode : null}
-                  {turnWorkHeaderNode}
               </AgentMessageTurnView>
               </>
             );
@@ -4643,22 +4581,35 @@ export const ConversationView = React.memo(function ConversationView({
         );
       });
     };
+    // ZCode AssistantHistoryStatus parity: one status trigger per settled
+    // assistant turn, placed ahead of the transcript it summarizes, so a turn
+    // never splits its worked time across two places.
+    const transcriptWorkSummary = message.role === "assistant"
+      && !isCompanionMode
+      && !isAgentInboxMessage(message)
+      && !isGroupRoomTranscriptMessage(message)
+      && !assistantTurnIsStreaming(message)
+      ? resolveConversationTurnWorkSummary(message)
+      : null;
     return (
       <div
         className={styles.codexTranscriptSurface}
         data-codex-transcript-surface="true"
         data-conversation-part-key={`${rowIdentity.messageKey}:codex-transcript`}
       >
-        {processCells.length > 0 ? (
+        {processCells.length > 0 || transcriptWorkSummary ? (
           <ConversationProcessDisclosure
             cells={processCells}
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
             turnStreaming={assistantTurnIsStreaming(message)}
+            workSummary={transcriptWorkSummary}
           >
             {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
-            {renderTimelineNodes(processCells, { attachToolApproval: false })}
+            {processCells.length > 0
+              ? renderTimelineNodes(processCells, { attachToolApproval: false })
+              : null}
           </ConversationProcessDisclosure>
         ) : null}
         {finalCells.length > 0 ? (
