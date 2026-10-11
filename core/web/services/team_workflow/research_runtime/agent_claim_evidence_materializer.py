@@ -576,6 +576,7 @@ def materialize_claim_evidence_from_task(
     question_scope: Mapping[str, Any],
     hypothesis_candidate_ids: object = None,
     hypothesis_candidate_bindings: object = None,
+    question_scope_resolution: str = "",
 ) -> list[dict[str, Any]]:
     """Register only fully anchored claims; repeated calls remain idempotent.
 
@@ -584,6 +585,12 @@ def materialize_claim_evidence_from_task(
     claim is proposed in the team claim ledger first and the canonical
     ClaimEvidence record is registered under the ledger claim id, so the
     claim belief gate can evaluate the candidate from real extraction output.
+
+    ``question_scope_resolution`` records how the production entry point
+    resolved ``question_scope`` (``ledger`` or ``run_scope_fallback``).  A
+    fallback resolution is stamped onto every returned record as
+    ``questionScopeResolution`` so archive-mode materializations stay
+    observable; the ledger resolution keeps the exact legacy record shape.
 
     A hypothesis candidate receives a relation only when its own formal
     statement and ``lineageRefs`` explicitly select this source.  Candidate
@@ -629,6 +636,14 @@ def materialize_claim_evidence_from_task(
     store = ClaimEvidenceStore(project_root)
     candidate_index, candidates_available = _run_source_candidate_index(
         normalized_team, normalized_source_run
+    )
+    # Observable fallback provenance: stamped only when the question scope was
+    # resolved from the collection run's own scope (the archive-mode shape);
+    # ledger-resolved runs keep the exact legacy record shape.
+    question_scope_marker = (
+        {"questionScopeResolution": "run_scope_fallback"}
+        if _text(question_scope_resolution) == "run_scope_fallback"
+        else {}
     )
     materialized: list[dict[str, Any]] = []
     for extraction, claim, claim_path in _materializable_claims(task):
@@ -755,6 +770,7 @@ def materialize_claim_evidence_from_task(
                 **stored,
                 "challengeEvidence": challenge_evidence,
                 "claimLedgerStatus": proposed["status"],
+                **question_scope_marker,
             }
         )
         # Candidate-specific relation: evidence is never copied to candidates
@@ -787,6 +803,7 @@ def materialize_claim_evidence_from_task(
                 {
                     **bridged,
                     "claimLedgerStatus": candidate_claim["status"],
+                    **question_scope_marker,
                     "claimBinding": {
                         "candidateId": bridged_candidate_id,
                         "claimId": candidate_claim["claimId"],
@@ -936,31 +953,86 @@ def materialize_candidate_claim_bindings_from_existing_evidence(
     return materialized
 
 
-def _formal_question_scope(team_id: str, workflow_run_id: str) -> dict[str, str]:
-    """Resolve the frozen formal run's question scope for ledger proposals.
+def _source_collection_run_scope_question_id(source_collection_run_id: str) -> str:
+    """Read the questionId frozen on the source collection run's own scope.
 
-    The workflow ledger owns the run→question binding, so the claim ledger
-    proposal uses exactly the question the run was created for.  An
-    unavailable ledger or a question-less run fails closed: materializing
-    evidence that can never bridge to a claim row would only feed the belief
-    gate permanent ``claim_data_missing`` verdicts.
+    The collection authority's own run record is the tier-2 scoping source:
+    reading it needs no formal write runtime, so processes that never
+    configured one (challenge archive mode) can still scope ledger proposals.
+    Fail-open to an empty string — an absent run, an unreadable store or a
+    scope without a question leaves the fail-closed decision to the caller.
+    """
+    from core.web.services import data_processing_service
+
+    run_id = _text(source_collection_run_id)
+    if not run_id:
+        return ""
+    try:
+        run_scope = data_processing_service.get_processing_run_scope(run_id)
+    except Exception:  # noqa: BLE001 - absent run cannot scope the fallback
+        return ""
+    scope = run_scope.get("scope") if isinstance(run_scope.get("scope"), dict) else {}
+    return _first_non_empty_text(scope.get("questionId"), scope.get("question_id"))
+
+
+def _formal_question_scope(
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str = "",
+) -> tuple[dict[str, str], str]:
+    """Resolve the question scope for ledger proposals, ledger-first.
+
+    Tier 1 — the workflow ledger owns the run→question binding, so the claim
+    ledger proposal uses exactly the question the run was created for.  Tier 2
+    — when that ledger is unavailable (challenge archive mode never configures
+    the formal write runtime; canvas runs may simply be absent from the
+    ledger) or its run carries no question, the source collection run's own
+    persisted scope questionId scopes the same proposal (the claim ledger is
+    team-level storage with no formal runtime dependency); the fallback is
+    reported as ``run_scope_fallback`` so materialized records stay
+    observable.  Both tiers failing keeps the fail-closed contract:
+    materializing evidence that can never bridge to a claim row would only
+    feed the belief gate permanent ``claim_data_missing`` verdicts.
     """
     from .formal_write_runtime import get_write_store
     from .hypothesis_first_chain import _question_scope_envelope
 
+    question_id = ""
+    failure: EvidenceMaterializationError | None = None
     try:
         run = get_write_store().get_run(_text(workflow_run_id))
-    except Exception as exc:  # noqa: BLE001 - fail closed on unavailable ledger
-        raise EvidenceMaterializationError(
+    except Exception as exc:  # noqa: BLE001 - tier 1 unavailable; tier 2 decides
+        failure = EvidenceMaterializationError(
             f"formal workflow run ledger is unavailable for claim scoping: {exc}"
-        ) from exc
-    question_id = _text(getattr(run, "question_id", "") if run is not None else "")
-    if not question_id:
-        raise EvidenceMaterializationError(
-            "formal workflow run does not carry a question; claims cannot be "
-            "proposed in the question-scoped claim ledger"
         )
-    return _question_scope_envelope(team_id, question_id)
+        failure.__cause__ = exc
+    else:
+        question_id = _text(getattr(run, "question_id", "") if run is not None else "")
+        if not question_id:
+            failure = EvidenceMaterializationError(
+                "formal workflow run does not carry a question; claims cannot be "
+                "proposed in the question-scoped claim ledger"
+            )
+    if question_id:
+        return _question_scope_envelope(team_id, question_id), "ledger"
+    fallback_question_id = _source_collection_run_scope_question_id(
+        source_collection_run_id
+    )
+    if fallback_question_id:
+        logger.warning(
+            "formal ledger question scoping failed for workflow run %s (%s); "
+            "falling back to source collection run %s scope question %s",
+            _text(workflow_run_id),
+            failure,
+            _text(source_collection_run_id),
+            fallback_question_id,
+        )
+        return (
+            _question_scope_envelope(team_id, fallback_question_id),
+            "run_scope_fallback",
+        )
+    assert failure is not None  # every empty tier-1 branch set its error above
+    raise failure
 
 
 def _candidate_source_run_id(candidate: dict[str, Any]) -> str:
@@ -1070,6 +1142,11 @@ def materialize_completed_extraction_task(
     bindings = agent.get("llmBindings") if isinstance(agent, dict) else {}
     dialogue = bindings.get("dialogue") if isinstance(bindings, dict) else {}
     model_ref = _text(dialogue.get("modelId")) if isinstance(dialogue, dict) else ""
+    question_scope, question_scope_resolution = _formal_question_scope(
+        team_id,
+        workflow_run_id,
+        source_collection_run_id,
+    )
     return materialize_claim_evidence_from_task(
         project_root=Path(team_service.PROJECT_ROOT),
         team_id=team_id,
@@ -1077,7 +1154,8 @@ def materialize_completed_extraction_task(
         source_collection_run_id=source_collection_run_id,
         task=task,
         model_ref=model_ref,
-        question_scope=_formal_question_scope(team_id, workflow_run_id),
+        question_scope=question_scope,
+        question_scope_resolution=question_scope_resolution,
         hypothesis_candidate_ids=_collection_run_hypothesis_candidate_ids(
             source_collection_run_id
         ),
@@ -1092,9 +1170,11 @@ def materialize_completed_extraction_task(
 # claim ledger was never created, so ``evaluate_claim_belief_gate`` failed
 # closed with ``claim_data_missing`` and the operator's accepted convergence
 # was rejected forever.  Both stage-task entry points above require a formal
-# workflow run (``_formal_question_scope``) and an extraction stage task;
-# chain-level collection runs have neither.  The bridge below crosses the
-# same Evidence Store boundary from the chain's own handoff authority.
+# workflow run (``_formal_question_scope``, which since the archive-mode fix
+# also accepts the collection run's own scope questionId as tier 2) and an
+# extraction stage task; chain-level collection runs have neither.  The bridge
+# below crosses the same Evidence Store boundary from the chain's own handoff
+# authority.
 
 
 def _chain_source_collection_candidates(

@@ -896,7 +896,10 @@ def test_verbatim_quote_writeback_materializes_ledger_row_and_gate_allows(tmp_pa
     monkeypatch.setattr(
         agent_claim_evidence_materializer,
         "_formal_question_scope",
-        lambda team_id, workflow_run_id: scope,
+        lambda team_id, workflow_run_id, source_collection_run_id="": (
+            scope,
+            "ledger",
+        ),
     )
     real_get_agent = agent_directory_service.get_agent
 
@@ -1035,7 +1038,10 @@ def test_missing_retrieved_at_backfilled_then_gate_passes_and_materializes(
     monkeypatch.setattr(
         agent_claim_evidence_materializer,
         "_formal_question_scope",
-        lambda team_id, workflow_run_id: scope,
+        lambda team_id, workflow_run_id, source_collection_run_id="": (
+            scope,
+            "ledger",
+        ),
     )
     real_get_agent = agent_directory_service.get_agent
 
@@ -1128,7 +1134,10 @@ def test_post_backfill_contract_violation_rejected_then_corrected_round_trip(
     monkeypatch.setattr(
         agent_claim_evidence_materializer,
         "_formal_question_scope",
-        lambda team_id, workflow_run_id: scope,
+        lambda team_id, workflow_run_id, source_collection_run_id="": (
+            scope,
+            "ledger",
+        ),
     )
     real_get_agent = agent_directory_service.get_agent
 
@@ -1253,7 +1262,10 @@ def _patch_claim_materialization_env(tmp_path, monkeypatch, team_id):
     monkeypatch.setattr(
         agent_claim_evidence_materializer,
         "_formal_question_scope",
-        lambda team_id, workflow_run_id: scope,
+        lambda team_id, workflow_run_id, source_collection_run_id="": (
+            scope,
+            "ledger",
+        ),
     )
     real_get_agent = agent_directory_service.get_agent
 
