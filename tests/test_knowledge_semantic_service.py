@@ -384,7 +384,10 @@ def test_real_chinese_tail_semantics_and_offline_approval_sync(knowledge_env, mo
     assert result["results"][0]["knowledgeItemId"] == applied["item"]["knowledgeItemId"]
     assert "自动保存" in result["results"][0]["matchedExcerpt"]
     assert result["results"][0]["matchedContentOffset"] > 2000
-    assert result["semanticRetrieval"]["indexedCandidateCount"] == 1
+    # With a prepared model every applied proposal syncs its item into the
+    # index: _item(env) applies one ("Shipping policy") and this test applies
+    # another, so two indexed candidates is the intended behavior.
+    assert result["semanticRetrieval"]["indexedCandidateCount"] == 2
     assert not retrieval.search_knowledge_items(agent_id=env["outsider"]["agentId"], knowledge_base_id=base["knowledgeBaseId"],
                   query="工作时突然断电", search_mode="semantic")["results"]
     lifecycle.set_knowledge_source_lifecycle(base["knowledgeBaseId"], source["sourceArtifactId"], status="withdrawn",
