@@ -514,6 +514,7 @@ export type RegenerateVariables = {
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
   turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
+  recoveredAcceptedTurnId?: string;
 };
 
 export type SwitchHeadVariables = {
@@ -580,6 +581,7 @@ export function useChatComposerTurnMutations({
   setSessionEditTargets,
   companionAgentId,
 }: UseChatComposerTurnMutationsOptions): ChatComposerTurnMutations {
+  const latestRegenerateSubmissionBySession = useRef(new Map<string, string>());
   const submitTurnMutation = useMutation<
     ChatSubmitAcceptedResponse,
     Error,
@@ -1109,7 +1111,36 @@ export function useChatComposerTurnMutations({
     },
   });
 
+  function reconcileRegenerateLayer(
+    variables: RegenerateVariables,
+    acceptedDetail: SessionDetail | undefined,
+    acceptedTurnId: string,
+  ) {
+    setActiveTurnLayersBySession((current) => {
+      const layer = current[variables.sessionId];
+      const ownsLayer = layer?.clientSubmissionId === variables.clientSubmissionId
+        || Boolean(layer && acceptedTurnId && layer.turnId === acceptedTurnId);
+      // A later submission or streamed turn must keep its own layer.
+      if (layer && !ownsLayer) return current;
+      if (layer && (layer.status === "completed" || layer.status === "failed" || layer.turnItems.length > 0)) {
+        return current;
+      }
+      if (!isCurrentRunningSessionTurn(acceptedDetail, variables.sessionId, acceptedTurnId)) {
+        return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
+      }
+      return setActiveTurnLayerForSession(current, variables.sessionId,
+        bindActiveTurnLayerToTurnId(layer, acceptedTurnId) ?? createOptimisticActiveTurnLayer({
+          sessionId: variables.sessionId,
+          turnId: acceptedTurnId,
+          clientSubmissionId: variables.clientSubmissionId,
+          updatedAt: acceptedDetail?.updatedAt,
+          accepted: true,
+        }));
+    });
+  }
+
   const regenerateMutation = useMutation({
+    mutationKey: ["session_regenerate"],
     mutationFn: async (
       {
         sessionId,
@@ -1130,6 +1161,7 @@ export function useChatComposerTurnMutations({
         turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
       }),
     onMutate: async (variables) => {
+      latestRegenerateSubmissionBySession.current.set(variables.sessionId, variables.clientSubmissionId);
       const telemetry = startUserAction("session_regenerate", {
         sessionId: variables.sessionId,
         messageId: variables.messageId,
@@ -1151,7 +1183,7 @@ export function useChatComposerTurnMutations({
           }),
         )
       );
-      // Drop the stale assistant output immediately; snapshot for rollback.
+      // Keep the journal branch visible while waiting for the accepted snapshot.
       queryClient.setQueryData<SessionDetail>(sessionKey, (detailState) =>
         applyOptimisticRegenerate(detailState, { messageId: variables.messageId }),
       );
@@ -1161,35 +1193,43 @@ export function useChatComposerTurnMutations({
       return { previousDetail, telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
+      if (latestRegenerateSubmissionBySession.current.get(variables.sessionId) !== variables.clientSubmissionId) return;
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         messageId: variables.messageId,
-        turnId: latestUserTurnId(nextDetail),
+        turnId: exactSubmitTurnId(nextDetail, variables.clientSubmissionId),
       });
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
+      setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
       syncSessionDetail(nextDetail);
-      const acceptedTurnId = latestUserTurnId(nextDetail);
-      setActiveTurnLayersBySession((current) => {
-        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
-          return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
-        }
-        return setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: acceptedTurnId,
-            clientSubmissionId: variables.clientSubmissionId,
-            updatedAt: nextDetail.updatedAt,
-          }),
-        );
-      });
+      // A newer SSE snapshot may already own the cache when HTTP arrives.
+      const syncedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId)) ?? nextDetail;
+      const acceptedTurnId = exactSubmitTurnId(syncedDetail, variables.clientSubmissionId)
+        || exactSubmitTurnId(nextDetail, variables.clientSubmissionId);
+      reconcileRegenerateLayer(variables, syncedDetail, acceptedTurnId);
       void chatWorkspaceCache.afterSessionChanged();
     },
-    onError: (error, variables, context) => {
+    onError: async (error, variables, context) => {
+      if (latestRegenerateSubmissionBySession.current.get(variables.sessionId) !== variables.clientSubmissionId) return;
+      const readback = await readbackSubmitAcceptance(queryClient, variables.sessionId, variables.clientSubmissionId);
+      const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const evidence = findSubmitAcceptanceEvidence(currentDetail, variables.clientSubmissionId) ?? readback.evidence;
+      if (latestRegenerateSubmissionBySession.current.get(variables.sessionId) !== variables.clientSubmissionId) return;
+      if (evidence) {
+        const acceptedTurnId = exactAcceptedSubmitTurnId(currentDetail, variables.clientSubmissionId, evidence);
+        if (isCurrentRunningSessionTurn(currentDetail, variables.sessionId, acceptedTurnId)) {
+          variables.recoveredAcceptedTurnId = acceptedTurnId;
+        }
+        reconcileRegenerateLayer(variables, currentDetail, acceptedTurnId);
+        setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
+        context?.telemetry?.succeeded({
+          sessionId: variables.sessionId,
+          messageId: variables.messageId,
+          turnId: acceptedTurnId,
+          acceptanceReadback: readback.status,
+        });
+        void chatWorkspaceCache.afterSessionChanged();
+        return;
+      }
       context?.telemetry?.failed(error, {
         sessionId: variables.sessionId,
         messageId: variables.messageId,
@@ -1203,7 +1243,9 @@ export function useChatComposerTurnMutations({
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
       }
       setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
+        current[variables.sessionId]?.clientSubmissionId === variables.clientSubmissionId
+          ? setActiveTurnLayerForSession(current, variables.sessionId, undefined)
+          : current,
       );
       setSessionComposerErrors((current) => ({
         ...current,
@@ -3202,6 +3244,7 @@ export function useChatComposerSubmitActions({
     const submitPending = Boolean(
       (submitTurnMutation.isPending && submitTurnMutation.variables?.sessionId === activeSessionId)
       || (editResubmitMutation.isPending && editResubmitMutation.variables?.sessionId === activeSessionId)
+      || (regenerateMutation.isPending && regenerateMutation.variables?.sessionId === activeSessionId)
     );
     if (!sessionBusy && !submitPending) {
       return;
@@ -3222,7 +3265,10 @@ export function useChatComposerSubmitActions({
         : editResubmitMutation.isPending
           && editResubmitMutation.variables?.sessionId === activeSessionId
           ? editResubmitMutation.variables.clientSubmissionId
-          : pendingUploadSubmissionRef.current.get(activeSessionId);
+          : regenerateMutation.isPending
+            && regenerateMutation.variables?.sessionId === activeSessionId
+            ? regenerateMutation.variables.clientSubmissionId
+            : pendingUploadSubmissionRef.current.get(activeSessionId);
       pendingStopAfterAcceptRef.current.set(activeSessionId, {
         sessionId: activeSessionId,
         previousDetail,
@@ -3242,6 +3288,8 @@ export function useChatComposerSubmitActions({
     detail,
     editResubmitMutation.isPending,
     editResubmitMutation.variables?.sessionId,
+    regenerateMutation.isPending,
+    regenerateMutation.variables,
     queryClient,
     sessionBusy,
     sessionStopping,
@@ -3330,13 +3378,21 @@ export function useChatComposerSubmitActions({
         sessionId?: unknown;
         turnId?: unknown;
       } | SessionDetail | undefined;
-      const acceptedTurnId = variables?.messageId
-        ? resolveSessionStopTurnId(data as SessionDetail | undefined, "")
-        : data && typeof data === "object" && "turnId" in data
-          ? String(data.turnId || "").trim()
-          : "";
-      if (!acceptedTurnId) return;
-      dispatchDeferredStop(sessionId, pendingStop, acceptedTurnId);
+      const isRegenerate = mutation.options.mutationKey?.[0] === "session_regenerate";
+      const cachedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId));
+      const acceptedTurnId = isRegenerate
+        ? exactSubmitTurnId(cachedDetail, clientSubmissionId)
+          || exactSubmitTurnId(data as SessionDetail | undefined, clientSubmissionId)
+        : variables?.messageId
+          ? resolveSessionStopTurnId(data as SessionDetail | undefined, "")
+          : data && typeof data === "object" && "turnId" in data
+            ? String(data.turnId || "").trim()
+            : "";
+      if (!acceptedTurnId) {
+        if (isRegenerate) discardDeferredStop(sessionId, pendingStop);
+        return;
+      }
+      dispatchDeferredStop(sessionId, pendingStop, acceptedTurnId, isRegenerate);
     });
     return unsubscribe;
   }, [discardDeferredStop, dispatchDeferredStop, queryClient]);
@@ -3395,6 +3451,7 @@ export function useChatComposerSubmitActions({
     const submitPending = Boolean(
       (submitTurnMutation.isPending && submitTurnMutation.variables?.sessionId === activeSessionId)
       || (editResubmitMutation.isPending && editResubmitMutation.variables?.sessionId === activeSessionId)
+      || (regenerateMutation.isPending && regenerateMutation.variables?.sessionId === activeSessionId)
     );
     if (!sessionBusy && !submitPending) {
       pendingStopAfterAcceptRef.current.delete(activeSessionId);
@@ -3422,6 +3479,8 @@ export function useChatComposerSubmitActions({
     detail,
     editResubmitMutation.isPending,
     editResubmitMutation.variables?.sessionId,
+    regenerateMutation.isPending,
+    regenerateMutation.variables,
     sessionBusy,
     stopTurnMutation,
     submitTurnMutation.isPending,

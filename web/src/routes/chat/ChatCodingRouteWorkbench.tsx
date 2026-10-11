@@ -2656,6 +2656,7 @@ export function ChatCodingRouteWorkbench() {
     t,
     submitTurnMutation,
     editResubmitMutation,
+    regenerateMutation,
     stopTurnMutation,
     sessionGuidanceMutation,
     activeTurnSettledByDetail,
