@@ -4,6 +4,9 @@ import {
 
 const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_1fr_auto]";
 const headerClass = "flex flex-wrap items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-4";
+const compactHeaderClass = "grid min-w-0 gap-1 border-b border-vui-border-soft px-3 py-2";
+const compactFileNameClass = "m-0 min-w-0 break-all font-mono text-vui-xs font-medium leading-snug text-vui-fg-primary";
+const compactSourceClass = "text-vui-xs leading-snug text-vui-fg-secondary";
 const headerCopyClass = "min-w-0 max-w-full";
 const eyebrowClass = "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";
 const fileNameClass = "m-0 break-all font-[var(--font-body)] text-vui-md font-bold text-vui-fg-primary";
@@ -29,6 +32,9 @@ const footnoteClass = "m-0 border-t border-vui-border-soft px-5 pb-3.5 pt-2.5 [f
 const styles = {
   surfaceClass,
   headerClass,
+  compactHeaderClass,
+  compactFileNameClass,
+  compactSourceClass,
   headerCopyClass,
   eyebrowClass,
   fileNameClass,

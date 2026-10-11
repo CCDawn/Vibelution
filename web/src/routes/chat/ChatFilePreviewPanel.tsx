@@ -6,6 +6,7 @@ import styles from "./ChatFilePreviewPanel.styles";
 
 type ChatFilePreviewPanelProps = {
   changed: boolean;
+  compactHeader?: boolean;
   errorMessage: string;
   file: FileContent | null | undefined;
   loadingLabel: string;
@@ -14,6 +15,7 @@ type ChatFilePreviewPanelProps = {
 
 export function ChatFilePreviewPanel({
   changed,
+  compactHeader,
   errorMessage,
   file,
   loadingLabel,
@@ -30,6 +32,7 @@ export function ChatFilePreviewPanel({
       <LazyFilePreview
         file={file}
         changed={changed}
+        compactHeader={compactHeader}
         sourceLabel={sourceLabel}
         fallback={
           <ProgressiveRegionSkeleton

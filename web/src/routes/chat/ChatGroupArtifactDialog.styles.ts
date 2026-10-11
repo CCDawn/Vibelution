@@ -3,6 +3,10 @@ const styles: Record<string, string> = {
     "vui-routes-chat-artifact-dialog min-w-0 w-[min(820px,calc(100vw_-_32px))] max-h-[min(760px,calc(100dvh_-_40px))]",
   body:
     "min-w-0 grid max-h-[min(620px,calc(100dvh_-_220px))] content-start gap-3 overflow-auto pr-1 [scrollbar-gutter:stable]",
+  previewBody:
+    "min-w-0 min-h-0 grid h-[min(520px,calc(100dvh_-_260px))] grid-rows-[minmax(0,1fr)] overflow-hidden",
+  backButton:
+    "max-[600px]:min-h-11",
   task:
     "min-w-0 grid gap-2 border-b border-[var(--vui-border-subtle)] pb-3 last:border-b-0 last:pb-0",
   taskHeading:
@@ -20,10 +24,6 @@ const styles: Record<string, string> = {
     "min-w-[4.5rem] rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-center [font-size:var(--vui-font-2xs)] leading-tight text-[var(--fg-tertiary)]",
   filePath:
     "min-w-0 break-all font-mono [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]",
-  previewHeader:
-    "min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[var(--vui-border-subtle)] pb-2",
-  previewPath:
-    "m-0 min-w-0 break-all pt-1 font-mono [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]",
   note:
     "m-0 min-w-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-tertiary)]",
 };

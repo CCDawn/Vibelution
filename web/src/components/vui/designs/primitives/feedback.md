@@ -150,6 +150,7 @@ import { VDialog } from "@/components/vui";
 
 ### 视觉与状态
 - 居中由 Content 的 `left/top` 与 Tailwind `translate` 定位；CSS 动效只过渡透明度和缩放，避免在 keyframes 写入 `translate()` 覆盖定位。抽屉 recipe 保留 `!transform-none`。
+- 600px 及以下视口，内置关闭按钮的点击区域至少 44×44px；桌面保持紧凑尺寸，保留 Radix 关闭与焦点恢复行为。
 
 ### 非职责
 - 不做抽屉；不做动作菜单（`VDropdownMenu`）。

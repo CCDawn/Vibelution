@@ -1044,4 +1044,4 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 传入已确认的 teamId、taskIds、lang、open 与 onOpenChange。先从同团队任务板查 workspacePath 与 workspaceBranch，再由 changes API 确认工作区有效；仅匹配 `.worktrees/<slug>` 与 `codex/<slug>` 的当前非删除文件提供预览。文件相对路径不得包含绝对路径或向上跳转；files API 再做项目路径约束。任务已移除、工作区缺失、加载失败、空改动和截断均有对应状态。
 
 ### 实现与边界
-`ChatGroupArtifactDialog.tsx` 只读查询当前任务，不读取历史版本，不改文件、不提交审批；界面明确标为当前改动。正文 Markdown 不传群聊猜测的工作区。预览可返回列表，弹窗关闭回到来源按钮，窄屏内容自行滚动；不新建第二套文件预览组件。
+`ChatGroupArtifactDialog.tsx` 只读查询当前任务，不读取历史版本，不改文件、不提交审批；界面明确标为当前改动。正文 Markdown 不传群聊猜测的工作区。预览复用 FilePreview 的 compactHeader，只展示一次文件相对路径和只读来源，完整路径保留在 title。代码正文在受限高度内独立滚动，返回列表按钮放在 VDialog footer，窄屏点击高度至少 44px；弹窗关闭回到来源按钮。不新建第二套文件预览组件。

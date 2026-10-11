@@ -221,13 +221,25 @@ export function ChatGroupArtifactDialog({
       onOpenChange={handleOpenChange}
       onCloseAutoFocus={onCloseAutoFocus}
       title={text("当前任务改动", "Current task changes")}
-      description={text("任务工作区当前状态，不是历史版本。", "Current task workspace state, not a historical version.")}
+      description={text("当前工作区 · 非历史版本", "Current workspace · Not a historical version")}
       size="lg"
       contentClassName={styles.artifactDialog}
       aria-label={text("当前任务改动", "Current task changes")}
       data-vui="chat-group-artifact-dialog"
+      footer={activeChange ? (
+        <VButton
+          type="button"
+          variant="secondary"
+          density="compact"
+          className={styles.backButton}
+          onPress={() => setSelectedChange(null)}
+          data-vui="chat-group-artifact-back"
+        >
+          {text("返回文件列表", "Back to files")}
+        </VButton>
+      ) : undefined}
     >
-      <div className={styles.body} data-testid="chat-group-artifact-body">
+      <div className={activeChange ? styles.previewBody : styles.body} data-testid="chat-group-artifact-body">
         {!normalizedTeamId ? (
           <p className={styles.state} role="status">{text("缺少团队信息。", "Team information is unavailable.")}</p>
         ) : normalizedTaskIds.length === 0 ? (
@@ -239,27 +251,14 @@ export function ChatGroupArtifactDialog({
         ) : !tasksMatchTeam ? (
           <p className={styles.state} role="alert">{text("团队信息不一致，无法读取任务改动。", "Team identity did not match; task changes could not be loaded.")}</p>
         ) : activeChange ? (
-          <>
-            <div className={styles.previewHeader}>
-              <p className={styles.previewPath} title={activeChange.path}>{activeChange.path}</p>
-              <VButton
-                type="button"
-                variant="secondary"
-                density="compact"
-                onPress={() => setSelectedChange(null)}
-                data-vui="chat-group-artifact-back"
-              >
-                {text("返回文件列表", "Back to files")}
-              </VButton>
-            </div>
             <ChatFilePreviewPanel
               changed
+              compactHeader
               errorMessage={fileQuery.isError ? text("文件预览读取失败。", "Could not load this file preview.") : ""}
               file={fileQuery.isFetching ? undefined : fileQuery.data}
               loadingLabel={text("正在读取文件…", "Loading file…")}
-              sourceLabel={text("当前任务工作区", "Current task workspace")}
+              sourceLabel={text("只读", "Read only")}
             />
-          </>
         ) : (
           sections.map((section) => {
             const { task, changes, changesQuery, taskId, workspaceSlug, safeChanges, hasUnsafePath } = section;
