@@ -416,12 +416,20 @@ def eligible_financial_items(
                     meta["supersedesSha256"],
                 )
             )
+        # The historical cutoff must also drop post-cutoff sources here, while
+        # candidates are being collected and before any ranking or top-k
+        # truncation runs. Filtering only after truncation let newer same-topic
+        # entries crowd a dated entry out of the result set and surface a false
+        # insufficient_evidence. The payload-boundary filter in
+        # _historical_financial_search_payload stays as fail-closed defense in
+        # depth for payload rows that never passed through this eligibility.
         if (
             source.get("status") != "active"
             or metadata.get("financialState") not in (None, "active")
             or item.get("stability") == "deprecated"
             or _date(meta["publishedAt"]) > now
             or (meta["expiresAt"] and _date(meta["expiresAt"]) <= now)
+            or not on_or_before(meta["publishedAt"], cutoff)
         ):
             continue
         candidates[item["knowledgeItemId"]] = meta

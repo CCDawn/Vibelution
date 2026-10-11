@@ -329,6 +329,60 @@ def test_historical_cutoff_selects_version_published_by_that_date(finance_env):
     )
 
 
+def test_historical_target_date_entry_survives_newer_topk_squeeze(finance_env):
+    """Filter-before-truncation: a dated entry must stay reachable even when
+    newer same-topic entries would fill every top-k slot first."""
+    env = finance_env
+
+    def stage_text(text, **changes):
+        meta = evidence(excerptSha256=hashlib.sha256(text.encode()).hexdigest(), **changes)
+        staged = knowledge.stage_financial_evidence(
+            agent_id=env["owner"], evidence=meta, excerpt=text
+        )
+        return review(env, staged, content=text)
+
+    target_text = (
+        "本公司2025年度营业收入为123.45元，其余段落为管理层讨论与分析："
+        "经营环境、行业格局、风险因素与应对措施均与年报全文一致，此处不再重复披露。"
+    )
+    target = stage_text(
+        target_text,
+        documentSha256="c" * 64,
+        reportVersion="dated",
+        page=11,
+        publishedAt="2025-06-01T00:00:00+00:00",
+    )
+    # More newer same-topic entries than the search top-k (default limit 5);
+    # each outranks the target for the query through higher term frequency.
+    for index in range(6):
+        newer_text = f"营业收入补充说明{index}：" + "营业收入" * 8
+        stage_text(
+            newer_text,
+            documentSha256=f"{index + 1:064x}",
+            reportVersion=f"newer{index}",
+            page=20 + index,
+            publishedAt=f"2026-01-0{index + 1}T00:00:00+00:00",
+        )
+
+    without_cutoff = search(env)
+    assert without_cutoff["status"] == "found"
+
+    with research_analysis_date_context("研究日期：2025-12-31"):
+        result = search(env)
+
+    assert result["status"] == "found", (
+        "target-date entry exists but was squeezed out of top-k before the "
+        f"historical date filter: {result}"
+    )
+    assert result["results"][0]["knowledgeItemId"] == (
+        target["directIngestion"]["item"]["knowledgeItemId"]
+    )
+    assert (
+        result["citations"][0]["financialEvidence"][0]["reportVersion"] == "dated"
+    )
+    assert target_text in result["results"][0]["excerpt"]
+
+
 @pytest.mark.parametrize(
     "omitted_fields",
     [("expiresAt",), ("supersedesSha256",), ("expiresAt", "supersedesSha256")],
