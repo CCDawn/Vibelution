@@ -43,7 +43,8 @@ export function FinanceWalkForward({ agentId, sourceRunId, zh, onSelectRun }: { 
         <VButton isDisabled={pending || !sourceRunId || !valid} onPress={() => void perform(async () => { if (!sourceRunId) return; await accept(await previewWalkForward(agentId, sourceRunId, { trainSessions: train, testSessions: test, stepSessions: test, maxTokens: budget, candidates: [40, 60, 80].map(value => ({ candidateId: `cap-${value}`, maxPositionPct: value })) })); })}>{zh ? "预检滚动计划" : "Preview plan"}</VButton>
       </div>
       {!sourceRunId ? <p className={styles.note}>{zh ? "先选择一条已有回测，使用其冻结行情。" : "Select an existing run to reuse its frozen prices."}</p> : null}
-      {error || workflows.isError ? <VStateSurface tone="error" density="compact" title={error || workflows.error?.message || "读取失败"} actions={<VButton onPress={() => void workflows.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : null}
+      {error ? <VStateSurface tone="error" density="compact" title={error} actions={<VButton onPress={() => setError("")}>{zh ? "关闭提示" : "Dismiss"}</VButton>} /> : null}
+      {workflows.isError ? <VStateSurface tone="error" density="compact" title={workflows.error?.message || (zh ? "读取失败" : "Unable to load workflows")} actions={<VButton isPending={workflows.isFetching} isDisabled={workflows.isFetching} onPress={() => void workflows.refetch()}>{zh ? "重新读取" : "Reload workflows"}</VButton>} /> : null}
       {workflows.isPending ? <VStateSurface tone="loading" busy density="compact" title={zh ? "读取滚动计划" : "Loading workflows"} /> : null}
       {items.length > 1 ? <VSelect aria-label="滚动验证记录" selectedKey={shown?.workflowId} options={items.map(item => ({ id: item.workflowId, label: `${zh ? labels[item.status] : item.status} · ${new Date(item.createdAt).toLocaleString()}` }))} onSelectionChange={value => setSelectedId(String(value))} /> : null}
       {shown ? <>

@@ -71,3 +71,37 @@ it("allows an explicit retry of a failed workflow and retains a rejected recover
   expect(api.actWalkForward).toHaveBeenCalledWith("a", "workflow", "resume");
   expect(node.textContent).toContain("子回测失败，请先检查子回测");
 });
+it("dismisses an operation error without refetching or replaying a model action", async () => {
+  vi.mocked(api.listWalkForward).mockResolvedValue({ items: [{ ...workflow, status: "failed" }] });
+  vi.mocked(api.actWalkForward).mockRejectedValueOnce(new Error("子回测暂时不可恢复"));
+  await render(); await click("滚动样本外验证"); await click("继续计划");
+  const reads = vi.mocked(api.listWalkForward).mock.calls.length;
+  await click("关闭提示");
+  expect(node.textContent).not.toContain("子回测暂时不可恢复");
+  expect(api.listWalkForward).toHaveBeenCalledTimes(reads);
+  expect(api.actWalkForward).toHaveBeenCalledTimes(1);
+  vi.mocked(api.actWalkForward).mockResolvedValue({ ...workflow, status: "running" });
+  await click("继续计划");
+  expect(api.actWalkForward).toHaveBeenCalledTimes(2);
+});
+it("retries only the list read and clears its error after recovery", async () => {
+  vi.mocked(api.listWalkForward).mockRejectedValueOnce(new Error("读取计划失败"));
+  await render(); await click("滚动样本外验证");
+  expect(node.textContent).toContain("读取计划失败");
+  vi.mocked(api.listWalkForward).mockResolvedValue({ items: [workflow] });
+  await click("重新读取");
+  expect(node.textContent).not.toContain("读取计划失败");
+  expect(node.textContent).toContain("按冻结预算启动");
+  expect(api.actWalkForward).not.toHaveBeenCalled();
+});
+it("keeps a list failure visible after dismissing a separate operation failure", async () => {
+  vi.mocked(api.listWalkForward).mockRejectedValue(new Error("计划列表离线"));
+  vi.mocked(api.previewWalkForward).mockRejectedValue(new Error("预检暂时失败"));
+  await render("source"); await click("滚动样本外验证"); await click("预检滚动计划");
+  expect(node.textContent).toContain("计划列表离线");
+  expect(node.textContent).toContain("预检暂时失败");
+  await click("关闭提示");
+  expect(node.textContent).not.toContain("预检暂时失败");
+  expect(node.textContent).toContain("计划列表离线");
+  expect(node.textContent).toContain("重新读取");
+});
