@@ -10,6 +10,7 @@ import {
 } from "./ConversationOperationDetails";
 import detailStyles from "./ConversationOperationDetails.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
 
 const classNames = {
   operationDetails: "operation-details",
@@ -43,8 +44,9 @@ const detailLabels = {
 describe("ConversationOperationDetails", () => {
   it("keeps deferred operation details out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./ConversationOperationDetails.tsx", import.meta.url))).toBe(true);
-    expect(conversationViewSource).toContain('from "./ConversationOperationDetails"');
-    expect(conversationViewSource).toContain("<DeferredOperationDetails");
+    expect(conversationViewSource).toContain('from "./conversationTimelineItems"');
+    expect(conversationTimelineItemsSource).toContain('from "./ConversationOperationDetails"');
+    expect(conversationTimelineItemsSource).toContain("<DeferredOperationDetails");
     expect(conversationViewSource).not.toContain("function DeferredOperationDetails");
     expect(conversationViewSource).not.toContain("function operationDetailsKind");
     expect(conversationViewSource).not.toContain("function operationDetailRows(");
