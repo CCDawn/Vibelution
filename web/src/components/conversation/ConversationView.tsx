@@ -1178,6 +1178,7 @@ export const ConversationView = React.memo(function ConversationView({
   );
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
+  const readingViewportAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
   // History rows are positioned by react-virtual, so they must use the same
   // viewport rhythm as the CSS grid that separates history from the live tail.
   const [narrowTimelineViewport, setNarrowTimelineViewport] = useState(() => (
@@ -1189,8 +1190,10 @@ export const ConversationView = React.memo(function ConversationView({
     if (typeof window.matchMedia !== "function") return undefined;
     const media = window.matchMedia(TIMELINE_NARROW_VIEWPORT_QUERY);
     const syncViewport = () => {
-      if (!followLatestRef.current) {
-        const anchor = captureTimelineRowKeyAnchor(timelineRef.current);
+      if (readingViewportAnchorRef.current || !followLatestRef.current) {
+        // The media event arrives after CSS has reflowed. Prefer the anchor
+        // remembered while reading at the previous width.
+        const anchor = readingViewportAnchorRef.current ?? captureTimelineRowKeyAnchor(timelineRef.current);
         if (anchor) {
           historyScrollAnchorRef.current = anchor;
           historyAnchorCorrectingRef.current = {
@@ -3344,6 +3347,11 @@ export const ConversationView = React.memo(function ConversationView({
     if (intent === "none") {
       return;
     }
+    if (historyAnchorCorrectingRef.current?.geometryReflow) {
+      historyAnchorCorrectingRef.current = null;
+      historyScrollAnchorRef.current = null;
+      readingViewportAnchorRef.current = null;
+    }
     userScrollIntentRef.current = intent;
     userScrollIntentAtRef.current = performance.now();
   }
@@ -3391,6 +3399,10 @@ export const ConversationView = React.memo(function ConversationView({
     timeline: HTMLDivElement,
     options: { followLatest?: boolean; behavior?: ScrollBehavior } = {},
   ) {
+    if (options.followLatest) {
+      readingViewportAnchorRef.current = null;
+      rememberUserScrollIntent("towardBottom");
+    }
     const wasAtBottom = atBottomRef.current;
     ignoreNextProgrammaticFollowRef.current = true;
     if (options.behavior) {
@@ -3670,14 +3682,39 @@ export const ConversationView = React.memo(function ConversationView({
     // Breakpoint changes alter virtual row offsets as well as text wrapping.
     // Keep a following reader at the tail after react-virtual's next measure.
     const timeline = timelineRef.current;
-    if (!timeline || !followLatestRef.current) return undefined;
-    scrollTimelineToBottom(timeline);
-    const frame = window.requestAnimationFrame(() => {
+    if (!timeline) return undefined;
+    const anchor = historyAnchorCorrectingRef.current?.geometryReflow
+      ? historyAnchorCorrectingRef.current.anchor : readingViewportAnchorRef.current;
+    // CSS can temporarily clamp scrollTop to the bottom before the media
+    // callback runs. A remembered reading anchor takes precedence over that.
+    const following = !anchor && followLatestRef.current;
+    if (anchor) followLatestRef.current = false;
+    if (!following && !anchor) return undefined;
+    const intentAtStart = userScrollIntentAtRef.current;
+    let frame = 0;
+    let remainingFrames = TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES;
+    const restoreViewport = () => {
       const current = timelineRef.current;
-      if (current && followLatestRef.current) scrollTimelineToBottom(current);
-    });
+      if (!current || userScrollIntentAtRef.current > intentAtStart) return;
+      if (following && followLatestRef.current) {
+        scrollTimelineToBottom(current);
+      } else if (anchor) {
+        // Browser/virtualizer clamps may briefly report "at bottom" while
+        // remeasuring. Preserve the pre-resize reading intent through them.
+        followLatestRef.current = false;
+        atBottomRef.current = false;
+        setIsAtBottom(false);
+        restoreTimelineRowKeyAnchor(current, anchor);
+        lastTimelineScrollTopRef.current = current.scrollTop;
+      }
+      // react-virtual measures rows in rAF; retain the target through those
+      // measurements rather than clearing it after the first matching paint.
+      if (remainingFrames-- > 0) frame = window.requestAnimationFrame(restoreViewport);
+      else if (!followLatestRef.current) readingViewportAnchorRef.current = captureTimelineRowKeyAnchor(current);
+    };
+    restoreViewport();
     return () => window.cancelAnimationFrame(frame);
-  }, [narrowTimelineViewport]);
+  }, [narrowTimelineViewport, sessionId]);
 
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
@@ -3894,6 +3931,11 @@ export const ConversationView = React.memo(function ConversationView({
       atBottomRef.current = nextState.isAtBottom;
       followLatestRef.current = nextState.shouldFollowLatest;
       setIsAtBottom(nextState.isAtBottom);
+      if (!nextState.shouldFollowLatest && !historyAnchorCorrectingRef.current?.geometryReflow) {
+        readingViewportAnchorRef.current = captureTimelineRowKeyAnchor(timeline);
+      } else if (nextState.shouldFollowLatest && currentUserScrollIntent() === "towardBottom") {
+        readingViewportAnchorRef.current = null;
+      }
       rememberSessionTimelineScroll(sessionId, {
         scrollTop: timeline.scrollTop,
         followingLatest: nextState.shouldFollowLatest,
@@ -3986,6 +4028,7 @@ export const ConversationView = React.memo(function ConversationView({
   }, [composerDisabled, composerFocusSignal, onComposerFocusRequestSettled]);
 
   useEffect(() => {
+    readingViewportAnchorRef.current = null;
     historyScrollAnchorRef.current = null;
     historyAnchorCorrectingRef.current = null;
     defaultExpansionRef.current = {};
@@ -6782,7 +6825,12 @@ export const ConversationView = React.memo(function ConversationView({
       ) : null}
 
       <div ref={timelineAreaRef} className={styles.timelineArea}>
-      <div ref={timelineRef} className={styles.timeline}>
+      <div
+        ref={timelineRef}
+        className={styles.timeline}
+        data-conversation-following={followLatestRef.current ? "true" : "false"}
+        data-conversation-reading-anchor={readingViewportAnchorRef.current?.rowKey ?? ""}
+      >
         {displayMessages.length === 0 && !activeTurnMessage ? (
           transcriptPending ? (
             <ConversationTranscriptLoadingState label={t("sessionTranscriptLoading")} />
