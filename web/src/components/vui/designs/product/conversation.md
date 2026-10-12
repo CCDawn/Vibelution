@@ -1055,3 +1055,20 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 
 ### 实现与边界
 `ChatGroupArtifactDialog.tsx` 只读查询当前任务，不读取历史版本，不改文件、不提交审批；界面明确标为当前改动。正文 Markdown 不传群聊猜测的工作区。预览复用 FilePreview 的 compactHeader，只展示一次文件相对路径和只读来源，完整路径保留在 title。代码正文在受限高度内独立滚动，返回列表按钮放在 VDialog footer，窄屏点击高度至少 44px；弹窗关闭回到来源按钮。不新建第二套文件预览组件。
+
+## ChatSessionBrowser
+
+### 功能
+在现有对话工作台主内容面浏览会话，按标题、Agent、模型、摘要和团队搜索，按状态筛选并按最近活动分组。
+
+### 适用范围
+普通 Chat 会话。通过会话标签栏的「浏览会话」进入，左侧仍保留既有 Agent 与团队目录。群聊、Companion 和 Finance 沿用各自的专属页面；不改变 Session 接收、持久化、实时输出或权限边界。
+
+### 使用方式
+向 `ChatSessionBrowser` 传入 route 的既有可见 `SessionSummary[]`、`agentsById`、运行/审批集合、语言及读取/失败状态。`onOpen` 委托原有 `handleOpenDirectSession`，新建与重试复用原有 mutation/query；组件只保存搜索和筛选条件，不自行获取或写入会话。已打开会话的正文和终端在浏览时隐藏但保持挂载，返回时保留草稿与阅读状态。
+
+### 视觉与状态
+主阅读面沿用已批准的圆角和层次；列表项显示头像、会话名称、Agent/模型及摘要，窄屏自然换行。头像只用于目录和浏览列表，顶部 `AgentSessionTabStrip` 保留原有图标、标题、状态、团队入口、逐项关闭与新建操作，不增加头像或身份副标题。读取中、空列表、无匹配、失败、带已有数据的刷新失败有独立反馈。
+
+### 实现与边界
+源码与样式归 `web/src/routes/chat/ChatSessionBrowser.tsx` 和 `ChatSessionBrowser.styles.ts`，组合 VUI 的既有按钮、输入和状态表面；`ChatCenterTabStrip` 提供浏览入口槽位，`ChatCenterSessionSurface` 保持原工作区挂载。数据、头像解析、状态语义与时间分组复用原有 owners，不建立第二份会话索引或 transcript。

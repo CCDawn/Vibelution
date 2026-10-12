@@ -208,7 +208,7 @@ describe("AgentConversationDirectory", () => {
     expect(styles.agentRow).toContain("!grid");
     expect(styles.agentRow).toContain("!h-auto");
     expect(styles.agentRow).toContain("!w-full");
-    expect(styles.agentRow).toContain("grid-cols-[26px_minmax(0,1fr)_auto]");
+    expect(styles.agentRow).toContain("grid-cols-[36px_minmax(0,1fr)_auto]");
     expect(styles.agentRow).toContain("!items-stretch");
     expect(styles.agentStatusSlot).toContain("h-full");
     expect(styles.agentStatusSlot).toContain("min-w-3.5");

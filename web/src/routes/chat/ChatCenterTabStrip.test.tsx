@@ -24,4 +24,20 @@ describe("ChatCenterTabStrip return navigation", () => {
     expect(html).toContain("群聊</span>");
     expect(html).not.toContain("<button");
   });
+  it("places the browse entry alongside existing session tabs without replacing their content", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <ChatCenterTabStrip
+          {...props}
+          chatReturnTarget={null}
+          showSessionTabs
+          sessionTabs={<span>原会话标签</span>}
+          sessionBrowserControl={<button type="button" aria-pressed>浏览会话</button>}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("原会话标签");
+    expect(html).toContain("浏览会话");
+    expect(html).not.toContain("<img");
+  });
 });

@@ -9,7 +9,7 @@ const styles = {
   messageTime: "shrink-0 text-xs text-[var(--fg-tertiary)]",
   messageBody: "mt-1 min-w-0 break-words text-[15px] leading-6 text-[var(--fg-secondary)]",
   earlierLink: "mt-2 !min-h-11 !px-0 text-sm",
-  frame: "flex h-full min-h-0 min-w-0 flex-col bg-[var(--vui-surface-panel)]",
+  frame: "m-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-elevation-1)] max-[600px]:m-2",
   header: "flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[var(--vui-border-subtle)] px-7 py-5 max-[600px]:flex-col max-[600px]:px-4 max-[600px]:py-4",
   headerCopy: "min-w-0 flex-1",
   eyebrow: "text-sm font-medium text-[var(--fg-tertiary)]",

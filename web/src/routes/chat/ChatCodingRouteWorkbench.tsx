@@ -224,6 +224,7 @@ import {
   runtimeMatchesSelectedChatSession,
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
+import { ChatSessionBrowser } from "./ChatSessionBrowser";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
@@ -717,6 +718,10 @@ export function ChatCodingRouteWorkbench() {
   }, [editingSessionTitle]);
 
   const [directoryFilterText, setDirectoryFilterText] = useState("");
+  const [sessionBrowserOpen, setSessionBrowserOpen] = useState(false);
+  useEffect(() => {
+    setSessionBrowserOpen(false);
+  }, [location.key]);
   const [showArchivedSessions, setShowArchivedSessions] = useState(false);
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? false,
@@ -2074,6 +2079,7 @@ export function ChatCodingRouteWorkbench() {
       return { ...current, [sessionId]: noted.model };
     });
   }, [activeSessionId, changeRail.show, ordinaryChangeRail]);
+  const sessionBrowserVisible = sessionBrowserOpen && !financeSurface && !verifiedCompanionMode && !groupPanelActive;
   const {
     layoutRef,
     dragState,
@@ -2098,7 +2104,7 @@ export function ChatCodingRouteWorkbench() {
     setResponsiveOverlayPane,
   } = useChatWorkbenchLayout({
     standardGroupRoomActive,
-    statusRailEnabled: verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened)),
+    statusRailEnabled: !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))),
     indexRailEnabled: !financeSurface,
   });
   useEffect(() => {
@@ -4370,14 +4376,25 @@ export function ChatCodingRouteWorkbench() {
               />
             ) : null}
             workspaceActiveTab={conversationWorkspaceTab}
+            sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
+              <VButton
+                variant="ghost"
+                className={sessionBrowserVisible ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+                aria-pressed={sessionBrowserVisible}
+                onPress={() => setSessionBrowserOpen(current => !current)}
+              >
+                {lang === "zh" ? "浏览会话" : "Browse sessions"}
+              </VButton>
+            ) : null}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
             statusRailAvailable={verifiedCompanionMode}
-            rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "侧栏" : "Side") : undefined}
+            rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}
             rightRailOpen={ordinaryChangeRail ? changeRailVisible : statusRailOverlayOpen}
             statusRailOverlayOpen={statusRailOverlayOpen}
             onActivateAgentFallbackTab={() => {
+              setSessionBrowserOpen(false);
               activeSessionId && setActiveTab(activeSessionId, "agent");
             }}
             onToggleLeftOverlay={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
@@ -4414,6 +4431,7 @@ export function ChatCodingRouteWorkbench() {
                 onContextMenu={openSessionContextMenu}
                 onDragReference={startSessionReferenceDrag}
                 onOpenCliAgentRun={(runId) => {
+                  setSessionBrowserOpen(false);
                   if (activeSessionId) {
                     setActiveTab(activeSessionId, cliAgentRunTabId(runId));
                   }
@@ -4424,12 +4442,18 @@ export function ChatCodingRouteWorkbench() {
                     void closeCliAgentRun(run);
                   }
                 }}
-                onCreateSession={handleCreateSession}
+                onCreateSession={() => {
+                  setSessionBrowserOpen(false);
+                  handleCreateSession();
+                }}
                 onDeleteSession={handleDeleteSession}
                 onOpenDirectSession={handleOpenDirectSession}
                 onPrefetchDirectSession={handlePrefetchDirectSession}
                 onRenameTitleChange={setEditingSessionTitle}
-                onSetActiveTab={setActiveTab}
+                onSetActiveTab={(sessionId, tab) => {
+                  setSessionBrowserOpen(false);
+                  setActiveTab(sessionId, tab);
+                }}
                 onSubmitRename={submitRenameSession}
               />
             )}
@@ -4443,6 +4467,7 @@ export function ChatCodingRouteWorkbench() {
                   activeSessionId && closePreviewTab(activeSessionId, tabPath);
                 }}
                 onOpenTab={(tabPath) => {
+                  setSessionBrowserOpen(false);
                   activeSessionId && setActiveTab(activeSessionId, tabPath);
                 }}
               />
@@ -4451,6 +4476,30 @@ export function ChatCodingRouteWorkbench() {
         )}
         surface={(
           <ChatCenterSessionSurface
+            browser={sessionBrowserVisible ? (
+              <ChatSessionBrowser
+                sessions={allVisibleSessions}
+                agentsById={agentsById}
+                activeSessionId={activeSessionId}
+                lang={lang}
+                resolveModelLabel={resolveModelLabel}
+                runtimeRunningSessionIds={runtimeRunningSessionIds}
+                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+                loading={conversationIndexLoading || (!agentsQuery.data && agentsQuery.isPending)}
+                error={sessionsErrorMessage || (agentsQuery.isError ? describeError(agentsQuery.error, t("loadFailed")) : "")}
+                createPending={createSessionMutation.isPending}
+                createDisabled={!selectedChatAgentId}
+                onOpen={(sessionId) => {
+                  setSessionBrowserOpen(false);
+                  handleOpenDirectSession(sessionId);
+                }}
+                onCreate={() => {
+                  setSessionBrowserOpen(false);
+                  handleCreateSession();
+                }}
+                onRetry={() => { void Promise.allSettled([rawSessionsQuery.refetch(), agentsQuery.refetch()]); }}
+              />
+            ) : undefined}
             terminal={(
               <ChatCliAgentTerminalStack
                 runs={mountedCliAgentRuns}
@@ -4590,7 +4639,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
       rightResizeHandle={
-      (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))) && responsiveLayout.rightVisible ? <PaneCollapseHandle
+      !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))) && responsiveLayout.rightVisible ? <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
