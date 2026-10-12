@@ -5,6 +5,7 @@ import type {
   AgentMessageReActOperationGroup,
 } from "./agentMessageOperations";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
 import {
   reActActionOperations,
   reActGroupDurationLabel,
@@ -37,7 +38,8 @@ function group(operations: AgentMessageOperation[]): AgentMessageReActOperationG
 
 describe("conversation ReAct operation item helpers", () => {
   it("keeps ReAct item derivation out of ConversationView", () => {
-    expect(conversationViewSource).toContain('from "./conversationReActOperationItems"');
+    expect(conversationViewSource).toContain('from "./conversationReActRows"');
+    expect(conversationReActRowsSource).toContain('from "./conversationReActOperationItems"');
     expect(conversationViewSource).not.toMatch(/function reActGroupDurationLabel\(/);
     expect(conversationViewSource).not.toMatch(/function reActActionOperations\(/);
     expect(conversationViewSource).not.toMatch(/function reActThoughtItems\(/);
