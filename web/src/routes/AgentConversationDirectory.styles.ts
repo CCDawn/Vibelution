@@ -3,9 +3,9 @@ import { vuiStateSelectedOpaqueRowClass } from "../design/vuiSurfaceRecipes";
 const styles = {
   // Keep the route marker on the root only: base.css treats every marker as a primary-color surface.
   agentDirectory:
-    "vui-routes-agentconversationdirectory grid min-w-0 gap-1 border-b border-[var(--vui-border-subtle)] pb-2",
+    "vui-routes-agentconversationdirectory grid min-w-0 gap-1 border-0 bg-transparent pb-0",
   agentSection:
-    "agentSection grid min-w-0 gap-0.5 [&>button]:min-h-10 [&>button]:font-medium [&>button]:!text-vui-fg-secondary [&>button]:[font-size:var(--vui-font-xs)] [&>div]:gap-0.5 [&>div]:pl-0",
+    "agentSection grid min-w-0 gap-0.5 [&>button]:min-h-[34px] [&>button]:font-medium [&>button]:!text-vui-fg-secondary [&>button]:[font-size:var(--vui-font-2xs)] [&>div]:gap-0.5 [&>div]:pl-0",
   agentDirectoryList:
     "agentDirectoryList grid min-w-0 gap-0.5",
   agentRoomHistory:
@@ -16,13 +16,13 @@ const styles = {
   agentRow:
     "agentRow !grid !h-auto !min-h-[62px] !w-full min-w-0 max-w-full " +
     "grid-cols-[36px_minmax(0,1fr)_auto] !items-stretch !justify-items-stretch !justify-start " +
-    "gap-x-2.5 gap-y-1 rounded-[var(--radius-panel)] !border-0 [border:0] !bg-transparent px-2.5 py-2 " +
+    "gap-x-[9px] gap-y-1 rounded-[8px] !border-0 [border:0] !bg-transparent px-2 py-[7px] " +
     "text-left !font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card " +
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
   agentRowActive:
-    `agentRowActive !border-0 [border:0] ${vuiStateSelectedOpaqueRowClass} shadow-none`,
+    `agentRowActive !border-0 [border:0] ${vuiStateSelectedOpaqueRowClass} shadow-[var(--vui-sheen)]`,
   agentAvatar:
-    "agentAvatar grid h-9 w-9 shrink-0 place-items-center self-center overflow-hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] [font-size:var(--vui-font-xs)] font-medium [color:var(--fg-secondary)]",
+    "agentAvatar grid h-9 w-9 shrink-0 place-items-center self-center overflow-hidden rounded-[9px] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] [font-size:var(--vui-font-xs)] font-medium [color:var(--fg-secondary)]",
   agentAvatarImage:
     "agentAvatarImage h-full w-full object-cover",
   agentCopy:
@@ -30,7 +30,7 @@ const styles = {
   agentTitleRow:
     "agentTitleRow flex min-w-0 items-center",
   agentTitle:
-    "agentTitle min-w-0 whitespace-normal break-words [font-size:var(--vui-type-control-size)] font-normal leading-snug [color:var(--fg-primary)] [overflow-wrap:anywhere]",
+    "agentTitle min-w-0 whitespace-normal break-words [font-size:var(--vui-type-control-size)] font-medium leading-[1.35] [color:var(--fg-primary)] [overflow-wrap:anywhere]",
   // Stretch to row height then center the light — survives VButton/Shadcn justify/items defaults.
   agentStatusSlot:
     "agentStatusSlot flex h-full min-h-full min-w-3.5 shrink-0 items-center justify-end gap-1.5 self-stretch",
@@ -47,7 +47,7 @@ const styles = {
   agentActivityCompleted:
     "agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
   agentMeta:
-    "agentMeta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 whitespace-normal break-words [font-size:var(--vui-font-2xs)] font-normal leading-snug [color:var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "agentMeta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 whitespace-normal break-words [font-size:var(--vui-font-micro-11)] font-normal leading-[1.35] [color:var(--fg-secondary)] [overflow-wrap:anywhere]",
   agentMetaItem:
     "agentMetaItem min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]",
   agentMetaCount:

@@ -217,7 +217,7 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain("data-agent-status-slot");
     expect(styles.agentTitle).toContain("[font-size:var(--vui-type-control-size)]");
     expect(styles.agentTitle).toContain("[color:var(--fg-primary)]");
-    expect(styles.agentMeta).toContain("[font-size:var(--vui-font-2xs)]");
+    expect(styles.agentMeta).toContain("[font-size:var(--vui-font-micro-11)]");
     expect(styles.agentMeta).toContain("font-normal");
     expect(styles.agentMeta).not.toContain("vui-routes-");
     expect(styles.agentMetaItem).not.toContain("vui-routes-");

@@ -50,12 +50,12 @@ describe("AgentUserContentSectionView", () => {
     expect(styles.userMessageBody).toContain("whitespace-pre-wrap");
     expect(styles.userMessageBody).toContain("[overflow-wrap:anywhere]");
     expect(styles.userMessageBody).toContain("max-w-full");
-    expect(styles.userMessageBody).toContain("rounded-xl");
-    expect(styles.userMessageBody).toContain("border-[var(--vui-border-subtle)]");
-    expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
+    expect(styles.userMessageBody).toContain("rounded-[12px]");
+    expect(styles.userMessageBody).toContain("border-[var(--border-hairline)]");
+    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--vui-surface-rail)_48%,var(--vui-surface-chat))]");
     expect(styles.userMessageBody).toContain("px-4");
     expect(styles.userMessageBody).toContain("py-3");
-    expect(styles.userMessageBody).toContain("shadow-[var(--vui-elevation-1-sheen)]");
+    expect(styles.userMessageBody).toContain("shadow-[var(--vui-sheen)]");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:max-w-full");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:whitespace-normal");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:break-words");
@@ -71,7 +71,7 @@ describe("AgentUserContentSectionView", () => {
     expect(styles.userMessageBodyWrap).toContain("relative");
     expect(styles.userMessageBodyWrap).not.toContain("overflow-hidden");
     expect(styles.userMessageCollapseFade).toContain("bg-gradient-to-t");
-    expect(styles.userMessageCollapseFade).toContain("from-[var(--vui-control-muted)]");
+    expect(styles.userMessageCollapseFade).toContain("from-[color-mix(in_srgb,var(--vui-surface-rail)_48%,var(--vui-surface-chat))]");
     expect(styles.userMessageCollapseFade).toContain("to-transparent");
     expect(styles.userMessageCollapseFade).toContain("pointer-events-none");
   });

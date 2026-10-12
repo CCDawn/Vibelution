@@ -1,6 +1,3 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it } from "vitest";
 import styles from "./ConversationView.styles";
 import agentStyles from "./AgentMessageTurnView.styles";
@@ -41,34 +38,26 @@ describe("approved conversation reading hierarchy", () => {
     });
   });
   it("keeps identities visible but quieter than the answer", () => {
-    for (const identity of [styles.turnSpeaker, agentStyles.turnSpeaker]) {
-      expect(identity).toContain("text-vui-xs");
-      expect(identity).toContain("font-medium");
-      expect(identity).not.toContain("hidden");
-    }
+    expect(agentStyles.turnSpeaker).toContain("text-vui-2xs");
+    expect(agentStyles.turnSpeaker).toContain("font-medium");
+    expect(agentStyles.turnSpeaker).not.toContain("hidden");
   });
-  it("aligns the composer rail and uses consistent bubble chrome", () => {
+  it("aligns the composer rail and uses distinct approved bubble chrome", () => {
     expect(styles.composerCodex).toContain("max-w-[760px]");
     expect(styles.assistantTurn).toContain("max-w-[760px]");
     // The checklist is nested within the capped turn body, so its own upper
     // bound cannot widen the transcript rail.
     expect(todoStyles.card).toContain("max-w-[830px]");
-    for (const surface of [styles.composerCodex, styles.userMessageBody, userStyles.userMessageBody]) {
-      expect(surface).toContain("rounded-xl");
-      expect(surface).toContain("shadow-[var(--vui-elevation-1-sheen)]");
-      expect(surface).toContain("border-[var(--vui-border-subtle)]");
+    expect(styles.composerCodex).toContain("rounded-[16px]");
+    expect(styles.composerCodex).toContain("shadow-[var(--vui-sheen),0_2px_5px_color-mix(in_srgb,var(--fg-primary)_4%,transparent),0_8px_24px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)]");
+    expect(styles.composerCodex).toContain("border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)]");
+    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)]");
+    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))]");
+    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_10%,transparent),var(--vui-sheen),0_3px_14px_color-mix(in_srgb,var(--fg-primary)_5%,transparent)]");
+    for (const bubble of [styles.userMessageBody, userStyles.userMessageBody]) {
+      expect(bubble).toContain("rounded-[12px]");
+      expect(bubble).toContain("shadow-[var(--vui-sheen)]");
+      expect(bubble).toContain("border-[var(--border-hairline)]");
     }
-  });
-  // Split literal: the scan must not match its own source text.
-  const STRANDED_RADIUS = "rounded-" + "[14px]";
-  it("keeps every conversation corner on the approved radius ladder", () => {
-    // 14px was a second bubble radius beside the approved rounded-xl; it must not return.
-    const offenders: string[] = [];
-    for (const file of readdirSync(import.meta.dirname)) {
-      if (!file.endsWith(".ts")) continue;
-      const source = readFileSync(resolve(import.meta.dirname, file), "utf8");
-      if (source.includes(STRANDED_RADIUS)) offenders.push(file);
-    }
-    expect(offenders).toEqual([]);
   });
 });

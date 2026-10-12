@@ -23,7 +23,7 @@ function cv(key: string, ...classNames: string[]) {
   return [conversationViewScope, key, ...classNames].join(" ");
 }
 
-const readableMessageText = "min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
+const readableMessageText = "min-w-0 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
 const readableMarkdownMeasure = "max-w-full";
 const assistantMessageMeasure = "w-full max-w-full";
 // Single readable transcript measure: one cap for every transcript body and turn.
@@ -39,7 +39,7 @@ const answerOnlyProcessShell = cv(
 const userMessageBubble = cv(
   "userMessageBody",
   readableMessageText,
-  "w-fit max-w-full justify-self-end rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-4 py-3 text-left text-[var(--fg-primary)] shadow-[var(--vui-elevation-1-sheen)]",
+  "w-fit max-w-full justify-self-end rounded-[12px] border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--vui-surface-rail)_48%,var(--vui-surface-chat))] px-4 py-3 text-left text-[var(--fg-primary)] shadow-[var(--vui-sheen)]",
 );
 const conversationComposerShell = cv(
   "composer",
@@ -47,7 +47,10 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-elevation-1-sheen)] focus-within:border-[var(--accent-cool)] focus-within:shadow-[var(--vui-shadow-focus),var(--vui-elevation-1-sheen)]",
+  "mx-auto mb-[18px] grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-sheen),0_2px_5px_color-mix(in_srgb,var(--fg-primary)_4%,transparent),0_8px_24px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_10%,transparent),var(--vui-sheen),0_3px_14px_color-mix(in_srgb,var(--fg-primary)_5%,transparent)]",
+  "[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)] [[data-theme=dark]_&]:border-[color-mix(in_srgb,var(--fg-primary)_16%,transparent)] [[data-theme=dark]_&]:shadow-[var(--vui-sheen),0_4px_18px_rgb(0_0_0_/_16%)]",
+  "[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] [[data-theme=dark]_&]:focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_10%,transparent),var(--vui-sheen),0_3px_14px_color-mix(in_srgb,var(--fg-primary)_5%,transparent)]",
+  "max-[719px]:mb-[10px] max-[719px]:rounded-[14px]",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [@media(max-height:520px)]:[&_textarea]:min-h-[44px]";
@@ -61,7 +64,7 @@ const composerFieldCodexShell = cv(
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
   "composerToolbarCodex",
-  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_var(--vui-alpha-tint-strong),transparent)] pt-1.5",
+  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-transparent pt-1.5",
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
@@ -570,9 +573,9 @@ backToBottomButton:
   markdownBlockquote:
     `vui-components-conversationview markdownBlockquote my-2 min-w-0 border-l-2 border-l-[var(--vui-border-strong)] pl-3 text-[var(--fg-secondary)] ${readableMarkdownMeasure}`,
   markdownBody:
-    "vui-components-conversationview markdownBody min-w-0 max-w-full text-vui-sm leading-[1.8] text-[var(--fg-primary)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview markdownBody min-w-0 max-w-full text-vui-xs leading-[1.8] text-[var(--fg-primary)] whitespace-normal break-words [overflow-wrap:anywhere]",
   markdownBodyWithTable:
-    "vui-components-conversationview markdownBodyWithTable min-w-0 text-vui-sm leading-[1.8] text-[var(--fg-primary)] max-w-full",
+    "vui-components-conversationview markdownBodyWithTable min-w-0 text-vui-xs leading-[1.8] text-[var(--fg-primary)] max-w-full",
   markdownDivider:
     `vui-components-conversationview markdownDivider my-4 min-w-0 border-0 border-t border-t-[var(--vui-border-subtle)] ${readableMarkdownMeasure}`,
   markdownHeading:
@@ -582,7 +585,7 @@ backToBottomButton:
   markdownHeading2:
     "vui-components-conversationview markdownHeading2 mb-3 mt-5 text-vui-lg",
   markdownHeading3:
-    "vui-components-conversationview markdownHeading3 mb-2 mt-5 text-vui-md",
+    "vui-components-conversationview markdownHeading3 mb-2 mt-[18px] text-vui-md !font-medium",
   markdownHeading4:
     "vui-components-conversationview markdownHeading4 mb-2 mt-4 text-vui-sm",
   markdownHeadingactive:
@@ -1210,10 +1213,10 @@ backToBottomButton:
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
 timeline:
-    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 py-4 [scrollbar-gutter:stable]",  timelineArea:
+    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 pt-7 pb-4 max-[719px]:px-5 max-[719px]:py-[22px] [scrollbar-gutter:stable]",  timelineArea:
     "vui-components-conversationview timelineArea @container/conversation relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineContent:
-    "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-2.5",
+    "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-7 max-[719px]:gap-5",
   timelineVirtualSpacer:
     "vui-components-conversationview timelineVirtualSpacer pointer-events-none min-w-0 shrink-0",
   // Translated into one shared layer. content-visibility would size-contain

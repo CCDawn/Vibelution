@@ -129,7 +129,7 @@ describe("AppShell layout contract", () => {
   it("keeps the global shell top bar and settings trigger compact", () => {
     expect(styles.statusSummaryDot).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
-    expect(shellStyles).toContain("--shell-topbar-height: 40px");
+    expect(shellStyles).toContain("--shell-topbar-height: 44px");
     expect(shellStyles).not.toContain("--shell-settings-dock-height");
     expect(shellStyles).toContain("env(titlebar-area-width");
     expect(styles.settingsPopoverContent).toContain("w-[min(280px,calc(100vw-20px))]");
@@ -234,7 +234,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("--shell-surface: var(--vui-surface-rail)");
     expect(shellStyles).toContain("--shell-panel: var(--vui-surface-panel)");
     expect(shellStyles).toContain("--shell-card: var(--vui-surface-row)");
-    expect(shellStyles).toContain("var(--vui-gradient-route-soft),\n    var(--shell-surface)");
+    expect(shellStyles).toContain("background: var(--shell-surface)");
     expect(shellStyles).not.toContain("color-mix(in srgb, var(--shell-panel)");
     expect(shellStyles).not.toContain("color-mix(in srgb, var(--shell-card)");
     expect(shellStyles).not.toContain("brandCopy");
@@ -345,7 +345,7 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the default shell on a flat canvas and custom images optional", () => {
-    expect(shellStyles).toContain("background: var(--vui-surface-base)");
+    expect(shellStyles).toContain("background: var(--vui-surface-rail)");
     expect(shellStyles).not.toContain("--shell-star-color");
     expect(shellStyles).not.toContain(".shell::before");
     expect(shellStyles).not.toContain("radial-gradient(circle at 8% 18%");
@@ -398,7 +398,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain('t("brandSubtle")');
     expect(styles).not.toHaveProperty("brandCopy");
     expect(styles).not.toHaveProperty("versionPill");
-    expect(shellStyles).toContain("--shell-topbar-height: 40px");
+    expect(shellStyles).toContain("--shell-topbar-height: 44px");
   });
 
   it("uses the lightweight shell dictionary instead of the full route dictionary", () => {

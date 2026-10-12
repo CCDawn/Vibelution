@@ -1,5 +1,5 @@
 :where(.vui-app-appshell).shell {
-  --shell-topbar-height: 40px;
+  --shell-topbar-height: 44px;
   --shell-window-control-inset: 0px;
   --shell-surface: var(--vui-surface-rail);
   --shell-surface-muted: var(--vui-surface-row);
@@ -16,7 +16,7 @@
   overflow: hidden;
   isolation: isolate;
   /* Flat canvas. Decorative glows repainted the whole window and competed with the transcript. */
-  background: var(--vui-surface-base);
+  background: var(--vui-surface-rail);
   backdrop-filter: none;
   color: var(--fg-primary);
 }
@@ -60,6 +60,8 @@
 }
 
 :where(.vui-app-appshell).shell[data-desktop-shell="electron"] {
+  /* The native caption overlay owns this platform's title-bar height. */
+  --shell-topbar-height: 40px;
   /* Three Windows caption buttons. titlebar-area-* replaces this fallback
      when Chromium exposes the Window Controls Overlay geometry. */
   --shell-window-control-inset: 138px;
@@ -136,12 +138,10 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  border-bottom: 1px solid var(--border-hairline);
-  background:
-    var(--vui-gradient-route-soft),
-    var(--shell-surface);
-  box-shadow: var(--vui-shadow-hairline);
-  backdrop-filter: blur(16px);
+  border-bottom: 1px solid transparent;
+  background: var(--shell-surface);
+  box-shadow: none;
+  backdrop-filter: none;
   pointer-events: none;
   -webkit-app-region: no-drag;
 }
@@ -202,7 +202,7 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
+  min-height: 28px;
   padding-inline: 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);

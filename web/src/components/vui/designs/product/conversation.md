@@ -8,9 +8,12 @@
 - Chat 保留现有单侧索引栏、顶部全局导航和共享宽度记忆；文件/变更面板继续按现有显式打开语义显示。
 - 索引条目使用紧凑标题和辅助信息，摘要不占第三行；选中底色使用 `--vui-selection-bg`，内高光使用 `--vui-sheen`。搜索、归档、排序、状态与批量操作沿用真实组件。
 - 对话正文和 composer 使用相同的阅读宽度；用户消息、输入区与文件交付通过已有 VUI 表面和 elevation token 表达轻微层次，助手正文不增加外层卡片。
+- 主内容面把原有会话标签、正文与输入区包在同一个 16px 圆角边界内，桌面左右及底部留白 12px、窄屏 8px；内层 ConversationView 不重复绘制边界。布局继续使用原轨道与已保存宽度。
+- 用户消息圆角明确为 12px；composer 桌面 16px、窄屏 14px，并使用轻微外影和焦点环。局部几何不能依赖当前实际为 8px 的通用 `rounded-xl` token。
+- 正文以默认 14px、发言人 12px 的层级对齐批准预览，仍随现有字体偏好缩放；消息行间距桌面 28px、窄屏 20px。这些规则由正式样式持有，预览不能另行覆盖成一套界面。
 - 材质与控件样式由真实 route/conversation style map 实现；隔离预览的 mock 内容、`.mac-preview` CSS 和窗口图标不进入正式应用。
 - Windows 的最小化、最大化和关闭由 Electron `titleBarOverlay` 提供，网页保持原生 caption 区留白。
-- 顶栏导航使用原生控件字号，普通项为 regular、当前项为 medium；Agent 目录与会话列表保持 44px 紧凑行高，Agent 名称不使用强调字重。
+- 顶栏保留原导航、操作与原生 Windows 控件留白，浏览器使用 44px 高的浅灰平面，Electron 跟随原生 caption 的 40px 高度；普通导航为 regular、当前项为 medium。Agent 目录保留 36px 头像、62px 最小行高、多行身份信息与 medium 标题；会话条目沿用原内容。
 
 ## ConversationTodoChecklist
 

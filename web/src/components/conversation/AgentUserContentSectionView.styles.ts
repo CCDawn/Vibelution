@@ -9,11 +9,11 @@ const styles = {
   userMessageBodyClamped:
     "vui-components-conversationview userMessageBodyClamped relative min-w-0 max-h-[120px] overflow-hidden",
   userMessageCollapseFade:
-    "vui-components-conversationview userMessageCollapseFade pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[var(--vui-control-muted)] to-transparent",
+    "vui-components-conversationview userMessageCollapseFade pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[color-mix(in_srgb,var(--vui-surface-rail)_48%,var(--vui-surface-chat))] to-transparent",
   userMessageCollapseToggle:
     "vui-components-conversationview userMessageCollapseToggle mt-1 flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left [font-size:var(--vui-type-caption-size)] text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]",
   userMessageBody:
-    "vui-components-conversationview userMessageBody min-w-0 w-fit max-w-full justify-self-end whitespace-pre-wrap rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-4 py-3 text-left text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-primary)] shadow-[var(--vui-elevation-1-sheen)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-full [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.inlineLink]:break-words [&_.inlineLink]:[overflow-wrap:anywhere]",
+    "vui-components-conversationview userMessageBody min-w-0 w-fit max-w-full justify-self-end whitespace-pre-wrap rounded-[12px] border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--vui-surface-rail)_48%,var(--vui-surface-chat))] px-4 py-3 text-left text-vui-xs leading-[var(--vui-line-readable)] text-[var(--fg-primary)] shadow-[var(--vui-sheen)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-full [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.inlineLink]:break-words [&_.inlineLink]:[overflow-wrap:anywhere]",
 } as const;
 
 export default styles;

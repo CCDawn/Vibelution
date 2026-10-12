@@ -774,12 +774,12 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.userMessageBody).toContain("justify-self-end");
     expect(styles.userMessageBody).toContain("w-fit");
     expect(styles.userMessageBody).toContain("max-w-full");
-    expect(styles.userMessageBody).toContain("rounded-xl");
-    expect(styles.userMessageBody).toContain("border-[var(--vui-border-subtle)]");
-    expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
+    expect(styles.userMessageBody).toContain("rounded-[12px]");
+    expect(styles.userMessageBody).toContain("border-[var(--border-hairline)]");
+    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--vui-surface-rail)_48%,var(--vui-surface-chat))]");
     expect(styles.userMessageBody).toContain("px-4");
     expect(styles.userMessageBody).toContain("py-3");
-    expect(styles.userMessageBody).toContain("shadow-[var(--vui-elevation-1-sheen)]");
+    expect(styles.userMessageBody).toContain("shadow-[var(--vui-sheen)]");
     expect(styles.userMessageBody).toContain("text-left");
 
 

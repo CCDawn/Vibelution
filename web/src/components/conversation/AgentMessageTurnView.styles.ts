@@ -10,7 +10,7 @@ const styles = {
   turnMetaIdentity:
     "vui-components-conversationview turnMetaIdentity inline-flex min-w-0 w-fit max-w-full items-center gap-2",
   turnSpeaker:
-    "vui-components-conversationview turnSpeaker min-w-0 max-w-full truncate text-vui-xs font-medium leading-tight text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview turnSpeaker min-w-0 max-w-full truncate text-vui-2xs font-medium leading-tight text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
 } as const;
 
 export default styles;
