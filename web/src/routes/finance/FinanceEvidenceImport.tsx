@@ -72,7 +72,7 @@ export function FinanceEvidenceImport({ agentId, knowledgeBaseId, stock, sourceU
       await reviewKnowledgeSourceInbox("agent", agentId, staged.source.inboxSourceId, {
         decision: "accepted", reviewedByAgentId: agentId, resolutionNote: "用户已核对公司、报告期、披露日期及原始PDF页文本。",
         ingestOnAccept: true, knowledgeBaseId, knowledgeTitle: staged.source.title,
-        knowledgeContent: selected.excerpt, tags: ["financial-report", ticker, period],
+        knowledgeContent: selected.excerpt, knowledgeSummary: zh ? `已审核原始页摘录 · 第${selected.page}页` : `Reviewed original excerpt · page ${selected.page}`, tags: ["financial-report", ticker, period],
       });
       setApproved(true);
       await client.invalidateQueries({ queryKey: ["finance", "library", agentId, knowledgeBaseId] });

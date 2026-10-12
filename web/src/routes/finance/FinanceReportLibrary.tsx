@@ -43,7 +43,9 @@ function normalizedIdentity(value: string) {
 function sourceIdentityMatchesStock(identity: SourceIdentity, stock: StockIdentity) {
   const tickerMatches = Boolean(identity.ticker) && identity.ticker.trim().toLocaleUpperCase() === stock.ticker.trim().toLocaleUpperCase();
   const companyMatches = Boolean(identity.company) && normalizedIdentity(identity.company) === normalizedIdentity(stock.name);
-  return identity.ticker && identity.company ? tickerMatches && companyMatches : tickerMatches || companyMatches;
+  // Reviewed A-share codes are stable identities; legal names and market
+  // abbreviations routinely differ. A different code must never match by name.
+  return identity.ticker ? tickerMatches : companyMatches;
 }
 
 function sourceIdentityLabel(identities: SourceIdentity[], zh: boolean) {
@@ -238,7 +240,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
           <VInput value={search} onChange={(event) => setSearch(event.target.value)} aria-label={zh ? "查找财报资料" : "Find reports"} placeholder={zh ? "查找资料" : "Find reports"} className={styles.input} />
           {!scopeComplete ? null : items.length === 0 ? <VStateSurface density="compact" tone="empty" title={search ? (zh ? "没有匹配资料" : "No matches") : currentStock && !showAllDocuments ? (zh ? `暂无 ${currentStock.name}（${currentStock.ticker}）的匹配资料` : `No materials matched ${currentStock.name} (${currentStock.ticker})`) : (zh ? "暂无有效财报" : "No active reports")} /> :
             <div className={styles.sourceList}>{items.map((item) => <VButton key={item.knowledgeItemId} variant="ghost" contentLayout="plain" className={`${styles.sourceButton} ${selected?.knowledgeItemId === item.knowledgeItemId ? styles.selected : ""}`} aria-pressed={selected?.knowledgeItemId === item.knowledgeItemId} onPress={() => { setManualBrowse(true); setSelectedId(item.knowledgeItemId); setSourceId(""); setExcerptOpen(false); }}>
-              <span className={styles.rowText}><strong>{item.title}</strong>{currentStock && showAllDocuments ? <span className={libraryStyles.identity}>{sourceIdentityLabel(activeScopeScan.identities[item.knowledgeItemId] ?? [], zh)}</span> : null}<span className={styles.small}>{item.summary.slice(0, 80)}</span></span>
+              <span className={styles.rowText}><strong>{item.title}</strong>{currentStock && showAllDocuments ? <span className={libraryStyles.identity}>{sourceIdentityLabel(activeScopeScan.identities[item.knowledgeItemId] ?? [], zh)}</span> : null}{item.summary && item.summary !== "Financial PDF excerpt awaiting source review." ? <span className={styles.small}>{item.summary.slice(0, 80)}</span> : null}</span>
             </VButton>)}</div>}
           {selected ? <section className={styles.detail} aria-label={zh ? "资料来源" : "Report source"}>
             {traceQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "来源加载失败" : "Could not load source"} actions={<VButton onPress={() => void traceQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :

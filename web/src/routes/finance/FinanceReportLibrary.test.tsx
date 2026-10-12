@@ -278,6 +278,16 @@ describe("financial report library", () => {
     expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
   });
 
+  it("matches the verified ticker when original filings use a legal company name", async () => {
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [{ ...item, summary: "Financial PDF excerpt awaiting source review." }] });
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, company: "贵州茅台酒股份有限公司", ticker: "600519" } } }] } });
+    await render(assistant, null, { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" });
+    await settleScope();
+    expect(node.textContent).toContain("年度财报");
+    expect(node.textContent).not.toContain("awaiting source review");
+    expect(node.textContent).toContain("贵州茅台酒股份有限公司");
+  });
+
   it("excludes unverified current-stock items and retries a failed scope trace on refresh", async () => {
     let failed = true;
     vi.mocked(fetchKnowledgeTrace).mockImplementation(async () => {
