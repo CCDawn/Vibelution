@@ -9,6 +9,7 @@ import { ConversationStreamingResponseContent } from "./ConversationStreamingRes
 
 import styles from "./ConversationStreamingResponseContent.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationResponseBlocksSource from "./conversationResponseBlocks.tsx?raw";
 
 // The production stream surface keeps Markdown lazy. These server-rendered
 // assertions cover the post-load renderer while the fallback has its own
@@ -38,7 +39,8 @@ describe("ConversationStreamingResponseContent", () => {
   });
   it("keeps streaming markdown projection out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./ConversationStreamingResponseContent.tsx", import.meta.url))).toBe(true);
-    expect(conversationViewSource).toContain('from "./ConversationStreamingResponseContent"');
+    expect(conversationViewSource).toContain('from "./conversationResponseBlocks"');
+    expect(conversationResponseBlocksSource).toContain('from "./ConversationStreamingResponseContent"');
     expect(conversationViewSource).not.toContain("function StreamingResponseContent");
     expect(conversationViewSource).not.toContain("projectStreamingMarkdownBlocks");
     expect(conversationViewSource).not.toContain("renderBlock={renderMarkdownBlock}");

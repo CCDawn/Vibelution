@@ -54,7 +54,6 @@ import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
-import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationSelectionQuoteMenu } from "./ConversationSelectionQuoteMenu";
 import {
   buildQuotedDraftText,
@@ -114,12 +113,6 @@ import {
 } from "./composerPromptSuggestionModel";
 import { useComposerPromptSuggestion } from "./useComposerPromptSuggestion";
 import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
-import {
-  ConversationSlashCommandChip,
-  parseUserSlashCommandEcho,
-  resolveUserSlashCommandTone,
-} from "./ConversationSlashCommandChip";
-import { ConversationFileReferenceChips } from "./ConversationFileReferenceChips";
 import {
   insertSlashCommandSuggestion,
   groupSlashCommandSuggestionsBySection,
@@ -248,7 +241,6 @@ import {
   TIMELINE_HISTORY_LOAD_THRESHOLD_PX,
 } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
 import { ConversationTurnModelControl } from "./ConversationTurnModelControl";
 import { ComposerContextRing } from "./ComposerContextRing";
@@ -347,10 +339,7 @@ import {
   COMPUTER_USE_TOOL_NAME,
   type ComputerUseResult,
 } from "./conversationComputerUseState";
-import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import {
-  isResponseSegmentCodeLike,
-  responseSegmentLabel as resolveResponseSegmentLabel,
   shouldShowAgentResponseBlock as resolveShouldShowAgentResponseBlock,
 } from "./conversationResponseSegmentPresentation";
 import {
@@ -386,6 +375,7 @@ import { createConversationCodexToolDetails } from "./conversationCodexToolDetai
 import { createConversationOperationGroups } from "./conversationOperationGroups";
 import { createConversationOperationRows } from "./conversationOperationRows";
 import { createConversationReActRows } from "./conversationReActRows";
+import { createConversationResponseBlocks } from "./conversationResponseBlocks";
 import { useConversationFind } from "./useConversationFind";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
@@ -4751,34 +4741,6 @@ export const ConversationView = React.memo(function ConversationView({
     );
   }
 
-  function responseSegmentLabel(segment: ResponseSegment) {
-    return resolveResponseSegmentLabel(segment, (key) => t(key));
-  }
-
-  function renderResponseSegment(segment: ResponseSegment, duplicateImageUrls?: Set<string>) {
-    const label = responseSegmentLabel(segment);
-    return (
-      <section
-        key={segment.id}
-        className={`${styles.responseSegment} ${styles[`responseSegment_${segment.kind}`]}`}
-      >
-        <div className={styles.responseSegmentHeader}>
-          <span className={styles.responseSegmentLabel}>{label}</span>
-          {segment.language && segment.kind !== "code" ? (
-            <span className={styles.responseSegmentMeta}>{segment.language}</span>
-          ) : null}
-        </div>
-        {isResponseSegmentCodeLike(segment) ? (
-          <pre className={styles.responseSegmentPre}>
-            <code>{formattedCodeBlockContent(segment.content, segment.language)}</code>
-          </pre>
-        ) : (
-          renderResponseText(segment.content, duplicateImageUrls)
-        )}
-      </section>
-    );
-  }
-
   function shouldShowAgentResponseBlock(
     message: ConversationMessage,
     sectionState: AgentMessageSectionState,
@@ -4791,94 +4753,6 @@ export const ConversationView = React.memo(function ConversationView({
       streaming: assistantTurnIsStreaming(message),
       segments: getCachedResponseSegments(sectionState.answerText),
     });
-  }
-
-  function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
-    return (
-      <LazyConversationMarkdownRenderer
-        content={content}
-        duplicateImageUrls={duplicateImageUrls}
-        renderImage={renderMarkdownImage}
-        workspaceRoot={sessionWorkspacePath}
-        language={lang}
-        onOpenRailFile={onOpenRailFile}
-      />
-    );
-  }
-
-  /**
-   * User message bodies echo a leading slash command as a chip (ZCode
-   * ConversationUserInputContent parity). The text prefix is the parse basis:
-   * optimistic rows and unknown commands carry no `slashSkillCommand`
-   * metadata, and the chip must render for both — tone comes from the same
-   * skill library the composer suggestion list ranks. Everything after the
-   * command token keeps the ordinary markdown body; non-user rows and
-   * slash-less text are untouched.
-   */
-  function renderUserContentWithSlashEcho(content: string, isUserAuthored: boolean) {
-    if (!isUserAuthored) {
-      return renderResponseText(content);
-    }
-    const echo = parseUserSlashCommandEcho(content);
-    if (!echo) {
-      return renderResponseText(content);
-    }
-    return (
-      <>
-        <ConversationSlashCommandChip
-          command={echo.command}
-          tone={resolveUserSlashCommandTone(echo.command, slashCommandSuggestions)}
-        />
-        {echo.rest.trim() ? renderResponseText(echo.rest) : null}
-      </>
-    );
-  }
-
-  function renderAssistantTranscriptResponseText(
-    content: string,
-    isStreaming: boolean,
-    duplicateImageUrls?: Set<string>,
-  ) {
-    if (!content) {
-      return null;
-    }
-    // One component type across streaming and settled: the Codex transcript
-    // cell keeps its markdown subtree mounted on the streaming→settled flip
-    // (settled text re-routes through the shared stable renderer instead of
-    // swapping to a different renderer component).
-    return (
-      <ConversationStreamingResponseContent
-        content={content}
-        isStreaming={isStreaming}
-        duplicateImageUrls={duplicateImageUrls}
-        renderImage={renderMarkdownImage}
-        workspaceRoot={sessionWorkspacePath}
-        language={lang}
-        onOpenRailFile={onOpenRailFile}
-      />
-    );
-  }
-
-  /**
-   * ZCode AssistantPreviewCards parity: a settled assistant answer surfaces
-   * the whitelisted local file references found in its final markdown as a
-   * clickable chip row (same open/reveal/copy semantics as the inline
-   * workspace-file links). Streaming turns stay chip-free; markdown-linked
-   * workspace files are already clickable inline, so the extractor suppresses
-   * them from the row instead of double-presenting.
-   */
-  function renderAssistantFileReferenceChips(message: ConversationMessage, text: string) {
-    if (assistantTurnIsStreaming(message)) {
-      return null;
-    }
-    return (
-      <ConversationFileReferenceChips
-        text={text}
-        workspaceRoot={sessionWorkspacePath}
-        language={lang}
-        onOpenInRail={onOpenRailFile}
-      />
-    );
   }
 
   const renderMarkdownImage = useCallback((alt: string, url: string, duplicateImageUrls?: Set<string>) => {
@@ -4926,6 +4800,21 @@ export const ConversationView = React.memo(function ConversationView({
       </figure>
     );
   }, [lang, openImagePreview]);
+
+  const {
+    renderResponseSegment,
+    renderResponseText,
+    renderUserContentWithSlashEcho,
+    renderAssistantTranscriptResponseText,
+    renderAssistantFileReferenceChips,
+  } = createConversationResponseBlocks({
+    lang,
+    t,
+    sessionWorkspacePath,
+    onOpenRailFile,
+    renderMarkdownImage,
+    slashCommandSuggestions,
+  });
 
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
