@@ -7,10 +7,13 @@ Late-binds constants via module-level imports from constants.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections import Counter
 from typing import Any
 
+from . import read_cache
 from .constants import BM25_B, BM25_K1, _SEARCH_TOKEN_PATTERN
 
 def _search_text_for_payload(payload: Any) -> str:
@@ -60,7 +63,12 @@ def _tokenize_bm25_text(text: str) -> list[str]:
     return tokens
 
 
-def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+def _rank_bm25_search_results(
+    results: list[dict[str, Any]],
+    query: str,
+    *,
+    search_products: list[dict[str, Any] | None] | None = None,
+) -> list[dict[str, Any]]:
     normalized_query = str(query or "").strip().lower()
     if not results:
         return []
@@ -78,9 +86,28 @@ def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list
     query_terms = list(dict.fromkeys(_tokenize_bm25_text(normalized_query)))
     if not query_terms:
         return []
-    document_terms = [_tokenize_bm25_text(_bm25_text_for_result(item.get("_searchDocument") or item)) for item in results]
-    document_term_sets = [set(terms) for terms in document_terms]
-    document_lengths = [len(terms) for terms in document_terms]
+    # Optional pre-derived per-document products (see _knowledge_item_search_products);
+    # fallback recomputes them from scratch when absent. Corpus-level statistics
+    # (N/avgdl/df/idf) always stay per-query: they depend on this candidate set.
+    products = (
+        search_products
+        if isinstance(search_products, (list, tuple)) and len(search_products) == len(results)
+        else None
+    )
+    document_terms: list[Any] = []
+    document_term_sets: list[Any] = []
+    document_lengths: list[int] = []
+    for index, item in enumerate(results):
+        entry = products[index] if products is not None else None
+        if isinstance(entry, dict) and entry.get("tokens") is not None:
+            document_terms.append(entry["tokens"])
+            document_term_sets.append(entry["tokenSet"])
+            document_lengths.append(int(entry["tokenCount"]))
+            continue
+        terms = _tokenize_bm25_text(_bm25_text_for_result(item.get("_searchDocument") or item))
+        document_terms.append(terms)
+        document_term_sets.append(set(terms))
+        document_lengths.append(len(terms))
     document_count = len(document_terms)
     average_document_length = max(1.0, sum(document_lengths) / max(document_count, 1))
     document_frequencies = {
@@ -88,8 +115,13 @@ def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list
         for term in query_terms
     }
     ranked: list[dict[str, Any]] = []
-    for result, terms, document_length in zip(results, document_terms, document_lengths):
-        counts = Counter(terms)
+    for index, (result, terms, document_length) in enumerate(zip(results, document_terms, document_lengths)):
+        entry = products[index] if products is not None else None
+        counts = (
+            entry["tokenCounts"]
+            if isinstance(entry, dict) and isinstance(entry.get("tokenCounts"), Counter)
+            else Counter(terms)
+        )
         score = 0.0
         for term in query_terms:
             term_frequency = counts.get(term, 0)
@@ -105,7 +137,10 @@ def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list
             if denominator <= 0:
                 continue
             score += idf * ((term_frequency * (BM25_K1 + 1.0)) / denominator)
-        if normalized_query in _bm25_text_for_result(result.get("_searchDocument") or result).lower():
+        if isinstance(entry, dict) and isinstance(entry.get("bm25TextLower"), str):
+            if normalized_query in entry["bm25TextLower"]:
+                score += 2.0
+        elif normalized_query in _bm25_text_for_result(result.get("_searchDocument") or result).lower():
             score += 2.0
         item = dict(result)
         rounded_score = round(score, 6)
@@ -168,6 +203,73 @@ def _knowledge_item_search_document(
     }
 
 
+def _search_document_memo_key(item: dict[str, Any], linked_source_artifacts: dict[str, dict[str, Any]]) -> str:
+    """Hash every input ``_knowledge_item_search_document`` actually reads.
+
+    Field checklist (must stay in lockstep with that builder): item ``title``,
+    ``summary``, ``content``, ``tags`` (values AND order), plus the linked
+    artifacts' ``title``/``summary`` pairs in dict insertion order (only dict
+    sources contribute). Financial projections rewrite title/summary before this
+    point, so the post-projection item is what gets keyed. The index-record
+    contentHash is deliberately NOT used: it ignores tags/artifact summaries.
+    """
+
+    sources = [
+        [str(source.get("title") or ""), str(source.get("summary") or "")]
+        for source in (linked_source_artifacts or {}).values()
+        if isinstance(source, dict)
+    ]
+    payload = {
+        "v": 1,
+        "title": str(item.get("title") or ""),
+        "summary": str(item.get("summary") or ""),
+        "content": str(item.get("content") or ""),
+        "tags": [str(tag or "") for tag in list(item.get("tags") or [])],
+        "sources": sources,
+    }
+    # ensure_ascii=True: non-ASCII (including any lone surrogates that survive
+    # JSONL parsing) escapes to \uXXXX, so the utf-8 encode below can never
+    # raise where the pre-memo text path tolerated such content.
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return "searchdoc:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _knowledge_item_search_products(
+    item: dict[str, Any],
+    linked_source_artifacts: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Memoized search document plus its derived token products.
+
+    Returns the ``search_document`` text plus the token list/Counter/count and
+    the filter haystack reused by BM25 ranking and ``_item_matches_filters``.
+    ``matchedExcerpt`` stays per-query (depends on the query, never cached).
+    Content changes naturally produce a new key; no write-side invalidation.
+    Token structures (tuple/frozenset/Counter) are shared read-only.
+    """
+
+    key = _search_document_memo_key(item, linked_source_artifacts)
+    cached = read_cache.cached_search_memo(key)
+    if cached is not None:
+        return cached
+    document = _knowledge_item_search_document(item, linked_source_artifacts)
+    bm25_text = _bm25_text_for_result(document)
+    haystack = _search_text_for_payload(document)
+    tokens = tuple(_tokenize_bm25_text(bm25_text))
+    products: dict[str, Any] = {
+        "document": document,
+        "bm25TextLower": bm25_text.lower(),
+        "tokens": tokens,
+        "tokenCounts": Counter(tokens),
+        "tokenSet": frozenset(tokens),
+        "tokenCount": len(tokens),
+        "haystack": haystack,
+        "haystackTokens": frozenset(_tokenize_bm25_text(haystack)),
+    }
+    estimated_chars = len(bm25_text) + len(haystack) + sum(len(token) for token in tokens)
+    read_cache.store_search_memo(key, products, estimated_chars=estimated_chars)
+    return {**products, "document": dict(document)}
+
+
 def _matched_excerpt(search_document: dict[str, Any], query: str, *, max_chars: int = 1200) -> str:
     """Return a bounded excerpt around a phrase or one of its indexed tokens."""
 
@@ -225,7 +327,7 @@ def _excerpt_around(text: str, offset: int, *, max_chars: int) -> str:
     return ("…" if has_prefix else "") + excerpt + ("…" if has_suffix else "")
 
 
-def _semantic_match_score(payload: Any, query: str) -> float:
+def _semantic_match_score(payload: Any, query: str, *, haystack_tokens: Any = None) -> float:
     normalized_query = str(query or "").strip().lower()
     if not normalized_query:
         return 1.0
@@ -235,10 +337,10 @@ def _semantic_match_score(payload: Any, query: str) -> float:
     query_tokens = _tokenize_search_text(normalized_query)
     if not query_tokens:
         return 0.0
-    haystack_tokens = _tokenize_search_text(haystack)
-    if not haystack_tokens:
+    tokens = haystack_tokens if haystack_tokens is not None else _tokenize_search_text(haystack)
+    if not tokens:
         return 0.0
-    return round(len(query_tokens.intersection(haystack_tokens)) / len(query_tokens), 4)
+    return round(len(query_tokens.intersection(tokens)) / len(query_tokens), 4)
 
 
 def _search_match_reason(view: dict[str, Any], query: str, score: float) -> str:
@@ -268,6 +370,7 @@ def _item_matches_filters(
     question_id: str = "",
     source_collection_run_id: str = "",
     search_document: dict[str, Any] | None = None,
+    search_products: dict[str, Any] | None = None,
 ) -> bool:
     if research_project_id and str(item.get("researchProjectId") or "") != research_project_id:
         return False
@@ -277,10 +380,17 @@ def _item_matches_filters(
         return False
     if query:
         normalized_search_mode = str(search_mode or "exact").strip().lower()
-        document = search_document or _knowledge_item_search_document(item, artifacts_by_id)
-        haystack = _search_text_for_payload(document)
+        if isinstance(search_products, dict) and search_products.get("haystack") is not None:
+            # Pre-derived products (see _knowledge_item_search_products) for the
+            # same item; their haystack pairs with their own token set.
+            haystack = str(search_products["haystack"])
+            haystack_tokens = search_products.get("haystackTokens")
+        else:
+            document = search_document or _knowledge_item_search_document(item, artifacts_by_id)
+            haystack = _search_text_for_payload(document)
+            haystack_tokens = None
         exact_match = query in haystack
-        semantic_score = _semantic_match_score(haystack, query)
+        semantic_score = _semantic_match_score(haystack, query, haystack_tokens=haystack_tokens)
         if normalized_search_mode == "exact" and not exact_match:
             return False
         if normalized_search_mode == "semantic" and semantic_score <= 0:

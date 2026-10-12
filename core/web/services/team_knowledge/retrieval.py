@@ -2,6 +2,12 @@
 from __future__ import annotations
 from typing import Any
 from . import lifecycle
+from . import search_ranking as _tk_ranking
+
+# Empty-query fast-path switch (production: always True). Kept as a module
+# constant so equivalence tests can A/B the fast path against the full-scan
+# construction path within one binary; flipping it must never change results.
+_EMPTY_QUERY_FAST_PATH = True
 
 def _service():
     from core.web.services import team_knowledge_service
@@ -129,6 +135,9 @@ def search_knowledge_items(
     score_after_scan = normalized_search_mode in {"bm25", "semantic", "hybrid"}
     semantic_info = None
     results: list[dict[str, Any]] = []
+    # Per-result memoized search products aligned with `results` append order,
+    # consumed by the BM25 ranker to skip re-tokenizing every document.
+    result_documents: list[dict[str, Any] | None] = []
     scanned_bases = 0
     owner_candidates = s._iter_knowledge_owners(agent_id=agent_id, include_archived=True)
     if normalized_owner_type and normalized_owner_id and not any(
@@ -199,7 +208,15 @@ def search_knowledge_items(
                     for source_id in [str(value or "") for value in list(item.get("sourceArtifactIds") or [])]
                     if source_id in artifacts_by_id
                 }
-                search_document = s._knowledge_item_search_document(item, linked_artifacts)
+                # Empty query (with only metadata filters): the search document,
+                # excerpt, BM25 and index decoration are all unreachable, so skip
+                # building them. Scoped empty-query listing stays a legal feature.
+                fast_path = not normalized_query and _EMPTY_QUERY_FAST_PATH
+                search_products = None
+                search_document = None
+                if not fast_path:
+                    search_products = _tk_ranking._knowledge_item_search_products(item, linked_artifacts)
+                    search_document = search_products["document"]
                 if not s._item_matches_filters(
                     item,
                     query="" if score_after_scan else normalized_query,
@@ -216,6 +233,7 @@ def search_knowledge_items(
                     question_id=normalized_question_id,
                     source_collection_run_id=normalized_source_collection_run_id,
                     search_document=search_document,
+                    search_products=search_products,
                 ):
                     continue
                 view = s._search_item_view(
@@ -226,9 +244,10 @@ def search_knowledge_items(
                     query=normalized_query,
                     search_document=search_document,
                 )
-                view["_searchDocument"] = search_document
-                from core.web.services.rag_vector_index_service import _content_hash
-                view["_indexContentHash"] = _content_hash(item)
+                if not fast_path:
+                    view["_searchDocument"] = search_document
+                    from core.web.services.rag_vector_index_service import _content_hash
+                    view["_indexContentHash"] = _content_hash(item)
                 view["revision"] = int(item.get("revision") or 1)
                 view["rootKnowledgeItemId"] = item.get("rootKnowledgeItemId") or item["knowledgeItemId"]
                 view["contentSha256"] = lifecycle.content_sha256(item)
@@ -239,13 +258,20 @@ def search_knowledge_items(
                     view["searchMode"] = normalized_search_mode
                     view["matchReason"] = "no_query" if not normalized_query else "metadata_filter"
                 else:
-                    score = s._semantic_match_score(search_document, normalized_query) if normalized_query else 1.0
+                    score = 1.0
+                    if normalized_query:
+                        # Same payload walk + token set the memo already derived
+                        # for this document; reuse instead of re-collecting.
+                        haystack = search_products["haystack"] if isinstance(search_products, dict) and search_products.get("haystack") is not None else search_document
+                        tokens = search_products.get("haystackTokens") if isinstance(search_products, dict) else None
+                        score = s._semantic_match_score(haystack, normalized_query, haystack_tokens=tokens)
                     if normalized_query and normalized_search_mode == "semantic" and score <= 0:
                         continue
                     view["semanticScore"] = score
                     view["searchMode"] = normalized_search_mode
                     view["matchReason"] = s._search_match_reason(search_document, normalized_query, score)
                 results.append(view)
+                result_documents.append(search_products)
     if scanned_bases == 0:
         # Early exit: every owner/base was excluded (ACL, owner filters, or no
         # active base), so `results` is provably empty. Skip tokenization and
@@ -261,7 +287,7 @@ def search_knowledge_items(
         results, semantic_info = rank_candidates(results, normalized_query, mode=normalized_search_mode)
         results = results[:bounded_limit]
     elif score_after_scan:
-        results = s._rank_bm25_search_results(results, normalized_query)
+        results = s._rank_bm25_search_results(results, normalized_query, search_products=result_documents)
         if normalized_query:
             results = [item for item in results if float(item.get("semanticScore") or 0.0) > 0]
         results = results[:bounded_limit]
@@ -276,7 +302,9 @@ def search_knowledge_items(
         normalized_team_id,
         normalized_base_id,
         actor_agent_id=agent_id,
-        fields={"queryLength": len(normalized_query), "resultCount": len(results), "scannedKnowledgeBaseCount": scanned_bases},
+        fields={"queryLength": len(normalized_query), "resultCount": len(results),
+                "scannedKnowledgeBaseCount": scanned_bases,
+                "searchMode": normalized_search_mode, "limit": bounded_limit},
     )
     return {
         "schemaVersion": s.SCHEMA_VERSION,
