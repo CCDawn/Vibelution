@@ -22,7 +22,9 @@ import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent
 import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
 import conversationOperationRowsSource from "./conversationOperationRows.tsx?raw";
+import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -1162,10 +1164,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });it("colors operation rows from each operation status instead of the operation kind", () => {
     expect(conversationOperationRowsSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
     expect(conversationOperationRowsSource).toContain("operationStatusTone(operation)");
-    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
-    expect(conversationViewSource).toContain("styles[`operationItem_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationIcon_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
+    expect(conversationOperationGroupsSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationOperationGroupsSource).toContain("styles[`operationItem_${statusTone}`]");
+    expect(conversationOperationGroupsSource).toContain("styles[`operationIcon_${statusTone}`]");
+    expect(conversationOperationGroupsSource).toContain("styles[`operationText_${statusTone}`]");
     expect(conversationViewSource).toContain("styles.timelineCellBody");
     expect(conversationViewSource).toContain("styles.timelineCellTitle");
     expect(styles.operationItem_success).toContain("!text-[var(--fg-secondary)]");
@@ -1185,9 +1187,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("keeps successful child tool rows neutral inside a failed process group", () => {
-    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
-    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
+    expect(conversationReActRowsSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationReActRowsSource).toContain("styles[`operationText_${statusTone}`]");
+    expect(conversationReActRowsSource).toContain("styles[`operationStatus_${statusTone}`]");
     expect(styles.reActToolName).toContain("text-[var(--fg-primary)]");
     expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationStatus_success).toContain("!text-[var(--fg-tertiary)]");
@@ -1665,9 +1667,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
 
   it("applies per-operation status tones inside expanded command packages", () => {
     expect(conversationViewSource).toContain("item.operations.map((operation) => {");
-    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
-    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
+    expect(conversationViewSource).toContain("styles[`operationIcon_${operationStatusToneClassName(operation)}` as keyof typeof styles]");
     expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");

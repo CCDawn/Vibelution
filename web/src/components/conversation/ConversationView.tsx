@@ -15,7 +15,6 @@ import {
   CirclePlus,
   Copy,
   Cpu,
-  ExternalLink,
   FileText,
   Gauge,
   GitFork,
@@ -29,10 +28,8 @@ import {
   RefreshCw,
   Square,
   X,
-  Search,
   Sparkles,
   TerminalSquare,
-  Wrench,
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -173,7 +170,6 @@ import { resolveConversationTurnWorkSummary } from "./conversationTurnWorkStatus
 import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
-import { isInternalRuntimeStatus } from "./conversationDisplayProtocol";
 import {
   buildAgentMessageOperationGroups,
   type AgentMessageOperation,
@@ -182,20 +178,15 @@ import {
   type AgentMessageReActOperationGroup,
 } from "./agentMessageOperations";
 import {
-  compactInternalProcessStateLabel,
   isLongLoopProgressOperation,
   isRunningOperationStatus,
   operationCollectionTone,
   operationStateLabel,
   operationStatusTone,
-  processSummaryMeta,
-  processSummaryPreview,
-  processSummaryTitle,
   isRetryOperation,
   shouldShowTimelineOperation,
   type OperationStateLabels,
 } from "./conversationOperationState";
-import { shouldExpandReActGroupByDefault } from "./conversationReActOperationItems";
 import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
@@ -388,7 +379,6 @@ import {
   resolveComposerPrimaryActionFlags,
   shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
-import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
 import {
   buildCodexToolActivityPills,
@@ -405,6 +395,7 @@ import {
 } from "./conversationThoughtUnits";
 import { ConversationFindBar } from "./ConversationFindBar";
 import { createCodexTranscriptCellRenderers } from "./conversationCodexTranscriptCells";
+import { createConversationOperationGroups } from "./conversationOperationGroups";
 import { createConversationOperationRows } from "./conversationOperationRows";
 import { createConversationReActRows } from "./conversationReActRows";
 import { useConversationFind } from "./useConversationFind";
@@ -425,7 +416,6 @@ const groupTranscriptInlineClassNames = {
 const COMPOSER_PASTE_NOTICE_VISIBLE_MS = 8000;
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
-const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
@@ -3680,23 +3670,32 @@ export const ConversationView = React.memo(function ConversationView({
     hasOperationDetails,
   });
 
-  function operationIcon(kind: AgentMessageOperationKind, label: string) {
-    switch (conversationOperationIconKind(kind, label)) {
-      case "thought":
-        return <Sparkles size={17} />;
-      case "mental":
-        return <BrainCircuit size={17} />;
-      case "search":
-        return <Search size={17} />;
-      case "link":
-        return <ExternalLink size={17} />;
-      case "terminal":
-        return <TerminalSquare size={17} />;
-      case "tool":
-      default:
-        return <Wrench size={17} />;
-    }
-  }
+  const {
+    isCompactInternalStatusOperation,
+    renderOperationTimeline,
+    renderOperationGroup,
+    renderFeedbackTimelineGroup,
+  } = createConversationOperationGroups({
+    lang,
+    t,
+    getExpansionState,
+    toggleSection,
+    operationStateLabels,
+    operationDetailLabels,
+    renderComputerUseResult,
+    formatDuration,
+    operationTone,
+    operationStatusToneClassName,
+    operationStatusIcon,
+    operationStatusText,
+    operationLabel,
+    hasOperationDetails,
+    operationGroupTitle,
+    operationTimelineTitle,
+    processSummaryIcon,
+    feedbackTimelineGroups,
+    renderFeedbackTimelineDetails,
+  });
 
   function renderRolloutTraceEvents(operation: AgentMessageOperation) {
     if (operation.kind !== "tool") {
@@ -3848,91 +3847,6 @@ export const ConversationView = React.memo(function ConversationView({
           </div>
         ) : null}
       </section>
-    );
-  }
-
-  function renderOperationTimeline(operations: AgentMessageOperation[], options: { limitInitialRows?: boolean } = {}) {
-    const shouldLimitRows = options.limitInitialRows && operations.length > INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT;
-    const hiddenOperationCount = shouldLimitRows ? operations.length - INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT : 0;
-    const visibleOperations = shouldLimitRows
-      ? operations.slice(-INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT)
-      : operations;
-    return (
-      <div className={styles.operationTimeline}>
-        {hiddenOperationCount > 0 ? (
-          <div className={styles.operationTimelineTrimmed}>
-            {lang === "zh"
-              ? `已折叠更早 ${hiddenOperationCount} 步执行记录`
-              : `${hiddenOperationCount} earlier execution steps collapsed`}
-          </div>
-        ) : null}
-        {visibleOperations.map((operation) => {
-          const duration = formatDuration(operation.durationSeconds);
-          const detailsId = `operation-detail-${operation.id}`;
-          const detailsExpanded = getExpansionState(operation.id, "details", false);
-          const canExpandDetails = hasOperationDetails(operation);
-          const computerUseResult = renderComputerUseResult(operation);
-          const detailToggleTitle = operation.kind === "thought"
-            ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
-            : operation.kind === "status"
-              ? detailsExpanded ? t("executionDetailsVisible") : t("executionDetailsHidden")
-            : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
-          const statusTone = operationStatusToneClassName(operation);
-          const operationClassName = [
-            styles.operationItem,
-            styles[`operationItem_${operationTone(operation)}`],
-            styles[`operationItem_${statusTone}`],
-            isRunningOperationStatus(operation.status) ? styles.operationItemActive : "",
-          ].filter(Boolean).join(" ");
-          return (
-            <div key={operation.id} className={styles.operationItemWrap}>
-              <div className={operationClassName}>
-                <span
-                  className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]} ${styles[`operationIcon_${statusTone}`]}`}
-                >
-                  {operationIcon(operation.kind, operation.label)}
-                </span>
-                <div className={`${styles.operationText} ${styles[`operationText_${statusTone}`]}`}>
-                  <span className={`${styles.operationName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
-                  {operation.summary ? (
-                    <span className={`${styles.operationSummaryText} ${styles[`operationText_${statusTone}`]}`}>{operation.summary}</span>
-                  ) : null}
-                </div>
-                <span className={`${styles.operationStatus} ${styles[`operationStatus_${statusTone}`]}`}>
-                  {operationStatusIcon(operation)}
-                  <span>{operationStatusText(operation.status)}</span>
-                </span>
-                {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
-                {canExpandDetails ? (
-                  <VButton
-                    type="button"
-                    className={styles.operationDetailToggle}
-                    aria-expanded={detailsExpanded}
-                    aria-controls={detailsId}
-                    onClick={() => toggleSection(operation.id, "details", false)}
-                    title={detailToggleTitle}
-                    isIconOnly
-                    icon={detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
-                ) : (
-                  <span className={styles.operationChevron} aria-hidden="true">
-                    {hasOperationDetails(operation) ? <ChevronRight size={16} /> : null}
-                  </span>
-                )}
-              </div>
-              {canExpandDetails ? (
-                <DeferredOperationDetails
-                  operation={operation}
-                  expanded={detailsExpanded}
-                  detailsId={detailsId}
-                  kind={operationDetailsKind(operation)}
-                  buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
-                />
-              ) : null}
-              {computerUseResult}
-            </div>
-          );
-        })}
-      </div>
     );
   }
 
@@ -5104,163 +5018,6 @@ export const ConversationView = React.memo(function ConversationView({
         ) : null}
         {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
         {computerUseResult}
-      </section>
-    );
-  }
-
-  function isCompactInternalStatusOperation(operation: AgentMessageOperation) {
-    return Boolean(
-      operation.kind === "status"
-      && !operation.error?.trim()
-      && isInternalRuntimeStatus({
-        kind: "status",
-        name: operation.rawLabel ?? operation.label,
-        status: operation.status,
-        summary: operation.summary,
-        resultPreview: operation.resultPreview,
-      }),
-    );
-  }
-
-  function renderOperationGroup(
-    messageId: string,
-    section: "thought" | "mental" | "tools",
-    operations: AgentMessageOperation[],
-    defaultExpanded: boolean,
-  ) {
-    if (operations.length === 0) {
-      return null;
-    }
-    const expanded = getExpansionState(messageId, section, defaultExpanded);
-    const kind = operations[0]?.kind ?? "tool";
-    const title = operationGroupTitle(kind, operations.length);
-    const toggleTitle = expanded
-      ? section === "thought"
-        ? t("thoughtProcessVisible")
-        : section === "mental"
-          ? t("mentalProcessVisible")
-          : t("toolProcessVisible")
-      : section === "thought"
-        ? t("thoughtProcessHidden")
-        : section === "mental"
-          ? t("mentalProcessHidden")
-          : t("toolProcessHidden");
-    return (
-      <section className={styles.operationGroup}>
-        <VButton
-          type="button"
-          className={styles.operationSummary}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, section, defaultExpanded)}
-          title={toggleTitle}
-          icon={operationIcon(kind, title)}
-          trailingIcon={expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        >
-          <span>{title}</span>
-          {!expanded && operations[0]?.summary ? (
-            <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
-          ) : null}
-        </VButton>
-        {expanded ? renderOperationTimeline(operations) : null}
-      </section>
-    );
-  }
-
-  function renderFeedbackTimelineGroup(
-    messageId: string,
-    operations: AgentMessageOperation[],
-    defaultExpanded: boolean,
-    processSectionIds?: string,
-  ) {
-    if (operations.length === 0) {
-      return null;
-    }
-    const { visibleOperations, reActGroups } = feedbackTimelineGroups(operations);
-    if (visibleOperations.length === 0) {
-      return null;
-    }
-    if (reActGroups.length === 0) {
-      return null;
-    }
-    const defaultTimelineExpanded = defaultExpanded || reActGroups.some((group) => shouldExpandReActGroupByDefault(group));
-    const expanded = getExpansionState(messageId, "feedback", defaultTimelineExpanded);
-    const title = operationTimelineTitle(visibleOperations);
-    const collectionTone = operationCollectionTone(operations);
-    const stateLabel = operations.length > visibleOperations.length && collectionTone === "running"
-      ? compactInternalProcessStateLabel(collectionTone, operations, operationStateLabels)
-      : operationStateLabel(operationCollectionTone(visibleOperations), operationStateLabels);
-    return (
-      <section
-        className={`${styles.operationGroup} ${styles.executionTraceGroup}`}
-        data-agent-process-section-ids={processSectionIds}
-        data-agent-process-kind={processSectionIds ? "feedback" : undefined}
-      >
-        <VButton
-          type="button"
-          className={styles.operationSummary}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, "feedback", defaultTimelineExpanded)}
-          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-          icon={operationIcon(operations[0]?.kind ?? "tool", title)}
-          trailingIcon={expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        >
-          <span>{title}</span>
-          <span className={styles.operationSummaryCount}>{stateLabel}</span>
-        </VButton>
-        {expanded ? renderFeedbackTimelineDetails(messageId, operations) : null}
-      </section>
-    );
-  }
-
-  function renderAnswerOnlyProcessGroup(
-    messageId: string,
-    operations: AgentMessageOperation[],
-    defaultExpanded: boolean,
-    renderDetails: () => ReactNode,
-    inlinePreview?: string,
-    processSectionIds?: string,
-  ) {
-    if (operations.length === 0) {
-      return null;
-    }
-    const tone = operationCollectionTone(operations);
-    const toneStyle = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
-    const expanded = getExpansionState(messageId, "process", defaultExpanded);
-    const preview = inlinePreview || processSummaryPreview(operations, operationStateLabels, compactPreview);
-    const title = processSummaryTitle(tone, operations, operationStateLabels);
-    const meta = processSummaryMeta(operations, operationStateLabels);
-    const hasExpandableDetails = operations.some(shouldShowTimelineOperation);
-    if (!hasExpandableDetails) {
-      return null;
-    }
-    const summaryContent = (
-      <>
-        <span className={styles.answerOnlyProcessIcon} aria-hidden="true">
-          {processSummaryIcon(tone)}
-        </span>
-        <span className={styles.answerOnlyProcessTitle}>{title}</span>
-        {meta ? <span className={styles.answerOnlyProcessMeta}>{meta}</span> : null}
-      </>
-    );
-    return (
-      <section
-        className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}
-        data-agent-process-section-ids={processSectionIds}
-        data-agent-process-kind={processSectionIds ? "answer-only" : undefined}
-      >
-        <VButton
-          type="button"
-        contentLayout="plain"
-          className={styles.answerOnlyProcessToggle}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, "process", defaultExpanded)}
-          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-        >
-          {summaryContent}
-          {preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </VButton>
-        {expanded ? <div className={styles.answerOnlyProcessDetails}>{renderDetails()}</div> : null}
       </section>
     );
   }
