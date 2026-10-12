@@ -8,6 +8,7 @@ import { dictionary } from "../../i18n/dictionary";
 import { ConversationView } from "./ConversationView";
 import styles from "./ConversationView.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
 import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
 
 function renderConversation(messages: ConversationMessage[]) {
@@ -82,5 +83,5 @@ describe("ConversationView process expansion defaults", () => {
     expect(handler).toContain("captureConversationProcessScrollAnchor(summary)");
     expect(handler).toContain("restoreConversationProcessScrollAnchor(timeline, summary, anchor)");
     expect(handler).not.toContain("scrollIntoView");
-    expect(conversationViewSource).toContain("onUserToggle={handleProcessDisclosureUserToggle}");
+    expect(conversationCodexSurfaceSource).toContain("onUserToggle={handleProcessDisclosureUserToggle}");
   });});
