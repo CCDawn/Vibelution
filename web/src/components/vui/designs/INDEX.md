@@ -243,3 +243,4 @@
 | `FinanceWalkForward` | [product/financial-assistant.md](./product/financial-assistant.md#financewalkforward) |
 | `FinanceReportExport` | [product/financial-assistant.md](./product/financial-assistant.md#financereportexport) |
 | `FinanceGroundedReportBody` / `FinanceReportReadState` / `FinanceReportEvidenceNotice` | [product/financial-assistant.md](./product/financial-assistant.md#financegroundedreportbody--financereportreadstate--financereportevidencenotice) |
+| `FinanceEvidenceImport` | [product/financial-assistant.md](./product/financial-assistant.md#financeevidenceimport) |

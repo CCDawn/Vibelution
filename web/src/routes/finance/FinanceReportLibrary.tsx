@@ -12,6 +12,7 @@ import { activeFinancialItems, activeFinancialSources, financialSourceMetadata }
 import type { StockIdentity } from "../../api/financialMarket";
 import type { ReportCitation } from "./stockResearchModel";
 import libraryStyles from "./FinanceReportLibrary.styles";
+import { FinanceEvidenceImport } from "./FinanceEvidenceImport";
 
 const CITATION_TRACE_BATCH_SIZE = 20;
 
@@ -211,7 +212,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
         </div>
         {citationScanComplete && !matchedItemId ? <span className={`${styles.small} basis-full`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
       </div> : null}
-      {knowledgeBaseId ? <VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton> : null}
+      {knowledgeBaseId ? <div className="flex min-w-0 items-center gap-2"><FinanceEvidenceImport key={`${agentId}:${stockKey}`} agentId={agentId} knowledgeBaseId={knowledgeBaseId} stock={currentStock} sourceUrl={citation?.url} zh={zh} /><VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton></div> : null}
       {!readable ? <VStateSurface density="compact" tone="unavailable" title={zh ? "财报库不可读" : "Library unavailable"} /> :
         itemsQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "资料加载失败" : "Could not load reports"} actions={<VButton onPress={() => void itemsQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :
         itemsQuery.isPending ? <div className={styles.skeleton} aria-label={zh ? "正在加载资料" : "Loading reports"}><VSkeleton /><VSkeleton /><VSkeleton /></div> : <>
