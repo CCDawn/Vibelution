@@ -486,7 +486,10 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
         "resultId": str(context.get("contextId") or _result_id("rag_context", knowledge_item_id, rank)).strip(),
         "resultType": "rag_context",
         "title": str(context.get("title") or "").strip(),
-        "excerpt": _excerpt(str(context.get("text") or ""), max_chars=1200),
+        # A reviewed financial page is already bounded to 60 source lines.
+        # Generic 18-line summaries can stop at a statement header, hiding its
+        # actual figures. Keep financial source lines within the same char cap.
+        "excerpt": _excerpt(str(context.get("text") or ""), max_chars=1200, max_lines=60 if source.get("financialEvidence") else 18),
         "score": float(context.get("score") or 0.0),
         "rank": rank,
         "ownerType": str(source.get("ownerType") or "team").strip(),
@@ -902,8 +905,8 @@ def _knowledge_text(item: dict[str, Any]) -> str:
     )
 
 
-def _excerpt(text: str, *, max_chars: int) -> str:
-    normalized = trim_lines(str(text or ""), max_lines=18).strip()
+def _excerpt(text: str, *, max_chars: int, max_lines: int = 18) -> str:
+    normalized = trim_lines(str(text or ""), max_lines=max_lines).strip()
     if len(normalized) <= max_chars:
         return normalized
     return normalized[: max_chars - 3].rstrip() + "..."

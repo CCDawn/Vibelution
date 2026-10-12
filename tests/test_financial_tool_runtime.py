@@ -1,5 +1,6 @@
 """Actual Key_Tools, executor, runtime identity and HTTP projection integration."""
 
+import hashlib
 import json
 from io import BytesIO
 from unittest.mock import Mock
@@ -164,6 +165,23 @@ def test_actual_executor_keeps_pre_cutoff_evidence_through_historical_compaction
     assert result["citations"][0]["financialEvidence"][0]["publishedAt"] == evidence()[
         "publishedAt"
     ]
+
+
+def test_actual_search_keeps_financial_rows_after_eighteen_lines(finance_env):
+    env = finance_env
+    original = "\n".join(["财报原始行"] * 22 + ["母公司利润表", "营业收入 49,660,601,803.96 元"])
+    staged = knowledge.stage_financial_evidence(
+        agent_id=env["owner"], evidence=evidence(excerptSha256=hashlib.sha256(original.encode()).hexdigest()), excerpt=original,
+    )
+    review(env, staged, content=original)
+    grant_financial_memory(env["owner"], "read")
+    with authorized_agent_tool_executor(env["owner"], executable_tools=(SEARCH,)) as execute:
+        raw, _ = execute(SEARCH, {"query": "母公司利润表营业收入", "ticker": "600519", "report_period": "2025FY", "limit": 1})
+    result = json.loads(raw)
+    assert result["status"] == "found"
+    assert "营业收入 49,660,601,803.96 元" in result["results"][0]["excerpt"]
+    assert len(raw) <= financial_memory_tools.MAX_RESULT_CHARS
+    assert result["citations"][0]["financialEvidence"][0]["excerptSha256"] == hashlib.sha256(original.encode()).hexdigest()
 
 
 def test_financial_search_compactor_rejects_future_and_undated_evidence_as_of():
