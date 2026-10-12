@@ -898,6 +898,7 @@ describe("AppShell layout contract", () => {
     // Native caption controls overlay the web title bar, so navigation reserves
     // the reported Window Controls Overlay area with a Windows fallback.
     expect(shellStyles).toContain('.shell[data-desktop-shell="electron"]');
+    expect(shellStyles).toMatch(/\.shell\[data-desktop-shell="electron"\]\s*\{[^}]*--shell-topbar-height:\s*40px/s);
     expect(shellStyles).toContain("--shell-window-control-inset: 138px");
     expect(shellStyles).toContain("env(titlebar-area-x, 0px)");
     expect(shellStyles).toContain("env(titlebar-area-width");

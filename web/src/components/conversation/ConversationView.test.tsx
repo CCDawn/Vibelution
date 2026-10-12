@@ -1101,6 +1101,20 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     );
     expect(conversationViewSource).toContain("measureTimelineVirtualRow");
     expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");
+    // Virtual history and its live tail share the approved responsive rhythm.
+    expect(conversationViewSource).toContain('TIMELINE_NARROW_VIEWPORT_QUERY = "(max-width: 719px)"');
+    expect(conversationViewSource).toContain("TIMELINE_VIRTUAL_ROW_GAP_PX = 28");
+    expect(conversationViewSource).toContain("TIMELINE_VIRTUAL_SCROLL_MARGIN_PX = 28");
+    expect(conversationViewSource).toContain("TIMELINE_NARROW_ROW_GAP_PX = 20");
+    expect(conversationViewSource).toContain("TIMELINE_NARROW_SCROLL_MARGIN_PX = 22");
+    expect(conversationViewSource).toContain("gap: narrowTimelineViewport ? TIMELINE_NARROW_ROW_GAP_PX : TIMELINE_VIRTUAL_ROW_GAP_PX");
+    expect(conversationViewSource).toContain("scrollMargin: narrowTimelineViewport ? TIMELINE_NARROW_SCROLL_MARGIN_PX : TIMELINE_VIRTUAL_SCROLL_MARGIN_PX");
+    expect(conversationViewSource).toContain("virtualStartPx: virtualItem.start - timelineVirtualizer.options.scrollMargin");
+    expect(conversationViewSource).toContain("geometryReflow: true");
+    expect(conversationViewSource).toContain("!pending.geometryReflow && activeTimelineMessages.length === pending.startLength");
+    expect(styles.timelineContent).toContain("gap-7 max-[719px]:gap-5");
+    expect(styles.timeline).toContain("pt-7");
+    expect(styles.timeline).toContain("max-[719px]:py-[22px]");
     expect(conversationViewSource).not.toContain("timelineRowResizeObserversRef");
     expect(conversationViewSource).not.toContain("scheduleTimelineHeightVersionBump");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");

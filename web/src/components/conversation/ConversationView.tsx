@@ -469,11 +469,14 @@ const CONVERSATION_FIND_JUMP_MAX_FRAMES = 12;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 // Virtual timeline (react-virtual): rows rendered beyond the measured viewport
 // per direction, vertical rhythm matching the timelineContent grid gap, the
-// scroll container's top padding (py-4) before the virtual host, and a
+// scroll container's top padding before the virtual host, and a
 // generous SSR/first-paint rect so server-rendered windows stay deterministic.
 const TIMELINE_VIRTUAL_OVERSCAN = 8;
-const TIMELINE_VIRTUAL_ROW_GAP_PX = 10;
-const TIMELINE_VIRTUAL_SCROLL_MARGIN_PX = 16;
+const TIMELINE_NARROW_VIEWPORT_QUERY = "(max-width: 719px)";
+const TIMELINE_VIRTUAL_ROW_GAP_PX = 28;
+const TIMELINE_VIRTUAL_SCROLL_MARGIN_PX = 28;
+const TIMELINE_NARROW_ROW_GAP_PX = 20;
+const TIMELINE_NARROW_SCROLL_MARGIN_PX = 22;
 const TIMELINE_VIRTUAL_INITIAL_RECT = { width: 1280, height: 900 };
 // Prepend anchor correction: bounded frames for measurements to land before
 // the viewport position is declared final (2px tolerance = subpixel jitter).
@@ -1175,6 +1178,36 @@ export const ConversationView = React.memo(function ConversationView({
   );
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
+  // History rows are positioned by react-virtual, so they must use the same
+  // viewport rhythm as the CSS grid that separates history from the live tail.
+  const [narrowTimelineViewport, setNarrowTimelineViewport] = useState(() => (
+    typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(TIMELINE_NARROW_VIEWPORT_QUERY).matches
+  ));
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const media = window.matchMedia(TIMELINE_NARROW_VIEWPORT_QUERY);
+    const syncViewport = () => {
+      if (!followLatestRef.current) {
+        const anchor = captureTimelineRowKeyAnchor(timelineRef.current);
+        if (anchor) {
+          historyScrollAnchorRef.current = anchor;
+          historyAnchorCorrectingRef.current = {
+            anchor,
+            startLength: 0, // Geometry reflow does not wait for message-count changes.
+            attempts: 0,
+            fallbackDone: false,
+            geometryReflow: true,
+          };
+        }
+      }
+      setNarrowTimelineViewport(media.matches);
+    };
+    syncViewport();
+    media.addEventListener("change", syncViewport);
+    return () => media.removeEventListener("change", syncViewport);
+  }, []);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
   /** Active prepend anchor while correction frames converge (see layout effect below). */
   const historyAnchorCorrectingRef = useRef<{
@@ -1183,6 +1216,8 @@ export const ConversationView = React.memo(function ConversationView({
     startLength: number;
     attempts: number;
     fallbackDone: boolean;
+    /** A viewport rhythm change needs correction even without a prepend. */
+    geometryReflow?: boolean;
   } | null>(null);
   /** Ensures a pending tool approval mounts under at most one tool activity per render. */
   const toolApprovalConsumedRef = useRef(false);
@@ -1979,8 +2014,8 @@ export const ConversationView = React.memo(function ConversationView({
     estimateSize: () => CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
     getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
     overscan: TIMELINE_VIRTUAL_OVERSCAN,
-    gap: TIMELINE_VIRTUAL_ROW_GAP_PX,
-    scrollMargin: TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
+    gap: narrowTimelineViewport ? TIMELINE_NARROW_ROW_GAP_PX : TIMELINE_VIRTUAL_ROW_GAP_PX,
+    scrollMargin: narrowTimelineViewport ? TIMELINE_NARROW_SCROLL_MARGIN_PX : TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
     initialRect: { width: TIMELINE_VIRTUAL_INITIAL_RECT.width, height: TIMELINE_VIRTUAL_INITIAL_RECT.height },
     useAnimationFrameWithResizeObserver: true,
   });
@@ -2269,7 +2304,10 @@ export const ConversationView = React.memo(function ConversationView({
    */
   const timelineRowPlan: Array<{ index: number; virtualStartPx: number | null }> = [];
   for (const virtualItem of timelineVirtualizer.getVirtualItems()) {
-    timelineRowPlan.push({ index: virtualItem.index, virtualStartPx: virtualItem.start });
+    timelineRowPlan.push({
+      index: virtualItem.index,
+      virtualStartPx: virtualItem.start - timelineVirtualizer.options.scrollMargin,
+    });
   }
   for (let tailOffset = 0; tailOffset < timelineLiveTailMessages.length; tailOffset += 1) {
     timelineRowPlan.push({ index: timelineLiveTailStartIndex + tailOffset, virtualStartPx: null });
@@ -3580,7 +3618,7 @@ export const ConversationView = React.memo(function ConversationView({
     if (!timeline) {
       return;
     }
-    if (activeTimelineMessages.length === pending.startLength) {
+    if (!pending.geometryReflow && activeTimelineMessages.length === pending.startLength) {
       // Capture done, prepend not committed yet: keep the anchor pending.
       return;
     }
@@ -3627,6 +3665,19 @@ export const ConversationView = React.memo(function ConversationView({
     timeline.scrollTop += drift;
     lastTimelineScrollTopRef.current = timeline.scrollTop;
   });
+
+  useLayoutEffect(() => {
+    // Breakpoint changes alter virtual row offsets as well as text wrapping.
+    // Keep a following reader at the tail after react-virtual's next measure.
+    const timeline = timelineRef.current;
+    if (!timeline || !followLatestRef.current) return undefined;
+    scrollTimelineToBottom(timeline);
+    const frame = window.requestAnimationFrame(() => {
+      const current = timelineRef.current;
+      if (current && followLatestRef.current) scrollTimelineToBottom(current);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [narrowTimelineViewport]);
 
   useLayoutEffect(() => {
     const timeline = timelineRef.current;

@@ -10,7 +10,7 @@
 - 对话正文和 composer 使用相同的阅读宽度；用户消息、输入区与文件交付通过已有 VUI 表面和 elevation token 表达轻微层次，助手正文不增加外层卡片。
 - 主内容面把原有会话标签、正文与输入区包在同一个 16px 圆角边界内，桌面左右及底部留白 12px、窄屏 8px；内层 ConversationView 不重复绘制边界。布局继续使用原轨道与已保存宽度。
 - 用户消息圆角明确为 12px；composer 桌面 16px、窄屏 14px，并使用轻微外影和焦点环。局部几何不能依赖当前实际为 8px 的通用 `rounded-xl` token。
-- 正文以默认 14px、发言人 12px 的层级对齐批准预览，仍随现有字体偏好缩放；消息行间距桌面 28px、窄屏 20px。这些规则由正式样式持有，预览不能另行覆盖成一套界面。
+- 正文以默认 14px、发言人 12px 的层级对齐批准预览，仍随现有字体偏好缩放；消息行间距桌面 28px、窄屏 20px。历史虚拟列表与实时尾部共用这个间距；虚拟列表顶部偏移与正文上内距一致（桌面 28px、719px 及以下 22px），调整视口时同步更新。正式样式与虚拟器共同持有这些几何规则，预览不能另行覆盖成一套界面。
 - 材质与控件样式由真实 route/conversation style map 实现；隔离预览的 mock 内容、`.mac-preview` CSS 和窗口图标不进入正式应用。
 - Windows 的最小化、最大化和关闭由 Electron `titleBarOverlay` 提供，网页保持原生 caption 区留白。
 - 顶栏保留原导航、操作与原生 Windows 控件留白，浏览器使用 44px 高的浅灰平面，Electron 跟随原生 caption 的 40px 高度；普通导航为 regular、当前项为 medium。Agent 目录保留 36px 头像、62px 最小行高、多行身份信息与 medium 标题；会话条目沿用原内容。
@@ -1071,7 +1071,7 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 向 `ChatSessionBrowser` 传入 route 的既有可见 `SessionSummary[]`、`agentsById`、运行/审批集合、语言及读取/失败状态。`onOpen` 委托原有 `handleOpenDirectSession`，新建与重试复用原有 mutation/query；组件只保存搜索和筛选条件，不自行获取或写入会话。已打开会话的正文和终端在浏览时隐藏但保持挂载，返回时保留草稿与阅读状态。
 
 ### 视觉与状态
-主阅读面沿用已批准的圆角和层次；列表项显示头像、会话名称、Agent/模型及摘要，窄屏自然换行。头像只用于目录和浏览列表，顶部 `AgentSessionTabStrip` 保留原有图标、标题、状态、团队入口、逐项关闭与新建操作，不增加头像或身份副标题。读取中、空列表、无匹配、失败、带已有数据的刷新失败有独立反馈。
+主阅读面沿用已批准的圆角和层次；会话浏览内容在 960px 范围内居中，桌面搜索与状态筛选左右排列，窄屏重排且筛选点击高度至少 44px。响应式布局使用局部优先级，避免后加载页面的 Tailwind 基础工具类覆盖它。列表项显示头像、会话名称、Agent/模型及摘要，窄屏自然换行。头像只用于目录和浏览列表，顶部 `AgentSessionTabStrip` 保留原有图标、标题、状态、团队入口、逐项关闭与新建操作，不增加头像或身份副标题。读取中、空列表、无匹配、失败、带已有数据的刷新失败有独立反馈。
 
 ### 实现与边界
 源码与样式归 `web/src/routes/chat/ChatSessionBrowser.tsx` 和 `ChatSessionBrowser.styles.ts`，组合 VUI 的既有按钮、输入和状态表面；`ChatCenterTabStrip` 提供浏览入口槽位，`ChatCenterSessionSurface` 保持原工作区挂载。数据、头像解析、状态语义与时间分组复用原有 owners，不建立第二份会话索引或 transcript。

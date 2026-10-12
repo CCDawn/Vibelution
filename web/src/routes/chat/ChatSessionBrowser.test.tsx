@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentInstance, SessionSummary } from "../../api/types";
 import { VuiProvider } from "../../components/vui";
 import { markSessionActivitySeen, sessionActivityStamp } from "../sessionActivityIndicator";
+import styles from "./ChatSessionBrowser.styles";
 import { ChatSessionBrowser, type ChatSessionBrowserProps } from "./ChatSessionBrowser";
 
 function session(id: string, patch: Partial<SessionSummary> = {}): SessionSummary {
@@ -82,6 +83,24 @@ afterEach(() => {
 });
 
 describe("ChatSessionBrowser", () => {
+  it("keeps the directory centered on desktop and preserves narrow-screen touch targets", async () => {
+    const preview = await mount(props());
+    try {
+      const root = preview.host.querySelector<HTMLElement>("main.chatSessionBrowser")!;
+      const tools = root.querySelector<HTMLElement>("header + div")!;
+      const filter = root.querySelector<HTMLButtonElement>('[data-session-status-filter="all"]')!;
+
+      expect(root.classList.contains("!mx-auto")).toBe(true);
+      expect(root.classList.contains("!max-w-[960px]")).toBe(true);
+      expect(tools.classList.contains("sm:!flex-row")).toBe(true);
+      expect(filter.classList.contains("!min-h-11")).toBe(true);
+      expect(filter.classList.contains("sm:!min-h-7")).toBe(true);
+      expect(styles.root).toContain("sm:!px-[clamp(16px,4vw,44px)]");
+    } finally {
+      await preview.unmount();
+    }
+  });
+
   it("filters by session content and status, then opens the selected result", async () => {
     const onOpen = vi.fn();
     const preview = await mount(props({

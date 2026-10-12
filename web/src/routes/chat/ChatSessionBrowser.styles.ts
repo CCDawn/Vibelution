@@ -1,24 +1,24 @@
 const styles = {
   root:
-    "chatSessionBrowser flex h-full min-h-0 min-w-0 w-full flex-col overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10",
+    "chatSessionBrowser !mx-auto flex h-full min-h-0 min-w-0 w-full !max-w-[960px] flex-col overflow-y-auto px-4 py-5 sm:!px-[clamp(16px,4vw,44px)] sm:!py-[clamp(20px,3.5vw,42px)] max-[390px]:!px-[13px]",
   header:
-    "flex min-w-0 flex-wrap items-start justify-between gap-3 pb-5 sm:gap-4",
-  headingCopy: "min-w-0 flex-1 basis-full sm:basis-auto",
+    "flex min-w-0 flex-wrap items-start justify-between gap-3 pb-5 sm:!gap-4",
+  headingCopy: "min-w-0 flex-1 basis-full sm:!basis-auto",
   eyebrow:
     "mb-1.5 block text-[11px] font-medium tracking-[0.025em] text-[var(--fg-tertiary)]",
   title:
     "m-0 text-[22px] font-semibold leading-tight tracking-[-0.025em] text-[var(--fg-primary)] sm:text-[24px]",
   description:
     "mb-0 mt-1.5 max-w-[58ch] text-[length:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]",
-  createButton: "mt-0 shrink-0 !min-h-[44px] sm:mt-4 sm:!min-h-8",
+  createButton: "mt-0 shrink-0 !min-h-[44px] sm:!mt-4 sm:!min-h-8",
   tools:
-    "flex min-w-0 flex-col gap-2 border-y border-[var(--vui-border-subtle)] py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3",
+    "flex min-w-0 flex-col gap-2 border-y border-[var(--vui-border-subtle)] py-2 sm:!flex-row sm:!items-center sm:!justify-between sm:!gap-3",
   search:
     "flex min-w-0 flex-1 items-center gap-2 text-[var(--fg-tertiary)]",
   searchInput:
     "min-w-0 flex-1 !border-transparent !bg-transparent !shadow-none focus-visible:!border-[var(--vui-border-subtle)]",
   filters:
-    "flex min-w-0 flex-wrap items-center gap-0.5 sm:shrink-0 sm:justify-end",
+    "flex min-w-0 flex-wrap items-center gap-0.5 sm:!shrink-0 sm:!justify-end",
   filter:
     "!h-11 !min-h-11 !rounded-[var(--radius-control)] !border-transparent !bg-transparent !px-3 !text-[length:var(--vui-font-xs)] !font-normal !text-[var(--fg-secondary)] !shadow-none hover:!bg-[var(--vui-control-muted-hover)] sm:!h-7 sm:!min-h-7 sm:!px-2",
   filterActive:
