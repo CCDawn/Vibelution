@@ -34,9 +34,12 @@ describe("Wave 2D composition demo paths", () => {
     }
   });
 
-  it("Chat direct session index item uses dense row + selected state recipe", () => {
-    expect(sessionStyles.sessionItem).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
-    expect(sessionStyles.sessionItemActive).toContain("!bg-[var(--bg-active)]");
+  it("Chat direct session index item uses a quiet native row and visible selection", () => {
+    expect(sessionStyles.sessionItem).toContain("!bg-transparent");
+    expect(sessionStyles.sessionItem).toContain("hover:!bg-[var(--vui-control-muted-hover)]");
+    expect(sessionStyles.sessionItemActive).toContain("!bg-[var(--vui-selection-bg)]");
+    expect(sessionStyles.sessionItemActive).toContain("!border-[var(--vui-border-hairline)]");
+    expect(sessionStyles.sessionItemActive).toContain("!shadow-[var(--vui-sheen)]");
     expect(sessionStyles.sessionItemActive).toContain("text-[var(--fg-primary)]");
     expect(sessionStyles.sessionItemActive).not.toContain("accent-cool");
 

@@ -31,7 +31,7 @@ const styles: Record<string, string> = {
   agentIndexMentalBlock:
     `vui-routes-chatcodingroute agentIndexMentalBlock min-w-0 ${vuiStateCoolInfoClass}`,
   agentIndexNameLine:
-    "vui-routes-chatcodingroute agentIndexNameLine !flex min-w-0 max-w-full items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-primary)] [&_em]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
+    "vui-routes-chatcodingroute agentIndexNameLine !flex min-w-0 max-w-full items-center gap-1.5 [font-size:var(--vui-type-control-size)] font-medium leading-tight [color:var(--fg-primary)] [&_em]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   agentIndexOpenButton:
     "vui-routes-chatcodingroute agentIndexOpenButton min-w-0 !grid !h-auto !min-h-[var(--vui-control-height-md)] !w-full max-w-full grid-cols-[30px_minmax(0,1fr)] items-center justify-start gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1 py-0.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-secondary)] shadow-none hover:border-[color-mix(in_srgb,var(--accent-cool)_26%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   agentIndexRoster:
@@ -75,9 +75,9 @@ const styles: Record<string, string> = {
   railOverlay:
     "vui-routes-chatcodingroute railOverlay !h-auto !bottom-0",
   railTop:
-    "vui-routes-chatcodingroute railTop flex shrink-0 min-h-[46px] min-w-0 flex-wrap items-center gap-1 px-3 pt-2",
+    "vui-routes-chatcodingroute railTop flex shrink-0 min-h-[44px] min-w-0 flex-wrap items-center gap-1 px-3 pt-2",
   railTitle:
-    "vui-routes-chatcodingroute railTitle min-w-0 flex-1 [font-size:var(--vui-font-sm)] font-semibold [color:var(--fg-primary)]",
+    "vui-routes-chatcodingroute railTitle min-w-0 flex-1 [font-size:var(--vui-type-control-size)] font-medium [color:var(--fg-primary)]",
   directorySearch:
     "vui-routes-chatcodingroute directorySearch min-w-0 basis-full py-2",
   directorySearchInput:

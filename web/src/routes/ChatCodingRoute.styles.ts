@@ -127,7 +127,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:
     "vui-routes-chatcodingroute resourceSplit min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1",
-  rightPane: `vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-[var(--chat-workbench-gap)] shadow-none [grid-column:1] [grid-row:1]`,
+  rightPane: `vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] ${vuiRailFillClass} bg-[linear-gradient(180deg,var(--vui-surface-toolbar),var(--vui-surface-rail))] p-[var(--chat-workbench-gap)] shadow-[var(--vui-sheen)] [grid-column:1] [grid-row:1]`,
   rightPaneWithTabs:
     "vui-routes-chatcodingroute rightPaneWithTabs grid-rows-[auto_auto_minmax(0,1fr)]",
   rightPaneWithoutTabs:
@@ -137,7 +137,7 @@ const styles: Record<string, string> = {
   sectionIdentity:
     "vui-routes-chatcodingroute sectionIdentity grid min-w-0 gap-0.5",
   sectionTitle:
-    "vui-routes-chatcodingroute sectionTitle m-0 min-w-0 truncate [font-size:var(--vui-font-sm)] font-[760] leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sectionTitle m-0 min-w-0 truncate [font-size:var(--vui-font-sm)] font-medium leading-tight text-[var(--fg-primary)]",
   // Section labels (运行模式 / Token / 陪伴): smaller than surface titles but primary-ink
   // so the rail scans as titled groups after hairline separators were removed.
   railSectionHeading:

@@ -48,13 +48,14 @@ describe("approved conversation reading hierarchy", () => {
     }
   });
   it("aligns the composer rail and uses consistent bubble chrome", () => {
-    expect(styles.composerCodex).toContain("max-w-[830px]");
-    expect(styles.assistantTurn).toContain("max-w-[830px]");
-    // One spelling of the transcript measure across the whole surface.
+    expect(styles.composerCodex).toContain("max-w-[760px]");
+    expect(styles.assistantTurn).toContain("max-w-[760px]");
+    // The checklist is nested within the capped turn body, so its own upper
+    // bound cannot widen the transcript rail.
     expect(todoStyles.card).toContain("max-w-[830px]");
     for (const surface of [styles.composerCodex, styles.userMessageBody, userStyles.userMessageBody]) {
       expect(surface).toContain("rounded-xl");
-      expect(surface).toContain("shadow-none");
+      expect(surface).toContain("shadow-[var(--vui-elevation-1-sheen)]");
       expect(surface).toContain("border-[var(--vui-border-subtle)]");
     }
   });

@@ -27,7 +27,7 @@ const readableMessageText = "min-w-0 text-vui-sm leading-[var(--vui-line-readabl
 const readableMarkdownMeasure = "max-w-full";
 const assistantMessageMeasure = "w-full max-w-full";
 // Single readable transcript measure: one cap for every transcript body and turn.
-const transcriptMeasure = "max-w-[830px]";
+const transcriptMeasure = "max-w-[760px]";
 const transcriptTurnRail = `w-full ${transcriptMeasure} justify-self-center`;
 const assistantTranscriptGrid = `grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 max-[719px]:gap-x-2`;
 const answerOnlyProcessShell = cv(
@@ -39,7 +39,7 @@ const answerOnlyProcessShell = cv(
 const userMessageBubble = cv(
   "userMessageBody",
   readableMessageText,
-  "w-fit max-w-full justify-self-end rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-4 py-3 text-left text-[var(--fg-primary)] shadow-none",
+  "w-fit max-w-full justify-self-end rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-4 py-3 text-left text-[var(--fg-primary)] shadow-[var(--vui-elevation-1-sheen)]",
 );
 const conversationComposerShell = cv(
   "composer",
@@ -47,7 +47,7 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-none focus-within:border-[var(--accent-cool)]",
+  "mx-auto grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-elevation-1-sheen)] focus-within:border-[var(--accent-cool)] focus-within:shadow-[var(--vui-shadow-focus),var(--vui-elevation-1-sheen)]",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [@media(max-height:520px)]:[&_textarea]:min-h-[44px]";
@@ -512,7 +512,7 @@ backToBottomButton:
   emptyStateHost:
     "vui-components-conversationview emptyStateHost grid min-h-full w-full min-w-0 flex-1 place-content-center place-items-center px-4 py-10 sm:py-14",
   emptyState:
-    "vui-components-conversationview emptyState w-full max-w-[min(100%,28rem)] min-w-0 justify-items-center border-dashed border-[color-mix(in_srgb,var(--fg-tertiary)_var(--vui-alpha-tint-strong),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_55%,var(--vui-surface-row))] px-6 py-8 text-center shadow-[var(--vui-shadow-hairline)] " +
+    "vui-components-conversationview emptyState w-full max-w-[min(100%,28rem)] min-w-0 justify-items-center !border-0 !bg-transparent !p-0 text-center !shadow-none " +
     "[&_strong]:[font-size:var(--vui-type-emphasis-size)] [&_strong]:font-[var(--vui-weight-semibold)] [&_strong]:leading-[var(--vui-type-emphasis-line)] [&_strong]:text-[var(--fg-primary)]",
   emptyStateStarters:
     "vui-components-conversationview emptyStateStarters mt-5 grid w-full max-w-[min(100%,40rem)] min-w-0 justify-items-center gap-2.5",

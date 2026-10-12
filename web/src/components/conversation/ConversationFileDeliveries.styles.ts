@@ -1,5 +1,5 @@
 export default {
-  root: "my-3 grid min-w-0 overflow-hidden rounded-xl border border-vui-border-soft",
+  root: "my-3 grid min-w-0 overflow-hidden !rounded-[var(--radius-panel)] border border-vui-border-subtle !shadow-[var(--vui-elevation-1-sheen)]",
   summaryRow:
     "grid min-w-0 grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-vui-border-soft px-3.5 py-3.5 max-[600px]:grid-cols-[40px_minmax(0,1fr)]",
   headerIcon: "grid h-10 w-10 place-items-center rounded-xl bg-vui-control-muted text-vui-fg-secondary",

@@ -741,16 +741,16 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timeline).toContain("pr-[clamp(3rem,3vw,3.5rem)]");
     expect(styles.timeline).not.toContain("px-[clamp(1rem,3vw,3rem)]");
     expect(styles.timeline).not.toContain("px-3");    expect(styles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
-    expect(styles.assistantTurn).toContain("w-full max-w-[830px]");
+    expect(styles.assistantTurn).toContain("w-full max-w-[760px]");
     expect(styles.assistantTurn).toContain("justify-self-center");
     expect(styles.assistantTurn).toContain("grid-cols-[2rem_minmax(0,1fr)]");
     expect(styles.assistantTurn).not.toContain("[&_.turnAvatar]:hidden");
     expect(styles.assistantTurn).not.toContain("[&_.turnMeta]:hidden");
-    expect(styles.agentInboxTurn).toContain("w-full max-w-[830px]");
+    expect(styles.agentInboxTurn).toContain("w-full max-w-[760px]");
     expect(styles.agentInboxTurn).toContain("justify-self-center");
-    expect(styles.groupTranscriptTurn).toContain("w-full max-w-[830px]");
+    expect(styles.groupTranscriptTurn).toContain("w-full max-w-[760px]");
     expect(styles.groupTranscriptTurn).toContain("justify-self-center");
-    expect(styles.userTurn).toContain("w-full max-w-[830px]");
+    expect(styles.userTurn).toContain("w-full max-w-[760px]");
     expect(styles.userTurn).toContain("justify-self-center");
     expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_2rem]");
     expect(styles.userTurn).not.toContain("[&_.turnAvatar]:hidden");
@@ -779,7 +779,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
     expect(styles.userMessageBody).toContain("px-4");
     expect(styles.userMessageBody).toContain("py-3");
-    expect(styles.userMessageBody).toContain("shadow-none");
+    expect(styles.userMessageBody).toContain("shadow-[var(--vui-elevation-1-sheen)]");
     expect(styles.userMessageBody).toContain("text-left");
 
 
@@ -1314,7 +1314,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.assistantTurn).toContain("[&_.turnContent]:w-full");
     expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-full");
     expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-full");
-    expect(styles.timelineAssistantTextCell).toContain("max-w-[830px]");
+    expect(styles.timelineAssistantTextCell).toContain("max-w-[760px]");
     expect(styles.codexTranscriptSurface).toContain("w-full");
     expect(styles.codexTranscriptSurface).toContain("max-w-full");
     expect(styles.codexTranscriptCellSummary).toContain("max-w-full");

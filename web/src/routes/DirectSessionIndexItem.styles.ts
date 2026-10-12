@@ -4,7 +4,6 @@ import {
 } from "../design/vuiChromeRecipes";
 
 import {
-  vuiDenseRowClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
   vuiStateSelectedRowFillClass,
@@ -63,14 +62,14 @@ const styles = {
   conversationTitleRow:
     "vui-routes-chatcodingroute conversationTitleRow grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1",
   directSessionItem:
-    "vui-routes-chatcodingroute directSessionItem pr-0 shadow-none",
+    "vui-routes-chatcodingroute directSessionItem pr-0",
   sessionActionStack:
     "vui-routes-chatcodingroute sessionActionStack min-w-0 flex flex-wrap items-center gap-1.5",
   sessionIconButton:
     `vui-routes-chatcodingroute sessionIconButton min-w-0 ${vuiControlIconSmClass} place-items-center border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] text-[var(--fg-tertiary)]`,
   sessionTeamBindingSlot:
     "vui-routes-chatcodingroute sessionTeamBindingSlot absolute right-2 top-2 z-10",
-  sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiDenseRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:${vuiStateSelectedRowFillClass}`,
+  sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden rounded-[var(--radius-control)] border border-transparent !bg-transparent text-left shadow-none transition-[border-color,background-color,box-shadow] hover:!bg-[var(--vui-control-muted-hover)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:${vuiStateSelectedRowFillClass}`,
   sessionItemWithBulkSelect:
     "vui-routes-chatcodingroute sessionItemWithBulkSelect grid-cols-[28px_minmax(0,1fr)] items-center",
   sessionItemWithTrailingActions:
@@ -82,7 +81,7 @@ const styles = {
   sessionBulkSelectInput:
     "vui-routes-chatcodingroute sessionBulkSelectInput absolute !w-px !h-px opacity-0 pointer-events-none",
   sessionItemActive:
-    "vui-routes-chatcodingroute sessionItemActive !border-transparent !bg-[var(--bg-active)] data-[selected=true]:!bg-[var(--bg-active)] text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sessionItemActive !border-[var(--vui-border-hairline)] !bg-[var(--vui-selection-bg)] data-[selected=true]:!bg-[var(--vui-selection-bg)] text-[var(--fg-primary)] !shadow-[var(--vui-sheen)]",
   sessionItemContextTarget:
     "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] !bg-[var(--vui-surface-card)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
   sessionItemArchived:
@@ -90,13 +89,13 @@ const styles = {
   sessionItemError:
     "vui-routes-chatcodingroute sessionItemError mx-2.5 mb-2 min-w-0 border-l-2 border-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_6%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--state-error)] [overflow-wrap:anywhere]",
   sessionItemMain:
-    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-h-[60px] min-w-0 appearance-none grid-cols-[32px_minmax(0,1fr)] items-center justify-stretch gap-2.5 rounded-none border-0 [border:0] bg-transparent !px-2.5 !py-2 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
+    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-h-[44px] min-w-0 appearance-none grid-cols-[32px_minmax(0,1fr)] items-center justify-stretch gap-2 rounded-[var(--radius-control)] border-0 [border:0] bg-transparent !px-2 !py-1.5 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
   sessionItemNotice:
     "vui-routes-chatcodingroute sessionItemNotice mx-2.5 mb-2 min-w-0 border-l-2 border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   sessionItemSummary:
-    "vui-routes-chatcodingroute sessionItemSummary block min-w-0 truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute sessionItemSummary sr-only",
   sessionItemTitle:
-    "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate [font-size:var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate [font-size:var(--vui-type-control-size)] font-medium leading-tight text-[var(--fg-primary)]",
   sessionRunningBadge:
     `vui-routes-chatcodingroute sessionRunningBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden ${vuiStateSuccessSoftClass} px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none [&_span]:leading-none [&_svg]:size-[10px] [&_svg]:shrink-0 [&_svg]:animate-spin`,
   sessionStatusCluster:

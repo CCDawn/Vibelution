@@ -60,10 +60,11 @@ describe("Wave 3B Chat session workbench composition", () => {
     expect(statusSource).toContain("export function CompanionLifeRail");
   });
 
-  it("keeps session index structure on dense/selected/chrome recipes", () => {
-    expect(sessionStyles.sessionItem).toMatch(/!bg-vui-surface-row|vuiDenseRowClass|!bg-\[var\(--vui-surface-row\)\]/);
-    expect(sessionStyles.sessionItem).toContain("!bg-vui-surface-row");
-    expect(sessionStyles.sessionItemActive).toContain("!bg-[var(--bg-active)]");
+  it("keeps session index structure on native selection and shared chrome", () => {
+    expect(sessionStyles.sessionItem).toContain("!bg-transparent");
+    expect(sessionStyles.sessionItem).toContain("hover:!bg-[var(--vui-control-muted-hover)]");
+    expect(sessionStyles.sessionItemActive).toContain("!bg-[var(--vui-selection-bg)]");
+    expect(sessionStyles.sessionItemActive).toContain("!shadow-[var(--vui-sheen)]");
     expect(sessionStyles.sessionItemActive).not.toContain("accent-cool");
     expect(sessionStyles.sessionIconButton).toContain("h-[var(--vui-control-height-sm)]");
     expect(sessionStyles.sessionRunningBadge).toContain(

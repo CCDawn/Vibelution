@@ -98,12 +98,12 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain('title="新会话 · 模型：mimo-v2.5"');
   });
 
-  it("keeps the selected session row visible above the dense row surface", () => {
+  it("keeps the selected session visible on the quiet native rail", () => {
     expect(directSessionIndexItemStyles.sessionItemActive).toContain(
-      "!bg-[var(--bg-active)]",
+      "!bg-[var(--vui-selection-bg)]",
     );
     expect(directSessionIndexItemStyles.sessionItemActive).toContain(
-      "data-[selected=true]:!bg-[var(--bg-active)]",
+      "data-[selected=true]:!bg-[var(--vui-selection-bg)]",
     );
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("accent-cool");
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain(

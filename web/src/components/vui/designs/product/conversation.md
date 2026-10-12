@@ -3,6 +3,14 @@
 > 对话工作台组合层：只服务 Chat composer / 时间线。
 > **禁止**在此重新实现按钮/输入；必须组合 VUI primitives。
 
+## 正式工作台视觉约定
+
+- Chat 保留现有单侧索引栏、顶部全局导航和共享宽度记忆；文件/变更面板继续按现有显式打开语义显示。
+- 索引条目使用紧凑标题和辅助信息，摘要不占第三行；选中底色使用 `--vui-selection-bg`，内高光使用 `--vui-sheen`。搜索、归档、排序、状态与批量操作沿用真实组件。
+- 对话正文和 composer 使用相同的阅读宽度；用户消息、输入区与文件交付通过已有 VUI 表面和 elevation token 表达轻微层次，助手正文不增加外层卡片。
+- 材质与控件样式由真实 route/conversation style map 实现；隔离预览的 mock 内容、`.mac-preview` CSS 和窗口图标不进入正式应用。
+- Windows 的最小化、最大化和关闭由 Electron `titleBarOverlay` 提供，网页保持原生 caption 区留白。
+
 ## ConversationTodoChecklist
 
 ### 功能

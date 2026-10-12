@@ -55,7 +55,7 @@ describe("AgentUserContentSectionView", () => {
     expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
     expect(styles.userMessageBody).toContain("px-4");
     expect(styles.userMessageBody).toContain("py-3");
-    expect(styles.userMessageBody).toContain("shadow-none");
+    expect(styles.userMessageBody).toContain("shadow-[var(--vui-elevation-1-sheen)]");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:max-w-full");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:whitespace-normal");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:break-words");
