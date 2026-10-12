@@ -26,6 +26,7 @@ import conversationOperationGroupsSource from "./conversationOperationGroups.tsx
 import conversationOperationRowsSource from "./conversationOperationRows.tsx?raw";
 import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
 import conversationResponseBlocksSource from "./conversationResponseBlocks.tsx?raw";
+import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
 import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
@@ -324,10 +325,10 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
   });
 
   it("feeds the file deliveries panel disk-truth metadata for the rewind entry", () => {
-    expect(conversationViewSource).toContain("conversationChangedFilesFromMetadata(message.metadata)");
-    expect(conversationViewSource).toContain("changedFiles={conversationChangedFilesFromMetadata(message.metadata)}");
-    expect(conversationViewSource).toContain("sessionId={sessionId}");
-    expect(conversationViewSource).toContain('turnId={message.role === "assistant" ? message.turnId : undefined}');
+    expect(conversationCodexSurfaceSource).toContain("conversationChangedFilesFromMetadata(message.metadata)");
+    expect(conversationCodexSurfaceSource).toContain("changedFiles={conversationChangedFilesFromMetadata(message.metadata)}");
+    expect(conversationCodexSurfaceSource).toContain("sessionId={sessionId}");
+    expect(conversationCodexSurfaceSource).toContain('turnId={message.role === "assistant" ? message.turnId : undefined}');
   });
 });
 
@@ -961,7 +962,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // decision travels as the isStreaming prop instead.
     expect(conversationResponseBlocksSource).toContain("function renderAssistantTranscriptResponseText(");
     expect(conversationResponseBlocksSource).toContain("isStreaming={isStreaming}");
-    expect(conversationViewSource).toContain(
+    expect(conversationCodexSurfaceSource).toContain(
       "renderAssistantTranscriptResponseText(\n            text,\n            assistantTurnIsStreaming(message),",
     );
     expect(conversationViewSource).not.toContain("renderStreamingResponseText");
