@@ -25,6 +25,29 @@ def clear_screen_cache():
     research._SCREEN_CACHE = None
 
 
+@pytest.mark.parametrize("complete", [True, False])
+def test_partial_universe_refreshes_without_holding_missing_pages_for_ten_minutes(monkeypatch, complete):
+    clock, loads = [0.0], []
+    monkeypatch.setattr(research.time, "monotonic", lambda: clock[0])
+
+    def load():
+        loads.append(clock[0])
+        return {"coverage": {"complete": complete}, "fetchedAt": str(len(loads))}
+
+    monkeypatch.setattr(research, "_load_screen_universe", load)
+    first = research._screen_universe()
+    assert first["cacheSeconds"] == (600 if complete else 60)
+    clock[0] = 1.0
+    assert research._screen_universe()["fetchedAt"] == "1"
+    clock[0] = 61.0
+    refreshed = research._screen_universe()
+    assert len(loads) == (1 if complete else 2)
+    assert refreshed["coverage"]["complete"] is complete
+    if complete:
+        clock[0] = 601.0
+        assert research._screen_universe()["fetchedAt"] == "2"
+
+
 def sina_row(code: str = "600519", **overrides):
     return {
         "symbol": f"sh{code}",

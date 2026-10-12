@@ -57,6 +57,7 @@ SCREEN_RESPONSE_MAX_BYTES = 2_000_000
 SCREEN_REQUEST_TIMEOUT_SECONDS = 6
 SCREEN_UNIVERSE_DEADLINE_SECONDS = 15
 SCREEN_CACHE_SECONDS = 600
+SCREEN_PARTIAL_CACHE_SECONDS = 60
 RESEARCH_NEWS_CACHE_SECONDS = 180
 RESEARCH_ANNOUNCEMENT_CACHE_SECONDS = 900
 RESEARCH_FUNDAMENTALS_CACHE_SECONDS = 1_800
@@ -343,18 +344,24 @@ def _load_screen_universe() -> dict[str, Any]:
     }
 
 
+def _screen_cache_ttl(snapshot: dict[str, Any]) -> int:
+    coverage = snapshot.get("coverage")
+    return SCREEN_CACHE_SECONDS if isinstance(coverage, dict) and coverage.get("complete") is True else SCREEN_PARTIAL_CACHE_SECONDS
+
+
 def _screen_universe() -> dict[str, Any]:
     global _SCREEN_CACHE
     now = time.monotonic()
     with _SCREEN_CACHE_LOCK:
-        if _SCREEN_CACHE and now - _SCREEN_CACHE[0] < SCREEN_CACHE_SECONDS:
+        if _SCREEN_CACHE and now - _SCREEN_CACHE[0] < _screen_cache_ttl(_SCREEN_CACHE[1]):
             return _SCREEN_CACHE[1]
     with _SCREEN_LOAD_LOCK:
         now = time.monotonic()
         with _SCREEN_CACHE_LOCK:
-            if _SCREEN_CACHE and now - _SCREEN_CACHE[0] < SCREEN_CACHE_SECONDS:
+            if _SCREEN_CACHE and now - _SCREEN_CACHE[0] < _screen_cache_ttl(_SCREEN_CACHE[1]):
                 return _SCREEN_CACHE[1]
         result = _load_screen_universe()
+        result = {**result, "cacheSeconds": _screen_cache_ttl(result)}
         with _SCREEN_CACHE_LOCK:
             _SCREEN_CACHE = (time.monotonic(), result)
         return result
