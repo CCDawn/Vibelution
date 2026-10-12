@@ -35,7 +35,7 @@ const styles = {
     "mb-1 flex min-h-7 items-center gap-1.5 px-2 text-[length:var(--vui-font-xs)] font-medium text-[var(--fg-secondary)] [&>svg]:text-[var(--fg-tertiary)] [&>span]:ml-auto [&>span]:text-[var(--fg-tertiary)] [&>span]:font-normal",
   groupRows: "grid min-w-0 gap-0.5",
   row:
-    "chatSessionBrowserRow flex !h-auto !min-h-[76px] w-full min-w-0 !items-start !justify-start !gap-3 !rounded-[9px] !border !border-transparent !bg-transparent !px-3 !py-2.5 !text-left !text-[var(--fg-primary)] !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[color-mix(in_srgb,var(--vui-surface-inset)_58%,transparent)] focus-visible:!outline-2 focus-visible:!outline-offset-2 focus-visible:!outline-[color-mix(in_srgb,var(--accent-cool)_52%,transparent)]",
+    "chatSessionBrowserRow flex !h-auto !min-h-[76px] w-full min-w-0 !items-start !justify-start !gap-3 !rounded-[9px] !border !border-transparent !bg-transparent !px-3 !py-2.5 !text-left !text-[var(--fg-primary)] !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted-hover)] focus-visible:!outline-2 focus-visible:!outline-offset-2 focus-visible:!outline-[color-mix(in_srgb,var(--accent-cool)_52%,transparent)]",
   rowActive:
     "!border-[color-mix(in_srgb,var(--fg-primary)_8%,transparent)] !bg-[var(--vui-selection-bg)] !shadow-[var(--vui-sheen)] hover:!bg-[var(--vui-selection-bg)]",
   avatar:
