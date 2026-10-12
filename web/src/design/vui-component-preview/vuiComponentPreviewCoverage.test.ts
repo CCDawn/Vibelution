@@ -39,6 +39,9 @@ const previewExemptDesignSections = new Set([
   // Route-owned dialog: team task-board, workspace changes and file-content queries
   // supply its states. Covered by dialog interaction tests and the isolated chat preview.
   "ChatGroupArtifactDialog",
+  // Route-owned composition: the authorized Session catalog and original route
+  // actions supply its state. Covered by browse/return tests and the approved isolated workbench preview.
+  "ChatSessionBrowser",
 ]);
 
 function collectPreviewSources(directory: string): string {
