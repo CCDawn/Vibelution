@@ -119,8 +119,6 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
             displayName: payload.draft.displayName,
             llmBindings: options.normalizeAgentLlmBindings(payload.draft.llmBindings),
             promptTemplateId: payload.draft.promptTemplateId,
-            toolPolicyId: payload.draft.toolPolicyId,
-            memoryPolicyId: payload.draft.memoryPolicyId,
             permissionPreset: payload.draft.permissionPreset,
             metadata: options.agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
             status: payload.draft.status,
@@ -128,6 +126,15 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
             expectedConfigRevision: payload.agent.configRevision,
             sourceDraftId: payload.sourceDraftId,
           };
+          // Rebinding even the same template ID replaces Agent-owned inline policies.
+          // Preserve those overrides when saving a model, name or other unrelated field.
+          const baselineDraft = options.draftFromAgent(payload.agent);
+          if (payload.draft.toolPolicyId !== baselineDraft.toolPolicyId) {
+            body.toolPolicyId = payload.draft.toolPolicyId;
+          }
+          if (payload.draft.memoryPolicyId !== baselineDraft.memoryPolicyId) {
+            body.memoryPolicyId = payload.draft.memoryPolicyId;
+          }
           const compressionChanged = options.contextCompressionPolicyChangedInDraft
             ? options.contextCompressionPolicyChangedInDraft(payload.draft, payload.agent)
             : true;
