@@ -23,7 +23,7 @@ vi.mock("../../api/financialJobs", () => ({
 const assistant = {
   agentId: "finance-agent-1", agentCode: "finance", displayName: "炒股智能体", status: "active", setupStatus: "ready",
   directSessionId: "session-1", knowledgeBaseId: "knowledge-1", knowledgeReadable: true, modelStatus: "configured_unverified",
-  reportStatus: "configured", marketDataStatus: "public_quotes", newsDelegationStatus: "available", privateLedgerStatus: "available", tradingEnabled: true,
+  reportStatus: "configured_unverified", marketDataStatus: "public_quotes", newsDelegationStatus: "available", privateLedgerStatus: "available", tradingEnabled: true,
 } as FinancialAssistant;
 const stock = { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" };
 const record = {
@@ -89,6 +89,12 @@ describe("FinanceDashboard", () => {
     expect(node.textContent).toContain("外部财报库未接入");
     expect(node.textContent).not.toContain("报告未配置");
     expect(buttonWithText("报告中心").disabled).toBe(false);
+  });
+
+  it("shows a configured external filings service as unverified until a real probe exists", async () => {
+    await render({ assistant: { ...assistant, reportStatus: "configured_unverified" } });
+    expect(node.textContent).toContain("外部财报库已填写 · 待验证");
+    expect(node.textContent).not.toContain("外部财报库已配置");
   });
 
   it("shows watchlist prices, research and live task counts, and routes into existing work areas", async () => {

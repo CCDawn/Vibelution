@@ -21,7 +21,7 @@
 3. 使用金融包的提示词创建财报助手。关闭助手的 web search/KG 扩展，使用其配置好的模型；本工具不是任意 RAGFlow chat 的通用适配器
 4. 将服务凭据保存在启动 Vibelution 后端进程的受控环境中，不能放进 Git、前端、提示词或工具参数
 
-代码接入不等于服务已部署。配置检查不会联网，`configured` 只表示配置格式完整，`connectivityVerified` 始终为 false；不能据此声称服务、检索或模型已通过验收。
+代码接入不等于服务已部署。配置检查不会联网，配置格式完整时助手列表投影为 `configured_unverified`，`connectivityVerified` 始终为 false；不能据此声称服务、检索或模型已通过验收。
 
 ## 服务器侧配置
 

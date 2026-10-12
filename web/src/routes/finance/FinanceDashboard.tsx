@@ -179,7 +179,7 @@ export function FinanceDashboard({
           <div className={styles.statusRows}>
             <span>{zh ? "行情" : "Quotes"}<strong>{assistant.marketDataStatus === "public_quotes" ? (zh ? "公开行情" : "Public data") : (zh ? "不可用" : "Unavailable")}</strong></span>
             <span>{zh ? "研究资料" : "Research sources"}<strong>{assistant.knowledgeReadable ? (zh ? "可读取" : "Readable") : (zh ? "不可用" : "Unavailable")}</strong></span>
-            <span>{zh ? "外部财报库" : "External filings library"}<strong>{assistant.reportStatus === "configured" ? (zh ? "已配置" : "Configured") : (zh ? "未接入" : "Not connected")}</strong></span>
+            <span>{zh ? "外部财报库" : "External filings library"}<strong>{assistant.reportStatus === "configured_unverified" ? (zh ? "已填写 · 待验证" : "Configured · unverified") : (zh ? "未接入" : "Not connected")}</strong></span>
           </div>
         </VSurface>
         <VSurface className={styles.panel} padding="normal" ariaLabel={zh ? "批次和计划" : "Research jobs"}>
