@@ -22,6 +22,7 @@ import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent
 import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationOperationRowsSource from "./conversationOperationRows.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -1145,8 +1146,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
     expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
   });it("colors operation rows from each operation status instead of the operation kind", () => {
-    expect(conversationViewSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
-    expect(conversationViewSource).toContain("operationStatusTone(operation)");
+    expect(conversationOperationRowsSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
+    expect(conversationOperationRowsSource).toContain("operationStatusTone(operation)");
     expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
     expect(conversationViewSource).toContain("styles[`operationItem_${statusTone}`]");
     expect(conversationViewSource).toContain("styles[`operationIcon_${statusTone}`]");
@@ -1164,7 +1165,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("normalizes incomplete live timeline fields at the render boundary", () => {
-    expect(conversationViewSource).toContain('const status = String(operation.status ?? "").trim().toLowerCase();');
+    expect(conversationOperationRowsSource).toContain('const status = String(operation.status ?? "").trim().toLowerCase();');
     expect(conversationViewSource).toContain('const rawTimelineTitle = String(item.title ?? "").trim();');
     expect(conversationViewSource).toContain('const itemSummary = String(item.summary ?? "").trim();');
   });
@@ -2386,9 +2387,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("does not use an animated spinner for the answer-only process summary icon", () => {
-    const start = conversationViewSource.indexOf("function processSummaryIcon");
-    const end = conversationViewSource.indexOf("function hasOperationDetails", start);
-    const processSummaryIconSource = conversationViewSource.slice(start, end);
+    const start = conversationOperationRowsSource.indexOf("function processSummaryIcon");
+    const end = conversationOperationRowsSource.indexOf("function hasOperationDetails", start);
+    const processSummaryIconSource = conversationOperationRowsSource.slice(start, end);
 
     expect(processSummaryIconSource).toContain("function processSummaryIcon");
     expect(end).toBeGreaterThan(start);
