@@ -4442,10 +4442,7 @@ export function ChatCodingRouteWorkbench() {
                     void closeCliAgentRun(run);
                   }
                 }}
-                onCreateSession={() => {
-                  setSessionBrowserOpen(false);
-                  handleCreateSession();
-                }}
+                onCreateSession={handleCreateSession}
                 onDeleteSession={handleDeleteSession}
                 onOpenDirectSession={handleOpenDirectSession}
                 onPrefetchDirectSession={handlePrefetchDirectSession}

@@ -211,7 +211,8 @@ describe("chat change rail wiring", () => {
     expect(workbench).toContain("workspaceActiveTab={conversationWorkspaceTab}");
     expect(workbench).toContain("activeTab={workspace.activeTab}");
     expect(workbench).toContain("openPreviewTab(activeSessionId, path)");
-    expect(workbench).toContain('rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "侧栏" : "Side") : undefined}');
+    // Browsing fills the main content plane; the original conversation restores its side rail on return.
+    expect(workbench).toContain('rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}');
     expect(workbench).toContain("ChatRightRail");
     expect(workbench).toContain('activeRailTab?.kind === "review"');
     expect(workbench).toContain("useChatGitRail");

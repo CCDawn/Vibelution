@@ -175,7 +175,7 @@ export function ChatSessionBrowser({
     { id: "completed", label: copy.filters.completed },
     { id: "ready", label: copy.filters.ready },
   ];
-  const filteredRows = rows.filter(({ session, display, tone, isCompleted, summary, teamName }) => {
+  const filteredRows = rows.filter(({ session, display, tone, isCompleted, teamName }) => {
     const searchable = [
       session.title,
       session.taskSummary,
