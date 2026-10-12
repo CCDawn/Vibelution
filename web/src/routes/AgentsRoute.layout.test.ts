@@ -1188,8 +1188,8 @@ describe("AgentsRoute layout contract", () => {
     expect(configDraftMutationsSource).toContain("displayName: payload.draft.displayName");
     expect(configDraftMutationsSource).toContain("llmBindings: options.normalizeAgentLlmBindings(payload.draft.llmBindings)");
     expect(configDraftMutationsSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
-    expect(configDraftMutationsSource).toContain("toolPolicyId: payload.draft.toolPolicyId");
-    expect(configDraftMutationsSource).toContain("memoryPolicyId: payload.draft.memoryPolicyId");
+    expect(configDraftMutationsSource).toContain("body.toolPolicyId = payload.draft.toolPolicyId");
+    expect(configDraftMutationsSource).toContain("body.memoryPolicyId = payload.draft.memoryPolicyId");
     expect(configDraftMutationsSource).toContain("status: payload.draft.status");
     expect(configDraftMutationsSource).toContain("updateAgent(payload.agentId");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
