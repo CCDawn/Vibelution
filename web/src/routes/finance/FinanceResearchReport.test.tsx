@@ -144,6 +144,20 @@ describe("FinanceResearchReport research metadata", () => {
     expect(container.textContent).toContain("Recovered exact report");
   });
 
+  it("offers the original conversation when a completed follow-up has no exportable report", async () => {
+    const resume = vi.fn(), startResearch = vi.fn();
+    vi.mocked(fetchFinancialReportText).mockRejectedValue(new Error("研究尚未成功完成，暂不能导出"));
+    const container = await render({ onSupplementEvidence: resume, onResearch: startResearch });
+    expect(container.textContent).toContain("会话结束不代表报告已成功生成");
+    expect(container.querySelector("[data-finance-report-body]")).toBeNull();
+    expect(container.textContent).not.toContain("经营质量仍需核实");
+    const recovery = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "返回研究对话");
+    expect(recovery).toBeTruthy();
+    await act(async () => recovery!.click());
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(startResearch).not.toHaveBeenCalled();
+  });
+
   it("offers native follow-up for missing evidence without starting another research", async () => {
     const supplement = vi.fn(), startResearch = vi.fn();
     vi.mocked(fetchFinancialReportText).mockResolvedValue("## 结论\n利润没有这一项。");

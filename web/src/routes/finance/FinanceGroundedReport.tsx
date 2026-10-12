@@ -30,10 +30,11 @@ export function useGroundedFinancialReport({ assistantAgentId, sessionId, turnId
   };
 }
 
-export function FinanceReportReadState({ read, zh }: { read: ReturnType<typeof useGroundedFinancialReport>; zh: boolean }) {
+export function FinanceReportReadState({ read, zh, onResumeResearch }: { read: ReturnType<typeof useGroundedFinancialReport>; zh: boolean; onResumeResearch?: () => void }) {
+  const incomplete = Boolean(read.error && /研究尚未成功完成|该轮内容不是研究报告|没有已提交的最终答案|已停止的研究不能导出/.test(read.error));
   return <VStateSurface density="compact" tone={read.error ? "error" : "loading"} busy={!read.error}
-    title={read.error ? (zh ? "报告读取失败" : "Report unavailable") : (zh ? "读取核验正文" : "Loading grounded report")}
-    actions={read.error ? <VButton variant="secondary" onPress={read.retry}>{zh ? "重试" : "Retry"}</VButton> : undefined}>{read.error}</VStateSurface>;
+    title={incomplete ? (zh ? "尚无可导出的研究报告" : "No exportable report yet") : read.error ? (zh ? "报告读取失败" : "Report unavailable") : (zh ? "读取核验正文" : "Loading grounded report")}
+    actions={read.error ? <>{onResumeResearch ? <VButton variant="secondary" onPress={onResumeResearch}>{zh ? "返回研究对话" : "Return to research"}</VButton> : null}<VButton variant="secondary" onPress={read.retry}>{zh ? "重试" : "Retry"}</VButton></> : undefined}>{incomplete ? (zh ? "会话结束不代表报告已成功生成。可在原对话继续研究，明确要求生成完整研究报告。" : "A finished conversation may not contain a completed report. Continue in the original conversation and request a full research report.") : read.error}</VStateSurface>;
 }
 
 export function FinanceReportEvidenceNotice({ text, originalText, zh, onSupplementEvidence }: { text: string; originalText: string; zh: boolean; onSupplementEvidence?: () => void }) {

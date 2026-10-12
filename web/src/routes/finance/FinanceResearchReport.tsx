@@ -31,7 +31,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
   const report = useMemo(() => projectedReport && verified.text
     ? stockResearchReportFromText(projectedReport, verified.text) : null, [projectedReport, verified.text]);
   if (!projectedReport) return <VStateSurface density="compact" tone={busy ? "loading" : "empty"} busy={busy} title={busy ? (zh ? "研究进行中" : "Research running") : (zh ? "这只股票还没有研究报告" : "No report for this stock")} actions={!busy ? <VButton variant="secondary" onPress={onResearch}>{zh ? "发起研究" : "Start research"}</VButton> : undefined}>{busy ? (zh ? "研究过程见右侧，完成后显示报告。" : "Follow progress on the right. The report appears after completion.") : undefined}</VStateSurface>;
-  if (!report) return <FinanceReportReadState read={verified} zh={zh} />;
+  if (!report) return <FinanceReportReadState read={verified} zh={zh} onResumeResearch={onSupplementEvidence} />;
   const selected = report.sections.find((section) => section.id === tab);
   const parameters = report.researchParameters;
   const parameterText = (zhLabel: string, enLabel: string, value: string) => `${zh ? zhLabel : enLabel}${zh ? "：" : ": "}${value}`;
