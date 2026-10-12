@@ -61,17 +61,17 @@ def test_semantic_query_requires_real_current_vectors_and_never_downloads(tmp_pa
     assert semantic.rank_candidates([candidate], "aircraft", mode="semantic")[0] == []
 
 
-def test_health_marks_non_bge_dimension_vectors_degraded(knowledge_env, monkeypatch):
+def test_health_marks_non_model_dimension_vectors_degraded(knowledge_env, monkeypatch):
     env = knowledge_env
     _item(env)
-    monkeypatch.setattr(semantic.embeddings, "readiness", lambda **_: {"status": "ready", "dimension": 512})
+    monkeypatch.setattr(semantic.embeddings, "readiness", lambda **_: {"status": "ready", "dimension": 2048})
     candidate = index.list_indexable_knowledge_items(agent_id=env["lead"]["agentId"])[0]
     index.write_index_record(candidate, embedding_provider="fastembed", embedding_model=semantic.embeddings.DEFAULT_MODEL_NAME,
                              chunks=[{"start": 0, "end": 1, "vector": [1.0, 0.0]}])
 
     health = semantic.get_semantic_index_health(agent_id=env["lead"]["agentId"])
 
-    assert semantic.DEFAULT_EMBEDDING_DIMENSION == 512
+    assert semantic.DEFAULT_EMBEDDING_DIMENSION == 2048
     assert health["status"] == "degraded"
     assert health["reason"] == "embedding_dimension_mismatch"
     assert health["indexedItemCount"] == 0
@@ -91,7 +91,7 @@ def test_health_reports_known_offline_model_load_failure(knowledge_env, monkeypa
             "loaded": False,
             "status": "load_failed",
             "reason": "offline_model_load_failed",
-            "dimension": 512,
+            "dimension": 2048,
         },
     )
 

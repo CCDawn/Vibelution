@@ -21,10 +21,27 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
-DEFAULT_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+DEFAULT_MODEL_NAME = "voyage-4-nano"
 FASTEMBED_THREADS = 2
 MAX_CACHED_MODELS = 1
 MANIFEST_SCHEMA_VERSION = 1
+
+# Models outside FastEmbed's built-in registry are served through
+# CustomTextEmbedding with a description registered on first use. Query-side
+# prefixes are model instructions FastEmbed does not apply on its own.
+_CUSTOM_MODEL_SPECS: dict[str, dict[str, Any]] = {
+    "voyage-4-nano": {
+        "hf_repo": "onnx-community/voyage-4-nano-ONNX",
+        "description": "Voyage 4 nano ONNX, mean pooling, normalized",
+        "dimension": 2048,
+        "model_file": "onnx/model.onnx",
+        "additional_files": ["onnx/model.onnx_data"],
+        "pooling": "MEAN",
+        "size_in_gb": 1.4,
+        "query_prefix": "Represent the query for retrieving supporting documents: ",
+    },
+}
+_CUSTOM_REGISTRY_READY = False
 
 _LOCAL_APP_DATA = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / ".cache"))
 DEFAULT_CACHE_DIR = _LOCAL_APP_DATA / "Vibelution" / "cache" / "fastembed"
@@ -219,13 +236,19 @@ def encode(
         if not normalized_texts:
             return []
 
+        texts_to_embed = normalized_texts
+        if normalized_purpose == "query":
+            query_prefix = str(_CUSTOM_MODEL_SPECS.get(normalized_name, {}).get("query_prefix") or "")
+            if query_prefix:
+                texts_to_embed = [query_prefix + text for text in normalized_texts]
+
         encoder = getattr(prepared.model, f"{normalized_purpose}_embed", None)
         if not callable(encoder):
             raise EmbeddingOutputError(
                 f"FastEmbed model {normalized_name!r} does not provide {normalized_purpose}_embed()."
             )
         try:
-            raw_vectors = list(encoder(normalized_texts))
+            raw_vectors = list(encoder(texts_to_embed))
         except Exception as error:  # noqa: BLE001 - convert library failures at the adapter boundary
             raise EmbeddingOutputError(
                 f"FastEmbed model {normalized_name!r} failed to encode {len(normalized_texts)} text(s)."
@@ -347,9 +370,61 @@ def _load_text_embedding_class() -> type[Any]:
     return text_embedding
 
 
+def _ensure_custom_models_registered() -> None:
+    """Register out-of-registry models with FastEmbed's CustomTextEmbedding once per process."""
+    global _CUSTOM_REGISTRY_READY
+    if _CUSTOM_REGISTRY_READY:
+        return
+    try:
+        from fastembed.common.model_description import (
+            DenseModelDescription,
+            ModelSource,
+            PoolingType,
+        )
+        from fastembed.text.custom_text_embedding import CustomTextEmbedding
+    except (ImportError, ModuleNotFoundError) as error:
+        raise FastEmbedUnavailableError(
+            "FastEmbed is unavailable. Install the project's FastEmbed dependency before preparing embeddings."
+        ) from error
+    for name, spec in _CUSTOM_MODEL_SPECS.items():
+        if any(getattr(entry, "model", None) == name for entry in CustomTextEmbedding.SUPPORTED_MODELS):
+            continue
+        CustomTextEmbedding.add_model(
+            DenseModelDescription(
+                model=name,
+                description=str(spec["description"]),
+                license="apache-2.0",
+                size_in_GB=float(spec["size_in_gb"]),
+                sources=ModelSource(hf=str(spec["hf_repo"])),
+                dim=int(spec["dimension"]),
+                model_file=str(spec["model_file"]),
+                additional_files=list(spec["additional_files"]),
+            ),
+            pooling=PoolingType(str(spec["pooling"])),
+            normalization=True,
+        )
+    _CUSTOM_REGISTRY_READY = True
+
+
+def _load_custom_embedding_class() -> type[Any]:
+    try:
+        _ensure_custom_models_registered()
+        from fastembed.text.custom_text_embedding import CustomTextEmbedding
+    except FastEmbedUnavailableError:
+        raise
+    except (ImportError, ModuleNotFoundError) as error:
+        raise FastEmbedUnavailableError(
+            "FastEmbed is unavailable. Install the project's FastEmbed dependency before preparing embeddings."
+        ) from error
+    return CustomTextEmbedding
+
+
 def _create_model(model_name: str, cache_dir: Path, *, local_files_only: bool) -> Any:
     try:
-        embedding_class = _load_text_embedding_class()
+        if model_name in _CUSTOM_MODEL_SPECS:
+            embedding_class = _load_custom_embedding_class()
+        else:
+            embedding_class = _load_text_embedding_class()
         return embedding_class(
             model_name=model_name,
             cache_dir=str(cache_dir),
@@ -371,10 +446,15 @@ def _create_model(model_name: str, cache_dir: Path, *, local_files_only: bool) -
 def _model_dimension(model: Any, model_name: str) -> int:
     try:
         dimension = int(getattr(model, "embedding_size"))
-    except (AttributeError, OverflowError, TypeError, ValueError) as error:
-        raise EmbeddingPreparationError(
-            f"FastEmbed model {model_name!r} does not expose a valid embedding dimension."
-        ) from error
+    except (AttributeError, NotImplementedError, OverflowError, TypeError, ValueError) as error:
+        # CustomTextEmbedding does not inherit the facade's embedding_size;
+        # its registered description dimension is the authoritative size.
+        spec = _CUSTOM_MODEL_SPECS.get(model_name)
+        if spec is None:
+            raise EmbeddingPreparationError(
+                f"FastEmbed model {model_name!r} does not expose a valid embedding dimension."
+            ) from error
+        dimension = int(spec["dimension"])
     if dimension < 1:
         raise EmbeddingPreparationError(
             f"FastEmbed model {model_name!r} returned an invalid embedding dimension."

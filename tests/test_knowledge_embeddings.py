@@ -12,6 +12,12 @@ def _clear_embedding_cache(monkeypatch):
         monkeypatch.setattr(knowledge_embeddings, "_MODEL_LOAD_FAILURES", OrderedDict())
 
 
+def _patch_embedding_loader(monkeypatch, loader):
+    """Route both the native and the custom-model loader seams to the same fake."""
+    monkeypatch.setattr(knowledge_embeddings, "_load_text_embedding_class", loader)
+    monkeypatch.setattr(knowledge_embeddings, "_load_custom_embedding_class", loader)
+
+
 def _fake_text_embedding_class(calls, *, query_vectors=None, passage_vectors=None):
     class FakeTextEmbedding:
         def __init__(self, *, model_name, cache_dir, threads, local_files_only):
@@ -46,7 +52,7 @@ def test_encode_requires_an_explicitly_prepared_model(tmp_path, monkeypatch):
     def unexpected_import():
         pytest.fail("encode must not import or initialize FastEmbed without a cache manifest")
 
-    monkeypatch.setattr(knowledge_embeddings, "_load_text_embedding_class", unexpected_import)
+    _patch_embedding_loader(monkeypatch, unexpected_import)
 
     with pytest.raises(knowledge_embeddings.EmbeddingModelNotPreparedError, match="call prepare"):
         knowledge_embeddings.encode(
@@ -58,11 +64,7 @@ def test_encode_requires_an_explicitly_prepared_model(tmp_path, monkeypatch):
 
 def test_prepare_and_encode_use_purpose_specific_fastembed_methods(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(calls))
     cache_dir = tmp_path / "model-cache"
 
     status = knowledge_embeddings.prepare(cache_dir=cache_dir)
@@ -70,7 +72,7 @@ def test_prepare_and_encode_use_purpose_specific_fastembed_methods(tmp_path, mon
     passages = knowledge_embeddings.encode(["知识内容"], purpose="passage", cache_dir=cache_dir)
 
     assert status["provider"] == "fastembed"
-    assert status["modelName"] == "BAAI/bge-small-zh-v1.5"
+    assert status["modelName"] == "voyage-4-nano"
     assert status["dimension"] == 3
     assert status["threads"] == 2
     assert status["prepared"] is True
@@ -87,11 +89,7 @@ def test_prepare_and_encode_use_purpose_specific_fastembed_methods(tmp_path, mon
 
 def test_prepared_manifest_rebuilds_model_offline_after_process_restart(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(calls))
     cache_dir = tmp_path / "model-cache"
 
     knowledge_embeddings.prepare(cache_dir=cache_dir)
@@ -111,11 +109,7 @@ def test_prepared_manifest_rebuilds_model_offline_after_process_restart(tmp_path
 
 def test_encode_never_falls_back_to_download_when_offline_cache_is_unavailable(tmp_path, monkeypatch):
     initial_calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(initial_calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(initial_calls))
     cache_dir = tmp_path / "model-cache"
     knowledge_embeddings.prepare(cache_dir=cache_dir)
     monkeypatch.setattr(knowledge_embeddings, "_MODEL_CACHE", OrderedDict())
@@ -129,7 +123,7 @@ def test_encode_never_falls_back_to_download_when_offline_cache_is_unavailable(t
                 pytest.fail("encode must never retry with network-enabled model loading")
             raise OSError("model files are absent")
 
-    monkeypatch.setattr(knowledge_embeddings, "_load_text_embedding_class", lambda: MissingCachedModel)
+    _patch_embedding_loader(monkeypatch, lambda: MissingCachedModel)
 
     with pytest.raises(knowledge_embeddings.EmbeddingOfflineCacheError):
         knowledge_embeddings.encode(["本地查询"], purpose="query", cache_dir=cache_dir)
@@ -139,11 +133,7 @@ def test_encode_never_falls_back_to_download_when_offline_cache_is_unavailable(t
 
 def test_offline_load_failure_is_reported_without_blocking_offline_retry(tmp_path, monkeypatch):
     initial_calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(initial_calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(initial_calls))
     cache_dir = tmp_path / "model-cache"
     knowledge_embeddings.prepare(cache_dir=cache_dir)
     monkeypatch.setattr(knowledge_embeddings, "_MODEL_CACHE", OrderedDict())
@@ -162,7 +152,7 @@ def test_offline_load_failure_is_reported_without_blocking_offline_retry(tmp_pat
         loader_calls.append(True)
         return BrokenCachedModel
 
-    monkeypatch.setattr(knowledge_embeddings, "_load_text_embedding_class", load_broken_cached_model)
+    _patch_embedding_loader(monkeypatch, load_broken_cached_model)
     with pytest.raises(knowledge_embeddings.EmbeddingOfflineCacheError):
         knowledge_embeddings.encode(["本地查询"], purpose="query", cache_dir=cache_dir)
 
@@ -175,11 +165,7 @@ def test_offline_load_failure_is_reported_without_blocking_offline_retry(tmp_pat
     assert loader_calls == [True]
 
     retry_calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(retry_calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(retry_calls))
     vectors = knowledge_embeddings.encode(["再次本地查询"], purpose="query", cache_dir=cache_dir)
 
     assert vectors == [[1.0, 0.0, 0.0]]
@@ -192,11 +178,7 @@ def test_offline_load_failure_is_reported_without_blocking_offline_retry(tmp_pat
 
 def test_explicit_prepare_can_recover_after_known_offline_load_failure(tmp_path, monkeypatch):
     initial_calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(initial_calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(initial_calls))
     cache_dir = tmp_path / "model-cache"
     knowledge_embeddings.prepare(cache_dir=cache_dir)
     monkeypatch.setattr(knowledge_embeddings, "_MODEL_CACHE", OrderedDict())
@@ -213,7 +195,7 @@ def test_explicit_prepare_can_recover_after_known_offline_load_failure(tmp_path,
         def query_embed(self, texts):
             return iter([[1.0, 0.0, 0.0] for _ in texts])
 
-    monkeypatch.setattr(knowledge_embeddings, "_load_text_embedding_class", lambda: RecoverableModel)
+    _patch_embedding_loader(monkeypatch, lambda: RecoverableModel)
     with pytest.raises(knowledge_embeddings.EmbeddingOfflineCacheError):
         knowledge_embeddings.encode(["本地查询"], purpose="query", cache_dir=cache_dir)
     assert knowledge_embeddings.readiness(cache_dir=cache_dir)["ready"] is False
@@ -227,11 +209,7 @@ def test_explicit_prepare_can_recover_after_known_offline_load_failure(tmp_path,
 
 def test_prepare_separates_model_and_cache_identities_with_bounded_memory(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(calls),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(calls))
     first_cache = tmp_path / "first-cache"
     second_cache = tmp_path / "second-cache"
 
@@ -250,7 +228,7 @@ def test_prepare_reports_a_missing_fastembed_dependency(tmp_path, monkeypatch):
     def missing_dependency():
         raise knowledge_embeddings.FastEmbedUnavailableError("FastEmbed is unavailable.")
 
-    monkeypatch.setattr(knowledge_embeddings, "_load_text_embedding_class", missing_dependency)
+    _patch_embedding_loader(monkeypatch, missing_dependency)
 
     with pytest.raises(knowledge_embeddings.FastEmbedUnavailableError, match="unavailable"):
         knowledge_embeddings.prepare(cache_dir=tmp_path / "cache")
@@ -267,11 +245,7 @@ def test_prepare_reports_a_missing_fastembed_dependency(tmp_path, monkeypatch):
 )
 def test_encode_rejects_invalid_fastembed_vectors(tmp_path, monkeypatch, vectors, message):
     calls = []
-    monkeypatch.setattr(
-        knowledge_embeddings,
-        "_load_text_embedding_class",
-        lambda: _fake_text_embedding_class(calls, query_vectors=vectors),
-    )
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(calls, query_vectors=vectors))
     cache_dir = tmp_path / "model-cache"
     knowledge_embeddings.prepare(cache_dir=cache_dir)
 
@@ -282,3 +256,41 @@ def test_encode_rejects_invalid_fastembed_vectors(tmp_path, monkeypatch, vectors
 def test_encode_rejects_unsupported_purpose(tmp_path):
     with pytest.raises(knowledge_embeddings.EmbeddingInputError, match="query.*passage"):
         knowledge_embeddings.encode(["query"], purpose="similarity", cache_dir=tmp_path / "cache")
+
+
+def test_custom_default_model_routes_via_custom_loader_and_applies_query_prefix(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        knowledge_embeddings,
+        "_load_text_embedding_class",
+        lambda: pytest.fail("the custom default model must not load through the native registry"),
+    )
+    monkeypatch.setattr(
+        knowledge_embeddings,
+        "_load_custom_embedding_class",
+        lambda: _fake_text_embedding_class(calls),
+    )
+    cache_dir = tmp_path / "model-cache"
+
+    knowledge_embeddings.prepare(cache_dir=cache_dir)
+    knowledge_embeddings.encode(["芯片制程极限"], purpose="query", cache_dir=cache_dir)
+    knowledge_embeddings.encode(["芯片制程极限"], purpose="passage", cache_dir=cache_dir)
+
+    prefix = knowledge_embeddings._CUSTOM_MODEL_SPECS["voyage-4-nano"]["query_prefix"]
+    assert calls[0]["model_name"] == "voyage-4-nano"
+    assert calls[1]["purpose"] == "query"
+    assert calls[1]["texts"] == [prefix + "芯片制程极限"]
+    assert calls[2]["purpose"] == "passage"
+    assert calls[2]["texts"] == ["芯片制程极限"]
+
+
+def test_query_prefix_is_not_applied_to_unregistered_models(tmp_path, monkeypatch):
+    calls = []
+    _patch_embedding_loader(monkeypatch, lambda: _fake_text_embedding_class(calls))
+    cache_dir = tmp_path / "model-cache"
+
+    knowledge_embeddings.prepare("model-a", cache_dir)
+    knowledge_embeddings.encode(["芯片制程极限"], purpose="query", model_name="model-a", cache_dir=cache_dir)
+
+    assert calls[1]["purpose"] == "query"
+    assert calls[1]["texts"] == ["芯片制程极限"]

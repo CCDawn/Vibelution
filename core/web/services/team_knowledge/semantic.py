@@ -20,9 +20,9 @@ from .search_ranking import _rank_bm25_search_results
 CHUNK_CHARS = 320
 CHUNK_OVERLAP = 64
 RRF_K = 60
-# BAAI/bge-small-zh-v1.5 emits 512-dimensional vectors. Keep this explicit
+# voyage-4-nano emits 2048-dimensional vectors. Keep this explicit
 # fallback for readiness payloads that omit their measured model dimension.
-DEFAULT_EMBEDDING_DIMENSION = 512
+DEFAULT_EMBEDDING_DIMENSION = 2048
 _BUILD_LOCK = threading.Lock()
 
 
