@@ -45,7 +45,7 @@ import {
   listVirtualHumanCompanionActivity,
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
-import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
+import { fetchKnowledgeOverview, listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
 import { fetchFileContent } from "../../api/files";
 import { ArchivedSessionRail } from "./ArchivedSessionRail";
 import { ChatRightRail } from "./ChatRightRail";
@@ -611,6 +611,52 @@ export function useStableSessionDetailPaint(options: {
     () => resolveStickySessionDetailPaint({ activeSessionId, detail: rawSessionDetail }),
     [activeSessionId, rawSessionDetail],
   );
+}
+
+/**
+ * Knowledge-reference queries feeding the composer "reference" dropdown.
+ *
+ * The item options enumerate entries across every knowledge base the agent can
+ * read (its private bases plus readable team bases). `searchKnowledgeItems` is
+ * the only endpoint offering that cross-owner enumeration with a server-side
+ * limit, so it stays — but it used to fire unconditionally with an empty query
+ * on every chat-workbench mount and agent switch, which dominated the live
+ * audit's scopeless empty-query search noise (most offenders scanned zero
+ * bases). The search is now gated on the agent-scoped knowledge overview:
+ * `summary.itemCount` counts the items of exactly the same owner/base set the
+ * search scans, so `itemCount === 0` proves the search would return nothing
+ * and the request is skipped. The overview is metadata-only (no item content)
+ * and cached alongside the bases query, so agents that do own knowledge pay
+ * one lightweight extra request instead of an unscoped scan-per-visit.
+ */
+export function useComposerKnowledgeReferenceQueries(agentId: string) {
+  const agentKnowledgeBasesQuery = useQuery({
+    queryKey: ["knowledge", "agent-bases", agentId],
+    queryFn: () => listAgentKnowledgeBases<{ knowledgeBases?: Array<{ knowledgeBaseId?: string; name?: string; description?: string }> }>(
+      agentId,
+      { actorAgentId: agentId },
+    ),
+    enabled: Boolean(agentId),
+    staleTime: 60_000,
+  });
+  const agentKnowledgeOverviewQuery = useQuery({
+    queryKey: ["knowledge", "overview", agentId],
+    queryFn: () => fetchKnowledgeOverview<{ summary?: { itemCount?: number } }>({ agentId }),
+    enabled: Boolean(agentId),
+    staleTime: 60_000,
+  });
+  const agentKnowledgeItemsQuery = useQuery({
+    queryKey: queryKeys.knowledgeSearch("", agentId, "", "", "keyword"),
+    queryFn: () => searchKnowledgeItems<{ results?: Array<{
+      knowledgeItemId?: string;
+      knowledgeBaseId?: string;
+      title?: string;
+      knowledgeBaseName?: string;
+    }> }>({ agentId, limit: 20 }),
+    enabled: Boolean(agentId) && (agentKnowledgeOverviewQuery.data?.summary?.itemCount ?? 0) > 0,
+    staleTime: 60_000,
+  });
+  return { agentKnowledgeBasesQuery, agentKnowledgeItemsQuery };
 }
 
 export function ChatCodingRouteWorkbench() {
@@ -3125,26 +3171,8 @@ export function ChatCodingRouteWorkbench() {
   const selectedChatAgent = selectedChatAgentId ? agentsById.get(selectedChatAgentId) : undefined;
 
   const composerKnowledgeAgentId = activeSessionAgentId || selectedChatAgentId || "";
-  const agentKnowledgeBasesQuery = useQuery({
-    queryKey: ["knowledge", "agent-bases", composerKnowledgeAgentId],
-    queryFn: () => listAgentKnowledgeBases<{ knowledgeBases?: Array<{ knowledgeBaseId?: string; name?: string; description?: string }> }>(
-      composerKnowledgeAgentId,
-      { actorAgentId: composerKnowledgeAgentId },
-    ),
-    enabled: Boolean(composerKnowledgeAgentId),
-    staleTime: 60_000,
-  });
-  const agentKnowledgeItemsQuery = useQuery({
-    queryKey: queryKeys.knowledgeSearch("", composerKnowledgeAgentId, "", "", "keyword"),
-    queryFn: () => searchKnowledgeItems<{ results?: Array<{
-      knowledgeItemId?: string;
-      knowledgeBaseId?: string;
-      title?: string;
-      knowledgeBaseName?: string;
-    }> }>({ agentId: composerKnowledgeAgentId, limit: 20 }),
-    enabled: Boolean(composerKnowledgeAgentId),
-    staleTime: 60_000,
-  });
+  const { agentKnowledgeBasesQuery, agentKnowledgeItemsQuery } =
+    useComposerKnowledgeReferenceQueries(composerKnowledgeAgentId);
   const composerKnowledgeReferenceOptions = useMemo<ChatComposerSessionReferenceOption[]>(() => {
     const options: ChatComposerSessionReferenceOption[] = [];
     for (const base of agentKnowledgeBasesQuery.data?.knowledgeBases ?? []) {
