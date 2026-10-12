@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -21,6 +22,33 @@ def _service():
     from core.web.services import team_knowledge_service
 
     return team_knowledge_service
+
+
+def _find_idempotent_source_record(
+    sources: list[dict[str, Any]],
+    idempotency_record: dict[str, str],
+) -> dict[str, Any] | None:
+    return next(
+        (
+            item
+            for item in sources
+            if isinstance(item, dict)
+            and isinstance(item.get("_idempotency"), dict)
+            and str(item["_idempotency"].get("scopeHash") or "") == idempotency_record["scopeHash"]
+        ),
+        None,
+    )
+
+
+def _best_effort_rmtree(path_value: Any) -> None:
+    """Best-effort staging cleanup; orphan tolerance never gets worse than leaving the tree."""
+    if not path_value:
+        return
+    s = _service()
+    try:
+        shutil.rmtree(s._extended_fs_path(Path(path_value)), ignore_errors=True)
+    except OSError:
+        pass
 
 
 _INTERNAL_SOURCE_FIELDS = {
@@ -343,16 +371,7 @@ def collect_source_to_inbox(
     with s._LOCK:
         sources = s._read_jsonl(s._owner_source_index_path(owner))
         if idempotency_record:
-            existing = next(
-                (
-                    item
-                    for item in sources
-                    if isinstance(item, dict)
-                    and isinstance(item.get("_idempotency"), dict)
-                    and str(item["_idempotency"].get("scopeHash") or "") == idempotency_record["scopeHash"]
-                ),
-                None,
-            )
+            existing = _find_idempotent_source_record(sources, idempotency_record)
             if existing is not None:
                 old_record = existing.get("_idempotency") if isinstance(existing.get("_idempotency"), dict) else {}
                 if str(old_record.get("requestFingerprint") or "") != idempotency_record["requestFingerprint"]:
@@ -361,9 +380,13 @@ def collect_source_to_inbox(
                     )
                 # Return the persisted record as-is so a retry cannot reset a review decision.
                 return _public_source(existing)
-
-        now = s.utc_now_iso()
         inbox_source_id = s._new_event_id("inboxsrc")
+
+    # Heavy staging I/O (original file write, per-copy sha256, copy2) runs
+    # outside the shared write lock: the target directory is isolated by the
+    # freshly allocated inbox_source_id and the registry is only mutated after
+    # staging has fully succeeded, under the commit lock below.
+    try:
         original_path = s._write_owner_inbox_source_file(
             owner,
             inbox_source_id,
@@ -378,8 +401,29 @@ def collect_source_to_inbox(
             inbox_source_id,
             local_file_paths or [],
         )
-        if local_copies:
-            normalized_ref["localCopies"] = local_copies
+    except Exception:
+        _best_effort_rmtree(s._owner_inbox_source_dir(owner, inbox_source_id))
+        raise
+    if local_copies:
+        normalized_ref["localCopies"] = local_copies
+
+    with s._LOCK:
+        sources = s._read_jsonl(s._owner_source_index_path(owner))
+        if idempotency_record:
+            existing = _find_idempotent_source_record(sources, idempotency_record)
+            if existing is not None:
+                old_record = existing.get("_idempotency") if isinstance(existing.get("_idempotency"), dict) else {}
+                # A concurrent request holding the same key won the registration
+                # race while this request staged; drop this attempt's orphan
+                # staging tree (isolated by its unique inbox_source_id).
+                _best_effort_rmtree(s._owner_inbox_source_dir(owner, inbox_source_id))
+                if str(old_record.get("requestFingerprint") or "") != idempotency_record["requestFingerprint"]:
+                    raise s.TeamKnowledgeIdempotencyConflictError(
+                        "Idempotency-Key was already used for a different source inbox request."
+                    )
+                # Return the persisted record as-is so a retry cannot reset a review decision.
+                return _public_source(existing)
+        now = s.utc_now_iso()
         source = {
             "schemaVersion": s.SCHEMA_VERSION,
             "inboxSourceId": inbox_source_id,
@@ -607,37 +651,28 @@ def collect_session_attachment_to_inbox(
     lock_wait_started_at = time.perf_counter()
     existing: dict[str, Any] | None = None
     idempotency_outcome = "created"
+    lock_acquired_at = lock_wait_started_at
     if idempotency_record:
         with s._LOCK:
             lock_acquired_at = time.perf_counter()
             sources = s._read_jsonl(s._owner_source_index_path(owner))
-            existing = next(
-                (
-                    item
-                    for item in sources
-                    if isinstance(item, dict)
-                    and isinstance(item.get("_idempotency"), dict)
-                    and str(item["_idempotency"].get("scopeHash") or "") == idempotency_record["scopeHash"]
-                ),
-                None,
-            )
-            if existing is not None:
-                old_record = existing.get("_idempotency") if isinstance(existing.get("_idempotency"), dict) else {}
-                idempotency_outcome = (
-                    "replayed"
-                    if str(old_record.get("requestFingerprint") or "") == idempotency_record["requestFingerprint"]
-                    else "conflict"
-                )
-                staged = _public_source(existing)
-                collected_at = time.perf_counter()
-            else:
-                staged, collected_at = stage_source()
+            existing = _find_idempotent_source_record(sources, idempotency_record)
+    staged: dict[str, Any]
+    if existing is not None:
+        old_record = existing.get("_idempotency") if isinstance(existing.get("_idempotency"), dict) else {}
+        idempotency_outcome = (
+            "replayed"
+            if str(old_record.get("requestFingerprint") or "") == idempotency_record["requestFingerprint"]
+            else "conflict"
+        )
+        staged = _public_source(existing)
+        collected_at = time.perf_counter()
     else:
-        lock_acquired_at = lock_wait_started_at
+        # Document text extraction and inbox staging run outside the shared
+        # write lock (PDF extraction is heavy CPU/IO); the reentrant
+        # ``collect_source_to_inbox`` performs its own locked admission —
+        # including the same-key replay re-check — and the registration.
         staged, collected_at = stage_source()
-
-    if not idempotency_record:
-        lock_acquired_at = lock_wait_started_at
     phase_timings_ms = {
         "ownerAuthorization": round((authorized_at - started_at) * 1000, 3),
         "sessionAndAttachmentResolve": round((attachment_resolved_at - authorized_at) * 1000, 3),
@@ -795,15 +830,15 @@ def review_owner_inbox_source(
         raise s.TeamKnowledgeError("Direct ingestion is only supported for accepted source reviews.")
     now = s.utc_now_iso()
     direct_ingestion: dict[str, Any] | None = None
-    with s._LOCK:
-        sources = s._read_jsonl(s._owner_source_index_path(owner))
-        source = s._find_by_id(sources, "inboxSourceId", inbox_source_id)
-        if not source:
-            raise s.TeamKnowledgeNotFoundError("Inbox source not found.")
-        current_status = str(source.get("status") or "")
+    normalized_knowledge_content = ""
+    staged_central: dict[str, Any] | None = None
+    target_base: dict[str, Any] | None = None
+
+    def _assert_source_reviewable(current: dict[str, Any]) -> None:
+        current_status = str(current.get("status") or "")
         if current_status not in {"pending", "needs_more_context"}:
             raise s.TeamKnowledgeError("Only pending or needs_more_context inbox sources can be reviewed.")
-        protected_collector_id = str(source.get("_sessionAttachmentCollectorAgentId") or "").strip()
+        protected_collector_id = str(current.get("_sessionAttachmentCollectorAgentId") or "").strip()
         if (
             owner["ownerType"] == "team"
             and protected_collector_id
@@ -812,7 +847,7 @@ def review_owner_inbox_source(
             raise s.TeamKnowledgePermissionError(
                 "A Team Agent cannot review their own staged session attachment source."
             )
-        protected_steward_pack_proposer_id = str(source.get("_teamStewardPackProposerAgentId") or "").strip()
+        protected_steward_pack_proposer_id = str(current.get("_teamStewardPackProposerAgentId") or "").strip()
         if (
             owner["ownerType"] == "team"
             and protected_steward_pack_proposer_id
@@ -821,6 +856,17 @@ def review_owner_inbox_source(
             raise s.TeamKnowledgePermissionError(
                 "A Team Agent cannot review their own staged steward-pack source."
             )
+
+    # --- Admission lock: status, self-review protection, and direct-ingestion
+    # target permissions all complete inside the shared write lock, before any
+    # promotion work runs (fxl-0026: permission checks must not move after
+    # promotion).
+    with s._LOCK:
+        sources = s._read_jsonl(s._owner_source_index_path(owner))
+        source = s._find_by_id(sources, "inboxSourceId", inbox_source_id)
+        if not source:
+            raise s.TeamKnowledgeNotFoundError("Inbox source not found.")
+        _assert_source_reviewable(source)
         if wants_direct_ingest:
             target_owner, target_base = s._require_base_with_owner(knowledge_base_id)
             target_owner = s._coerce_owner_context(target_owner)
@@ -833,27 +879,56 @@ def review_owner_inbox_source(
             # Creating the downstream source artifact also requires propose.
             # Reject before central promotion rather than leaving a partial review.
             s._require_permission(target_owner, target_base, reviewer_id, "propose")
-            normalized_knowledge_content = (
-                _read_staged_document_content(owner, source)
-                if normalized_content_mode == "source_document"
-                else s._normalize_formal_knowledge_content(knowledge_content)
-            )
-            if not normalized_knowledge_content:
-                raise s.TeamKnowledgeError("Direct ingestion requires knowledgeContent.")
-            s._tk_financial.validate_financial_source(
-                target_base,
-                str(source.get("sourceType") or ""),
-                source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {},
-                content=normalized_knowledge_content,
-            )
-        central_source: dict[str, Any] | None = None
-        promotion: dict[str, Any] | None = None
+        # Speculative staging plan: for accepted decisions, peek the central
+        # hash dedupe under the lock so hashes already centrally promoted skip
+        # the lock-free staging round. The authoritative dedupe re-check stays
+        # inside the commit lock in _promote_owner_source_to_central_locked.
+        central_staging_id = ""
+        if normalized_decision == "accepted":
+            source_hash = str(source.get("sourceHash") or "").strip()
+            if not source_hash:
+                raise s.TeamKnowledgeError("Inbox source requires sourceHash before central promotion.")
+            s._assert_central_source_write_allowed()
+            if not s._find_central_source_by_hash_locked(source_hash):
+                central_staging_id = s._new_event_id("csrc")
+
+    # --- Lock-free validation and staging. Staged inbox files are immutable
+    # snapshots, so reading and hashing them cannot race a concurrent writer.
+    if wants_direct_ingest:
+        normalized_knowledge_content = (
+            _read_staged_document_content(owner, source)
+            if normalized_content_mode == "source_document"
+            else s._normalize_formal_knowledge_content(knowledge_content)
+        )
+        if not normalized_knowledge_content:
+            raise s.TeamKnowledgeError("Direct ingestion requires knowledgeContent.")
+        s._tk_financial.validate_financial_source(
+            target_base,
+            str(source.get("sourceType") or ""),
+            source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {},
+            content=normalized_knowledge_content,
+        )
+    if central_staging_id:
+        staged_central = _stage_central_source_payload(owner, source, central_staging_id)
+
+    central_source: dict[str, Any] | None = None
+    promotion: dict[str, Any] | None = None
+    # --- Commit lock: re-validate the source — a concurrent review may have
+    # resolved it while this request staged outside the lock (double-review
+    # guard) — then apply the decision and registration atomically.
+    with s._LOCK:
+        sources = s._read_jsonl(s._owner_source_index_path(owner))
+        source = s._find_by_id(sources, "inboxSourceId", inbox_source_id)
+        if not source:
+            raise s.TeamKnowledgeNotFoundError("Inbox source not found.")
+        _assert_source_reviewable(source)
         if normalized_decision == "accepted":
             central_source, promotion = s._promote_owner_source_to_central_locked(
                 owner,
                 source,
                 reviewer_id=reviewer_id,
                 resolution_note=resolution_note,
+                staged_central=staged_central,
             )
             source["status"] = "accepted"
             source["curationStatus"] = "central_curated"
@@ -1227,6 +1302,7 @@ def _promote_owner_source_to_central_locked(
     *,
     reviewer_id: str,
     resolution_note: str,
+    staged_central: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     s = _service()
     owner = s._coerce_owner_context(owner_value)
@@ -1238,10 +1314,24 @@ def _promote_owner_source_to_central_locked(
     dedupe_status = "reused" if existing else "created"
     if existing:
         central_source = existing
+        if staged_central:
+            # A concurrent promotion registered the same hash while this
+            # review staged outside the lock; drop the orphan staging tree
+            # (best-effort, never touches the winner's registered snapshot).
+            _best_effort_rmtree(staged_central.get("stagingDir"))
     else:
         now = s.utc_now_iso()
-        central_source_id = s._new_event_id("csrc")
-        central_path = s._copy_or_write_central_source_file(owner, source, central_source_id)
+        if staged_central:
+            # Commit the lock-free staged snapshot: one same-volume
+            # ``os.replace`` from the staging sibling into the final
+            # per-source directory, then register under this lock.
+            central_source_id = str(staged_central.get("centralSourceId") or "")
+            snapshot_sha256 = str(staged_central.get("snapshotSha256") or "")
+            central_path = _commit_staged_central_source(s, staged_central)
+        else:
+            central_source_id = s._new_event_id("csrc")
+            snapshot_sha256 = ""
+            central_path = s._copy_or_write_central_source_file(owner, source, central_source_id)
         source_dir = central_path.parent
         local_copies = s._relocate_local_copies_to_central(
             list(source.get("localCopies") or []),
@@ -1250,6 +1340,8 @@ def _promote_owner_source_to_central_locked(
         source_ref = s._bounded_dict(source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {})
         if local_copies:
             source_ref["localCopies"] = local_copies
+        if not snapshot_sha256:
+            snapshot_sha256 = hashlib.sha256(central_path.read_bytes()).hexdigest()
         central_source = {
             "schemaVersion": s.SCHEMA_VERSION,
             "centralSourceId": central_source_id,
@@ -1263,7 +1355,7 @@ def _promote_owner_source_to_central_locked(
             "centralPath": s._project_relative_path(central_path),
             "snapshotYear": central_path.parent.parent.name,
             "snapshotFilename": central_path.name,
-            "snapshotSha256": hashlib.sha256(central_path.read_bytes()).hexdigest(),
+            "snapshotSha256": snapshot_sha256,
             "localCopies": local_copies,
             "originOwnerType": owner["ownerType"],
             "originOwnerId": owner["ownerId"],
@@ -1370,50 +1462,103 @@ def _append_owner_ref_for_central_source_locked(
     return promotion
 
 
-def _copy_or_write_central_source_file(owner_value: Any, source: dict[str, Any], central_source_id: str) -> Path:
+def _central_source_snapshot_layout(source: dict[str, Any], central_source_id: str) -> Path:
+    """Resolve the final per-source directory (year bucket + central id) for a central snapshot."""
+    s = _service()
+    accepted_at = str(source.get("reviewedAt") or source.get("capturedAt") or s.utc_now_iso())
+    year = s._safe_token(accepted_at[:4], default="undated", max_length=16)
+    return (
+        s._central_source_accepted_dir() / year / s._safe_token(central_source_id, default="source", max_length=128)
+    )
+
+
+def _stage_central_source_payload(
+    owner_value: Any,
+    source: dict[str, Any],
+    central_source_id: str,
+) -> dict[str, Any]:
+    """Stage the central source snapshot outside the shared write lock.
+
+    The staging directory is a sibling of the final per-source directory inside
+    the accepted tree (same volume), so the in-lock commit reduces to one
+    ``os.replace``. The central registry stays untouched until that commit. A
+    staging failure cleans the staging directory best-effort and re-raises.
+    """
     s = _service()
     s._assert_central_source_write_allowed()
     owner = s._coerce_owner_context(owner_value)
-    accepted_at = str(source.get("reviewedAt") or source.get("capturedAt") or s.utc_now_iso())
-    year = s._safe_token(accepted_at[:4], default="undated", max_length=16)
-    source_dir = s._central_source_accepted_dir() / year / s._safe_token(central_source_id, default="source", max_length=128)
-    source_dir.mkdir(parents=True, exist_ok=True)
-    original_path = s._project_path_from_relative(str(source.get("originalPath") or ""))
-    filename = s._safe_source_filename(str(source.get("originalFilename") or ""), default="source.txt")
-    target_path = source_dir / filename
-    copied_original = False
-    if original_path and original_path.exists() and original_path.is_file():
-        shutil.copy2(s._extended_fs_path(original_path), s._extended_fs_path(target_path))
-        copied_original = True
-        attachments_src = original_path.parent / "attachments"
-        if attachments_src.is_dir():
-            shutil.copytree(
-                s._extended_fs_path(attachments_src),
-                s._extended_fs_path(source_dir / "attachments"),
-                dirs_exist_ok=True,
+    final_dir = _central_source_snapshot_layout(source, central_source_id)
+    staging_dir = final_dir.parent / f"{final_dir.name}.staging-{s._new_event_id('stage')}"
+    staging_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        original_path = s._project_path_from_relative(str(source.get("originalPath") or ""))
+        filename = s._safe_source_filename(str(source.get("originalFilename") or ""), default="source.txt")
+        target_path = staging_dir / filename
+        copied_original = False
+        if original_path and original_path.exists() and original_path.is_file():
+            shutil.copy2(s._extended_fs_path(original_path), s._extended_fs_path(target_path))
+            copied_original = True
+            attachments_src = original_path.parent / "attachments"
+            if attachments_src.is_dir():
+                shutil.copytree(
+                    s._extended_fs_path(attachments_src),
+                    s._extended_fs_path(staging_dir / "attachments"),
+                    dirs_exist_ok=True,
+                )
+        if not copied_original:
+            target_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": s.SCHEMA_VERSION,
+                        "ownerType": owner["ownerType"],
+                        "ownerId": owner["ownerId"],
+                        "inboxSourceId": source.get("inboxSourceId") or "",
+                        "sourceType": source.get("sourceType") or "",
+                        "sourceRef": source.get("sourceRef") or {},
+                        "title": source.get("title") or "",
+                        "summary": source.get("summary") or "",
+                        "sourceHash": source.get("sourceHash") or "",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
             )
-    if not copied_original:
-        target_path.write_text(
-            json.dumps(
-                {
-                    "schemaVersion": s.SCHEMA_VERSION,
-                    "ownerType": owner["ownerType"],
-                    "ownerId": owner["ownerId"],
-                    "inboxSourceId": source.get("inboxSourceId") or "",
-                    "sourceType": source.get("sourceType") or "",
-                    "sourceRef": source.get("sourceRef") or {},
-                    "title": source.get("title") or "",
-                    "summary": source.get("summary") or "",
-                    "sourceHash": source.get("sourceHash") or "",
-                },
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    return target_path
+        snapshot_sha256 = hashlib.sha256(s._extended_fs_path(target_path).read_bytes()).hexdigest()
+    except Exception:
+        _best_effort_rmtree(staging_dir)
+        raise
+    return {
+        "centralSourceId": central_source_id,
+        "stagingDir": staging_dir,
+        "finalDir": final_dir,
+        "centralFilename": filename,
+        "snapshotSha256": snapshot_sha256,
+    }
+
+
+def _commit_staged_central_source(s: Any, staged: dict[str, Any]) -> Path:
+    """Atomically move a lock-free staged central snapshot into its final position."""
+    staging_dir = Path(staged["stagingDir"])
+    final_dir = Path(staged["finalDir"])
+    filename = str(staged.get("centralFilename") or "")
+    if not filename:
+        raise s.TeamKnowledgeError("Staged central source snapshot is missing its filename.")
+    final_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Same-volume directory rename (extended-length paths on Windows); the
+    # freshly allocated centralSourceId guarantees the final directory does
+    # not exist yet, so the snapshot appears atomically at its registry path.
+    os.replace(s._extended_fs_path(staging_dir), s._extended_fs_path(final_dir))
+    return final_dir / filename
+
+
+def _copy_or_write_central_source_file(owner_value: Any, source: dict[str, Any], central_source_id: str) -> Path:
+    """Stage and atomically publish one central snapshot (kept as one step)."""
+    s = _service()
+    staged = _stage_central_source_payload(owner_value, source, central_source_id)
+    return _commit_staged_central_source(s, staged)
 
 
 def _require_central_source_for_owner(
