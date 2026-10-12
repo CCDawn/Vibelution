@@ -40,7 +40,9 @@ describe("knowledge search requests", () => {
 });
 
 describe("knowledge catalog API", () => {
-  it("owns the knowledge platform transports including unused C5 routes", () => {
+  // 2026-10-12 裁决：governance-plan 与 ingestion-package 前端封装删除，端点保留给 agent 工具/工作流；
+  // 下方 owners 清单即当前仍保留的前端 transport 封装的精确清单。
+  it("owns the knowledge platform transports", () => {
     const owners = [
       "fetchKnowledgeOverview",
       "fetchKnowledgeDashboardSnapshot",
@@ -49,7 +51,6 @@ describe("knowledge catalog API", () => {
       "fetchKnowledgeStewardWorkbench",
       "fetchKnowledgeOperationsHealth",
       "fetchKnowledgeAgentReadiness",
-      "fetchKnowledgeGovernancePlan",
       "searchKnowledgeItems",
       "retrieveKnowledgeRag",
       "fetchKnowledgeRagHealth",
@@ -67,7 +68,6 @@ describe("knowledge catalog API", () => {
       "createAgentKnowledgeBase",
       "createKnowledgeCentralSourceArtifact",
       "createKnowledgeRefinementProposal",
-      "createKnowledgeIngestionPackage",
       "reviewKnowledgeRefinementProposal",
       "listKnowledgeItems",
       "fetchKnowledgeTrace",
@@ -92,7 +92,6 @@ describe("knowledge catalog API", () => {
     expect(apiSource).toContain("/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}");
     expect(apiSource).toContain("/central-source-artifacts");
     expect(apiSource).toContain("/refinement-proposals");
-    expect(apiSource).toContain("/ingestion-packages");
     expect(apiSource).toContain("/rating-suggestions/review-batch");
     expect(apiSource).toContain("/api/teams/${encodeURIComponent(teamId)}/knowledge-bases");
     expect(apiSource).toContain("/api/agents/${encodeURIComponent(agentId)}/knowledge-bases");

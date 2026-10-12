@@ -113,17 +113,6 @@ export function fetchKnowledgeAgentReadiness<T>(options?: {
   });
 }
 
-export function fetchKnowledgeGovernancePlan<T>(options?: {
-  agentId?: string;
-  limit?: number;
-  signal?: AbortSignal;
-}): Promise<T> {
-  return fetchJson<T>(
-    `/api/knowledge/governance/plan${agentQuery(options?.agentId, { limit: options?.limit })}`,
-    { signal: options?.signal },
-  );
-}
-
 export function searchKnowledgeItems<T>(options: {
   agentId: string;
   knowledgeBaseId?: string;
@@ -360,13 +349,6 @@ export function createKnowledgeRefinementProposal<T>(
   body: unknown,
 ): Promise<T> {
   return sendJson<T>(knowledgeBasePath(knowledgeBaseId, "/refinement-proposals"), "POST", body);
-}
-
-export function createKnowledgeIngestionPackage<T>(
-  knowledgeBaseId: string,
-  body: unknown,
-): Promise<T> {
-  return sendJson<T>(knowledgeBasePath(knowledgeBaseId, "/ingestion-packages"), "POST", body);
 }
 
 export function reviewKnowledgeRefinementProposal<T>(
