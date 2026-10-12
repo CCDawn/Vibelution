@@ -1,5 +1,5 @@
 import { PanelRightClose, Plus, Search, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createSessionChild, fetchSessionDetail, listSessionChildSessions, submitSessionMessage } from "../../api/chat";
@@ -132,6 +132,8 @@ type ChatRightRailProps = {
   model: ChatRightRailModel;
   onModelChange: (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => void;
   onCollapse: () => void;
+  /** Specialist-chat note at the top of the column body; ordinary sessions pass nothing. */
+  preface?: ReactNode;
   review: ChatRightRailReview;
   devtools: ChatRightRailDevtoolsInput;
   terminalRun: CliAgentRunView | null;
@@ -457,11 +459,13 @@ function directoryRows(sessions: SessionSummary[]): DirectoryRow[] {
 
 function ChatRightRailDirectoryBody({
   sessionId,
+  live,
   lang,
   copy,
   onOpenItem,
 }: {
   sessionId: string;
+  live: boolean;
   lang: "zh" | "en";
   copy: {
     directory: string;
@@ -479,6 +483,8 @@ function ChatRightRailDirectoryBody({
     queryKey: queryKeys.sessionChildSessions(sessionId || "none"),
     queryFn: () => listSessionChildSessions(sessionId),
     enabled: Boolean(sessionId),
+    refetchInterval: live ? 3_000 : false,
+    refetchIntervalInBackground: false,
   });
   const rows = directoryRows(directoryQuery.data ?? []);
   const running = rows.filter((row) => sideChatPhaseIsInFlight(row.status));
@@ -530,6 +536,7 @@ export function ChatRightRail({
   model,
   onModelChange,
   onCollapse,
+  preface = null,
   review,
   devtools,
   terminalRun,
@@ -852,6 +859,7 @@ export function ChatRightRail({
         </div>
       ) : null}
       <div className={styles.body}>
+        {preface}
         {model.tabs.length === 0 ? (
           <div className={styles.launcher}>
             <VEmptyState title={copy.openTab} align="start">
@@ -1053,6 +1061,7 @@ export function ChatRightRail({
         {active?.kind === "directory" && sessionKind !== "child" ? (
           <ChatRightRailDirectoryBody
             sessionId={sessionId}
+            live
             lang={lang}
             copy={copy}
             onOpenItem={(item) => {

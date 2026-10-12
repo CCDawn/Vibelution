@@ -4268,6 +4268,7 @@ export function ChatCodingRouteWorkbench() {
             openPreviewTab(activeSessionId, path);
           }
         }}
+        preface={<FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
         review={{
           sessionTitle: lang === "zh" ? "这次对话" : "This chat",
           sessionEmptyLabel: lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet",
@@ -4572,7 +4573,7 @@ export function ChatCodingRouteWorkbench() {
               invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
-              preface={financialResearchBridge ? null : <FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
+              preface={null}
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
