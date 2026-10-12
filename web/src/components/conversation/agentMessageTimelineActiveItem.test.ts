@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
 
 const conversationViewSource = readFileSync(new URL("./ConversationView.tsx", import.meta.url), "utf8");
+const conversationTimelineItemsSource = readFileSync(new URL("./conversationTimelineItems.tsx", import.meta.url), "utf8");
 const helperModuleUrl = new URL("./agentMessageTimelineActiveItem.ts", import.meta.url);
 
 const assistantTextItem: AgentMessageTimelineItem = {
@@ -42,7 +43,8 @@ const completedThoughtItem: AgentMessageTimelineItem = {
 describe("agentMessageTimelineActiveItem", () => {
   it("keeps active timeline item selection outside ConversationView", () => {
     expect(existsSync(helperModuleUrl)).toBe(true);
-    expect(conversationViewSource).toContain("from \"./agentMessageTimelineActiveItem\"");
+    expect(conversationViewSource).toContain("from \"./conversationTimelineItems\"");
+    expect(conversationTimelineItemsSource).toContain("from \"./agentMessageTimelineActiveItem\"");
     expect(conversationViewSource).not.toContain("function activeTimelineItemId(");
   });
 
