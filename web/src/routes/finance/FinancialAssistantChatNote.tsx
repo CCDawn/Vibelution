@@ -14,7 +14,8 @@ export function FinancialAssistantChatNote({
   lang: "zh" | "en";
 }) {
   const location = useLocation();
-  const assistants = useFinancialAssistants(Boolean(sessionId) && location.pathname === "/finance");
+  const financeSurface = ["/finance", "/chat"].includes(location.pathname);
+  const assistants = useFinancialAssistants(Boolean(sessionId) && financeSurface);
   const row = assistants.data?.find((item) => item.directSessionId === sessionId && item.status === "active");
   if (!sessionId || !row) {
     return null;
