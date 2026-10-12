@@ -300,6 +300,37 @@ def test_extraction_caps_pages_and_total_excerpt_text(monkeypatch):
     assert any("单页摘录达到字符上限" in warning for warning in result["warnings"])
 
 
+def test_explicit_original_page_beyond_candidate_scan_only_reads_that_page(monkeypatch):
+    import pypdf
+
+    reads = []
+
+    class Page:
+        def __init__(self, number):
+            self.number = number
+
+        def extract_text(self):
+            reads.append(self.number)
+            return f"Original page {self.number}"
+
+    class Reader:
+        is_encrypted = False
+
+        def __init__(self, *_args, **_kwargs):
+            self.pages = [Page(i) for i in range(1, 302)]
+
+    monkeypatch.setattr(pypdf, "PdfReader", Reader)
+    result = official_pdf.extract_official_pdf_pages(b"%PDF-test", page=301)
+    assert reads == [301]
+    assert result["pageCount"] == 301
+    assert result["pages"][0]["page"] == 301
+    assert result["pages"][0]["excerpt"] == "Original page 301"
+    for invalid in (0, 302, True):
+        with pytest.raises(official_pdf.OfficialPdfError, match="原始页码"):
+            official_pdf.extract_official_pdf_pages(b"%PDF-test", page=invalid)
+    assert reads == [301]
+
+
 def test_aggregate_pdf_byte_budget_is_enforced_against_loader_result(monkeypatch):
     monkeypatch.setattr(frozen, "_MAX_TOTAL_PDF_BYTES", 10)
     first = _notice(url=PDF_A, code="n1", period="2024FY")

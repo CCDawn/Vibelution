@@ -35,7 +35,7 @@ def _require_assistant(agent_id: str) -> None:
         raise FinancialEvidenceImportError("财报专库尚未就绪", 409)
 
 
-def preview_pdf(agent_id: str, source_url: str, pdf_base64: str = "") -> dict:
+def preview_pdf(agent_id: str, source_url: str, pdf_base64: str = "", page: int | None = None) -> dict:
     """Read only: original bytes stay local; nothing is searchable or staged."""
     _require_assistant(agent_id)
     try:
@@ -49,22 +49,22 @@ def preview_pdf(agent_id: str, source_url: str, pdf_base64: str = "") -> dict:
                 pdf_bytes = base64.b64decode(pdf_base64, validate=True)
             except (ValueError, binascii.Error) as exc:
                 raise FinancialEvidenceImportError("PDF上传数据无效") from exc
-            result = official_pdf.extract_official_pdf_pages(pdf_bytes)
+            result = official_pdf.extract_official_pdf_pages(pdf_bytes, page=page)
         else:
-            result = official_pdf.fetch_and_extract_official_pdf(url)
+            result = official_pdf.fetch_and_extract_official_pdf(url, page=page)
     except official_pdf.OfficialPdfError as exc:
         raise FinancialEvidenceImportError(str(exc)) from exc
     # The existing financial profile allows at most 60 excerpt lines. Keep an
     # exact prefix of each extracted page, never a generated financial summary.
     pages = []
     warnings = list(result.get("warnings") or [])
-    for page in result.get("pages") or []:
-        original = str(page["excerpt"])
+    for extracted_page in result.get("pages") or []:
+        original = str(extracted_page["excerpt"])
         excerpt = "\n".join(original.splitlines()[:60]).strip()
         if excerpt != original.strip():
             warnings.append("部分页面仅预览前60行原文，未覆盖部分不进入证据库。")
         if excerpt:
-            pages.append({"page": page["page"], "excerpt": excerpt, "excerptSha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest()})
+            pages.append({"page": extracted_page["page"], "excerpt": excerpt, "excerptSha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest()})
     if not pages:
         raise FinancialEvidenceImportError("PDF没有可读取的文本页；扫描件需要先完成OCR，不能以模型回答替代原文")
     return {**result, "sourceUrl": url, "pages": pages, "warnings": list(dict.fromkeys(warnings)), "coverageStatus": "partial" if warnings else result.get("coverageStatus", "available")}
@@ -72,7 +72,7 @@ def preview_pdf(agent_id: str, source_url: str, pdf_base64: str = "") -> dict:
 
 def stage_pdf_page(agent_id: str, payload: dict) -> dict:
     """Re-extract the same original and submit exactly one page for review."""
-    parsed = preview_pdf(agent_id, payload["sourceUrl"], payload.get("pdfBase64", ""))
+    parsed = preview_pdf(agent_id, payload["sourceUrl"], payload.get("pdfBase64", ""), payload["page"])
     if parsed["documentSha256"] != payload["expectedDocumentSha256"]:
         raise FinancialEvidenceImportError("PDF原件已变化，请重新预览后提交", 409)
     page = next((p for p in parsed["pages"] if p["page"] == payload["page"]), None)

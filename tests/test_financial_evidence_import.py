@@ -16,7 +16,7 @@ HASH = hashlib.sha256(DOCUMENT).hexdigest()
 def importer(monkeypatch):
     monkeypatch.setattr(imports.directory, "get_agent", lambda _: {"status": "active", "metadata": {"financialAssistantProfile": imports.assistants.PROFILE}})
     monkeypatch.setattr(imports.knowledge, "get_financial_knowledge_base", lambda **_: {"knowledgeBase": {"profile": "financial_reports_v1"}})
-    monkeypatch.setattr(imports.official_pdf, "extract_official_pdf_pages", lambda data: {"documentSha256": hashlib.sha256(data).hexdigest(), "pageCount": 8, "byteSize": len(data), "pages": [{"page": 5, "excerpt": "营业收入 200 元\n来源原文", "excerptSha256": "unused"}], "warnings": [], "numericValidation": "not_performed"})
+    monkeypatch.setattr(imports.official_pdf, "extract_official_pdf_pages", lambda data, **_: {"documentSha256": hashlib.sha256(data).hexdigest(), "pageCount": 8, "byteSize": len(data), "pages": [{"page": 5, "excerpt": "营业收入 200 元\n来源原文", "excerptSha256": "unused"}], "warnings": [], "numericValidation": "not_performed"})
     return {"sourceUrl": URL, "pdfBase64": base64.b64encode(DOCUMENT).decode(), "company": "贵州茅台", "ticker": "600519", "reportPeriod": "2026H1", "reportVersion": "original", "publishedDate": "2026-08-15", "page": 5, "expectedDocumentSha256": HASH}
 
 
@@ -58,7 +58,7 @@ def test_wrong_agent_profile_cannot_import(importer, monkeypatch):
 
 def test_truncation_preserves_exact_page_prefix(importer, monkeypatch):
     original = "\n".join(f"原文第{i}行" for i in range(70))
-    monkeypatch.setattr(imports.official_pdf, "extract_official_pdf_pages", lambda _: {"documentSha256": HASH, "pages": [{"page": 5, "excerpt": original}], "warnings": []})
+    monkeypatch.setattr(imports.official_pdf, "extract_official_pdf_pages", lambda _, **__: {"documentSha256": HASH, "pages": [{"page": 5, "excerpt": original}], "warnings": []})
     result = imports.preview_pdf("finance", URL, importer["pdfBase64"])
     assert result["pages"][0]["excerpt"] == "\n".join(original.splitlines()[:60])
     assert result["warnings"]
@@ -88,3 +88,17 @@ def test_http_preview_routes_use_exact_agent_and_input(importer, monkeypatch):
         assert response.json()["documentSha256"] == HASH
         rejected = client.post("/api/financial-assistants/finance/evidence/stage", json={**importer, "expectedDocumentSha256": "a" * 64})
         assert rejected.status_code == 409
+
+
+def test_stage_reextracts_the_requested_original_page(importer, monkeypatch):
+    reads = []
+    def extract(data, *, page=None):
+        reads.append(page)
+        return {"documentSha256": HASH, "pageCount": 301, "pages": [{"page": page, "excerpt": f"Original {page}"}], "warnings": []}
+    monkeypatch.setattr(imports.official_pdf, "extract_official_pdf_pages", extract)
+    calls = []
+    monkeypatch.setattr(imports.knowledge, "stage_financial_evidence", lambda **data: calls.append(data) or {})
+    imports.stage_pdf_page("finance", {**importer, "page": 301})
+    assert reads == [301]
+    assert calls[0]["excerpt"] == "Original 301"
+    assert calls[0]["evidence"]["page"] == 301

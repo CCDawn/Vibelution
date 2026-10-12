@@ -70,4 +70,27 @@ describe("financial PDF import and native review", () => {
     expect(document.body.textContent).toContain("本页原文已审核入库");
     expect(reviewKnowledgeSourceInbox).not.toHaveBeenCalled();
   });
+
+  it("requires reading a page outside the suggested candidates before staging its exact text", async () => {
+    await ready();
+    await input("财报原文页码", "40");
+    expect(button("提交本页审核").disabled).toBe(true);
+    vi.mocked(previewFinancialPdf).mockResolvedValueOnce({ ...preview, pages: [{ page: 40, excerpt: "原始现金流量表第40页", excerptSha256: "c".repeat(64) }] });
+    await click("读取该页");
+    expect(previewFinancialPdf).toHaveBeenLastCalledWith("finance", expect.objectContaining({ page: 40 }));
+    await click("提交本页审核");
+    expect(stageFinancialPdf).toHaveBeenLastCalledWith("finance", expect.objectContaining({ page: 40, expectedDocumentSha256: preview.documentSha256 }));
+    await act(async () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    await click("确认原文并入库");
+    expect(reviewKnowledgeSourceInbox).toHaveBeenLastCalledWith("agent", "finance", "source-1", expect.objectContaining({ knowledgeContent: "原始现金流量表第40页" }));
+  });
+
+  it("rejects a changed original while reading another page", async () => {
+    await ready(); await input("财报原文页码", "40");
+    vi.mocked(previewFinancialPdf).mockResolvedValueOnce({ ...preview, documentSha256: "d".repeat(64) });
+    await click("读取该页");
+    expect(document.body.textContent).toContain("PDF原件已变化");
+    expect(button("提交本页审核").disabled).toBe(true);
+    expect(stageFinancialPdf).not.toHaveBeenCalled();
+  });
 });

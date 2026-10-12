@@ -1,4 +1,4 @@
-export type FinancialPdfInput = { sourceUrl: string; pdfBase64?: string };
+export type FinancialPdfInput = { sourceUrl: string; pdfBase64?: string; page?: number };
 export type FinancialPdfPage = { page: number; excerpt: string; excerptSha256: string };
 export type FinancialPdfPreview = {
   documentSha256: string; sourceUrl: string; pageCount: number; byteSize: number;

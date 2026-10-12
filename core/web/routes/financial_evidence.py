@@ -13,6 +13,7 @@ class PdfPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sourceUrl: str = Field(min_length=1, max_length=2048)
     pdfBase64: str = Field(default="", max_length=service.MAX_BASE64_CHARS)
+    page: int | None = Field(default=None, ge=1, le=100000)
 
 
 class PdfStageRequest(PdfPreviewRequest):
@@ -21,7 +22,7 @@ class PdfStageRequest(PdfPreviewRequest):
     reportPeriod: str = Field(pattern=r"^20\d{2}(FY|Q[1-4]|H[12])$")
     reportVersion: str = Field(default="original", min_length=1, max_length=96)
     publishedDate: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
-    page: int = Field(ge=1, le=240)
+    page: int = Field(ge=1, le=100000)
     expectedDocumentSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -38,7 +39,7 @@ def _invoke(call, *args):
 
 @router.post("/financial-assistants/{agent_id}/evidence/preview")
 def preview_financial_pdf(agent_id: str, payload: PdfPreviewRequest) -> dict:
-    return _invoke(service.preview_pdf, agent_id, payload.sourceUrl, payload.pdfBase64)
+    return _invoke(service.preview_pdf, agent_id, payload.sourceUrl, payload.pdfBase64, payload.page)
 
 
 @router.post("/financial-assistants/{agent_id}/evidence/stage")

@@ -323,14 +323,15 @@ def fetch_and_extract_official_pdf(
     *,
     max_bytes: int = MAX_PDF_BYTES,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    page: int | None = None,
 ) -> dict[str, Any]:
     """Download one original and return bounded page-level text evidence."""
 
     pdf_bytes = download_official_pdf(url, max_bytes=max_bytes, timeout=timeout)
-    return extract_official_pdf_pages(pdf_bytes)
+    return extract_official_pdf_pages(pdf_bytes, page=page)
 
 
-def extract_official_pdf_pages(pdf_bytes: bytes) -> dict[str, Any]:
+def extract_official_pdf_pages(pdf_bytes: bytes, *, page: int | None = None) -> dict[str, Any]:
     """Hash and extract selected financial-report pages without value validation."""
 
     if (
@@ -366,11 +367,13 @@ def extract_official_pdf_pages(pdf_bytes: bytes) -> dict[str, Any]:
             document_hash, 0, len(pdf_bytes), ["财报PDF解析失败，原件哈希已保留。"]
         )
 
+    if page is not None and (isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= page_count):
+        raise OfficialPdfError(f"原始页码须在1至{page_count}之间")
     scan_count = min(page_count, MAX_PDF_PAGES)
-    if page_count > MAX_PDF_PAGES:
+    if page is None and page_count > MAX_PDF_PAGES:
         warnings.append("财报PDF页数超过解析上限，后续页面未扫描。")
     extracted: list[tuple[int, str]] = []
-    for page_number in range(1, scan_count + 1):
+    for page_number in ([page] if page is not None else range(1, scan_count + 1)):
         try:
             raw_text = str(reader.pages[page_number - 1].extract_text() or "")
         except Exception:  # noqa: BLE001 - preserve other readable pages
@@ -392,7 +395,7 @@ def extract_official_pdf_pages(pdf_bytes: bytes) -> dict[str, Any]:
         if text:
             extracted.append((page_number, text))
 
-    selected_pages = _select_statement_pages(extracted)
+    selected_pages = extracted if page is not None else _select_statement_pages(extracted)
     if not selected_pages:
         if extracted:
             selected_pages = extracted[:1]

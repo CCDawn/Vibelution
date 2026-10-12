@@ -5,7 +5,7 @@ import { previewFinancialPdf, stageFinancialPdf } from "../../api/financialEvide
 import { reviewKnowledgeSourceInbox } from "../../api/knowledge";
 import type { FinancialPdfInput, FinancialPdfPreview, FinancialPdfStaged } from "../../api/types/financialEvidence";
 import type { StockIdentity } from "../../api/financialMarket";
-import { VButton, VCheckbox, VDialog, VInput, VRouteLinkButton, VSelect, VStateSurface } from "../../components/vui";
+import { VButton, VCheckbox, VDialog, VInput, VRouteLinkButton, VStateSurface } from "../../components/vui";
 
 const field = "flex min-w-0 items-center gap-2 whitespace-nowrap text-vui-xs [&_input]:min-w-0 [&_input]:flex-1";
 
@@ -19,6 +19,7 @@ export function FinanceEvidenceImport({ agentId, knowledgeBaseId, stock, sourceU
   const [page, setPage] = useState(""), [staged, setStaged] = useState<FinancialPdfStaged | null>(null);
   const [checked, setChecked] = useState(false), [approved, setApproved] = useState(false);
   const selected = preview?.pages.find(p => String(p.page) === page);
+  const pageValid = Boolean(preview && /^\d+$/.test(page) && Number(page) >= 1 && Number(page) <= preview.pageCount);
   const metadataValid = Boolean(company.trim() && /^[036489]\d{5}$/.test(ticker) && /^20\d{2}(FY|Q[1-4]|H[12])$/.test(period) && /^\d{4}-\d{2}-\d{2}$/.test(published));
   function resetPreview() { setPreview(null); setOriginal(null); setStaged(null); setChecked(false); setApproved(false); setError(""); }
   async function operation(action: () => Promise<void>) {
@@ -56,6 +57,15 @@ export function FinanceEvidenceImport({ agentId, knowledgeBaseId, stock, sourceU
       setStaged(result); setApproved(Boolean(result.source.knowledgeItemId));
     });
   }
+  async function loadPage() {
+    if (!preview || !original || !pageValid) return;
+    const expectedHash = preview.documentSha256;
+    await operation(async () => {
+      const result = await previewFinancialPdf(agentId, { ...original, page: Number(page) });
+      if (result.documentSha256 !== expectedHash) { resetPreview(); throw new Error(zh ? "PDF原件已变化，请重新预览" : "Original PDF changed; preview again"); }
+      setPreview(result); setChecked(false);
+    });
+  }
   async function approve() {
     if (!staged || !selected || !checked || approved) return;
     await operation(async () => {
@@ -84,7 +94,8 @@ export function FinanceEvidenceImport({ agentId, knowledgeBaseId, stock, sourceU
         </div>
         {!staged ? <VButton variant="secondary" isPending={busy} isDisabled={!url.trim() || busy} onPress={() => void loadPreview()}>{zh ? "读取原文预览" : "Preview original"}</VButton> : null}
         {preview ? <>
-          <div className="flex min-w-0 items-center gap-2 text-vui-xs"><span>{zh ? `原件${preview.pageCount}页 · 已提取${preview.pages.length}页` : `${preview.pageCount} original pages · ${preview.pages.length} extracted`}</span><VSelect aria-label="财报原文页码" selectedKey={page} isDisabled={locked} options={preview.pages.map(p => ({ id: String(p.page), label: zh ? `第${p.page}页` : `Page ${p.page}` }))} onSelectionChange={key => { setPage(String(key)); setChecked(false); }} /><VRouteLinkButton to={`${preview.sourceUrl}#page=${page}`} target="_blank" rel="noopener noreferrer" reloadDocument>{zh ? "打开PDF原件" : "Original PDF"}</VRouteLinkButton></div>
+          <div className="flex min-w-0 items-center gap-2 text-vui-xs"><span className="shrink-0">{zh ? `原件${preview.pageCount}页` : `${preview.pageCount} original pages`}</span><label className={field}>{zh ? "原始页码" : "Page"}<VInput aria-label="财报原文页码" type="number" min={1} max={preview.pageCount} value={page} disabled={locked} onChange={event => { setPage(event.target.value); setChecked(false); }} /></label><VButton variant="secondary" density="compact" isDisabled={locked || !pageValid} onPress={() => void loadPage()}>{zh ? "读取该页" : "Read page"}</VButton><VRouteLinkButton to={`${preview.sourceUrl}#page=${pageValid ? page : 1}`} target="_blank" rel="noopener noreferrer" reloadDocument>{zh ? "打开PDF原件" : "Original PDF"}</VRouteLinkButton></div>
+          {!selected ? <VStateSurface tone="info" density="compact" title={zh ? "输入原始页码并读取该页后才能送审" : "Read the original page before staging"} /> : null}
           <pre aria-label="财报原文页文本" className="m-0 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel p-3 text-vui-xs leading-5">{selected?.excerpt}</pre>
           <p className="m-0 text-vui-xs text-vui-fg-tertiary">{zh ? "仅提交当前原始页摘录，审核后才可检索；未自动核验数字、公司归属或披露日期。" : "Only this original page excerpt is submitted. Search requires approval; figures, issuer and date are not automatically verified."}</p>
           {preview.warnings.map(warning => <VStateSurface key={warning} tone="unavailable" density="compact" title={warning} />)}
