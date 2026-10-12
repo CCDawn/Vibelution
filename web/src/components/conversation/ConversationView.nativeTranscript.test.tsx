@@ -215,7 +215,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-companion-typing-avatar="true"');
     expect(html).toContain(styles.companionTypingTurn);
     expect(html).toContain(styles.companionTypingContent);
-    expect(styles.companionTypingTurn).toContain("max-w-[830px]");
+    expect(styles.companionTypingTurn).toContain("max-w-[760px]");
     expect(styles.companionTypingTurn).toContain("justify-self-center");
     expect(styles.companionTypingTurn).toContain("grid-cols-[2rem_minmax(0,1fr)]");
     expect(styles.companionTypingContent).toContain("col-start-2");

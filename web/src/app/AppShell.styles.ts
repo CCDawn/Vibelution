@@ -93,11 +93,11 @@ const styles = {
     `vui-app-appshell mobileRouteToggle hidden min-w-0 !h-10 !min-h-10 !w-full !justify-start !border-0 !px-2 !text-vui-xs !shadow-none ${vuiControlQuietChromeClass}`,
   nav: "vui-app-appshell nav min-w-0",
   navLink:
-    "vui-app-appshell navLink relative z-[2] inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
+    "vui-app-appshell navLink relative z-[2] inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-type-control-size)] font-normal text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
-    "vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-transparent bg-[var(--bg-active)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
+    "vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-transparent bg-[var(--bg-active)] px-2.5 [font-size:var(--vui-type-control-size)] font-medium text-[var(--fg-primary)] no-underline select-none",
   navLinkDisabled:
-    "vui-app-appshell navLinkDisabled relative inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
+    "vui-app-appshell navLinkDisabled relative inline-flex min-h-[var(--vui-control-height-sm)] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-type-control-size)] font-normal text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:
     `vui-app-appshell returnButton min-w-0 ${vuiControlQuietClass}`,
   settingsActionButton:

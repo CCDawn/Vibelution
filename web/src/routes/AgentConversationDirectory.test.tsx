@@ -215,7 +215,7 @@ describe("AgentConversationDirectory", () => {
     expect(styles.agentStatusSlot).toContain("self-stretch");
     expect(styles.agentStatusSlot).toContain("items-center");
     expect(directorySource).toContain("data-agent-status-slot");
-    expect(styles.agentTitle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.agentTitle).toContain("[font-size:var(--vui-type-control-size)]");
     expect(styles.agentTitle).toContain("[color:var(--fg-primary)]");
     expect(styles.agentMeta).toContain("[font-size:var(--vui-font-2xs)]");
     expect(styles.agentMeta).toContain("font-normal");

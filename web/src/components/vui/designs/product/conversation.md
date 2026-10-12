@@ -10,6 +10,7 @@
 - 对话正文和 composer 使用相同的阅读宽度；用户消息、输入区与文件交付通过已有 VUI 表面和 elevation token 表达轻微层次，助手正文不增加外层卡片。
 - 材质与控件样式由真实 route/conversation style map 实现；隔离预览的 mock 内容、`.mac-preview` CSS 和窗口图标不进入正式应用。
 - Windows 的最小化、最大化和关闭由 Electron `titleBarOverlay` 提供，网页保持原生 caption 区留白。
+- 顶栏导航使用原生控件字号，普通项为 regular、当前项为 medium；Agent 目录与会话列表保持 44px 紧凑行高，Agent 名称不使用强调字重。
 
 ## ConversationTodoChecklist
 

@@ -14,9 +14,9 @@ const styles = {
     "agentRoomHistoryTopic grid min-w-0 gap-0.5 [&>button]:min-h-7 [&>button]:font-normal [&>button]:[font-size:var(--vui-font-2xs)] [&>div]:gap-0.5 [&>div]:pl-1",
   // surface-role: hover-fill — the trailing count and activity stay on the row mid-line.
   agentRow:
-    "agentRow !grid !h-auto !min-h-[54px] !w-full min-w-0 max-w-full " +
+    "agentRow !grid !h-auto !min-h-[44px] !w-full min-w-0 max-w-full " +
     "grid-cols-[26px_minmax(0,1fr)_auto] !items-stretch !justify-items-stretch !justify-start " +
-    "gap-x-2.5 gap-y-0 rounded-[var(--radius-control)] !border-0 [border:0] !bg-transparent px-2.5 py-2 " +
+    "gap-x-2.5 gap-y-0 rounded-[var(--radius-control)] !border-0 [border:0] !bg-transparent px-2.5 py-1.5 " +
     "text-left !font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card " +
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
   agentRowActive:
@@ -30,7 +30,7 @@ const styles = {
   agentTitleRow:
     "agentTitleRow flex min-w-0 items-center",
   agentTitle:
-    "agentTitle min-w-0 truncate [font-size:var(--vui-font-xs)] font-medium leading-tight [color:var(--fg-primary)]",
+    "agentTitle min-w-0 truncate [font-size:var(--vui-type-control-size)] font-normal leading-tight [color:var(--fg-primary)]",
   // Stretch to row height then center the light — survives VButton/Shadcn justify/items defaults.
   agentStatusSlot:
     "agentStatusSlot flex h-full min-h-full min-w-3.5 shrink-0 items-center justify-end gap-1.5 self-stretch",
