@@ -1151,9 +1151,10 @@ describe("MemoryRoute layout contract", () => {
     // VStateSurface may use title= for loading/empty; native HTML title tooltips stay forbidden.
     expect(knowledgeBaseSidebarSource).not.toContain("title={copy.knowledgeHint}");
     expect(knowledgeBaseSidebarSource).not.toContain(" title=\"");
-    expect(knowledgeModeTabsSource).toContain('import { VTabs } from "../components/vui"');
+    expect(knowledgeModeTabsSource).toContain('import { VStatusChip, VTabs, VTooltip } from "../components/vui"');
     expect(knowledgeModeTabsSource).toContain("<VTabs");
     // Hints ride on Radix trigger title (tablist a11y: no VTooltip wrapping tabs).
+    // The semantic-index status chip inside the search label is a quiet span, not the tab itself.
     expect(knowledgeModeTabsSource).toContain("title: mode.hint");
     expect(knowledgeModeTabsSource).not.toContain("content={mode.hint}");
     expect(knowledgeRagPanelSource).toContain('<VTooltip content={copy.ragRetrievalHint} width="wide">');

@@ -20,6 +20,7 @@ import {
   retrieveKnowledgeRag,
   searchKnowledgeItems,
 } from "../../api/knowledge";
+import { fetchKnowledgeSemanticIndexHealth } from "../../api/knowledgeLifecycle";
 import {
   fetchMemoryAgentDetail,
   fetchMemoryAgents,
@@ -360,6 +361,18 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     refetchIntervalInBackground: false,
     staleTime: 60_000,
   });
+  const knowledgeSemanticIndexHealthQuery = useQuery({
+    queryKey: queryKeys.knowledgeSemanticIndexHealth(activeKnowledgeActorAgentId),
+    queryFn: ({ signal }) =>
+      fetchKnowledgeSemanticIndexHealth({
+        agentId: activeKnowledgeActorAgentId,
+        signal,
+      }),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+    staleTime: 60_000,
+  });
   const knowledgeRagRetrieveQuery = useQuery({
     queryKey: queryKeys.knowledgeRagRetrieve(
       activeKnowledgeBaseForItems,
@@ -486,6 +499,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
     knowledgeItemsQuery,
     knowledgeSearchQuery,
     knowledgeRagHealthQuery,
+    knowledgeSemanticIndexHealthQuery,
     knowledgeRagRetrieveQuery,
     ratingSuggestionsQuery,
     permissionAuditQuery,

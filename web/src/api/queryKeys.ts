@@ -189,6 +189,7 @@ export const queryKeys = {
   knowledgeSearch: (knowledgeBaseId: string, agentId: string, query: string, tags: string, mode = "") =>
     ["knowledge", "search", knowledgeBaseId, agentId, query, tags, mode] as const,
   knowledgeRagHealth: (agentId = "") => ["knowledge", "rag", "health", agentId] as const,
+  knowledgeSemanticIndexHealth: (agentId = "") => ["knowledge", "semantic-index", "health", agentId] as const,
   knowledgeRagRetrieve: (knowledgeBaseId: string, agentId: string, query: string, tags: string, mode: string, topK: number, maxContextChars: number) =>
     ["knowledge", "rag", "retrieve", knowledgeBaseId, agentId, query, tags, mode, topK, maxContextChars] as const,
   knowledgeRatingSuggestions: (knowledgeBaseId: string, agentId = "", status = "", priority = "") =>

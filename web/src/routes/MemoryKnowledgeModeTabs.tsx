@@ -1,7 +1,14 @@
-import { VTabs } from "../components/vui";
+import { VStatusChip, VTabs, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeModeTabs.styles";
 
 export type MemoryKnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions";
+
+/** Agent-scoped semantic-index health snapshot powering the search tab badge. */
+export type MemoryKnowledgeSemanticIndexHealth = {
+  status: string;
+  indexedItemCount?: number;
+  indexableItemCount?: number;
+};
 
 export type MemoryKnowledgeModeTabsCopy = {
   governance: string;
@@ -15,6 +22,13 @@ export type MemoryKnowledgeModeTabsCopy = {
   governanceTasks: string;
   permissionAudit: string;
   ingestionAdapters: string;
+  semanticIndex: string;
+  semanticIndexReady: string;
+  semanticIndexDegraded: string;
+  semanticIndexUnknown: string;
+  semanticIndexUnavailable: string;
+  semanticIndexIndexed: string;
+  semanticIndexTotal: string;
 };
 
 type MemoryKnowledgeModeTabsProps = {
@@ -31,6 +45,8 @@ type MemoryKnowledgeModeTabsProps = {
   openGovernanceTaskCount: number;
   permissionKnowledgeBaseCount: number;
   ingestionAdapterCount: number;
+  /** Undefined (query pending/disabled) renders no badge — never a fake "unavailable". */
+  semanticIndexHealth?: MemoryKnowledgeSemanticIndexHealth;
   onModeChange: (mode: MemoryKnowledgeWorkspaceMode) => void;
 };
 
@@ -48,6 +64,7 @@ export function MemoryKnowledgeModeTabs({
   openGovernanceTaskCount,
   permissionKnowledgeBaseCount,
   ingestionAdapterCount,
+  semanticIndexHealth,
   onModeChange,
 }: MemoryKnowledgeModeTabsProps) {
   const modes = [
@@ -83,6 +100,31 @@ export function MemoryKnowledgeModeTabs({
     },
   ];
 
+  // Same mapping as MemoryKnowledgeRagPanel: ready=success, unavailable=danger, else warning.
+  const semanticIndexTone = semanticIndexHealth?.status === "ready"
+    ? "success"
+    : semanticIndexHealth?.status === "unavailable"
+      ? "danger"
+      : "warning";
+  const semanticIndexStatusLabel = semanticIndexHealth?.status === "ready"
+    ? copy.semanticIndexReady
+    : semanticIndexHealth?.status === "degraded"
+      ? copy.semanticIndexDegraded
+      : semanticIndexHealth?.status === "unavailable"
+        ? copy.semanticIndexUnavailable
+        : copy.semanticIndexUnknown;
+  const semanticIndexTooltip = semanticIndexHealth
+    ? [
+      `${copy.semanticIndex}: ${semanticIndexStatusLabel}`,
+      `${copy.semanticIndexIndexed}: ${semanticIndexHealth.indexedItemCount ?? 0} / ${copy.semanticIndexTotal}: ${semanticIndexHealth.indexableItemCount ?? 0}`,
+    ].join("\n")
+    : "";
+  const semanticIndexBadge = semanticIndexHealth ? (
+    <VTooltip content={semanticIndexTooltip} width="wide">
+      <VStatusChip tone={semanticIndexTone}>{semanticIndexStatusLabel}</VStatusChip>
+    </VTooltip>
+  ) : null;
+
   return (
     <VTabs
       aria-label={copy.governance}
@@ -108,6 +150,7 @@ export function MemoryKnowledgeModeTabs({
           <>
             <span>{mode.label}</span>
             <strong>{mode.count}</strong>
+            {mode.key === "search" ? semanticIndexBadge : null}
           </>
         ),
       }))}

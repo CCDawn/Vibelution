@@ -2659,6 +2659,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     knowledgeItemsQuery,
     knowledgeSearchQuery,
     knowledgeRagHealthQuery,
+    knowledgeSemanticIndexHealthQuery,
     knowledgeRagRetrieveQuery,
     ratingSuggestionsQuery,
     permissionAuditQuery,
@@ -2808,6 +2809,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const ownerInboxSources = sourceInboxQuery.data?.sources ?? [];
   const centralSources = centralSourcesQuery.data?.centralSources ?? [];
   const knowledgeRagHealth = knowledgeRagHealthQuery.data;
+  const knowledgeSemanticIndexHealth = knowledgeSemanticIndexHealthQuery.data;
   const localRagProviderHealth = knowledgeRagHealth?.providers.find((provider) => provider.provider === "local") ?? knowledgeRagHealth?.providers[0];
   const knowledgeRagPolicy = knowledgeRagHealth?.retrievalPolicy ?? knowledgeRagRetrieveQuery.data?.retrievalPolicy;
   const ratingSuggestions = (ratingSuggestionsQuery.data?.suggestions ?? []).filter((suggestion) =>
@@ -4263,6 +4265,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             openGovernanceTaskCount={governanceTasksQuery.data?.summary.openTaskCount ?? 0}
             permissionKnowledgeBaseCount={permissionAudit?.summary.knowledgeBaseCount ?? 0}
             ingestionAdapterCount={ingestionAdapters.length}
+            semanticIndexHealth={knowledgeSemanticIndexHealth}
             onModeChange={setActiveKnowledgeWorkspaceMode}
           />
           {activeKnowledgeWorkspaceMode === "sources" ? (
