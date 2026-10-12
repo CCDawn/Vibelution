@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
+
 from core.web.services import team_knowledge_service as facade
 from core.web.services.team_knowledge import (
     constants,
     permissions,
+    public_catalog,
     search_ranking,
     source_inbox,
     store,
@@ -126,6 +129,34 @@ def test_facade_reexports_source_inbox() -> None:
     assert facade._promote_owner_source_to_central_locked is source_inbox._promote_owner_source_to_central_locked
     assert facade._require_central_source_for_owner is source_inbox._require_central_source_for_owner
     assert facade._direct_ingest_accepted_source_locked is source_inbox._direct_ingest_accepted_source_locked
+
+
+def test_facade_reexports_public_catalog_task_status() -> None:
+    # Governance task status filter has one implementation (public_catalog,
+    # whose claim scope covers the governance projection); the facade re-exports it.
+    assert facade._task_status_matches is public_catalog._task_status_matches
+
+
+def test_public_catalog_reuses_single_implementations() -> None:
+    # Converged duplicates: the catalog must not re-define store/search_ranking
+    # helpers; it imports the single implementation.
+    assert public_catalog._sync_roots is store._sync_roots
+    assert public_catalog._project_root is store._project_root
+    assert public_catalog._tokenize_search_text is search_ranking._tokenize_search_text
+    assert not hasattr(public_catalog, "_tokenize_catalog_text")
+    source = inspect.getsource(public_catalog)
+    assert "def _sync_roots" not in source
+    assert "def _project_root" not in source
+    assert "def _tokenize_catalog_text" not in source
+
+
+def test_task_status_matches_semantics() -> None:
+    assert public_catalog._task_status_matches(True, "all") is True
+    assert public_catalog._task_status_matches(False, "all") is True
+    assert public_catalog._task_status_matches(True, "closed") is True
+    assert public_catalog._task_status_matches(False, "closed") is False
+    assert public_catalog._task_status_matches(True, "open") is False
+    assert public_catalog._task_status_matches(False, "open") is True
 
 
 def test_source_inbox_normalizes_review_decision() -> None:

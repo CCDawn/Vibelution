@@ -22,6 +22,9 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 
+from .search_ranking import _tokenize_search_text
+from .store import _project_root, _sync_roots
+
 PUBLIC_STRUCTURE_SCHEMA_VERSION = 2
 
 # A.5 hard budget
@@ -123,11 +126,6 @@ def _experience_dir() -> Path:
 
 def _experience_path(card_id: str) -> Path:
     return _experience_dir() / f"{card_id}.md"
-
-
-def _project_root() -> Path:
-    s = _service()
-    return s._project_root()
 
 
 def _read_structure() -> dict[str, Any]:
@@ -1084,11 +1082,11 @@ def search_public_catalog(*, query: str = "", limit: int = 8, agent_id: str = ""
     queues = _read_queues()
     open_conflict_ids = _open_conflict_card_ids(queues)
     searchable = [card for card in structure["cards"] if _card_is_searchable(card, open_conflict_ids)]
-    query_tokens = _tokenize_catalog_text(normalized_query)
+    query_tokens = _tokenize_search_text(normalized_query)
     matched: list[dict[str, Any]] = []
     for card in searchable:
         haystack = _catalog_haystack(card)
-        haystack_tokens = _tokenize_catalog_text(haystack)
+        haystack_tokens = _tokenize_search_text(haystack)
         score = _catalog_overlap_score(query_tokens, haystack_tokens)
         if score <= 0:
             continue
@@ -1107,11 +1105,6 @@ def search_public_catalog(*, query: str = "", limit: int = 8, agent_id: str = ""
         },
         "results": results,
     }
-
-
-def _tokenize_catalog_text(text: str) -> set[str]:
-    s = _service()
-    return s._tokenize_search_text(str(text or ""))
 
 
 def _catalog_haystack(card: dict[str, Any]) -> str:
@@ -1557,11 +1550,6 @@ def _append_public_audit(action: str, fields: dict[str, Any], *, actor_agent_id:
             "payload": {str(key)[:80]: value for key, value in list(fields.items())[:20]},
         },
     )
-
-
-def _sync_roots() -> None:
-    s = _service()
-    s._sync_roots()
 
 
 # ---------------------------------------------------------------------------

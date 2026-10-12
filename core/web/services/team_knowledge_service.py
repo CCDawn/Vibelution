@@ -2768,6 +2768,7 @@ resolve_public_proposal = _tk_public_catalog.resolve_public_proposal
 list_catalog_queue_events = _tk_public_catalog.list_catalog_queue_events
 resolve_catalog_queue_event = _tk_public_catalog.resolve_catalog_queue_event
 _catalog_governance_tasks = _tk_public_catalog._catalog_governance_tasks
+_task_status_matches = _tk_public_catalog._task_status_matches
 
 
 def _local_copies_from_source_artifacts(source_artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2895,14 +2896,6 @@ def _search_source_summary(source: dict[str, Any]) -> dict[str, Any]:
     if content_trust:
         summary["contentTrust"] = content_trust
     return summary
-
-
-def _task_status_matches(closed: bool, normalized_status: str) -> bool:
-    if normalized_status == "all":
-        return True
-    if normalized_status == "closed":
-        return closed
-    return not closed
 
 
 def _governance_task(
