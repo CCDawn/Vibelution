@@ -193,7 +193,11 @@ def _project(agent: dict) -> dict:
         "knowledgeBaseId": base_id,
         "knowledgeReadable": can_read,
         "modelStatus": "configured_unverified" if configured else "not_configured",
-        "reportStatus": financial_report_availability()["status"],
+        "reportStatus": (
+            "configured_unverified"
+            if financial_report_availability()["status"] == "configured"
+            else "not_configured"
+        ),
         # Capability status only; each quote request reports provider failures.
         "marketDataStatus": "public_quotes",
         "marketToolStatus": _market_tool_status(agent),

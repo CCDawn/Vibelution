@@ -29,6 +29,18 @@ def entry_env(finance_env, monkeypatch):
     return finance_env
 
 
+def test_list_projects_only_configured_unverified_report_status(entry_env, monkeypatch):
+    monkeypatch.setattr(
+        service, "financial_report_availability", lambda: {"status": "configured"}
+    )
+    created = service.create_financial_assistant()
+    assert created["assistant"]["reportStatus"] == "configured_unverified"
+    assert service.list_financial_assistants() == [
+        {**created["assistant"], "reportStatus": "configured_unverified"}
+    ]
+
+
+
 def test_explicit_setup_uses_native_identity_session_and_private_read_policy(entry_env):
     assert service.list_financial_assistants() == []
     result = service.create_financial_assistant()
