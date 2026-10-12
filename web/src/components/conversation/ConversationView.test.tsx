@@ -25,6 +25,7 @@ import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
 import conversationOperationRowsSource from "./conversationOperationRows.tsx?raw";
 import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
+import conversationResponseBlocksSource from "./conversationResponseBlocks.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -940,7 +941,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("parseConversationMarkdownBlocks");
     // Answer bodies keep the shared lazy markdown renderer; only group-transcript
     // chat lines delegate to the pure inline renderer.
-    expect(conversationViewSource).toContain("<LazyConversationMarkdownRenderer");
+    expect(conversationResponseBlocksSource).toContain("<LazyConversationMarkdownRenderer");
     expect(conversationViewSource).toContain(
       "renderConversationInlineMarkdown(assistantFinalAnswerText(message), groupTranscriptInlineClassNames)",
     );
@@ -957,8 +958,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // Settle must not swap renderer component types: the transcript cell
     // keeps ConversationStreamingResponseContent mounted and the streaming
     // decision travels as the isStreaming prop instead.
-    expect(conversationViewSource).toContain("function renderAssistantTranscriptResponseText(");
-    expect(conversationViewSource).toContain("isStreaming={isStreaming}");
+    expect(conversationResponseBlocksSource).toContain("function renderAssistantTranscriptResponseText(");
+    expect(conversationResponseBlocksSource).toContain("isStreaming={isStreaming}");
     expect(conversationViewSource).toContain(
       "renderAssistantTranscriptResponseText(\n            text,\n            assistantTurnIsStreaming(message),",
     );
@@ -979,9 +980,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     );
     // Segment bodies, the assistant transcript cell, and the settled file-reference
     // chip row each forward the root and the chrome language together.
-    expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(3);
+    expect(conversationResponseBlocksSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(3);
     expect(
-      conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
+      conversationResponseBlocksSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
     ).toBe(3);
     // Prop lives on the shared view contract so the composer bridge passes it
     // through its ConversationViewProps-derived spread.
@@ -990,7 +991,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // markdown subtree (settled answers render through the same renderer).
     expect(conversationStreamingResponseContentSource).toContain("workspaceRoot={workspaceRoot}");
     expect(conversationStreamingResponseContentSource).toContain("language={language}");
-    expect(conversationViewSource).toContain("onOpenRailFile={onOpenRailFile}");
+    expect(conversationResponseBlocksSource).toContain("onOpenRailFile={onOpenRailFile}");
     expect(conversationStreamingResponseContentSource).toContain("onOpenRailFile={onOpenRailFile}");
     expect(chatRouteSource).toContain("onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== \"child\" ? openOrdinaryRailFile : undefined");
   });
