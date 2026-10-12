@@ -63,11 +63,15 @@ function Skills({ stock, zh, onResearchPrompt }: CenterProps) {
   const searchText = search.toLocaleLowerCase();
   const methods = FINANCE_GUIDES.filter(method => `${method.title} ${method.prompt}`.toLocaleLowerCase().includes(searchText));
   const selectedMethod = FINANCE_GUIDES.find(method => method.id === methodId);
-  const skills = (library.data?.skills ?? []).filter((skill) => {
-    if (!/\b(?:stocks?|finance|financial|equity|investment|backtest|valuation|filings?|portfolio|dividend|earnings)\b|cash flow|a-share|股票|财报|财务|估值|分红|现金流|投资|回测|A股/i.test(`${skill.name} ${skill.description} ${skill.command}`)) return false;
-    if (!`${skill.name} ${skill.description} ${skill.command}`.toLocaleLowerCase().includes(searchText)) return false;
+  const sourcePriority = (source: string) => source === "codex" ? 0 : source === "agents" ? 1 : 2;
+  const canonicalSkills = [...(library.data?.skills ?? [])].sort((left, right) => sourcePriority(left.source) - sourcePriority(right.source)).filter(skill => {
     if (seenCommands.has(skill.command)) return false;
     seenCommands.add(skill.command);
+    return true;
+  });
+  const skills = canonicalSkills.filter((skill) => {
+    if (!/\b(?:stocks?|finance|financial|equity|investment|backtest|valuation|filings?|portfolio|dividend|earnings)\b|cash flow|a-share|股票|财报|财务|估值|分红|现金流|投资|回测|A股/i.test(`${skill.name} ${skill.description} ${skill.command}`)) return false;
+    if (!`${skill.name} ${skill.description} ${skill.command}`.toLocaleLowerCase().includes(searchText)) return false;
     return true;
   });
   return <div className={styles.page} data-finance-skills><h1 className={styles.heading}>{zh ? "技能中心" : "Skill center"}</h1><VInput value={search} maxLength={100} aria-label={zh ? "搜索技能" : "Search skills"} placeholder={zh ? "搜索股票研究方法或技能" : "Search research methods or skills"} onChange={(event) => setSearch(event.target.value)} />

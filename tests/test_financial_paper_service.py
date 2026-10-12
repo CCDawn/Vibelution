@@ -140,6 +140,38 @@ def test_concurrent_identical_order_is_recorded_once(paper_env):
     assert account["cashYuan"] == "998994.99"
 
 
+def test_existing_ledger_reader_waits_for_inflight_transaction(paper_env, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from core.web.services.financial_paper import ledger
+
+    agent_id = paper_env["agent"]["agentId"]
+    paper.open_account(agent_id)
+    path = ledger._ledger_path(ledger._financial_agent(agent_id))
+    reached_path, read_called = Event(), Event()
+    original_read = ledger._load_ledger
+
+    def reader_path(_agent):
+        reached_path.set()
+        return path
+
+    def read(*args):
+        read_called.set()
+        return original_read(*args)
+
+    monkeypatch.setattr(ledger, "_ledger_path", reader_path)
+    monkeypatch.setattr(ledger, "_load_ledger", read)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with ledger._transaction_lock(path):
+            future = pool.submit(ledger._load_existing, agent_id)
+            assert reached_path.wait(2)
+            assert not read_called.wait(0.2), "a reader entered during an active ledger replacement"
+        _, _, result = future.result(timeout=5)
+    assert read_called.is_set()
+    assert result["agentId"] == agent_id
+
+
 def test_insufficient_cash_does_not_mutate_the_ledger(paper_env):
     agent_id = paper_env["agent"]["agentId"]
     paper.open_account(agent_id)

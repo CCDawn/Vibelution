@@ -103,6 +103,17 @@ describe("Finance knowledge center", () => {
     expect(container.textContent).toContain("已安装股票技能");
     expect(container.textContent).toContain("核对一份年报");
   });
+  it("filters the canonical native command source before showing finance metadata", async () => {
+    api.skills.mockResolvedValue({ skills: [
+      { name: "Agent filings", command: "/same", description: "A股财报", source: "agents" },
+      { name: "Codex developer", command: "/same", description: "API development", source: "codex" },
+    ] });
+    await render("skills");
+    expect(container.textContent).not.toContain("Agent filings");
+    expect(container.textContent).not.toContain("Codex developer");
+    expect(api.detail).not.toHaveBeenCalled();
+    expect(draft).not.toHaveBeenCalled();
+  });
   it("offers five lessons and resets the quiz before starting a real research exercise", async () => {
     await render("learning");
     expect(button("5. 模拟交易")).toBeTruthy(); expect(button("核对一份年报")).toBeTruthy();

@@ -336,7 +336,11 @@ def _load_existing(agent_id: str) -> tuple[dict[str, Any], Path, dict[str, Any]]
     agent = _financial_agent(agent_id)
     path = _ledger_path(agent)
     normalized_id = str(agent["agentId"])
-    ledger = _load_ledger(path, normalized_id)
+    if not path.exists():
+        # A read of an unopened account must not create a directory or lock file.
+        raise AccountNotOpenedError("尚未开设模拟账户")
+    with _transaction_lock(path):
+        ledger = _load_ledger(path, normalized_id)
     if ledger is None:
         raise AccountNotOpenedError("尚未开设模拟账户")
     return agent, path, ledger
