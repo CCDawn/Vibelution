@@ -532,6 +532,20 @@ describe("Finance analyst team", () => {
     expect(container.textContent).not.toContain("等待主助手汇总");
   });
 
+  it.each(["needs_continue", "paused_limit", "superseded"])("does not count terminal %s fallback text as a completed synthesis", async (reason) => {
+    currentRun = makeRun(); currentRun.coordinationStatus = "blocked";
+    for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.synthesis.turnId = "turn-synthesis";
+    const fetchDetail = api.session.getMockImplementation()!;
+    api.session.mockImplementation(async (sessionId: string) => sessionId === "session-assistant"
+      ? { ...detailFor(sessionId, currentRun!.synthesis, "工具额度已耗尽，本轮停止"), terminalReason: reason, lastTurnTerminalTurnId: "turn-synthesis" }
+      : fetchDetail(sessionId));
+    await render();
+    expect(container.textContent).toContain("汇总失败");
+    expect(container.textContent).not.toContain("主助手已汇总");
+    expect(container.textContent).not.toContain("工具额度已耗尽，本轮停止");
+  });
+
   it("reuses the same run-creation key after an ambiguous transport failure", async () => {
     api.create.mockRejectedValueOnce(new Error("network timeout"));
     await render();
