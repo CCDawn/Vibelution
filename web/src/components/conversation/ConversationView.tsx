@@ -9,7 +9,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronsDownUp,
   CircleDot,
   CircleMinus,
   CirclePlus,
@@ -191,11 +190,8 @@ import { projectConversationDisplayMessages } from "./conversationDisplayMessage
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,
-  isCliAgentLifecycleMessage,
-  isContextCompressionMarkerMessage,
   isForkedSessionMarkerMessage,
   isGroupRoomTranscriptMessage,
-  isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
@@ -281,11 +277,7 @@ import { buildConversationToolActivityDetailRows } from "./conversationToolActiv
 import {
   agentInboxSourceLabel,
   agentInboxSummary,
-  cliAgentLifecycleDetail,
-  cliAgentLifecycleLabel,
   groupRoomTranscriptLabel,
-  sessionRecoveryResumedDetail,
-  sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -345,6 +337,7 @@ import { createConversationOperationGroups } from "./conversationOperationGroups
 import { createConversationOperationRows } from "./conversationOperationRows";
 import { createConversationReActRows } from "./conversationReActRows";
 import { createConversationResponseBlocks } from "./conversationResponseBlocks";
+import { createConversationSpecialRows } from "./conversationSpecialRows";
 import { createConversationTimelineItems } from "./conversationTimelineItems";
 import { useComputerUseResults } from "./useComputerUseResults";
 import { useConversationFind } from "./useConversationFind";
@@ -438,56 +431,6 @@ function turnNavPlainPreviewText(message: ConversationMessage | undefined): stri
     .replace(/\*\*|__|~~|`/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-/** Presentation tone of a context-compression checkpoint divider. */
-type ConversationCompressionDividerTone =
-  | "applied"
-  | "skipped_low_savings"
-  | "failed_preserved";
-
-/**
- * Backend compression statuses spell both ways ("applied" from the ledger
- * projection, "context_compression_applied" from status turn items); normalize
- * to one divider tone. Unknown statuses present as the plain applied row.
- */
-function normalizeCompressionDividerTone(raw: unknown): ConversationCompressionDividerTone {
-  const value = String(raw ?? "").trim().toLowerCase().replace(/^context_compression_/, "");
-  if (value === "skipped_low_savings") {
-    return "skipped_low_savings";
-  }
-  if (value === "failed_preserved") {
-    return "failed_preserved";
-  }
-  return "applied";
-}
-
-/**
- * Compression checkpoints reach the timeline through two carriers: server
- * projections with `metadata.kind = "context_compression_marker"` and status
- * turn items whose diagnosticSummary carries the same kind (the native Codex
- * transcript shape). Both render as one ZCode-style hairline divider instead
- * of a generic status cell; the token-saving text never renders.
- */
-function conversationCompressionDividerTone(
-  message: ConversationMessage,
-): ConversationCompressionDividerTone | null {
-  if (isContextCompressionMarkerMessage(message)) {
-    return normalizeCompressionDividerTone(message.metadata?.status);
-  }
-  if (message.role !== "assistant") {
-    return null;
-  }
-  for (const item of message.turnItems) {
-    if (item.type !== "status") {
-      continue;
-    }
-    const summary = item.diagnosticSummary;
-    if (summary && String(summary.kind ?? "").trim() === "context_compression_marker") {
-      return normalizeCompressionDividerTone(summary.status ?? item.code);
-    }
-  }
-  return null;
 }
 
 type ConversationUserInlineEditorProps = {
@@ -1731,80 +1674,9 @@ export const ConversationView = React.memo(function ConversationView({
             if (companionTypingMessage?.id === message.id) {
               return null;
             }
-            if (isCliAgentLifecycleMessage(message)) {
-              const detail = cliAgentLifecycleDetail(message);
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={styles.cliAgentLifecycleTurn}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                >
-                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
-                    <TerminalSquare size={14} />
-                  </span>
-                  <span className={styles.cliAgentLifecycleText}>
-                    {cliAgentLifecycleLabel(message, lang)}
-                  </span>
-                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
-                  {message.timestamp ? (
-                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
-                  ) : null}
-                </article>
-              );
-            }
-            if (isSessionRecoveryResumedMessage(message)) {
-              const detail = sessionRecoveryResumedDetail(message, lang);
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={styles.cliAgentLifecycleTurn}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                >
-                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
-                    <RefreshCw size={14} />
-                  </span>
-                  <span className={styles.cliAgentLifecycleText}>
-                    {sessionRecoveryResumedLabel(message, lang)}
-                  </span>
-                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
-                  {message.timestamp ? (
-                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
-                  ) : null}
-                </article>
-              );
-            }
-            // Context-compression checkpoints are timeline chrome, not model
-            // answers: one hairline divider per checkpoint, toned by outcome.
-            // The token-saving numbers never render.
-            const compressionTone = conversationCompressionDividerTone(message);
-            if (compressionTone) {
-              const compressionLabel = compressionTone === "applied"
-                ? t("compressionDividerApplied")
-                : compressionTone === "skipped_low_savings"
-                  ? t("compressionDividerSkipped")
-                  : t("compressionDividerFailed");
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={[
-                    styles.turnDividerRow,
-                    compressionTone === "applied"
-                      ? styles.turnDividerToneApplied
-                      : compressionTone === "skipped_low_savings"
-                        ? styles.turnDividerToneQuiet
-                        : styles.turnDividerToneWarning,
-                  ].filter(Boolean).join(" ")}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                  data-conversation-compression-divider={compressionTone}
-                >
-                  <span className={styles.turnDividerRule} aria-hidden="true" />
-                  <span className={styles.turnDividerIcon} aria-hidden="true">
-                    <ChevronsDownUp size={13} />
-                  </span>
-                  <span className={styles.turnDividerLabel}>{compressionLabel}</span>
-                  <span className={styles.turnDividerRule} aria-hidden="true" />
-                </article>
-              );
+            const specialRow = renderTimelineSpecialRow(message, rowIdentity?.rowKey ?? message.id);
+            if (specialRow) {
+              return specialRow;
             }
             const agentMessage = agentMessagesByMessageId.get(message.id);
             if (!agentMessage) {
@@ -3762,6 +3634,12 @@ export const ConversationView = React.memo(function ConversationView({
     showMentalSnapshots,
     getExpansionState,
     toggleSection,
+    formatTimestamp,
+  });
+
+  const { renderTimelineSpecialRow } = createConversationSpecialRows({
+    lang,
+    t,
     formatTimestamp,
   });
 
