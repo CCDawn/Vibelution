@@ -12141,6 +12141,7 @@ def test_queued_turn_withdraw_and_drain_failure_stays_visible(tmp_path, monkeypa
     assert [row["id"] for row in rows] == [requeued_turn_id]
     assert rows[0]["status"] == "blocked"
     assert "provider unavailable" in rows[0]["lastError"]
+    original_submission_id = rows[0]["clientSubmissionId"]
 
     # Editing a blocked turn is an explicit retry and makes it drainable again.
     fail_next_schedule["value"] = False
@@ -12150,7 +12151,79 @@ def test_queued_turn_withdraw_and_drain_failure_stays_visible(tmp_path, monkeypa
     )
     assert retried.status_code == 200
     assert [row["id"] for row in session_service.get_session_detail("session-live")["queuedTurns"]] == []
+    assert len(scheduled_contexts) == 2
+    assert scheduled_contexts[-1]["raw_user_message"] == "重试的排队消息"
+    assert scheduled_contexts[-1]["client_submission_id"] != original_submission_id
 
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+@pytest.mark.parametrize("terminal_type", [None, "turn_completed", "turn_interrupted"])
+def test_blocked_queue_edit_does_not_repeat_unconfirmed_or_successful_dispatch(tmp_path, monkeypatch, terminal_type):
+    from core.web.services.session import submit
+
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queue-retry-authority")
+    scheduled = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled.append(context))
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, session_id: fn(session_id)))
+    assert client.post("/api/sessions/session-live/messages", json={"content": "第一轮"}).status_code == 202
+    response = client.post("/api/sessions/session-live/messages", json={"content": "原排队内容", "queueIfBusy": True})
+    queued_id = response.json()["queuedTurnId"]
+    # Simulate a lost dispatch outcome: a persisted blocked row is not proof
+    # that its native turn failed, even when the session flag has been cleared.
+    state = session_service.load_session_chat_state(session_service.PROJECT_ROOT, "session-live")
+    row = state["queued_turns"][0]
+    row["status"] = "blocked"
+    row["lastError"] = "lost response"
+    session_service.save_session_chat_state(session_service.PROJECT_ROOT, "session-live", state)
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_by_correlation",
+                        lambda *args, **kwargs: [SimpleNamespace(turn_id="previous-dispatch")])
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_cached",
+                        lambda *args, **kwargs: [] if terminal_type is None else [
+                            SimpleNamespace(turn_id="previous-dispatch", event_type=terminal_type)])
+    monkeypatch.setattr(submit, "get_development_submission_admission_runtime", lambda root: None)
+    edited = client.patch(f"/api/sessions/session-live/queued-turns/{queued_id}", json={"content": "新内容"})
+    assert edited.status_code == 422
+    persisted = session_service.load_session_chat_state(session_service.PROJECT_ROOT, "session-live")["queued_turns"][0]
+    assert persisted["status"] == "blocked"
+    assert persisted["content"] == "原排队内容"
+    assert "dispatchClientSubmissionId" not in persisted
+    assert len(scheduled) == 1
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_queue_retry_probe_requires_terminal_proof_for_admission_receipt(monkeypatch):
+    from core.web.services.session import submit
+
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_by_correlation", lambda *args, **kwargs: [])
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_cached", lambda *args, **kwargs: [])
+    monkeypatch.setattr(submit, "get_development_submission_admission_runtime", lambda root: SimpleNamespace(
+        existing=lambda **kwargs: {"turnId": "reserved-but-unknown"}))
+    assert submit._queued_submission_retry_state(session_service, session_id="any", client_submission_id="reserved") == "unknown"
+
+
+def test_queue_edit_preserves_original_enqueue_deduplication(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queue-edit-dedup")
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    assert client.post("/api/sessions/session-live/messages", json={"content": "第一轮"}).status_code == 202
+    body = {"content": "原内容", "queueIfBusy": True, "clientSubmissionId": "queue-edit-original"}
+    queued = client.post("/api/sessions/session-live/messages", json=body)
+    assert queued.status_code == 202
+    queued_id = queued.json()["queuedTurnId"]
+    assert client.patch(f"/api/sessions/session-live/queued-turns/{queued_id}", json={"content": "编辑内容"}).status_code == 200
+    replay = client.post("/api/sessions/session-live/messages", json=body)
+    assert replay.status_code == 202
+    assert replay.json()["queuedTurnId"] == queued_id
+    rows = session_service.load_session_chat_state(session_service.PROJECT_ROOT, "session-live")["queued_turns"]
+    assert len(rows) == 1
+    assert rows[0]["content"] == "编辑内容"
+    assert rows[0]["dispatchClientSubmissionFingerprint"] != rows[0]["clientSubmissionFingerprint"]
+    conflict = client.post("/api/sessions/session-live/messages", json={**body, "content": "不同请求"})
+    assert conflict.status_code == 422
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
     session_service._clear_session_live_output("session-live")

@@ -371,6 +371,48 @@ def _existing_submission_replay(
     )
 
 
+def _queued_submission_retry_state(service: Any, *, session_id: str, client_submission_id: str) -> str:
+    """Probe native journal/admission authority before replacing a dispatch identity."""
+    if not client_submission_id:
+        return "unaccepted"
+    turn_ids: set[str] = set()
+    for event_type in (service.EVENT_USER_MESSAGE, service.EVENT_TURN_STARTED):
+        events = journal_bridge.load_session_conversation_events_by_correlation(
+            session_id, event_type=event_type, correlation_id=client_submission_id,
+            project_root=service.PROJECT_ROOT,
+        )
+        for event in events:
+            turn_id = str(getattr(event, "turn_id", "") or "").strip()
+            if not turn_id:
+                return "unknown"
+            turn_ids.add(turn_id)
+    runtime = get_development_submission_admission_runtime(service.PROJECT_ROOT)
+    if runtime is not None:
+        receipt = runtime.existing(session_id=session_id, client_submission_id=client_submission_id)
+        if receipt is not None:
+            turn_id = str(receipt.get("turnId") or "").strip()
+            if not turn_id:
+                return "unknown"
+            turn_ids.add(turn_id)
+    if not turn_ids:
+        return "unaccepted"
+    events = journal_bridge.load_session_conversation_events_cached(
+        session_id, project_root=service.PROJECT_ROOT,
+    )
+    for turn_id in turn_ids:
+        terminal = next(
+            (
+                event for event in reversed(events)
+                if str(getattr(event, "turn_id", "") or "").strip() == turn_id
+                and getattr(event, "event_type", "") in TERMINAL_EVENTS
+            ),
+            None,
+        )
+        if terminal is None or getattr(terminal, "event_type", "") != service.EVENT_TURN_FAILED:
+            return "unknown"
+    return "failed"
+
+
 def _existing_partial_submission_turn_id(
     service: Any,
     *,

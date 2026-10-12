@@ -412,6 +412,21 @@ def update_session_queued_turn(
                     en="That queued message is not paused.",
                 )
             )
+        if current_status == "blocked" and requested_status is None:
+            from . import submit
+
+            dispatch_id = str(row.get("dispatchClientSubmissionId") or row.get("clientSubmissionId") or "").strip()
+            retry_state = submit._queued_submission_retry_state(
+                s, session_id=normalized_session_id, client_submission_id=dispatch_id,
+            )
+            if retry_state == "unknown":
+                raise s.SessionValidationError(s.text_for(
+                    lang,
+                    zh="无法确认上次发送已经失败，请先查看该轮状态；为避免重复发送，暂不能重试。",
+                    en="The previous submission is not confirmed failed. Check its turn status before retrying to avoid duplicate sends.",
+                ))
+            if retry_state == "failed":
+                row["dispatchClientSubmissionId"] = f"queue-retry-{uuid.uuid4().hex}"
         if content is not None:
             next_content = str(content or "").strip()
             if not next_content and not row["attachments"]:
@@ -427,7 +442,7 @@ def update_session_queued_turn(
             if fingerprint_base:
                 from . import submit
 
-                row["clientSubmissionFingerprint"] = submit._session_submission_fingerprint_from_base(
+                row["dispatchClientSubmissionFingerprint"] = submit._session_submission_fingerprint_from_base(
                     row["content"],
                     fingerprint_base,
                 )
@@ -1286,8 +1301,8 @@ def drain_session_queued_turns(session_id: str) -> bool:
             message_source = DRAINED_TURN_MESSAGE_SOURCE
             drained_model_selection = head.get("modelSelection")
             submit_kwargs = {
-                "client_submission_id": str(head.get("clientSubmissionId") or ""),
-                "_client_submission_fingerprint": str(head.get("clientSubmissionFingerprint") or ""),
+                "client_submission_id": str(head.get("dispatchClientSubmissionId") or head.get("clientSubmissionId") or ""),
+                "_client_submission_fingerprint": str(head.get("dispatchClientSubmissionFingerprint") or head.get("clientSubmissionFingerprint") or ""),
                 "_client_submission_fingerprint_base": str(head.get("clientSubmissionFingerprintBase") or ""),
                 "attachment_ids": [
                     str(attachment.get("artifactId") or "")
