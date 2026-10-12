@@ -59,8 +59,19 @@ unverified reference; its same-period CNINFO link does not establish that the
 displayed value matches the PDF or that the value was preserved point in time.
 All references stay inside the existing untrusted-materials JSON boundary,
 carry truncation notices, and are read-only. This prompt context does not expand
-the export rule: conclusion amounts still require a cited original-PDF excerpt
-or a deterministic calculation, and the stored Session/Journal is unchanged.
+the export rule: financial statement conclusion amounts still require a cited
+original-PDF excerpt or a deterministic calculation. Market claims follow the
+separate exact-field and dated-source rules below; the stored Session/Journal
+is unchanged.
+
+When historical summary data is unsupported, the basic analyst can receive a
+separate public original-PDF snapshot fetched through the existing official
+announcement and bounded PDF adapters. This does not read the owner's private
+library or change analyst ACLs. The snapshot freezes the original document hash,
+exact excerpt hashes, page numbers, publication date, report period and pending
+revision notices for the run. It is retrieved later and is always partial,
+unreviewed source context, never a historical archive guarantee or a synthetic
+native tool result; it does not authorize exported financial conclusion amounts.
 
 Same-Turn `financial_market_snapshot_tool` results also verify raw share-price,
 signed change-percent and PE/PB occurrences by their exact fields. A report with

@@ -414,6 +414,10 @@ def test_synthesis_prompt_receives_only_cutoff_and_stock_scoped_tool_references(
     assert "公开快照未核对原文" in prompt
     assert "不要调用任何工具" in prompt[:prompt.index(runs._UNTRUSTED_REFERENCE_BEGIN)]
     assert "不为填满章节继续探查" in prompt[:prompt.index(runs._UNTRUSTED_REFERENCE_BEGIN)]
+    instructions = prompt[:prompt.index(runs._UNTRUSTED_REFERENCE_BEGIN)]
+    assert "结论与摘要优先用定性表述" in instructions
+    assert "明确起止日期且能复算" in instructions
+    assert "不得把行情数值用作财报证据" in instructions
 
 
 def test_synthesis_tool_references_fail_closed_on_wrong_agent_turn_or_non_ashare(monkeypatch):

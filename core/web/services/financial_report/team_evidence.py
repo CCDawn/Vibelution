@@ -643,6 +643,11 @@ def synthesis_tool_references(owner: str, run: dict) -> list[dict]:
     snapshot_item = _public_fundamentals_reference(run, symbol, cutoff)
     if snapshot_item is not None:
         candidates.append(snapshot_item)
+    from core.web.services.financial_team.public_filings import public_filing_reference
+
+    original_item = public_filing_reference(run.get("publicOriginalFilingSnapshot"), symbol, cutoff)
+    if original_item is not None:
+        candidates.append(original_item)
 
     for name, output, status in role_records.get("news", [])[:_MAX_RECORDS]:
         if name in _SYNTHESIS_ROLE_TOOLS["news"]:
