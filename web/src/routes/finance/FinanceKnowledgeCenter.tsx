@@ -55,19 +55,30 @@ function Memory({ assistant, zh, onResearchPrompt }: CenterProps) {
 function Skills({ stock, zh, onResearchPrompt }: CenterProps) {
   const [search, setSearch] = useState("");
   const [command, setCommand] = useState("");
+  const [methodId, setMethodId] = useState<string>(FINANCE_GUIDES[0].id);
   const library = useQuery({ queryKey: queryKeys.skills(), queryFn: fetchSkillLibrary, staleTime: 60_000, retry: false });
   const skillName = command.replace(/^\/+/, "").trim();
   const detail = useQuery({ queryKey: queryKeys.skill(skillName), queryFn: () => fetchSkillLibraryDetail(skillName), enabled: Boolean(skillName), staleTime: 60_000, retry: false });
   const seenCommands = new Set<string>();
   const searchText = search.toLocaleLowerCase();
+  const methods = FINANCE_GUIDES.filter(method => `${method.title} ${method.prompt}`.toLocaleLowerCase().includes(searchText));
+  const selectedMethod = FINANCE_GUIDES.find(method => method.id === methodId);
   const skills = (library.data?.skills ?? []).filter((skill) => {
+    if (!/\b(?:stocks?|finance|financial|equity|investment|backtest|valuation|filings?|portfolio|dividend|earnings)\b|cash flow|a-share|股票|财报|财务|估值|分红|现金流|投资|回测|A股/i.test(`${skill.name} ${skill.description} ${skill.command}`)) return false;
     if (!`${skill.name} ${skill.description} ${skill.command}`.toLocaleLowerCase().includes(searchText)) return false;
     if (seenCommands.has(skill.command)) return false;
     seenCommands.add(skill.command);
     return true;
   });
-  return <div className={styles.page} data-finance-skills><h1 className={styles.heading}>{zh ? "技能中心" : "Skill center"}</h1><VInput value={search} maxLength={100} aria-label={zh ? "搜索技能" : "Search skills"} placeholder={zh ? "搜索已安装技能" : "Search installed skills"} onChange={(event) => setSearch(event.target.value)} />
-    {library.isPending ? <VStateSurface tone="loading" busy title={zh ? "加载技能" : "Loading skills"} /> : library.isError ? <VStateSurface tone="error" title={zh ? "技能加载失败" : "Skills unavailable"} actions={<VButton onPress={() => void library.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : <div className={styles.columns}><div className={styles.list}>{skills.length ? skills.map((skill) => <VButton key={`${skill.source}:${skill.command}`} variant="secondary" className={[styles.listItem, command === skill.command ? styles.selected : ""].join(" ")} onPress={() => setCommand(skill.command)}><span className={styles.skill}><strong>{skill.name}</strong><span className={styles.description}>{skill.description}</span></span></VButton>) : <VStateSurface tone="empty" title={zh ? "没有匹配技能" : "No matching skills"} />}</div><VSurface className={styles.card}>{!command ? <p className={styles.small}>{zh ? "选择技能查看使用方法" : "Select a skill"}</p> : detail.isPending ? <VStateSurface tone="loading" busy title={zh ? "加载使用方法" : "Loading instructions"} /> : detail.isError ? <VStateSurface tone="error" title={zh ? "技能详情不可用" : "Skill unavailable"} actions={<VButton onPress={() => void detail.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : detail.data ? <><h2 className={styles.title}>{detail.data.name}</h2><p className={styles.content}>{detail.data.content}</p><VButton icon={<BookOpen size={14} />} onPress={() => onResearchPrompt(`${detail.data.command}\n请先核实此技能在当前会话可用，再按其适用范围研究 ${stock.name}（${stock.ticker}）；不能使用时说明原因，不虚构技能执行。`)}>{zh ? "用此技能研究当前股票" : "Use for selected stock"}</VButton></> : null}</VSurface></div>}
+  return <div className={styles.page} data-finance-skills><h1 className={styles.heading}>{zh ? "技能中心" : "Skill center"}</h1><VInput value={search} maxLength={100} aria-label={zh ? "搜索技能" : "Search skills"} placeholder={zh ? "搜索股票研究方法或技能" : "Search research methods or skills"} onChange={(event) => setSearch(event.target.value)} />
+    <div className={styles.columns}><div className={styles.list}>
+      <h2 className={styles.title}>{zh ? "研究流程" : "Research workflows"}</h2>
+      {methods.length ? methods.map(method => <VButton key={method.id} variant="secondary" className={[styles.listItem, methodId === method.id ? styles.selected : ""].join(" ")} aria-pressed={methodId === method.id} onPress={() => { setMethodId(method.id); setCommand(""); }}>{method.title}</VButton>) : <VStateSurface tone="empty" title={zh ? "没有匹配流程" : "No matching workflows"} />}
+      <h2 className={styles.title}>{zh ? "已安装股票技能" : "Installed stock skills"}</h2>
+      {library.isPending ? <VStateSurface tone="loading" busy title={zh ? "加载技能" : "Loading skills"} /> : library.isError ? <VStateSurface tone="error" title={zh ? "技能加载失败" : "Skills unavailable"} actions={<VButton onPress={() => void library.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : skills.length ? skills.map(skill => <VButton key={`${skill.source}:${skill.command}`} variant="secondary" className={[styles.listItem, command === skill.command ? styles.selected : ""].join(" ")} aria-pressed={command === skill.command} onPress={() => { setCommand(skill.command); setMethodId(""); }}><span className={styles.skill}><strong>{skill.name}</strong><span className={styles.description}>{skill.description}</span></span></VButton>) : <p className={styles.small}>{zh ? "没有匹配的已安装股票技能" : "No matching installed stock skills"}</p>}
+    </div><VSurface className={styles.card}>
+      {selectedMethod ? <><h2 className={styles.title}>{selectedMethod.title}</h2><p className={styles.small}>{zh ? "内置研究流程" : "Built-in research workflow"}</p><p className={styles.text}>{selectedMethod.prompt}</p><VButton icon={<BookOpen size={14} />} onPress={() => onResearchPrompt(`请针对 ${stock.name}（${stock.ticker}）：${selectedMethod.prompt}。只使用当前已授权的公开来源与已审核证据，明确来源、日期、单位和缺口，不虚构数字或工具执行。`)}>{zh ? "准备研究" : "Prepare research"}</VButton></> : !command ? <p className={styles.small}>{zh ? "选择研究流程或技能" : "Select a workflow or skill"}</p> : detail.isPending ? <VStateSurface tone="loading" busy title={zh ? "加载使用方法" : "Loading instructions"} /> : detail.isError ? <VStateSurface tone="error" title={zh ? "技能详情不可用" : "Skill unavailable"} actions={<VButton onPress={() => void detail.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : detail.data ? <><h2 className={styles.title}>{detail.data.name}</h2><p className={styles.content}>{detail.data.content}</p><VButton icon={<BookOpen size={14} />} onPress={() => onResearchPrompt(`${detail.data.command}\n请先核实此技能在当前会话可用，再按其适用范围研究 ${stock.name}（${stock.ticker}）；不能使用时说明原因，不虚构技能执行。`)}>{zh ? "用此技能研究当前股票" : "Use for selected stock"}</VButton></> : null}
+    </VSurface></div>
   </div>;
 }
 

@@ -7,7 +7,7 @@ import type { FinancialPdfInput, FinancialPdfPreview, FinancialPdfStaged } from 
 import type { StockIdentity } from "../../api/financialMarket";
 import { VButton, VCheckbox, VDialog, VInput, VRouteLinkButton, VStateSurface } from "../../components/vui";
 
-const field = "flex min-w-0 items-center gap-2 whitespace-nowrap text-vui-xs [&_input]:min-w-0 [&_input]:flex-1";
+import styles from "./FinanceEvidenceImport.styles";
 
 export function FinanceEvidenceImport({ agentId, knowledgeBaseId, stock, sourceUrl = "", zh }: { agentId: string; knowledgeBaseId: string; stock?: StockIdentity; sourceUrl?: string; zh: boolean }) {
   const client = useQueryClient(), gate = useRef(false);
@@ -83,21 +83,21 @@ export function FinanceEvidenceImport({ agentId, knowledgeBaseId, stock, sourceU
     <VButton density="compact" variant="secondary" icon={<Upload size={14} />} onPress={() => setOpen(true)}>{zh ? "导入财报" : "Import PDF"}</VButton>
     <VDialog open={open} onOpenChange={value => { if (!busy) setOpen(value); }} title={zh ? "导入原始财报" : "Import original filing"} size="lg"
       footer={<><VButton variant="secondary" isDisabled={busy} onPress={() => setOpen(false)}>{zh ? "关闭" : "Close"}</VButton>{approved ? <VButton variant="secondary" onPress={resetPreview}>{zh ? "导入另一页" : "Import another page"}</VButton> : staged ? <VButton isPending={busy} isDisabled={!checked || busy} onPress={() => void approve()}>{zh ? "确认原文并入库" : "Approve original and file"}</VButton> : <VButton isPending={busy} isDisabled={busy || !selected || !metadataValid} onPress={() => void stage()}>{zh ? "提交本页审核" : "Stage this page"}</VButton>}</>}>
-      <div className="grid min-w-0 gap-3">
-        <label className={field}>{zh ? "官方PDF链接" : "Official PDF URL"}<VInput aria-label="财报官方PDF链接" value={url} disabled={locked} placeholder="https://static.cninfo.com.cn/...PDF" onChange={event => { setUrl(event.target.value); resetPreview(); }} /></label>
-        <label className={field}>{zh ? "本地PDF（可选）" : "Local PDF (optional)"}<VInput aria-label="财报PDF文件" type="file" accept=".pdf,application/pdf" disabled={locked} onChange={event => void readFile(event.target.files?.[0])} /></label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className={field}>{zh ? "公司" : "Company"}<VInput aria-label="财报公司" value={company} disabled={locked} maxLength={120} onChange={event => setCompany(event.target.value)} /></label>
-          <label className={field}>{zh ? "A股代码" : "CN ticker"}<VInput aria-label="财报股票代码" value={ticker} disabled={locked} maxLength={6} onChange={event => setTicker(event.target.value.trim())} /></label>
-          <label className={field}>{zh ? "报告期" : "Period"}<VInput aria-label="财报报告期" value={period} disabled={locked} placeholder="2026H1 / 2025FY" maxLength={8} onChange={event => setPeriod(event.target.value.toUpperCase())} /></label>
-          <label className={field}>{zh ? "披露日期" : "Published"}<VInput aria-label="财报披露日期" type="date" value={published} disabled={locked} onChange={event => setPublished(event.target.value)} /></label>
+      <div className={styles.form}>
+        <label className={styles.field}>{zh ? "官方PDF链接" : "Official PDF URL"}<VInput aria-label="财报官方PDF链接" value={url} disabled={locked} placeholder="https://static.cninfo.com.cn/...PDF" onChange={event => { setUrl(event.target.value); resetPreview(); }} /></label>
+        <label className={styles.field}>{zh ? "本地PDF（可选）" : "Local PDF (optional)"}<VInput aria-label="财报PDF文件" type="file" accept=".pdf,application/pdf" disabled={locked} onChange={event => void readFile(event.target.files?.[0])} /></label>
+        <div className={styles.metadata}>
+          <label className={styles.field}>{zh ? "公司" : "Company"}<VInput aria-label="财报公司" value={company} disabled={locked} maxLength={120} onChange={event => setCompany(event.target.value)} /></label>
+          <label className={styles.field}>{zh ? "A股代码" : "CN ticker"}<VInput aria-label="财报股票代码" value={ticker} disabled={locked} maxLength={6} onChange={event => setTicker(event.target.value.trim())} /></label>
+          <label className={styles.field}>{zh ? "报告期" : "Period"}<VInput aria-label="财报报告期" value={period} disabled={locked} placeholder="2026H1 / 2025FY" maxLength={8} onChange={event => setPeriod(event.target.value.toUpperCase())} /></label>
+          <label className={styles.field}>{zh ? "披露日期" : "Published"}<VInput aria-label="财报披露日期" type="date" value={published} disabled={locked} onChange={event => setPublished(event.target.value)} /></label>
         </div>
         {!staged ? <VButton variant="secondary" isPending={busy} isDisabled={!url.trim() || busy} onPress={() => void loadPreview()}>{zh ? "读取原文预览" : "Preview original"}</VButton> : null}
         {preview ? <>
-          <div className="flex min-w-0 items-center gap-2 text-vui-xs"><span className="shrink-0">{zh ? `原件${preview.pageCount}页` : `${preview.pageCount} original pages`}</span><label className={field}>{zh ? "原始页码" : "Page"}<VInput aria-label="财报原文页码" type="number" min={1} max={preview.pageCount} value={page} disabled={locked} onChange={event => { setPage(event.target.value); setChecked(false); }} /></label><VButton variant="secondary" density="compact" isDisabled={locked || !pageValid} onPress={() => void loadPage()}>{zh ? "读取该页" : "Read page"}</VButton><VRouteLinkButton to={`${preview.sourceUrl}#page=${pageValid ? page : 1}`} target="_blank" rel="noopener noreferrer" reloadDocument>{zh ? "打开PDF原件" : "Original PDF"}</VRouteLinkButton></div>
+          <div className={styles.pageActions}><span className={styles.pageCount}>{zh ? `原件${preview.pageCount}页` : `${preview.pageCount} original pages`}</span><label className={styles.field}>{zh ? "原始页码" : "Page"}<VInput aria-label="财报原文页码" type="number" min={1} max={preview.pageCount} value={page} disabled={locked} onChange={event => { setPage(event.target.value); setChecked(false); }} /></label><VButton variant="secondary" density="compact" isDisabled={locked || !pageValid} onPress={() => void loadPage()}>{zh ? "读取该页" : "Read page"}</VButton><VRouteLinkButton to={`${preview.sourceUrl}#page=${pageValid ? page : 1}`} target="_blank" rel="noopener noreferrer" reloadDocument>{zh ? "打开PDF原件" : "Original PDF"}</VRouteLinkButton></div>
           {!selected ? <VStateSurface tone="info" density="compact" title={zh ? "输入原始页码并读取该页后才能送审" : "Read the original page before staging"} /> : null}
-          <pre aria-label="财报原文页文本" className="m-0 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel p-3 text-vui-xs leading-5">{selected?.excerpt}</pre>
-          <p className="m-0 text-vui-xs text-vui-fg-tertiary">{zh ? "仅提交当前原始页摘录，审核后才可检索；未自动核验数字、公司归属或披露日期。" : "Only this original page excerpt is submitted. Search requires approval; figures, issuer and date are not automatically verified."}</p>
+          <pre aria-label="财报原文页文本" className={styles.excerpt}>{selected?.excerpt}</pre>
+          <p className={styles.notice}>{zh ? "仅提交当前原始页摘录，审核后才可检索；未自动核验数字、公司归属或披露日期。" : "Only this original page excerpt is submitted. Search requires approval; figures, issuer and date are not automatically verified."}</p>
           {preview.warnings.map(warning => <VStateSurface key={warning} tone="unavailable" density="compact" title={warning} />)}
         </> : null}
         {staged && !approved ? <><VStateSurface tone="info" density="compact" title={zh ? "本页待审核，尚不可检索" : "Pending review; not searchable"} /><VCheckbox isSelected={checked} onChange={setChecked} isDisabled={busy}>{zh ? "我已核对公司、报告期、披露日期及本页原文" : "I checked the issuer, period, publication date and original page"}</VCheckbox></> : null}

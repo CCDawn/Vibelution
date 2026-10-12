@@ -56,7 +56,7 @@ describe("Finance knowledge center", () => {
     expect(api.save).not.toHaveBeenCalled();
   });
   it("uses the actual native slash command after previewing the selected skill", async () => {
-    const skill = { name: "Evidence review", command: "/evidence-review", description: "核对原始证据", source: "agents", content: "Skill source body", hash: "hash-one" };
+    const skill = { name: "Evidence review", command: "/evidence-review", description: "核对股票财报原始证据", source: "agents", content: "Skill source body", hash: "hash-one" };
     api.skills.mockResolvedValue({ skills: [skill] }); api.detail.mockResolvedValue(skill);
     await render("skills");
     await act(async () => button("Evidence review").click()); await settle();
@@ -68,13 +68,40 @@ describe("Finance knowledge center", () => {
     expect(draft.mock.calls[0][0]).toContain(stock.ticker);
   });
   it("lists a native executable skill command once across mirrored sources", async () => {
-    const skill = { name: "Evidence review", command: "/evidence-review", description: "核对原始证据", source: "agents", content: "Native selected source body" };
+    const skill = { name: "Evidence review", command: "/evidence-review", description: "核对股票财报原始证据", source: "agents", content: "Native selected source body" };
     api.skills.mockResolvedValue({ skills: [skill, { ...skill, source: "codex" }] }); api.detail.mockResolvedValue(skill);
     await render("skills");
     expect([...container.querySelectorAll("button")].filter((node) => node.textContent?.includes(skill.name))).toHaveLength(1);
     await act(async () => button(skill.name).click()); await settle();
     expect(api.detail).toHaveBeenCalledWith("evidence-review");
     expect(container.textContent).toContain(skill.content);
+  });
+  it("keeps stock workflows available without installed skills and only prepares an explicit draft", async () => {
+    api.skills.mockRejectedValue(new Error("Library unavailable"));
+    await render("skills");
+    expect(container.textContent).toContain("技能加载失败");
+    expect(container.textContent).toContain("内置研究流程");
+    expect(draft).not.toHaveBeenCalled();
+    expect(api.detail).not.toHaveBeenCalled();
+    await act(async () => button("建立风险清单").click());
+    await act(async () => button("准备研究").click());
+    expect(draft).toHaveBeenCalledTimes(1);
+    expect(draft.mock.calls[0][0]).toContain(stock.ticker);
+    expect(draft.mock.calls[0][0]).toContain("经营、财务、行业、政策和流动性");
+    expect(draft.mock.calls[0][0]).not.toMatch(/^\//);
+  });
+  it("does not present development and relationship skills as stock research skills", async () => {
+    api.skills.mockResolvedValue({ skills: [
+      { name: "Developer", command: "/developer", description: "API development", source: "agents" },
+      { name: "Relationship", command: "/relationship", description: "恋爱聊天", source: "agents" },
+      { name: "A-share filings", command: "/ashare", description: "A股财报核验", source: "agents" },
+    ] });
+    await render("skills");
+    expect(container.textContent).not.toContain("Developer");
+    expect(container.textContent).not.toContain("Relationship");
+    expect(container.textContent).toContain("A-share filings");
+    expect(container.textContent).toContain("已安装股票技能");
+    expect(container.textContent).toContain("核对一份年报");
   });
   it("offers five lessons and resets the quiz before starting a real research exercise", async () => {
     await render("learning");
