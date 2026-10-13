@@ -959,6 +959,18 @@ rules:
     notes:
       - "Authorization contract coverage is scoped to tests and authorization/tool paths; ordinary product and documentation edits do not run it."
 
+  - id: development-permission-preflight
+    description: "Read-only development isolation checks and constrained Launcher approval handoff."
+    executionLayers:
+      - "focused"
+    paths:
+      - "scripts/development_preflight.py"
+      - "tests/test_development_preflight.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_development_preflight.py -q"
+    notes:
+      - "Does not execute lifecycle or modify host policy; reports runtime acceptance as unverified."
+
   - id: docs-only
     description: "Documentation-only changes."
     executionLayers:

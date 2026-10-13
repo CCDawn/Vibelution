@@ -129,6 +129,8 @@ Launcher / runtime 落点速查：[`core/web/services/launcher_runtime.md`](../.
 
 Agent 内部必须判断要不要重启 Launcher。对用户只在需要对方动手时说「请重启后再试」；不要贴 `not needed / recommended / required` 枚举。
 
+遇到宿主权限/命令拦截时，按 [开发权限与验收交接](development-permissions.md) 保留拒绝证据、继续独立开发，并准备指定实例的正式审批说明；不得换工具重试已拒动作。`scripts/development_preflight.py` 只生成只读检查与既有 Launcher IPC 交接，不授予执行权限。
+
 | 值 | WHEN |
 | --- | --- |
 | `not needed` | 纯 docs/注释/不进运行时 |
