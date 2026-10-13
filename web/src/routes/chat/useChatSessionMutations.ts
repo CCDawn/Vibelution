@@ -1,10 +1,11 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useMutation, type QueryClient } from "@tanstack/react-query";
 
+import { updateAgent } from "../../api/agents";
 import { pinChatSession, unpinChatSession } from "../../api/chat";
 import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
 import { queryKeys } from "../../api/queryKeys";
-import type { SessionSummary } from "../../api/types";
+import type { AgentInstance, SessionSummary } from "../../api/types";
 import { startUserAction } from "../../app/userActionTelemetry";
 import {
   captureAgentSessionCacheSnapshots,
@@ -16,11 +17,13 @@ import {
 } from "../chatSessionIndexQuery";
 import { describeChatRouteError as describeError } from "./chatCodingRouteViewModel";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import type { TranslationKey } from "../../i18n/dictionaryTypes";
 
 export type ChatSessionMutationsInput = {
   queryClient: QueryClient;
   chatWorkspaceCache: ReturnType<typeof createChatWorkspaceCache>;
   lang: "zh" | "en";
+  t: (key: TranslationKey) => string;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   /** A select captured before an archive write must not restore old read-only flags. */
   latestDirectSessionSelectionRef: RefObject<string | null>;
@@ -36,6 +39,7 @@ export function useChatSessionMutations({
   queryClient,
   chatWorkspaceCache,
   lang,
+  t,
   setSessionComposerErrors,
   latestDirectSessionSelectionRef,
   directSessionSelectionGenerationRef,
@@ -161,5 +165,39 @@ export function useChatSessionMutations({
     },
   });
 
-  return { sessionArchiveMutation, pinSessionMutation };
+  const renameAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string; displayName: string }) =>
+      updateAgent(payload.agentId, { displayName: payload.displayName }) as Promise<AgentInstance>,
+    onMutate: async (payload) => {
+      const telemetry = startUserAction("agent_rename", { agentId: payload.agentId });
+      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.map((agent) => agent.agentId === payload.agentId
+          ? { ...agent, displayName: payload.displayName }
+          : agent),
+      );
+      return { previousAgents, telemetry };
+    },
+    onSuccess: (updatedAgent, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: updatedAgent.agentId });
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
+      );
+      setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
+      void chatWorkspaceCache.afterAgentRenamed(updatedAgent.agentId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { agentId: variables.agentId });
+      if (context?.previousAgents) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(error, t("loadFailed")),
+      }));
+    },
+  });
+
+  return { sessionArchiveMutation, pinSessionMutation, renameAgentMutation };
 }

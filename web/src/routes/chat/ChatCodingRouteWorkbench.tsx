@@ -42,7 +42,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
-import { archiveAgent, updateAgent } from "../../api/agents";
+import { archiveAgent } from "../../api/agents";
 import {
   listVirtualHumanCompanionActivity,
   listVirtualHumanCompanions,
@@ -108,7 +108,6 @@ import type { ConversationForkScope } from "../../components/conversation/conver
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
 import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
-import { startUserAction } from "../../app/userActionTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
@@ -1269,10 +1268,11 @@ export function ChatCodingRouteWorkbench() {
     () => (showArchivedSessions ? archivedSessionsQuery.data?.items ?? [] : []),
     [archivedSessionsQuery.data, showArchivedSessions],
   );
-  const { sessionArchiveMutation, pinSessionMutation } = useChatSessionMutations({
+  const { sessionArchiveMutation, pinSessionMutation, renameAgentMutation } = useChatSessionMutations({
     queryClient,
     chatWorkspaceCache,
     lang,
+    t,
     setSessionComposerErrors,
     latestDirectSessionSelectionRef,
     directSessionSelectionGenerationRef,
@@ -1622,40 +1622,6 @@ export function ChatCodingRouteWorkbench() {
     setEditingSessionId,
     setEditingSessionTitle,
     suppressRenameBlurUntilRef,
-  });
-
-  const renameAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string; displayName: string }) =>
-      updateAgent(payload.agentId, { displayName: payload.displayName }) as Promise<AgentInstance>,
-    onMutate: async (payload) => {
-      const telemetry = startUserAction("agent_rename", { agentId: payload.agentId });
-      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
-      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
-      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
-        current?.map((agent) => agent.agentId === payload.agentId
-          ? { ...agent, displayName: payload.displayName }
-          : agent),
-      );
-      return { previousAgents, telemetry };
-    },
-    onSuccess: (updatedAgent, _variables, context) => {
-      context?.telemetry?.succeeded({ agentId: updatedAgent.agentId });
-      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
-        current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
-      );
-      setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
-      void chatWorkspaceCache.afterAgentRenamed(updatedAgent.agentId);
-    },
-    onError: (error, variables, context) => {
-      context?.telemetry?.failed(error, { agentId: variables.agentId });
-      if (context?.previousAgents) {
-        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
-      }
-      setSessionComposerErrors((current) => ({
-        ...current,
-        __sessions__: describeError(error, t("loadFailed")),
-      }));
-    },
   });
 
   const retireArchivedAgentSessions = useChatArchivedAgentRetirement({
