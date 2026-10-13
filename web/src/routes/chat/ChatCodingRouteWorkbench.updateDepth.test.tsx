@@ -45,7 +45,7 @@ import {
   useStableSessionDetailPlaceholder,
   type SessionToolApprovalPollingInput,
   type SessionToolApprovalsQueryOptions,
-} from "./ChatCodingRouteWorkbench";
+} from "./chatSessionQuerySeams";
 
 // happy-dom needs an explicit act environment; without it act() only warns.
 // Repo pattern: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
