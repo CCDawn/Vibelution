@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   UPDATE_BANNER_DISMISSED_STORAGE_KEY,
   isUpdateBannerVerdict,
+  isLauncherUpdateAvailable,
+  launcherUpdateBannerCopy,
+  frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
   shouldShowUpdateBanner,
   storeUpdateBannerDismissedHead,
@@ -12,14 +15,14 @@ import {
 } from "./updateBanner";
 
 describe("updateBanner verdict gate", () => {
-  it("prompts for every verdict where the backend runs stale code", () => {
+  it("prompts for stale backend or frontend code", () => {
     expect(isUpdateBannerVerdict("backend_behind")).toBe(true);
     expect(isUpdateBannerVerdict("backend_and_frontend_behind")).toBe(true);
+    expect(isUpdateBannerVerdict("frontend_behind")).toBe(true);
   });
 
-  it("does not prompt for current, frontend-only, or unknown verdicts", () => {
+  it("does not prompt for current or unknown verdicts", () => {
     expect(isUpdateBannerVerdict("current")).toBe(false);
-    expect(isUpdateBannerVerdict("frontend_behind")).toBe(false);
     expect(isUpdateBannerVerdict("unknown")).toBe(false);
     expect(isUpdateBannerVerdict(undefined)).toBe(false);
     expect(isUpdateBannerVerdict(null)).toBe(false);
@@ -27,6 +30,15 @@ describe("updateBanner verdict gate", () => {
 });
 
 describe("shouldShowUpdateBanner", () => {
+  it("keeps a stale Launcher visible even when the workbench is current", () => {
+    const launcherFreshness = { current: false, label: "stale", shellStale: true };
+    expect(shouldShowUpdateBanner({ verdict: "current", diskHead: "new-head", dismissedHead: "", launcherFreshness })).toBe(true);
+    expect(shouldShowUpdateBanner({ verdict: "current", diskHead: "new-head", dismissedHead: "new-head", launcherFreshness })).toBe(false);
+    expect(isLauncherUpdateAvailable({ current: null, label: "unknown" })).toBe(false);
+    expect(isLauncherUpdateAvailable({ current: true, label: "current" })).toBe(false);
+    expect(launcherUpdateBannerCopy("zh").detail).toContain("打开启动管理");
+    expect(frontendUpdateBannerCopy("zh").title).toContain("前端有更新");
+  });
   it("shows when the backend is behind and no dismissal matches the disk HEAD", () => {
     expect(shouldShowUpdateBanner({
       verdict: "backend_behind",

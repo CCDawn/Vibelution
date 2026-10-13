@@ -299,7 +299,7 @@ backToBottomButton:
     "vui-components-conversationview turnDividerIcon inline-grid shrink-0 place-items-center text-[var(--fg-tertiary)]",
   turnDividerLabel:
     "vui-components-conversationview turnDividerLabel min-w-0 max-w-full truncate text-vui-xs leading-tight text-[var(--fg-tertiary)]",
-  turnDividerToneApplied: `vui-components-conversationview turnDividerToneApplied ${vuiStateCoolInfoClass}`,
+  turnDividerToneApplied: "vui-components-conversationview turnDividerToneApplied",
   turnDividerToneQuiet:
     "vui-components-conversationview turnDividerToneQuiet opacity-60",
   turnDividerToneWarning: `vui-components-conversationview turnDividerToneWarning ${vuiStateWarningSoftClass} text-[var(--state-warning)] [&_.turnDividerRule]:bg-[color-mix(in_srgb,var(--state-warning)_32%,transparent)] [&_.turnDividerIcon]:text-[var(--state-warning)] [&_.turnDividerLabel]:text-[var(--state-warning)]`,
