@@ -2,8 +2,8 @@
  * 全局命令面（workbench 根路由挂载，与 AppShell 并列）：全局快捷键分发 +
  * 命令面板 + 会话搜索。
  *
- * - Ctrl+K / ⌘K 唤起 VCommandPalette（命令源：壳层主导航 + 壳层动作，非 mock）；
- * - Ctrl+P / ⌘P 唤起 VSessionSearchDialog（数据源：useSessionSearchQuery，server 分页）；
+ * - Ctrl+K / ⌘K 在普通 Chat 中委托统一搜索；其他页面唤起 VCommandPalette；
+ * - Ctrl+P / ⌘P 优先委托已挂载的 Chat 搜索；其他页面使用全局分页搜索；
  * - 快捷键基建见 web/src/shortcuts/；用户覆盖持久化到
  *   localStorage（vibelution.shortcuts.overrides），改键入口在设置页
  *   「快捷键」分区（ConfigShortcutsPanel），覆盖变更经订阅即时生效，无需重载。
@@ -32,6 +32,7 @@ import {
 } from "../shortcuts/shortcutOverrides";
 import { isAppleKeyboardPlatform } from "../shortcuts/platform";
 import { useGlobalShortcuts } from "../shortcuts/useGlobalShortcuts";
+import { requestSessionIndexSearch } from "../shortcuts/sessionSearchDispatch";
 import { serializeChatRouteSelection } from "../routes/chat/chatSelectionProjection";
 import { useSessionSearchQuery } from "../routes/useSessionSearchQuery";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
@@ -101,7 +102,12 @@ export function GlobalCommandSurfaces() {
   }, []);
 
   const runCommand = useCallback(
-    (commandId: ShortcutCommandId) => {
+    (commandId: ShortcutCommandId, binding = "") => {
+      if (requestSessionIndexSearch(commandId, binding)) {
+        setPaletteOpen(false);
+        setSearchOpen(false);
+        return;
+      }
       if (commandId === "openCommandPalette") {
         setPaletteOpen((open) => !open);
       } else if (commandId === "openSessionSearch") {
@@ -181,7 +187,7 @@ export function GlobalCommandSurfaces() {
         detail: lang === "en" ? "Open the session search dialog (Ctrl+P)" : "打开会话搜索（Ctrl+P）",
         group: lang === "en" ? "Actions" : "动作",
         keywords: "search session 会话 搜索 find",
-        onRun: runWithRecent("action:open-session-search", () => setSearchOpen(true)),
+        onRun: runWithRecent("action:open-session-search", () => runCommand("openSessionSearch")),
       },
     ];
     // `>` 命令模式过滤掉导航条目；有记录时注入「最近使用」分组置顶（去重）。

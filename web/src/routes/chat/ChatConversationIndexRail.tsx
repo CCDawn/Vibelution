@@ -40,6 +40,7 @@ import styles from "./ChatConversationIndexRail.styles";
 import { ChatSessionIndexToolbar } from "./ChatSessionIndexToolbar";
 import { ChatSessionIndexSearch } from "./ChatSessionIndexSearch";
 import type { SessionListPreferences } from "./sessionListPreferences";
+import { SESSION_INDEX_SEARCH_EVENT } from "../../shortcuts/sessionSearchDispatch";
 
 export type ConversationIndexPanelKey = "conversations" | "members";
 
@@ -234,17 +235,18 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
   ], [createGroupRoomPending, createSessionPending, lang, onCreateAgent, onCreateSession, onToggleGroupComposer]);
 
   useEffect(() => {
+    const openIndexSearch = (event: Event) => {
+      event.preventDefault();
+      setOptionsOpen(false);
+      setCreateMenuOpen(false);
+      setSearchOpen(true);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
         return;
       }
       const key = event.key.toLocaleLowerCase();
-      if (key === "k") {
-        event.preventDefault();
-        setOptionsOpen(false);
-        setCreateMenuOpen(false);
-        setSearchOpen(true);
-      } else if (key === "n") {
+      if (key === "n") {
         event.preventDefault();
         setOptionsOpen(false);
         if (showArchivedSessions) onToggleShowArchivedSessions();
@@ -252,7 +254,11 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener(SESSION_INDEX_SEARCH_EVENT, openIndexSearch);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(SESSION_INDEX_SEARCH_EVENT, openIndexSearch);
+    };
   }, [showArchivedSessions, onToggleShowArchivedSessions]);
 
   return (

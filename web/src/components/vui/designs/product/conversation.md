@@ -43,6 +43,8 @@
 ### 使用方式
 普通 Chat 索引栏。会话范围提供原 Agent/团队过滤；隐藏过滤条件不会影响全部范围。已加载会话补充任务标题、摘要和工作区命中，并沿用删除 tombstone，避免删除后从缓存恢复结果。Agent/团队范围不发会话搜索请求；默认全部先呈现会话，输入关键词后先呈现身份命中。
 
+全局快捷键分发通过可取消的 session-index-search 事件委托已挂载的普通 Chat 搜索；默认 Ctrl+K 和会话搜索命令 Ctrl+P 只打开这个面。其他页面继续使用原全局命令/搜索。用户改绑的命令面板键位保留全局命令语义，会话搜索改绑继续委托当前 Chat；不再用路由内硬编码 Ctrl+K 绕过用户设置。
+
 ### 实现落点与边界
 `web/src/routes/chat/ChatSessionIndexSearch.tsx`；打开会话、Agent、团队委托原有 callbacks。范围与关键词只用于搜索 UI，不形成新的 session 索引、transcript 或持久化权威；不修改 Journal、worker、SSE、Companion 或权限。工作区补充只覆盖已加载会话；不宣称全文检索。
 
