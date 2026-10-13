@@ -25,7 +25,7 @@ export function FinancialAssistantChatNote({
   const zh = lang === "zh";
   return (
     <VStateSurface
-      density="compact"
+      className={noteStyles.surface}
       tone="info"
       title={zh ? "炒股智能体" : "Investment assistant"}
       data-financial-assistant-note="chat"

@@ -12,6 +12,7 @@ import {
   VEmptyState,
   VInput,
   VRouteLinkButton,
+  VSurface,
   VTextarea,
 } from "../../components/vui";
 import { auxTaskStatusLabel } from "../auxConversations/auxTaskPresentation";
@@ -662,6 +663,7 @@ export function ChatRightRail({
   };
   return (
     <section id={id} className={`${styles.shell} ${className}`} aria-label={copy.rail}>
+      <VSurface padding="none" className={styles.panel}>
       <div className={styles.toolbar}>
         {model.tabs.length === 0 ? <span className={styles.title}>{lang === "zh" ? "侧栏" : "Side"}</span> : null}
         <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
@@ -1122,6 +1124,7 @@ export function ChatRightRail({
           <VEmptyState title={copy.contextualEmpty} />
         ) : null}
       </div>
+      </VSurface>
     </section>
   );
 }
