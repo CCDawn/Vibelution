@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { queryKeys } from "../../api/queryKeys";
+import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
 import { VuiProvider } from "../../components/vui";
 import { ChatRightRail, type ChatRightRailSideClient } from "./ChatRightRail";
 import {
@@ -53,10 +54,11 @@ const emptyReview = {
   onSelectGitFile: () => undefined,
 };
 
-function Harness({ client, initialModel = EMPTY_CHAT_RIGHT_RAIL, sessionKind }: {
+function Harness({ client, initialModel = EMPTY_CHAT_RIGHT_RAIL, sessionKind, preface }: {
   client: ChatRightRailSideClient;
   initialModel?: ChatRightRailModel;
   sessionKind?: string;
+  preface?: React.ReactNode;
 }) {
   const [model, setModel] = useState<ChatRightRailModel>(initialModel);
   const activeSideTab = model.tabs.find((tab) => tab.id === model.activeId && tab.kind === "side");
@@ -72,6 +74,7 @@ function Harness({ client, initialModel = EMPTY_CHAT_RIGHT_RAIL, sessionKind }: 
         model={model}
         onModelChange={setModel}
         onCollapse={() => undefined}
+        preface={preface}
         devtools={{ phase: "idle", status: "ready", messages: [] }}
         terminalRun={null}
         terminalMountedInCenter={false}
@@ -105,6 +108,7 @@ describe("chat right rail interaction", () => {
     initialModel = EMPTY_CHAT_RIGHT_RAIL,
     prepare?: (queryClient: QueryClient) => void,
     sessionKind?: string,
+    preface?: React.ReactNode,
   ) {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -115,8 +119,8 @@ describe("chat right rail interaction", () => {
       root?.render(
         <VuiProvider>
           <QueryClientProvider client={queryClient}>
-            <MemoryRouter>
-              <Harness client={client} initialModel={initialModel} sessionKind={sessionKind} />
+            <MemoryRouter initialEntries={["/chat?session=parent-1"]}>
+              <Harness client={client} initialModel={initialModel} sessionKind={sessionKind} preface={preface} />
             </MemoryRouter>
           </QueryClientProvider>
         </VuiProvider>,
@@ -687,5 +691,32 @@ describe("chat right rail interaction", () => {
     expect(host.textContent).toContain("这项任务的详情在辅助对话中心。");
     expect(host.textContent).toContain("打开辅助对话中心");
     expect(host.textContent).not.toContain("进行中");
+  });
+
+  it("renders the assistant note in the rail body and keeps the directory listing live", async () => {
+    const client: ChatRightRailSideClient = {
+      createChild: async () => ({ childSessionId: "unused", parentSessionId: "parent-1" }),
+      submit: async () => undefined,
+      fetchDetail: async () => ({ currentPhase: "idle", status: "ready", messages: [] }),
+    };
+    const model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "directory", title: "子智能体目录" });
+    const host = await mount(client, model, (queryClient) => {
+      queryClient.setQueryData(queryKeys.financialAssistants(), [{
+        agentId: "finance-a", agentCode: "A086", displayName: "炒股智能体", status: "active",
+        setupStatus: "ready", directSessionId: "parent-1", knowledgeBaseId: "agent:finance-a:reports",
+        knowledgeReadable: true, modelStatus: "configured_unverified", reportStatus: "not_configured",
+        newsDelegationStatus: "disabled", marketDataStatus: "not_connected", privateLedgerStatus: "not_implemented",
+        tradingEnabled: false,
+      }]);
+      queryClient.setQueryData(queryKeys.sessionChildSessions("parent-1"), [
+        { id: "child-run", title: "正在查", taskTitle: "正在查", status: "running", currentPhase: "running",
+          taskSummary: "", lastActive: "", updatedAt: "" },
+      ]);
+    }, undefined, <FinancialAssistantChatNote sessionId="parent-1" lang="zh" />);
+    await act(async () => { await Promise.resolve(); });
+    expect(host.textContent).toContain("不会实盘下单");
+    expect(host.textContent).toContain("暂无分钟行情");
+    expect(host.textContent).toContain("进行中 · 1");
+    expect(host.textContent).toContain("正在查 · 运行中");
   });
 });

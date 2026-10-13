@@ -57,7 +57,19 @@ describe("financial assistant chat note", () => {
     ));
     await settle();
     expect(container.textContent).toBe("");
-    expect(listFinancialAssistants).not.toHaveBeenCalled();
+    expect(listFinancialAssistants).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the boundary card in the right column of its own ordinary chat", async () => {
+    await act(async () => root.render(
+      <QueryClientProvider client={client}><MemoryRouter initialEntries={["/chat?session=native-session"]}>
+        <FinancialAssistantChatNote sessionId="native-session" lang="zh" />
+      </MemoryRouter></QueryClientProvider>,
+    ));
+    await settle();
+    expect(listFinancialAssistants).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("不会实盘下单");
+    expect(container.textContent).toContain("暂无分钟行情");
   });
 
   it("puts connection status on the matching agent and skips everyone else", async () => {
