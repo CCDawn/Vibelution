@@ -43,6 +43,12 @@ export type ConversationTurnNavEntry = {
    */
   userPreviewText: string;
   assistantPreviewText: string;
+  /**
+   * The turn's assistant row is still streaming (`assistant-active:<renderKey>`
+   * row keys from agentMessageTimelineRows); running ticks get a rail emphasis
+   * floor and the localized running hover fallback.
+   */
+  isRunning: boolean;
 };
 
 /**
@@ -62,6 +68,15 @@ export function conversationTurnNavRowKind(rowKey: string): ConversationTurnNavR
     return "user";
   }
   return "other";
+}
+
+/**
+ * `assistant-active:<renderKey>` rows are the timeline's live streaming
+ * assistant surface (agentMessageTimelineRows); a turn owning one is still
+ * running and gets rail emphasis plus the localized running hover fallback.
+ */
+export function conversationTurnNavRowIsRunning(rowKey: string): boolean {
+  return String(rowKey ?? "").startsWith("assistant-active:");
 }
 
 /** Single-line, length-capped tooltip label with a caller-localized fallback. */
@@ -115,6 +130,7 @@ export function buildConversationTurnNavDirectory(
         label: conversationTurnNavLabel(row.previewText, fallbackLabel(entries.length + 1)),
         userPreviewText: previewFor(row.rowKey, CONVERSATION_TURN_NAV_USER_PREVIEW_MAX_CHARS),
         assistantPreviewText: "",
+        isRunning: false,
       };
       entries.push(current);
       return;
@@ -128,6 +144,7 @@ export function buildConversationTurnNavDirectory(
           row.rowKey,
           CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS,
         );
+        current.isRunning = conversationTurnNavRowIsRunning(row.rowKey);
         return;
       }
       current = {
@@ -141,6 +158,7 @@ export function buildConversationTurnNavDirectory(
           row.rowKey,
           CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS,
         ),
+        isRunning: conversationTurnNavRowIsRunning(row.rowKey),
       };
       entries.push(current);
     }

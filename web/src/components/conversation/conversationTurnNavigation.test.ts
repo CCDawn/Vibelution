@@ -51,6 +51,26 @@ describe("conversationTurnNavigation", () => {
     expect(entries.map((entry) => entry.turnIndex)).toEqual([0, 1, 2, 3]);
   });
 
+  it("derives isRunning from assistant-active assistant row keys", () => {
+    const entries = buildConversationTurnNavDirectory(rows(
+      ["user-message:u1", "问一"],
+      ["assistant-turn:t1", "答一"],
+      ["user-message:u2", "问二"],
+      ["assistant-active:render-9", ""],
+      ["assistant-active:render-10", ""],
+      ["user-message:u3", "问三"],
+    ), { fallbackLabel: (turnNumber) => `第 ${turnNumber} 轮` });
+    expect(entries.map((entry) => entry.assistantRowKey)).toEqual([
+      "assistant-turn:t1",
+      "assistant-active:render-9",
+      "assistant-active:render-10",
+      null,
+    ]);
+    // Completed turn, running user-anchored turn, running assistant-anchored
+    // turn, and a fresh user turn with no assistant row yet.
+    expect(entries.map((entry) => entry.isRunning)).toEqual([false, true, true, false]);
+  });
+
   it("labels turns from the user preview and falls back to the localized turn number", () => {
     const entries = turnDirectory();
     expect(entries[0]?.label).toBe("第一轮提问");

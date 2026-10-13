@@ -1057,7 +1057,7 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 ## ConversationTurnNavigator
 
 ### 功能
-对话内容区左侧的轮次导航，不创建第二份会话记录。12×2 短横线在悬停或聚焦时伸长，邻近两项渐变；减少动态效果偏好下不播放过渡。
+对话内容区左侧的轮次导航，不创建第二份会话记录。悬停或聚焦时按 ZCode 山峰衰减伸长：交互中心条 scaleX 2.6、opacity 1 并用 `var(--fg-primary)` 强色；距离 1 为 1.7/0.86，距离 2 为 1.25/0.72，其余 1/0.58。无交互时当前轮保持 `var(--fg-primary)` + opacity 0.9，其余 0.58；减少动态效果偏好下不播放过渡。
 
 ### 适用范围
 - 六轮及以上的会话；对话容器宽度达到 864px 时显示。
@@ -1065,10 +1065,10 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 - 不用于会话列表、消息编辑或会话数据持久化。
 
 ### 使用方式
-传入既有轮次目录 `entries`、当前轮次 `currentIndex`、本地化 `ariaLabel` 与既有 `onNavigate`。密集的 36×18 命中区使用 `VNativeButton`；`VHoverCard` 向右显示两行问题和三行回答。无摘要的项不挂空浮卡。
+传入既有轮次目录 `entries`、当前轮次 `currentIndex`、本地化 `ariaLabel`、既有 `onNavigate` 与可选 `runningAssistantPreview`。密集的 36×18 命中区使用 `VNativeButton`；`VHoverCard` 向右显示两行问题和三行回答。无摘要的项不挂空浮卡；运行中且尚无正文的轮次显示 `runningAssistantPreview` 本地化文案，缺省时不渲染第二段，绝不回退硬编码英文。
 
 ### 实现与边界
-React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到当前标记。原有时间线跳转、减少动态效果滚动、消息投影及会话数据保持不变。
+React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到当前标记。tick 按钮带 `aria-current="location"`（当前轮）、`aria-posinset`/`aria-setsize` 与 `data-running`；目录里 `assistant-active:` 前缀的助手行派生 `isRunning`，运行中条目 opacity 不低于 0.72。原有时间线跳转、减少动态效果滚动、消息投影及会话数据保持不变。
 
 ## ChatGroupArtifactDialog
 

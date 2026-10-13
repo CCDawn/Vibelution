@@ -4180,6 +4180,7 @@ export const ConversationView = React.memo(function ConversationView({
         currentIndex={timelineTurnNavCurrentIndex}
         ariaLabel={lang === "zh" ? "会话轮次导航" : "Turn navigation"}
         onNavigate={handleTurnNavigate}
+        runningAssistantPreview={t("turnNavigatorRunningAssistant")}
       />
       </div>
 
