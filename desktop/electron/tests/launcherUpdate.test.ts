@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { executeLauncherUpdate, projectLauncherUpdateFreshness } from "../src/process/launcherUpdate.js";
+import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
 import type { ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 
 function updateInputs(state: ActiveWorkStatus = { state: "idle", message: "" }) {
@@ -133,5 +133,24 @@ describe("Launcher freshness is based on the real packaged shell", () => {
   });
   it("only reports current after a verified source identity and surfaces refresh failures", () => {
     expect(projectLauncherUpdateFreshness({ ...input, shell: { schemaVersion: 1, stale: false, reason: "current", currentElectronTree: "a".repeat(40), refreshBlocked: true, refreshBlockedDetail: "package failed" } })).toMatchObject({ current: true, refreshError: "package failed" });
+  });
+  it("returns a version when task status fails and keeps the last known shell", () => {
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const body = main.slice(main.indexOf("async function currentLauncherUpdateFreshness"), main.indexOf("async function exitAndRelaunchLauncherShell"));
+    expect(body).toContain("Promise.allSettled");
+    expect(body).toContain("retainKnownDesktopShell");
+    expect(body).toContain('state: "unknown"');
+    expect(body).not.toContain("inspectCurrentDesktopShell().catch(() => undefined)");
+  });
+
+  it("keeps the last identified shell when the next read misses", () => {
+    const known = { schemaVersion: 1 as const, stale: true, launchBlocking: true, reason: "provenance_mismatch", currentElectronTree: "c".repeat(40), packagedSourceCommit: "a".repeat(40), currentCommit: "b".repeat(40) };
+    const missed = { schemaVersion: 1 as const, stale: true, launchBlocking: false, reason: "frontend_inspection_failed", currentElectronTree: "d".repeat(40) };
+    expect(retainKnownDesktopShell(known, undefined)).toBe(known);
+    expect(retainKnownDesktopShell(known, missed)).toBe(known);
+    expect(retainKnownDesktopShell(undefined, missed)).toBeUndefined();
+    const newer = { ...known, stale: false, reason: "current", currentElectronTree: "e".repeat(40) };
+    expect(retainKnownDesktopShell(known, newer)).toBe(newer);
+    expect(projectLauncherUpdateFreshness({ ...input, shell: retainKnownDesktopShell(known, missed) })).toMatchObject({ current: false, updateAvailable: true });
   });
 });

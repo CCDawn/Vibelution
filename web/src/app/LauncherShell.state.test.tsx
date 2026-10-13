@@ -97,6 +97,7 @@ describe("LauncherShell launcher state synchronization", () => {
     expect(container.querySelector("[data-testid='branch-items']")?.textContent).toBe("");
     expect(launcherBridge.onLauncherStateChanged).toHaveBeenCalledTimes(1);
     expect(launcherBridge.listeners.size).toBe(1);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     await act(async () => {
       for (const listener of launcherBridge.listeners) {
@@ -108,5 +109,8 @@ describe("LauncherShell launcher state synchronization", () => {
 
     await vi.waitFor(() => expect(container.querySelector("[data-testid='branch-items']")?.textContent).toContain("branch-1"));
     expect(launcherBridge.getLauncherBranchInstances).toHaveBeenCalledTimes(2);
+    const invalidated = invalidate.mock.calls.map((call) => JSON.stringify(call[0] ?? {}));
+    expect(invalidated.some((item) => item.includes("branch-instances"))).toBe(true);
+    expect(invalidated.some((item) => item.includes("freshness"))).toBe(false);
   });
 });
