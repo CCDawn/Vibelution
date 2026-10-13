@@ -163,7 +163,7 @@ export function FinanceLessonManager({ agentId, zh }: { agentId: string; zh: boo
         </div>
         <p className={styles.claim}>{version.text}</p>
         {version.supersededBy ? <p className={styles.note}>{zh ? `替代版本：${version.supersededBy}` : `Replaced by: ${version.supersededBy}`}</p> : null}
-        {version.revokedAt ? <p className={styles.note}>{zh ? `作废时间：${version.revokedAt}` : `Revoked at: ${version.revokedAt}`}</p> : null}
+        {version.revokedAt ? <p className={styles.note}>{zh ? `${version.state === "superseded" ? "替代时间" : "作废时间"}：${version.revokedAt}` : `${version.state === "superseded" ? "Replaced" : "Revoked"} at: ${version.revokedAt}`}</p> : null}
         <div className={styles.row}>
           {claim.sessionId && claim.turnId ? <VRouteLinkButton variant="secondary" to={reportLocation(location.pathname, location.search, claim)}>{zh ? "打开原报告" : "Open source report"}</VRouteLinkButton> : <VButton variant="secondary" isDisabled>{zh ? "原报告不可用" : "Source report unavailable"}</VButton>}
           {version.state === "active" ? <>
