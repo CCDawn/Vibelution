@@ -23,6 +23,8 @@ AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workben
 
 分栏页的页面根保持灰色，最外层 VSplitWorkspace 的 main / aside 各自使用白色 12px 圆角，sidebar 与顶栏同灰；不得将所有列圈进第二个白色大框。仅匹配路由内没有 split 祖先的最外层 split，嵌套编辑器和画布不重复套框。窄屏设置页保留根滚动以容纳竖向排列的表单。
 
+圆角衔接由外层 pane 独占：同尺寸的 Board/Canvas/Agent pane-root 不重复画 8px 内框；灰 sidebar 的 recipe 根不保留矩形边框。页级标题不再套第二张圆角卡片；分栏页的页级工具条与外框同灰，白 pane 内的工具条继续与正文相连；Dense 页的页头和正文共用同一白色基底。共享拖动线使用正文色，贴左右 pane 边界且上下各避开 12px 弧段；保留原命中区、键盘和宽度记忆。
+
 选择器仅命中 AppShell 项目 split 的直属路由根，同时支持 connection-notice 的 `workbench-content-frame` 宿主。不得匹配嵌套工作台、弹窗或已独立实现圆角边界的主会话壳。非 VUI route root 使用已有 `data-vui-domain-recipe` / `data-vui-recipe` 登记，避免依靠业务 class 名或给所有后代 section 统一背景。用量页标记为 `usage-workbench`。
 
 ---
