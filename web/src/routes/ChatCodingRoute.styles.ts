@@ -42,7 +42,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.,
   centerPane:
-    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-3 mb-3 overflow-hidden rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_9%,transparent)] ${vuiChatFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:mx-2 max-[700px]:mb-2`,
+    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--fg-primary)_9%,transparent)] ${vuiChatFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
   // Column placement is separate from the pane. The built stylesheet emits
   // grid-column:3 after grid-column:1, so both utilities on one node keep column 3.
   centerPaneDocked:
@@ -77,7 +77,7 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute contextCompositionSegmentUser min-w-0 ${vuiStateWarmSoftClass}`,
   contextLineCompact: `vui-routes-chatcodingroute contextLineCompact min-w-0 ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] leading-snug shadow-none [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden [overflow-wrap:anywhere]`,
   layout:
-    "vui-routes-chatcodingroute layout relative w-full min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:0px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]",
+    `vui-routes-chatcodingroute layout relative w-full min-w-0 grid !gap-0 !p-0 ${vuiRailFillClass} [--vui-surface-rail:var(--shell-surface)] [--chat-workbench-gap:4px] [--chat-pane-gutter:0px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]`,
   layoutCompactDesktop:
     "vui-routes-chatcodingroute layoutCompactDesktop w-full grid min-w-0 grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)] overflow-hidden",
   layoutStatusRailCollapsed:
@@ -127,7 +127,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:
     "vui-routes-chatcodingroute resourceSplit min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1",
-  rightPane: `vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] ${vuiRailFillClass} bg-[linear-gradient(180deg,var(--vui-surface-toolbar),var(--vui-surface-rail))] p-[var(--chat-workbench-gap)] shadow-[var(--vui-sheen)] [grid-column:1] [grid-row:1]`,
+  rightPane: `vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] ${vuiRailFillClass} bg-none p-[var(--chat-workbench-gap)] shadow-none [grid-column:1] [grid-row:1]`,
   rightPaneWithTabs:
     "vui-routes-chatcodingroute rightPaneWithTabs grid-rows-[auto_auto_minmax(0,1fr)]",
   rightPaneWithoutTabs:
