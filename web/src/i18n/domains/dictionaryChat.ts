@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: chat (190 keys). */
+/** Route/domain dictionary slice: chat (191 keys). */
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
@@ -236,6 +236,7 @@ export const dictionaryChat = {
     findPreviousMatch: "上一个命中",
     findNextMatch: "下一个命中",
     findCloseBar: "关闭查找（Esc）",
+    turnNavigatorRunningAssistant: "助手正在回复中…",
   },
   en: {
     navChat: "Chat",
@@ -473,5 +474,6 @@ export const dictionaryChat = {
     findPreviousMatch: "Previous match",
     findNextMatch: "Next match",
     findCloseBar: "Close find (Esc)",
+    turnNavigatorRunningAssistant: "Assistant is still working…",
   },
 } as const;

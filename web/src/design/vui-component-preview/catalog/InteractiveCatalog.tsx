@@ -58,6 +58,7 @@ export function InteractiveCatalog() {
               assistantRowKey: `preview-assistant-${index}`, label: `跳转到第 ${index + 1} 轮`,
               userPreviewText: `第 ${index + 1} 轮：优化对话阅读体验`,
               assistantPreviewText: "左侧短横线导航，悬停查看摘要，点击定位；窄屏隐藏。",
+              isRunning: false,
             }))}
             currentIndex={turnIndex} ariaLabel="示例会话轮次导航" onNavigate={(entry) => setTurnIndex(entry.turnIndex)}
           />

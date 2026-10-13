@@ -9,6 +9,11 @@ type ConversationTurnNavigatorProps = {
   currentIndex: number;
   ariaLabel: string;
   onNavigate: (entry: ConversationTurnNavEntry) => void;
+  /**
+   * Localized hover fallback shown for running turns without final assistant
+   * text yet; empty/omitted keeps the single-paragraph hover behavior.
+   */
+  runningAssistantPreview?: string;
 };
 
 /** ZCode-inspired left rail; the existing timeline remains the navigation authority. */
@@ -16,7 +21,7 @@ export function ConversationTurnNavigator(props: ConversationTurnNavigatorProps)
   return props.entries.length < CONVERSATION_TURN_NAV_MIN_TURNS ? null : <TurnRail {...props} />;
 }
 
-function TurnRail({ entries, currentIndex, ariaLabel, onNavigate }: ConversationTurnNavigatorProps) {
+function TurnRail({ entries, currentIndex, ariaLabel, onNavigate, runningAssistantPreview }: ConversationTurnNavigatorProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const virtualizer = useVirtualizer({
@@ -46,10 +51,26 @@ function TurnRail({ entries, currentIndex, ariaLabel, onNavigate }: Conversation
         {virtualizer.getVirtualItems().map((row) => {
           const entry = entries[row.index];
           const active = entry.turnIndex === currentIndex;
-          const distance = hoverIndex === null ? Infinity : Math.abs(row.index - hoverIndex);
-          const emphasis = distance === 0 ? "scale-x-[2.6] opacity-100" : distance === 1 ? "scale-x-[1.7] opacity-80" : distance === 2 ? "scale-x-[1.25] opacity-65" : active ? "opacity-100" : "opacity-40";
+          const interactive = hoverIndex !== null;
+          const distance = interactive ? Math.abs(row.index - hoverIndex) : Infinity;
+          // ZCode mountain decay (conversationTurnNavigatorHelpers): d0 scaleX
+          // 2.6/opacity 1 with the strong fg-primary mark, d1 1.7/0.86, d2
+          // 1.25/0.72, else 0.58. Idle keeps only the scroll-active tone
+          // (fg-primary + 0.9); running ticks never dim below 0.72.
+          const emphasis = interactive
+            ? distance === 0
+              ? "scale-x-[2.6] opacity-100 text-[var(--fg-primary)]"
+              : distance === 1
+                ? "scale-x-[1.7] opacity-[0.86]"
+                : distance === 2
+                  ? "scale-x-[1.25] opacity-[0.72]"
+                  : entry.isRunning ? "opacity-[0.72]" : "opacity-[0.58]"
+            : active
+              ? "opacity-[0.9]"
+              : entry.isRunning ? "opacity-[0.72]" : "opacity-[0.58]";
           return <div key={row.key} className="absolute left-0 top-0 h-[18px] w-full" style={{ transform: `translateY(${row.start}px)` }}>
-            <TurnRailItem entry={entry} active={active} emphasis={emphasis} onNavigate={onNavigate}
+            <TurnRailItem entry={entry} active={active} emphasis={emphasis} index={row.index} total={entries.length}
+              onNavigate={onNavigate} runningAssistantPreview={runningAssistantPreview}
               onFocusChange={(focused) => setHoverIndex(focused ? row.index : null)} />
           </div>;
         })}
@@ -58,25 +79,32 @@ function TurnRail({ entries, currentIndex, ariaLabel, onNavigate }: Conversation
   </nav>;
 }
 
-function TurnRailItem({ entry, active, emphasis, onNavigate, onFocusChange }: {
+function TurnRailItem({ entry, active, emphasis, index, total, onNavigate, onFocusChange, runningAssistantPreview }: {
   entry: ConversationTurnNavEntry; active: boolean; emphasis: string;
+  index: number; total: number;
   onNavigate: ConversationTurnNavigatorProps["onNavigate"];
   onFocusChange: (focused: boolean) => void;
+  runningAssistantPreview?: string;
 }) {
   const [open, setOpen] = useState(false);
   const user = entry.userPreviewText.trim();
   const assistant = entry.assistantPreviewText.trim();
+  // Running turns without final text fall back to the localized running copy;
+  // an absent/empty string keeps the previous no-second-paragraph behavior.
+  const running = entry.isRunning && !assistant ? (runningAssistantPreview ?? "").trim() : "";
   const button = <VNativeButton className={`${styles.turnNavigatorDot} ${active ? styles.turnNavigatorDotActive : ""}`}
-    onClick={() => onNavigate(entry)} aria-label={entry.label} aria-current={active ? "true" : undefined}
+    onClick={() => onNavigate(entry)} aria-label={entry.label} aria-current={active ? "location" : undefined}
+    aria-posinset={index + 1} aria-setsize={total} data-running={entry.isRunning ? "true" : "false"}
     onPointerEnter={() => onFocusChange(true)} onFocus={() => onFocusChange(true)} onBlur={() => onFocusChange(false)}>
     <span className={`${styles.turnNavigatorDotMark} ${emphasis}`} aria-hidden="true" />
   </VNativeButton>;
-  if (!user && !assistant) return button;
+  if (!user && !assistant && !running) return button;
   // Only visible items mount. Controlled mode keeps the trigger stable on
   // first focus, preventing the initial click from being lost to remounting.
   return <VHoverCard side="right" align="start" sideOffset={10} open={open} onOpenChange={setOpen}
     content={<div className={styles.turnNavigatorHoverBody}>
       {user && <p className={styles.turnNavigatorHoverUser}>{user}</p>}
       {assistant && <p className={styles.turnNavigatorHoverAssistant}>{assistant}</p>}
+      {running && <p className={styles.turnNavigatorHoverAssistant}>{running}</p>}
     </div>}>{button}</VHoverCard>;
 }

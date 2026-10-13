@@ -19,6 +19,7 @@ function navEntry(overrides: Partial<ConversationTurnNavEntry> = {}): Conversati
     label: "第一轮：修复构建",
     userPreviewText: "",
     assistantPreviewText: "",
+    isRunning: false,
     ...overrides,
   };
 }
@@ -31,7 +32,11 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(36);
 });
 
-function mountNavigator(entries: ConversationTurnNavEntry[], onNavigate = vi.fn()) {
+function mountNavigator(
+  entries: ConversationTurnNavEntry[],
+  onNavigate = vi.fn(),
+  extra: { currentIndex?: number; runningAssistantPreview?: string } = {},
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -40,13 +45,22 @@ function mountNavigator(entries: ConversationTurnNavEntry[], onNavigate = vi.fn(
       <VuiProvider>
         <ConversationTurnNavigator
           entries={entries}
-          currentIndex={0}
+          currentIndex={extra.currentIndex ?? 0}
           ariaLabel="会话轮次导航"
           onNavigate={onNavigate}
+          runningAssistantPreview={extra.runningAssistantPreview}
         />
       </VuiProvider>,
     );
   });
+}
+
+function unmountNavigator() {
+  act(() => {
+    root?.unmount();
+  });
+  root = null;
+  container?.remove();
 }
 
 afterEach(() => {
@@ -174,5 +188,151 @@ describe("ConversationTurnNavigator turn rail hover previews", () => {
     });
     const contents = document.querySelectorAll("[data-vui='hover-card-content']");
     expect(contents.length).toBe(0);
+  });
+});
+
+describe("ConversationTurnNavigator ZCode visual calibration", () => {
+  function railButtons() {
+    return container.querySelectorAll<HTMLButtonElement>("nav button");
+  }
+
+  function markAt(index: number) {
+    const buttons = railButtons();
+    const mark = buttons[index]?.querySelector("span");
+    expect(mark).toBeTruthy();
+    return mark?.className ?? "";
+  }
+
+  function sixTurns(overrides: Record<number, Partial<ConversationTurnNavEntry>> = {}) {
+    return Array.from({ length: 6 }, (_, turnIndex) => navEntry({
+      turnIndex,
+      userPreviewText: `问题 ${turnIndex}`,
+      ...overrides[turnIndex],
+    }));
+  }
+
+  it("applies the ZCode mountain decay around the hovered tick with a strong center", () => {
+    mountNavigator(sixTurns());
+    const buttons = railButtons();
+    act(() => {
+      pointerOver(buttons[3]);
+    });
+    // Center: scaleX 2.6, full opacity, strong fg-primary mark.
+    expect(markAt(3)).toContain("scale-x-[2.6]");
+    expect(markAt(3)).toContain("opacity-100");
+    expect(markAt(3)).toContain("text-[var(--fg-primary)]");
+    // Distance 1: 1.7 / 0.86; distance 2: 1.25 / 0.72.
+    expect(markAt(2)).toContain("scale-x-[1.7]");
+    expect(markAt(2)).toContain("opacity-[0.86]");
+    expect(markAt(4)).toContain("scale-x-[1.7]");
+    expect(markAt(4)).toContain("opacity-[0.86]");
+    expect(markAt(1)).toContain("scale-x-[1.25]");
+    expect(markAt(1)).toContain("opacity-[0.72]");
+    expect(markAt(5)).toContain("scale-x-[1.25]");
+    expect(markAt(5)).toContain("opacity-[0.72]");
+    // Beyond the mountain: plain 0.58, even for the active tick (index 0).
+    expect(markAt(0)).toContain("opacity-[0.58]");
+    expect(markAt(0)).not.toContain("scale-x-");
+    expect(markAt(0)).not.toContain("opacity-[0.9]");
+  });
+
+  it("keeps the idle scroll-active tone at 0.9 and mutes the rest at 0.58", () => {
+    mountNavigator(sixTurns());
+    expect(railButtons()[0].className).toContain("turnNavigatorDotActive");
+    expect(markAt(0)).toContain("opacity-[0.9]");
+    expect(markAt(0)).not.toContain("scale-x-");
+    for (const index of [1, 2, 3, 4, 5]) {
+      expect(markAt(index)).toContain("opacity-[0.58]");
+      expect(markAt(index)).not.toContain("scale-x-");
+    }
+  });
+
+  it("anchors directory a11y: aria-current=location plus posinset/setsize", () => {
+    mountNavigator(sixTurns());
+    const buttons = railButtons();
+    expect(buttons[0].getAttribute("aria-current")).toBe("location");
+    for (const index of [1, 2, 3, 4, 5]) {
+      expect(buttons[index].getAttribute("aria-current")).toBeNull();
+    }
+    buttons.forEach((button, index) => {
+      expect(button.getAttribute("aria-posinset")).toBe(String(index + 1));
+      expect(button.getAttribute("aria-setsize")).toBe("6");
+    });
+  });
+
+  it("emphasizes running ticks with the 0.72 opacity floor and data-running", () => {
+    mountNavigator(sixTurns({ 5: { isRunning: true } }));
+    const buttons = railButtons();
+    // Idle: running keeps 0.72 instead of the plain 0.58 idle dim.
+    expect(markAt(5)).toContain("opacity-[0.72]");
+    expect(markAt(4)).toContain("opacity-[0.58]");
+    expect(buttons[5].getAttribute("data-running")).toBe("true");
+    expect(buttons[0].getAttribute("data-running")).toBe("false");
+    // Far from the hovered center, the floor still beats the 0.58 decay.
+    act(() => {
+      pointerOver(buttons[0]);
+    });
+    expect(markAt(5)).toContain("opacity-[0.72]");
+  });
+
+  it("runs the localized running fallback in hover previews only without final text", () => {
+    vi.useFakeTimers();
+    mountNavigator(sixTurns({
+      4: { isRunning: true, assistantPreviewText: "流式中的部分正文" },
+      5: { isRunning: true },
+    }), undefined, { runningAssistantPreview: "助手正在回复中…" });
+    const buttons = railButtons();
+
+    // Running without assistant text: user query + localized running copy.
+    act(() => {
+      pointerOver(buttons[5]);
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    let content = document.querySelector("[data-vui='hover-card-content']");
+    expect(content?.textContent).toContain("问题 5");
+    expect(content?.textContent).toContain("助手正在回复中…");
+    expect(content?.querySelectorAll("p").length).toBe(2);
+
+    // Streaming text already present: the assistant excerpt wins, no running copy.
+    act(() => {
+      pointerOver(buttons[4]);
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    // Turn 5's card stays mounted from the previous hover; pick by content.
+    const contents = [...document.querySelectorAll("[data-vui='hover-card-content']")];
+    const turnFourCard = contents.find((node) => node.textContent?.includes("问题 4"));
+    expect(turnFourCard?.textContent).toContain("流式中的部分正文");
+    expect(turnFourCard?.textContent).not.toContain("助手正在回复中…");
+    expect(turnFourCard?.querySelectorAll("p").length).toBe(2);
+  });
+
+  it("omits the running paragraph when no localized copy is provided", () => {
+    vi.useFakeTimers();
+    mountNavigator(sixTurns({ 5: { isRunning: true, userPreviewText: "第五轮问题" } }));
+    const buttons = railButtons();
+    act(() => {
+      pointerOver(buttons[5]);
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    const content = document.querySelector("[data-vui='hover-card-content']");
+    expect(content?.textContent).toContain("第五轮问题");
+    expect(content?.querySelectorAll("p").length).toBe(1);
+  });
+
+  it("keeps preview-less running dots unwrapped unless running copy exists", () => {
+    mountNavigator(sixTurns({ 5: { isRunning: true, userPreviewText: "" } }));
+    const buttons = railButtons();
+    expect(buttons[5].getAttribute("data-slot")).toBeNull();
+    unmountNavigator();
+    mountNavigator(sixTurns({ 5: { isRunning: true, userPreviewText: "" } }), undefined, {
+      runningAssistantPreview: "助手正在回复中…",
+    });
+    expect(railButtons()[5].getAttribute("data-slot")).toBe("hover-card-trigger");
   });
 });
