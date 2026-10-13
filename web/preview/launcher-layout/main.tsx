@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, ArrowLeft, ArrowRight, Box, Check, ChevronRight, Circle, Copy, Ellipsis, ExternalLink, Folder, GitBranch, Monitor, Play, Search, Settings2, ShieldCheck, Square, Wrench } from "lucide-react";
-import { VButton, VChip, VConfirmDialog, VDenseOpsPage, VDropdownMenu, VEmptyState, VInput, VSplitWorkspace, VStringSelect, VTabs, VuiProvider } from "../../src/components/vui";
+import { VButton, VChip, VConfirmDialog, VDenseOpsPage, VDropdownMenu, VEmptyState, VInput, VSplitWorkspace, VStringSelect, VSurface, VTabs, VuiProvider } from "../../src/components/vui";
 import "./preview.css";
 
 type State = "running" | "stopped" | "starting" | "failed";
@@ -70,7 +70,7 @@ function LauncherPreview() {
         <VButton className="nav-item" variant="ghost" icon={<Wrench size={17} />} onPress={() => setNotice("维护页不在本次预览范围内。")}>维护</VButton>
       </div>
       <div className="nav-bottom"><p><span className="status-dot running" />{runningCount} 个工作区运行中</p><VButton className="nav-item" variant="ghost" icon={<Settings2 size={17} />} onPress={() => setNotice("设置页沿用现有入口，本次不会修改设置。")}>设置</VButton></div>
-    </nav>} main={<div className="main-scroll" ref={mainScroll}><div className="page-container">
+    </nav>} main={<VSurface as="div" tone="panel" padding="none" className="main-surface"><div className="main-scroll" ref={mainScroll}><div className="page-container">
       <div className="breadcrumb"><span>Vibelution</span><ChevronRight size={13} />{branch ? <><VButton variant="ghost" onPress={() => { setSelected(""); setNotice(""); }}>分支</VButton><ChevronRight size={13} /><span className="breadcrumb-current">详情</span></> : <span className="breadcrumb-current">分支</span>}</div>
       {branch ? <VDenseOpsPage className="detail-page" hideHeader fill={false} bodyClassName="preview-page-body" ariaLabel="分支详情">
         <VButton variant="ghost" className="back-link" icon={<ArrowLeft size={14} />} onPress={() => { setSelected(""); setNotice(""); }}>返回分支列表</VButton>
@@ -78,22 +78,22 @@ function LauncherPreview() {
         <VTabs className="page-tabs" listClassName="page-tabs-list" triggerClassName="page-tab" aria-label="分支详情" value={tab} onValueChange={setTab} items={[{ id: "overview", label: "概览" }, { id: "startup", label: "启动信息" }]} />
         {branch.state === "failed" ? <div className="failure-callout" role="alert"><Activity size={18} /><div><strong>启动未完成</strong><p>{branch.error}</p></div><VButton variant="ghost" trailingIcon={<ArrowRight size={14} />} onPress={() => setTab("startup")}>查看原因</VButton></div> : null}
         {tab === "overview" ? <div className="detail-grid">
-          <section className="information-section"><h2><Monitor size={16} />运行情况</h2><p className="section-hint">工作台、服务与构建状态</p><dl>
+          <VSurface className="information-section" tone="panel" padding="normal"><h2><Monitor size={16} />运行情况</h2><p className="section-hint">工作台、服务与构建状态</p><dl>
             <InfoRow label="工作台"><span className="inline-state"><span className={`status-dot ${branch.state}`} />{stateLabels[branch.state]}</span></InfoRow>
             <InfoRow label="窗口">{branch.window ? "已打开" : "未打开"}</InfoRow>
             <InfoRow label="后端">{branch.state === "running" ? "已就绪" : branch.state === "starting" ? "正在启动" : branch.state === "failed" ? "未就绪" : "未运行"}</InfoRow>
             <InfoRow label="前端"><span className="inline-state"><Check size={14} />已构建</span></InfoRow>
-          </dl><div className="section-footnote">{branch.state === "stopped" ? "工作区文件已保留，可随时重新启动。" : branch.state === "running" ? "服务已就绪，可进入工作台继续工作。" : branch.state === "starting" ? "等待服务就绪后即可进入工作台。" : "可查看启动信息并重新尝试。"}</div></section>
-          <section className="information-section"><h2><Folder size={16} />工作区信息</h2><p className="section-hint">本地目录与当前代码版本</p><dl>
+          </dl><div className="section-footnote">{branch.state === "stopped" ? "工作区文件已保留，可随时重新启动。" : branch.state === "running" ? "服务已就绪，可进入工作台继续工作。" : branch.state === "starting" ? "等待服务就绪后即可进入工作台。" : "可查看启动信息并重新尝试。"}</div></VSurface>
+          <VSurface className="information-section" tone="panel" padding="normal"><h2><Folder size={16} />工作区信息</h2><p className="section-hint">本地目录与当前代码版本</p><dl>
             <InfoRow label="类型">{branch.id === "main" ? "主工作区" : "任务分支"}</InfoRow>
             <InfoRow label="Git"><span className={branch.dirty ? "git-warning" : ""}>{branch.dirty ? "有未提交改动" : "工作区干净"}</span></InfoRow>
             <InfoRow label="提交"><code>{branch.head}</code></InfoRow>
-          </dl><div className="path-block"><div><span>目录</span><VButton variant="ghost" isIconOnly aria-label="复制工作区路径" title="复制路径" icon={<Copy size={14} />} onPress={() => { void navigator.clipboard.writeText(branch.path).then(() => setNotice("模拟工作区路径已复制。"), () => { setFullPath(true); setNotice("浏览器未允许复制，已展开完整路径。可选中文本复制。"); }); }} /></div><code title={branch.path} className={fullPath ? "path-full" : "path-short"}>{fullPath ? branch.path : branch.id === "main" ? "Projects / Vibelution" : `.worktrees / ${branch.path.split("\\").at(-1)}`}</code><VButton variant="ghost" className="path-toggle" onPress={() => setFullPath(!fullPath)}>{fullPath ? "收起完整路径" : "查看完整路径"}</VButton></div></section>
-        </div> : <section className="startup-section"><div className="startup-heading"><h2>启动信息</h2><Status state={branch.state} /></div><p className="section-hint">用于理解当前阶段，定位启动异常。</p><dl>
+          </dl><div className="path-block"><div><span>目录</span><VButton variant="ghost" isIconOnly aria-label="复制工作区路径" title="复制路径" icon={<Copy size={14} />} onPress={() => { void navigator.clipboard.writeText(branch.path).then(() => setNotice("模拟工作区路径已复制。"), () => { setFullPath(true); setNotice("浏览器未允许复制，已展开完整路径。可选中文本复制。"); }); }} /></div><code title={branch.path} className={fullPath ? "path-full" : "path-short"}>{fullPath ? branch.path : branch.id === "main" ? "Projects / Vibelution" : `.worktrees / ${branch.path.split("\\").at(-1)}`}</code><VButton variant="ghost" className="path-toggle" onPress={() => setFullPath(!fullPath)}>{fullPath ? "收起完整路径" : "查看完整路径"}</VButton></div></VSurface>
+        </div> : <VSurface className="startup-section" tone="panel" padding="normal"><div className="startup-heading"><h2>启动信息</h2><Status state={branch.state} /></div><p className="section-hint">用于理解当前阶段，定位启动异常。</p><dl>
           <InfoRow label="当前阶段">{branch.state === "running" ? "服务就绪" : branch.state === "starting" ? "等待后端就绪" : branch.state === "failed" ? "后端启动超时" : "已停止，等待启动"}</InfoRow>
           <InfoRow label="错误信息">{branch.error || "当前没有启动错误"}</InfoRow>
           {branch.error ? <InfoRow label="错误代码"><code>BACKEND_START_TIMEOUT</code></InfoRow> : null}
-        </dl><VButton variant="secondary" icon={<Activity size={15} />} onPress={() => setNotice("诊断入口为模拟展示，未访问真实日志。")}>查看运行诊断</VButton></section>}
+        </dl><VButton variant="secondary" icon={<Activity size={15} />} onPress={() => setNotice("诊断入口为模拟展示，未访问真实日志。")}>查看运行诊断</VButton></VSurface>}
       </VDenseOpsPage> : <VDenseOpsPage className="branches-page" hideHeader fill={false} bodyClassName="preview-page-body" ariaLabel="分支列表">
         <div className="list-heading"><div><h1>分支</h1><p>管理本地工作区，打开工作台继续工作。</p></div><span className="list-total">{branches.length} 个工作区</span></div>
         <div className="list-controls"><VTabs className="filter-tabs" aria-label="筛选分支" value={filter} onValueChange={setFilter} listClassName="filter-tabs-list" triggerClassName="filter-tab" items={[{ id: "all", label: `全部 ${branches.length}` }, { id: "running", label: `运行中 ${runningCount}` }, { id: "stopped", label: `已停止 ${branches.filter((item) => item.state === "stopped").length}` }, { id: "failed", label: `需关注 ${branches.filter((item) => item.state === "failed").length}` }]} /><div className="search-field"><Search size={15} /><VInput aria-label="搜索分支" placeholder="搜索分支…" value={query} onChange={(event) => setQuery(event.target.value)} /></div></div>
@@ -102,7 +102,7 @@ function LauncherPreview() {
         </div><p className="list-caption"><Circle size={12} />每个分支使用独立工作区，操作只影响对应实例。</p>
       </VDenseOpsPage>}
       {notice ? <div className="operation-notice" role="status"><Check size={15} /><span>{notice}</span><VButton variant="ghost" className="notice-dismiss" onPress={() => setNotice("")}>关闭</VButton></div> : null}
-    </div></div>} />
+    </div></div></VSurface>} />
     {previewControl}
     <VConfirmDialog open={confirmStop !== null} onOpenChange={(open) => { if (!open) setConfirmStop(null); }} title="停止这个工作台？" description="这是模拟操作。正式停止会关闭对应窗口与后端，保留工作区文件和未提交改动。" confirmLabel="停止工作台" cancelLabel="取消" tone="danger" onConfirm={() => { if (confirmStop) changeState(confirmStop, "stopped"); setConfirmStop(null); setNotice("已模拟停止工作台，未操作任何真实进程。"); }} />
   </div></VuiProvider>;

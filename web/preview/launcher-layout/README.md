@@ -15,3 +15,5 @@ node web/node_modules/vite/bin/vite.js --config web/preview/launcher-layout/vite
 覆盖：列表搜索/筛选/无结果、详情返回、概览/启动信息、运行/停止/启动中/失败、停止确认与取消、长分支名/完整路径、浅色/深色、桌面与窄屏。
 
 当前阶段：等待用户审阅预览；批准后才将界面组合落地到正式组件，保留现有生命周期判断、权限与反馈语义。
+
+用户修订方向：对齐 Workbench 主页面，并保留圆角。已只读核对当前主页面：灰色 canvas/rail、白色内容面、12px 主内容圆角；内部 VSurface 使用共享 8px panel token，按钮与页签使用 5px control token；主按钮直接沿用 VUI 原生 face/border/shadow。取消上一版自定义蓝色和直角分栏，保留现有列表、详情和模拟交互。
