@@ -40,6 +40,7 @@ _BOLD_SECTION_TITLE = re.compile(
     r"key facts|facts|risks?|recommendations?)",
     re.IGNORECASE,
 )
+_BOLD_EVIDENCE_TITLE = re.compile(r"行情(?:证据)?|基本面|新闻|双方分歧|证据与来源")
 _PAGE = re.compile(
     r"第\s*(\d{1,6})\s*页|PDF\s*(\d{1,6})\s*页|\b(?:p\.|page\s+)(\d{1,6})\b",
     re.IGNORECASE,
@@ -653,7 +654,9 @@ def _conclusion_spans(text: str) -> list[tuple[int, int]]:
     for heading in _BOLD_HEADING.finditer(text):
         title = heading.group("title").strip().rstrip(":：").strip()
         body = heading.group("body") or ""
-        if body.strip() and not _BOLD_SECTION_TITLE.search(title):
+        if body.strip() and not (
+            _BOLD_SECTION_TITLE.search(title) or _BOLD_EVIDENCE_TITLE.fullmatch(title)
+        ):
             continue
         body_start = heading.start("body") if body.strip() else heading.end()
         headings.append((heading.start(), heading.end(), title, body_start))
