@@ -1,0 +1,4 @@
+export const flatControl = "!h-10 !min-h-10 !rounded-md !border-vui-border-subtle !px-3 !shadow-none ![background:var(--vui-surface-panel)] !text-sm max-sm:!h-11 max-sm:!min-h-11 max-sm:!text-base";
+export const quietButton = "!h-9 !min-h-9 !rounded-md !border-transparent !px-3 !shadow-none ![background:transparent] max-sm:!h-11 max-sm:!min-h-11";
+export const primaryButton = "!h-9 !min-h-9 !rounded-md !border-transparent !px-4 !shadow-none ![background:var(--fg-primary)] !text-[var(--vui-surface-panel)] max-sm:!h-11 max-sm:!min-h-11";
+export const selectControl = "[&_button]:!h-10 [&_button]:!min-h-10 [&_button]:!rounded-md [&_button]:!border-vui-border-subtle [&_button]:!px-3 [&_button]:!shadow-none [&_button]:![background:var(--vui-surface-panel)] [&_button]:!text-sm max-sm:[&_button]:!h-11 max-sm:[&_button]:!min-h-11 max-sm:[&_button]:!text-base";

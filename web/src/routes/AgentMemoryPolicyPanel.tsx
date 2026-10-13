@@ -1,6 +1,17 @@
 import { ExternalLink, X } from "lucide-react";
 
-import { VButton, VCheckbox, VNativeInput, VTooltip } from "../components/vui";
+import { VButton, VCheckbox, VFieldRow, VNativeInput, VSettingsFormPage, VTooltip } from "../components/vui";
+import {
+  agentConfigFormPageClass,
+  agentConfigActionsClass,
+  agentConfigContentClass,
+  agentConfigControlClass,
+  agentConfigEditorClass,
+  agentConfigFooterClass,
+  agentConfigPrimaryButtonClass,
+  agentConfigQuietButtonClass,
+  agentConfigRowClass,
+} from "./agentConfigForm.styles";
 import styles from "./AgentMemoryPolicyPanel.styles";
 
 export type AgentMemoryPolicyDraft = {
@@ -163,110 +174,119 @@ export function AgentMemoryPolicyPanel({
     },
   ];
 
-  return (
-    <section className={styles.configEditor}>
-      <div className={styles.panelHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{copy.memoryPolicyTitle}</p>
-          <h3>
-            <VTooltip width="wide" content={<code className={styles.rootPathTooltip}>{rootPath || "-"}</code>}>
-              <span className={styles.policyIdTrigger} tabIndex={0} aria-label={`${copy.memoryPolicyTitle}：${policyId || "-"}；${rootPath || "-"}`}>
-                {policyId || "-"}
-              </span>
-            </VTooltip>
-          </h3>
-        </div>
-        <span className={dirty ? styles.dirtyPill : styles.cleanPill}>
-          {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-        </span>
-      </div>
-      <div className={styles.memoryEnabledSection}>
-        <span>{copy.memoryEnabled}</span>
-        <div className={styles.toggleGrid}>
-          <VCheckbox
-            isSelected={draft.enabled}
-            onChange={(value) => onDraftChange({ enabled: value })}
+  const renderMemoryField = (section: MemorySectionConfig<AgentMemoryGroupField>) => {
+    const values = draft[section.field];
+    return (
+      <VFieldRow key={section.field} label={section.label} className={agentConfigRowClass}>
+        <div className={styles.memoryControl}>
+          <div
+            className={styles.selectedValues}
+            aria-label={values.length ? undefined : `${section.label}：${section.emptyLabel}`}
           >
-            {copy.memoryEnabledHint}
-          </VCheckbox>
+            {values.map((value) => (
+              <VButton
+                key={`${section.field}:${value}`}
+                type="button"
+                className={agentConfigQuietButtonClass}
+                variant="ghost"
+                trailingIcon={<X size={12} />}
+                aria-label={removeTitle(value, lang)}
+                title={removeTitle(value, lang)}
+                onPress={() => onRemoveMemoryGroup(section.field, value)}
+              >
+                {value}
+              </VButton>
+            ))}
+          </div>
+          <div className={styles.inlineAdd}>
+            <VNativeInput
+              className={agentConfigControlClass}
+              list={section.list}
+              aria-label={section.label}
+              value={draft[section.inputField]}
+              placeholder={section.placeholder}
+              onChange={(event) => updateInputField(onDraftChange, section.inputField, event.target.value)}
+            />
+            <VButton
+              type="button"
+              className={agentConfigQuietButtonClass}
+              variant="secondary"
+              onPress={() => onAddMemoryGroup(section.field, draft[section.inputField])}
+            >
+              {copy.addSharedGroup}
+            </VButton>
+          </div>
         </div>
-      </div>
-      <div className={styles.memoryPolicyGrid}>
-        {sharedGroupSections.map((section) => (
-          <section key={section.field}>
-            <span>{section.label}</span>
-            <div className={styles.tagList} aria-label={draft[section.field].length ? undefined : `${section.label}：${section.emptyLabel}`}>
-              {draft[section.field].length ? draft[section.field].map((group) => (
-                <VButton
-                  key={`${section.field}:${group}`}
-                  type="button"
-                  variant="ghost"
-                  trailingIcon={<X size={12} />}
-                  title={removeTitle(group, lang)}
-                  onPress={() => onRemoveMemoryGroup(section.field, group)}
-                >
-                  {group}
-                </VButton>
-              )) : null}
-            </div>
-            <div className={styles.inlineAdd}>
-              <VNativeInput
-                list={section.list}
-                value={draft[section.inputField]}
-                placeholder={section.placeholder}
-                onChange={(event) => updateInputField(onDraftChange, section.inputField, event.target.value)}
-              />
-              <VButton type="button" variant="secondary" onPress={() => onAddMemoryGroup(section.field, draft[section.inputField])}>
-                {copy.addSharedGroup}
+      </VFieldRow>
+    );
+  };
+
+  const renderKnowledgeBaseField = (section: MemorySectionConfig<AgentKnowledgeBaseField>) => {
+    const values = draft[section.field];
+    return (
+      <VFieldRow key={section.field} label={section.label} className={agentConfigRowClass}>
+        <div className={styles.memoryControl}>
+          <div
+            className={styles.selectedValues}
+            aria-label={values.length ? undefined : `${section.label}：${section.emptyLabel}`}
+          >
+            {values.map((value) => (
+              <VButton
+                key={`${section.field}:${value}`}
+                type="button"
+                className={agentConfigQuietButtonClass}
+                variant="ghost"
+                trailingIcon={<X size={12} />}
+                aria-label={removeTitle(value, lang)}
+                title={removeTitle(value, lang)}
+                onPress={() => onRemoveKnowledgeBaseId(section.field, value)}
+              >
+                {value}
               </VButton>
-            </div>
-          </section>
-        ))}
-        {knowledgeBaseSections.map((section) => (
-          <section key={section.field}>
-            <span>{section.label}</span>
-            <div className={styles.tagList} aria-label={draft[section.field].length ? undefined : `${section.label}：${section.emptyLabel}`}>
-              {draft[section.field].length ? draft[section.field].map((knowledgeBaseId) => (
-                <VButton
-                  key={`${section.field}:${knowledgeBaseId}`}
-                  type="button"
-                  variant="ghost"
-                  trailingIcon={<X size={12} />}
-                  title={removeTitle(knowledgeBaseId, lang)}
-                  onPress={() => onRemoveKnowledgeBaseId(section.field, knowledgeBaseId)}
-                >
-                  {knowledgeBaseId}
-                </VButton>
-              )) : null}
-            </div>
-            <div className={styles.inlineAdd}>
-              <VNativeInput
-                value={draft[section.inputField]}
-                placeholder={section.placeholder}
-                onChange={(event) => updateInputField(onDraftChange, section.inputField, event.target.value)}
-              />
-              <VButton type="button" variant="secondary" onPress={() => onAddKnowledgeBaseId(section.field, draft[section.inputField])}>
-                {copy.addSharedGroup}
-              </VButton>
-            </div>
-          </section>
-        ))}
-      </div>
-      <datalist id="agent-memory-groups">
-        {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
-      </datalist>
-      <div className={styles.editorActions}>
+            ))}
+          </div>
+          <div className={styles.inlineAdd}>
+            <VNativeInput
+              className={agentConfigControlClass}
+              aria-label={section.label}
+              value={draft[section.inputField]}
+              placeholder={section.placeholder}
+              onChange={(event) => updateInputField(onDraftChange, section.inputField, event.target.value)}
+            />
+            <VButton
+              type="button"
+              className={agentConfigQuietButtonClass}
+              variant="secondary"
+              onPress={() => onAddKnowledgeBaseId(section.field, draft[section.inputField])}
+            >
+              {copy.addSharedGroup}
+            </VButton>
+          </div>
+        </div>
+      </VFieldRow>
+    );
+  };
+
+  const footer = (
+    <div className={agentConfigActionsClass}>
+      <span className={dirty ? styles.pendingStatus : styles.savedStatus} aria-live="polite">
+        {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已保存" : "Saved")}
+      </span>
+      <div>
         <VButton
           type="button"
-          variant="secondary"
-          icon={<ExternalLink size={15} />}
+          className={agentConfigQuietButtonClass}
+          variant="ghost"
+          icon={<ExternalLink size={14} />}
           onPress={onOpenMemoryPage}
         >
-          {lang === "zh" ? "去记忆页配置" : "Open memory page"}
+          {lang === "zh" ? "记忆页" : "Memory"}
         </VButton>
         <VButton
           type="button"
+          className={agentConfigQuietButtonClass}
           variant="secondary"
+          aria-label={lang === "zh" ? "重置记忆配置" : "Reset memory settings"}
           isDisabled={!dirty || pending}
           onPress={onReset}
         >
@@ -274,13 +294,60 @@ export function AgentMemoryPolicyPanel({
         </VButton>
         <VButton
           type="button"
+          className={agentConfigPrimaryButtonClass}
           variant="primary"
+          aria-label={pending ? copy.savingMemoryPolicy : copy.saveMemoryPolicy}
           isDisabled={!canSave || pending}
           onPress={onSave}
         >
-          {pending ? copy.savingMemoryPolicy : copy.saveMemoryPolicy}
+          {pending ? (lang === "zh" ? "保存中…" : "Saving…") : (lang === "zh" ? "保存" : "Save")}
         </VButton>
       </div>
-    </section>
+    </div>
+  );
+
+  return (
+    <VSettingsFormPage
+      className={agentConfigFormPageClass}
+      ariaLabel={copy.memoryPolicyTitle}
+      title=""
+      headerClassName="hidden"
+      bodyClassName={agentConfigEditorClass}
+      footerClassName={agentConfigFooterClass}
+      footer={footer}
+    >
+      <div className={agentConfigContentClass}>
+        <section className={styles.fieldSection}>
+          <h3>{lang === "zh" ? "记忆策略" : "Memory policy"}</h3>
+          <VFieldRow label={lang === "zh" ? "策略标识" : "Policy ID"} htmlFor="agent-memory-policy-id" className={agentConfigRowClass}>
+            <VTooltip width="wide" content={<code className={styles.rootPathTooltip}>{rootPath || "-"}</code>}>
+              <output
+                id="agent-memory-policy-id"
+                tabIndex={0}
+                className={styles.policyIdValue}
+                aria-label={`${lang === "zh" ? "策略标识" : "Policy ID"}：${policyId || "-"}；${rootPath || "-"}`}
+              >
+                {policyId || "-"}
+              </output>
+            </VTooltip>
+          </VFieldRow>
+          <VFieldRow label={copy.memoryEnabled} className={agentConfigRowClass}>
+            <VCheckbox
+              aria-label={copy.memoryEnabled}
+              isSelected={draft.enabled}
+              onChange={(value) => onDraftChange({ enabled: value })}
+            />
+          </VFieldRow>
+          {sharedGroupSections.map(renderMemoryField)}
+        </section>
+        <section className={styles.fieldSection}>
+          <h3>{lang === "zh" ? "知识库权限" : "Knowledge base access"}</h3>
+          {knowledgeBaseSections.map(renderKnowledgeBaseField)}
+        </section>
+        <datalist id="agent-memory-groups">
+          {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
+        </datalist>
+      </div>
+    </VSettingsFormPage>
   );
 }

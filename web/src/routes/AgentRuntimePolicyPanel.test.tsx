@@ -50,9 +50,17 @@ describe("AgentRuntimePolicyPanel", () => {
       />,
     );
 
+    expect(markup).toContain('data-vui-recipe="settings-form-page"');
+    expect(markup).toContain('data-vui="settings-form-footer"');
+    expect((markup.match(/data-vui="field-row"/g) ?? []).length).toBe(9);
     expect(markup).toContain("委派策略");
     expect(markup).toContain("监督策略");
+    expect(markup).toContain('aria-label="重置运行策略"');
+    expect(markup).toContain("允许子 Agent");
+    expect(markup).toContain("允许唤醒消息");
     expect(markup).toContain("保存成功");
+    expect(markup).toContain('max="8"');
+    expect(markup).toContain('max="4"');
     expect(markup).toContain('tabindex="0"');
     expect(markup).not.toContain(">通信: 2 pending<");
     expect(markup).not.toContain("state-success");

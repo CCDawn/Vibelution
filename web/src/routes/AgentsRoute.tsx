@@ -191,11 +191,11 @@ import {
   agentBoundaryType,
   agentHasTeamReference,
   configChangeSnapshotFromDraft,
-  configDraftEqualsDraft,
   contextCompressionDraftEqualsDraft,
   contextCompressionDraftFromAgent,
   contextCompressionPolicyChangedInDraft,
   contextCompressionPolicyFromDraft,
+  isContextCompressionPolicyDraftValid,
   DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT,
   draftEqualsAgent,
   draftFromAgent,
@@ -283,6 +283,12 @@ import {
   type ToolPermissionGroup,
   type ToolPolicyMode,
 } from "./agents/agentRoutePolicyDraftModel";
+import {
+  mergeAgentConfigDraftGroup,
+  mergeCleanAgentConfigDraftGroups,
+  sameAgentConfigDraftGroup,
+  type AgentConfigSaveGroup,
+} from "./agents/agentRouteConfigGroupDraft";
 import {
   agentArchiveProtected,
   agentBulkActionItemNote,
@@ -456,6 +462,8 @@ export function AgentsRoute() {
   const [bulkAgentPending, setBulkAgentPending] = useState(false);
   const [configDraftPresenceDirty, setConfigDraftPresenceDirty] = useState(() => readConfigDraftPresence());
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
   const appliedRouteTargetRef = useRef("");
   const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -863,7 +871,7 @@ export function AgentsRoute() {
       return;
     }
 
-    setConfigDraft((current) => configDraftEqualsDraft(current, previousSource.config) ? nextSource.config : current);
+    setConfigDraft((current) => mergeCleanAgentConfigDraftGroups(current, previousSource.config, nextSource.config));
     setMembershipDraft((current) => membershipDraftEqualsDraft(current, previousSource.membership) ? nextSource.membership : current);
     setPersonaDraft((current) => personaDraftEqualsDraft(current, previousSource.persona) ? nextSource.persona : current);
     setTaskDraft((current) => taskDraftEqualsDraft(current, previousSource.task) ? nextSource.task : current);
@@ -898,6 +906,9 @@ export function AgentsRoute() {
   }, [visibleAgents]);
 
   const configDirty = !draftEqualsAgent(configDraft, selectedAgent);
+  const configBaselineDraft = draftFromAgent(selectedAgent);
+  const configModelsDirty = !sameAgentConfigDraftGroup(configDraft, configBaselineDraft, "models");
+  const configBasicDirty = !sameAgentConfigDraftGroup(configDraft, configBaselineDraft, "basic");
   const membershipDirty = !membershipDraftEqualsWorkspace(membershipDraft, workspace, selectedAgent);
   const personaDirty = !personaDraftEqualsAgent(personaDraft, selectedAgent);
   const taskDirty = !taskDraftEqualsAgent(taskDraft, selectedAgent);
@@ -909,6 +920,9 @@ export function AgentsRoute() {
   const toolGovernanceDeltaTotal = toolPolicyDeltaCount(toolGovernanceDelta);
   const canSubmitToolGovernance = Boolean(selectedAgent?.agentId && toolGovernanceDeltaTotal > 0);
   const canSaveConfig = Boolean(selectedAgent?.agentId && configDraft.displayName.trim() && configDirty);
+  const canSaveConfigModels = Boolean(selectedAgent?.agentId && configModelsDirty);
+  const canSaveConfigBasic = Boolean(selectedAgent?.agentId && configDraft.displayName.trim() && configBasicDirty
+    && isContextCompressionPolicyDraftValid(configDraft.contextCompressionPolicy));
   const canSaveMembership = Boolean(selectedAgent?.agentId && membershipDirty);
   const canSavePersona = Boolean(selectedAgent?.agentId && personaDirty);
   const canSaveTask = Boolean(selectedAgent?.agentId && taskDirty);
@@ -1011,6 +1025,7 @@ export function AgentsRoute() {
     setConfigDraft,
     draftSyncSourceRef,
     getWorkspace: () => workspace,
+    getSelectedAgentId: () => selectedAgentIdRef.current,
     draftFromAgent,
     draftSyncSourceFromAgent,
     normalizeAgentLlmBindings,
@@ -1283,6 +1298,32 @@ export function AgentsRoute() {
       modelChoices: workspace?.agentModelChoices ?? [],
       sourceDraftId: activeConfigDraftId,
     });
+  };
+
+  const saveAgentConfigGroup = (group: AgentConfigSaveGroup) => {
+    if (!selectedAgent || selectedAgentConfigPending || promoteAgentModelMutation.isPending) {
+      return;
+    }
+    const groupCanSave = group === "models" ? canSaveConfigModels : canSaveConfigBasic;
+    if (!groupCanSave) {
+      return;
+    }
+    updateAgentMutation.mutate({
+      agentId: selectedAgent.agentId,
+      agent: selectedAgent,
+      draft: configDraft,
+      modelChoices: workspace?.agentModelChoices ?? [],
+      sourceDraftId: activeConfigDraftId,
+      group,
+    });
+  };
+
+  const resetAgentConfigGroup = (group: AgentConfigSaveGroup) => {
+    if (!selectedAgent) {
+      return;
+    }
+    const baseline = draftFromAgent(selectedAgent);
+    setConfigDraft((current) => mergeAgentConfigDraftGroup(current, baseline, group));
   };
 
   const saveAgentConfigDraft = () => {
@@ -2367,6 +2408,11 @@ export function AgentsRoute() {
         dirty: configDirty,
         configDraftDirty: configDraftPresenceDirty,
         canSave: canSaveConfig && !promoteAgentModelMutation.isPending,
+        groupDirty: { models: configModelsDirty, basic: configBasicDirty },
+        groupCanSave: {
+          models: canSaveConfigModels && !selectedAgentConfigPending && !promoteAgentModelMutation.isPending,
+          basic: canSaveConfigBasic && !selectedAgentConfigPending && !promoteAgentModelMutation.isPending,
+        },
         pending: selectedAgentConfigPending || promoteAgentModelMutation.isPending,
         notice,
         title: copy.personaHint,
@@ -2429,6 +2475,8 @@ export function AgentsRoute() {
         },
         onReset: () => setConfigDraft(draftFromAgent(selectedAgent)),
         onSave: saveAgentConfig,
+        onResetGroup: resetAgentConfigGroup,
+        onSaveGroup: saveAgentConfigGroup,
       },
       personaProfile: selectedAgentRequiresPersona ? {
         copy,

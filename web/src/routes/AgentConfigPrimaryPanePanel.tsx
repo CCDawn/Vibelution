@@ -10,7 +10,7 @@ import { AgentTaskProfilePanel } from "./AgentTaskProfilePanel";
 import { AgentToolGovernancePanel } from "./AgentToolGovernancePanel";
 import styles from "./AgentConfigPrimaryPanePanel.styles";
 
-export type AgentConfigPrimarySectionId = "all" | "basic" | "profile" | "ops";
+export type AgentConfigPrimarySectionId = "all" | "models" | "basic" | "persona" | "task" | "tools" | "profile" | "ops";
 
 type AgentConfigPrimaryPanePanelProps = {
   section?: AgentConfigPrimarySectionId;
@@ -37,13 +37,16 @@ export function AgentConfigPrimaryPanePanel({
   opsTitle = "运维与危险操作",
   opsHint = "健康检查、归档删除与调试重置与日常配置分离，默认仅在需要时查看。",
 }: AgentConfigPrimaryPanePanelProps) {
-  const showBasic = section === "all" || section === "basic";
+  const showBasic = section === "all" || section === "basic" || section === "models";
   const showProfile = section === "all" || section === "profile";
   const showOps = section === "all" || section === "ops";
 
   return (
     <>
-      {showBasic ? <AgentCoreConfigPanel {...coreConfig} /> : null}
+      {showBasic ? <AgentCoreConfigPanel {...coreConfig} section={section === "models" ? "models" : section === "basic" ? "basic" : "all"} /> : null}
+      {section === "persona" && personaProfile ? <AgentPersonaProfilePanel {...personaProfile} /> : null}
+      {section === "task" && taskProfile ? <AgentTaskProfilePanel {...taskProfile} /> : null}
+      {section === "tools" ? <AgentToolGovernancePanel {...toolGovernance} /> : null}
       {showProfile ? (
         <>
           {personaProfile ? <AgentPersonaProfilePanel {...personaProfile} /> : null}
@@ -61,7 +64,6 @@ export function AgentConfigPrimaryPanePanel({
             className={styles.opsHeader}
             headingLevel={null}
             title={opsTitle}
-            eyebrow={opsHint}
           />
           <AgentHealthMaintenancePanel {...healthMaintenance} />
           <AgentArchiveZonePanel {...archiveZone} />

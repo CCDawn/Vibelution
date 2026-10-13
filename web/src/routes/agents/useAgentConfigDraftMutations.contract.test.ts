@@ -34,8 +34,10 @@ describe("agent config draft mutations contract", () => {
     expect(mutationsSource).not.toContain('from "../../api/client"');
   });
 
-  it("publishes the Agent-owned permission preset with config revision concurrency", () => {
-    expect(mutationsSource).toContain("permissionPreset: payload.draft.permissionPreset");
+  it("sends the permission preset only with basic fields and preserves config revision concurrency", () => {
+    expect(mutationsSource).toContain('payload.group === "basic"');
+    expect(mutationsSource).toContain("body.permissionPreset = payload.draft.permissionPreset");
+    expect(mutationsSource).toContain('payload.group === "models"');
     expect(mutationsSource).toContain("expectedConfigRevision: payload.agent.configRevision");
   });
 
@@ -43,5 +45,10 @@ describe("agent config draft mutations contract", () => {
     expect(mutationsSource).toContain("contextCompressionPolicyChangedInDraft");
     expect(mutationsSource).toContain("if (compressionChanged)");
     expect(routeSource).toContain("contextCompressionPolicyChangedInDraft");
+  });
+
+  it("gates basic saves on custom compression values without affecting model saves", () => {
+    expect(routeSource).toContain("const canSaveConfigModels = Boolean(selectedAgent?.agentId && configModelsDirty);");
+    expect(routeSource).toContain("isContextCompressionPolicyDraftValid(configDraft.contextCompressionPolicy)");
   });
 });

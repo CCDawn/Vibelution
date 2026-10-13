@@ -7,7 +7,11 @@ import { updateAgent } from "../../api/agents";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import type { AgentConfigDraft } from "../AgentCoreConfigPanel";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
-import { draftFromAgent, contextCompressionPolicyFromDraft } from "./agentRouteDraftModel";
+import {
+  contextCompressionPolicyChangedInDraft,
+  contextCompressionPolicyFromDraft,
+  draftFromAgent,
+} from "./agentRouteDraftModel";
 import { normalizeAgentLlmBindings } from "./agentRouteLlmModel";
 import { useAgentConfigDraftMutations } from "./useAgentConfigDraftMutations";
 
@@ -24,30 +28,231 @@ const agent = {
 } as AgentConfigWorkspaceAgent;
 let root: Root, node: HTMLDivElement, client: QueryClient;
 let mutations: ReturnType<typeof useAgentConfigDraftMutations>;
+let setConfigDraft: ReturnType<typeof vi.fn>, setNotice: ReturnType<typeof vi.fn>;
+let activeAgentId: string;
 function Consumer() {
   mutations = useAgentConfigDraftMutations({
-    lang: "zh", setNotice: vi.fn(), chatWorkspaceCache: createChatWorkspaceCache(client),
-    setConfigDraft: vi.fn(), draftSyncSourceRef: { current: null }, getWorkspace: () => undefined,
+    lang: "zh", setNotice, chatWorkspaceCache: createChatWorkspaceCache(client),
+    setConfigDraft, draftSyncSourceRef: { current: null }, getWorkspace: () => undefined,
+    getSelectedAgentId: () => activeAgentId,
     draftFromAgent, draftSyncSourceFromAgent: () => null, normalizeAgentLlmBindings,
-    contextCompressionPolicyFromDraft, contextCompressionPolicyChangedInDraft: () => false,
+    contextCompressionPolicyFromDraft, contextCompressionPolicyChangedInDraft,
     agentMetadataWithReasoningEffort: () => ({}), agentLabel: row => row?.displayName ?? "",
     updatedAgentWorkspaceCache: current => current,
   });
   return null;
 }
 beforeEach(async () => {
-  vi.clearAllMocks(); vi.mocked(updateAgent).mockResolvedValue(agent);
+  vi.clearAllMocks(); vi.mocked(updateAgent).mockResolvedValue(agent); setConfigDraft = vi.fn(); setNotice = vi.fn(); activeAgentId = agent.agentId;
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   node = document.createElement("div"); document.body.append(node); root = createRoot(node);
   await act(async () => root.render(<QueryClientProvider client={client}><Consumer /></QueryClientProvider>));
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
-async function save(changes: Partial<AgentConfigDraft>) {
+async function save(changes: Partial<AgentConfigDraft>, group?: "models" | "basic") {
   await act(async () => mutations.updateAgentMutation.mutateAsync({
-    agentId: agent.agentId, agent, draft: { ...draftFromAgent(agent), ...changes }, modelChoices: [], sourceDraftId: "",
+    agentId: agent.agentId, agent, draft: { ...draftFromAgent(agent), ...changes }, modelChoices: [], sourceDraftId: "", group,
   }));
   return vi.mocked(updateAgent).mock.calls[0][1];
 }
+
+it("model-group save submits only bindings and reasoning metadata with revision guards", async () => {
+  const patch = await save({
+    llmBindings: { dialogue: { modelId: "new-model" } },
+    reasoningEffortBySlot: { dialogue: "high" },
+  }, "models");
+
+  expect(patch).toMatchObject({
+    llmBindings: { dialogue: { modelId: "new-model" } },
+    metadata: {},
+    expectedUpdatedAt: agent.updatedAt,
+    expectedConfigRevision: 4,
+  });
+  expect(patch).not.toHaveProperty("displayName");
+  expect(patch).not.toHaveProperty("status");
+  expect(patch).not.toHaveProperty("promptTemplateId");
+  expect(patch).not.toHaveProperty("permissionPreset");
+  expect(patch).not.toHaveProperty("toolPolicyId");
+  expect(patch).not.toHaveProperty("memoryPolicyId");
+  expect(patch).not.toHaveProperty("contextCompressionPolicy");
+});
+
+it("basic-group save submits basic fields without model fields", async () => {
+  const patch = await save({
+    displayName: "基本配置已更改",
+    promptTemplateId: "prompt-next",
+    status: "paused",
+    permissionPreset: "allow_safe_tools",
+  }, "basic");
+
+  expect(patch).toMatchObject({
+    displayName: "基本配置已更改",
+    promptTemplateId: "prompt-next",
+    status: "paused",
+    permissionPreset: "allow_safe_tools",
+    expectedUpdatedAt: agent.updatedAt,
+    expectedConfigRevision: 4,
+  });
+  expect(patch).not.toHaveProperty("llmBindings");
+  expect(patch).not.toHaveProperty("metadata");
+  expect(patch).not.toHaveProperty("contextCompressionPolicy");
+});
+
+it("basic-group save sends only explicitly changed tool, memory, and compression settings", async () => {
+  const baseline = draftFromAgent(agent);
+  const patch = await save({
+    toolPolicyId: "tool-selected",
+    memoryPolicyId: "memory-selected",
+    contextCompressionPolicy: { ...baseline.contextCompressionPolicy, maxTokenLimit: "16000" },
+  }, "basic");
+
+  expect(patch).toMatchObject({
+    toolPolicyId: "tool-selected",
+    memoryPolicyId: "memory-selected",
+    contextCompressionPolicy: { mode: "custom", maxTokenLimit: 16000 },
+  });
+  expect(patch).not.toHaveProperty("llmBindings");
+  expect(patch).not.toHaveProperty("metadata");
+});
+
+it("a model-save response keeps unsaved basic draft fields", async () => {
+  const savedAgent = {
+    ...agent,
+    llmBindings: { dialogue: { modelId: "saved-model" } },
+    metadata: { llmReasoningEffort: { dialogue: "high" } },
+  } as AgentConfigWorkspaceAgent;
+  vi.mocked(updateAgent).mockResolvedValue(savedAgent);
+  const submittedDraft = {
+    ...draftFromAgent(agent),
+    llmBindings: { dialogue: { modelId: "saved-model" } },
+    displayName: "未保存的名称",
+  };
+
+  await act(async () => mutations.updateAgentMutation.mutateAsync({
+    agentId: agent.agentId, agent, draft: submittedDraft, modelChoices: [], sourceDraftId: "", group: "models",
+  }));
+
+  const updater = setConfigDraft.mock.calls.at(-1)?.[0] as (current: AgentConfigDraft) => AgentConfigDraft;
+  const current = { ...submittedDraft, promptTemplateId: "unsaved-prompt" };
+  const next = updater(current);
+  expect(next.llmBindings).toEqual(savedAgent.llmBindings);
+  expect(next.reasoningEffortBySlot).toEqual({ dialogue: "high" });
+  expect(next.displayName).toBe("未保存的名称");
+  expect(next.promptTemplateId).toBe("unsaved-prompt");
+});
+
+it("a basic-save response keeps unsaved model draft fields", async () => {
+  const savedAgent = {
+    ...agent,
+    displayName: "已保存名称",
+    promptTemplateId: "prompt-next",
+  } as AgentConfigWorkspaceAgent;
+  vi.mocked(updateAgent).mockResolvedValue(savedAgent);
+  const submittedDraft = {
+    ...draftFromAgent(agent),
+    displayName: "已保存名称",
+    promptTemplateId: "prompt-next",
+    llmBindings: { dialogue: { modelId: "unsaved-model" } },
+    reasoningEffortBySlot: { dialogue: "high" },
+  };
+
+  await act(async () => mutations.updateAgentMutation.mutateAsync({
+    agentId: agent.agentId, agent, draft: submittedDraft, modelChoices: [], sourceDraftId: "", group: "basic",
+  }));
+
+  const updater = setConfigDraft.mock.calls.at(-1)?.[0] as (current: AgentConfigDraft) => AgentConfigDraft;
+  const current = { ...submittedDraft, llmBindings: { dialogue: { modelId: "edited-while-saving" } } };
+  const next = updater(current);
+  expect(next.displayName).toBe("已保存名称");
+  expect(next.promptTemplateId).toBe("prompt-next");
+  expect(next.llmBindings).toEqual(current.llmBindings);
+  expect(next.reasoningEffortBySlot).toEqual(current.reasoningEffortBySlot);
+});
+
+it("a save response keeps a newer edit made to the same group", async () => {
+  const savedAgent = {
+    ...agent,
+    llmBindings: { dialogue: { modelId: "submitted-model" } },
+  } as AgentConfigWorkspaceAgent;
+  vi.mocked(updateAgent).mockResolvedValue(savedAgent);
+  const submittedDraft = {
+    ...draftFromAgent(agent),
+    llmBindings: { dialogue: { modelId: "submitted-model" } },
+  };
+
+  await act(async () => mutations.updateAgentMutation.mutateAsync({
+    agentId: agent.agentId, agent, draft: submittedDraft, modelChoices: [], sourceDraftId: "", group: "models",
+  }));
+
+  const updater = setConfigDraft.mock.calls.at(-1)?.[0] as (current: AgentConfigDraft) => AgentConfigDraft;
+  const current = { ...submittedDraft, llmBindings: { dialogue: { modelId: "edited-while-saving" } } };
+  expect(updater(current)).toBe(current);
+});
+
+it("a late response after switching Agents does not touch the newly selected draft", async () => {
+  const savedAgent = {
+    ...agent,
+    llmBindings: { dialogue: { modelId: "saved-model" } },
+  } as AgentConfigWorkspaceAgent;
+  let resolveSave: ((value: AgentConfigWorkspaceAgent) => void) | undefined;
+  vi.mocked(updateAgent).mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
+  const submittedDraft = {
+    ...draftFromAgent(agent),
+    llmBindings: { dialogue: { modelId: "saved-model" } },
+  };
+
+  await act(async () => {
+    const pending = mutations.updateAgentMutation.mutateAsync({
+      agentId: agent.agentId, agent, draft: submittedDraft, modelChoices: [], sourceDraftId: "", group: "models",
+    });
+    await vi.waitFor(() => expect(updateAgent).toHaveBeenCalled());
+    activeAgentId = "another-agent";
+    resolveSave?.(savedAgent);
+    await pending;
+  });
+
+  const updater = setConfigDraft.mock.calls.at(-1)?.[0] as (current: AgentConfigDraft) => AgentConfigDraft;
+  const otherAgentDraft = { ...draftFromAgent(agent), displayName: "另一个 Agent 的草稿" };
+  expect(updater(otherAgentDraft)).toBe(otherAgentDraft);
+  expect(setNotice).not.toHaveBeenCalled();
+});
+
+it("a late failure after switching Agents does not show a notice on the newly selected Agent", async () => {
+  let rejectSave: ((reason?: unknown) => void) | undefined;
+  vi.mocked(updateAgent).mockReturnValue(new Promise((_, reject) => { rejectSave = reject; }));
+
+  await act(async () => {
+    const pending = mutations.updateAgentMutation.mutateAsync({
+      agentId: agent.agentId,
+      agent,
+      draft: { ...draftFromAgent(agent), llmBindings: { dialogue: { modelId: "unsaved-model" } } },
+      modelChoices: [],
+      sourceDraftId: "",
+      group: "models",
+    });
+    await vi.waitFor(() => expect(updateAgent).toHaveBeenCalled());
+    activeAgentId = "another-agent";
+    rejectSave?.(new Error("save failed"));
+    await expect(pending).rejects.toThrow("save failed");
+  });
+
+  expect(setNotice).not.toHaveBeenCalled();
+});
+
+it("a failed grouped save leaves the local draft untouched", async () => {
+  vi.mocked(updateAgent).mockRejectedValue(new Error("network down"));
+  await act(async () => {
+    await expect(mutations.updateAgentMutation.mutateAsync({
+      agentId: agent.agentId,
+      agent,
+      draft: { ...draftFromAgent(agent), llmBindings: { dialogue: { modelId: "unsaved-model" } } },
+      modelChoices: [],
+      sourceDraftId: "",
+      group: "models",
+    })).rejects.toThrow("network down");
+  });
+  expect(setConfigDraft).not.toHaveBeenCalled();
+});
 it("changing the model preserves inline tool and financial-library policies", async () => {
   const patch = await save({ llmBindings: { dialogue: { modelId: "qwen-flash" } } });
   expect(patch.llmBindings).toEqual({ dialogue: { modelId: "qwen-flash" } });

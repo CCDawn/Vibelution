@@ -1,14 +1,62 @@
-import { createElement } from "react";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionSummary } from "../../api/types";
 import {
   resolveBareRouteBootstrapTarget,
   resolveStoredDirectChatSelection,
+  CHAT_SELECTION_STORAGE_KEY,
+  readCurrentChatSelectionPreference,
   storedChatSelectionBlocksServerBootstrap,
   useChatSelectionPersistence,
 } from "./useChatSelectionPersistence";
+import { parseChatRouteSelection, type ChatRouteSelection } from "./chatSelectionProjection";
+
+let root: Root | undefined;
+let host: HTMLDivElement | undefined;
+let currentPersistence: ReturnType<typeof useChatSelectionPersistence> | null = null;
+let navigateRoute: NavigateFunction | null = null;
+
+function PersistenceRouteProbe({
+  activeSessionAgentId = "",
+  selectedAgentId = "",
+  serverSessionId = "",
+  sessionRows = sessions,
+  selectionOverride,
+}: {
+  activeSessionAgentId?: string;
+  selectedAgentId?: string;
+  serverSessionId?: string;
+  sessionRows?: SessionSummary[];
+  selectionOverride?: ChatRouteSelection;
+}) {
+  const location = useLocation();
+  navigateRoute = useNavigate();
+  currentPersistence = useChatSelectionPersistence({
+    selection: selectionOverride ?? parseChatRouteSelection(location.search),
+    serverSessionId,
+    activeSessionAgentId,
+    selectedAgentId,
+    sessions: sessionRows,
+  });
+  return null;
+}
+
+async function mountRouteProbe(path: string, props: Parameters<typeof PersistenceRouteProbe>[0] = {}) {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root?.render(createElement(
+    MemoryRouter,
+    { initialEntries: [path] },
+    createElement(PersistenceRouteProbe, props),
+  )));
+}
 
 const sessions: SessionSummary[] = [
   {
@@ -33,7 +81,15 @@ const sessions: SessionSummary[] = [
   },
 ];
 
-afterEach(() => {
+afterEach(async () => {
+  if (root) {
+    await act(async () => root?.unmount());
+    root = undefined;
+  }
+  host?.remove();
+  host = undefined;
+  currentPersistence = null;
+  navigateRoute = null;
   vi.unstubAllGlobals();
 });
 
@@ -58,7 +114,7 @@ describe("useChatSelectionPersistence", () => {
       return null;
     }
 
-    renderToStaticMarkup(createElement(Probe));
+    renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ["/chat"] }, createElement(Probe)));
 
     expect(bootstrapTarget).toEqual({ kind: "session", sessionId: "session-luna-1" });
   });
@@ -123,6 +179,77 @@ describe("useChatSelectionPersistence", () => {
       setItem: () => undefined,
     })).toBe(false);
   });
+
+  it("safely reads the current preference through the hook-owned storage key", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: () => JSON.stringify({ sessionId: "session-luna-1", agentId: "agent-luna" }),
+      },
+    });
+    expect(readCurrentChatSelectionPreference()).toMatchObject({
+      sessionId: "session-luna-1",
+      agentId: "agent-luna",
+    });
+  });
+
+  it("persists only a changed route selection and uses the canonical session Agent", async () => {
+    window.localStorage.removeItem(CHAT_SELECTION_STORAGE_KEY);
+    const setItem = vi.spyOn(window.localStorage, "setItem");
+    await mountRouteProbe("/chat?session=session-luna-1", {
+      activeSessionAgentId: "agent-gpt",
+      selectedAgentId: "agent-gpt",
+    });
+
+    expect(readCurrentChatSelectionPreference()).toMatchObject({
+      sessionId: "session-luna-1",
+      agentId: "agent-luna",
+    });
+    expect(setItem).toHaveBeenCalledTimes(1);
+
+    await act(async () => root?.render(createElement(
+      MemoryRouter,
+      { initialEntries: ["/chat?session=session-luna-1"] },
+      createElement(PersistenceRouteProbe, {
+        activeSessionAgentId: "agent-gpt",
+        selectedAgentId: "agent-gpt",
+        sessionRows: [...sessions].reverse(),
+      }),
+    )));
+
+    expect(currentPersistence?.bareRouteBootstrapTarget).toBeNull();
+    expect(readCurrentChatSelectionPreference()).toMatchObject({ agentId: "agent-luna" });
+    expect(setItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not persist an embedded Chat selection when its Finance URL points elsewhere", async () => {
+    window.localStorage.removeItem(CHAT_SELECTION_STORAGE_KEY);
+    const setItem = vi.spyOn(window.localStorage, "setItem");
+    await mountRouteProbe("/finance?session=session-gpt-1", {
+      selectionOverride: { kind: "session", sessionId: "session-luna-1" },
+      activeSessionAgentId: "agent-luna",
+      selectedAgentId: "agent-luna",
+    });
+
+    expect(readCurrentChatSelectionPreference()).toBeNull();
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the latest stored Agent when the same workbench enters bare Chat", async () => {
+    window.localStorage.setItem(CHAT_SELECTION_STORAGE_KEY, JSON.stringify({
+      sessionId: "session-luna-1",
+      agentId: "agent-luna",
+    }));
+    await mountRouteProbe("/chat?session=session-luna-1");
+
+    window.localStorage.setItem(CHAT_SELECTION_STORAGE_KEY, JSON.stringify({
+      sessionId: "session-gpt-1",
+      agentId: "agent-gpt",
+    }));
+    await act(async () => navigateRoute?.("/chat"));
+
+    expect(currentPersistence?.storedSelection).toMatchObject({ agentId: "agent-gpt" });
+    expect(currentPersistence?.bareRouteBootstrapTarget).toEqual({ kind: "session", sessionId: "session-gpt-1" });
+  });
 });
 
 describe("resolveBareRouteBootstrapTarget", () => {
@@ -146,6 +273,14 @@ describe("resolveBareRouteBootstrapTarget", () => {
     expect(resolveBareRouteBootstrapTarget({
       stored: { sessionId: "session-removed" },
       serverSessionId: "session-removed-too",
+      sessions,
+    })).toEqual({ kind: "session", sessionId: "session-luna-1" });
+  });
+
+  it("falls back to the stored Agent's visible session before the server pointer", () => {
+    expect(resolveBareRouteBootstrapTarget({
+      stored: { sessionId: "session-removed", agentId: "agent-luna" },
+      serverSessionId: "session-gpt-1",
       sessions,
     })).toEqual({ kind: "session", sessionId: "session-luna-1" });
   });

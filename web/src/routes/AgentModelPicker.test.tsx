@@ -70,7 +70,7 @@ const candidates = [
 ];
 
 describe("AgentModelPicker", () => {
-  it("renders a closed trigger with the selected model via VDialog host", () => {
+  it("renders a closed trigger with the selected model via a compact VPopover host", () => {
     const html = renderToStaticMarkup(
       <AgentModelPicker
         candidates={candidates}
@@ -87,10 +87,10 @@ describe("AgentModelPicker", () => {
 
     expect(html).toContain("Sol");
     expect(html).toContain('aria-haspopup="dialog"');
-    expect(pickerSource).toContain("<VDialog");
+    expect(pickerSource).toContain("<VPopover");
     expect(pickerSource).toContain("onOpenChange={handleOpenChange}");
     expect(pickerSource).not.toContain("createPortal(");
-    expect(pickerStyles.dialogContent).toContain("min(760px");
+    expect(pickerStyles.dialogContent).toContain("352px");
     expect(pickerStyles.dialogContent).toContain("100dvh");
   });
 

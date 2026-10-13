@@ -1,5 +1,16 @@
 import { AgentTaskProfile } from "../api/types";
-import { VButton, VContextualHint, VNativeInput, VNativeTextarea } from "../components/vui";
+import { VButton, VFieldRow, VNativeInput, VNativeTextarea, VSettingsFormPage } from "../components/vui";
+import {
+  agentConfigFormPageClass,
+  agentConfigActionsClass,
+  agentConfigContentClass,
+  agentConfigControlClass,
+  agentConfigEditorClass,
+  agentConfigFooterClass,
+  agentConfigPrimaryButtonClass,
+  agentConfigQuietButtonClass,
+  agentConfigRowClass,
+} from "./agentConfigForm.styles";
 import styles from "./AgentTaskProfilePanel.styles";
 
 export type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
@@ -40,7 +51,6 @@ type AgentTaskProfilePanelProps = {
 export function AgentTaskProfilePanel({
   copy,
   lang,
-  summary,
   draft,
   dirty,
   canSave,
@@ -49,89 +59,125 @@ export function AgentTaskProfilePanel({
   onReset,
   onSave,
 }: AgentTaskProfilePanelProps) {
-  return (
-    <section className={styles.configEditor}>
-      <div className={styles.panelHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{copy.taskTitle}</p>
-          <h3 className={styles.contextualHintRow}>
-            {summary}
-            <VContextualHint content={copy.taskHint} label={`${copy.taskTitle}说明`} />
-          </h3>
-        </div>
-        <span className={dirty ? styles.dirtyPill : styles.cleanPill}>
-          {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-        </span>
-      </div>
-      <div className={styles.editorGrid}>
-        <label className={styles.fieldWide}>
-          <span>{copy.mission}</span>
-          <VNativeTextarea value={draft.mission} onChange={(event) => onDraftChange({ mission: event.target.value })} />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.taskTypes}</span>
-          <VNativeInput
-            value={draft.taskTypes}
-            placeholder={copy.taskTypesPlaceholder}
-            onChange={(event) => onDraftChange({ taskTypes: event.target.value })}
-          />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.responsibilities}</span>
-          <VNativeTextarea value={draft.responsibilities} onChange={(event) => onDraftChange({ responsibilities: event.target.value })} />
-        </label>
-        <details className={styles.advancedDetails}>
-          <summary>{lang === "zh" ? "偏好、交付要求与交接" : "More profile details"}</summary>
-          <div className={styles.advancedBody}>
-            <label className={styles.fieldWide}>
-              <span>{copy.preferredTasks}</span>
-              <VNativeTextarea value={draft.preferredTasks} onChange={(event) => onDraftChange({ preferredTasks: event.target.value })} />
-            </label>
-            <label className={styles.fieldWide}>
-              <span>{copy.avoidTasks}</span>
-              <VNativeTextarea value={draft.avoidTasks} onChange={(event) => onDraftChange({ avoidTasks: event.target.value })} />
-            </label>
-            <label className={styles.fieldWide}>
-              <span>{copy.successCriteria}</span>
-              <VNativeTextarea value={draft.successCriteria} onChange={(event) => onDraftChange({ successCriteria: event.target.value })} />
-            </label>
-            <label className={styles.fieldWide}>
-              <span>{copy.deliverables}</span>
-              <VNativeTextarea value={draft.deliverables} onChange={(event) => onDraftChange({ deliverables: event.target.value })} />
-            </label>
-            <label className={styles.fieldWide}>
-              <span>{copy.constraints}</span>
-              <VNativeTextarea value={draft.constraints} onChange={(event) => onDraftChange({ constraints: event.target.value })} />
-            </label>
-            <label className={styles.fieldWide}>
-              <span>{copy.handoffNotes}</span>
-              <VNativeTextarea value={draft.handoffNotes} onChange={(event) => onDraftChange({ handoffNotes: event.target.value })} />
-            </label>
-          </div>
-        </details>
-      </div>
-      <div className={styles.editorActions}>
+  const footer = (
+    <div className={agentConfigActionsClass}>
+      <span className={dirty ? styles.pendingStatus : styles.savedStatus} aria-live="polite">
+        {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已保存" : "Saved")}
+      </span>
+      <div>
         <VButton
           type="button"
+          className={agentConfigQuietButtonClass}
           variant="secondary"
+          aria-label={lang === "zh" ? `重置${copy.taskTitle}` : `Reset ${copy.taskTitle.toLowerCase()}`}
           isDisabled={!dirty || pending}
-          tooltip={lang === "zh" ? "放弃本次未保存的任务档案修改。" : "Discard unsaved task profile changes."}
-          disabledReason={!dirty ? (lang === "zh" ? "当前没有未保存修改。" : "There are no unsaved changes.") : (lang === "zh" ? "正在保存，请稍候。" : "Saving is in progress.")}
           onPress={onReset}
         >
           {copy.resetConfig}
         </VButton>
         <VButton
           type="button"
+          className={agentConfigPrimaryButtonClass}
           variant="primary"
+          aria-label={pending ? copy.savingTask : copy.saveTask}
           isDisabled={!canSave || pending}
-          tooltip={lang === "zh" ? "保存当前任务档案。" : "Save the current task profile."}
-          disabledReason={!canSave ? (lang === "zh" ? "请先完成任务档案的必填内容。" : "Complete the required task profile fields first.") : (lang === "zh" ? "正在保存，请稍候。" : "Saving is in progress.")}
           onPress={onSave}
         >
-          {pending ? copy.savingTask : copy.saveTask}
+          {pending ? (lang === "zh" ? "保存中…" : "Saving…") : (lang === "zh" ? "保存" : "Save")}
         </VButton>
       </div>
-    </section>
+    </div>
+  );
+
+  return (
+    <VSettingsFormPage
+      className={agentConfigFormPageClass}
+      ariaLabel={copy.taskTitle}
+      title=""
+      headerClassName="hidden"
+      bodyClassName={agentConfigEditorClass}
+      footerClassName={agentConfigFooterClass}
+      footer={footer}
+    >
+      <div className={agentConfigContentClass}>
+        <section className={styles.fieldSection}>
+          <h3>{lang === "zh" ? "职责与范围" : "Scope and responsibilities"}</h3>
+          <VFieldRow label={copy.mission} className={agentConfigRowClass}>
+            <VNativeTextarea
+              className={`${agentConfigControlClass} ${styles.textarea}`}
+              value={draft.mission}
+              onChange={(event) => onDraftChange({ mission: event.target.value })}
+            />
+          </VFieldRow>
+          <VFieldRow label={copy.taskTypes} className={agentConfigRowClass}>
+            <VNativeInput
+              className={agentConfigControlClass}
+              value={draft.taskTypes}
+              placeholder={copy.taskTypesPlaceholder}
+              onChange={(event) => onDraftChange({ taskTypes: event.target.value })}
+            />
+          </VFieldRow>
+          <VFieldRow label={copy.responsibilities} className={agentConfigRowClass}>
+            <VNativeTextarea
+              className={`${agentConfigControlClass} ${styles.textarea}`}
+              value={draft.responsibilities}
+              onChange={(event) => onDraftChange({ responsibilities: event.target.value })}
+            />
+          </VFieldRow>
+        </section>
+        <section className={styles.fieldSection}>
+          <h3>{lang === "zh" ? "交付要求" : "Deliverable requirements"}</h3>
+          <VFieldRow label={copy.deliverables} className={agentConfigRowClass}>
+            <VNativeTextarea
+              className={`${agentConfigControlClass} ${styles.textarea}`}
+              value={draft.deliverables}
+              onChange={(event) => onDraftChange({ deliverables: event.target.value })}
+            />
+          </VFieldRow>
+          <VFieldRow label={copy.successCriteria} className={agentConfigRowClass}>
+            <VNativeTextarea
+              className={`${agentConfigControlClass} ${styles.textarea}`}
+              value={draft.successCriteria}
+              onChange={(event) => onDraftChange({ successCriteria: event.target.value })}
+            />
+          </VFieldRow>
+          <VFieldRow label={copy.constraints} className={agentConfigRowClass}>
+            <VNativeTextarea
+              className={`${agentConfigControlClass} ${styles.textarea}`}
+              value={draft.constraints}
+              onChange={(event) => onDraftChange({ constraints: event.target.value })}
+            />
+          </VFieldRow>
+        </section>
+        <section>
+          <details className={styles.advancedDetails}>
+            <summary>{lang === "zh" ? "偏好与交接" : "Preferences and handoff"}</summary>
+            <div className={styles.advancedBody}>
+              <VFieldRow label={copy.preferredTasks} className={agentConfigRowClass}>
+                <VNativeTextarea
+                  className={`${agentConfigControlClass} ${styles.textarea}`}
+                  value={draft.preferredTasks}
+                  onChange={(event) => onDraftChange({ preferredTasks: event.target.value })}
+                />
+              </VFieldRow>
+              <VFieldRow label={copy.avoidTasks} className={agentConfigRowClass}>
+                <VNativeTextarea
+                  className={`${agentConfigControlClass} ${styles.textarea}`}
+                  value={draft.avoidTasks}
+                  onChange={(event) => onDraftChange({ avoidTasks: event.target.value })}
+                />
+              </VFieldRow>
+              <VFieldRow label={copy.handoffNotes} className={agentConfigRowClass}>
+                <VNativeTextarea
+                  className={`${agentConfigControlClass} ${styles.textarea}`}
+                  value={draft.handoffNotes}
+                  onChange={(event) => onDraftChange({ handoffNotes: event.target.value })}
+                />
+              </VFieldRow>
+            </div>
+          </details>
+        </section>
+      </div>
+    </VSettingsFormPage>
   );
 }

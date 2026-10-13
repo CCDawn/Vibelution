@@ -15,7 +15,7 @@ import type { AgentPerceptionDraftState, AgentPerceptionDraftStore } from "./age
 
 export type AgentSelectedDetailPaneId = "overview" | "config" | "activity" | "perception";
 
-export type AgentConfigSectionId = "basic" | "profile" | "capability" | "ops";
+export type AgentConfigSectionId = "models" | "basic" | "persona" | "task" | "capability" | "runtime" | "ops";
 
 /** Secondary panes — kept off the default overview graph (F3-B). */
 const AgentActivityPanePanel = lazy(() =>
@@ -35,6 +35,9 @@ const AgentConfigReferencesPanePanel = lazy(() =>
 );
 const AgentConfigChangeHistoryPanel = lazy(() =>
   import("./AgentConfigChangeHistoryPanel").then((m) => ({ default: m.AgentConfigChangeHistoryPanel })),
+);
+const AgentRuntimePolicyPanel = lazy(() =>
+  import("./AgentRuntimePolicyPanel").then((m) => ({ default: m.AgentRuntimePolicyPanel })),
 );
 const AgentVirtualHumanPluginPanel = lazy(() =>
   import("./agent-plugins/AgentVirtualHumanPluginPanel").then((m) => ({ default: m.AgentVirtualHumanPluginPanel })),
@@ -71,16 +74,22 @@ function configSectionLabels(lang: "zh" | "en") {
   return lang === "zh"
     ? {
         basic: "基本",
-        profile: "人设与任务",
-        capability: "能力绑定",
-        ops: "运维·危险",
+        models: "模型",
+        persona: "人物",
+        task: "任务",
+        capability: "工具与记忆",
+        runtime: "委派与监督",
+        ops: "运维",
         navLabel: "配置分组",
       }
     : {
         basic: "Basics",
-        profile: "Persona",
-        capability: "Capabilities",
-        ops: "Ops · Danger",
+        models: "Models",
+        persona: "Persona",
+        task: "Tasks",
+        capability: "Tools & memory",
+        runtime: "Delegation & supervision",
+        ops: "Operations",
         navLabel: "Configuration sections",
       };
 }
@@ -117,7 +126,7 @@ export function AgentSelectedDetailContentPanel({
   preferOpsSection = false,
 }: AgentSelectedDetailContentPanelProps) {
   const [configSection, setConfigSection] = useState<AgentConfigSectionId>(
-    preferOpsSection ? "ops" : "basic",
+    preferOpsSection ? "ops" : "models",
   );
   const [perceptionDrafts, setPerceptionDrafts] = useState<AgentPerceptionDraftState>({});
   const perceptionDraftStore = useMemo<AgentPerceptionDraftStore>(() => ({
@@ -130,8 +139,8 @@ export function AgentSelectedDetailContentPanel({
     if (activePane !== "config") {
       return;
     }
-    setConfigSection(preferOpsSection ? "ops" : "basic");
-  }, [activePane, header.agentName, preferOpsSection]);
+    setConfigSection(preferOpsSection ? "ops" : "models");
+  }, [activePane, agentId, preferOpsSection]);
 
   const opsBadge = useMemo(() => {
     const health = configPrimary.healthMaintenance?.health;
@@ -150,17 +159,20 @@ export function AgentSelectedDetailContentPanel({
       ) : null}
       {activePane === "config" ? (
         <PaneSuspense lang={header.lang}>
-          <div className={styles.paneContent}>
-            <FinancialAssistantStatusNote agentId={agentId} lang={header.lang} />
+          <div className={styles.configPane}>
+            <div><FinancialAssistantStatusNote agentId={agentId} lang={header.lang} /></div>
             <nav className={styles.configSectionNav} aria-label={labels.navLabel}>
               {(
                 [
+                  ["models", labels.models],
                   ["basic", labels.basic],
-                  ["profile", labels.profile],
+                  ["persona", labels.persona],
+                  ["task", labels.task],
                   ["capability", labels.capability],
+                  ["runtime", labels.runtime],
                   ["ops", labels.ops],
                 ] as const
-              ).map(([id, label]) => (
+              ).filter(([id]) => id === "persona" ? Boolean(configPrimary.personaProfile) : id === "task" ? Boolean(configPrimary.taskProfile) : true).map(([id, label]) => (
                 <VNativeButton
                   key={id}
                   type="button"
@@ -178,30 +190,30 @@ export function AgentSelectedDetailContentPanel({
               ))}
             </nav>
             <div className={styles.configSectionBody}>
+              {configSection === "models" ? <AgentConfigPrimaryPanePanel {...configPrimary} section="models" /> : null}
               {configSection === "basic" ? (
                 <AgentConfigPrimaryPanePanel {...configPrimary} section="basic" />
               ) : null}
-              {configSection === "profile" ? (
-                <AgentConfigPrimaryPanePanel {...configPrimary} section="profile" />
-              ) : null}
+              {configSection === "persona" ? <AgentConfigPrimaryPanePanel {...configPrimary} section="persona" /> : null}
+              {configSection === "task" ? <AgentConfigPrimaryPanePanel {...configPrimary} section="task" /> : null}
               {configSection === "capability" ? (
-                <>
-                  <AgentVirtualHumanPluginPanel {...virtualHumanPlugin} />
-                  <AgentConfigPolicyPanePanel {...configPolicies} />
-                  <AgentConfigReferencesPanePanel {...configReferences} />
-                </>
+                <AgentConfigPolicyPanePanel {...configPolicies} toolGovernance={<AgentConfigPrimaryPanePanel {...configPrimary} section="tools" />} />
               ) : null}
+              {configSection === "runtime" ? <AgentRuntimePolicyPanel {...activity.runtimePolicy} /> : null}
               {configSection === "ops" ? (
+                <div className={styles.opsContent}>
                 <AgentConfigPrimaryPanePanel
                   {...configPrimary}
                   section="ops"
-                  opsTitle={header.lang === "zh" ? "运维与危险操作" : "Ops and dangerous actions"}
+                  opsTitle={header.lang === "zh" ? "Agent 管理" : "Agent management"}
                   opsHint={
                     header.lang === "zh"
                       ? "健康检查、归档删除与调试重置与日常配置分离。"
                       : "Health, archive/delete, and debug reset are separated from daily config."
                   }
                 />
+                <details className={styles.secondaryDetails}><summary className={styles.secondarySummary}>{header.lang === "zh" ? "关联与插件" : "References & plugins"}</summary><div className={styles.secondaryBody}><AgentVirtualHumanPluginPanel {...virtualHumanPlugin} /><AgentConfigReferencesPanePanel {...configReferences} /></div></details>
+                </div>
               ) : null}
             </div>
           </div>
@@ -210,7 +222,7 @@ export function AgentSelectedDetailContentPanel({
       {activePane === "activity" ? (
         <PaneSuspense lang={header.lang}>
           <div className={styles.paneContent}>
-            <AgentActivityPanePanel {...activity} />
+            <AgentActivityPanePanel {...activity} hideRuntimePolicy />
             <AgentConfigChangeHistoryPanel {...configChanges} lang={header.lang} />
           </div>
         </PaneSuspense>
