@@ -65,8 +65,25 @@ const productSharedParentStyleConsumers = [
   // ConversationMarkdownClassNames map (passed down per render) instead of
   // owning a second markdown style module.
   "components/conversation/StreamingLiveMarkdownBlocks.tsx",
+  // Timeline and transcript slices share ConversationView.styles.
+  "components/conversation/conversationAuxiliaryPanels.tsx",
+  "components/conversation/conversationCodexSurface.tsx",
+  "components/conversation/conversationCodexToolDetails.tsx",
+  "components/conversation/conversationCodexTranscriptCells.tsx",
+  "components/conversation/conversationOperationGroups.tsx",
+  "components/conversation/conversationOperationRows.tsx",
+  "components/conversation/conversationReActRows.tsx",
+  "components/conversation/conversationResponseBlocks.tsx",
+  "components/conversation/conversationSpecialRows.tsx",
+  "components/conversation/conversationThoughtUnits.tsx",
+  "components/conversation/conversationTimelineItems.tsx",
+  "components/conversation/useComputerUseResults.tsx",
   "routes/chat/CacheDetailDialog.tsx",
+  "routes/chat/ChatConversationIndexPanel.tsx",
   "routes/chat/ChatConversationIndexRail.tsx",
+  // Group timeline and project bus share ChatGroupCenterSurface.styles.
+  "routes/chat/ChatGroupRoundsTimeline.tsx",
+  "routes/chat/ChatProjectBusSurface.tsx",
   "routes/chat/chatRoutePresentation.tsx",
   "routes/chat/TokenCoreStatusPanel.tsx",
   "routes/chat/useChatWorkbenchLayout.ts",
