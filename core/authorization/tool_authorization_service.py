@@ -491,6 +491,14 @@ def authorize_tool_execution(
             context,
             tool_name=normalized_tool,
         )
+    from core.agent_plugins.runtime_extensions import agent_plugin_tool_execution_denial
+
+    plugin_denial = agent_plugin_tool_execution_denial(runtime, normalized_tool)
+    if plugin_denial:
+        return _execution_denial(
+            "agent_plugin_execution_denied", plugin_denial,
+            runtime_agent_id, runtime_turn_id, context, tool_name=normalized_tool,
+        )
     constraint_denial = _runtime_constraint_denial(runtime, normalized_tool, tool_args or {})
     if constraint_denial:
         code, detail = constraint_denial

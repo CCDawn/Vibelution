@@ -392,6 +392,16 @@ def _default_proactive_submitter(**payload: Any) -> dict[str, Any]:
         raise RuntimeError("Virtual human life runtime is not accepting proactive turns.")
     from .session_service import submit_session_proactive_turn
 
+    if (payload.get("trigger") or {}).get("deliveryKind") == "self_wake":
+        from core.agent_plugins.virtual_human_life.native_wakeup import resolve_worker
+        from core.agent_plugins.virtual_human_life.self_continuity import SESSION_PATH
+
+        owner_id = str(payload.get("agent_id") or "")
+        reference = get_virtual_human_life_service().store.read_json(owner_id, SESSION_PATH) or {}
+        runtime_id = str(reference.get("runtimeAgentId") or "")
+        if resolve_worker(runtime_id, session_id=str(payload.get("session_id") or "")) != owner_id:
+            raise VirtualHumanLifeError("Autonomous submission owner conflicts.")
+        payload["agent_id"] = runtime_id
     return submit_session_proactive_turn(**payload)
 
 
@@ -839,6 +849,18 @@ def _default_agent_persona_initializer(agent_id: str) -> dict[str, Any]:
     return {"initialized": True, "reason": "virtual_human_default"}
 
 
+def _default_self_wake_session_provider(agent_id: str) -> str:
+    from core.agent_plugins.virtual_human_life.native_wakeup import ensure_session
+
+    return ensure_session(agent_id)
+
+
+def _default_self_wake_canceller(agent_id: str, session_id: str, turn_id: str) -> None:
+    from core.agent_plugins.virtual_human_life.native_wakeup import cancel_turn
+
+    cancel_turn(agent_id, session_id, turn_id)
+
+
 def get_virtual_human_life_service() -> VirtualHumanLifeService:
     global _SERVICE
     with _SERVICE_LOCK:
@@ -861,6 +883,8 @@ def get_virtual_human_life_service() -> VirtualHumanLifeService:
                 runtime_acceptance_provider=_runtime_acceptance_allowed,
                 directory_visibility_manager=_default_directory_visibility_manager,
                 steward_provisioner=_default_steward_provisioner,
+                self_wake_session_provider=_default_self_wake_session_provider,
+                self_wake_canceller=_default_self_wake_canceller,
             )
         return _SERVICE
 
@@ -897,6 +921,14 @@ def resolve_virtual_human_runtime_target(
         include_archived=True,
     )
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if metadata.get("virtualHumanSelfWake") is True:
+        from core.agent_plugins.virtual_human_life.native_wakeup import resolve_worker
+
+        target_agent_id = resolve_worker(runtime_agent_id, session_id=normalized_session_id)
+        return {
+            "runtimeAgentId": runtime_agent_id, "targetAgentId": target_agent_id,
+            "binding": service.binding_for(target_agent_id), "steward": False, "selfWake": True,
+        }
     target_agent_id = str(metadata.get("lifeStewardForAgentId") or "").strip()
     if not target_agent_id:
         raise VirtualHumanLifeError("Virtual-human plugin binding is disabled for this Agent.")
@@ -1480,6 +1512,14 @@ def filter_virtual_human_tool_names(
             session_id=str((runtime_context or {}).get("sessionId") or ""),
             runtime_agent=runtime_agent,
         )
+        if resolved.get("selfWake"):
+            from core.agent_plugins.virtual_human_life.native_wakeup import (
+                authorized_tool_names,
+            )
+
+            tool_names = authorized_tool_names(
+                agent_id, tool_names, session_id=str((runtime_context or {}).get("sessionId") or ""),
+            )
         return get_virtual_human_life_service().filter_tool_names(
             str(resolved.get("targetAgentId") or ""),
             tool_names,
@@ -1492,6 +1532,8 @@ def filter_virtual_human_tool_names(
             type(exc).__name__,
         )
         plugin_prefix = "virtual_human_"
+        if ((runtime_agent or {}).get("metadata") or {}).get("virtualHumanSelfWake") is True:
+            return []
         try:
             binding = get_virtual_human_life_service().binding_for(agent_id)
         except Exception:  # noqa: BLE001 - fail-closed binding probe
@@ -1507,6 +1549,11 @@ def filter_virtual_human_tool_names(
 
 def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, Any]]:
     service = get_virtual_human_life_service()
+    from core.agent_plugins.virtual_human_life.native_wakeup import (
+        recover_pending_purges,
+    )
+
+    recover_pending_purges()
     results: list[dict[str, Any]] = []
     for agent in service.agent_lister():
         if not _RUNTIME_ACCEPTING.is_set():
@@ -1532,6 +1579,12 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, A
                     type(exc).__name__,
                 )
             result = service.heartbeat_agent(agent_id, coalesced=coalesced)
+            wake_result = service.self_continuity.tick(agent_id, now=service._now(), restarted=coalesced)
+            _record_scene(
+                "self_wake_tick", agent_id=agent_id, outcome=str(wake_result.get("status") or "unknown"),
+                fields={"wakeId": str(wake_result.get("wakeId") or ""),
+                        "waitReason": str(wake_result.get("waitReason") or "")},
+            )
             direct_session_id = str(
                 agent.get("directSessionId") or agent.get("direct_session_id") or ""
             ).strip()
@@ -1709,20 +1762,42 @@ def prepare_virtual_human_agent_archive(
     *,
     stage_workspace: bool = False,
 ) -> dict[str, Any] | None:
-    token = get_virtual_human_life_service().prepare_agent_archive(
-        agent_id,
-        stage_workspace=stage_workspace,
-    )
-    if token is not None:
-        _cancel_agent_proactive_session_turns(agent_id, reason="agent_archive_prepare")
+    service = get_virtual_human_life_service()
+    with service._lock_for(agent_id):
+        from core.agent_plugins.virtual_human_life.native_wakeup import (
+            archive_pair,
+            rollback_pair,
+        )
+
+        # Capture/cancel the paired native execution identity before staging
+        # moves the plugin reference. The lock excludes new wake dispatch.
+        if service.binding_for(agent_id) is not None:
+            _cancel_agent_proactive_session_turns(agent_id, reason="agent_archive_prepare")
+        pair = archive_pair(agent_id, purging=stage_workspace)
+        try:
+            token = service.prepare_agent_archive(agent_id, stage_workspace=stage_workspace)
+        except Exception:
+            rollback_pair(pair)
+            raise
+        if token is not None:
+            token["selfWakePair"] = pair
     return token
 
 
 def rollback_virtual_human_agent_archive(token: dict[str, Any] | None) -> None:
     get_virtual_human_life_service().rollback_agent_archive(token)
+    from core.agent_plugins.virtual_human_life.native_wakeup import rollback_pair
+
+    rollback_pair((token or {}).get("selfWakePair"))
 
 
 def commit_virtual_human_agent_purge(token: dict[str, Any] | None) -> None:
+    from core.agent_plugins.virtual_human_life.native_wakeup import purge_pair
+
+    try:
+        purge_pair((token or {}).get("selfWakePair"))
+    except Exception as exc:  # noqa: BLE001 - owner purge has committed; archived worker retains a retry receipt
+        logger.warning("Autonomous native pair purge deferred (%s).", type(exc).__name__)
     get_virtual_human_life_service().commit_agent_purge(token)
 
 
@@ -1730,8 +1805,10 @@ def proactive_context_is_current(context: dict[str, Any]) -> bool:
     if str(context.get("origin") or "") != "proactive_plugin":
         return True
     metadata = context.get("proactive_plugin") if isinstance(context.get("proactive_plugin"), dict) else {}
+    from core.agent_plugins.virtual_human_life.native_wakeup import context_owner
+
     return get_virtual_human_life_service().proactive_turn_is_current(
-        agent_id=str(context.get("agent_id") or "").strip(),
+        agent_id=context_owner(context),
         binding_revision=int(metadata.get("bindingRevision") or 0),
         delivery_token=str(metadata.get("deliveryToken") or "").strip(),
     )
@@ -1764,8 +1841,10 @@ def finalize_proactive_delivery(context: dict[str, Any]) -> dict[str, Any] | Non
     )
     if assistant_receipt is None:
         return None
+    from core.agent_plugins.virtual_human_life.native_wakeup import context_owner
+
     receipt = get_virtual_human_life_service().record_delivery_receipt(
-        str(context.get("agent_id") or "").strip(),
+        context_owner(context),
         delivery_token=str(metadata.get("deliveryToken") or "").strip(),
         turn_id=turn_id,
         receipt_event_id=str(getattr(assistant_receipt, "event_id", "") or "").strip(),
@@ -1799,6 +1878,17 @@ def _cancel_agent_proactive_session_turns(agent_id: str, *, reason: str) -> None
         cancel = getattr(session_service, "cancel_agent_plugin_proactive_turns", None)
         if callable(cancel):
             cancel(agent_id, plugin_id=PLUGIN_ID, reason=reason)
+            from core.agent_plugins.virtual_human_life.native_wakeup import (
+                resolve_worker,
+            )
+            from core.agent_plugins.virtual_human_life.self_continuity import (
+                SESSION_PATH,
+            )
+
+            reference = get_virtual_human_life_service().store.read_json(agent_id, SESSION_PATH) or {}
+            runtime_id = str(reference.get("runtimeAgentId") or "")
+            if runtime_id and resolve_worker(runtime_id, require_enabled=False) == agent_id:
+                cancel(runtime_id, plugin_id=PLUGIN_ID, reason=reason)
     except Exception as exc:  # noqa: BLE001 - optional Session cancellation adapter
         logger.warning(
             "Failed to cancel proactive turns for agent=%s (%s).",
