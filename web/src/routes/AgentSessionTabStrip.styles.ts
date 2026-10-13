@@ -2,9 +2,9 @@ const styles = {
   sessionHeader: "flex min-w-0 max-w-full items-center gap-1",
   // Card chrome lives on the outer tab shell so close control sits inside the same surface.
   agentSessionTab:
-    "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-8 w-fit max-w-[14rem] shrink-0 items-center gap-0 rounded-t-[8px] rounded-b-none border border-transparent bg-transparent pr-0.5 text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--vui-control-hover-fg)]",
+    "vui-routes-chatcodingroute agentSessionTab min-w-0 inline-flex h-7 w-fit max-w-[14rem] shrink-0 items-center gap-0 rounded-[6px] border-0 bg-transparent pr-0.5 text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--vui-control-hover-fg)]",
   agentSessionTabActive:
-    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 z-[1] border-[var(--vui-border-subtle)] !border-b-transparent !bg-vui-surface-chat data-[selected=true]:!bg-vui-surface-chat text-[var(--fg-primary)] opacity-100 hover:!bg-vui-surface-chat hover:text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 !bg-[color-mix(in_srgb,var(--fg-primary)_6%,var(--vui-surface-chat))] data-[selected=true]:!bg-[color-mix(in_srgb,var(--fg-primary)_6%,var(--vui-surface-chat))] text-[var(--fg-primary)] opacity-100 hover:text-[var(--fg-primary)]",
   agentSessionTabChild:
     "vui-routes-chatcodingroute agentSessionTabChild min-w-0",
   agentSessionTabCli:
@@ -34,11 +34,11 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabEditButton h-6 min-h-6 w-6 min-w-6 shrink-0 rounded-[var(--radius-control)] !border-0 border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] shadow-none hover:!border-transparent hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] hover:shadow-none",
   // Single-row rename chrome: matches normal tab height, no stacked kicker.
   agentSessionTabEditing:
-    "vui-routes-chatcodingroute agentSessionTabEditing h-8 min-w-[11rem] max-w-[14rem] gap-1 rounded-t-[8px] rounded-b-none border !border-b-transparent border-[var(--vui-border-subtle)] !bg-vui-surface-chat px-1.5 py-0 opacity-100",
+    "vui-routes-chatcodingroute agentSessionTabEditing h-7 min-w-[11rem] max-w-[14rem] gap-1 rounded-[6px] border-0 !bg-[color-mix(in_srgb,var(--fg-primary)_6%,var(--vui-surface-chat))] px-1.5 py-0 opacity-100",
   agentSessionTabGroup:
-    "vui-routes-chatcodingroute agentSessionTabGroup min-w-0 flex w-fit flex-none flex-nowrap items-end gap-0.5",
+    "vui-routes-chatcodingroute agentSessionTabGroup min-w-0 flex w-fit flex-none flex-nowrap items-center gap-0.5",
   agentSessionTabRail:
-    "vui-routes-chatcodingroute agentSessionTabRail min-w-0 flex w-fit max-w-full flex-[0_1_auto] flex-nowrap items-end gap-0.5 overflow-x-auto overflow-y-hidden pr-2 [scrollbar-width:thin]",
+    "vui-routes-chatcodingroute agentSessionTabRail min-w-0 flex w-fit max-w-full flex-[0_1_auto] flex-nowrap items-center gap-0.5 overflow-x-auto overflow-y-hidden pr-2 [scrollbar-width:thin]",
   agentSessionTabIcon:
     "vui-routes-chatcodingroute agentSessionTabIcon inline-grid h-3.5 w-3.5 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   agentSessionTabIconActive:
@@ -47,7 +47,7 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-vui-micro-10 font-semibold leading-none text-[var(--fg-tertiary)]",
   // Content hit target only — selection chrome is on the outer agentSessionTab card.
   // Fixed row: [icon] [title flex] [status slot] — status always occupies the same 14px cell.
-  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !inline-flex !h-[30px] !min-h-[30px] min-w-0 max-w-full flex-1 items-center !gap-1.5 !rounded-none !border-0 !bg-transparent !bg-none !px-2 !py-0 !text-inherit !shadow-none hover:!border-transparent hover:!bg-transparent hover:!text-inherit`,
+  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !inline-flex !h-7 !min-h-7 min-w-0 max-w-full flex-1 items-center !gap-1.5 !rounded-none !border-0 !bg-transparent !bg-none !px-2 !py-0 !text-inherit !shadow-none hover:!border-transparent hover:!bg-transparent hover:!text-inherit`,
   agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive !text-[var(--fg-primary)] !shadow-none`,
   agentSessionTabMainActionContextTarget:
     "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget",
@@ -88,7 +88,7 @@ const styles = {
   agentSessionTabTitle:
     "vui-routes-chatcodingroute agentSessionTabTitle block min-w-0 max-w-full truncate text-left [font-size:var(--vui-font-xs)] font-normal leading-none text-[var(--fg-secondary)]",
   agentSessionTabTitleActive:
-    "vui-routes-chatcodingroute agentSessionTabTitleActive !font-medium !text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabTitleActive !font-normal !text-[var(--fg-primary)]",
   // Inline tab rename field: strip dense form chrome so it reads as a tab title, not a dialog.
   agentSessionTabTitleInput:
     "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 flex-1 !h-7 !min-h-7 !w-[8.5rem] max-w-[10rem] !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-1.5 !py-0 ![font-size:var(--vui-font-xs)] !font-medium !leading-none !text-[var(--fg-primary)] !shadow-none placeholder:!font-normal placeholder:!text-[var(--fg-tertiary)] focus-visible:!outline-none focus-visible:!ring-1 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)]",

@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 
 import type { ConversationMessage } from "../../api/types";
-import { VButton } from "../vui";
+import { VButton, VDropdownMenu, VIconButton } from "../vui";
 import { ConversationShareExportDialog } from "./ConversationShareExportDialog";
+import styles from "./ConversationShareExportButton.styles";
 
 export type ConversationShareExportButtonProps = {
   sessionId: string;
@@ -10,6 +12,7 @@ export type ConversationShareExportButtonProps = {
   messages: ConversationMessage[];
   language?: "zh" | "en";
   isDisabled?: boolean;
+  presentation?: "button" | "menu";
 };
 
 /**
@@ -23,12 +26,20 @@ export function ConversationShareExportButton({
   messages,
   language = "zh",
   isDisabled = false,
+  presentation = "button",
 }: ConversationShareExportButtonProps) {
   const zh = language === "zh";
   const [open, setOpen] = useState(false);
   return (
     <>
-      <VButton
+      {presentation === "menu" ? (
+        <VDropdownMenu
+          aria-label={zh ? "会话操作" : "Conversation actions"}
+          align="end"
+          trigger={<VIconButton label={zh ? "会话操作" : "Conversation actions"} className={styles.menuTrigger} icon={<MoreHorizontal size={16} aria-hidden="true" />} />}
+          items={[{ id: "export-html", label: zh ? "导出 HTML" : "Export HTML", disabled: isDisabled, onSelect: () => setOpen(true) }]}
+        />
+      ) : <VButton
         data-vui="conversation-share-export-button"
         variant="ghost"
         density="compact"
@@ -36,7 +47,7 @@ export function ConversationShareExportButton({
         onPress={() => setOpen(true)}
       >
         {zh ? "导出 HTML" : "Export HTML"}
-      </VButton>
+      </VButton>}
       <ConversationShareExportDialog
         open={open}
         sessionId={sessionId}
