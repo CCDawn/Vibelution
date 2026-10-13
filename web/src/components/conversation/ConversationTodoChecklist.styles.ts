@@ -5,9 +5,11 @@ function cv(key: string, ...classNames: string[]) {
 }
 
 const styles = {
+  // Quiet plan rows, not a card: the register builds hierarchy with spacing,
+  // hairlines and alignment, not nested frames (Codex plan-panel parity).
   card: cv(
     "card",
-    "min-w-0 max-w-[830px] rounded-xl border border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,var(--vui-surface-workspace))] px-3 py-2 text-[var(--fg-secondary)] shadow-none",
+    "min-w-0 max-w-[830px] border-t border-[color-mix(in_srgb,var(--border-soft)_46%,transparent)] bg-transparent px-0 pt-1.5 pb-1 text-[var(--fg-secondary)] shadow-none",
   ),
   header: cv(
     "header",
@@ -17,7 +19,7 @@ const styles = {
   title: cv("title", "min-w-0 truncate font-medium"),
   counter: cv(
     "counter",
-    "shrink-0 rounded-full border border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] px-1.5 py-px text-[var(--fg-tertiary)] tabular-nums",
+    "shrink-0 text-[var(--fg-tertiary)] tabular-nums",
   ),
   warning: cv(
     "warning",

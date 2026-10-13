@@ -15,7 +15,7 @@ import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
 import { LauncherNavigation } from "./LauncherNavigation";
-import { VSplitWorkspace } from "../components/vui";
+import { VSplitWorkspace, VSurface } from "../components/vui";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
@@ -88,7 +88,7 @@ export function LauncherShell() {
         className={styles.workspace}
         columnsClassName={styles.columns}
         sidebar={<LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} />}
-        main={<div className={styles.main}><Outlet /></div>}
+        main={<VSurface as="div" tone="panel" padding="none" className={styles.main}><Outlet /></VSurface>}
       />
     </div>
   );

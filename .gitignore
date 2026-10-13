@@ -192,3 +192,4 @@ Thumbs.db
 
 # --- Windows: accidental file created when redirecting to reserved device name ---
 /nul
+.playwright-mcp/

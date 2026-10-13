@@ -1,6 +1,10 @@
 import type { SessionTurnItem } from "../../api/types/chat";
+import type { ConversationMessage } from "../../api/types";
 import { parseToolCallInput } from "../../api/toolCallInput";
-import { consolidateSessionTurnItemsV2 } from "../../routes/chatTurnProtocol";
+import {
+  consolidateSessionTurnItemsV2,
+  hasTerminalCanonicalTurnOutcome,
+} from "../../routes/chatTurnProtocol";
 
 /**
  * Client-derived todo checklist state (Claude Code TodoWrite paradigm).
@@ -101,4 +105,36 @@ export function deriveLatestTodoChecklist(
     }
   }
   return latest;
+}
+
+export type SessionTodoChecklistProjection = {
+  snapshot: TodoChecklistSnapshot;
+  turnSettled: boolean;
+  messageId: string;
+};
+
+/**
+ * Session-level projection for surfaces outside the turn body (e.g. the right
+ * rail plan tab): the newest assistant turn that ever produced a valid
+ * checklist wins, so a plan started in an older turn stays visible while
+ * later turns stream. Returns undefined when no turn carried one.
+ */
+export function deriveSessionTodoChecklist(
+  messages: readonly ConversationMessage[] | undefined,
+): SessionTodoChecklistProjection | undefined {
+  for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const message = (messages ?? [])[index];
+    if (message.role !== "assistant") {
+      continue;
+    }
+    const snapshot = deriveLatestTodoChecklist(message.turnItems);
+    if (snapshot) {
+      return {
+        snapshot,
+        turnSettled: hasTerminalCanonicalTurnOutcome(message),
+        messageId: message.id,
+      };
+    }
+  }
+  return undefined;
 }

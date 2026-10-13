@@ -425,7 +425,7 @@ export function LauncherBranchInstancesPanel({
         {showOpen ? (
           <VButton
             type="button"
-            variant="secondary"
+            variant={detailId === item.id ? "primary" : "secondary"}
             density="compact"
             isDisabled={startBusy || stopBusy || admissionBlocked}
             isPending={startBusy || stopBusy}

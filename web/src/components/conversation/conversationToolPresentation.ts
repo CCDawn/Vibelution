@@ -3,6 +3,7 @@ import {
   patchTextFromArguments,
   type ConversationPatchRowSummary,
 } from "./conversationPatchModel";
+import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
 
 export type ConversationToolPresentationLanguage = "zh" | "en";
 
@@ -473,7 +474,13 @@ function compactToolPresentationCandidate(
     : compactToolPresentationText(normalized);
 }
 
-export function completedToolPresentationSummary({
+export function completedToolPresentationSummary(input: CompletedToolPresentationSummaryInput) {
+  // Presentation boundary: terminal payload text carries SGR artifacts; strip
+  // them here so every caller (pills, cells, summaries) stays clean.
+  return stripAnsiArtifacts(completedToolPresentationSummaryResolved(input));
+}
+
+function completedToolPresentationSummaryResolved({
   toolSummary,
   cellSummary,
   resultPreview,
@@ -778,7 +785,14 @@ export function buildCodexToolActivityPills(options: {
   noMatch?: boolean;
   nonzeroExit?: boolean;
 }): CodexToolActivityPills {
-  const pills = buildToolActivityPillsForStatus(options);
+  const cleanOptions = {
+    ...options,
+    toolSummary: options.toolSummary === undefined ? undefined : stripAnsiArtifacts(options.toolSummary),
+    cellSummary: options.cellSummary === undefined ? undefined : stripAnsiArtifacts(options.cellSummary),
+    resultPreview: options.resultPreview === undefined ? undefined : stripAnsiArtifacts(options.resultPreview),
+    displayCommand: options.displayCommand === undefined ? undefined : stripAnsiArtifacts(options.displayCommand),
+  };
+  const pills = buildToolActivityPillsForStatus(cleanOptions);
   // The patch summary is orthogonal to status, so it is attached here rather
   // than repeated in each status branch below. It only fills the subject when
   // no result-derived summary named the target, and it adds the edit size that

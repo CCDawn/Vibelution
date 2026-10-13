@@ -9,13 +9,11 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronsDownUp,
   CircleDot,
   CircleMinus,
   CirclePlus,
   Copy,
   Cpu,
-  ExternalLink,
   FileText,
   Gauge,
   GitFork,
@@ -29,10 +27,8 @@ import {
   RefreshCw,
   Square,
   X,
-  Search,
   Sparkles,
   TerminalSquare,
-  Wrench,
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -57,7 +53,6 @@ import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
-import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationSelectionQuoteMenu } from "./ConversationSelectionQuoteMenu";
 import {
   buildQuotedDraftText,
@@ -74,22 +69,8 @@ import {
 import { buildConversationModelSwitchBoundaries } from "./conversationModelSwitch";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
-import {
-  buildOperationDetailRows,
-  DeferredOperationDetails,
-  operationDetailsKind,
-  readableOperationResult,
-  type OperationDetailLabels,
-  type OperationDetailRow,
-} from "./ConversationOperationDetails";
-import {
-  buildMentalBodyRows,
-  buildMentalMetaRows,
-  latestAgentMentalPart,
-  mentalSnapshotPreview,
-  type MentalStateFormatters,
-  type MentalStateLabels,
-} from "./conversationMentalState";
+import { type OperationDetailLabels } from "./ConversationOperationDetails";
+import { latestAgentMentalPart } from "./conversationMentalState";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 
@@ -118,12 +99,6 @@ import {
 } from "./composerPromptSuggestionModel";
 import { useComposerPromptSuggestion } from "./useComposerPromptSuggestion";
 import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
-import {
-  ConversationSlashCommandChip,
-  parseUserSlashCommandEcho,
-  resolveUserSlashCommandTone,
-} from "./ConversationSlashCommandChip";
-import { ConversationFileReferenceChips } from "./ConversationFileReferenceChips";
 import {
   insertSlashCommandSuggestion,
   groupSlashCommandSuggestionsBySection,
@@ -169,41 +144,26 @@ import {
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
 import { ConversationRunningTasks } from "./ConversationRunningTasks";
-import { resolveConversationTurnWorkSummary } from "./conversationTurnWorkStatus";
 import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
-import { isInternalRuntimeStatus } from "./conversationDisplayProtocol";
 import {
   buildAgentMessageOperationGroups,
-  buildAgentMessageReActOperationGroups,
   type AgentMessageOperation,
   type AgentMessageOperationGroups,
   type AgentMessageOperationKind,
   type AgentMessageReActOperationGroup,
 } from "./agentMessageOperations";
 import {
-  compactInternalProcessStateLabel,
-  compactVisibleTimelineOperations,
   isLongLoopProgressOperation,
   isRunningOperationStatus,
   operationCollectionTone,
-  operationDisplayLabel,
   operationStateLabel,
   operationStatusTone,
-  processSummaryMeta,
-  processSummaryPreview,
-  processSummaryTitle,
   isRetryOperation,
   shouldShowTimelineOperation,
   type OperationStateLabels,
 } from "./conversationOperationState";
-import {
-  reActActionOperations,
-  reActResultItems,
-  reActThoughtItems,
-  shouldExpandReActGroupByDefault,
-} from "./conversationReActOperationItems";
 import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
@@ -211,58 +171,27 @@ import {
 import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
-  dedupeCodexTranscriptCellsForDisplay,
-  settleCodexTranscriptActiveStatuses,
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import {
-  buildCodexTranscriptTimelineNodes,
-  codexTranscriptToolDurationSeconds,
-  codexTranscriptToolRawName,
-  createCodexTranscriptToolActivity,
-  formatCodexTranscriptDuration,
-  shouldAttachToolApprovalToActivity,
-} from "./conversationToolActivityModel";
-import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
-import {
   captureConversationProcessScrollAnchor,
   restoreConversationProcessScrollAnchor,
 } from "./conversationProcessScrollAnchor";
-import { ConversationToolActivity } from "./ConversationToolActivity";
-import {
-  ConversationToolActivityPills,
-  toolActivityAriaTitle,
-} from "./ConversationToolActivityPills";
-import { ConversationFileDeliveries } from "./ConversationFileDeliveries";
-import { conversationChangedFilesFromMetadata, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
-import { ConversationPatchDiff } from "./ConversationPatchDiff";
-import { conversationToolPatchText } from "./conversationPatchModel";
-import {
-  buildConversationTerminalToolDetail,
-  ConversationTerminalToolDetail,
-} from "./ConversationTerminalToolDetail";
-import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
+import { ConversationToolActivityPills } from "./ConversationToolActivityPills";
 import {
   preserveConversationExpansionDefaults,
   shouldRefreshConversationExpansionDefault,
 } from "./conversationExpansionDefaults";
-import { activeAgentMessageTimelineItemId } from "./agentMessageTimelineActiveItem";
-import {
-  agentMessageTimelineItemRowKey,
-  type AgentMessageTimelineRowIdentity,
-} from "./agentMessageTimelineRows";
+import { type AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
 import { useAgentThread } from "./useAgentThread";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
 import { projectConversationDisplayMessages } from "./conversationDisplayMessages";
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,
-  isCliAgentLifecycleMessage,
-  isContextCompressionMarkerMessage,
   isForkedSessionMarkerMessage,
   isGroupRoomTranscriptMessage,
-  isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
@@ -276,7 +205,6 @@ import {
   TIMELINE_HISTORY_LOAD_THRESHOLD_PX,
 } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
 import { ConversationTurnModelControl } from "./ConversationTurnModelControl";
 import { ComposerContextRing } from "./ComposerContextRing";
@@ -287,10 +215,7 @@ import {
   conversationImagePreviewUrl,
   isLikelyConversationImageUrl,
 } from "./conversationImagePreview";
-import {
-  formatConversationDuration,
-  formatConversationTimestamp,
-} from "./conversationTimeFormat";
+import { formatConversationTimestamp } from "./conversationTimeFormat";
 import {
   captureTimelineRowKeyAnchor,
   restoreTimelineRowKeyAnchor,
@@ -348,18 +273,11 @@ import {
   resolveSessionTurnErrorRecoveryAction,
   resolveTurnErrorTypeLabelKey,
 } from "./conversationTurnErrorPresentation";
-import {
-  buildConversationToolActivityDetailRows,
-  conversationToolActivityEmptyDetailLabel,
-} from "./conversationToolActivityDetail";
+import { buildConversationToolActivityDetailRows } from "./conversationToolActivityDetail";
 import {
   agentInboxSourceLabel,
   agentInboxSummary,
-  cliAgentLifecycleDetail,
-  cliAgentLifecycleLabel,
   groupRoomTranscriptLabel,
-  sessionRecoveryResumedDetail,
-  sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
@@ -381,23 +299,11 @@ import {
   COMPUTER_USE_TOOL_NAME,
   type ComputerUseResult,
 } from "./conversationComputerUseState";
-import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import {
-  isResponseSegmentCodeLike,
-  responseSegmentLabel as resolveResponseSegmentLabel,
   shouldShowAgentResponseBlock as resolveShouldShowAgentResponseBlock,
 } from "./conversationResponseSegmentPresentation";
 import {
   compactConversationPreview,
-  operationGroupTitle as resolveOperationGroupTitle,
-  hasOperationDetails as resolveHasOperationDetails,
-  operationStatusFallbackText,
-  operationStatusIconKind,
-  operationStatusToneClassNameFromTone,
-  operationTimelineTitle as resolveOperationTimelineTitle,
-  operationVisualTone,
-  processSummaryIconKind,
-  rolloutTraceEventLabel as resolveRolloutTraceEventLabel,
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
 } from "./conversationOperationPresentation";
 import {
@@ -410,39 +316,32 @@ import {
   resolveComposerPrimaryActionFlags,
   shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
-import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
 import {
-  buildCodexToolActivityPills,
   completedToolPresentationSummary,
-  conversationToolDetailPresentation,
   conversationToolPresentationLabel,
-  extractToolDisplayCommand,
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
 import {
-  isThoughtScrollAtBottom,
-  resolveThoughtStreamingSummary,
-  type ThoughtStreamingSummary,
-} from "./conversationThoughtSummary";
-import {
-  buildConversationFindIndex,
-  createConversationFindIndexCache,
-  resolveConversationFindActiveIndex,
-  resolveConversationFindJumpPlan,
-  stepConversationFindActiveIndex,
-  type ConversationFindIndexCache,
-} from "./conversationFindIndex";
-import {
-  applyConversationFindRowMarks,
-  clearConversationFindRowMarks,
-  collectConversationFindMatchedMessageIds,
-  CONVERSATION_FIND_HIGHLIGHT_DECAY_MS,
-  flashConversationFindRow,
-  queryConversationFindRowElement,
-  scrollConversationFindRowIntoView,
-} from "./conversationFindHighlightDom";
-import { ConversationFindBar, type ConversationFindBarLabels } from "./ConversationFindBar";
+  ThoughtDurationLabel,
+  ThoughtScrollBody,
+  ThoughtStreamingSummary,
+  replaceDividerPlaceholder,
+} from "./conversationThoughtUnits";
+import { ConversationFindBar } from "./ConversationFindBar";
+import { createCodexTranscriptCellRenderers } from "./conversationCodexTranscriptCells";
+import { createConversationAuxiliaryPanels } from "./conversationAuxiliaryPanels";
+import { createConversationCodexSurface } from "./conversationCodexSurface";
+import { createConversationCodexToolDetails } from "./conversationCodexToolDetails";
+import { createConversationOperationGroups } from "./conversationOperationGroups";
+import { createConversationOperationRows } from "./conversationOperationRows";
+import { createConversationReActRows } from "./conversationReActRows";
+import { createConversationResponseBlocks } from "./conversationResponseBlocks";
+import { createConversationSpecialRows } from "./conversationSpecialRows";
+import { createConversationTimelineItems } from "./conversationTimelineItems";
+import { resolveConversationTurnUsageLabel } from "./conversationTurnUsageLabel";
+import { useComputerUseResults } from "./useComputerUseResults";
+import { useConversationFind } from "./useConversationFind";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -460,12 +359,8 @@ const groupTranscriptInlineClassNames = {
 const COMPOSER_PASTE_NOTICE_VISIBLE_MS = 8000;
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
-const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
-// Find-in-transcript：输入防抖（毫秒）与跳转重试帧数上限（虚拟行挂载等待）。
-const CONVERSATION_FIND_DEBOUNCE_MS = 150;
-const CONVERSATION_FIND_JUMP_MAX_FRAMES = 12;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 // Virtual timeline (react-virtual): rows rendered beyond the measured viewport
 // per direction, vertical rhythm matching the timelineContent grid gap, the
@@ -482,171 +377,6 @@ const TIMELINE_VIRTUAL_INITIAL_RECT = { width: 1280, height: 900 };
 // the viewport position is declared final (2px tolerance = subpixel jitter).
 const TIMELINE_ANCHOR_CORRECTION_MAX_FRAMES = 30;
 const TIMELINE_ANCHOR_CORRECTION_TOLERANCE_PX = 2;
-
-/**
- * Height-capped thought body; sticks to bottom while streaming until the user
- * scrolls away from the bottom, then pauses follow until they return.
- */
-function ThoughtScrollBody({
-  text,
-  streaming,
-  className,
-}: {
-  text: string;
-  streaming: boolean;
-  className?: string;
-}) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Starts true on every (re)mount so an expand or fresh stream follows the
-  // newest content; onScroll flips it off as soon as the user leaves the bottom.
-  const autoFollowBottomRef = useRef(true);
-  const handleScroll = useCallback(() => {
-    const node = scrollRef.current;
-    if (!node) {
-      return;
-    }
-    autoFollowBottomRef.current = isThoughtScrollAtBottom({
-      clientHeight: node.clientHeight,
-      scrollHeight: node.scrollHeight,
-      scrollTop: node.scrollTop,
-    });
-  }, []);
-  useLayoutEffect(() => {
-    if (!streaming) {
-      return;
-    }
-    const node = scrollRef.current;
-    if (!node) {
-      return;
-    }
-    if (autoFollowBottomRef.current) {
-      node.scrollTop = node.scrollHeight;
-    }
-  }, [streaming, text]);
-  return (
-    <div
-      ref={scrollRef}
-      onScroll={handleScroll}
-      className={[styles.thoughtScrollBody, className].filter(Boolean).join(" ")}
-      data-thought-scroll-body="true"
-      data-thought-scroll-streaming={streaming ? "true" : undefined}
-    >
-      <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
-    </div>
-  );
-}
-
-/**
- * Collapsed thought summary: the latest thought sentence in one nowrap line.
- * Overflow hides and the viewport is pushed to its end on every content or
- * width change, so the newest words stay pinned at the right edge while older
- * text rolls out to the left; a CSS mask fades both edges only once the line
- * actually overflows.
- */
-function ThoughtStreamingSummary({ text }: { text: string }) {
-  const viewportRef = useRef<HTMLSpanElement | null>(null);
-  const [overflowing, setOverflowing] = useState(false);
-  const summary: ThoughtStreamingSummary | null = resolveThoughtStreamingSummary(text);
-  const summaryText = summary?.text ?? "";
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport || !summaryText) {
-      return;
-    }
-    const syncSummaryViewport = () => {
-      setOverflowing((current) => {
-        const next = viewport.scrollWidth > viewport.clientWidth + 1;
-        return current === next ? current : next;
-      });
-      viewport.scrollLeft = viewport.scrollWidth;
-    };
-    syncSummaryViewport();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const resizeObserver = new ResizeObserver(syncSummaryViewport);
-    resizeObserver.observe(viewport);
-    return () => resizeObserver.disconnect();
-  }, [summaryText]);
-  if (!summary) {
-    return null;
-  }
-  return (
-    <>
-      <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-      <span
-        ref={viewportRef}
-        className={[
-          styles.thoughtStreamingSummary,
-          overflowing ? styles.thoughtStreamingSummaryMasked : "",
-        ].filter(Boolean).join(" ")}
-        data-thought-streaming-summary="true"
-        data-thought-summary-mask={overflowing ? "both" : "none"}
-      >
-        <span className={styles.thoughtStreamingSummaryText}>{summary.text}</span>
-      </span>
-    </>
-  );
-}
-
-/**
- * Progress narration body: clamped preview while settled, full scrollable text
- * while live or expanded. No box chrome so it reads lighter than the thinking lane.
- */
-function ProgressScrollBody({
-  text,
-  streaming,
-  clamped,
-}: {
-  text: string;
-  streaming: boolean;
-  clamped: boolean;
-}) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    if (!streaming || clamped) {
-      return;
-    }
-    const node = scrollRef.current;
-    if (!node) {
-      return;
-    }
-    node.scrollTop = node.scrollHeight;
-  }, [clamped, streaming, text]);
-  if (clamped) {
-    return (
-      <div className={styles.codexTranscriptProgressClamped} data-codex-progress-clamped="true">
-        {text}
-      </div>
-    );
-  }
-  return (
-    <div
-      ref={scrollRef}
-      className={styles.codexTranscriptProgressBody}
-      data-codex-progress-body="true"
-      data-codex-progress-streaming={streaming ? "true" : undefined}
-    >
-      <pre className={styles.codexTranscriptProgressText}>{text}</pre>
-    </div>
-  );
-}
-
-const PROGRESS_CLAMP_LINES = 3;
-const PROGRESS_CLAMP_CHARACTERS_PER_LINE = 72;
-
-/**
- * Codex parity: only offer an expand toggle when expanding would reveal
- * something the 3-line clamp hides; a short update stays static text.
- */
-function progressTextExceedsClamp(text: string) {
-  const segments = String(text ?? "").split("\n");
-  let lines = 0;
-  for (const segment of segments) {
-    lines += Math.max(1, Math.ceil(segment.length / PROGRESS_CLAMP_CHARACTERS_PER_LINE));
-  }
-  return lines > PROGRESS_CLAMP_LINES;
-}
 
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
@@ -706,163 +436,6 @@ function turnNavPlainPreviewText(message: ConversationMessage | undefined): stri
     .replace(/\s+/g, " ")
     .trim();
 }
-
-/** Presentation tone of a context-compression checkpoint divider. */
-type ConversationCompressionDividerTone =
-  | "applied"
-  | "skipped_low_savings"
-  | "failed_preserved";
-
-/**
- * Backend compression statuses spell both ways ("applied" from the ledger
- * projection, "context_compression_applied" from status turn items); normalize
- * to one divider tone. Unknown statuses present as the plain applied row.
- */
-function normalizeCompressionDividerTone(raw: unknown): ConversationCompressionDividerTone {
-  const value = String(raw ?? "").trim().toLowerCase().replace(/^context_compression_/, "");
-  if (value === "skipped_low_savings") {
-    return "skipped_low_savings";
-  }
-  if (value === "failed_preserved") {
-    return "failed_preserved";
-  }
-  return "applied";
-}
-
-/**
- * Compression checkpoints reach the timeline through two carriers: server
- * projections with `metadata.kind = "context_compression_marker"` and status
- * turn items whose diagnosticSummary carries the same kind (the native Codex
- * transcript shape). Both render as one ZCode-style hairline divider instead
- * of a generic status cell; the token-saving text never renders.
- */
-function conversationCompressionDividerTone(
-  message: ConversationMessage,
-): ConversationCompressionDividerTone | null {
-  if (isContextCompressionMarkerMessage(message)) {
-    return normalizeCompressionDividerTone(message.metadata?.status);
-  }
-  if (message.role !== "assistant") {
-    return null;
-  }
-  for (const item of message.turnItems) {
-    if (item.type !== "status") {
-      continue;
-    }
-    const summary = item.diagnosticSummary;
-    if (summary && String(summary.kind ?? "").trim() === "context_compression_marker") {
-      return normalizeCompressionDividerTone(summary.status ?? item.code);
-    }
-  }
-  return null;
-}
-
-function replaceDividerPlaceholder(template: string, token: string, value: string) {
-  return template.split(`{${token}}`).join(value);
-}
-
-const THOUGHT_DURATION_TICK_MS = 1000;
-
-/**
- * ZCode thought-duration semantics, client clock only: the timer starts at the
- * unit's first live render, ticks every second while (and only while) the unit
- * is expanded and live, and freezes when the unit settles. Units that arrive
- * already settled (history loads) have no client-clock reading — they show a
- * duration only when the server carried canonical reasoning stamps
- * (`settledDurationSeconds`, see conversationThoughtDuration.ts); otherwise
- * they render nothing rather than fabricate one.
- */
-const ThoughtDurationLabel = React.memo(function ThoughtDurationLabel({
-  live,
-  expanded,
-  settledDurationSeconds,
-  settledSecondsTemplate,
-  settledMomentsLabel,
-}: {
-  live: boolean;
-  expanded: boolean;
-  /** Server-derived total for units that arrived settled; undefined when the stamps are absent. */
-  settledDurationSeconds?: number;
-  settledSecondsTemplate: string;
-  settledMomentsLabel: string;
-}) {
-  const startedAtRef = useRef<number | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
-
-  // First live render opens the client-side measurement window.
-  useEffect(() => {
-    if (live && startedAtRef.current === null) {
-      startedAtRef.current = Date.now();
-    }
-  }, [live]);
-
-  // Per-second cadence is tied to visibility: only an expanded live unit ticks.
-  // A self-rescheduling timeout (not an interval) keeps the ticking scoped to
-  // this label and clears with the effect on expand/settle changes.
-  useEffect(() => {
-    if (!live || !expanded || startedAtRef.current === null) {
-      return undefined;
-    }
-    let timer: number | null = null;
-    const syncElapsed = () => {
-      setElapsedSeconds(
-        Math.max(0, Math.round((Date.now() - (startedAtRef.current ?? Date.now())) / THOUGHT_DURATION_TICK_MS)),
-      );
-      timer = window.setTimeout(syncElapsed, THOUGHT_DURATION_TICK_MS);
-    };
-    syncElapsed();
-    return () => {
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [live, expanded]);
-
-  // Freeze once: settle closes the window with the last honest reading.
-  useEffect(() => {
-    if (!live && startedAtRef.current !== null) {
-      setElapsedSeconds(
-        Math.max(0, Math.round((Date.now() - startedAtRef.current) / THOUGHT_DURATION_TICK_MS)),
-      );
-    }
-  }, [live]);
-
-  if (live) {
-    // Nothing ticked yet (collapsed live unit): no duration label.
-    if (elapsedSeconds === null) {
-      return null;
-    }
-    return (
-      <span
-        className={styles.thoughtDuration}
-        data-thought-duration="live"
-      >
-        <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-        {`${elapsedSeconds}s`}
-      </span>
-    );
-  }
-  // Settled: server-derived canonical stamps win (they bracket the true
-  // measurement window; the client window only opens at first render), then
-  // the client-clock frozen reading. Units with neither show nothing.
-  const frozenSeconds = settledDurationSeconds
-    ?? (startedAtRef.current !== null && elapsedSeconds !== null ? elapsedSeconds : null);
-  if (frozenSeconds === null) {
-    return null;
-  }
-  const frozenLabel = frozenSeconds < 1
-    ? settledMomentsLabel
-    : replaceDividerPlaceholder(settledSecondsTemplate, "seconds", String(frozenSeconds));
-  return (
-    <span
-      className={styles.thoughtDuration}
-      data-thought-duration="settled"
-    >
-      <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-      {frozenLabel}
-    </span>
-  );
-});
 
 type ConversationUserInlineEditorProps = {
   lang: "zh" | "en";
@@ -1271,8 +844,6 @@ export const ConversationView = React.memo(function ConversationView({
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
-  const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
-  const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
   // In-chat SFT curation: server map + optimistic overlay for instant button
@@ -1311,26 +882,6 @@ export const ConversationView = React.memo(function ConversationView({
   const [forkDialogMessage, setForkDialogMessage] = useState<ConversationMessage | null>(null);
   const [forkScope, setForkScope] = useState<ConversationForkScope>("visible_path");
   const [forkPending, setForkPending] = useState(false);
-  // Find-in-transcript（对话内查找）：状态全部组件内部管理，不跨 route 边界。
-  const [conversationFindOpen, setConversationFindOpen] = useState(false);
-  const [conversationFindQuery, setConversationFindQuery] = useState("");
-  const [conversationFindSettledQuery, setConversationFindSettledQuery] = useState("");
-  const [conversationFindActiveIndex, setConversationFindActiveIndex] = useState(-1);
-  const conversationFindOpenRef = useRef(false);
-  conversationFindOpenRef.current = conversationFindOpen;
-  const conversationFindInputRef = useRef<HTMLInputElement | null>(null);
-  // 按消息 id 的索引缓存跨渲染持有：流式更新只重扫签名变化的消息。
-  const conversationFindIndexCacheRef = useRef<ConversationFindIndexCache>(
-    createConversationFindIndexCache(),
-  );
-  const conversationFindFlashCancelRef = useRef<(() => void) | null>(null);
-  // 会话视图根容器：Ctrl+F / Esc 的 window 级监听用它圈定作用范围。
-  const conversationSurfaceRef = useRef<HTMLDivElement | null>(null);
-  // Esc 仲裁用的模态镜像：覆盖层（图片预览/分叉对话框）打开时 Esc 归覆盖层。
-  const conversationFindPreviewImageRef = useRef<ConversationImagePreviewRequest | null>(null);
-  conversationFindPreviewImageRef.current = previewImage;
-  const conversationFindForkDialogRef = useRef<ConversationMessage | null>(null);
-  conversationFindForkDialogRef.current = forkDialogMessage;
   // Text-selection quote menu (zai-org/ZCode useTextSelection pattern,
   // Apache-2.0): snapshot of the selected text. The menu centers itself on
   // that viewport rect.
@@ -2030,275 +1581,31 @@ export const ConversationView = React.memo(function ConversationView({
     },
     [timelineVirtualizer],
   );
-  // ============================================================================
-  // Find-in-transcript（对话内查找）：索引 + 导航 + 高亮 + 跳转。
-  // 索引源是 timelineHistoryMessages（settled 前缀；在途尾部不入索引），
-  // messageOrder 即 virtualizer 行号；增量复用依赖按消息 id 的签名缓存。
-  // ============================================================================
-  const conversationFindIndex = useMemo(
-    () => buildConversationFindIndex(
-      timelineHistoryMessages,
-      conversationFindSettledQuery,
-      { cache: conversationFindIndexCacheRef.current },
-    ),
-    [conversationFindSettledQuery, timelineHistoryMessages],
-  );
-  const conversationFindMatchedMessageIds = useMemo(
-    () => collectConversationFindMatchedMessageIds(conversationFindIndex.matches),
-    [conversationFindIndex],
-  );
-  const activeConversationFindMatch = conversationFindActiveIndex >= 0
-    ? (conversationFindIndex.matches[conversationFindActiveIndex] ?? null)
-    : null;
-  // 查询串防抖（150ms）：settled 查询驱动索引；关闭时清匹配态、保留输入值。
-  useEffect(() => {
-    if (!conversationFindOpen) {
-      setConversationFindSettledQuery("");
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      setConversationFindSettledQuery(conversationFindQuery);
-    }, CONVERSATION_FIND_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [conversationFindOpen, conversationFindQuery]);
-  // 生效命中序号：查询变化重置为首个命中；流式重建只做夹取，不打断当前位置。
-  const conversationFindQueryKeyRef = useRef("");
-  // 跳转去重键（查询+消息+行内序号）；closeConversationFind 归零让重开重新跳。
-  const conversationFindJumpKeyRef = useRef("");
-  useEffect(() => {
-    const queryChanged = conversationFindQueryKeyRef.current !== conversationFindIndex.query;
-    conversationFindQueryKeyRef.current = conversationFindIndex.query;
-    setConversationFindActiveIndex((current) => (queryChanged
-      ? resolveConversationFindActiveIndex(conversationFindIndex.matchCount, 0)
-      : resolveConversationFindActiveIndex(conversationFindIndex.matchCount, current)));
-  }, [conversationFindIndex]);
-  const closeConversationFind = useCallback(() => {
-    setConversationFindOpen(false);
-    setConversationFindActiveIndex(-1);
-    // 重开后再查同一词也要重新跳转（jumpKey 归零，重开不沿用上次命中）。
-    conversationFindJumpKeyRef.current = "";
-  }, []);
-  const openConversationFind = useCallback(() => {
-    setConversationFindOpen(true);
-  }, []);
-  // 打开时聚焦查找输入框（重开也全选，便于直接换词）。
-  useEffect(() => {
-    if (!conversationFindOpen) {
-      return undefined;
-    }
-    const frame = window.requestAnimationFrame(() => {
-      const input = conversationFindInputRef.current;
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [conversationFindOpen]);
-  // Ctrl+F / Cmd+F 打开查找条：仅当焦点落在会话视图内或空白处（点击转录后
-  // 焦点常在 body）；其他输入框（如本页之外的控件）不接管。
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat || event.isComposing || event.altKey || event.shiftKey) {
-        return;
-      }
-      if (!(event.ctrlKey || event.metaKey) || String(event.key).toLowerCase() !== "f") {
-        return;
-      }
-      const surface = conversationSurfaceRef.current;
-      const target = event.target;
-      if (!surface || !(target instanceof Node)) {
-        return;
-      }
-      if (target !== document.body && target !== document.documentElement && !surface.contains(target)) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      const wasOpen = conversationFindOpenRef.current;
-      openConversationFind();
-      if (wasOpen) {
-        // 已打开：把焦点拉回输入框（state 不变时 open 效果不会重跑）。
-        window.requestAnimationFrame(() => conversationFindInputRef.current?.focus());
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [openConversationFind]);
-  // Esc 关闭查找条（优先于一切停止语义）：find 输入框自带 Esc 处理并
-  // preventDefault，这里兜住焦点在转录/正文时的 Esc。模态覆盖层优先。
-  useEffect(() => {
-    if (!conversationFindOpen) {
-      return undefined;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.key !== "Escape") {
-        return;
-      }
-      if (conversationFindPreviewImageRef.current || conversationFindForkDialogRef.current) {
-        return;
-      }
-      const surface = conversationSurfaceRef.current;
-      const target = event.target;
-      if (!surface || !(target instanceof Node)) {
-        return;
-      }
-      // 焦点常落在 body（点击转录行后不产生焦点）：与 Ctrl+F 同一判定，
-      // body/根元素或会话视图内都允许关闭；其他面板的焦点不接管。
-      if (
-        target !== document.body
-        && target !== document.documentElement
-        && !surface.contains(target)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      closeConversationFind();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [conversationFindOpen, closeConversationFind]);
-  const handleConversationFindPrevious = useCallback(() => {
-    setConversationFindActiveIndex((current) => stepConversationFindActiveIndex(
-      current,
-      -1,
-      conversationFindIndex.matchCount,
-    ));
-  }, [conversationFindIndex.matchCount]);
-  const handleConversationFindNext = useCallback(() => {
-    setConversationFindActiveIndex((current) => stepConversationFindActiveIndex(
-      current,
-      1,
-      conversationFindIndex.matchCount,
-    ));
-  }, [conversationFindIndex.matchCount]);
-  // 命中标记同步：挂载窗口内的命中行打 data 标记（CSS 出视觉）；虚拟化滚动
-  // 重挂行时在 scroll 上 rAF 重放。0 命中/关闭时清除全部标记。
-  useEffect(() => {
-    if (!conversationFindOpen || conversationFindIndex.matchCount === 0) {
-      clearConversationFindRowMarks(timelineRef.current);
-      return undefined;
-    }
-    const timeline = timelineRef.current;
-    if (!timeline) {
-      return undefined;
-    }
-    let frame: number | null = null;
-    const syncMarks = () => {
-      frame = null;
-      applyConversationFindRowMarks(timeline, {
-        matchedMessageIds: conversationFindMatchedMessageIds,
-        activeMessageId: activeConversationFindMatch?.messageId ?? null,
-      });
-    };
-    syncMarks();
-    const handleScroll = () => {
-      if (frame === null) {
-        frame = window.requestAnimationFrame(syncMarks);
-      }
-    };
-    timeline.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      timeline.removeEventListener("scroll", handleScroll);
-      if (frame !== null) {
-        window.cancelAnimationFrame(frame);
-      }
-    };
-  }, [
-    conversationFindOpen,
-    conversationFindIndex.matchCount,
-    conversationFindMatchedMessageIds,
-    activeConversationFindMatch,
-  ]);
-  // 跳转 + 3s 行高亮：目标行不在窗口先 scrollToIndex/钉底，行挂载后精对位
-  // 并重放强调动画。同一命中（查询+消息+行内序号）不重复跳。
-  useEffect(() => {
-    if (!conversationFindOpen) {
-      return undefined;
-    }
-    const match = activeConversationFindMatch;
-    if (!match) {
-      return undefined;
-    }
-    const jumpKey = `${conversationFindIndex.query}:${match.messageId}:${match.matchIndexInRow}`;
-    if (conversationFindJumpKeyRef.current === jumpKey) {
-      return undefined;
-    }
-    conversationFindJumpKeyRef.current = jumpKey;
-    if (resolveConversationFindJumpPlan(match.messageOrder, timelineLiveTailStartIndex) === "virtual") {
-      timelineVirtualizer.scrollToIndex(match.messageOrder, { align: "center" });
-    } else {
-      const timeline = timelineRef.current;
-      if (timeline) {
-        scrollTimelineToBottom(timeline, { followLatest: false });
-      }
-    }
-    let cancelled = false;
-    const frames: number[] = [];
-    let attempts = 0;
-    const settle = () => {
-      if (cancelled) {
-        return;
-      }
-      const row = queryConversationFindRowElement(timelineRef.current, match.messageId);
-      if (!row) {
-        attempts += 1;
-        if (attempts <= CONVERSATION_FIND_JUMP_MAX_FRAMES) {
-          frames.push(window.requestAnimationFrame(settle));
-        }
-        return;
-      }
-      scrollConversationFindRowIntoView(row);
-      conversationFindFlashCancelRef.current?.();
-      conversationFindFlashCancelRef.current = flashConversationFindRow(
-        row,
-        CONVERSATION_FIND_HIGHLIGHT_DECAY_MS,
-      );
-    };
-    frames.push(window.requestAnimationFrame(settle));
-    return () => {
-      cancelled = true;
-      for (const frame of frames) {
-        window.cancelAnimationFrame(frame);
-      }
-    };
-  }, [
-    conversationFindOpen,
-    conversationFindIndex.query,
-    activeConversationFindMatch,
-    timelineLiveTailStartIndex,
+  // Find-in-transcript（对话内查找）：状态、索引、导航、高亮与跳转全部在
+  // useConversationFind 内，不跨 route 边界。
+  const {
+    open: conversationFindOpen,
+    query: conversationFindQuery,
+    setQuery: setConversationFindQuery,
+    activeIndex: conversationFindActiveIndex,
+    matchCount: conversationFindMatchCount,
+    inputRef: conversationFindInputRef,
+    surfaceRef: conversationSurfaceRef,
+    barLabels: conversationFindBarLabels,
+    close: closeConversationFind,
+    handlePrevious: handleConversationFindPrevious,
+    handleNext: handleConversationFindNext,
+  } = useConversationFind({
+    sessionId,
+    t,
+    historyMessages: timelineHistoryMessages,
+    liveTailStartIndex: timelineLiveTailStartIndex,
+    timelineRef,
     timelineVirtualizer,
-  ]);
-  // 关闭/卸载收尾：取消挂起的 3s 衰减定时器，避免摘掉后续会话行的属性。
-  useEffect(() => {
-    if (conversationFindOpen) {
-      return undefined;
-    }
-    conversationFindFlashCancelRef.current?.();
-    conversationFindFlashCancelRef.current = null;
-    return undefined;
-  }, [conversationFindOpen]);
-  useEffect(() => () => {
-    conversationFindFlashCancelRef.current?.();
-    conversationFindFlashCancelRef.current = null;
-  }, []);
-  // 会话切换不跨会话复用索引缓存。
-  useEffect(() => {
-    conversationFindIndexCacheRef.current.clear();
-    conversationFindJumpKeyRef.current = "";
-    conversationFindQueryKeyRef.current = "";
-  }, [sessionId]);
-  const conversationFindBarLabels: ConversationFindBarLabels = useMemo(() => ({
-    title: t("findInConversationTitle"),
-    placeholder: t("findInConversationPlaceholder"),
-    matchCountAria: (current, total) => t("findMatchCountAria")
-      .replace("{current}", String(current))
-      .replace("{total}", String(total)),
-    previous: t("findPreviousMatch"),
-    next: t("findNextMatch"),
-    close: t("findCloseBar"),
-  }), [t]);
+    previewImage,
+    forkDialogMessage,
+    scrollTimelineToBottom: (timeline) => scrollTimelineToBottom(timeline, { followLatest: false }),
+  });
   /**
    * One render plan for both blocks: measured virtual rows inside the history
    * host (virtualStartPx set) plus the in-flight live-tail rows after it
@@ -2409,80 +1716,9 @@ export const ConversationView = React.memo(function ConversationView({
             if (companionTypingMessage?.id === message.id) {
               return null;
             }
-            if (isCliAgentLifecycleMessage(message)) {
-              const detail = cliAgentLifecycleDetail(message);
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={styles.cliAgentLifecycleTurn}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                >
-                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
-                    <TerminalSquare size={14} />
-                  </span>
-                  <span className={styles.cliAgentLifecycleText}>
-                    {cliAgentLifecycleLabel(message, lang)}
-                  </span>
-                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
-                  {message.timestamp ? (
-                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
-                  ) : null}
-                </article>
-              );
-            }
-            if (isSessionRecoveryResumedMessage(message)) {
-              const detail = sessionRecoveryResumedDetail(message, lang);
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={styles.cliAgentLifecycleTurn}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                >
-                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
-                    <RefreshCw size={14} />
-                  </span>
-                  <span className={styles.cliAgentLifecycleText}>
-                    {sessionRecoveryResumedLabel(message, lang)}
-                  </span>
-                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
-                  {message.timestamp ? (
-                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
-                  ) : null}
-                </article>
-              );
-            }
-            // Context-compression checkpoints are timeline chrome, not model
-            // answers: one hairline divider per checkpoint, toned by outcome.
-            // The token-saving numbers never render.
-            const compressionTone = conversationCompressionDividerTone(message);
-            if (compressionTone) {
-              const compressionLabel = compressionTone === "applied"
-                ? t("compressionDividerApplied")
-                : compressionTone === "skipped_low_savings"
-                  ? t("compressionDividerSkipped")
-                  : t("compressionDividerFailed");
-              return (
-                <article
-                  key={rowIdentity?.rowKey ?? message.id}
-                  className={[
-                    styles.turnDividerRow,
-                    compressionTone === "applied"
-                      ? styles.turnDividerToneApplied
-                      : compressionTone === "skipped_low_savings"
-                        ? styles.turnDividerToneQuiet
-                        : styles.turnDividerToneWarning,
-                  ].filter(Boolean).join(" ")}
-                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
-                  data-conversation-compression-divider={compressionTone}
-                >
-                  <span className={styles.turnDividerRule} aria-hidden="true" />
-                  <span className={styles.turnDividerIcon} aria-hidden="true">
-                    <ChevronsDownUp size={13} />
-                  </span>
-                  <span className={styles.turnDividerLabel}>{compressionLabel}</span>
-                  <span className={styles.turnDividerRule} aria-hidden="true" />
-                </article>
-              );
+            const specialRow = renderTimelineSpecialRow(message, rowIdentity?.rowKey ?? message.id);
+            if (specialRow) {
+              return specialRow;
             }
             const agentMessage = agentMessagesByMessageId.get(message.id);
             if (!agentMessage) {
@@ -2575,6 +1811,16 @@ export const ConversationView = React.memo(function ConversationView({
               && !assistantTurnIsStreaming(message)
               ? responseText.trim()
               : "";
+            // Codex parity: settled turns carry a quiet measured token-usage
+            // label near the turn meta; streaming turns and surfaces without
+            // wire facts render nothing.
+            const turnUsageLabel = message.role === "assistant"
+              && !assistantTurnIsStreaming(message)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              ? resolveConversationTurnUsageLabel(message.usageStats, lang)
+              : null;
             // SFT curation actions share the copy affordance's gate and stay
             // out of companion/inbox/group surfaces by contract.
             const messageCurationGate = Boolean(copyableAnswerText)
@@ -2862,6 +2108,15 @@ export const ConversationView = React.memo(function ConversationView({
                 }
                 metaActions={
                   <>
+                    {turnUsageLabel ? (
+                      <span
+                        className={styles.turnUsageLabel}
+                        title={turnUsageLabel.titleLines.join("\n")}
+                        data-conversation-turn-usage="1"
+                      >
+                        {turnUsageLabel.label}
+                      </span>
+                    ) : null}
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
                     <span
                       className={isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions}
@@ -3338,6 +2593,12 @@ export const ConversationView = React.memo(function ConversationView({
   const openImagePreview = useCallback((image: ConversationImagePreviewRequest) => {
     setPreviewImage(image);
   }, []);
+
+  const {
+    computerUseSessionResults,
+    computerUseSessionPending,
+    renderComputerUseResult,
+  } = useComputerUseResults({ lang, openImagePreview });
 
   function closeImagePreview() {
     setPreviewImage(null);
@@ -4142,12 +3403,6 @@ export const ConversationView = React.memo(function ConversationView({
     });
   }
 
-  function reasoningExpansionSectionId(cell: Pick<CodexTranscriptCell, "id" | "sourceItemId">) {
-    // Prefer sourceItemId so stream updates that rewrite cell.id keep the same open/closed choice.
-    const stable = String(cell.sourceItemId || cell.id || "").trim();
-    return `reasoning:${stable || "active"}`;
-  }
-
   function scrollToBottom() {
     const timeline = timelineRef.current;
     if (!timeline) {
@@ -4215,356 +3470,89 @@ export const ConversationView = React.memo(function ConversationView({
     });
   }
 
-  const formatDuration = formatConversationDuration;
+  const {
+    formatDuration,
+    operationTone,
+    operationStatusToneClassName,
+    operationStatusIcon,
+    operationStatusText,
+    rolloutTraceEventLabel,
+    operationLabel,
+    operationGroupTitle,
+    operationTimelineTitle,
+    processSummaryIcon,
+    hasOperationDetails,
+    buildLegacyToolActivityPills,
+  } = createConversationOperationRows({ lang, t, statusLabel, operationStateLabels });
 
-  function operationIcon(kind: AgentMessageOperationKind, label: string) {
-    switch (conversationOperationIconKind(kind, label)) {
-      case "thought":
-        return <Sparkles size={17} />;
-      case "mental":
-        return <BrainCircuit size={17} />;
-      case "search":
-        return <Search size={17} />;
-      case "link":
-        return <ExternalLink size={17} />;
-      case "terminal":
-        return <TerminalSquare size={17} />;
-      case "tool":
-      default:
-        return <Wrench size={17} />;
-    }
-  }
+  const {
+    renderCodexThoughtScrollCell,
+    renderCodexProgressCell,
+    renderCodexReasoningSummaryCell,
+    codexTranscriptVisibleSummary,
+    codexTranscriptCellIcon,
+    codexTranscriptCellTitle,
+    codexTranscriptCellMeta,
+  } = createCodexTranscriptCellRenderers({ lang, t, getExpansionState, toggleSection });
 
-  function operationTone(operation: AgentMessageOperation) {
-    return operationVisualTone(operation);
-  }
+  const {
+    codexTranscriptToolDetailRows,
+    renderCodexTranscriptToolDetailContent,
+    codexTranscriptToolDetailIsEmpty,
+    renderRolloutTraceEvents,
+  } = createConversationCodexToolDetails({
+    lang,
+    operationDetailLabels,
+    rolloutTraceEventLabel,
+    codexTranscriptCellTitle,
+  });
 
-  function operationStatusToneClassName(operation: AgentMessageOperation) {
-    return operationStatusToneClassNameFromTone(operationStatusTone(operation));
-  }
+  const {
+    renderReActOperationContent,
+    feedbackTimelineGroups,
+    renderFeedbackTimelineDetails,
+  } = createConversationReActRows({
+    lang,
+    t,
+    getExpansionState,
+    toggleSection,
+    operationDetailLabels,
+    renderComputerUseResult,
+    formatDuration,
+    buildLegacyToolActivityPills,
+    operationLabel,
+    operationStatusIcon,
+    operationStatusText,
+    operationStatusToneClassName,
+    hasOperationDetails,
+  });
 
-  function operationStatusIcon(operation: AgentMessageOperation, animateRunning = true) {
-    const status = String(operation.status ?? "").trim().toLowerCase();
-    switch (operationStatusIconKind(status, isRunningOperationStatus(status), animateRunning)) {
-      case "done":
-        return <CheckCircle2 size={14} />;
-      case "running":
-        return <LoaderCircle className={styles.statusSpinner} size={14} />;
-      case "running_static":
-      case "idle":
-      default:
-        return <CircleDot size={14} />;
-    }
-  }
-
-  function operationStatusText(status: string | null | undefined) {
-    return operationStatusFallbackText(String(status ?? ""), lang, statusLabel);
-  }
-
-  function rolloutTraceEventLabel(kind: CodexRolloutTraceEvent["kind"]) {
-    return resolveRolloutTraceEventLabel(kind, lang);
-  }
-
-  function renderRolloutTraceEvents(operation: AgentMessageOperation) {
-    if (operation.kind !== "tool") {
-      return null;
-    }
-    if (operationStatusTone(operation) === "done") {
-      return null;
-    }
-    const events = buildCodexRolloutTraceEvents(operation);
-    if (events.length === 0) {
-      return null;
-    }
-    return (
-      <ol className={styles.rolloutTraceList} aria-label={lang === "zh" ? "工具生命周期" : "Tool lifecycle"}>
-        {events.map((event) => {
-          const eventClassName = [
-            styles.rolloutTraceItem,
-            styles[`rolloutTraceItem_${event.status}`],
-          ].filter(Boolean).join(" ");
-          const detailText = [
-            event.error,
-            event.exitCode !== undefined && event.exitCode !== null ? `exit ${event.exitCode}` : "",
-            event.timedOut ? (lang === "zh" ? "已超时" : "timed out") : "",
-          ].filter(Boolean).join(" · ");
-          return (
-            <li
-              key={event.id}
-              className={eventClassName}
-              data-rollout-trace-kind={event.kind}
-              data-rollout-trace-status={event.status}
-              data-rollout-tool-call-id={event.toolCallId}
-              data-rollout-terminal-operation-id={event.terminalOperationId}
-              data-rollout-terminal-id={event.terminalId}
-            >
-              <span className={styles.rolloutTraceDot} aria-hidden="true" />
-              <span className={styles.rolloutTraceText}>
-                <span className={styles.rolloutTraceTitle}>{rolloutTraceEventLabel(event.kind)}</span>
-                {detailText ? <span className={styles.rolloutTraceMeta}>{detailText}</span> : null}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-    );
-  }
-
-  function operationLabel(operation: AgentMessageOperation) {
-    if (isRetryOperation(operation)) {
-      return lang === "zh" ? "请求重试" : "Retrying";
-    }
-    return operationDisplayLabel(operation, operationStateLabels);
-  }
-
-  function operationGroupTitle(kind: AgentMessageOperationKind, count: number) {
-    return resolveOperationGroupTitle(kind, count, {
-      thoughtProcess: t("thoughtProcess"),
-      mentalProcess: t("mentalProcess"),
-      toolProcess: t("toolProcess"),
-    });
-  }
-
-  function operationTimelineTitle(operations: AgentMessageOperation[]) {
-    return resolveOperationTimelineTitle(operations, lang, {
-      thoughtProcess: t("thoughtProcess"),
-      mentalProcess: t("mentalProcess"),
-      toolProcess: t("toolProcess"),
-    });
-  }
-
-  function processSummaryIcon(tone: string) {
-    switch (processSummaryIconKind(tone)) {
-      case "failed":
-        return <TerminalSquare size={14} />;
-      case "done":
-        return <CheckCircle2 size={14} />;
-      case "running":
-      case "degraded":
-      case "default":
-      default:
-        return <CircleDot size={14} />;
-    }
-  }
-
-  function hasOperationDetails(operation: AgentMessageOperation) {
-    return resolveHasOperationDetails(operation);
-  }
-
-  function renderComputerUseResult(operation: AgentMessageOperation) {
-    const result = computerUseResultForOperation(operation, computerUseSessionResults);
-    if (!result) {
-      return null;
-    }
-    const previewLabel = lang === "zh" ? "预览沙盒截图" : "Preview sandbox screenshot";
-    const confirmLabel = lang === "zh" ? "确认继续" : "Confirm";
-    const cancelLabel = lang === "zh" ? "停止任务" : "Stop";
-    const pendingAction = computerUseSessionPending[result.sessionId];
-    const imageAlt = result.summary || (lang === "zh" ? "Computer Use 沙盒截图" : "Computer Use sandbox screenshot");
-    const confirmSession = () => {
-      setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: "confirm" }));
-      void fetchJson<ComputerUseResult>(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/confirm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmation: "approved_from_chat" }),
-      })
-        .then((payload) => {
-          setComputerUseSessionResults((current) => ({ ...current, [result.sessionId]: payload }));
-        })
-        .catch((error) => {
-          setComputerUseSessionResults((current) => ({
-            ...current,
-            [result.sessionId]: {
-              ...result,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          }));
-        })
-        .finally(() => {
-          setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: undefined }));
-        });
-    };
-    const cancelSession = () => {
-      setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: "cancel" }));
-      void fetchJson<ComputerUseResult>(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/cancel`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "cancelled_from_chat" }),
-      })
-        .then((payload) => {
-          setComputerUseSessionResults((current) => ({ ...current, [result.sessionId]: payload }));
-        })
-        .catch((error) => {
-          setComputerUseSessionResults((current) => ({
-            ...current,
-            [result.sessionId]: {
-              ...result,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          }));
-        })
-        .finally(() => {
-          setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: undefined }));
-        });
-    };
-    return (
-      <section className={styles.computerUsePanel}>
-        <div className={styles.computerUseHeader}>
-          <span>{result.status || "computer_use"}</span>
-          <code>{result.sessionId}</code>
-        </div>
-        {result.summary ? <p className={styles.computerUseSummary}>{result.summary}</p> : null}
-        {result.screenshotUrl ? (
-          <VButton
-            type="button"
-            className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
-            onClick={() =>
-              openImagePreview({
-                src: result.screenshotUrl,
-                alt: imageAlt,
-                downloadUrl: result.screenshotUrl,
-                downloadName: true,
-              })
-            }
-            aria-label={previewLabel}
-            title={previewLabel}
-          >
-            <img className={styles.computerUseScreenshot} src={result.screenshotUrl} alt={imageAlt} loading="lazy" />
-          </VButton>
-        ) : null}
-        {result.steps.length > 0 ? (
-          <ol className={styles.computerUseSteps}>
-            {result.steps.slice(0, 6).map((step, index) => (
-              <li key={`${result.sessionId}-${step.index ?? index}`}>
-                <span>{step.action || step.status || `${index + 1}`}</span>
-                <p>{step.summary || step.status || ""}</p>
-              </li>
-            ))}
-          </ol>
-        ) : null}
-        {result.error ? <p className={styles.computerUseError}>{result.error}</p> : null}
-        {result.needsConfirmation || result.status === "running" ? (
-          <div className={styles.computerUseActions}>
-            {result.needsConfirmation ? (
-              <VButton type="button" onClick={confirmSession} isDisabled={Boolean(pendingAction)}>
-                {pendingAction === "confirm" ? (lang === "zh" ? "确认中" : "Confirming") : confirmLabel}
-              </VButton>
-            ) : null}
-            <VButton type="button" onClick={cancelSession} isDisabled={Boolean(pendingAction)}>
-              {pendingAction === "cancel" ? (lang === "zh" ? "停止中" : "Stopping") : cancelLabel}
-            </VButton>
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  function renderOperationTimeline(operations: AgentMessageOperation[], options: { limitInitialRows?: boolean } = {}) {
-    const shouldLimitRows = options.limitInitialRows && operations.length > INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT;
-    const hiddenOperationCount = shouldLimitRows ? operations.length - INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT : 0;
-    const visibleOperations = shouldLimitRows
-      ? operations.slice(-INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT)
-      : operations;
-    return (
-      <div className={styles.operationTimeline}>
-        {hiddenOperationCount > 0 ? (
-          <div className={styles.operationTimelineTrimmed}>
-            {lang === "zh"
-              ? `已折叠更早 ${hiddenOperationCount} 步执行记录`
-              : `${hiddenOperationCount} earlier execution steps collapsed`}
-          </div>
-        ) : null}
-        {visibleOperations.map((operation) => {
-          const duration = formatDuration(operation.durationSeconds);
-          const detailsId = `operation-detail-${operation.id}`;
-          const detailsExpanded = getExpansionState(operation.id, "details", false);
-          const canExpandDetails = hasOperationDetails(operation);
-          const computerUseResult = renderComputerUseResult(operation);
-          const detailToggleTitle = operation.kind === "thought"
-            ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
-            : operation.kind === "status"
-              ? detailsExpanded ? t("executionDetailsVisible") : t("executionDetailsHidden")
-            : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
-          const statusTone = operationStatusToneClassName(operation);
-          const operationClassName = [
-            styles.operationItem,
-            styles[`operationItem_${operationTone(operation)}`],
-            styles[`operationItem_${statusTone}`],
-            isRunningOperationStatus(operation.status) ? styles.operationItemActive : "",
-          ].filter(Boolean).join(" ");
-          return (
-            <div key={operation.id} className={styles.operationItemWrap}>
-              <div className={operationClassName}>
-                <span
-                  className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]} ${styles[`operationIcon_${statusTone}`]}`}
-                >
-                  {operationIcon(operation.kind, operation.label)}
-                </span>
-                <div className={`${styles.operationText} ${styles[`operationText_${statusTone}`]}`}>
-                  <span className={`${styles.operationName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
-                  {operation.summary ? (
-                    <span className={`${styles.operationSummaryText} ${styles[`operationText_${statusTone}`]}`}>{operation.summary}</span>
-                  ) : null}
-                </div>
-                <span className={`${styles.operationStatus} ${styles[`operationStatus_${statusTone}`]}`}>
-                  {operationStatusIcon(operation)}
-                  <span>{operationStatusText(operation.status)}</span>
-                </span>
-                {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
-                {canExpandDetails ? (
-                  <VButton
-                    type="button"
-                    className={styles.operationDetailToggle}
-                    aria-expanded={detailsExpanded}
-                    aria-controls={detailsId}
-                    onClick={() => toggleSection(operation.id, "details", false)}
-                    title={detailToggleTitle}
-                    isIconOnly
-                    icon={detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
-                ) : (
-                  <span className={styles.operationChevron} aria-hidden="true">
-                    {hasOperationDetails(operation) ? <ChevronRight size={16} /> : null}
-                  </span>
-                )}
-              </div>
-              {canExpandDetails ? (
-                <DeferredOperationDetails
-                  operation={operation}
-                  expanded={detailsExpanded}
-                  detailsId={detailsId}
-                  kind={operationDetailsKind(operation)}
-                  buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
-                />
-              ) : null}
-              {computerUseResult}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  function renderAgentMessageTimeline(
-    message: ConversationMessage,
-    items: AgentMessageTimelineItem[],
-    rowIdentity: AgentMessageTimelineRowIdentity,
-    processSectionIds?: string,
-  ) {
-    if (items.length === 0) {
-      return null;
-    }
-    const activeItemId = activeAgentMessageTimelineItemId({ streaming: assistantTurnIsStreaming(message) }, items);
-    return (
-      <div
-        className={styles.conversationCellTimeline}
-        data-conversation-part-key={rowIdentity.processKey}
-        data-agent-process-section-ids={processSectionIds}
-        data-agent-process-kind={processSectionIds ? "timeline" : undefined}
-      >
-        {items.map((item) => renderAgentMessageTimelineItem(message, item, rowIdentity, item.id === activeItemId))}
-      </div>
-    );
-  }
+  const {
+    isCompactInternalStatusOperation,
+    renderOperationTimeline,
+    renderOperationGroup,
+    renderFeedbackTimelineGroup,
+  } = createConversationOperationGroups({
+    lang,
+    t,
+    getExpansionState,
+    toggleSection,
+    operationStateLabels,
+    operationDetailLabels,
+    renderComputerUseResult,
+    formatDuration,
+    operationTone,
+    operationStatusToneClassName,
+    operationStatusIcon,
+    operationStatusText,
+    operationLabel,
+    hasOperationDetails,
+    operationGroupTitle,
+    operationTimelineTitle,
+    processSummaryIcon,
+    feedbackTimelineGroups,
+    renderFeedbackTimelineDetails,
+  });
 
   function handleCopyAnswer(messageId: string, text: string) {
     const trimmed = text.trim();
@@ -4631,145 +3619,6 @@ export const ConversationView = React.memo(function ConversationView({
       });
   }
 
-  // Failed/interrupted turns force their tool/work rows open (scene kept for
-  // diagnosis): persisted turn_error, interrupted partials, and the live
-  // turnError still in flight for this turn (same judgment as the banner).
-  function turnWorkForceExpand(message: ConversationMessage): boolean {
-    const turnId = message.role === "assistant" ? String(message.turnId || "").trim() : "";
-    return isTurnErrorMessage(message)
-      || message.metadata?.interrupted === true
-      || Boolean(
-        turnError
-        && !turnErrorSupersededByFinalAnswer
-        && turnId
-        && String(turnError.turnId || "") === turnId,
-      );
-  }
-
-  function renderCodexTranscriptCells(
-    message: ConversationMessage,
-    cells: CodexTranscriptCell[],
-    rowIdentity: AgentMessageTimelineRowIdentity,
-    isCompanionMode = false,
-  ) {
-    const visibleCells = dedupeCodexTranscriptCellsForDisplay(
-      settleCodexTranscriptActiveStatuses(
-        cells.filter((cell) => cell.kind !== "user"),
-        { turnStreaming: assistantTurnIsStreaming(message) },
-      ),
-    );
-    if (visibleCells.length === 0) {
-      return null;
-    }
-    const isFinalResponseCell = (cell: CodexTranscriptCell) => (
-      cell.kind === "assistant_markdown" && cell.phase !== "commentary"
-    );
-    const processCells = isCompanionMode
-      ? []
-      : visibleCells.filter((cell) => !isFinalResponseCell(cell));
-    const finalCells = isCompanionMode
-      ? visibleCells.filter((cell) => isFinalResponseCell(cell) || cell.kind === "error_notice")
-      : visibleCells.filter(isFinalResponseCell);
-    const renderTimelineNodes = (
-      timelineCells: CodexTranscriptCell[],
-      options?: { attachToolApproval?: boolean },
-    ) => {
-      const nodes = buildCodexTranscriptTimelineNodes(timelineCells);
-      const canAttach = Boolean(options?.attachToolApproval && toolApproval && !toolApprovalConsumedRef.current);
-      const toolActivities = nodes.filter((node) => node.kind === "tool_activity");
-      const matchedActivityId = canAttach
-        ? (
-          toolActivities.find((node) => node.kind === "tool_activity" && shouldAttachToolApprovalToActivity(
-            node.activity,
-            toolApproval?.toolName,
-            { preferAnyOpenWhenUnmatched: false },
-          ))
-          ?? toolActivities.find((node) => node.kind === "tool_activity" && shouldAttachToolApprovalToActivity(
-            node.activity,
-            toolApproval?.toolName,
-            { preferAnyOpenWhenUnmatched: true },
-          ))
-          ?? toolActivities[toolActivities.length - 1]
-        )
-        : null;
-      const matchedId = matchedActivityId && matchedActivityId.kind === "tool_activity"
-        ? matchedActivityId.activity.id
-        : "";
-      return nodes.map((node) => {
-        if (node.kind !== "tool_activity") {
-          return renderCodexTranscriptCell(message, node.cell, { attachToolApproval: false });
-        }
-        const attachApproval = Boolean(canAttach && node.activity.id === matchedId);
-        if (attachApproval) {
-          toolApprovalConsumedRef.current = true;
-        }
-        return (
-          <ConversationToolActivity
-            key={node.activity.id}
-            activity={node.activity}
-            language={lang === "en" ? "en" : "zh"}
-            renderToolDetails={renderCodexTranscriptToolDetailContent}
-            toolDetailIsEmpty={codexTranscriptToolDetailIsEmpty}
-            approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
-            sessionId={sessionId}
-            turnFailed={turnWorkForceExpand(message)}
-          />
-        );
-      });
-    };
-    // ZCode AssistantHistoryStatus parity: one status trigger per settled
-    // assistant turn, placed ahead of the transcript it summarizes, so a turn
-    // never splits its worked time across two places.
-    const transcriptWorkSummary = message.role === "assistant"
-      && !isCompanionMode
-      && !isAgentInboxMessage(message)
-      && !isGroupRoomTranscriptMessage(message)
-      && !assistantTurnIsStreaming(message)
-      ? resolveConversationTurnWorkSummary(message)
-      : null;
-    return (
-      <div
-        className={styles.codexTranscriptSurface}
-        data-codex-transcript-surface="true"
-        data-conversation-part-key={`${rowIdentity.messageKey}:codex-transcript`}
-      >
-        {processCells.length > 0 || transcriptWorkSummary ? (
-          <ConversationProcessDisclosure
-            cells={processCells}
-            language={lang === "en" ? "en" : "zh"}
-            messageOrder={activeTimelineMessageOrder}
-            onUserToggle={handleProcessDisclosureUserToggle}
-            turnStreaming={assistantTurnIsStreaming(message)}
-            workSummary={transcriptWorkSummary}
-          >
-            {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
-            {processCells.length > 0
-              ? renderTimelineNodes(processCells, { attachToolApproval: false })
-              : null}
-          </ConversationProcessDisclosure>
-        ) : null}
-        {finalCells.length > 0 ? (
-          <div data-codex-final-response="true">
-            {renderTimelineNodes(finalCells, { attachToolApproval: false })}
-          </div>
-        ) : null}
-        {!isCompanionMode ? (
-          <ConversationFileDeliveries
-            cells={cells}
-            language={lang === "en" ? "en" : "zh"}
-            changedFiles={conversationChangedFilesFromMetadata(message.metadata)}
-            sessionId={sessionId}
-            turnId={message.role === "assistant" ? message.turnId : undefined}
-            onContinue={showComposer && !composerDisabled ? (path) => {
-              onComposerChange(fileDeliveryFollowupDraft(composerValue, path, lang === "en" ? "en" : "zh"));
-              requestAnimationFrame(() => composerInputRef.current?.focus());
-            } : undefined}
-          />
-        ) : null}
-      </div>
-    );
-  }
-
   function shouldRenderCompactActiveTurnPlaceholder(
     message: ConversationMessage,
     options: {
@@ -4792,1706 +3641,9 @@ export const ConversationView = React.memo(function ConversationView({
     });
   }
 
-  function renderCodexTranscriptCell(
-    message: ConversationMessage,
-    cell: CodexTranscriptCell,
-    options?: { attachToolApproval?: boolean },
-  ) {
-    if (cell.kind === "assistant_markdown") {
-      const text = cell.text?.trim() ?? "";
-      if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
-        return null;
-      }
-      // Commentary is user-facing progress narration: its own lighter lane,
-      // while reasoning_summary remains the collapsible thinking lane.
-      if (cell.phase === "commentary") {
-        return renderCodexProgressCell(message.id, cell, text);
-      }
-      return (
-        <section
-          key={cell.id}
-          className={[styles.codexTranscriptCell, styles.codexTranscriptAssistantCell, styles.codexTranscriptFinalCell].filter(Boolean).join(" ")}
-          data-codex-transcript-cell-kind={cell.kind}
-          data-codex-transcript-cell-status={cell.status}
-          data-codex-transcript-cell-tone={cell.tone}
-          data-codex-transcript-cell-channel={cell.channel || undefined}
-          data-codex-transcript-cell-phase={cell.phase ?? ""}
-          data-conversation-part-key={cell.id}
-        >
-          {renderAssistantTranscriptResponseText(
-            text,
-            assistantTurnIsStreaming(message),
-            imageArtifactUrlsBeforeMessage.get(message.id),
-          )}
-          {renderAssistantFileReferenceChips(message, text)}
-        </section>
-      );
-    }
-    if (cell.kind === "reasoning_summary") {
-      return renderCodexReasoningSummaryCell(message, cell);
-    }
-    if (cell.kind === "error_notice") {
-      const rawErrorTitle = cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed");
-      const visibleErrorTitle = conversationToolPresentationLabel(rawErrorTitle, lang === "en" ? "en" : "zh");
-      const errorText = completedToolPresentationSummary({
-        cellSummary: cell.summary,
-        resultPreview: cell.text,
-        toolName: rawErrorTitle,
-        status: cell.status,
-        language: lang === "en" ? "en" : "zh",
-      });
-      const diagnosticRows = buildConversationToolActivityDetailRows(cell, lang === "en" ? "en" : "zh");
-      const fallbackDiagnosticRows = diagnosticRows.length > 0
-        ? diagnosticRows
-        : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
-      const isCompactToolFailure = Boolean(cell.operationIds?.length);
-      if (isCompactToolFailure) {
-        const compactErrorSummary = (
-          <>
-            <span className={styles.codexTranscriptCellTitle}>{visibleErrorTitle}</span>
-            {cell.failureCount && cell.failureCount > 1 ? (
-              <span className={styles.codexTranscriptCellMeta}>· {cell.failureCount} {lang === "zh" ? "次" : "times"}</span>
-            ) : null}
-            {fallbackDiagnosticRows.length > 0 ? (
-              <ChevronDown className={styles.codexTranscriptInlineChevron} size={14} aria-hidden="true" />
-            ) : null}
-            {errorText ? <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span> : null}
-            {errorText ? <span className={styles.codexTranscriptCompactErrorSummary}>{errorText}</span> : null}
-          </>
-        );
-        return (
-          <section
-            key={cell.id}
-            className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, styles.codexTranscriptCell_error].filter(Boolean).join(" ")}
-            data-codex-transcript-cell-kind={cell.kind}
-            data-codex-transcript-cell-status={cell.status}
-            data-codex-transcript-cell-tone={cell.tone}
-            data-codex-tool-error-compact="true"
-            data-conversation-part-key={cell.id}
-            role="status"
-          >
-            <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-              <TerminalSquare size={14} />
-            </span>
-            <div className={styles.codexTranscriptCellBody}>
-              {fallbackDiagnosticRows.length > 0 ? (
-                <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
-                  <summary className={`${styles.codexTranscriptCellTitleRow} ${styles.codexTranscriptCompactErrorDetailsSummary}`}>
-                    {compactErrorSummary}
-                  </summary>
-                  <dl className={styles.turnErrorReasonList}>
-                    {fallbackDiagnosticRows.map((row) => (
-                      <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                        <dt>{row.label}</dt>
-                        <dd>{row.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </details>
-              ) : (
-                <div className={styles.codexTranscriptCellTitleRow}>
-                  {compactErrorSummary}
-                </div>
-              )}
-            </div>
-          </section>
-        );
-      }
-      return (
-        <section
-          key={cell.id}
-          className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, styles.codexTranscriptCell_error].filter(Boolean).join(" ")}
-          data-codex-transcript-cell-kind={cell.kind}
-          data-codex-transcript-cell-status={cell.status}
-          data-codex-transcript-cell-tone={cell.tone}
-          data-codex-transcript-cell-channel={cell.channel || undefined}
-          data-codex-transcript-cell-phase={cell.phase ?? ""}
-          data-codex-transcript-cell-terminal={cell.terminal ? "true" : "false"}
-          data-conversation-part-key={cell.id}
-          role="status"
-        >
-          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-            <TerminalSquare size={14} />
-          </span>
-          <div className={styles.codexTranscriptCellBody}>
-            <span className={styles.codexTranscriptCellTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
-            </span>
-            {errorText ? (
-              <div className={styles.codexTranscriptCellSummary}>{renderResponseText(errorText)}</div>
-            ) : null}
-            {fallbackDiagnosticRows.length > 0 ? (
-              <details className={styles.operationDetailsDisclosure} data-codex-error-diagnostic="true">
-                <summary className={styles.operationDetailsSummary}>
-                  <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "诊断详情" : "Diagnostics"}</span>
-                  <span className={styles.operationDetailsChevronButton} aria-hidden="true">
-                    <span className={styles.operationDetailsChevronClosed}>▸</span>
-                    <span className={styles.operationDetailsChevronOpen}>▾</span>
-                  </span>
-                </summary>
-                <dl className={styles.turnErrorReasonList}>
-                  {fallbackDiagnosticRows.map((row) => (
-                    <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                      <dt>{row.label}</dt>
-                      <dd>{row.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </details>
-            ) : null}
-          </div>
-        </section>
-      );
-    }
-    if (cell.kind === "stream_tail") {
-      return (
-        <section
-          key={cell.id}
-          className={`${styles.codexTranscriptCell} ${styles.codexTranscriptProcessCell} ${styles.codexTranscriptCell_running}`}
-          data-codex-transcript-cell-kind={cell.kind}
-          data-codex-transcript-cell-status={cell.status}
-          data-codex-transcript-cell-tone={cell.tone}
-          data-conversation-part-key={cell.id}
-          role="status"
-          aria-live="polite"
-        >
-          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-            <LoaderCircle className={styles.statusSpinner} size={14} />
-          </span>
-          <span className={styles.codexTranscriptCellBody}>
-            <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "正在生成" : "Streaming"}</span>
-          </span>
-        </section>
-      );
-    }
-    if (cell.kind === "tool_call") {
-      const activity = createCodexTranscriptToolActivity([cell]);
-      const attachApproval = Boolean(
-        options?.attachToolApproval
-        && toolApproval
-        && !toolApprovalConsumedRef.current
-        && shouldAttachToolApprovalToActivity(activity, toolApproval.toolName, { preferAnyOpenWhenUnmatched: true }),
-      );
-      if (attachApproval) {
-        toolApprovalConsumedRef.current = true;
-      }
-      return (
-        <ConversationToolActivity
-          key={cell.id}
-          activity={activity}
-          language={lang === "en" ? "en" : "zh"}
-          renderToolDetails={renderCodexTranscriptToolDetailContent}
-          approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
-          sessionId={sessionId}
-          turnFailed={turnWorkForceExpand(message)}
-        />
-      );
-    }
-    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
-    const icon = codexTranscriptCellIcon(cell);
-    const title = codexTranscriptCellTitle(cell);
-    const meta = codexTranscriptCellMeta(cell);
-    const summary = codexTranscriptVisibleSummary(cell);
-    return (
-      <section
-        key={cell.id}
-        className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, toneClassName].filter(Boolean).join(" ")}
-        data-codex-transcript-cell-kind={cell.kind}
-        data-codex-transcript-cell-status={cell.status}
-        data-codex-transcript-cell-tone={cell.tone}
-        data-codex-transcript-cell-channel={cell.channel || undefined}
-        data-codex-transcript-cell-phase={cell.phase || undefined}
-        data-conversation-part-key={cell.id}
-        role={cell.status === "running" || cell.status === "pending" ? "status" : undefined}
-        aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
-      >
-        <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-          {icon}
-        </span>
-        <span className={styles.codexTranscriptCellBody}>
-          <span className={styles.codexTranscriptCellTitleRow}>
-            <span className={styles.codexTranscriptCellTitle}>{title}</span>
-            {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
-          </span>
-          {summary ? <span className={styles.codexTranscriptCellSummary}>{summary}</span> : null}
-        </span>
-      </section>
-    );
-  }
-
-  /**
-   * Collapsible thinking lane (ZCode reasoning parity): streaming and settled
-   * thoughts both stay collapsed until the user expands. The collapsed header
-   * keeps icon + status title plus a single-line horizontally rolling summary
-   * of the latest thought sentence; the expanded body is height-capped and
-   * bottom-following.
-   */
-  function renderCodexThoughtScrollCell(
-    messageId: string,
-    input: {
-      cellId: string;
-      sectionId: string;
-      text: string;
-      status: CodexTranscriptCell["status"];
-      tone: CodexTranscriptCell["tone"];
-      phase?: string;
-      channel?: string;
-      kind?: CodexTranscriptCell["kind"];
-      settledDurationSeconds?: number;
-    },
-  ) {
-    const fullText = String(input.text || "").trim();
-    if (!fullText) {
-      return null;
-    }
-    const isLive = input.status === "running" || input.status === "pending";
-    // ZCode parity: streaming and completed reasoning default collapsed, so a
-    // live stream no longer unfolds over the transcript. The user's explicit
-    // toggle (explicit expansion state) still wins over the default; the
-    // section id comes from `reasoningExpansionSectionId`, which prefers
-    // sourceItemId so stream updates that rewrite cell.id keep the choice.
-    const defaultExpanded = false;
-    const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
-    const thoughtTitle = isLive
-      ? (lang === "zh" ? "思考中" : "Thinking…")
-      : (lang === "zh" ? "已思考" : "Thought");
-    const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
-    return (
-      <section
-        key={input.cellId}
-        className={[
-          styles.codexTranscriptCell,
-          styles.codexTranscriptReasoningCell,
-          toneClassName,
-        ].filter(Boolean).join(" ")}
-        data-codex-transcript-cell-kind={input.kind || "assistant_markdown"}
-        data-codex-transcript-cell-status={input.status}
-        data-codex-transcript-cell-tone={input.tone}
-        data-codex-transcript-cell-channel={input.channel || undefined}
-        data-codex-transcript-cell-phase={input.phase ?? ""}
-        data-conversation-part-key={input.cellId}
-        data-thought-section={input.sectionId}
-        data-thought-expanded={expanded ? "true" : "false"}
-        role={isLive ? "status" : undefined}
-        aria-live={isLive ? "polite" : undefined}
-      >
-        <VButton
-          type="button"
-          contentLayout="plain"
-          className={styles.codexTranscriptReasoningHeader}
-          aria-expanded={expanded}
-          aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSection(messageId, input.sectionId, defaultExpanded);
-          }}
-        >
-          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-            {isLive
-              ? <LoaderCircle className={styles.statusSpinner} size={14} />
-              : <BrainCircuit size={14} />}
-          </span>
-          <span className={styles.codexTranscriptReasoningHeaderBody}>
-            <span className={styles.codexTranscriptReasoningTitleRow}>
-              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
-              <ThoughtDurationLabel
-                live={isLive}
-                expanded={expanded}
-                settledDurationSeconds={input.settledDurationSeconds}
-                settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
-                settledMomentsLabel={t("thoughtDurationSettledMoments")}
-              />
-              {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
-            </span>
-          </span>
-        </VButton>
-        {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} /> : null}
-      </section>
-    );
-  }
-
-  /**
-   * Progress narration lane (commentary): user-facing updates stay visible in
-   * chronological order. Long updates start at the three-line preview while
-   * live and settled; users can expand them when they need the full text.
-   */
-  function renderCodexProgressCell(
-    messageId: string,
-    cell: CodexTranscriptCell,
-    text: string,
-  ) {
-    const sectionId = reasoningExpansionSectionId(cell);
-    const isLive = cell.status === "running" || cell.status === "pending";
-    const defaultExpanded = false;
-    const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
-    const canExpand = progressTextExceedsClamp(text);
-    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
-    const headerContent = (
-      <>
-        <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-          {isLive
-            ? <LoaderCircle className={styles.statusSpinner} size={14} />
-            : <MessageSquareText size={14} />}
-        </span>
-        <span className={styles.codexTranscriptReasoningHeaderBody}>
-          <span className={styles.codexTranscriptReasoningTitleRow}>
-            <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "进展" : "Progress"}</span>
-          </span>
-        </span>
-      </>
-    );
-    return (
-      <section
-        key={cell.id}
-        className={[
-          styles.codexTranscriptCell,
-          styles.codexTranscriptProgressCell,
-          toneClassName,
-        ].filter(Boolean).join(" ")}
-        data-codex-transcript-cell-kind={cell.kind}
-        data-codex-transcript-cell-status={cell.status}
-        data-codex-transcript-cell-tone={cell.tone}
-        data-codex-transcript-cell-channel={cell.channel || undefined}
-        data-codex-transcript-cell-phase={cell.phase ?? ""}
-        data-codex-progress-cell="true"
-        data-codex-progress-expandable={canExpand ? "true" : "false"}
-        data-conversation-part-key={cell.id}
-        data-progress-section={sectionId}
-        data-progress-expanded={expanded ? "true" : "false"}
-        role={isLive ? "status" : undefined}
-        aria-live={isLive ? "polite" : undefined}
-      >
-        {canExpand ? (
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.codexTranscriptProgressHeader}
-            aria-expanded={expanded}
-            aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleSection(messageId, sectionId, defaultExpanded);
-            }}
-          >
-            {headerContent}
-          </VButton>
-        ) : (
-          <div
-            className={styles.codexTranscriptProgressHeader}
-            data-codex-progress-static="true"
-          >
-            {headerContent}
-          </div>
-        )}
-        <ProgressScrollBody text={text} streaming={isLive} clamped={!expanded} />
-      </section>
-    );
-  }
-
-  function renderCodexReasoningSummaryCell(
-    message: ConversationMessage,
-    cell: CodexTranscriptCell,
-  ) {
-    const fullText = String(cell.text || cell.summary || "").trim();
-    if (!fullText) {
-      return null;
-    }
-    return renderCodexThoughtScrollCell(message.id, {
-      cellId: cell.id,
-      sectionId: reasoningExpansionSectionId(cell),
-      text: fullText,
-      status: cell.status,
-      tone: cell.tone,
-      phase: cell.phase,
-      channel: cell.channel,
-      kind: cell.kind,
-      settledDurationSeconds: cell.settledDurationSeconds,
-    });
-  }
-
-  function codexTranscriptVisibleSummary(cell: CodexTranscriptCell) {
-    if (cell.kind === "tool_call") {
-      return cell.status === "completed"
-        ? codexTranscriptCompletedToolSummary(cell)
-        : cell.summary || cell.text;
-    }
-    if (cell.kind === "error_notice") {
-      return "";
-    }
-    if (cell.kind === "reasoning_summary") {
-      // Collapsed preview is rendered by renderCodexReasoningSummaryCell.
-      return cell.summary || cell.text;
-    }
-    return cell.summary || cell.text;
-  }
-
-  function codexTranscriptCompletedToolSummary(cell: CodexTranscriptCell) {
-    const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
-    return completedToolPresentationSummary({
-      toolSummary: toolCall?.summary,
-      cellSummary: cell.summary,
-      resultPreview: toolCall?.resultPreview,
-      cellText: cell.text,
-      toolName: toolCall?.rawToolName || cell.title,
-      status: cell.status,
-      language: lang,
-    });
-  }
-
-  function codexTranscriptCellIcon(cell: CodexTranscriptCell) {
-    if (cell.status === "running" || cell.status === "pending") {
-      return <LoaderCircle className={styles.statusSpinner} size={14} />;
-    }
-    if (cell.kind === "reasoning_summary") {
-      return <BrainCircuit size={14} />;
-    }
-    if (cell.kind === "status") {
-      return <CircleDot size={14} />;
-    }
-    if (cell.kind === "error_notice" || cell.status === "failed") {
-      return <TerminalSquare size={14} />;
-    }
-    return <CheckCircle2 size={14} />;
-  }
-
-  function codexTranscriptCellTitle(cell: CodexTranscriptCell) {
-    if (cell.kind === "tool_call") {
-      const rawToolName = cell.toolLifecycleModel?.toolCalls?.[0]?.rawToolName?.trim();
-      const rawTitle = cell.title?.trim();
-      return codexTranscriptToolLabel(rawToolName || rawTitle || "");
-    }
-    if (cell.title?.trim()) {
-      return cell.title.trim();
-    }
-    if (cell.kind === "reasoning_summary") {
-      return lang === "zh" ? "思考" : "Reasoning";
-    }
-    if (cell.kind === "status") {
-      return lang === "zh" ? "状态" : "Status";
-    }
-    if (cell.kind === "error_notice") {
-      return lang === "zh" ? "执行失败" : "Failed";
-    }
-    return lang === "zh" ? "工具调用" : "Tool call";
-  }
-
-  function codexTranscriptToolLabel(name: string) {
-    return conversationToolPresentationLabel(name, lang);
-  }
-
-  function codexTranscriptCellMeta(cell: CodexTranscriptCell) {
-    if (cell.status === "completed") {
-      const duration = codexTranscriptToolDurationSeconds(cell);
-      const completedLabel = lang === "zh" ? "完成" : "Completed";
-      return duration === null ? completedLabel : `${completedLabel} ${formatCodexTranscriptDuration(duration)}`;
-    }
-    if (cell.status === "failed") {
-      return lang === "zh" ? "失败" : "Failed";
-    }
-    if (cell.status === "degraded") {
-      return lang === "zh" ? "降级" : "Degraded";
-    }
-    if (cell.status === "pending") {
-      return lang === "zh" ? "等待中" : "Pending";
-    }
-    if (cell.status === "running") {
-      return lang === "zh" ? "运行中" : "Running";
-    }
-    return "";
-  }
-
-  function renderCodexTranscriptToolDetailContent(cell: CodexTranscriptCell): ReactNode {
-    if (cell.kind === "error_notice") {
-      const activityRows = buildConversationToolActivityDetailRows(cell, lang);
-      const diagnosticRows = activityRows.length > 0
-        ? activityRows
-        : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
-      if (diagnosticRows.length === 0) {
-        return (
-          <p className={styles.codexTranscriptCellMeta}>{conversationToolActivityEmptyDetailLabel(lang)}</p>
-        );
-      }
-      return (
-        <dl className={styles.turnErrorReasonList} data-codex-error-diagnostic="true">
-          {diagnosticRows.map((row) => (
-            <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      );
-    }
-    if (cell.kind !== "tool_call") {
-      return null;
-    }
-    const terminalDetail = buildConversationTerminalToolDetail(cell, lang);
-    const rows = terminalDetail ? [] : codexTranscriptToolDetailRows(cell);
-    const rolloutEvents = renderCodexTranscriptRolloutEvents(cell);
-    const patchText = conversationToolPatchText(cell);
-    const patchDiff = patchText
-      ? <ConversationPatchDiff patchText={patchText} language={lang} />
-      : null;
-    if (!terminalDetail && rows.length === 0 && !rolloutEvents) {
-      const extraRows = buildConversationToolActivityDetailRows(cell, lang);
-      if (extraRows.length === 0) {
-        return (
-          <>
-            {patchDiff}
-            {!patchDiff ? (
-              <p className={styles.codexTranscriptCellMeta}>{conversationToolActivityEmptyDetailLabel(lang)}</p>
-            ) : null}
-          </>
-        );
-      }
-      return (
-        <>
-          {patchDiff}
-          <dl className={styles.turnErrorReasonList} data-codex-tool-activity-detail="true">
-            {extraRows.map((row) => (
-              <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                <dt>{row.label}</dt>
-                <dd>{row.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </>
-      );
-    }
-    return (
-      <>
-        {patchDiff}
-        {terminalDetail ? (
-          <ConversationTerminalToolDetail detail={terminalDetail} language={lang} />
-        ) : rows.length > 0 ? (
-          <div className={styles.operationDetails}>
-            {rows.map((row, index) => {
-              return (
-                <div key={`${cell.id}-${row.label}-${index}`} className={styles.operationDetailRow}>
-                  <pre
-                    className={styles.operationDetailValue}
-                    aria-label={row.label}
-                    tabIndex={0}
-                  >
-                    {row.value}
-                  </pre>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-        {rolloutEvents}
-      </>
-    );
-  }
-
-  /**
-   * Codex/opencode parity: a row with nothing to expand renders no toggle.
-   * Mirrors the detail builder above so the two can never disagree.
-   */
-  function codexTranscriptToolDetailIsEmpty(cell: CodexTranscriptCell): boolean {
-    if (cell.kind === "error_notice") {
-      const activityRows = buildConversationToolActivityDetailRows(cell, lang);
-      const diagnosticRows = activityRows.length > 0
-        ? activityRows
-        : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
-      return diagnosticRows.length === 0;
-    }
-    if (cell.kind !== "tool_call") {
-      return true;
-    }
-    if (buildConversationTerminalToolDetail(cell, lang)) {
-      return false;
-    }
-    if (codexTranscriptToolDetailRows(cell).length > 0) {
-      return false;
-    }
-    if (renderCodexTranscriptRolloutEvents(cell)) {
-      return false;
-    }
-    if (conversationToolPatchText(cell)) {
-      return false;
-    }
-    return buildConversationToolActivityDetailRows(cell, lang).length === 0;
-  }
-
-  function codexTranscriptToolDetailRows(cell: CodexTranscriptCell): OperationDetailRow[] {
-    const model = cell.toolLifecycleModel;
-    if (!model) {
-      return [];
-    }
-    const operationIds = new Set(cell.operationIds ?? []);
-    const matchedToolCalls = model.toolCalls.filter((toolCall) =>
-      operationIds.size === 0
-      || operationIds.has(toolCall.rawOperationId)
-      || operationIds.has(toolCall.toolCallId)
-      || (toolCall.terminalOperationId ? operationIds.has(toolCall.terminalOperationId) : false)
-    );
-    const toolCalls = matchedToolCalls.length > 0 ? matchedToolCalls : model.toolCalls;
-    const toolCallIds = new Set(toolCalls.map((toolCall) => toolCall.toolCallId).filter(Boolean));
-    const terminalOperations = model.terminalOperations.filter((operation) =>
-      toolCallIds.has(operation.toolCallId)
-      || operationIds.has(operation.rawOperationId)
-      || operationIds.has(operation.operationId)
-    );
-    const rows: OperationDetailRow[] = [];
-    const primaryToolCall = toolCalls[0];
-    const toolName = primaryToolCall?.rawToolName || primaryToolCall?.title || codexTranscriptToolRawName(cell);
-    const presentDetail = (value: string) => boundedCodexToolDetailText(
-      conversationToolDetailPresentation({
-        value,
-        toolName,
-        language: lang,
-      }),
-    );
-    const visibleTitle = codexTranscriptCellTitle(cell);
-    const instructionLabel = lang === "zh" ? "指令" : "Instruction";
-    const pushedInstructions = new Set<string>();
-    function pushInstruction(value: string) {
-      const text = value.trim();
-      if (!text || text === visibleTitle || pushedInstructions.has(text)) {
-        return;
-      }
-      pushedInstructions.add(text);
-      rows.push({ label: instructionLabel, value: presentDetail(text) });
-    }
-    for (const operation of terminalOperations) {
-      const displayCommand = operation.request?.displayCommand?.trim();
-      if (displayCommand) {
-        pushInstruction(displayCommand);
-      }
-      const output = firstNonEmptyText(
-        operation.result?.formattedOutput,
-        operation.result?.stdout,
-      );
-      if (output) {
-        rows.push({
-          label: operationDetailLabels.toolCallResult,
-          value: presentDetail(output),
-        });
-      }
-      const error = firstNonEmptyText(operation.result?.stderr);
-      if (error) {
-        rows.push({
-          label: operationDetailLabels.toolCallError,
-          value: presentDetail(error),
-        });
-      }
-    }
-    const resultPreview = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.resultPreview));
-    if (!rows.some((row) => row.label === instructionLabel)) {
-      const argumentInstruction = codexTranscriptToolInstructionText(primaryToolCall?.arguments);
-      if (argumentInstruction) {
-        pushInstruction(argumentInstruction);
-      }
-    }
-    const resultTruncated = toolCalls.some((toolCall) => toolCall.truncated === true);
-    if (resultPreview && !rows.some((row) => row.label === operationDetailLabels.toolCallResult && row.value.includes(resultPreview.slice(0, 80)))) {
-      const boundedResult = presentDetail(resultPreview);
-      rows.push({
-        label: operationDetailLabels.toolCallResult,
-        value: resultTruncated && boundedResult
-          ? `${boundedResult}\n\n[${lang === "zh" ? "输出已截断，仅显示预览" : "Output truncated; preview only"}]`
-          : boundedResult,
-      });
-    }
-    const error = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.error));
-    if (error) {
-      rows.push({
-        label: operationDetailLabels.toolCallError,
-        value: presentDetail(error),
-      });
-    }
-    return rows;
-  }
-
-  function firstNonEmptyText(...values: Array<string | undefined | null>) {
-    for (const value of values) {
-      const text = String(value ?? "").trim();
-      if (text) {
-        return text;
-      }
-    }
-    return "";
-  }
-
-  /** Codex/opencode parity: replay keeps the command, not just the result blob. */
-  function codexTranscriptToolInstructionText(argumentsRecord: Record<string, unknown> | undefined | null) {
-    if (!argumentsRecord || typeof argumentsRecord !== "object") {
-      return "";
-    }
-    const pickString = (keys: string[]) => {
-      for (const key of keys) {
-        const value = argumentsRecord[key];
-        if (typeof value === "string" && value.trim()) {
-          return value.trim();
-        }
-        if (Array.isArray(value) && value.length > 0) {
-          const joined = value.map((entry) => String(entry ?? "")).join(" ").trim();
-          if (joined) {
-            return joined;
-          }
-        }
-      }
-      return "";
-    };
-    const direct = pickString(["command", "cmd", "shell_command", "path", "query", "url"]);
-    if (direct) {
-      return direct;
-    }
-    try {
-      const serialized = JSON.stringify(argumentsRecord);
-      return serialized && serialized !== "{}" ? serialized : "";
-    } catch {
-      return "";
-    }
-  }
-
-  function boundedCodexToolDetailText(value: string) {
-    const normalized = String(value ?? "").trim();
-    if (!normalized) {
-      return "";
-    }
-    const maxLines = 18;
-    const maxChars = 1600;
-    const lines = normalized.split(/\r?\n/);
-    const lineBounded = lines.slice(0, maxLines).join("\n").trimEnd();
-    const lengthBounded = lineBounded.length > maxChars
-      ? lineBounded.slice(0, maxChars).trimEnd()
-      : lineBounded;
-    const omittedLineCount = Math.max(0, lines.length - maxLines);
-    const omittedCharCount = Math.max(0, normalized.length - lengthBounded.length);
-    const notices = [
-      omittedLineCount > 0 ? (lang === "zh" ? `已省略 ${omittedLineCount} 行` : `${omittedLineCount} lines omitted`) : "",
-      omittedCharCount > 0 ? (lang === "zh" ? `已省略 ${omittedCharCount} 个字符` : `${omittedCharCount} characters omitted`) : "",
-    ].filter(Boolean);
-    return notices.length > 0 ? `${lengthBounded}\n\n[${notices.join(lang === "zh" ? "，" : ", ")}]` : lengthBounded;
-  }
-
-  function renderCodexTranscriptRolloutEvents(cell: CodexTranscriptCell) {
-    if (cell.tone !== "error" && cell.tone !== "warning" && cell.status !== "running") {
-      return null;
-    }
-    const events = cell.rolloutTraceEvents ?? [];
-    if (events.length === 0) {
-      return null;
-    }
-    return (
-      <details
-        className={styles.operationDetailsDisclosure}
-        data-codex-tool-technical-details="true"
-      >
-        <summary className={styles.operationDetailsSummary}>
-          <span className={styles.operationDetailsChevronButton} aria-hidden="true">
-            <span className={styles.operationDetailsChevronClosed}>▸</span>
-            <span className={styles.operationDetailsChevronOpen}>▾</span>
-          </span>
-          <span>{lang === "zh" ? "技术详情" : "Technical details"}</span>
-        </summary>
-        <ol className={styles.rolloutTraceList} aria-label={lang === "zh" ? "工具生命周期" : "Tool lifecycle"}>
-          {events.map((event) => {
-            const eventClassName = [
-              styles.rolloutTraceItem,
-              styles[`rolloutTraceItem_${event.status}`],
-            ].filter(Boolean).join(" ");
-            const detailText = [
-              event.error,
-              event.exitCode !== undefined && event.exitCode !== null ? `exit ${event.exitCode}` : "",
-              event.timedOut ? (lang === "zh" ? "已超时" : "timed out") : "",
-            ].filter(Boolean).join(" · ");
-            return (
-              <li
-                key={event.id}
-                className={eventClassName}
-                data-rollout-trace-kind={event.kind}
-                data-rollout-trace-status={event.status}
-                data-rollout-tool-call-id={event.toolCallId}
-                data-rollout-terminal-operation-id={event.terminalOperationId}
-                data-rollout-terminal-id={event.terminalId}
-              >
-                <span className={styles.rolloutTraceDot} aria-hidden="true" />
-                <span className={styles.rolloutTraceText}>
-                  <span className={styles.rolloutTraceTitle}>{rolloutTraceEventLabel(event.kind)}</span>
-                  {detailText ? <span className={styles.rolloutTraceMeta}>{detailText}</span> : null}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      </details>
-    );
-  }
-
-  function renderAgentMessageTimelineItem(
-    message: ConversationMessage,
-    item: AgentMessageTimelineItem,
-    rowIdentity: AgentMessageTimelineRowIdentity,
-    isActiveTimelineItem: boolean,
-  ) {
-    if (item.kind === "thought") {
-      return renderThoughtTimelineItem(message, item, rowIdentity, isActiveTimelineItem);
-    }
-    if (item.kind === "assistant_text") {
-      return renderAssistantTextTimelineItem(message, item, rowIdentity);
-    }
-    if (item.kind === "command_group") {
-      return renderCommandGroupTimelineItem(message, item, rowIdentity, isActiveTimelineItem);
-    }
-    return renderOperationTimelineItem(item, rowIdentity, isActiveTimelineItem);
-  }
-
-  function renderThoughtTimelineItem(
-    message: ConversationMessage,
-    item: Extract<AgentMessageTimelineItem, { kind: "thought" }>,
-    rowIdentity: AgentMessageTimelineRowIdentity,
-    isActiveTimelineItem: boolean,
-  ) {
-    // ZCode parity: streaming and settled thoughts both stay collapsed until the
-    // user expands; the collapsed header shows the running/settled title plus a
-    // single-line rolling summary of the latest thought sentence.
-    const isLive = item.status === "running" || item.status === "pending";
-    const defaultExpanded = false;
-    const sectionId = `thought:${item.id}`;
-    const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
-    const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
-    const thoughtTitle = isLive
-      ? (lang === "zh" ? "思考中" : "Thinking…")
-      : (lang === "zh" ? "已思考" : "Thought");
-    return (
-      <section
-        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-        className={styles.timelineThoughtCell}
-        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-        data-thought-section={sectionId}
-        data-thought-expanded={expanded ? "true" : "false"}
-      >
-        <VButton
-          type="button"
-        contentLayout="plain"
-          className={styles.timelineThoughtHeader}
-          aria-expanded={expanded}
-          aria-label={toggleLabel}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSection(message.id, sectionId, defaultExpanded);
-          }}
-        >
-          {isActiveTimelineItem && isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
-          <span className={styles.timelineCellBody}>
-            <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-              <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
-              <ThoughtDurationLabel
-                live={isLive}
-                expanded={expanded}
-                settledDurationSeconds={item.settledDurationSeconds}
-                settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
-                settledMomentsLabel={t("thoughtDurationSettledMoments")}
-              />
-              {!expanded ? <ThoughtStreamingSummary text={item.text} /> : null}
-            </span>
-          </span>
-          {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
-        </VButton>
-        {expanded ? (
-          <div className={styles.codexTranscriptReasoningTextButton}>
-            <ThoughtScrollBody
-              text={item.text}
-              streaming={isLive}
-            />
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  function renderAssistantTextTimelineItem(
-    message: ConversationMessage,
-    item: Extract<AgentMessageTimelineItem, { kind: "assistant_text" }>,
-    rowIdentity: AgentMessageTimelineRowIdentity,
-  ) {
-    const segments = getCachedResponseSegments(item.text);
-    return (
-      <section
-        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-        className={styles.timelineAssistantTextCell}
-        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-      >
-        {segments.map((segment) => renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)))}
-        {renderAssistantFileReferenceChips(message, item.text)}
-      </section>
-    );
-  }
-
-  function timelineStatusText(item: AgentMessageTimelineItem) {
-    const status = item.status;
-    if (status === "failed") {
-      return lang === "zh" ? "执行失败" : "Failed";
-    }
-    if (status === "degraded") {
-      const rawStatus = item.kind === "operation"
-        ? String(item.operation.status || item.operation.rawStatus || "").trim().toLowerCase()
-        : "";
-      if (rawStatus === "fallback") {
-        return lang === "zh" ? "备用路径" : "Fallback";
-      }
-      if (rawStatus === "partial") {
-        return lang === "zh" ? "部分结果" : "Partial";
-      }
-      if (rawStatus === "unavailable") {
-        return lang === "zh" ? "不可用" : "Unavailable";
-      }
-      if (rawStatus === "recovered") {
-        return lang === "zh" ? "已恢复" : "Recovered";
-      }
-      return lang === "zh" ? "降级" : "Degraded";
-    }
-    if (status === "running") {
-      return lang === "zh" ? "运行中" : "Running";
-    }
-    if (status === "pending") {
-      return lang === "zh" ? "等待中" : "Pending";
-    }
-    return "";
-  }
-
-  function buildLegacyToolActivityPills(
-    operation: AgentMessageOperation,
-    options?: {
-      status?: string;
-      title?: string;
-      summary?: string;
-      durationLabel?: string;
-    },
-  ): CodexToolActivityPills {
-    const rawToolName = String(
-      operation.rawLabel
-      || options?.title
-      || operation.label
-      || "",
-    ).trim();
-    const exitCode = typeof operation.exitCode === "number" ? operation.exitCode : null;
-    // Prefer rawStatus so fallback/partial survive timeline status normalization.
-    const status = operation.rawStatus || options?.status || operation.status;
-    const timedOut = Boolean(operation.timedOut)
-      || /超时|timed?\s*out/i.test(`${operation.summary || ""} ${operation.error || ""}`);
-    // Prefer product-facing labels (operation.label / timeline title) over raw tool ids.
-    const productActionLabel = [operation.label, options?.title]
-      .map((value) => String(value || "").trim())
-      .find((value) => value && value !== rawToolName && !/_tool$/i.test(value));
-    const normalizedStatus = String(status || "").trim().toLowerCase();
-    const isFailedRow = normalizedStatus === "failed"
-      || normalizedStatus === "error"
-      || timedOut;
-    // Failed rows surface diagnostics; completed rows keep command/summary only (not raw previews).
-    const diagnosticSubject = [
-      operation.error,
-      options?.summary,
-      operation.summary,
-    ].map((value) => String(value || "").trim()).find(Boolean) || "";
-    const pills = buildCodexToolActivityPills({
-      toolName: productActionLabel ? productActionLabel : rawToolName,
-      status,
-      language: lang === "en" ? "en" : "zh",
-      durationSeconds: operation.durationSeconds,
-      durationLabel: options?.durationLabel ?? formatDuration(operation.durationSeconds),
-      toolSummary: isFailedRow ? diagnosticSubject : operation.summary,
-      cellSummary: isFailedRow ? diagnosticSubject : (options?.summary || operation.summary),
-      resultPreview: isFailedRow ? diagnosticSubject : undefined,
-      displayCommand: isFailedRow ? "" : extractToolDisplayCommand(operation.arguments),
-      timedOut,
-      nonzeroExit: exitCode !== null && exitCode !== 0 && !isFailedRow,
-    });
-    if (productActionLabel && pills.actionLabel !== productActionLabel) {
-      return { ...pills, actionLabel: productActionLabel };
-    }
-    return pills;
-  }
-
-  function renderCommandGroupTimelineItem(
-    message: ConversationMessage,
-    item: Extract<AgentMessageTimelineItem, { kind: "command_group" }>,
-    rowIdentity: AgentMessageTimelineRowIdentity,
-    isActiveTimelineItem: boolean,
-  ) {
-    const expanded = getExpansionState(message.id, item.id, false);
-    const duration = formatDuration(
-      item.operations
-        .map((operation) => operation.durationSeconds)
-        .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
-        .reduce((total, value) => total + value, 0),
-    );
-    const groupPills = buildCodexToolActivityPills({
-      toolName: "exec_command",
-      status: item.status,
-      language: lang === "en" ? "en" : "zh",
-      durationLabel: duration,
-      cellSummary: item.summary,
-    });
-    // Package title stays prominent; summary is the muted subject under the pill pair.
-    if (item.title?.trim()) {
-      groupPills.actionLabel = item.title.trim();
-    }
-    if (item.summary?.trim()) {
-      groupPills.subject = item.summary.trim();
-    }
-    const statusTone = item.status === "completed" ? "success" : item.status === "degraded" ? "warning" : item.status;
-    const timelineToneClassName = styles[`timelineOperationCell_${statusTone}` as keyof typeof styles] ?? "";
-    const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
-    const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
-    const className = [
-      styles.timelineOperationCell,
-      timelineToneClassName,
-    ].filter(Boolean).join(" ");
-    return (
-      <section
-        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-        className={className}
-        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-      >
-        <VButton
-          type="button"
-        contentLayout="plain"
-          className={`${styles.timelineCellHeader} ${toneTextClassName}`}
-          aria-expanded={expanded}
-          aria-label={toolActivityAriaTitle(groupPills)}
-          onClick={() => toggleSection(message.id, item.id, false)}
-          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-        >
-          <ConversationToolActivityPills
-            pills={groupPills}
-            leadingIcon={(
-              <span className={`${styles.operationIcon} ${toneIconClassName}`}>
-                {isActiveTimelineItem && item.status === "running"
-                  ? <LoaderCircle className={styles.statusSpinner} size={14} />
-                  : <TerminalSquare size={14} />}
-              </span>
-            )}
-          />
-        </VButton>
-        {expanded ? (
-          <div className={styles.timelineCommandList}>
-            {item.operations.map((operation) => {
-              const operationIconClassName = styles[`operationIcon_${operationStatusToneClassName(operation)}` as keyof typeof styles] ?? "";
-              const pills = buildLegacyToolActivityPills(operation);
-              return (
-                <div key={operation.id} className={styles.timelineCommandRow}>
-                  <ConversationToolActivityPills
-                    pills={pills}
-                    leadingIcon={(
-                      <span className={`${styles.operationIcon} ${operationIconClassName}`}>
-                        {operationStatusIcon(operation, isActiveTimelineItem)}
-                      </span>
-                    )}
-                  />
-                  {renderRolloutTraceEvents(operation)}
-                  {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  function isLowValueToolLoopStatusOperation(operation: AgentMessageOperation) {
-    if (operation.kind !== "status") {
-      return false;
-    }
-    const haystack = [
-      operation.label,
-      operation.rawLabel,
-      operation.summary,
-      operation.resultPreview,
-      operation.error,
-    ].map((value) => String(value || "").toLowerCase()).join(" ");
-    return (
-      haystack.includes("long_loop")
-      || haystack.includes("工具循环")
-      || haystack.includes("tool loop")
-      || haystack.includes("尚未形成最终回答")
-      || haystack.includes("本轮尚未形成最终回答")
-      || haystack.includes("尚未形成最终回答")
-    );
-  }
-
-  function renderOperationTimelineItem(
-    item: Extract<AgentMessageTimelineItem, { kind: "operation" }>,
-    rowIdentity: AgentMessageTimelineRowIdentity,
-    isActiveTimelineItem: boolean,
-  ) {
-    const operation = item.operation;
-    // Codex does not surface internal "tool loop / no final answer yet" progress as a tool row.
-    if (isLowValueToolLoopStatusOperation(operation)) {
-      return null;
-    }
-    const rawTimelineTitle = String(item.title ?? "").trim();
-    const itemSummary = String(item.summary ?? "").trim();
-    const rawOperationLabel = String(operation.rawLabel ?? "").trim();
-    const rawToolName = rawOperationLabel || rawTimelineTitle || String(operation.label ?? "").trim();
-    const semanticToolTitle = conversationToolPresentationLabel(rawToolName, lang);
-    const visibleTitle = isRetryOperation(operation)
-      ? lang === "zh" ? "请求重试" : "Retrying"
-      : operation.kind === "tool"
-      ? rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
-        ? rawTimelineTitle
-        : semanticToolTitle
-      : rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
-        ? rawTimelineTitle
-        : operationLabel(operation);
-    const detailsId = `timeline-operation-detail-${operation.id}`;
-    const detailsExpanded = getExpansionState(operation.id, "details", false);
-    const canExpandDetails = hasOperationDetails(operation);
-    const duration = formatDuration(operation.durationSeconds);
-    const computerUseResult = renderComputerUseResult(operation);
-    const readableResult = operation.kind === "tool" || isCompactInternalStatusOperation(operation)
-      ? ""
-      : readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
-    const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== itemSummary);
-    const visibleStatus = timelineStatusText(item);
-    const statusTone = operationStatusToneClassName(operation);
-    const timelineToneClassName = styles[`timelineOperationCell_${statusTone}` as keyof typeof styles] ?? "";
-    const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
-    const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
-    const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
-    const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
-    const visibleSummary = operation.kind === "tool"
-      ? completedToolPresentationSummary({
-          toolSummary: operation.error,
-          cellSummary: String(operation.summary ?? ""),
-          resultPreview: operation.resultPreview,
-          cellText: itemSummary,
-          toolName: rawToolName,
-          status: item.status,
-          language: lang,
-        })
-      : statusTone === "failed" && operation.error?.trim()
-        ? [itemSummary, operation.error.trim()].filter(Boolean).join(" · ")
-        : itemSummary;
-    const toolPills = operation.kind === "tool"
-      ? buildLegacyToolActivityPills(operation, {
-          status: item.status,
-          title: rawToolName,
-          summary: itemSummary || visibleSummary,
-          durationLabel: duration,
-        })
-      : null;
-    const className = [
-      styles.timelineOperationCell,
-      timelineToneClassName,
-    ].filter(Boolean).join(" ");
-    const leadingIcon = (
-      <span className={`${styles.operationIcon} ${toneIconClassName}`}>
-        {operationStatusIcon(operation, isActiveTimelineItem)}
-      </span>
-    );
-    // Tool rows: Codex quiet chrome — leading status icon only. A trailing
-    // ChevronRight was wrapping onto a second grid line as a lone "›" under the icon.
-    const headerContent = toolPills ? (
-      <ConversationToolActivityPills pills={toolPills} leadingIcon={leadingIcon} />
-    ) : (
-      <>
-        {leadingIcon}
-        <span className={styles.timelineCellBody}>
-          <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-            <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{visibleTitle}</span>
-            {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
-            {canExpandDetails ? (
-              <span className={styles.timelineCellInlineChevron} aria-hidden="true">
-                {detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </span>
-            ) : null}
-            {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
-            {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
-          </span>
-        </span>
-      </>
-    );
-    const headerAriaLabel = toolPills ? toolActivityAriaTitle(toolPills) : visibleTitle;
-    return (
-      <section
-        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-        className={className}
-        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
-        data-codex-tool-unified-row={toolPills ? "true" : undefined}
-      >
-        {canExpandDetails ? (
-          <VButton
-            type="button"
-            className={`${styles.timelineCellHeader} ${toneTextClassName}`}
-            aria-expanded={detailsExpanded}
-            aria-controls={detailsId}
-            aria-label={headerAriaLabel}
-            onClick={() => toggleSection(operation.id, "details", false)}
-            title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
-          >
-            {headerContent}
-          </VButton>
-        ) : (
-          <div className={`${styles.timelineCellHeader} ${toneTextClassName}`}>
-            {headerContent}
-          </div>
-        )}
-        {canExpandDetails ? (
-          <>
-            <DeferredOperationDetails
-              operation={operation}
-              expanded={detailsExpanded}
-              detailsId={detailsId}
-              kind={operationDetailsKind(operation)}
-              buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
-            />
-            {detailsExpanded ? renderRolloutTraceEvents(operation) : null}
-          </>
-        ) : null}
-        {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
-        {computerUseResult}
-      </section>
-    );
-  }
-
-  function isCompactInternalStatusOperation(operation: AgentMessageOperation) {
-    return Boolean(
-      operation.kind === "status"
-      && !operation.error?.trim()
-      && isInternalRuntimeStatus({
-        kind: "status",
-        name: operation.rawLabel ?? operation.label,
-        status: operation.status,
-        summary: operation.summary,
-        resultPreview: operation.resultPreview,
-      }),
-    );
-  }
-
-  function renderReActActionSection(group: AgentMessageReActOperationGroup) {
-    const actions = reActActionOperations(group);
-    if (actions.length === 0) {
-      return null;
-    }
-    return (
-      <section className={styles.reActOperationSection}>
-        <div className={styles.reActToolList}>
-          {actions.map((operation) => {
-            const duration = formatDuration(operation.durationSeconds);
-            const detailsId = `operation-detail-${operation.id}`;
-            const detailsExpanded = getExpansionState(operation.id, "details", false);
-            const canExpandDetails = hasOperationDetails(operation);
-            const computerUseResult = renderComputerUseResult(operation);
-            const statusTone = operationStatusToneClassName(operation);
-            const pills = operation.kind === "tool"
-              ? buildLegacyToolActivityPills(operation)
-              : null;
-            return (
-              <div key={operation.id} className={`${styles.reActToolItem} ${styles[`operationItem_${statusTone}`]}`}>
-                <div className={`${styles.reActToolLine} ${styles[`operationItem_${statusTone}`]}`}>
-                  {pills ? (
-                    <ConversationToolActivityPills pills={pills} />
-                  ) : (
-                    <span className={`${styles.reActToolName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
-                  )}
-                  {!pills && operation.summary ? (
-                    <span className={`${styles.reActToolSummary} ${styles[`operationText_${statusTone}`]}`}>{operation.summary}</span>
-                  ) : null}
-                  {!pills ? (
-                    <span className={`${styles.reActToolStatus} ${styles[`operationStatus_${statusTone}`]}`}>
-                      {operationStatusIcon(operation)}
-                      <span>{operationStatusText(operation.status)}</span>
-                      {duration ? <span>{duration}</span> : null}
-                    </span>
-                  ) : null}
-                  {canExpandDetails ? (
-                    <VButton
-                      type="button"
-                      className={styles.reActToolDetailToggle}
-                      aria-expanded={detailsExpanded}
-                      aria-controls={detailsId}
-                      onClick={() => toggleSection(operation.id, "details", false)}
-                      title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
-                      isIconOnly
-                      icon={detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />} />
-                  ) : null}
-                </div>
-                {canExpandDetails ? (
-                  <DeferredOperationDetails
-                    operation={operation}
-                    expanded={detailsExpanded}
-                    detailsId={detailsId}
-                    kind="tool"
-                    buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
-                  />
-                ) : null}
-                {computerUseResult}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-    );
-  }
-
-  function renderReActThoughtSection(group: AgentMessageReActOperationGroup) {
-    const thoughts = reActThoughtItems(group);
-    if (thoughts.length === 0) {
-      return null;
-    }
-    return (
-      <section className={styles.reActOperationSection}>
-        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "思考" : "Thinking"}</span>
-        <div className={styles.reActThoughtStack}>
-          {thoughts.map((item) => (
-            <pre key={item.id} className={styles.reActThoughtText}>{item.value}</pre>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  function renderReActResultSection(messageId: string, group: AgentMessageReActOperationGroup) {
-    const results = reActResultItems(group, {
-      operationLabel,
-      readableOperationResult: (operation) => readableOperationResult(operation, operationDetailLabels.structuredResultFallback),
-    });
-    if (results.length === 0) {
-      return null;
-    }
-    const sectionId = `feedback-react-results-${group.id}`;
-    const bodyId = `${sectionId}-body`;
-    const expanded = getExpansionState(messageId, sectionId, false);
-    const label = lang === "zh"
-      ? results.length > 1 ? `结果 ${results.length}` : "结果"
-      : results.length > 1 ? `${results.length} results` : "Result";
-    return (
-      <section className={styles.reActOperationSection}>
-        <VButton
-          type="button"
-          className={styles.reActResultToggle}
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          onClick={() => toggleSection(messageId, sectionId, false)}
-          title={expanded
-            ? lang === "zh" ? "折叠工具结果" : "Collapse tool results"
-            : lang === "zh" ? "展开工具结果" : "Expand tool results"}
-          trailingIcon={expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-        >
-          <span className={styles.reActOperationSectionLabel}>{label}</span>
-        </VButton>
-        {expanded ? (
-          <div id={bodyId} className={styles.reActResultList}>
-            {results.map((item) => (
-              <div
-                key={item.id}
-                className={`${styles.reActResultItem} ${item.tone === "failed" ? styles.reActResultItem_failed : ""}`}
-              >
-                <span className={styles.reActResultLabel}>{item.label}</span>
-                <pre className={styles.reActResultValue}>{item.value}</pre>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  function renderReActOperationContent(messageId: string, group: AgentMessageReActOperationGroup) {
-    return (
-      <div className={styles.reActOperationBody}>
-        {renderReActThoughtSection(group)}
-        {renderReActActionSection(group)}
-        {renderReActResultSection(messageId, group)}
-      </div>
-    );
-  }
-
-  function feedbackTimelineGroups(operations: AgentMessageOperation[]) {
-    const visibleOperations = compactVisibleTimelineOperations(operations.filter(shouldShowTimelineOperation));
-    return {
-      visibleOperations,
-      reActGroups: buildAgentMessageReActOperationGroups(visibleOperations),
-    };
-  }
-
-  function renderFeedbackTimelineDetails(messageId: string, operations: AgentMessageOperation[]) {
-    const { reActGroups } = feedbackTimelineGroups(operations);
-    if (reActGroups.length === 0) {
-      return null;
-    }
-    return (
-      <div className={styles.reActOperationList}>
-        {reActGroups.map((group) => (
-          <div key={group.id}>
-            {renderReActOperationContent(messageId, group)}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  function renderOperationGroup(
-    messageId: string,
-    section: "thought" | "mental" | "tools",
-    operations: AgentMessageOperation[],
-    defaultExpanded: boolean,
-  ) {
-    if (operations.length === 0) {
-      return null;
-    }
-    const expanded = getExpansionState(messageId, section, defaultExpanded);
-    const kind = operations[0]?.kind ?? "tool";
-    const title = operationGroupTitle(kind, operations.length);
-    const toggleTitle = expanded
-      ? section === "thought"
-        ? t("thoughtProcessVisible")
-        : section === "mental"
-          ? t("mentalProcessVisible")
-          : t("toolProcessVisible")
-      : section === "thought"
-        ? t("thoughtProcessHidden")
-        : section === "mental"
-          ? t("mentalProcessHidden")
-          : t("toolProcessHidden");
-    return (
-      <section className={styles.operationGroup}>
-        <VButton
-          type="button"
-          className={styles.operationSummary}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, section, defaultExpanded)}
-          title={toggleTitle}
-          icon={operationIcon(kind, title)}
-          trailingIcon={expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        >
-          <span>{title}</span>
-          {!expanded && operations[0]?.summary ? (
-            <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
-          ) : null}
-        </VButton>
-        {expanded ? renderOperationTimeline(operations) : null}
-      </section>
-    );
-  }
-
-  function renderFeedbackTimelineGroup(
-    messageId: string,
-    operations: AgentMessageOperation[],
-    defaultExpanded: boolean,
-    processSectionIds?: string,
-  ) {
-    if (operations.length === 0) {
-      return null;
-    }
-    const { visibleOperations, reActGroups } = feedbackTimelineGroups(operations);
-    if (visibleOperations.length === 0) {
-      return null;
-    }
-    if (reActGroups.length === 0) {
-      return null;
-    }
-    const defaultTimelineExpanded = defaultExpanded || reActGroups.some((group) => shouldExpandReActGroupByDefault(group));
-    const expanded = getExpansionState(messageId, "feedback", defaultTimelineExpanded);
-    const title = operationTimelineTitle(visibleOperations);
-    const collectionTone = operationCollectionTone(operations);
-    const stateLabel = operations.length > visibleOperations.length && collectionTone === "running"
-      ? compactInternalProcessStateLabel(collectionTone, operations, operationStateLabels)
-      : operationStateLabel(operationCollectionTone(visibleOperations), operationStateLabels);
-    return (
-      <section
-        className={`${styles.operationGroup} ${styles.executionTraceGroup}`}
-        data-agent-process-section-ids={processSectionIds}
-        data-agent-process-kind={processSectionIds ? "feedback" : undefined}
-      >
-        <VButton
-          type="button"
-          className={styles.operationSummary}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, "feedback", defaultTimelineExpanded)}
-          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-          icon={operationIcon(operations[0]?.kind ?? "tool", title)}
-          trailingIcon={expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        >
-          <span>{title}</span>
-          <span className={styles.operationSummaryCount}>{stateLabel}</span>
-        </VButton>
-        {expanded ? renderFeedbackTimelineDetails(messageId, operations) : null}
-      </section>
-    );
-  }
-
-  function renderAnswerOnlyProcessGroup(
-    messageId: string,
-    operations: AgentMessageOperation[],
-    defaultExpanded: boolean,
-    renderDetails: () => ReactNode,
-    inlinePreview?: string,
-    processSectionIds?: string,
-  ) {
-    if (operations.length === 0) {
-      return null;
-    }
-    const tone = operationCollectionTone(operations);
-    const toneStyle = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
-    const expanded = getExpansionState(messageId, "process", defaultExpanded);
-    const preview = inlinePreview || processSummaryPreview(operations, operationStateLabels, compactPreview);
-    const title = processSummaryTitle(tone, operations, operationStateLabels);
-    const meta = processSummaryMeta(operations, operationStateLabels);
-    const hasExpandableDetails = operations.some(shouldShowTimelineOperation);
-    if (!hasExpandableDetails) {
-      return null;
-    }
-    const summaryContent = (
-      <>
-        <span className={styles.answerOnlyProcessIcon} aria-hidden="true">
-          {processSummaryIcon(tone)}
-        </span>
-        <span className={styles.answerOnlyProcessTitle}>{title}</span>
-        {meta ? <span className={styles.answerOnlyProcessMeta}>{meta}</span> : null}
-      </>
-    );
-    return (
-      <section
-        className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}
-        data-agent-process-section-ids={processSectionIds}
-        data-agent-process-kind={processSectionIds ? "answer-only" : undefined}
-      >
-        <VButton
-          type="button"
-        contentLayout="plain"
-          className={styles.answerOnlyProcessToggle}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, "process", defaultExpanded)}
-          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-        >
-          {summaryContent}
-          {preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </VButton>
-        {expanded ? <div className={styles.answerOnlyProcessDetails}>{renderDetails()}</div> : null}
-      </section>
-    );
-  }
-
   function shouldExpandToolGroupByDefault(message: ConversationMessage, operations: AgentMessageOperation[]) {
     return assistantTurnIsStreaming(message)
       || operations.some((operation) => operation.kind === "tool" && (operation.rawLabel ?? operation.label) === COMPUTER_USE_TOOL_NAME);
-  }
-
-  function renderAgentMentalPanel(
-    messageId: string,
-    part: AgentMentalPart | undefined,
-    defaultExpandedOverride: boolean | undefined,
-    isRunning: boolean,
-  ) {
-    if (!showMentalSnapshots || !part || !part.snapshot) {
-      return null;
-    }
-    const snapshot = part.snapshot;
-    const expanded = getExpansionState(messageId, "mental", defaultExpandedOverride ?? true);
-    const toggleTitle = expanded ? t("mentalProcessVisible") : t("mentalProcessHidden");
-    const mentalLabels: MentalStateLabels = {
-      feeling: t("mentalFeeling"),
-      summary: t("mentalSummary"),
-      feelingSummary: `${t("mentalFeeling")} / ${t("mentalSummary")}`,
-      mood: t("mentalMood"),
-      cognitiveState: t("mentalCognitiveState"),
-      source: t("mentalSource"),
-      confidence: t("mentalConfidence"),
-      samples: t("mentalSamples"),
-      lastUpdated: t("mentalLastUpdated"),
-      whisper: t("mentalWhisper"),
-      intervention: t("mentalIntervention"),
-      cognitiveStateUnknown: t("mentalCognitiveState_unknown"),
-      cognitiveStateNormal: t("mentalCognitiveState_normal"),
-      cognitiveStateProductive: t("mentalCognitiveState_productive"),
-      cognitiveStateLooping: t("mentalCognitiveState_looping"),
-      cognitiveStateThrashing: t("mentalCognitiveState_thrashing"),
-      cognitiveStateTunnelVision: t("mentalCognitiveState_tunnel_vision"),
-      cognitiveStateDisoriented: t("mentalCognitiveState_disoriented"),
-      sourceState: t("mentalSourceState"),
-      sourceDiagnosis: t("mentalSourceDiagnosis"),
-      sourceRuntime: t("runtime"),
-    };
-    const mentalFormatters: MentalStateFormatters = {
-      compactPreview,
-      formatTimestamp,
-    };
-    const metaRows = buildMentalMetaRows(snapshot, mentalLabels, mentalFormatters);
-    const bodyRows = buildMentalBodyRows(snapshot, mentalLabels);
-    const preview = mentalSnapshotPreview(snapshot, mentalLabels, mentalFormatters);
-    return (
-      <section className={`${styles.auxiliaryBlock} ${styles.auxiliaryBlock_mental}`}>
-        <VButton
-          type="button"
-          className={styles.operationSummary}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, "mental", defaultExpandedOverride ?? true)}
-          title={toggleTitle}
-          icon={<BrainCircuit size={17} />}
-          trailingIcon={
-            <>
-              {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
-              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </>
-          }
-        >
-          <span>{t("mentalProcess")}</span>
-          {!expanded && preview ? (
-            <span className={styles.operationSummaryPreview}>{preview}</span>
-          ) : null}
-        </VButton>
-        {expanded ? (
-          <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>
-            {metaRows.length ? (
-              <div className={styles.mentalMetaGrid}>
-                {metaRows.map((row) => (
-                  <span key={row.label} className={styles.mentalMetaItem}>
-                    <small>{row.label}</small>
-                    <strong>{row.value}</strong>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {bodyRows.length ? (
-              <div className={styles.mentalBodyList}>
-                {bodyRows.map((row) => (
-                  <p key={row.label} className={styles.mentalBodyRow}>
-                    <span>{row.label}</span>
-                    {row.value}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  function responseSegmentLabel(segment: ResponseSegment) {
-    return resolveResponseSegmentLabel(segment, (key) => t(key));
-  }
-
-  function renderResponseSegment(segment: ResponseSegment, duplicateImageUrls?: Set<string>) {
-    const label = responseSegmentLabel(segment);
-    return (
-      <section
-        key={segment.id}
-        className={`${styles.responseSegment} ${styles[`responseSegment_${segment.kind}`]}`}
-      >
-        <div className={styles.responseSegmentHeader}>
-          <span className={styles.responseSegmentLabel}>{label}</span>
-          {segment.language && segment.kind !== "code" ? (
-            <span className={styles.responseSegmentMeta}>{segment.language}</span>
-          ) : null}
-        </div>
-        {isResponseSegmentCodeLike(segment) ? (
-          <pre className={styles.responseSegmentPre}>
-            <code>{formattedCodeBlockContent(segment.content, segment.language)}</code>
-          </pre>
-        ) : (
-          renderResponseText(segment.content, duplicateImageUrls)
-        )}
-      </section>
-    );
   }
 
   function shouldShowAgentResponseBlock(
@@ -6506,94 +3658,6 @@ export const ConversationView = React.memo(function ConversationView({
       streaming: assistantTurnIsStreaming(message),
       segments: getCachedResponseSegments(sectionState.answerText),
     });
-  }
-
-  function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
-    return (
-      <LazyConversationMarkdownRenderer
-        content={content}
-        duplicateImageUrls={duplicateImageUrls}
-        renderImage={renderMarkdownImage}
-        workspaceRoot={sessionWorkspacePath}
-        language={lang}
-        onOpenRailFile={onOpenRailFile}
-      />
-    );
-  }
-
-  /**
-   * User message bodies echo a leading slash command as a chip (ZCode
-   * ConversationUserInputContent parity). The text prefix is the parse basis:
-   * optimistic rows and unknown commands carry no `slashSkillCommand`
-   * metadata, and the chip must render for both — tone comes from the same
-   * skill library the composer suggestion list ranks. Everything after the
-   * command token keeps the ordinary markdown body; non-user rows and
-   * slash-less text are untouched.
-   */
-  function renderUserContentWithSlashEcho(content: string, isUserAuthored: boolean) {
-    if (!isUserAuthored) {
-      return renderResponseText(content);
-    }
-    const echo = parseUserSlashCommandEcho(content);
-    if (!echo) {
-      return renderResponseText(content);
-    }
-    return (
-      <>
-        <ConversationSlashCommandChip
-          command={echo.command}
-          tone={resolveUserSlashCommandTone(echo.command, slashCommandSuggestions)}
-        />
-        {echo.rest.trim() ? renderResponseText(echo.rest) : null}
-      </>
-    );
-  }
-
-  function renderAssistantTranscriptResponseText(
-    content: string,
-    isStreaming: boolean,
-    duplicateImageUrls?: Set<string>,
-  ) {
-    if (!content) {
-      return null;
-    }
-    // One component type across streaming and settled: the Codex transcript
-    // cell keeps its markdown subtree mounted on the streaming→settled flip
-    // (settled text re-routes through the shared stable renderer instead of
-    // swapping to a different renderer component).
-    return (
-      <ConversationStreamingResponseContent
-        content={content}
-        isStreaming={isStreaming}
-        duplicateImageUrls={duplicateImageUrls}
-        renderImage={renderMarkdownImage}
-        workspaceRoot={sessionWorkspacePath}
-        language={lang}
-        onOpenRailFile={onOpenRailFile}
-      />
-    );
-  }
-
-  /**
-   * ZCode AssistantPreviewCards parity: a settled assistant answer surfaces
-   * the whitelisted local file references found in its final markdown as a
-   * clickable chip row (same open/reveal/copy semantics as the inline
-   * workspace-file links). Streaming turns stay chip-free; markdown-linked
-   * workspace files are already clickable inline, so the extractor suppresses
-   * them from the row instead of double-presenting.
-   */
-  function renderAssistantFileReferenceChips(message: ConversationMessage, text: string) {
-    if (assistantTurnIsStreaming(message)) {
-      return null;
-    }
-    return (
-      <ConversationFileReferenceChips
-        text={text}
-        workspaceRoot={sessionWorkspacePath}
-        language={lang}
-        onOpenInRail={onOpenRailFile}
-      />
-    );
   }
 
   const renderMarkdownImage = useCallback((alt: string, url: string, duplicateImageUrls?: Set<string>) => {
@@ -6641,6 +3705,88 @@ export const ConversationView = React.memo(function ConversationView({
       </figure>
     );
   }, [lang, openImagePreview]);
+
+  const {
+    renderResponseSegment,
+    renderResponseText,
+    renderUserContentWithSlashEcho,
+    renderAssistantTranscriptResponseText,
+    renderAssistantFileReferenceChips,
+  } = createConversationResponseBlocks({
+    lang,
+    t,
+    sessionWorkspacePath,
+    onOpenRailFile,
+    renderMarkdownImage,
+    slashCommandSuggestions,
+  });
+
+  const { renderAgentMessageTimeline } = createConversationTimelineItems({
+    lang,
+    t,
+    getExpansionState,
+    toggleSection,
+    operationDetailLabels,
+    renderComputerUseResult,
+    imageArtifactUrlsBeforeMessage,
+    getCachedResponseSegments,
+    renderRolloutTraceEvents,
+    isCompactInternalStatusOperation,
+    renderResponseSegment,
+    renderAssistantFileReferenceChips,
+    formatDuration,
+    operationStatusToneClassName,
+    operationStatusIcon,
+    operationStatusText,
+    operationLabel,
+    buildLegacyToolActivityPills,
+    hasOperationDetails,
+  });
+
+  const { renderAgentMentalPanel } = createConversationAuxiliaryPanels({
+    t,
+    showMentalSnapshots,
+    getExpansionState,
+    toggleSection,
+    formatTimestamp,
+  });
+
+  const { renderTimelineSpecialRow } = createConversationSpecialRows({
+    lang,
+    t,
+    formatTimestamp,
+  });
+
+  const {
+    turnWorkForceExpand,
+    renderCodexTranscriptCells,
+  } = createConversationCodexSurface({
+    lang,
+    sessionId,
+    toolApproval,
+    toolApprovalConsumedRef,
+    turnError,
+    turnErrorSupersededByFinalAnswer,
+    imageArtifactUrlsBeforeMessage,
+    activeTimelineMessageOrder,
+    handleProcessDisclosureUserToggle,
+    showComposer,
+    composerDisabled,
+    composerValue,
+    composerInputRef,
+    onComposerChange,
+    renderCodexProgressCell,
+    renderCodexReasoningSummaryCell,
+    codexTranscriptCellIcon,
+    codexTranscriptCellTitle,
+    codexTranscriptCellMeta,
+    codexTranscriptVisibleSummary,
+    renderCodexTranscriptToolDetailContent,
+    codexTranscriptToolDetailIsEmpty,
+    renderResponseText,
+    renderAssistantTranscriptResponseText,
+    renderAssistantFileReferenceChips,
+  });
 
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
@@ -7021,7 +4167,7 @@ export const ConversationView = React.memo(function ConversationView({
           inputRef={conversationFindInputRef}
           value={conversationFindQuery}
           onValueChange={setConversationFindQuery}
-          matchCount={conversationFindIndex.matchCount}
+          matchCount={conversationFindMatchCount}
           activeIndex={conversationFindActiveIndex}
           onPrevious={handleConversationFindPrevious}
           onNext={handleConversationFindNext}
