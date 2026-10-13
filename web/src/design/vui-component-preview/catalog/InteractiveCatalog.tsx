@@ -17,7 +17,7 @@ import {
 } from "../../../components/vui";
 import { ConversationTurnModelControl } from "../../../components/conversation/ConversationTurnModelControl";
 import { ConversationTurnNavigator } from "../../../components/conversation/ConversationTurnNavigator";
-import type { SessionLlmModelOption, SessionModelSelection } from "../../../api/types";
+import type { SessionLlmModelOption } from "../../../api/types";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 
@@ -47,7 +47,6 @@ export function InteractiveCatalog() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [turnModelSelection, setTurnModelSelection] = useState<SessionModelSelection | null>(null);
 
   return (
     <VuiPreviewSection title="Interactive">
@@ -68,11 +67,7 @@ export function InteractiveCatalog() {
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTurnModelControl">
         <ConversationTurnModelControl
-          choices={turnModelChoices}
-          sessionDefaultModelId="qwen3-max"
-          selection={turnModelSelection}
-          disabled={false}
-          onSelectionChange={setTurnModelSelection}
+          model={turnModelChoices[0]}
         />
       </VuiPreviewCard>
       <VuiPreviewCard name="VRouteLinkButton">

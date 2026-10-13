@@ -5,7 +5,6 @@ import type {
   ConversationMessage,
   SessionReferenceAttachment,
   SessionLlmModelOption,
-  SessionModelSelection,
   SessionTurnError,
   SkillLibraryItem,
   AgentPermissionPreset,
@@ -42,13 +41,11 @@ export type ConversationLlmControl = {
   onReasoningEffortChange: (reasoningEffort: string) => void;
 };
 
-/** Composer model picker. Null selection follows the session default for later sends. */
+/** Read-only Agent model identity shown in the composer. */
 export type ConversationTurnModelControl = {
-  choices: SessionLlmModelOption[];
-  sessionDefaultModelId: string;
-  selection: SessionModelSelection | null;
-  disabled: boolean;
-  onSelectionChange: (selection: SessionModelSelection | null) => void;
+  model: SessionLlmModelOption | null;
+  loading?: boolean;
+  error?: boolean;
 };
 
 export type ConversationComposerVariant = "compact" | "codex";
@@ -163,8 +160,10 @@ export type ConversationViewProps = {
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;
   llmControl?: ConversationLlmControl;
-  /** Per-turn model override entry; absent when the session has no model choices. */
+  /** Read-only model display; editing belongs to the Agent management page. */
   turnModelControl?: ConversationTurnModelControl;
+  /** /模型 opens the current Agent configuration. */
+  onOpenAgentModelConfig?: () => void;
   /** Compact context composition ring (left of send). */
   composerContextRing?: ComposerContextRingModel | null;
   onOpenComposerContextDetail?: () => void;

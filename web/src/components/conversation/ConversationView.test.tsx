@@ -863,8 +863,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(composerActionStackSource).toContain("className={primaryActionClassName}");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
     expect(conversationViewSource).toContain("className={styles.attachButton}");
-    expect(conversationViewSource).toContain("<ConversationTurnModelControl {...turnModelControl} openSignal={modelMenuOpenSignal} />");
-    expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} openSignal={turnModelControl ? \"\" : modelMenuOpenSignal} />");
+    expect(conversationViewSource).toContain("<ConversationTurnModelControl {...turnModelControl} />");
+    expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
     expect(conversationViewSource).toContain("<ComposerContextRing");
     // Ring internals are owned by ComposerContextRing.test.tsx; keep only the
     // regressions that would silently slip back in at this call site.
