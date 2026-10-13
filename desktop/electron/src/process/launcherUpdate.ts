@@ -19,7 +19,10 @@ export async function executeLauncherUpdate(input: {
     } catch {
       status = { state: "unknown", message: "" };
     }
-    if (status.state === "idle" || (status.state === "active" && input.interruptActiveWork)) return null;
+    // An explicit operator update already authorized the interrupt. Unknown is
+    // not a reason to cancel: stopWorkspaces still saves records first.
+    const operatorUpdate = input.interruptActiveWork === true;
+    if (status.state === "idle" || (operatorUpdate && (status.state === "active" || status.state === "unknown"))) return null;
     return {
       schemaVersion: 1,
       accepted: false,

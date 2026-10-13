@@ -271,7 +271,7 @@ describe("LauncherRoute layout contract", () => {
     expect(branchInstancesPanelSource).toContain("forceStopId");
     // The affordance is tiered by verified process liveness: the inline button
     // variant and the overflow menu entry are both gated on the tier.
-    expect(branchInstancesPanelSource).toContain("forceStopTier(item)");
+    expect(branchInstancesPanelSource).toContain("forceStopTier(item, pendingOperation)");
     expect(branchInstancesPanelSource).toContain('variant={forceStopTierValue === "danger" ? "danger" : "secondary"}');
     expect(branchInstancesPanelSource).toContain('forceStopMenuOnly ? [{ id: "force-stop"');
   });

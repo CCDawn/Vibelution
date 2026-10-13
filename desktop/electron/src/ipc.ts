@@ -9,6 +9,8 @@ export const IPC_CHANNELS = {
   endDesktopPetWindowDrag: "pet:window-drag-end",
   requestDesktopShellExit: "launcher:request-desktop-shell-exit",
   requestWorkbenchRestart: "launcher:request-workbench-restart",
+  getLauncherFreshness: "launcher:get-freshness",
+  showLauncherWindow: "launcher:show-window",
   notifyConversationCompleted: "launcher:notify-conversation-completed",
   conversationNotificationOpened: "launcher:conversation-notification-opened",
   getLauncherState: "launcher:get-state",

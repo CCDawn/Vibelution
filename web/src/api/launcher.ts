@@ -514,7 +514,32 @@ export function getLauncherStatus() {
 }
 
 export function getLauncherFreshness() {
+  const bridge = workbenchUpdateBridge();
+  if (bridge) return bridge.getLauncherFreshness();
   return fetchLauncherJson<LauncherFreshness>("freshness");
+}
+
+type WorkbenchUpdateBridge = {
+  getLauncherFreshness: () => Promise<LauncherFreshness>;
+  showLauncherWindow: () => Promise<void>;
+};
+
+function workbenchUpdateBridge(): WorkbenchUpdateBridge | null {
+  if (typeof window === "undefined") return null;
+  const candidate = (globalThis as { vibelutionLauncher?: Partial<WorkbenchUpdateBridge> }).vibelutionLauncher;
+  return candidate && typeof candidate.getLauncherFreshness === "function"
+    && typeof candidate.showLauncherWindow === "function" ? candidate as WorkbenchUpdateBridge : null;
+}
+
+/** Workbench has only version reads and window navigation, never full Launcher control. */
+export function hasLauncherFreshnessBridge(): boolean {
+  return workbenchUpdateBridge() !== null || hasLauncherIpcBridge();
+}
+
+export function showLauncherWindow(): Promise<void> {
+  const bridge = workbenchUpdateBridge();
+  if (!bridge) return Promise.reject(new Error("Launcher window bridge is unavailable. Open Launcher from the desktop tray."));
+  return bridge.showLauncherWindow();
 }
 
 export function restartLatestLauncher() {

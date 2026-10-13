@@ -292,14 +292,14 @@ backToBottomButton:
   // and a short label. Compression checkpoints, model switches and the fork
   // provenance marker all share the row; only the tone differs.
   turnDividerRow:
-    "vui-components-conversationview turnDividerRow flex min-w-0 max-w-full items-center gap-2 py-0.5 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
+    `vui-components-conversationview turnDividerRow mx-auto flex w-full ${transcriptMeasure} min-w-0 items-center gap-2 py-0.5 text-vui-xs leading-tight text-[var(--fg-tertiary)]`,
   turnDividerRule:
     "vui-components-conversationview turnDividerRule h-px min-w-0 flex-1 bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)]",
   turnDividerIcon:
     "vui-components-conversationview turnDividerIcon inline-grid shrink-0 place-items-center text-[var(--fg-tertiary)]",
   turnDividerLabel:
     "vui-components-conversationview turnDividerLabel min-w-0 max-w-full truncate text-vui-xs leading-tight text-[var(--fg-tertiary)]",
-  turnDividerToneApplied: `vui-components-conversationview turnDividerToneApplied ${vuiStateCoolInfoClass}`,
+  turnDividerToneApplied: "vui-components-conversationview turnDividerToneApplied",
   turnDividerToneQuiet:
     "vui-components-conversationview turnDividerToneQuiet opacity-60",
   turnDividerToneWarning: `vui-components-conversationview turnDividerToneWarning ${vuiStateWarningSoftClass} text-[var(--state-warning)] [&_.turnDividerRule]:bg-[color-mix(in_srgb,var(--state-warning)_32%,transparent)] [&_.turnDividerIcon]:text-[var(--state-warning)] [&_.turnDividerLabel]:text-[var(--state-warning)]`,
