@@ -154,14 +154,14 @@ describe("router route contracts", () => {
     expect(configMarkup).toContain('data-loading-region="settings-navigation"');
     expect(configMarkup).toContain('data-loading-region="settings-content"');
     expect(configMarkup).toContain("正在打开设置工作台");
-    expect(configMarkup).toContain("animate-spin");
+    expect(configMarkup).not.toContain("animate-spin");
 
     const teamsMarkup = lazyFallbackMarkup(findWorkbenchRoute("teams"));
     expect(teamsMarkup).toContain('data-route-loading="teams"');
     expect(teamsMarkup).toContain('data-loading-region="team-canvas"');
     expect(teamsMarkup).toContain('data-loading-region="team-inspector"');
     expect(teamsMarkup).toContain("正在打开团队工作台");
-    expect(teamsMarkup).toContain("animate-spin");
+    expect(teamsMarkup).not.toContain("animate-spin");
   });
 
   it("keeps the finance research frame visible while its route chunk loads", () => {
@@ -184,6 +184,9 @@ describe("router route contracts", () => {
     expect(chatMarkup).toContain('data-loading-region="chat-workspace"');
     expect(chatMarkup).toContain('data-vui="chat-session-workbench-shell"');
     expect(chatMarkup).toContain('data-vui="skeleton"');
+    expect(chatMarkup).toContain("min-h-[44px]");
+    expect(chatMarkup).toContain("grid-cols-[32px_minmax(0,1fr)]");
+    expect(chatMarkup).toContain("min-h-[104px]");
     expect(chatMarkup).not.toContain("animate-spin");
 
     const ChatRoute: ComponentType = () => null;

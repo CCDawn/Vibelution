@@ -8,6 +8,9 @@ describe("ProgressiveRegionSkeleton contract", () => {
     expect(source).toContain("Do not swap an entire workbench main region");
     expect(source).toContain('data-testid="progressive-region-skeleton"');
     expect(source).toContain('variant === "list"');
+    expect(source).toContain('variant === "session"');
+    expect(source).toContain("min-h-[44px]");
+    expect(source).toContain("min-h-[104px]");
     expect(source).toContain('variant === "detail"');
     expect(source).toContain('variant === "panel"');
     expect(source).toContain('variant === "canvas"');
