@@ -2354,3 +2354,28 @@ Dialogue V2 完成时，用户可观察到人物有时一句说完、有时自�
 - 关闭 fencing、重开保留未来计划、过期重新判断、主动联系关闭时可自主工作但不能联系、用户消息取消自己的工作、隐藏 Session 跨 Agent 拒绝、revision/幂等/时间/预算边界。
 - 停机后过期模拟活动为 skipped，工具活动为 unknown；无新完成事件、无由离线模拟生成的日记或成长。普通 Session、Journal、worker、SSE 和 composer 差异为零，并运行相关普通 Session 回归。
 - 代码和原生会话适配检查、脚本化行动循环、工具注册检查与真实模型连续生活实测分别记录。产品刷新仍经 Launcher，本地合入不等于运行中的产品已经刷新。
+
+### 34.4 真实模型与桌面实例验收（2026-10-13）
+
+隔离 Launcher 实例 `17fca4ed`、后端端口 `8006` 实际运行本节实现；共享主应用没有停止或刷新。人物 `agent-20261013-230252-840437` 的聊天 Session 为 `session-20261013-230252-542145`，隐藏自主 Session 为 `session-20261013-230437-628031`。默认 `openai/gpt-5.5` 调用返回 `auth_failed`、输入输出 token 均为零，因此不计成功。仅测试人物替换为已配置的 `opencode_go/deepseek-v4-flash`，未改全局模型配置。
+
+测试人物只开放 Companion 工具和文件读写，关闭网络与主动联系。默认逐次审批曾阻止第一笔写入；拒绝该调用、将此测试人物设为 `full_access` 后仍保留受限工具策略。该旧回合下一笔工具调用被真实授权闸拒绝，提示人物授权已变化。便签输出随后明确限制到隔离实例 dataHome 的 `workspace/companion-self-check/`，不写 checkout。
+
+连续三轮都由真实原生 Turn 执行 `write_file_tool`，成功后自行通过 `schedule_wakeup` 预约下一轮；期间没有追加用户消息。以下回执与磁盘文件大小、SHA256 一致：
+
+| 原生自主 Turn 后缀 | 作品 | 大小 | SHA256 |
+| --- | --- | --- | --- |
+| `proactive-92870a39061f498e` | `note-1.txt` | 167 bytes | `2fbe1e8a97d0a3b5de7aeda7242d89a3fd64a93351654943654d5bbf9f6aa788` |
+| `proactive-c8772fcdfd9b4b47` | `note-2.txt` | 164 bytes | `04a8e8414c14acf19f1af8a712d6252f1bd2b6511a476d54e36975cc4b3b297c` |
+| `proactive-bc7e4beab3444fc6` | `note-3.txt` | 173 bytes | `369bbb35a02db5173f41092a8ea3a4ed39f4bd71b755d04677f964629e350cdf` |
+
+第四轮仅检查并调用 `cancel_wakeup`，没有第四份作品。主人物 directSession 一直未变；自主工具记录没有进入人物聊天，普通 Session 列表没有暴露隐藏 Session。桌面人物聊天页首次导航曾超过 20 秒仍显示加载；重新加载后消息正常可见，真实自主工作期间没有新增人物聊天文本。页面显示验证只覆盖此桌面宽屏场景。
+
+关闭与恢复分开核验：
+
+- 页面脚本 `window.close()` 让测试窗口消失，但后端 PID `18188` 和端口继续存在，状态文件变化，原预约第四轮仍被执行。这条程序关闭旁路未通过；未扩大本 Companion 任务修改桌面生命周期。不能据系统关闭结果宣称所有关闭入口都已通过。
+- 另一次模型计划 revision `11` 预约于 `2026-10-13T15:34:10Z`。在系统窗口关闭入口对精确测试窗口发送 `WM_CLOSE` 后，测试后端 PID `40604`、renderer PID `17880` 退出，端口释放，Launcher 确认 `desiredState=closed / observedState=closed`；共享 shell PID `33252` 保持运行。没有用强杀代替关闭。
+- `15:34:19Z` 至 `15:36:12Z`，全部 21 个 Companion/作品文件的 SHA256 不变，已越过原预约时间；没有新增作品、日记或生活经历。
+- Launcher 重开后，过期 revision `11` 被替换为 revision `12 / restart_review`，新唤醒时间 `15:37:30.625512Z`；原预约没有补执行。新的真实回合 `proactive-5d856c2ff60645c2` 根据当前时间和已完成作品安排次日 `07:30 +08:00` 的未来行动，三份作品校验值仍未变。
+
+自主计划、真实工具执行、系统窗口关闭、停机静止和过期重排已实测。共享全应用 shell 退出、整夜长期运行未测试；页面程序关闭旁路与首次页面加载迟延仍须由各自 owning surface 单独处理。默认模型认证失败不因替代模型成功而消除。
