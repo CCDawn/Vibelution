@@ -15,6 +15,6 @@ export function financeSessionReferences(
     return true;
   }).map((session) => {
     const reference = buildSessionReferencePayload(session, displayName, session.taskSummary);
-    return { id: session.id, title: reference.title || session.id, meta: session.taskSummary, reference };
+    return { id: session.id, title: reference.title || session.id, meta: (session.updatedAt || session.lastActive || "").slice(0, 10), reference };
   });
 }

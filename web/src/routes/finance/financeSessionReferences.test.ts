@@ -4,7 +4,7 @@ import { resetSessionDeleteTombstonesForTests, markSessionDeleteTombstone } from
 import { financeSessionReferences } from "./financeSessionReferences";
 
 const row = (id: string, overrides: Partial<SessionSummary> = {}) => ({
-  id, agentId: "finance", title: `研究 ${id}`, taskSummary: "已核验摘要", ...overrides,
+  id, agentId: "finance", title: `研究 ${id}`, taskSummary: "已核验摘要", updatedAt: "2026-10-13T00:00:00Z", ...overrides,
 } as SessionSummary);
 
 afterEach(() => resetSessionDeleteTombstonesForTests());
@@ -18,7 +18,7 @@ describe("finance scoped session references", () => {
       row("hidden", { hiddenFromIndex: true }), row("deleted"), row("old"),
     ], "finance", "current", "验收助手");
     expect(options).toHaveLength(1);
-    expect(options[0]).toMatchObject({ id: "old", title: "研究 old", reference: {
+    expect(options[0]).toMatchObject({ id: "old", title: "研究 old", meta: "2026-10-13", reference: {
       referenceId: "session:old", kind: "session", sessionId: "old", agentId: "finance",
       agentDisplayName: "验收助手", summary: "已核验摘要",
     } });
