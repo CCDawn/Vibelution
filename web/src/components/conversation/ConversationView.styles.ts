@@ -292,7 +292,7 @@ backToBottomButton:
   // and a short label. Compression checkpoints, model switches and the fork
   // provenance marker all share the row; only the tone differs.
   turnDividerRow:
-    "vui-components-conversationview turnDividerRow flex min-w-0 max-w-full items-center gap-2 py-0.5 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
+    `vui-components-conversationview turnDividerRow mx-auto flex w-full ${transcriptMeasure} min-w-0 items-center gap-2 py-0.5 text-vui-xs leading-tight text-[var(--fg-tertiary)]`,
   turnDividerRule:
     "vui-components-conversationview turnDividerRule h-px min-w-0 flex-1 bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)]",
   turnDividerIcon:
