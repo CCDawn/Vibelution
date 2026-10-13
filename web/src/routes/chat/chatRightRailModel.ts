@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { formatTurnTokenCount } from "../../components/conversation/conversationTurnUsageLabel";
 import { assistantFinalAnswerText, assistantTurnIsInFlight } from "../chatTurnProtocol";
 
 export const CHAT_RIGHT_RAIL_LAUNCHER_KINDS = [
@@ -465,7 +466,10 @@ export type ChatRightRailDevtoolsRow = {
   value: string;
 };
 
-export function projectChatRightRailDevtools(input: ChatRightRailDevtoolsInput): {
+export function projectChatRightRailDevtools(
+  input: ChatRightRailDevtoolsInput,
+  lang: "zh" | "en" = "zh",
+): {
   empty: boolean;
   rows: ChatRightRailDevtoolsRow[];
 } {
@@ -499,7 +503,7 @@ export function projectChatRightRailDevtools(input: ChatRightRailDevtoolsInput):
       { id: "status", labelZh: "状态", labelEn: "Status", value: input.status?.trim() || dash },
       { id: "messages", labelZh: "消息", labelEn: "Messages", value: String(messages.length) },
       { id: "toolCalls", labelZh: "工具调用", labelEn: "Tool calls", value: String(toolCalls) },
-      { id: "tokens", labelZh: "Token", labelEn: "Tokens", value: sawTokens ? String(tokens) : dash },
+      { id: "tokens", labelZh: "Token", labelEn: "Tokens", value: sawTokens ? formatTurnTokenCount(tokens, lang) : dash },
     ],
   };
 }

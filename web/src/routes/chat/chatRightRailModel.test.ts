@@ -218,6 +218,20 @@ describe("chat right rail model", () => {
     expect(view.rows.find((row) => row.id === "messages")?.value).toBe("2");
   });
 
+  it("formats the token total compactly per locale, matching the turn meta label", () => {
+    const input = {
+      messages: [
+        { role: "assistant", turnItems: [], usageStats: { totalTokens: 13_260 } },
+      ],
+    } as const;
+    expect(
+      projectChatRightRailDevtools(input, "zh").rows.find((row) => row.id === "tokens")?.value,
+    ).toBe("1.3万");
+    expect(
+      projectChatRightRailDevtools(input, "en").rows.find((row) => row.id === "tokens")?.value,
+    ).toBe("13.3K");
+  });
+
   it("remembers the side-chat child and reads a final answer", () => {
     const side = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "side", title: "辅助对话" });
     const remembered = rememberChatRightRailSideChild(side, "side", "child-1");
