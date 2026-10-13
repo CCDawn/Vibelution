@@ -201,9 +201,11 @@ const emptyDiff: GitFileDiff = {
 
 describe("chat change rail wiring", () => {
   const workbench = readFileSync(resolve(here, "ChatCodingRouteWorkbench.tsx"), "utf8");
+  const railPreview = readFileSync(resolve(here, "useChatRailPreview.ts"), "utf8");
 
   it("keeps the center conversation open while the right column shows the file", () => {
-    expect(workbench).toContain("buildChatChangeRail");
+    expect(workbench).toContain("useChatRailPreview({");
+    expect(railPreview).toContain("buildChatChangeRail");
     expect(workbench).toContain("changeRailOpened");
     expect(workbench).toContain("ordinaryChangeRail");
     expect(workbench).toContain("conversationWorkspaceTab");
@@ -214,8 +216,8 @@ describe("chat change rail wiring", () => {
     // Browsing fills the main content plane; the original conversation restores its side rail on return.
     expect(workbench).toContain('rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}');
     expect(workbench).toContain("ChatRightRail");
-    expect(workbench).toContain('activeRailTab?.kind === "review"');
-    expect(workbench).toContain("useChatGitRail");
+    expect(railPreview).toContain('activeRailTab?.kind === "review"');
+    expect(railPreview).toContain("useChatGitRail");
     expect(workbench).not.toContain("ChatSidePane");
   });
 });
