@@ -2887,6 +2887,15 @@ describe("conversation turn envelope dividers", () => {
     expect(styles.turnDividerToneWarning).toContain("var(--state-warning)");
     expect(styles.thoughtDuration).toContain("tabular-nums");
   });
+
+  it("aligns envelope dividers to the 760px transcript column instead of the full timeline", () => {
+    // Hairlines span the conversation flow's column (transcriptMeasure), the
+    // same measure as timelineAssistantTextCell/turnError — never the
+    // full-bleed timeline width.
+    expect(styles.turnDividerRow).toContain("mx-auto");
+    expect(styles.turnDividerRow).toContain("w-full");
+    expect(styles.turnDividerRow).toContain("max-w-[760px]");
+  });
 });
 
 describe("group transcript rich text", () => {

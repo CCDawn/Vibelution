@@ -9,7 +9,7 @@ from .prompt_pack import PROMPT_PACK_FILES
 PLUGIN_ID = "virtual-human-life"
 TOOL_BUNDLE_ID = "virtual_human_life"
 PROMPT_PACK_ID = "virtual_human_life_v1"
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.3.0"
 STORAGE_SCHEMA_VERSION = 1
 
 VIRTUAL_HUMAN_TOOL_NAMES = (
@@ -36,6 +36,7 @@ def manifest_projection() -> dict[str, Any]:
         "capabilities": [
             "life.state",
             "life.schedule",
+            "life.self_planned_wakeup",
             "life.activity",
             "life.mood",
             "life.diary",

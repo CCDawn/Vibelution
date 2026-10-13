@@ -1,36 +1,35 @@
-import type { CodeFreshnessVerdict } from "../api/types";
+import type { CodeFreshnessVerdict, LauncherFreshness } from "../api/types";
 import { shellDictionary } from "../i18n/shellDictionary";
 
 /**
- * Workbench update banner (backend is behind disk HEAD): the running backend
- * keeps serving old code until the Launcher restarts the workbench, so the
- * shell surfaces a top banner with a restart action wired to the shared
- * lifecycle path. Dismissal stores the disk HEAD commit, so a NEW commit
- * re-prompts automatically without any extra bookkeeping.
+ * Workbench update banner: include frontend and Launcher versions so a
+ * current backend cannot hide a stale interface or desktop shell.
+ * Dismissal stores the disk HEAD commit; a new commit prompts again.
  */
 export const UPDATE_BANNER_DISMISSED_STORAGE_KEY = "vibelution.workbench.update-banner-dismissed.v1";
 
 const UPDATE_BANNER_HEAD_TOKEN_LENGTH = 7;
 
-/**
- * Only a stale BACKEND needs a restart to apply new code. A frontend-only
- * verdict keeps its existing coverage: the caution status dot plus the
- * "Refresh frontend" action in the settings popover.
- */
 export function isUpdateBannerVerdict(verdict: CodeFreshnessVerdict | undefined | null): boolean {
-  return verdict === "backend_behind" || verdict === "backend_and_frontend_behind";
+  return verdict === "backend_behind" || verdict === "backend_and_frontend_behind" || verdict === "frontend_behind";
+}
+
+export function isLauncherUpdateAvailable(freshness: LauncherFreshness | undefined | null): boolean {
+  return Boolean(freshness && (freshness.current === false || freshness.shellStale || freshness.updateAvailable));
 }
 
 export function shouldShowUpdateBanner({
   verdict,
   diskHead,
   dismissedHead,
+  launcherFreshness,
 }: {
   verdict: CodeFreshnessVerdict | undefined | null;
   diskHead: string | undefined | null;
   dismissedHead: string | undefined | null;
+  launcherFreshness?: LauncherFreshness | null;
 }): boolean {
-  if (!isUpdateBannerVerdict(verdict)) {
+  if (!isUpdateBannerVerdict(verdict) && !isLauncherUpdateAvailable(launcherFreshness)) {
     return false;
   }
   const head = String(diskHead ?? "").trim();
@@ -38,6 +37,18 @@ export function shouldShowUpdateBanner({
     return false;
   }
   return String(dismissedHead ?? "").trim() !== head;
+}
+
+export function launcherUpdateBannerCopy(lang: string): { title: string; detail: string } {
+  return lang === "en"
+    ? { title: "Launcher update available", detail: "Launcher is running an earlier version. Open Launcher to update and restart." }
+    : { title: "启动器有更新", detail: "启动器仍在运行较早版本，请打开启动管理更新并重启。" };
+}
+
+export function frontendUpdateBannerCopy(lang: string): { title: string; detail: string } {
+  return lang === "en"
+    ? { title: "Frontend updated — restart to apply", detail: "The interface build is behind local code. Restart to load the latest frontend." }
+    : { title: "前端有更新，重启后生效", detail: "运行中的界面构建落后于本地代码，重启会加载最新前端。" };
 }
 
 /** Short commit token for copy, e.g. `@e91a851`. Empty when no HEAD is known. */
