@@ -601,9 +601,15 @@ describe("AgentsRoute layout contract", () => {
     expect(managementModuleBarStyles.moduleBar).not.toContain("transparent");
   });
 
-  it("uses a compact VUI module bar with the primary Agent action", () => {
+  it("keeps module navigation separate from Agent directory actions", () => {
     expect(managementHeaderPanelSource).toContain("VIconButton");
-    expect(managementHeaderPanelSource).toContain("VButton");
+    expect(managementHeaderPanelSource).toContain("AgentManagementDirectoryActions");
+    expect(managementHeaderPanelSource).not.toContain('variant="primary"');
+    expect(routeSource).toContain("directoryActions={(");
+    expect(workspaceLayoutPanelSource).toContain('data-vui="agent-directory-header"');
+    expect(workspaceLayoutPanelSource.indexOf('data-vui="agent-directory-header"')).toBeLessThan(
+      workspaceLayoutPanelSource.indexOf("styles.directoryFilter"),
+    );
     expect(managementHeaderPanelSource).toContain("onCreateAgent");
     expect(routeSource).not.toContain("agentSummaryMetrics");
     expect(routeSource).not.toContain("styles.summaryCard");

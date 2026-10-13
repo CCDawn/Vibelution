@@ -18,7 +18,12 @@ type AgentManagementHeaderPanelProps = {
   onRefresh: () => void;
 };
 
-export function AgentManagementHeaderPanel({
+export function AgentManagementHeaderPanel() {
+  return <AgentManagementModuleBar active="agents" />;
+}
+
+/** Directory actions stay beside the list they create and refresh. */
+export function AgentManagementDirectoryActions({
   copy,
   createAgentButtonRef,
   createAgentButtonId,
@@ -27,29 +32,26 @@ export function AgentManagementHeaderPanel({
   onRefresh,
 }: AgentManagementHeaderPanelProps) {
   return (
-    <AgentManagementModuleBar
-      active="agents"
-      actions={(
-        <>
-          <VIconButton
-            type="button"
-            label={copy.refresh}
-            icon={<RefreshCw size={15} />}
-            isDisabled={refreshing}
-            onPress={onRefresh}
-          />
-          <VButton
-            ref={createAgentButtonRef}
-            id={createAgentButtonId}
-            type="button"
-            variant="primary"
-            icon={<Plus size={15} />}
-            onPress={onCreateAgent}
-          >
-            {copy.createAgent}
-          </VButton>
-        </>
-      )}
-    />
+    <>
+      <VIconButton
+        type="button"
+        variant="ghost"
+        label={copy.refresh}
+        icon={<RefreshCw size={15} />}
+        isDisabled={refreshing}
+        onPress={onRefresh}
+      />
+      <VButton
+        ref={createAgentButtonRef}
+        id={createAgentButtonId}
+        type="button"
+        variant="ghost"
+        isIconOnly
+        aria-label={copy.createAgent}
+        tooltip={copy.createAgent}
+        icon={<Plus size={15} />}
+        onPress={onCreateAgent}
+      />
+    </>
   );
 }
