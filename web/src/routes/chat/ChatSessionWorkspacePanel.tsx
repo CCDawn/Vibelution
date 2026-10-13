@@ -53,6 +53,7 @@ type ChatSessionWorkspacePanelProps = {
   loadingSessionLabel: string;
   /** Fixed note at the start of one specialist chat. Ordinary sessions pass nothing. */
   preface?: ReactNode;
+  hideExportControl?: boolean;
   noSessionsLabel: string;
   notices: SessionRuntimeNotice[];
   onApproveToolApproval: () => void;
@@ -91,6 +92,7 @@ export function ChatSessionWorkspacePanel({
   lang,
   loadingSessionLabel,
   preface = null,
+  hideExportControl = false,
   noSessionsLabel,
   notices,
   onApproveToolApproval,
@@ -178,7 +180,7 @@ export function ChatSessionWorkspacePanel({
             </div>
           ) : null}
           <ChatRuntimeNoticeStack lang={lang} notices={notices} />
-          {conversation ? (
+          {conversation && !hideExportControl ? (
             <div className={styles.conversationToolbar}>
               {/* Session-level local HTML export; direct sessions only — group
                   rooms render through their own transcript component above. */}

@@ -23,6 +23,7 @@ import {
   MessageCircleHeart,
   RotateCcw,
   PanelLeftOpen,
+  List,
   Search,
   Sparkles,
   Trash2,
@@ -111,6 +112,7 @@ import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { PaneResizeHandle } from "../../components/layout/PaneResizeHandle";
+import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { PaneCollapseHandle } from "../../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
@@ -4220,6 +4222,9 @@ export function ChatCodingRouteWorkbench() {
     onTurnModelSelectionChange: setTurnModelSelectionForSession,
   });
 
+  const headerExportVisible = !verifiedCompanionMode && !groupPanelActive && !financeSurface
+    && !sessionBrowserVisible && conversationWorkspaceTab === "agent" && Boolean(conversationModel);
+
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
     {financeSurface ? <FinancialResearchLiveProjection sessionId={activeSessionId ?? ""} agentId={detail?.agentId} messages={detail?.messages ?? EMPTY_FINANCIAL_MESSAGES} /> : null}
@@ -4383,15 +4388,22 @@ export function ChatCodingRouteWorkbench() {
             ) : null}
             workspaceActiveTab={conversationWorkspaceTab}
             sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
-              <VButton
-                variant="ghost"
-                className={sessionBrowserVisible ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+              <VIconButton
+                label={lang === "zh" ? "浏览会话" : "Browse sessions"}
+                icon={<List size={16} strokeWidth={1.5} aria-hidden="true" />}
+                className={sessionBrowserVisible ? `${styles.toolbarIconButton} ${styles.tabActive}` : styles.toolbarIconButton}
                 aria-pressed={sessionBrowserVisible}
                 onPress={() => setSessionBrowserOpen(current => !current)}
-              >
-                {lang === "zh" ? "浏览会话" : "Browse sessions"}
-              </VButton>
+              />
             ) : null}
+            sessionActionsControl={headerExportVisible && conversationModel ? <ConversationShareExportButton
+              key={conversationModel.sessionId}
+              sessionId={conversationModel.sessionId}
+              messages={conversationModel.messages}
+              language={lang}
+              presentation="menu"
+              isDisabled={conversationModel.messages.length === 0}
+            /> : undefined}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
@@ -4611,6 +4623,7 @@ export function ChatCodingRouteWorkbench() {
               blockingErrorMessage={sessionDetailErrorMessage}
               cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
               conversation={conversationModel}
+              hideExportControl={headerExportVisible}
               conversationFocused={statusRailCollapsed}
               filePreview={{
                 changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
@@ -4642,7 +4655,16 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
       rightResizeHandle={
-      !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))) && responsiveLayout.rightVisible ? <PaneCollapseHandle
+      !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))) && responsiveLayout.rightVisible ? (ordinaryChangeRail ? (statusRailCollapsed ? null : <PaneResizeHandle
+        label={t("resizeRightPanel")}
+        className={styles.resizeHandleRight}
+        active={dragState?.side === "right"}
+        valueNow={rightPanelWidth}
+        valueMin={MIN_RIGHT_PANEL_WIDTH}
+        valueMax={MAX_RIGHT_PANEL_WIDTH}
+        onPointerDown={(event) => handleResizeStart("right", event)}
+        onKeyDown={(event) => handleResizeKeyDown("right", event)}
+      />) : <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
@@ -4656,7 +4678,7 @@ export function ChatCodingRouteWorkbench() {
         onToggle={() => setRightPaneCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("right", event)}
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
-      /> : null
+      />) : null
       }
       conversationIndex={financeSurface ? null : verifiedCompanionMode ? (
       <CompanionPersonRail

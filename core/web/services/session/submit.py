@@ -371,7 +371,9 @@ def _existing_submission_replay(
     )
 
 
-def _queued_submission_retry_state(service: Any, *, session_id: str, client_submission_id: str) -> str:
+def _queued_submission_retry_state(
+    service: Any, *, session_id: str, client_submission_id: str, expected_turn_id: str = "",
+) -> str:
     """Probe native journal/admission authority before replacing a dispatch identity."""
     if not client_submission_id:
         return "unaccepted"
@@ -396,6 +398,8 @@ def _queued_submission_retry_state(service: Any, *, session_id: str, client_subm
             turn_ids.add(turn_id)
     if not turn_ids:
         return "unaccepted"
+    if expected_turn_id and turn_ids != {expected_turn_id}:
+        return "unknown"
     events = journal_bridge.load_session_conversation_events_cached(
         session_id, project_root=service.PROJECT_ROOT,
     )

@@ -29,15 +29,42 @@ describe("ChatCenterTabStrip return navigation", () => {
       <MemoryRouter>
         <ChatCenterTabStrip
           {...props}
+          styles={{ overlayPaneControls: "overlay-controls" }}
           chatReturnTarget={null}
           showSessionTabs
           sessionTabs={<span>原会话标签</span>}
-          sessionBrowserControl={<button type="button" aria-pressed>浏览会话</button>}
+          sessionBrowserControl={<button type="button" aria-label="浏览会话">浏览会话</button>}
+          sessionActionsControl={<button type="button" aria-label="会话操作">会话操作</button>}
         />
       </MemoryRouter>,
     );
     expect(html).toContain("原会话标签");
     expect(html).toContain("浏览会话");
+    expect(html).toContain("会话操作");
     expect(html).not.toContain("<img");
+
+    const controlsRow = html.match(/<div class="overlay-controls">([\s\S]*?)<\/div>/)?.[1] ?? "";
+    expect(controlsRow).toContain('aria-label="浏览会话"');
+    expect(controlsRow).toContain('aria-label="会话操作"');
+  });
+
+  it("preserves the right rail icon control name and expanded state", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <ChatCenterTabStrip
+          {...props}
+          styles={{ overlayPaneControls: "overlay-controls", toolbarIconButton: "toolbar-icon" }}
+          chatReturnTarget={null}
+          rightRailLabel="侧栏"
+          rightRailOpen
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('id="chat-status-toggle"');
+    expect(html).toContain('aria-label="侧栏"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-controls="chat-status-pane"');
+    expect(html).toMatch(/class="[^"]*toolbar-icon[^"]*"/);
   });
 });

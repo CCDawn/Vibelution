@@ -91,6 +91,23 @@ def test_uncited_ratio_is_hidden_and_a_cited_amount_stays():
     assert MISSING_FIGURE in grounded
 
 
+@pytest.mark.parametrize("heading", ["行情证据", "行情", "基本面", "新闻", "双方分歧", "证据与来源"])
+def test_inline_bold_evidence_heading_ends_conclusion_like_markdown_heading(heading):
+    bold = f"**结论（定性）**：未知收益 91.93%。\n\n**{heading}**：来源摘录收入 907.03 亿元，尚未审核。\n\n**综合结论**：未知利润 445.17 亿元。"
+    markdown = f"## 结论（定性）\n未知收益 91.93%。\n\n## {heading}\n来源摘录收入 907.03 亿元，尚未审核。\n\n## 综合结论\n未知利润 445.17 亿元。"
+    for text in (bold, markdown):
+        grounded = ground_report_text(text, [])
+        assert "907.03 亿元，尚未审核" in grounded
+        assert "91.93" not in grounded
+        assert "445.17" not in grounded
+
+
+def test_inline_bold_emphasis_does_not_end_conclusion():
+    grounded = ground_report_text("**结论**：未知收益 91.93%。\n\n**基本面很强**：未知利润 445.17 亿元。", [])
+    assert "91.93" not in grounded
+    assert "445.17" not in grounded
+
+
 def test_program_checked_expression_keeps_only_the_matching_result():
     text = "## 结论\n150.00 / 200.00 = 75.00%，另有 150.00 / 200.00 = 0.75%，以及 150.00 / 200.00 = 0.75。见第5页。"
     grounded = ground_report_text(text, PAGE)
