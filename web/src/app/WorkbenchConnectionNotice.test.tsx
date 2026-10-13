@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import shellSource from "./AppShell.tsx?raw";
+import shellStylesSource from "./AppShell.styles.ts?raw";
 import { connectionFailureIsPersistent, WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -58,7 +59,8 @@ describe("workbench connection recovery", () => {
     expect(shellSource).toContain("<CompanionDesktopAttention /><Outlet />");
     expect(shellSource).not.toContain("unavailable ? null : <Outlet");
     expect(shellSource.indexOf("<div className={styles.mainArea}>" )).toBeLessThan(shellSource.indexOf("<WorkbenchConnectionNotice"));
-    expect(shellSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(shellSource).toContain("className={styles.contentFrame}");
+    expect(shellStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(shellSource).toContain("lastHealthyAt={backendHealthQuery.dataUpdatedAt}");
     expect(shellSource).toContain("failedAt={backendHealthQuery.errorUpdatedAt}");
   });

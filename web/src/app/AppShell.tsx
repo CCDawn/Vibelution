@@ -3096,7 +3096,7 @@ export function AppShell() {
       </header>
 
       <div className={styles.mainArea}>
-      <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]" data-testid="workbench-content-frame">
+      <div className={styles.contentFrame} data-testid="workbench-content-frame">
       <div><WorkbenchConnectionNotice
         unavailable={(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen}
         lang={lang}
