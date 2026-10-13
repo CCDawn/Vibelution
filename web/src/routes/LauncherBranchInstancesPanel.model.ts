@@ -782,21 +782,30 @@ export function canForceStopInstance(item: LauncherBranchInstance): boolean {
   return item.runtime.lifecycleState === "error";
 }
 
-export type ForceStopTier = "danger" | "secondary" | "menu";
+export type ForceStopTier = "danger" | "secondary" | "menu" | "hidden";
 
 /**
  * Presentation tier for the force-stop affordance. Reachability (confirm
  * dialog + dispatch) stays with canForceStopInstance; the tier only decides
  * where and how loudly the row presents the action:
+ * - hidden: the row is shown as stopped and has no live backend or window,
+ *   so there is no process to force-stop;
  * - danger: the row still carries live runtime signals (live backend/window,
  *   an in-flight lifecycle state, or a verified match) — keep the red button;
  * - secondary: no live signal and the spawn identity was never verified or is
- *   untrusted (missing/unknown/mismatch) — the recorded state may be stale,
- *   so soften the button but keep it on the row;
- * - menu: the backend verified the spawn process is dead — no inline button,
- *   the recovery action lives in the overflow menu.
+ *   untrusted, and the row is not shown as stopped — soften the button but
+ *   keep it on the row;
+ * - menu: the backend verified the spawn process is dead and the row is not
+ *   shown as stopped — no inline button, the recovery action lives in the
+ *   overflow menu.
  */
-export function forceStopTier(item: LauncherBranchInstance): ForceStopTier {
+export function forceStopTier(
+  item: LauncherBranchInstance,
+  pending?: LifecyclePendingInput,
+): ForceStopTier {
+  if (instanceRuntimeState(item, pending) === "stopped" && !instanceHasLiveRuntime(item)) {
+    return "hidden";
+  }
   if (
     instanceHasLiveRuntime(item)
     || LIVE_LIFECYCLE_STATES.has(item.runtime.lifecycleState)
