@@ -1573,6 +1573,7 @@ describe("IPC channels", () => {
       "endDesktopPetWindowDrag",
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
+      "getLauncherFreshness",
       "getLauncherState",
       "getVersion",
       "launcherInvoke",
@@ -1585,7 +1586,8 @@ describe("IPC channels", () => {
       "refreshLauncherState",
       "requestDesktopShellExit",
       "requestWorkbenchRestart",
-      "showItemInFolder"
+      "showItemInFolder",
+      "showLauncherWindow"
     ]);
   });
 
