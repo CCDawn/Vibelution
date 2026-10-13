@@ -18,7 +18,7 @@ export type UseChatWorkbenchContextMenusResult = {
 
 /**
  * Session/Agent context-menu open state plus global dismiss (pointer/scroll/Escape).
- * Menu JSX stays in the workbench slots; this hook only owns chrome state.
+ * Menu JSX lives in ChatConversationIndexPanel; this hook only owns chrome state.
  */
 export function useChatWorkbenchContextMenus(): UseChatWorkbenchContextMenusResult {
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);

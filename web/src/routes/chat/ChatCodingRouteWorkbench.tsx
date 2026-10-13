@@ -18,7 +18,6 @@ import {
   Check,
   ChevronRight,
   HeartHandshake,
-  ListTree,
   MessageCircleHeart,
   RotateCcw,
   PanelLeftOpen,
@@ -34,7 +33,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -46,7 +44,6 @@ import {
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
 import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
-import { ArchivedSessionRail } from "./ArchivedSessionRail";
 import { ChatRightRail } from "./ChatRightRail";
 import {
   EMPTY_CHAT_RIGHT_RAIL,
@@ -100,7 +97,7 @@ import {
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VStringSelect, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
@@ -123,16 +120,10 @@ import {
 } from "../chatSessionIndexQuery";
 import {
   loadSessionListPreferences,
-  normalizeSessionListSortBy,
   saveSessionListPreferences,
   sessionListSortQueryValue,
   type SessionListPreferences,
 } from "./sessionListPreferences";
-import {
-  groupSessionsByTimeline,
-  splitPinnedSessions,
-  type SessionListDateBucket,
-} from "./sessionListGrouping";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import {
   ACTIVE_INDEX_POLL_MS,
@@ -155,21 +146,13 @@ import {
   sessionAgentDisplayInfo,
 } from "../agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
-import {
-  AgentConversationDirectory,
-} from "../AgentConversationDirectory";
 import { directoryTeamBlockIds } from "../agentConversationDirectoryModel";
-import { ConversationIndexTree } from "../ConversationIndexTree";
-import { ConversationIndexSection } from "../ConversationIndexSection";
-import { DirectSessionIndexList } from "../DirectSessionIndexList";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   hasInvalidChildSessionLink,
   isSessionArchived,
   rootSessionIdFor,
-  sessionToConversationSummary,
   useConversationIndexModel,
-  conversationGroupLabel,
 } from "../conversationIndexModel";
 import {
   activeTurnTerminalRefreshKey,
@@ -216,8 +199,7 @@ import {
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
-import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
-import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
+import { ChatConversationIndexPanel } from "./ChatConversationIndexPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
 import { CompanionLifeRail } from "../companions/CompanionLifeRail";
@@ -381,25 +363,6 @@ const AgentCreateWizardDialog = lazy(() =>
 const CacheDetailDialog = lazy(() =>
   import("./CacheDetailDialog").then((module) => ({
     default: module.CacheDetailDialog,
-  })),
-);
-
-/** Secondary-lazy: session row context menu. */
-const SessionContextMenu = lazy(() =>
-  import("../SessionContextMenu").then((module) => ({
-    default: module.SessionContextMenu,
-  })),
-);
-
-/** Secondary-lazy: Agent directory row context menu. */
-const AgentRenameDialog = lazy(() =>
-  import("../AgentRenameDialog").then((module) => ({
-    default: module.AgentRenameDialog,
-  })),
-);
-const AgentContextMenu = lazy(() =>
-  import("../AgentContextMenu").then((module) => ({
-    default: module.AgentContextMenu,
   })),
 );
 
@@ -3096,364 +3059,128 @@ export function ChatCodingRouteWorkbench() {
     visibleSessionCount: allVisibleSessions.length,
     directoryGatePending,
   });
-  const toggleRailSection = useCallback((key: string) => {
-    setRailSectionCollapsed((current) => ({ ...current, [key]: !current[key] }));
-  }, []);
-  const timelineBucketLabel = useCallback((bucket: SessionListDateBucket) => {
-    switch (bucket) {
-      case "today":
-        return t("sessionListTimelineToday");
-      case "yesterday":
-        return t("sessionListTimelineYesterday");
-      case "thisWeek":
-        return t("sessionListTimelineThisWeek");
-      default:
-        return t("sessionListTimelineEarlier");
+  const openSessionReportLibrary = useCallback((session: SessionSummary) => {
+    const row = financialAssistants.data?.find((item) => item.agentId === session.agentId);
+    if (!row?.knowledgeBaseId) {
+      return;
     }
-  }, [t]);
-  // Pinned-first split plus optional day buckets over the loaded page; the
-  // backend already orders pinned first, the split only isolates the section.
-  const sessionListRail = (() => {
-    const railSessions = allVisibleSessions.filter((session) => !isSessionArchived(session));
-    const { pinned, unpinned } = splitPinnedSessions(railSessions);
-    const timelineGroups = showArchivedSessions || !sessionListPrefs.timelineGrouping
-      ? []
-      : groupSessionsByTimeline(unpinned, Date.now());
-    const renderSessionList = (
-      sessions: SessionSummary[],
-      renderTrailingActions?: (session: SessionSummary) => ReactNode,
-    ) => {
-      const listSessionsById = new Map(sessionsById);
-      for (const session of sessions) {
-        const existing = listSessionsById.get(session.id);
-        listSessionsById.set(session.id, existing ? { ...existing, ...session } : session);
-      }
-      return (
-      <DirectSessionIndexList
-        renderTrailingActions={renderTrailingActions}
-        activeSessionId={activeSessionId}
-        addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
-        agentsById={agentsById}
-        avatarImageUrlFrom={avatarImageUrlFrom}
-        avatarInitials={avatarInitials}
-        buildSessionReferencePayload={buildSessionReferencePayload}
-        contextMenuSessionId={contextMenuSessionId}
-        conversations={sessions.map(sessionToConversationSummary)}
-        deleteBusyLabel={t("deleteSessionBusy")}
-        editingSessionId={editingSessionId}
-        editingSessionTitle={editingSessionTitle}
-        formatTime={formatConversationIndexTime}
-        groupPanelActive={groupPanelActive}
-        isBusyPhase={isBusyPhase}
-        lang={lang}
-        renamePending={renameSessionMutation.isPending}
-        renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-        resolveModelLabel={resolveModelLabel}
-        runtimeRunningSessionIds={runtimeRunningSessionIds}
-        sessionComposerErrors={sessionComposerErrors}
-        sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-        sessionsById={listSessionsById}
-        statusLabel={statusLabel}
-        t={t}
-        onCancelRename={cancelRenameSession}
-        onContextMenu={openSessionContextMenu}
-        onDragReference={startSessionReferenceDrag}
-        onOpen={handleOpenDirectSession}
-        onPrefetch={handlePrefetchDirectSession}
-        onRenameTitleChange={setEditingSessionTitle}
-        onSubmitRename={submitRenameSession}
-      />
-      );
-    };
-    const groups = !pinned.length && !timelineGroups.length ? null : (
-      <>
-        {pinned.length ? (
-          <ConversationIndexSection
-            count={pinned.length}
-            expanded={!railSectionCollapsed.sessionListPinned}
-            label={t("sessionListPinnedSection")}
-            onToggle={() => toggleRailSection("sessionListPinned")}
-          >
-            {renderSessionList(pinned)}
-          </ConversationIndexSection>
-        ) : null}
-        {timelineGroups.map((group) => (
-          <ConversationIndexSection
-            key={group.bucket}
-            count={group.sessions.length}
-            expanded={!railSectionCollapsed[`sessionListTimeline:${group.bucket}`]}
-            label={timelineBucketLabel(group.bucket)}
-            onToggle={() => toggleRailSection(`sessionListTimeline:${group.bucket}`)}
-          >
-            {renderSessionList(group.sessions)}
-          </ConversationIndexSection>
-        ))}
-      </>
-    );
-    return { groups, renderSessionList };
-  })();
-  const archivedRailSessions = (() => {
-    const fromQuery = archivedSessions.filter((session) => {
-      const cached = sessionsById.get(session.id);
-      return !cached || isSessionArchived(cached);
-    });
-    const known = new Set(fromQuery.map((session) => session.id));
-    const optimistic = allVisibleSessions.filter((session) => (
-      isSessionArchived(session) && !known.has(session.id)
-    ));
-    return [...fromQuery, ...optimistic];
-  })();
+    setSessionContextMenu(null);
+    navigate(agentCenterMemoryRoute({
+      agentId: row.agentId,
+      knowledgeBaseId: row.knowledgeBaseId,
+      returnLabel: "chat",
+      returnTo: `/chat?session=${encodeURIComponent(session.id)}`,
+    }));
+  }, [financialAssistants.data, navigate, setSessionContextMenu]);
+  const sessionReportLibraryOpener = (
+    contextMenuSession && financialAssistants.data?.some((item) =>
+      item.agentId === contextMenuSession.agentId && item.knowledgeBaseId)
+  )
+    ? openSessionReportLibrary
+    : undefined;
   const conversationIndexPanel = (
-    <>
-    <div className={styles.sessionListControlsRow} data-vui="chat-session-list-controls">
-      <VStringSelect
-        ariaLabel={t("sessionListSortAria")}
-        className={styles.sessionListSortSelect}
-        value={sessionListPrefs.sortBy}
-        onValueChange={(value) => setSessionListPrefs((current) => ({
-          ...current,
-          sortBy: normalizeSessionListSortBy(value),
-        }))}
-        options={[
-          { value: "updatedAt", label: t("sessionListSortByUpdated") },
-          { value: "createdAt", label: t("sessionListSortByCreated") },
-        ]}
-      />
-      {showArchivedSessions ? null : (
-        <VIconButton
-          type="button"
-          data-vui="chat-session-timeline-toggle"
-          label={t("sessionListTimelineToggle")}
-          tooltip={t("sessionListTimelineToggle")}
-          aria-pressed={sessionListPrefs.timelineGrouping}
-          onClick={() => setSessionListPrefs((current) => ({
-            ...current,
-            timelineGrouping: !current.timelineGrouping,
-          }))}
-          icon={<ListTree size={16} aria-hidden="true" />}
-        />
-      )}
-    </div>
-    <ChatConversationIndexPanelContent
-      styles={styles}
-      loadingLabel={t("loadingSession")}
-      sessionsErrorMessage={sessionsErrorMessage}
-      sessionComposerSessionsError={sessionComposerErrors.__sessions__}
-      sessionsTransientError={Boolean(sessionsErrorState.transientError)}
-      sessionsBlockingError={Boolean(sessionsErrorState.blockingError)}
+    <ChatConversationIndexPanel
+      activeGroupRoomId={activeGroupRoomId}
+      activeSessionId={activeSessionId}
+      agentContextMenu={agentContextMenu}
+      agentRenameDraft={agentRenameDraft}
+      agentsById={agentsById}
+      allVisibleSessions={allVisibleSessions}
+      allVisibleSessionsSelected={allVisibleSessionsSelected}
+      archiveVisibleAgents={archiveVisibleAgents}
+      archivedSessions={archivedSessions}
+      archivedSessionsPending={archivedSessionsQuery.isPending}
+      archivedTotalEstimate={archivedSessionsQuery.data?.totalEstimate ?? 0}
+      beginRenameSession={beginRenameSession}
+      bulkDeleteSessionsMutation={bulkDeleteSessionsMutation}
+      bulkRemoveSessions={bulkRemoveSessions}
+      bulkSessionPending={bulkSessionPending}
+      cancelAgentRename={cancelAgentRename}
+      cancelRenameSession={cancelRenameSession}
+      clearBulkSessions={clearBulkSessions}
+      collapsedConversationGroups={collapsedConversationGroups}
+      contextMenuAddToReviewDisabled={contextMenuAddToReviewDisabled}
+      contextMenuAddToReviewPending={contextMenuAddToReviewPending}
+      contextMenuAgentArchivePending={contextMenuAgentArchivePending}
+      contextMenuClearHistoryDisabled={contextMenuClearHistoryDisabled}
+      contextMenuClearHistoryPending={contextMenuClearHistoryPending}
+      contextMenuClearHistoryVisible={contextMenuClearHistoryVisible}
+      contextMenuDeleteDisabled={contextMenuDeleteDisabled}
+      contextMenuSession={contextMenuSession}
+      contextMenuSessionId={contextMenuSessionId}
       conversationIndexLoading={conversationIndexLoading}
-      isEmpty={
-        showArchivedSessions
-          ? !archivedSessionsQuery.isPending
-            && archivedSessions.length === 0
-            && allVisibleSessions.every((session) => !isSessionArchived(session) && !(Number(session.pinnedAtMs ?? 0) > 0))
-          : filteredConversations.length === 0
-            && archiveVisibleAgents.length === 0
-            && filteredTeams.length === 0
-            && filteredStandaloneGroupConversations.length === 0
-            && allVisibleSessions.length === 0
-      }
-      emptyTitle={showArchivedSessions ? t("noArchivedSessions") : t("noSessionsYet")}
-    >
-          {sessionListRail.groups}
-          {showArchivedSessions ? (
-            <ArchivedSessionRail
-              sessions={archivedRailSessions}
-              totalCount={Math.max(archivedSessionsQuery.data?.totalEstimate ?? 0, archivedRailSessions.length)}
-              sortBy={sessionListPrefs.sortBy}
-              loading={archivedSessionsQuery.isPending}
-              archivePendingSessionId={
-                sessionArchiveMutation.isPending
-                  ? String(sessionArchiveMutation.variables?.sessionId || "")
-                  : ""
-              }
-              deletePendingSessionId={
-                deleteSessionMutation.isPending
-                  ? String(deleteSessionMutation.variables?.sessionId || "")
-                  : ""
-              }
-              deleteAllPending={bulkDeleteSessionsMutation.isPending}
-              isBusyPhase={isBusyPhase}
-              lang={lang}
-              t={t}
-              onUnarchive={(session) => sessionArchiveMutation.mutate({
-                sessionId: session.id,
-                archive: false,
-              })}
-              onDelete={handleDeleteArchivedSession}
-              onDeleteAll={handleDeleteAllArchivedSessions}
-              renderSessions={sessionListRail.renderSessionList}
-            />
-          ) : null}
-          {showArchivedSessions ? null : <>
-          <AgentConversationDirectory
-            activeAgentId={selectedChatAgentId}
-            activeSessionId={activeSessionId}
-            activeGroupRoomId={activeGroupRoomId}
-            agents={archiveVisibleAgents}
-            avatarInitials={avatarInitials}
-            filterText={directoryFilterText}
-            formatTime={formatConversationIndexTime}
-            lang={lang}
-            resolveModelLabel={resolveModelLabel}
-            runtimeRunningSessionIds={runtimeRunningSessionIds}
-            sessions={allVisibleSessions}
-            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-            statusLabel={statusLabel}
-            teams={teams}
-            teamRoomsByTeamId={teamRoomsByTeamId}
-            onContextMenu={openAgentContextMenu}
-            onOpenAgent={(agent) => {
-              if (!handleOpenAgent(agent)) {
-                handleCreateAgentSession(agent);
-              }
-            }}
-            onOpenGroupRoom={handleOpenGroupRoom}
-          />
-          {agentContextMenu ? (
-            <Suspense fallback={null}>
-              <AgentContextMenu
-                archivePending={contextMenuAgentArchivePending}
-                createPending={createSessionMutation.isPending}
-                renamePending={renameAgentMutation.isPending}
-                lang={lang}
-                state={agentContextMenu}
-                onArchive={handleArchiveAgent}
-                onCreateSession={handleCreateAgentSession}
-                onOpenConfig={handleOpenAgentConfig}
-                onOpenLatest={handleOpenAgentLatestSession}
-                onRename={handleRenameAgent}
-                onDismiss={() => setAgentContextMenu(null)}
-              />
-            </Suspense>
-          ) : null}
-          {agentRenameDraft ? (
-            <Suspense fallback={null}>
-              <AgentRenameDialog
-                draft={agentRenameDraft}
-                lang={lang}
-                pending={renameAgentMutation.isPending}
-                onCancel={cancelAgentRename}
-                onChange={setAgentRenameDraftName}
-                onSubmit={submitAgentRename}
-              />
-            </Suspense>
-          ) : null}
-          {sessionBulkNotice ? (
-            <div className={styles.panelNotice} role="status">{sessionBulkNotice.text}</div>
-          ) : null}
-          <SessionBulkOperationsPanel
-            copy={sessionBulkCopy}
-            selectedCount={selectedBulkSessions.length}
-            visibleCount={visibleDirectSessionIds.length}
-            allVisibleSelected={allVisibleSessionsSelected}
-            pending={bulkSessionPending}
-            onSelectVisible={selectVisibleBulkSessions}
-            onClearSelection={clearBulkSessions}
-            onRemove={() => { void bulkRemoveSessions(); }}
-          />
-          <ConversationIndexTree
-            activeGroupRoomId={activeGroupRoomId}
-            activeSessionId={activeSessionId}
-            addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
-            agentsById={agentsById}
-            avatarImageUrlFrom={avatarImageUrlFrom}
-            avatarInitials={avatarInitials}
-            buildSessionReferencePayload={buildSessionReferencePayload}
-            collapsedConversationGroups={collapsedConversationGroups}
-            contextMenuSessionId={contextMenuSessionId}
-            conversationGroupLabel={conversationGroupLabel}
-            deleteBusyLabel={t("deleteSessionBusy")}
-            editingSessionId={editingSessionId}
-            editingSessionTitle={editingSessionTitle}
-            filteredConversationsCount={groupedGroupConversationCount}
-            filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
-            filteredTeams={filteredTeams}
-            formatTime={formatConversationIndexTime}
-            groupPanelActive={groupPanelActive}
-            groupedConversations={groupedGroupConversations}
-            isBusyPhase={isBusyPhase}
-            lang={lang}
-            renamePending={renameSessionMutation.isPending}
-            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-            resolveModelLabel={resolveModelLabel}
-            runtimeRunningSessionIds={runtimeRunningSessionIds}
-            searchHasTerm={searchHasTerm}
-            sessionComposerErrors={sessionComposerErrors}
-            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-            sessionsById={sessionsById}
-            teams={teams}
-            statusLabel={statusLabel}
-            t={t}
-            onCancelRename={cancelRenameSession}
-            onContextMenu={openSessionContextMenu}
-            onDragReference={startSessionReferenceDrag}
-            onOpenDirectSession={handleOpenDirectSession}
-            onPrefetchDirectSession={handlePrefetchDirectSession}
-            onOpenGroupRoom={handleOpenGroupRoom}
-            onRenameTitleChange={setEditingSessionTitle}
-            onSubmitRename={submitRenameSession}
-            onToggleConversationGroup={toggleConversationGroup}
-            bulkSelectionEnabled
-            selectedBulkSessionIds={selectedBulkSessionIds}
-            bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
-            onToggleBulk={toggleBulkSession}
-          />
-          </>}
-          {sessionContextMenu && contextMenuSession ? (
-            <Suspense fallback={null}>
-              <SessionContextMenu
-                addToReviewDisabled={contextMenuAddToReviewDisabled}
-                addToReviewPending={contextMenuAddToReviewPending}
-                pinDisabled={pinSessionMutation.isPending}
-                pinPending={
-                  pinSessionMutation.isPending
-                  && pinSessionMutation.variables?.sessionId === contextMenuSession.id
-                }
-                clearHistoryDisabled={contextMenuClearHistoryDisabled}
-                clearHistoryPending={contextMenuClearHistoryPending}
-                clearHistoryVisible={contextMenuClearHistoryVisible}
-                deleteDisabled={contextMenuDeleteDisabled}
-                lang={lang}
-                position={sessionContextMenu}
-                session={contextMenuSession}
-                t={t}
-                archiveDisabled={sessionArchiveMutation.isPending}
-                archivePending={
-                  sessionArchiveMutation.isPending
-                  && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id
-                }
-                onAddToReview={handleAddSessionToReview}
-                onArchive={handleArchiveSession}
-                onTogglePin={handleTogglePinSession}
-                onClearHistory={handleClearSessionHistory}
-                onDelete={handleDeleteSession}
-                onOpenAgentConfig={openSessionAgentConfig}
-                onOpenReportLibrary={
-                  contextMenuSession && financialAssistants.data?.some((item) =>
-                    item.agentId === contextMenuSession.agentId && item.knowledgeBaseId)
-                    ? (session) => {
-                        const row = financialAssistants.data?.find((item) => item.agentId === session.agentId);
-                        if (!row?.knowledgeBaseId) {
-                          return;
-                        }
-                        setSessionContextMenu(null);
-                        navigate(agentCenterMemoryRoute({
-                          agentId: row.agentId,
-                          knowledgeBaseId: row.knowledgeBaseId,
-                          returnLabel: "chat",
-                          returnTo: `/chat?session=${encodeURIComponent(session.id)}`,
-                        }));
-                      }
-                    : undefined
-                }
-                onRename={beginRenameSession}
-                onDismiss={() => setSessionContextMenu(null)}
-              />
-            </Suspense>
-          ) : null}
-    </ChatConversationIndexPanelContent>
-    </>
+      createSessionMutation={createSessionMutation}
+      deleteSessionMutation={deleteSessionMutation}
+      directoryFilterText={directoryFilterText}
+      editingSessionId={editingSessionId}
+      editingSessionTitle={editingSessionTitle}
+      filteredConversations={filteredConversations}
+      filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
+      filteredTeams={filteredTeams}
+      formatConversationIndexTime={formatConversationIndexTime}
+      groupPanelActive={groupPanelActive}
+      groupedGroupConversationCount={groupedGroupConversationCount}
+      groupedGroupConversations={groupedGroupConversations}
+      handleAddSessionToReview={handleAddSessionToReview}
+      handleArchiveAgent={handleArchiveAgent}
+      handleArchiveSession={handleArchiveSession}
+      handleClearSessionHistory={handleClearSessionHistory}
+      handleCreateAgentSession={handleCreateAgentSession}
+      handleDeleteAllArchivedSessions={handleDeleteAllArchivedSessions}
+      handleDeleteArchivedSession={handleDeleteArchivedSession}
+      handleDeleteSession={handleDeleteSession}
+      handleOpenAgent={handleOpenAgent}
+      handleOpenAgentConfig={handleOpenAgentConfig}
+      handleOpenAgentLatestSession={handleOpenAgentLatestSession}
+      handleOpenDirectSession={handleOpenDirectSession}
+      handleOpenGroupRoom={handleOpenGroupRoom}
+      handlePrefetchDirectSession={handlePrefetchDirectSession}
+      handleRenameAgent={handleRenameAgent}
+      handleTogglePinSession={handleTogglePinSession}
+      lang={lang}
+      onOpenReportLibrary={sessionReportLibraryOpener}
+      openAgentContextMenu={openAgentContextMenu}
+      openSessionAgentConfig={openSessionAgentConfig}
+      openSessionContextMenu={openSessionContextMenu}
+      pinSessionMutation={pinSessionMutation}
+      railSectionCollapsed={railSectionCollapsed}
+      renameAgentMutation={renameAgentMutation}
+      renameSessionMutation={renameSessionMutation}
+      resolveModelLabel={resolveModelLabel}
+      runtimeRunningSessionIds={runtimeRunningSessionIds}
+      searchHasTerm={searchHasTerm}
+      selectVisibleBulkSessions={selectVisibleBulkSessions}
+      selectedBulkSessionIds={selectedBulkSessionIds}
+      selectedBulkSessions={selectedBulkSessions}
+      selectedChatAgentId={selectedChatAgentId}
+      sessionArchiveMutation={sessionArchiveMutation}
+      sessionBulkCopy={sessionBulkCopy}
+      sessionBulkNotice={sessionBulkNotice}
+      sessionComposerErrors={sessionComposerErrors}
+      sessionContextMenu={sessionContextMenu}
+      sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+      sessionListPrefs={sessionListPrefs}
+      sessionsBlockingError={Boolean(sessionsErrorState.blockingError)}
+      sessionsById={sessionsById}
+      sessionsErrorMessage={sessionsErrorMessage}
+      sessionsTransientError={Boolean(sessionsErrorState.transientError)}
+      setAgentContextMenu={setAgentContextMenu}
+      setAgentRenameDraftName={setAgentRenameDraftName}
+      setEditingSessionTitle={setEditingSessionTitle}
+      setRailSectionCollapsed={setRailSectionCollapsed}
+      setSessionContextMenu={setSessionContextMenu}
+      setSessionListPrefs={setSessionListPrefs}
+      showArchivedSessions={showArchivedSessions}
+      statusLabel={statusLabel}
+      submitAgentRename={submitAgentRename}
+      submitRenameSession={submitRenameSession}
+      t={t}
+      teamRoomsByTeamId={teamRoomsByTeamId}
+      teams={teams}
+      toggleBulkSession={toggleBulkSession}
+      toggleConversationGroup={toggleConversationGroup}
+      visibleDirectSessionIds={visibleDirectSessionIds}
+    />
   );
 
   const openOrdinarySideChat = useCallback((draft: string, sendDraft: boolean) => {

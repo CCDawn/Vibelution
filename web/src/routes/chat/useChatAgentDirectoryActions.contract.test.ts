@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ChatCodingRouteWorkbench.tsx?raw";
+import indexPanelSource from "./ChatConversationIndexPanel.tsx?raw";
 import actionsSource from "./useChatAgentDirectoryActions.ts?raw";
 import sessionMutationsSource from "./useChatSessionMutations.ts?raw";
 
@@ -37,7 +38,7 @@ describe("useChatAgentDirectoryActions contract", () => {
     expect(routeSource).not.toContain("function handleCreateAgent()");
     expect(routeSource).not.toContain("const handleRenameAgent = useCallback");
     expect(routeSource).toContain("handleArchiveAgent");
-    expect(routeSource).toContain("AgentRenameDialog");
+    expect(indexPanelSource).toContain("AgentRenameDialog");
     expect(routeSource).toContain("agentRenameDraft");
     expect(routeSource).toContain("submitAgentRename");
     expect(actionsSource).toContain("const [agentCreateWizardOpen, setAgentCreateWizardOpen]");
