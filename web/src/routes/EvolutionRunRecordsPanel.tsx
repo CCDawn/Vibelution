@@ -372,8 +372,8 @@ export function EvolutionRunRecordsPanel({
 
       {separator}
 
-      <section className={`${VUI_WORKBENCH_PANE_CLASS} min-h-0 min-w-0 flex flex-col`}>
-        <div className={`${styles.runDetailPanel} min-h-0 min-w-0 flex-1`}>
+      <section className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.workbenchDetailPane}`}>
+        <div className={`${styles.runDetailPanel} ${styles.workbenchDetailBody}`}>
           {selectedRun ? (
             <>
               <div className={styles.detailHeader}>

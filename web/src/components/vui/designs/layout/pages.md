@@ -31,7 +31,15 @@ AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workben
 
 ## VWorkbenchFrame
 
+### 功能
+
 持久的窗口内容宿主（`data-vui="workbench-frame"`），位于 Outlet 和其 Suspense 外。AppShell 与 LauncherShell 是两个实际消费者。children 是路由正文，不缓存、不保留已离开的业务页面，不管理 Session、查询或尺寸持久化。
+
+### 适用范围
+
+用于窗口级路由内容区。内部编辑器与画布沿用所属 recipe，不再增加第二个 Frame。
+
+### 使用方式
 
 | Prop | 说明 |
 | --- | --- |

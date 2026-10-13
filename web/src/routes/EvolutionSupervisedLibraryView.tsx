@@ -675,12 +675,12 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
 
             <VSurface
               as="section"
-              className={`${VUI_WORKBENCH_PANE_CLASS} min-h-0 min-w-0 flex flex-col`}
+              className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.workbenchDetailPane}`}
               elevation="panel"
               padding="none"
               tone="panel"
             >
-              <div className={`${styles.detailPanel} min-h-0 min-w-0 flex-1`}>
+              <div className={`${styles.detailPanel} ${styles.workbenchDetailBody}`}>
                 {selectedProposalSummary ? (
                   selectedProposalIsSelfCandidate ? (
                     renderSelfEvolutionCandidateDetail(selectedProposalSummary)
