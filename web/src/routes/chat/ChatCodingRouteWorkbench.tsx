@@ -55,6 +55,7 @@ import {
   type ChatRightRailModel,
 } from "./chatRightRailModel";
 import { requestChatRightRailOpen, subscribeChatRightRailOpen } from "./chatRightRailRequests";
+import { useChatComposerTransientState } from "./useChatComposerTransientState";
 import { useChatRailPreview } from "./useChatRailPreview";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -343,8 +344,6 @@ import {
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
   moveStoredSessionDraft,
-  readStoredSessionDraftState,
-  removeStoredSessionDraft,
   scheduleSessionDraftMetaSave,
 } from "./chatDraftPersistence";
 import { rekeySessionComposerEntry } from "../chatComposerState";
@@ -353,15 +352,12 @@ import {
   buildKnowledgeBaseReferencePayload,
   buildKnowledgeItemReferencePayload,
   buildSessionReferencePayload,
-  clearSessionImageAttachments,
-  clearSessionReferenceAttachments,
   clearUnsupportedSessionImageAttachments,
   readStoredMentalModelToggle,
   readStoredPromptSuggestionToggle,
   readStoredRuntimeStatusToggle,
   startSessionReferenceDrag,
   writeStoredPromptSuggestionToggle,
-  type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import styles from "../ChatCodingRoute.styles";
 
@@ -462,12 +458,6 @@ export function ChatCodingRouteWorkbench() {
   }, [sessionListPrefs]);
   const sessionListSort = sessionListSortQueryValue(sessionListPrefs.sortBy);
   const [railSectionCollapsed, setRailSectionCollapsed] = useState<Record<string, boolean>>({});
-  const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
-  // One storage read hydrates text + rich draft fields (per-turn model
-  // selection and reference chips) for every remembered session.
-  const [storedDraftState] = useState(() => readStoredSessionDraftState());
-  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(storedDraftState.drafts);
-  const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
   const requestSessionComposerFocus = useCallback((sessionId: string) => {
@@ -488,10 +478,7 @@ export function ChatCodingRouteWorkbench() {
         : current
     ));
   }, []);
-  const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({});
   const rebaseComposerPreviewOwnersRef = useRef<((fromSessionId: string, toSessionId: string) => void) | null>(null);
-  const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>(storedDraftState.referenceAttachments);
-  const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const editingSessionIdRef = useRef<string | null>(null);
@@ -518,6 +505,24 @@ export function ChatCodingRouteWorkbench() {
   // The workbench itself re-renders only on the primitive signals below.
   const activeTurnLayersStore = useMemo(() => createActiveTurnLayersStore(), []);
   const { setActiveTurnLayersBySession, activeTurnLayersBySessionRef } = activeTurnLayersStore;
+  const {
+    storedDraftState,
+    sessionDrafts,
+    setSessionDrafts,
+    sessionComposerErrors,
+    setSessionComposerErrors,
+    sessionImageAttachments,
+    setSessionImageAttachments,
+    sessionReferenceAttachments,
+    setSessionReferenceAttachments,
+    sessionImageUploadPending,
+    setSessionImageUploadPending,
+    imageUploadInFlightRef,
+    clearSessionTransientUiState,
+  } = useChatComposerTransientState({
+    queryClient,
+    setActiveTurnLayersBySession,
+  });
 
   useEffect(() => {
     editingSessionIdRef.current = editingSessionId;
@@ -1065,36 +1070,6 @@ export function ChatCodingRouteWorkbench() {
       }));
     },
   });
-  const clearSessionTransientUiState = useCallback(
-    (sessionId: string) => {
-      const normalizedSessionId = String(sessionId || "").trim();
-      if (!normalizedSessionId) {
-        return;
-      }
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, normalizedSessionId, undefined)
-      );
-      setSessionDrafts((current) => {
-        const { [normalizedSessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      removeStoredSessionDraft(normalizedSessionId);
-      setSessionImageAttachments((current) => clearSessionImageAttachments(current, normalizedSessionId));
-      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, normalizedSessionId));
-      delete imageUploadInFlightRef.current[normalizedSessionId];
-      setSessionImageUploadPending((current) => {
-        const { [normalizedSessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      setSessionComposerErrors((current) => {
-        const { [normalizedSessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      void queryClient.cancelQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true });
-      queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true });
-    },
-    [queryClient],
-  );
   const { selectDirectSessionMutation } = useChatSessionSelection({
     queryClient,
     chatWorkspaceCache,
