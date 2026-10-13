@@ -77,7 +77,7 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute contextCompositionSegmentUser min-w-0 ${vuiStateWarmSoftClass}`,
   contextLineCompact: `vui-routes-chatcodingroute contextLineCompact min-w-0 ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] leading-snug shadow-none [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden [overflow-wrap:anywhere]`,
   layout:
-    `vui-routes-chatcodingroute layout relative w-full min-w-0 grid !gap-0 !p-0 ${vuiRailFillClass} [--vui-surface-rail:var(--shell-surface)] [--chat-workbench-gap:4px] [--chat-pane-gutter:0px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]`,
+    `vui-routes-chatcodingroute layout relative w-full min-w-0 grid !gap-0 !p-0 ${vuiRailFillClass} [--vui-surface-rail:var(--shell-surface)] [--pane-resize-rule-color:var(--fg-primary)] [--chat-workbench-gap:4px] [--chat-pane-gutter:0px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]`,
   layoutCompactDesktop:
     "vui-routes-chatcodingroute layoutCompactDesktop w-full grid min-w-0 grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)] overflow-hidden",
   layoutStatusRailCollapsed:
@@ -120,9 +120,9 @@ const styles: Record<string, string> = {
   panelState:
     "vui-routes-chatcodingroute panelState min-h-[72px] place-items-center !content-center !text-center",
   resizeHandleLeft:
-    "vui-routes-chatcodingroute resizeHandleLeft h-full w-full min-w-0 max-[860px]:block [grid-column:2] [grid-row:1]",
+    "vui-routes-chatcodingroute resizeHandleLeft h-full w-full min-w-0 max-[860px]:block [--pane-resize-rule-offset:4.5px] [--pane-resize-rule-top:12px] [--pane-resize-rule-bottom:16px] [grid-column:2] [grid-row:1]",
   resizeHandleRight:
-    "vui-routes-chatcodingroute resizeHandleRight h-full w-full min-w-0 max-[860px]:block [grid-column:4] [grid-row:1]",
+    "vui-routes-chatcodingroute resizeHandleRight h-full w-full min-w-0 max-[860px]:block [--pane-resize-rule-offset:-4.5px] [--pane-resize-rule-top:12px] [--pane-resize-rule-bottom:16px] [grid-column:4] [grid-row:1]",
   resourceMetric:
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:
