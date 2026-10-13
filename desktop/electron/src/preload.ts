@@ -9,7 +9,9 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
   ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
     controlDesktopPet: (open?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open),
-    requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger)
+    requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger),
+    getLauncherFreshness: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherFreshness),
+    showLauncherWindow: () => ipcRenderer.invoke(IPC_CHANNELS.showLauncherWindow)
   } : {}),
   focusWorkbenchWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbenchWindow),
   requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit),
