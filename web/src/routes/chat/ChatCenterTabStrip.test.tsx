@@ -43,7 +43,7 @@ describe("ChatCenterTabStrip return navigation", () => {
     expect(html).toContain("会话操作");
     expect(html).not.toContain("<img");
 
-    const controlsRow = html.match(/<div class="overlay-controls">([\s\S]*?)<\/div>/)?.[1] ?? "";
+    const controlsRow = html.match(/<div class="overlay-controls"[^>]*>([\s\S]*?)<\/div>/)?.[1] ?? "";
     expect(controlsRow).toContain('aria-label="浏览会话"');
     expect(controlsRow).toContain('aria-label="会话操作"');
   });
@@ -62,7 +62,7 @@ describe("ChatCenterTabStrip return navigation", () => {
     );
 
     expect(html).toContain('id="chat-status-toggle"');
-    expect(html).toContain('aria-label="侧栏"');
+    expect(html).toContain('aria-label="收起侧栏"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-controls="chat-status-pane"');
     expect(html).toMatch(/class="[^"]*toolbar-icon[^"]*"/);

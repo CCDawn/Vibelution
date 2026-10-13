@@ -109,7 +109,7 @@ export function ChatCenterTabStrip({
         {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
       {sessionBrowserControl || sessionActionsControl || !leftOverlayVisible || showRightToggle ? (
-        <div className={styles.overlayPaneControls}>
+        <div className={styles.overlayPaneControls} role="group" aria-label={lang === "zh" ? "会话视图与操作" : "Session views and actions"}>
           {sessionBrowserControl}
           {!leftOverlayVisible ? (
             <VButton
@@ -125,7 +125,8 @@ export function ChatCenterTabStrip({
           ) : null}
           {showRightToggle && rightRailLabel ? <VIconButton
             id="chat-status-toggle"
-            label={rightRailLabel}
+            label={lang === "zh" ? `${railOpen ? "收起" : "展开"}${rightRailLabel}` : `${railOpen ? "Collapse" : "Expand"} ${rightRailLabel}`}
+            tooltip={rightRailLabel}
             className={styles.toolbarIconButton}
             aria-expanded={railOpen}
             aria-controls="chat-status-pane"

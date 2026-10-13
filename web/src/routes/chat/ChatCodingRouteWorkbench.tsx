@@ -4223,7 +4223,8 @@ export function ChatCodingRouteWorkbench() {
   });
 
   const headerExportVisible = !verifiedCompanionMode && !groupPanelActive && !financeSurface
-    && !sessionBrowserVisible && conversationWorkspaceTab === "agent" && Boolean(conversationModel);
+    && !sessionBrowserVisible && conversationWorkspaceTab === "agent" && Boolean(conversationModel)
+    && !activeCliAgentRunId && !sessionDetailErrorState.blockingError && !invalidChildSessionLinkMessage;
 
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
