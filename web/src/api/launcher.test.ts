@@ -8,6 +8,9 @@ import {
   requestBranchInstanceCleanup,
   requestBranchInstanceLifecycle,
   getLauncherStatus,
+  getLauncherFreshness,
+  hasLauncherFreshnessBridge,
+  showLauncherWindow,
   getLauncherState,
   onLauncherStateChanged,
   refreshLauncherState,
@@ -41,6 +44,27 @@ function stubLauncherIpcBridge(invoke: (payload: unknown) => Promise<LauncherIpc
 }
 
 describe("launcher api helpers", () => {
+  it("reads Launcher freshness and opens its window through narrow workbench capabilities", async () => {
+    vi.stubGlobal("window", {});
+    const freshness = { current: false, label: "stale", shellStale: true };
+    const getFreshness = vi.fn().mockResolvedValue(freshness);
+    const showWindow = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("vibelutionLauncher", { getLauncherFreshness: getFreshness, showLauncherWindow: showWindow });
+    expect(hasLauncherFreshnessBridge()).toBe(true);
+    expect(await getLauncherFreshness()).toEqual(freshness);
+    await showLauncherWindow();
+    expect(showWindow).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not expose freshness or window navigation on an older workbench bridge", async () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("vibelutionLauncher", { requestWorkbenchRestart: vi.fn() });
+    expect(hasLauncherFreshnessBridge()).toBe(false);
+    await expect(showLauncherWindow()).rejects.toThrow("Launcher window bridge is unavailable");
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

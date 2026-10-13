@@ -387,13 +387,13 @@ export function LauncherBranchInstancesPanel({
     // progress instead of a frozen button.
     const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy;
     const showStop = canStopInstance(item, pendingOperation) || stopBusy;
-    // Reachability (confirm dialog + dispatch) stays with canForceStopInstance;
-    // the verified liveness tier only decides where and how loudly the row
-    // presents the action. A backend-verified dead spawn leaves the row and
-    // lives only in the overflow menu.
-    const forceStopTierValue = forceStopTier(item);
+    // Reachability (confirm dialog + dispatch) stays with canForceStopInstance.
+    // A row shown as stopped, with no live backend or window, does not offer
+    // force-stop. Live and in-flight rows keep the red button. A verified-dead
+    // spawn that is not shown as stopped stays in the overflow menu.
+    const forceStopTierValue = forceStopTier(item, pendingOperation);
     const forceStopMenuOnly = canForceStopInstance(item) && forceStopTierValue === "menu";
-    const showForceStop = canForceStopInstance(item) && !forceStopMenuOnly;
+    const showForceStop = canForceStopInstance(item) && (forceStopTierValue === "danger" || forceStopTierValue === "secondary");
     const requestOpen = () => {
       if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id)) {
         return;
