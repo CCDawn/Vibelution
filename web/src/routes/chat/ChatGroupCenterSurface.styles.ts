@@ -40,8 +40,12 @@ const styles = {
     "vui-routes-chatcodingroute groupEmptyState grid min-h-[min(220px,calc(100dvh_-_260px))] min-w-0 place-items-center px-6 text-center [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_svg]:mb-2 [&_svg]:text-[var(--accent-cool)]",
   groupMessageList:
     "vui-routes-chatcodingroute groupMessageList min-w-0 grid content-start gap-3 [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  groupTimelineHost:
+    "vui-routes-chatcodingroute groupTimelineHost relative grid min-h-0 min-w-0",
+  groupBackToBottom:
+    "vui-routes-chatcodingroute groupBackToBottom absolute bottom-3 right-3 z-20 inline-flex size-8 min-w-0 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-0 text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[10px] transition-[color,background-color,border-color,box-shadow,opacity] duration-150 hover:border-[var(--vui-control-hover-border)] hover:bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] motion-reduce:transition-none",
   groupMessageTimeline:
-    "vui-routes-chatcodingroute groupMessageTimeline min-w-0 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-7 pb-6 pt-2 max-[600px]:px-4 [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute groupMessageTimeline min-w-0 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-7 pb-6 pt-2 max-[600px]:px-4 [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [scrollbar-gutter:stable] [&>*]:mx-auto [&>*]:w-full [&>*]:max-w-[830px]",
   groupRefreshButton:
     `vui-routes-chatcodingroute groupRefreshButton min-w-0 ${vuiControlQuietClass}`,
   groupRoundBlock: "vui-routes-chatcodingroute groupRoundBlock mx-auto w-full max-w-[860px] min-w-0",
@@ -54,10 +58,11 @@ const styles = {
   groupResultCopy: "mt-2 break-words [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   groupStopButton:
     `vui-routes-chatcodingroute groupStopButton min-w-0 !min-h-11 ${vuiControlQuietClass}`,
-  groupTopicComposer: "min-w-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-7 pb-4 pt-4 max-[600px]:px-3 max-[600px]:py-3 [&>div]:mx-auto [&>div]:max-w-[860px]",
-  groupTopicComposerField: "rounded-xl border border-[var(--vui-border-subtle)] focus-within:ring-2 focus-within:ring-[var(--vui-border-strong)]",
+  groupTopicComposer: "min-w-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-7 pb-4 pt-4 max-[600px]:px-3 max-[600px]:py-3 [&>div]:mx-auto [&>div]:max-w-[830px]",
+  // Codex composer-shell parity: framed field, accent focus border, quiet toolbar.
+  groupTopicComposerField: "rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-none focus-within:border-[var(--accent-cool)]",
   groupTopicInput: "!min-h-[72px] !w-full !resize-none !rounded-xl !border-0 !bg-transparent !px-4 !py-3 [font-size:var(--vui-font-md)] !shadow-none",
-  groupTopicComposerActions: "flex min-w-0 items-center justify-between gap-2 px-2 pb-2 [&_button]:!min-h-11",
+  groupTopicComposerActions: "flex min-w-0 items-center justify-between gap-2 px-2 pb-1.5",
   groupComposerFootnote: "mt-2 flex justify-between gap-3 text-vui-2xs text-[var(--fg-tertiary)] max-[600px]:[&>span:last-child]:hidden",
   groupMembers: "grid divide-y divide-[var(--vui-border-subtle)]",
   groupMemberRow: "flex min-w-0 items-center gap-3 py-4",

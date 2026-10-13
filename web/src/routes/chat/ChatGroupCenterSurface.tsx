@@ -127,6 +127,9 @@ export type ChatGroupCenterSurfaceProps = {
   onStopGroupRound: () => void;
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
+  /** Ordinary-chat parity: workspace file links open in the right rail. */
+  workspaceRoot?: string;
+  onOpenRailFile?: (path: string) => void;
   onOpenGroupTeam?: () => void;
   onManageGroupRoom?: () => void;
   artifactTeamId?: string;
@@ -217,6 +220,8 @@ function GroupRoundsTimeline({
   groupSpeakerProgress,
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
+  workspaceRoot,
+  onOpenRailFile,
   onOpenArtifacts,
 }: {
   items: GroupTimelineItem[];
@@ -236,6 +241,8 @@ function GroupRoundsTimeline({
   groupSpeakerProgress?: GroupSpeakerProgressMap;
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
+  workspaceRoot?: string;
+  onOpenRailFile?: (path: string) => void;
   onOpenArtifacts?: (taskIds: string[], trigger: HTMLElement) => void;
 }) {
   const transcriptPrefix = useId();
@@ -420,6 +427,8 @@ function GroupRoundsTimeline({
                             mentionTargets={chatMentionTargets}
                             onOpenMentionTarget={onOpenMentionTarget}
                             onToggleExpanded={onToggleExpandedGroupMessage}
+                            workspaceRoot={workspaceRoot}
+                            onOpenRailFile={onOpenRailFile}
                           />
                         </div>
                       </article>
@@ -519,6 +528,8 @@ function GroupRoundsTimeline({
                           mentionTargets={chatMentionTargets}
                           onOpenMentionTarget={onOpenMentionTarget}
                           onToggleExpanded={onToggleExpandedGroupMessage}
+                          workspaceRoot={workspaceRoot}
+                          onOpenRailFile={onOpenRailFile}
                         />
                       </div>
                     ) : progress.state === "running" && typingStale ? (
@@ -621,6 +632,8 @@ export function ChatGroupCenterSurface({
   onStopGroupRound,
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
+  workspaceRoot,
+  onOpenRailFile,
   onOpenGroupTeam,
   onManageGroupRoom,
   artifactTeamId,
@@ -665,6 +678,7 @@ export function ChatGroupCenterSurface({
   const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
   const streamedLength = Object.values(groupSpeakerStreams ?? {}).reduce((sum, speakers) => sum + Object.values(speakers).reduce((length, speaker) => length + speaker.content.length, 0), 0);
   const groupTimelineRef = useRef<HTMLDivElement | null>(null);
+  const [groupBackToBottomVisible, setGroupBackToBottomVisible] = useState(false);
   const groupTimelineFollowingRef = useRef(true);
   const groupTimelineOpenedRoomIdRef = useRef<string | null>(null);
   const projectBusInitialLoading = projectBusRefreshing && !projectBusTimeline;
@@ -906,8 +920,9 @@ export function ChatGroupCenterSurface({
           </div>
         )}
       />
+      <div className={styles.groupTimelineHost}>
       <div ref={groupTimelineRef} className={styles.groupMessageTimeline} role="log" aria-label={lang === "zh" ? "团队发言" : "Team messages"} aria-live="polite" aria-relevant="additions text"
-        onScroll={(event) => { const element = event.currentTarget; groupTimelineFollowingRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 180; }}>
+        onScroll={(event) => { const element = event.currentTarget; const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 180; groupTimelineFollowingRef.current = atBottom; setGroupBackToBottomVisible((current) => current === !atBottom ? current : !atBottom); }}>
         {groupRoomRefreshError ? <div className={styles.inlineNotice} role="alert">{groupRoomRefreshError}</div> : null}
         {groupRoundStopping ? <p className={styles.groupTypingStaleNote} role="status">{lang === "zh" ? "正在停止，已有发言会保留。" : "Stopping. Existing messages will be kept."}</p> : null}
         {timelineItems.length ? (
@@ -930,6 +945,8 @@ export function ChatGroupCenterSurface({
               groupSpeakerProgress={groupSpeakerProgress}
               onOpenMentionTarget={onOpenMentionTarget}
               onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
+              workspaceRoot={workspaceRoot}
+              onOpenRailFile={onOpenRailFile}
               onOpenArtifacts={artifactTeamId ? (taskIds, trigger) => {
                 artifactTriggerRef.current = trigger;
                 setArtifactSelection({ roomId: activeGroupRoomId, teamId: artifactTeamId, taskIds });
@@ -962,6 +979,23 @@ export function ChatGroupCenterSurface({
             </p>
           </div>
         )}
+      </div>
+      {groupBackToBottomVisible ? (
+        <VButton
+          type="button"
+          isIconOnly
+          className={styles.groupBackToBottom}
+          aria-label={lang === "zh" ? "回到底部" : "Back to bottom"}
+          title={lang === "zh" ? "回到底部" : "Back to bottom"}
+          icon={<ArrowUp size={16} className="rotate-180" />}
+          onClick={() => {
+            const element = groupTimelineRef.current;
+            if (element) {
+              element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
+            }
+          }}
+        />
+      ) : null}
       </div>
       <div className={styles.groupTopicComposer}>
         {groupRoomActionError ? <div className={styles.inlineNotice} role="alert">{groupRoomActionError}</div> : null}

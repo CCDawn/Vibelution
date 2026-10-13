@@ -122,6 +122,16 @@ describe("chat right rail model", () => {
     expect(chatRightRailLauncherKinds("child")).not.toContain("side");
   });
 
+  it("keeps review, terminal, browser and devtools for group rooms but hides side chats", () => {
+    expect(chatRightRailLauncherKinds("group")).toEqual([
+      "review",
+      "terminal",
+      "browser",
+      "devtools",
+    ]);
+    expect(chatRightRailLauncherKinds("group")).not.toContain("side");
+  });
+
   it("reuses one tab for review, terminal, browser, devtools, side, and the directory", () => {
     const once = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "review", title: "审查" });
     const twice = openChatRightRailTab(once, { kind: "review", title: "审查" });

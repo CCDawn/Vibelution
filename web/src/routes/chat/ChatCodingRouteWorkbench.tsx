@@ -1676,7 +1676,10 @@ export function ChatCodingRouteWorkbench() {
   const activeCliAgentRunId = cliAgentRunIdFromTabId(workspace.activeTab);
   const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;
   const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
-  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
+  // Group rooms share the ordinary right rail (review/git, file preview,
+  // devtools); session-scoped kinds (side chats, subagent directory) stay
+  // hidden through the launcher filter, and rail state keys off the room id.
+  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface;
   const {
     fileContentQuery,
     changeRail,
@@ -1694,7 +1697,7 @@ export function ChatCodingRouteWorkbench() {
     setReviewPick,
     changePreview,
   } = useChatRailPreview({
-    activeSessionId,
+    activeSessionId: groupPanelActive ? `group:${activeGroupRoomId}` : activeSessionId,
     activeFilePath,
     workspace,
     changedFileList,
@@ -3509,9 +3512,11 @@ export function ChatCodingRouteWorkbench() {
   ]);
 
   const openOrdinaryRailFile = useCallback((path: string) => {
-    const requestSessionId = activeSessionId?.trim() || "";
     const filePath = path.trim();
-    if (!ordinaryChangeRail || !requestSessionId || detail?.sessionKind === "child" || !filePath) {
+    const requestSessionId = groupPanelActive
+      ? `group:${activeGroupRoomId}`
+      : (activeSessionId?.trim() || "");
+    if (!ordinaryChangeRail || !requestSessionId || (!groupPanelActive && detail?.sessionKind === "child") || !filePath) {
       return;
     }
     const title = filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
@@ -3521,7 +3526,7 @@ export function ChatCodingRouteWorkbench() {
       title,
       filePath,
     });
-  }, [activeSessionId, detail?.sessionKind, ordinaryChangeRail]);
+  }, [activeGroupRoomId, activeSessionId, detail?.sessionKind, groupPanelActive, ordinaryChangeRail]);
 
   // Conversation surface model, memoized so unrelated workbench renders (rails,
   // dialogs, composer state) do not re-render ConversationView: the memo gate
@@ -3845,8 +3850,8 @@ export function ChatCodingRouteWorkbench() {
       <ChatRightRail
         className={statusRailClassName}
         lang={lang}
-        sessionId={activeSessionId ?? ""}
-        sessionKind={detail?.sessionKind}
+        sessionId={groupPanelActive ? "" : (activeSessionId ?? "")}
+        sessionKind={groupPanelActive ? "group" : detail?.sessionKind}
         model={railModel}
         onModelChange={updateRailModel}
         onCollapse={toggleChangeRail}
@@ -3863,7 +3868,7 @@ export function ChatCodingRouteWorkbench() {
             openPreviewTab(activeSessionId, path);
           }
         }}
-        preface={<FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
+        preface={groupPanelActive ? null : <FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
         review={{
           sessionTitle: lang === "zh" ? "这次对话" : "This chat",
           sessionEmptyLabel: lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet",
@@ -3897,11 +3902,12 @@ export function ChatCodingRouteWorkbench() {
             openPreviewTab(activeSessionId, path);
           },
           onSelectGitFile: (path) => {
-            if (!activeSessionId) {
+            const reviewKey = groupPanelActive ? `group:${activeGroupRoomId}` : activeSessionId;
+            if (!reviewKey) {
               return;
             }
             gitRail.selectPath(path);
-            setReviewPick({ sessionId: activeSessionId, source: "git", path });
+            setReviewPick({ sessionId: reviewKey, source: "git", path });
           },
         }}
       />
@@ -4143,6 +4149,8 @@ export function ChatCodingRouteWorkbench() {
                     : [...current, messageId],
                 )
               }
+              workspaceRoot={detail?.workspaceRoot || detail?.workspacePath || directSessionActiveSummary?.workspacePath || undefined}
+              onOpenRailFile={openOrdinaryRailFile}
             />
             )}
             sessionWorkspace={(
