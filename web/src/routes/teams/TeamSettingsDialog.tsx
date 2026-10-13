@@ -14,6 +14,7 @@ import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
 import { VButton, VConfirmDialog, VDialog, VNativeInput, VSelect, VStatusChip, VTextarea } from "../../components/vui";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import {
+  addTeamSettingsMemberDraft,
   buildTeamSettingsPayload,
   createTeamSettingsDraft,
   TEAM_MEMBER_ROLE_MAX_LENGTH,
@@ -109,7 +110,7 @@ export function TeamSettingsDialog({
     if (!draft.addAgentId) {
       return;
     }
-    setDraft((current) => ({ ...current, addAgentId: "" }));
+    setDraft(addTeamSettingsMemberDraft);
   };
 
   return (
@@ -169,6 +170,7 @@ export function TeamSettingsDialog({
             {draft.members.length === 0 ? <p className={styles.sectionHint}>{copy.emptyMembers}</p> : null}
             {draft.members.map((member) => {
               const memberRef = team.members.find((item) => item.memberId === member.memberId);
+              const memberAgentName = memberRef?.agentName || agentsById.get(member.agentId)?.displayName || member.agentId;
               const modelStatus = teamMemberModelStatus(
                 memberRef ?? ({ agentId: member.agentId } as Team["members"][number]),
                 agentsById,
@@ -187,7 +189,7 @@ export function TeamSettingsDialog({
                         maxLength={TEAM_MEMBER_ROLE_MAX_LENGTH}
                         placeholder={copy.memberRoleFallback}
                         disabled={locked || pending || member.remove}
-                        aria-label={`${copy.memberRoleLabel} · ${memberRef?.agentName || member.agentId}`}
+                        aria-label={`${copy.memberRoleLabel} · ${memberAgentName}`}
                         onChange={(event) => patchMember(member.memberId, { role: event.target.value })}
                       />
                     </label>
@@ -208,7 +210,7 @@ export function TeamSettingsDialog({
                         value={member.purpose}
                         rows={2}
                         isDisabled={locked || pending || member.remove}
-                        aria-label={`${copy.memberPurposeLabel} · ${memberRef?.agentName || member.agentId}`}
+                        aria-label={`${copy.memberPurposeLabel} · ${memberAgentName}`}
                         onChange={(event) => patchMember(member.memberId, { purpose: event.target.value })}
                       />
                     </label>
@@ -219,7 +221,7 @@ export function TeamSettingsDialog({
                         rows={2}
                         placeholder={copy.memberResponsibilitiesPlaceholder}
                         isDisabled={locked || pending || member.remove}
-                        aria-label={`${copy.memberResponsibilitiesLabel} · ${memberRef?.agentName || member.agentId}`}
+                        aria-label={`${copy.memberResponsibilitiesLabel} · ${memberAgentName}`}
                         onChange={(event) => patchMember(member.memberId, { responsibilitiesText: event.target.value })}
                       />
                     </label>
