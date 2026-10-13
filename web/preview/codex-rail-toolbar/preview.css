@@ -26,12 +26,15 @@
 .preview-center { height:calc(100% - 4px); margin:0 4px 4px; display:flex; flex-direction:column; min-width:0; }
 .preview-tab-strip { display:flex; align-items:center; height:44px; flex-shrink:0; gap:3px; padding:0 4px; min-width:0; }
 .preview-session-tabs { display:flex; align-items:flex-end; height:100%; flex:1; min-width:0; gap:2px; overflow:hidden; }
-.codex-alignment-preview .preview-session-tab { min-width:0; max-width:220px; height:32px; min-height:32px; padding:0 9px; gap:8px; border:0; border-radius:8px 8px 0 0; background:#fff; background-image:none; box-shadow:none; font-size:13px; font-weight:500; }
+.codex-alignment-preview .preview-session-tab { min-width:0; max-width:216px; height:32px; min-height:32px; padding:0 10px; gap:8px; border:0; border-radius:8px 8px 0 0; background:transparent; background-image:none; box-shadow:none; font-size:13px; font-weight:400; color:#6e7277; }
+.codex-alignment-preview .preview-session-tab-active { background:#fff; color:#303338; font-weight:400; }
 .preview-session-tab span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .preview-session-tab > :last-child { margin-left:8px; color:#75787c; }
 .preview-tab-add { align-self:center; }
-.preview-controls { display:flex; align-items:center; flex-shrink:0; }
+.preview-controls { display:flex; align-items:center; flex-shrink:0; gap:2px; }
 .codex-alignment-preview .preview-controls .preview-toggle { font-size:0!important; width:28px!important; min-width:28px!important; padding:0!important; gap:0!important; }
+.codex-alignment-preview .preview-controls .preview-toggle-active { background:transparent!important; }
+.codex-alignment-preview .preview-browse { width:28px!important; min-width:28px!important; padding:0!important; }
 .codex-alignment-preview .preview-toggle-active { background:#dcdfe1!important; color:#282a2e!important; }
 .preview-main-body { position:relative; flex:1; min-height:0; background:#fff; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; }
 .preview-body-tools { display:flex; height:32px; flex-shrink:0; justify-content:flex-end; padding:2px 12px; }
@@ -75,6 +78,9 @@
 .preview-real-rail .launcherList li:nth-child(3) .launcherButton:before { background-image:var(--launcher-icon-3); }
 .preview-real-rail .launcherList li:nth-child(4) .launcherButton:before { background-image:var(--launcher-icon-4); }
 .preview-real-rail .launcherList li:nth-child(5) .launcherButton:before { background-image:var(--launcher-icon-5); }
+.preview-real-rail .launcherList li:nth-child(6) .launcherButton:before { background-image:var(--launcher-icon-6); }
+.preview-real-rail .launcherList li:nth-child(7) .launcherButton:before { background-image:var(--launcher-icon-7); }
+.preview-real-rail .launcherList li:nth-child(8) .launcherButton:before { background-image:var(--launcher-icon-8); }
 .preview-real-rail .metrics { padding:18px 16px; gap:0; }
 .preview-real-rail .metric { padding:12px 0; border-bottom:1px solid #f0f0f0; font-size:13px; }
 .preview-real-rail .metricValue { font-weight:500; }
