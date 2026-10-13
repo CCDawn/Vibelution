@@ -1,7 +1,7 @@
 import { Archive, EyeOff, LayoutDashboard, Pencil, Settings2 } from "lucide-react";
 import type { Team } from "../../api/types";
 import { VDropdownMenu, type VDropdownMenuItem } from "../../components/vui";
-import styles from "../AgentContextMenu.styles";
+import styles from "./TeamContextMenu.styles";
 import { isReadOnlyTeam } from "./TeamSettingsDialog";
 
 export type TeamContextMenuState = { x: number; y: number; team: Team };

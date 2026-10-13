@@ -8,6 +8,7 @@ import { VButton, VConfirmDialog, VDialog, VNativeInput } from "../../components
 import { isReadOnlyTeam, TeamSettingsDialog } from "../teams/TeamSettingsDialog";
 import { useTeamSettingsActions } from "../teams/useTeamSettingsActions";
 import type { TeamDirectoryAction } from "./useTeamDirectoryManagement";
+import styles from "./TeamDirectoryManagementOverlay.styles";
 
 type Props = { action: TeamDirectoryAction; team: Team | null; teams: Team[]; lang: "zh" | "en"; onClose: () => void };
 
@@ -52,7 +53,7 @@ export function TeamDirectoryManagementOverlay({ action, team, teams, lang, onCl
     submitted.current = true;
     submit();
   };
-  const error = settings.errorMessage ? <p role="alert" className="text-sm text-destructive">{settings.errorMessage}</p> : null;
+  const error = settings.errorMessage ? <p role="alert" className={styles.error}>{settings.errorMessage}</p> : null;
 
   if (action.mode === "settings") {
     if (!detail.data || !workspace.data) {
@@ -88,7 +89,7 @@ export function TeamDirectoryManagementOverlay({ action, team, teams, lang, onCl
       <VButton variant="secondary" isDisabled={pending} onPress={close}>{zh ? "取消" : "Cancel"}</VButton>
       <VButton variant="primary" isDisabled={!canSave} isPending={pending} onPress={rename}>{zh ? "保存" : "Save"}</VButton>
     </>}>
-    <label htmlFor={nameId} className="sr-only">{zh ? "团队名称" : "Team name"}</label>
+    <label htmlFor={nameId} className={styles.accessibleLabel}>{zh ? "团队名称" : "Team name"}</label>
     <VNativeInput ref={inputRef} id={nameId} value={name} maxLength={160} disabled={locked || pending}
       autoComplete="off" onChange={(event) => setName(event.target.value)}
       onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); rename(); } }} />

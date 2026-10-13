@@ -8,6 +8,10 @@ const styles = {
     "agentSection grid min-w-0 gap-0.5 [&>button]:min-h-[34px] [&>button]:font-medium [&>button]:!text-vui-fg-secondary [&>button]:[font-size:var(--vui-font-2xs)] [&>div]:gap-0.5 [&>div]:pl-0",
   agentDirectoryList:
     "agentDirectoryList grid min-w-0 gap-0.5",
+  hiddenTeamEntry: "w-full justify-start",
+  hiddenTeamList: "flex flex-col gap-2",
+  hiddenTeamRow: "flex items-center justify-between gap-3",
+  hiddenTeamName: "min-w-0 truncate",
   agentRoomHistory:
     "agentRoomHistory grid min-w-0 gap-0.5 pl-1 [&>button]:min-h-8 [&>button]:font-medium [&>button]:[font-size:var(--vui-font-xs)] [&>div]:gap-0.5 [&>div]:pl-0",
   agentRoomHistoryTopic:

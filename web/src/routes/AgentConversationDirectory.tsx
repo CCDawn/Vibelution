@@ -487,16 +487,16 @@ export function AgentConversationDirectory({
             : (lang === "zh" ? "暂无可用 Agent。新建 Agent 后可在其下建立多个会话。" : "No available Agents. Create an Agent, then add sessions under it.")}
         </p>
       )}
-      {management.hiddenTeams.length ? <VButton variant="ghost" density="compact" className="w-full justify-start"
+      {management.hiddenTeams.length ? <VButton variant="ghost" density="compact" className={styles.hiddenTeamEntry}
         onPress={() => management.setRestoreOpen(true)}>
         {lang === "zh" ? `已隐藏团队（${management.hiddenTeams.length}）` : `Hidden teams (${management.hiddenTeams.length})`}
       </VButton> : null}
       {management.restoreOpen ? <VDialog open title={lang === "zh" ? "已隐藏团队" : "Hidden teams"}
         description={lang === "zh" ? "仅在当前浏览器的左栏隐藏，团队、成员和全部记录均保留。" : "Hidden only from this browser's rail. Teams, members and records are preserved."}
         size="sm" onOpenChange={management.setRestoreOpen}>
-        <div className="flex flex-col gap-2">
-          {management.hiddenTeams.length ? management.hiddenTeams.map((team) => <div key={team.teamId} className="flex items-center justify-between gap-3">
-            <span className="min-w-0 truncate" title={team.name}>{team.name}</span>
+        <div className={styles.hiddenTeamList}>
+          {management.hiddenTeams.length ? management.hiddenTeams.map((team) => <div key={team.teamId} className={styles.hiddenTeamRow}>
+            <span className={styles.hiddenTeamName} title={team.name}>{team.name}</span>
             <VButton variant="secondary" density="compact" onPress={() => management.restore(team.teamId)}
               aria-label={lang === "zh" ? `恢复 ${team.name}` : `Restore ${team.name}`}>{lang === "zh" ? "恢复" : "Restore"}</VButton>
           </div>) : <p>{lang === "zh" ? "没有隐藏的团队。" : "No hidden teams."}</p>}
