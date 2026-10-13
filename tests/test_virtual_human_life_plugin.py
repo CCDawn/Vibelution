@@ -803,7 +803,7 @@ def test_heartbeat_completes_only_simulated_activity_with_an_outcome(
     result = service.heartbeat_agent(
         "agent-a",
         now=datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
-        coalesced=True,
+        coalesced=False,
     )
 
     activities = {
@@ -812,7 +812,7 @@ def test_heartbeat_completes_only_simulated_activity_with_an_outcome(
     }
     assert activities["simulated-breakfast"]["status"] == "completed"
     assert activities["simulated-breakfast"]["outcome"]["status"] == "succeeded"
-    assert activities["simulated-breakfast"]["simulatedAfterRestart"] is True
+    assert "simulatedAfterRestart" not in activities["simulated-breakfast"]
     assert activities["tool-reading"]["status"] == "unknown"
     assert "outcome" not in activities["tool-reading"]
     assert result["completedEventCount"] == 1
@@ -1032,7 +1032,7 @@ def test_heartbeat_rolls_state_local_date_forward_after_local_midnight(
     assert state["timezone"] == "Asia/Shanghai"
 
 
-def test_restart_coalesces_previous_local_day_within_24_hours_once(
+def test_restart_skips_previous_local_day_without_fabricating_experiences(
     tmp_path: Path,
 ) -> None:
     now = [datetime(2026, 8, 27, 15, 0, tzinfo=timezone.utc)]
@@ -1071,18 +1071,17 @@ def test_restart_coalesces_previous_local_day_within_24_hours_once(
     result = service.heartbeat_agent("agent-a", now=now[0], coalesced=True)
 
     previous = service.schedule_for("agent-a", "2026-08-27")["activities"][0]
-    assert previous["status"] == "completed"
-    assert previous["simulatedAfterRestart"] is True
-    assert result["completedEventCount"] == 1
-    assert service.list_events("agent-a", date="2026-08-27")[-1][
-        "simulatedAfterRestart"
-    ] is True
+    assert previous["status"] == "skipped"
+    assert previous["skipReason"] == "host_was_not_running"
+    assert "outcome" not in previous
+    assert result["completedEventCount"] == 0
+    assert service.list_events("agent-a", date="2026-08-27") == []
 
     now[0] = datetime(2026, 8, 27, 16, 15, tzinfo=timezone.utc)
     repeated = service.heartbeat_agent("agent-a", now=now[0], coalesced=True)
 
     assert repeated["completedEventCount"] == 0
-    assert len(service.list_events("agent-a", date="2026-08-27")) == 1
+    assert service.list_events("agent-a", date="2026-08-27") == []
 
 
 def test_proactive_request_can_be_fenced_when_host_runtime_is_stopping(
