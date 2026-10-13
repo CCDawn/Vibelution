@@ -2,7 +2,7 @@ export default {
   root: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
   rail: "flex w-11 shrink-0 flex-col items-center gap-1 border-r border-vui-border-subtle px-1 py-2",
   sessions: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-  heading: "flex min-w-0 shrink-0 items-center gap-1 px-2 py-2",
+  heading: "flex h-11 min-w-0 shrink-0 items-center gap-1 px-2",
   title: "min-w-0 flex-1 truncate text-xs font-medium",
   newResearch: "!h-7 !min-h-7 !px-1.5 !text-xs whitespace-nowrap !border-transparent !bg-transparent !shadow-none",
   iconButton: "!h-7 !min-h-7 !w-7 !min-w-7 !px-1 !border-transparent !bg-transparent !shadow-none",

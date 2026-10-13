@@ -1,13 +1,20 @@
 const border = "border-[var(--vui-border-subtle)]";
 const muted = "text-[var(--fg-tertiary)]";
+// Finance already owns the outer panel; embedded chat must not add another inset frame.
+const embeddedChatAlignment = [
+  "[&_[data-vui-region=chat-conversation-center]]:!m-0 [&_[data-vui-region=chat-conversation-center]]:!rounded-none [&_[data-vui-region=chat-conversation-center]]:!border-0 [&_[data-vui-region=chat-conversation-center]]:!shadow-none",
+  "[&_.vui-components-conversationview.surface]:!rounded-none [&_.vui-components-conversationview.surface]:!border-0",
+  "[&_.composerCodex]:!w-[calc(100%_-_2rem)] [&_.composerCodex]:!mb-3 [&_.composerFieldCodex]:!gap-1 [&_.composerToolbarCodex]:!pt-0",
+  "[&_.inputCodex]:![background:transparent] [&_.inputCodex]:!resize-none",
+].join(" ");
 export default {
   frame: "finance-research-workspace flex h-[calc(100dvh_-_var(--shell-topbar-height))] w-full max-w-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--vui-surface-panel)] text-[var(--fg-primary)]",
   actions: "flex shrink-0 items-center gap-1",
   split: "h-full w-full max-w-full flex-1 !gap-0 overflow-hidden",
   workspacePane: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--vui-surface-row)]",
-  workspacePaneHeader: "shrink-0 !justify-between px-4 pb-2 pt-4",
-  workspaceAsideHead: "shrink-0 border-b border-vui-border-subtle px-3 pb-2 pt-2",
-  workspaceAsideHeader: "!justify-between !gap-2 !p-0",
+  workspacePaneHeader: "h-11 shrink-0 !justify-between px-4 !py-0",
+  workspaceAsideHead: "shrink-0 border-b border-vui-border-subtle px-3 pb-2",
+  workspaceAsideHeader: "h-11 !justify-between !gap-2 !p-0",
   workspacePaneAction: "!border-transparent !bg-transparent !shadow-none hover:!bg-[var(--vui-control-muted)]",
   workspacePaneTitle: "min-w-0 flex-1 truncate text-sm font-semibold",
   workspaceAsideTabs: "mt-2 min-w-0 [&_[role=tablist]]:!border-0 [&_[role=tablist]]:!bg-transparent [&_[role=tablist]]:!shadow-none [&_[role=tab]]:!text-xs",
@@ -19,7 +26,7 @@ export default {
   workspaceHeaderMeta: "shrink-0 whitespace-nowrap text-xs tabular-nums text-vui-fg-tertiary",
   workspaceHeaderActions: "flex shrink-0 items-center gap-2",
   workspacePlaceholder: "min-h-0 min-w-0 flex-1 px-3",
-  workspaceToolbar: `shrink-0 !justify-between border-b ${border} px-4 py-2`,
+  workspaceToolbar: `h-11 shrink-0 !justify-between border-b ${border} px-4 !py-0`,
   workspaceGroupTabs: "min-w-0 shrink-0 px-4 py-1.5",
   workspaceMarketSearch: "min-w-0 shrink-0 px-5 pb-3",
   workspaceMarketToolbar: "gap-3",
@@ -47,7 +54,7 @@ export default {
   contextTitle: "flex min-w-0 items-center gap-2 text-sm font-medium [&>span]:truncate",
   contextMeta: `text-xs ${muted}`,
   tasks: "flex items-center gap-1 [&>button]:!min-h-10 [&>button]:!px-3 [&>button]:text-xs",
-  native: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [&_.tabStrip]:hidden [&_[data-vui-region=chat-conversation-center]]:!grid-rows-[minmax(0,1fr)] [&_.emptyState]:!border-0 [&_.emptyState]:!bg-transparent [&_.emptyState]:!shadow-none [&_[data-vui=conversation-starter-cards]]:hidden [&_[data-vui=chat-session-workbench-shell]]:!h-full [&_[data-vui=chat-session-workbench-shell]]:!max-h-full [&_[data-vui=chat-session-workbench-shell]]:!min-h-0",
+  native: `flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [&_.tabStrip]:hidden [&_[data-vui-region=chat-conversation-center]]:!grid-rows-[minmax(0,1fr)] [&_.emptyState]:!border-0 [&_.emptyState]:!bg-transparent [&_.emptyState]:!shadow-none [&_[data-vui=conversation-starter-cards]]:hidden [&_[data-vui=chat-session-workbench-shell]]:!h-full [&_[data-vui=chat-session-workbench-shell]]:!max-h-full [&_[data-vui=chat-session-workbench-shell]]:!min-h-0 ${embeddedChatAlignment}`,
   state: "flex min-h-0 flex-1 items-center justify-center overflow-auto px-5 py-8",
   stateSurface: "!max-w-md !border-0 !bg-transparent !shadow-none",
   sourceList: "grid min-w-0 gap-1",
