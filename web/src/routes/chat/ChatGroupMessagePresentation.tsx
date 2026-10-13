@@ -67,6 +67,9 @@ export type ChatGroupMessageBodyProps = {
   mentionTargets: ChatMentionTarget[];
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpanded: (messageId: string) => void;
+  /** Ordinary-chat parity: workspace file links open in the right rail. */
+  workspaceRoot?: string;
+  onOpenRailFile?: (path: string) => void;
 };
 
 function structuredChallengePayload(
@@ -259,6 +262,8 @@ export function ChatGroupMessageBody({
   mentionTargets,
   onOpenMentionTarget,
   onToggleExpanded,
+  workspaceRoot,
+  onOpenRailFile,
 }: ChatGroupMessageBodyProps) {
   const bodyId = useId();
   const renderMentionText = useCallback((text: string) => (
@@ -309,6 +314,8 @@ export function ChatGroupMessageBody({
             : (lang === "zh" ? "暂无内容" : "No content yet"))}
           language={lang}
           renderText={renderMentionText}
+          workspaceRoot={workspaceRoot}
+          onOpenRailFile={onOpenRailFile}
         />
       </div>
       {collapsible ? (
