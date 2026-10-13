@@ -9,6 +9,8 @@
 | manifest、能力、工具包和 Prompt Pack 元数据 | `manifest.py` |
 | 绑定、生活状态、日程、活动、日记、Agent 生命周期 token 和领域编排 | `service.py` |
 | 长期目标、项目、习惯、技能与完成事件推进 | `drives.py` |
+| 人物自主预约下一次行动、到点原生唤醒、停机后重新规划 | `self_continuity.py` |
+| 隐藏内部执行身份、原生 Session 配对与主人物当前授权交集 | `native_wakeup.py` |
 | 情绪事件、余波恢复和表达档位 | `affect.py` |
 | 关系事件、每日变化上限、阶段迟滞和自然回落 | `relationship_events.py` |
 | 主动候选、未回复降速、未完话题和承诺 | `conversation_continuity.py` |
@@ -38,6 +40,8 @@
 ## 不变量
 
 - 计划不等于经历；只有带有效 outcome 的活动才能成为 Life Event、日记或长期记忆来源。
+- 自我唤醒只保存一个有界未来命令及原生 receipt 引用，不保存第二份 transcript；执行复用同一人物的隐藏原生工作 Session 和 assistant-only proactive admission，工作记录只有该 Session Journal 持有，不复制陪伴聊天。人物可用既有 schedule tool 读取、替换和取消未来唤醒；初次启用会安排一次规划唤醒，后续时间由人物决定。自我唤醒独立于主动联系开关、次数和免打扰，不创建聊天 continuation burst；联系用户必须另走既有聊天门，每次原生工具仍受 ToolPolicy 限制。
+- 关闭应用即停止生活与调度。重启时过期活动标记 skipped/unknown，不补造生活事件、日记或成长；过期/中断的唤醒改为一次未来的重新规划，未来有效计划保留。自我唤醒至少间隔一分钟、最多预约七天后、每天至多 24 次，忙碌或已到达的用户消息优先。
 - 主动 Turn 不写 `user_message`；只有 assistant item 持久化并取得 receipt 后才计额度。
 - `candidate/reserved/delivering` 使用稳定 token 和有效期；重启只按 receipt 对账或过期，不盲目重发。
 - disable、archive、purge prepare 和 host stop 先使新工作失效，再取消插件拥有的主动 Turn。

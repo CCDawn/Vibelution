@@ -33,6 +33,8 @@ class AgentPluginRuntimeExtension(Protocol):
 
     def blocked_tool_names(self, agent_id: str) -> list[str]: ...
 
+    def tool_execution_denial(self, runtime: dict[str, Any], tool_name: str) -> str | None: ...
+
     def prepare_agent_archive(
         self,
         agent_id: str,
@@ -173,6 +175,17 @@ def blocked_agent_plugin_tool_names(agent_id: str) -> list[str]:
     return blocked
 
 
+def agent_plugin_tool_execution_denial(runtime: dict[str, Any], tool_name: str) -> str | None:
+    """Optional live execution fence; ordinary Agent runtime stays unchanged."""
+    for extension in installed_runtime_extensions():
+        guard = getattr(extension, "tool_execution_denial", None)
+        if callable(guard):
+            denial = guard(runtime, tool_name)
+            if denial:
+                return str(denial)[:300]
+    return None
+
+
 def prepare_agent_plugin_archive(
     agent_id: str,
     *,
@@ -263,6 +276,7 @@ __all__ = [
     "AgentPluginRuntimeExtension",
     "agent_plugin_proactive_runtime_metadata",
     "agent_plugin_proactive_turn_is_current",
+    "agent_plugin_tool_execution_denial",
     "blocked_agent_plugin_tool_names",
     "build_agent_plugin_prompt_segments",
     "cancel_agent_plugin_proactive_attempt",

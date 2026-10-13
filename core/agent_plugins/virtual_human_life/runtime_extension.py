@@ -52,6 +52,13 @@ class VirtualHumanLifeRuntimeExtension:
             return []
         return list(VIRTUAL_HUMAN_TOOL_NAMES)
 
+    def tool_execution_denial(
+        self, runtime: dict[str, Any], tool_name: str
+    ) -> str | None:
+        from .native_wakeup import execution_denial
+
+        return execution_denial(runtime, tool_name)
+
     def prepare_agent_archive(
         self,
         agent_id: str,
@@ -76,9 +83,24 @@ class VirtualHumanLifeRuntimeExtension:
         binding_revision: int,
         delivery_token: str,
     ) -> bool:
+        try:
+            resolved = self._facade().resolve_virtual_human_runtime_target(agent_id)
+        except (ValueError, RuntimeError):
+            return False
+        service = self._facade().get_virtual_human_life_service()
+        if resolved.get("selfWake"):
+            from .self_continuity import SESSION_PATH
+
+            owner_id = str(resolved["targetAgentId"])
+            attempt = service.proactive_attempt(owner_id, delivery_token) or {}
+            reference = service.store.read_json(owner_id, SESSION_PATH) or {}
+            if attempt.get("deliveryKind") != "self_wake" or attempt.get(
+                "sessionId"
+            ) != reference.get("sessionId"):
+                return False
         return bool(
-            self._facade().get_virtual_human_life_service().proactive_turn_is_current(
-                agent_id=agent_id,
+            service.proactive_turn_is_current(
+                agent_id=str(resolved["targetAgentId"]),
                 binding_revision=binding_revision,
                 delivery_token=delivery_token,
             )
@@ -91,7 +113,13 @@ class VirtualHumanLifeRuntimeExtension:
         delivery_token: str,
         reason: str,
     ) -> None:
-        self._facade().get_virtual_human_life_service().cancel_proactive_attempt(
+        service = self._facade().get_virtual_human_life_service()
+        # Cancellation remains available after disable/stop fences the owner.
+        if not service.binding_for(agent_id):
+            from .native_wakeup import resolve_worker
+
+            agent_id = resolve_worker(agent_id, require_enabled=False)
+        service.cancel_proactive_attempt(
             agent_id,
             delivery_token,
             reason=reason,
@@ -117,6 +145,22 @@ class VirtualHumanLifeRuntimeExtension:
             if isinstance(plugin_metadata.get("trigger"), dict)
             else {}
         )
+        if trigger.get("deliveryKind") == "self_wake":
+            wake = (
+                trigger.get("selfWake")
+                if isinstance(trigger.get("selfWake"), dict)
+                else {}
+            )
+            return {
+                "virtualHumanLife": {
+                    "kind": "self_wake",
+                    "wakeId": str(wake.get("wakeId") or "")[:160],
+                    "requiredToolNames": [
+                        str(name).strip()[:160]
+                        for name in wake.get("requiredToolNames", [])
+                    ][:8],
+                }
+            }
         tool_activity = (
             trigger.get("toolActivity")
             if isinstance(trigger.get("toolActivity"), dict)

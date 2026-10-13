@@ -22,7 +22,7 @@
 5. 第一版交付可信第一方插件包和可扩展插件契约，不开放任意第三方 Python 动态加载、插件市场或不可信代码沙箱。
 6. 旧 `pet_info.json` 不自动绑定给任何 Agent；只能通过带预览和 receipt 的显式导入操作迁移到用户指定 Agent。
 7. 计划与实际经历严格分离。只有实际完成且具有有效 outcome 的活动可以进入日记；长期记忆还需通过重要性晋升。
-8. 应用关闭期间不宣称实时运行。启动后只允许合并漏掉的心跳；纯模拟活动仅在规则能产生有效 outcome 时形成 `simulatedAfterRestart=true` 事件，工具型活动不得推定完成。
+8. 应用前后端统一生命周期：应用关闭后两端停止，生活和唤醒均不推进。重新启动按当前现实时间恢复，过期计划重新判断、取消或改期，不补算停机期间的模拟经历、日记或成长，工具型活动不得推定完成。该决策由用户于 2026-10-13 明确确认，替代旧的重启后模拟活动补算规则。
 9. 主动生活触发使用正式的 `proactive_turn` 内部来源，不通过普通 `submit_session_message()` 伪造用户消息。
 10. 插件启用或后端重启会恢复生活心跳和主动消息能力，但不等于立即发送“启动问候”；任何实际发送仍需通过有效期、额度、间隔、免打扰、会话和权限门。
 11. 拟人化第二阶段以“实际事件 → 情绪/目标/关系/未完事项 → 计划/表达/主动联系 → 新实际事件”为唯一因果闭环，不增加无来源的人设或数值漂移。
@@ -2326,3 +2326,31 @@ Dialogue V2 完成时，用户可观察到人物有时一句说完、有时自�
 - 集成：实际工具→服务→同一日历/open loop→Prompt，禁用/错误会话/管家/伪造或过期 Turn 拒绝；失败/无关活动不成为共同结果，跨日来源仍可验证。
 - 普通链路：受保护文件差异为空，并运行普通 Session 与现有 Companion 工具、Prompt、mailbox、continuity 回归。未改前端，不要求额外 UI 生产构建。
 - 代码验证与真实自然聊天验收分开；本轮不运行外部模型、不重启产品、不 push/发布。后续运行态刷新只经 Launcher 且遵守 active-work guard。
+
+## 34. 自主计划、定时自我唤醒与连续行动（2026-10-13）
+
+用户已确认采用“人物自主制定计划 → 安排下一次行动时间 → 到点唤醒 → 读取已有状态并行动 → 根据结果重新安排”的闭环。人物可调整计划并执行已授权的阅读、创作等行动；应用前后端统一关闭，关闭期间停止生活与调度。重新打开按当前现实时间重排，不补造停机期间的经历。
+
+### 34.1 复用和执行边界
+
+- OpenClaw 的 [dynamic cadence / next_check](https://docs.openclaw.ai/automation/cron-jobs/schedules#dynamic-cadence-pacing) 提供人物决定下一次唤醒间隔、系统限制边界的参考。
+- Hermes Agent 的 [agent-managed scheduling](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron#agent-managed-scheduling-cron-jobs-that-manage-cron-jobs) 提供行动内安排后续任务、持久调度和默认关闭递归扩张的参考。本地固定源码 `NousResearch/hermes-agent@6f31cfad7825a78b69c46eedbd31f2ac2abacfb8` 的 `cron/scheduler.py::_resolve_cron_disabled_toolsets` 与 `tools/cronjob_tools.py::cronjob` 为机器证据入口。只参考机制，不复制外部代码，不引入额外 Agent、Memory 或调度运行时。
+- Generative Agents 的 [plan.py](https://github.com/joonspk-research/generative_agents/blob/fe05a71d3e4ed7d10bf68aa4eda6dd995ec070f4/reverie/backend_server/persona/cognitive_modules/plan.py) 提供记忆、生活规划、行动拆分和事件重排的概念参考；其模拟时间和旧运行依赖不作为产品执行底座。
+- `self_continuity.py` 只拥有一个未来唤醒命令、版本、幂等键、预算和原生 receipt 引用。模型决定意图、原因、时间和所需工具；调度成功绝不能成为生活完成、成长或日记的来源。
+- 自主行动复用生活管家已有的“内部执行 Agent + 隐藏原生 direct Session”配对模式。创建时不传主人物的 `agent_id`，使用 `activate=False, conversation_index_kind=hidden`；否则目录同步会重绑主人物的聊天。适配层校验 owner、内部执行身份、Session、source 和 externalTaskId。内部身份沿用人物角色、模型与授权约束，插件目标、经历、记忆和计划仍归同一个人物；工作 Session Journal 是行动记录唯一权威，不复制陪伴 transcript，不创建另一套 Turn/worker/SSE。
+- 真正联系用户仍走现有 direct Session、主动候选和联系权限链路；自主工作不消耗联系额度，不绕过联系开关或免打扰。用户新消息先取消插件拥有的自主工作，并以精确 Session/Turn 身份调用既有 stop API；普通 Session 核心不作修改。
+
+### 34.2 工具和恢复契约
+
+既有 `virtual_human_schedule_tool` 增加 `view_wakeup / schedule_wakeup / cancel_wakeup`。写入只允许当前人物自身的 direct Session 或三重校验后的内部执行 Session，不能由生活管家代替安排。`start_at` 使用带时区 ISO 时间，`title` 为意图，`reason` 为原因，`required_tool_names` 为工具引用；`expected_version` 使用唤醒计划 revision，每个新决定使用新的 idempotency_key。内部执行身份工具取主人物当前 ToolPolicy、当次计划声明及插件固定工具、内部 ToolPolicy 的交集；保留原有 scope/access/call-budget 约束，不开放 dialogue V2 气泡工具。
+
+每人只保留一个未来唤醒，至少一分钟后、最多七天后，本地日每天最多 24 次。用户消息、正在运行的会话和尚未出队的消息优先。初次启用安排一次未来规划；未来有效计划跨重启保留，过期或中断命令改为未来的重新判断，不重放原命令。取消状态不因重启复活；原生工作完成或失败后若模型未留下下一步，只安排重新规划，不把旧动作直接重发。
+
+真实工具执行还经 Agent-scoped 插件授权闸：人物当前工具策略变化后，当前内部回合停止使用旧授权，待重新规划；普通 Agent 返回无额外限制。内部身份随人物成对归档，归档失败恢复先前状态；删除人物前须等待内部回合收束，成功后删除内部原生 Session 与执行身份。人物数据、目标、记忆和计划只保留一个插件权威。
+
+### 34.3 验收层次
+
+- 连续三轮自主安排、到点执行、原生回执和下一计划更新；重复 tick 不多发，当前行动完成回写不得覆盖模型已生成的下一计划。
+- 关闭 fencing、重开保留未来计划、过期重新判断、主动联系关闭时可自主工作但不能联系、用户消息取消自己的工作、隐藏 Session 跨 Agent 拒绝、revision/幂等/时间/预算边界。
+- 停机后过期模拟活动为 skipped，工具活动为 unknown；无新完成事件、无由离线模拟生成的日记或成长。普通 Session、Journal、worker、SSE 和 composer 差异为零，并运行相关普通 Session 回归。
+- 代码和原生会话适配检查、脚本化行动循环、工具注册检查与真实模型连续生活实测分别记录。产品刷新仍经 Launcher，本地合入不等于运行中的产品已经刷新。
