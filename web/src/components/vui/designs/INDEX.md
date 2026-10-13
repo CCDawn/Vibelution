@@ -150,6 +150,12 @@
 | 思考耗时（思考中计时） | [product/conversation.md](./product/conversation.md#思考耗时) |
 | 流式行内渲染统一（live tail 与 settled 同源） | [product/conversation.md](./product/conversation.md#流式行内渲染统一live-tail-与-settled-同源) |
 
+## Product — project utilities
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `ProjectUtilityRightRail` | [product/project-utilities.md](./product/project-utilities.md#projectutilityrightrail) |
+
 ## Product — virtual-human companion
 
 | 组件 | 设计说明 |

@@ -7,6 +7,9 @@ export const CHAT_RIGHT_RAIL_LAUNCHER_KINDS = [
   "terminal",
   "browser",
   "devtools",
+  "project_tasks",
+  "project_git",
+  "project_notices",
 ] as const;
 
 export const CHAT_RIGHT_RAIL_CONTEXT_KINDS = [
@@ -33,6 +36,9 @@ const SINGLETON_KINDS = new Set<ChatRightRailKind>([
   "browser",
   "devtools",
   "directory",
+  "project_tasks",
+  "project_git",
+  "project_notices",
 ]);
 
 export const CHAT_RIGHT_RAIL_CLOSED_CAP = 8;
@@ -93,6 +99,9 @@ const KIND_LABELS: Record<ChatRightRailKind, { zh: string; en: string }> = {
   workflow: { zh: "工作流实例", en: "Workflow" },
   trajectory: { zh: "模型调用轨迹", en: "Model calls" },
   bash: { zh: "后台输出", en: "Background output" },
+  project_tasks: { zh: "任务", en: "Tasks" },
+  project_git: { zh: "变更", en: "Changes" },
+  project_notices: { zh: "通知", en: "Notifications" },
 };
 
 const CONTEXT_TITLE_KINDS = new Set<ChatRightRailKind>([

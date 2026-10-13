@@ -10,6 +10,13 @@ import launcherShellSource from "./LauncherShell.tsx?raw";
 import documentLanguageSource from "./documentLanguage.ts?raw";
 import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
 import { shellDictionary } from "../i18n/shellDictionary";
+import chatRightRailSource from "../routes/chat/ChatRightRail.tsx?raw";
+import chatRightRailModelSource from "../routes/chat/chatRightRailModel.ts?raw";
+import projectNotificationsPanelSource from "../routes/chat/ProjectNotificationsPanel.tsx?raw";
+import projectUtilityPanelSource from "../routes/chat/ProjectUtilityPanel.tsx?raw";
+import runtimeTasksPanelSource from "../routes/auxConversations/RuntimeTasksPanel.tsx?raw";
+import runtimeTasksPanelStylesSource from "../routes/auxConversations/RuntimeTasksPanel.styles.ts?raw";
+import shellProjectUtilitiesSource from "./ShellProjectUtilities.tsx?raw";
 
 const shellStyles = readFileSync(fileURLToPath(new URL("../design/workbench-shell.css", import.meta.url)), "utf8");
 
@@ -137,8 +144,6 @@ describe("AppShell layout contract", () => {
     expect(styles.settingsActionList).toContain("grid-cols-1");
     expect(styles.settingsTrigger).toContain("!min-h-8");
     expect(styles.settingsTrigger).toContain("!size-8");
-    expect(shellSource).toContain("VStatusChip");
-    expect(shellSource).toContain("systemToneToStatus");
     expect(shellSource).toContain("systemToneToDotClass");
     expect(shellSource).toContain("styles.statusSummaryDot");
     expect(shellSource).not.toContain("statusSummaryCount");
@@ -182,25 +187,12 @@ describe("AppShell layout contract", () => {
     expect(narrowTopBarBlock).not.toContain("--shell-topbar-height");
   });
 
-  it("keeps AppShell popover headers layout-only instead of card-like", () => {
-    const panelChromeTokens = [
-      "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]",
-      "bg-[var(--vui-surface-glass)]",
-      "shadow-[var(--vui-shadow-hairline)]",
-    ];
-    const headerStyles = [
-      styles.activeWorkDetailHeader,
-    ];
-
-    for (const value of headerStyles) {
-      expect(value).toContain("flex");
-      expect(value).toContain("items-center");
-      for (const token of panelChromeTokens) {
-        expect(value).not.toContain(token);
-      }
-    }
-    expect(styles.activeWorkDetailHeader).toContain("border-b");
-    expect(styles.activeWorkDetailHeader).toContain("text-[var(--fg-primary)]");
+  it("keeps task rail headers lightweight inside the shared panel", () => {
+    expect(runtimeTasksPanelStylesSource).toContain('const header = "grid min-w-0 gap-2 border-b border-vui-border-subtle px-2 pb-2 pt-2";');
+    expect(runtimeTasksPanelStylesSource).toContain('const sectionHeader = "flex min-w-0 items-center justify-between gap-2 px-0.5";');
+    expect(runtimeTasksPanelStylesSource).not.toContain("rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]");
+    expect(runtimeTasksPanelStylesSource).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(runtimeTasksPanelStylesSource).not.toContain("shadow-[var(--vui-shadow-hairline)]");
   });
 
   it("routes card-like shell controls through shared quiet hover tokens", () => {
@@ -273,29 +265,36 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkTrigger).not.toContain("shadow-none");
   });
 
-  it("wires the git trigger to status-aware labels, summary title and a pending-work dot", () => {
-    expect(shellSource).toContain('aria-label={t("navGit")}');
-    expect(shellSource).toContain("const shellGitNeedsAttention = Boolean(");
-    expect(shellSource).toContain("shellGitStatus.worktrees?.withCommits ?? 0) > 0 || (shellGitStatus.upstream?.ahead ?? 0) > 0");
+  it("opens project changes in the shared right rail and keeps the Git status indicator", () => {
+    expect(shellSource).toContain('aria-label={lang === "en" ? "Changes" : "变更"}');
+    expect(shellSource).toContain('projectUtilities.model.activeId === "project_git"');
+    expect(shellSource).toContain('openProjectUtilityRail("project_git")');
     expect(shellSource).toContain("`${t(\"navGit\")}：${shellGitStatus.summary}`");
+    expect(shellSource).toContain('(shellGitStatus?.counts.total ?? 0) > 0');
+    expect(shellSource).not.toContain('to="/git"');
     expect(shellSource).toContain("queryKeys.gitStatus()");
     expect(shellSource).toContain("fetchGitStatus({ limit: 500, signal })");
     expect(shellSource).toContain("styles.settingsTriggerAlertDot");
-    // Low-frequency, foreground-only shell poll (shares the /git cache).
+    // Low-frequency, foreground-only shell poll (shares the Git status cache).
     expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000)");
   });
 
-  it("renames the bell to the agent broadcast and tracks unseen broadcasts via a cursor", () => {
+  it("opens notifications in the shared right rail and marks them seen after the list is shown", () => {
     expect(shellSource).toContain("<Bell size={17} />");
     expect(shellSource).not.toContain("BellRing");
+    expect(shellSource).toContain('aria-label={lang === "en" ? "Notifications" : "通知"}');
+    expect(shellSource).toContain('projectUtilities.model.activeId === "project_notices"');
+    expect(shellSource).toContain('openProjectUtilityRail("project_notices")');
     expect(shellSource).toContain("t(\"agentBroadcastLabel\")");
     expect(shellSource).toContain("queryKeys.projectAgentBusLatestEvent()");
     expect(shellSource).toContain("listProjectAgentBusTimeline(1, { signal })");
-    // Every left click (modifier or not) counts as having looked at the bell.
-    expect(shellSource).toContain("if (event.button === 0) {\n            markAgentBroadcastSeen();\n          }");
     // First visit silently adopts the baseline instead of flagging all history.
     expect(shellSource).toContain("resolveAgentBroadcastBadgeState(agentBroadcastLatestEventMs, agentBroadcastReadAtMs)");
     expect(shellSource).toContain("agentBroadcastBadgeState.adoptedBaseline");
+    // Reading is committed only after the successful timeline has rendered.
+    expect(projectUtilityPanelSource).toContain("onSeen={markProjectNoticesSeen}");
+    expect(projectNotificationsPanelSource).toContain("if (!timelineQuery.isSuccess");
+    expect(projectNotificationsPanelSource).toContain("onSeen(newestEventMs)");
     // Gentle foreground-only poll; no background churn for a badge.
     expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 60_000)");
     expect(styles.settingsTriggerIconSlot).toContain("relative");
@@ -309,27 +308,34 @@ describe("AppShell layout contract", () => {
     expect(shellDictionary.en.agentBroadcastUnread).toBe("new broadcasts");
   });
 
-  it("exposes the aux task center from the title bar with a running-count badge", () => {
-    // The entry sits in the settings trigger family next to the git shortcut.
-    expect(shellSource).toContain('to="/aux"');
-    expect(shellSource).toContain("<ListTree size={17} />");
-    expect(shellSource).toContain("const auxCenterLabel = lang === \"en\" ? \"Background tasks\" : \"后台任务\";");
-    expect(shellSource).toContain('aria-label={auxCenterLabel}');
-    // Global active-only badge poll: revision-aware payload, gentle foreground
-    // beat, no background churn, cache entry distinct from /aux and strips.
+  it("opens project tasks from the title bar with a deduplicated running count", () => {
+    expect(shellSource).toContain('aria-label={lang === "en" ? "Tasks" : "任务"}');
+    expect(shellSource).toContain('projectUtilities.model.activeId === "project_tasks"');
+    expect(shellSource).toContain('openProjectUtilityRail("project_tasks")');
+    expect(shellSource).toContain("projectTaskCount(activeWorkIndicator, shellAuxTasksQuery.data?.running ?? [])");
+    expect(shellSource).not.toContain('to="/aux"');
+    // Global active-only count source: revision-aware payload, gentle foreground
+    // beat, no background churn, cache entry distinct from /aux and session strips.
     expect(shellSource).toContain('queryKeys.runtimeTasks("", "shell")');
-    expect(shellSource).toContain('listRuntimeTasksRevisionAware(\n        { status: "active" }');
+    expect(shellSource).toMatch(/listRuntimeTasksRevisionAware\(\s*\{\s*status: "active"\s*\}/);
     expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000)");
     expect(shellSource).toContain("refetchIntervalInBackground: false");
-    // Badge reads running.length: digit when busy, hidden at zero, 9+ clamp.
-    expect(shellSource).toContain('shellAuxRunningCount > 9 ? "9+" : String(shellAuxRunningCount)');
-    expect(shellSource).toContain("{shellAuxRunningBadge ? (");
-    expect(shellSource).toContain("styles.settingsTriggerCountBadge");
-    expect(styles.settingsTriggerCountBadge).toContain("absolute");
-    expect(styles.settingsTriggerCountBadge).toContain("bg-[var(--accent-cool)]");
-    expect(styles.settingsTriggerCountBadge).toContain("rounded-full");
     // /aux stops falling back to the app title in the return-navigation label.
     expect(shellSource).toContain('if (pathname.startsWith("/aux")) return auxCenterLabel;');
+  });
+
+  it("reuses the chat right rail for project tools while preserving side chat, browser, and CLI tabs", () => {
+    expect(shellProjectUtilitiesSource).toContain('<ChatRightRail id="shell-project-utilities"');
+    expect(chatRightRailSource).toContain("{active && isProjectUtilityKind(active.kind) ? <ProjectUtilityPanel");
+    expect(chatRightRailSource).toContain('active?.kind === "side"');
+    expect(chatRightRailSource).toContain('active?.kind === "browser"');
+    expect(chatRightRailSource).toContain("CliAgentRunTerminalPanel");
+    for (const kind of ["side", "terminal", "browser", "project_tasks", "project_git", "project_notices"]) {
+      expect(chatRightRailModelSource).toContain(`"${kind}"`);
+    }
+    expect(projectUtilityPanelSource).toContain("<ProjectGitPanel lang={lang} />");
+    expect(projectUtilityPanelSource).toContain("<ProjectNotificationsPanel");
+    expect(projectUtilityPanelSource).toContain("<RuntimeTasksPanel");
   });
 
   it("exposes a shell-level semantic return action without visible helper copy", () => {
@@ -426,35 +432,27 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navMemory")');
   });
 
-  it("keeps common settings separate from maintenance and project tools", () => {
+  it("keeps settings actions separate from project utility rail triggers", () => {
     expect(shellSource).toContain("LazyAppShellSettingsMenu");
     expect(shellSource).toContain("onThemeChange={selectTheme}");
     expect(shellSource).toContain("onRefresh={refreshFrontend}");
-    expect(shellSource).toContain('to="/git"');
-    expect(shellSource).toContain('kind: "project_bus"');
+    expect(shellSource).not.toContain('to="/git"');
+    expect(shellSource).not.toContain('serializeChatRouteSelection("", { kind: "project_bus" })');
+    expect(shellSource).not.toContain('chatRoute.openProjectBus({ telemetrySource: "shell_settings" })');
     expect(shellSource).not.toContain("gitHeroLabel");
     expect(styles.settingsPopoverContent).toContain("280px");
   });
 
-  it("moves active work details into a title-bar popover", () => {
-    expect(shellSource).not.toContain("settingsActiveWork");
-    expect(shellSource).toContain("activeWorkIndicator.items.map");
-    expect(shellSource).toContain("className={styles.activeWorkDetailLink}");
-    expect(shellSource).toContain("to={item.href}");
-    expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
-    expect(shellSource).toContain('data-shell-group="active-work"');
-    expect(shellSource).not.toContain('data-vui="active-work-popover"');
-    expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
-    expect(shellSource).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
-    // Native title stays human-readable; task details live in the clicked popover.
-    expect(shellSource).not.toContain("title={activeWorkDetailsTitle}");
-    expect(shellSource).not.toContain("formatActiveWorkRunId");
-    expect(shellSource).not.toContain("activeWorkChipAriaLabel");
-
-    expect(styles.activeWorkPanel).toBeTypeOf("string");
-    expect(styles.activeWorkDetailItem).toBeTypeOf("string");
-    expect(styles.activeWorkDetailLink).toContain("block");
-    expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
+  it("moves active work details into the project task rail", () => {
+    expect(shellSource).toContain('openProjectUtilityRail("project_tasks")');
+    expect(projectUtilityPanelSource).toContain("activeWork={deriveActiveWorkIndicator(runtime.data, lang)}");
+    expect(runtimeTasksPanelSource).toContain("visibleActiveWork.map");
+    expect(runtimeTasksPanelSource).toContain("activeWorkSessionIdentity(item)");
+    expect(runtimeTasksPanelSource).toContain("item.href");
+    expect(shellSource).not.toContain("activeWorkIndicator.items.map");
+    expect(shellSource).not.toContain("renderActiveWorkItem");
+    expect(shellSource).not.toContain("activeWorkDetailLink");
+    expect(shellSource).not.toContain("activeWorkPopoverContent");
   });
 
   it("tells the truth when the backend is half dead", () => {
@@ -478,27 +476,27 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("timeoutMs: RUNTIME_SUMMARY_TIMEOUT_MS");
   });
 
-  it("makes the status chip speak the code-freshness verdict and retryable on failure", () => {
+  it("shows the system status summary in settings and retries failed probes there", () => {
     // B-4: a behind build must say "restart recommended" (and an unknown
     // version must stop reading as a green "connected"), not only change color.
     expect(shellSource).toContain("codeFreshnessCardOverride(codeFreshnessQuery.data?.verdict)");
     expect(shellSource).toContain("value: t(codeFreshnessOverride.valueKey)");
     expect(shellSource).toContain('t("codeFreshnessTitle")');
-    // Freshness rides both the tooltip summary and the accessible name.
+    // Freshness rides the status summary in settings.
     expect(shellSource).toContain("const statusSummaryAriaLabel = codeFreshnessOverride");
     expect(shellSource).toContain("codeFreshnessStatusPart");
     // Caution never overrides a real failed primary card.
     expect(shellSource).toContain('primaryStatusCard.tone !== "failed"');
-    // B-7: a failed primary card turns the chip into an explicit retry control.
+    // B-7: failed probes expose a compact retry action in the settings row.
     expect(shellSource).toContain("const statusRetryable = effectivePrimaryStatusCard.tone === \"failed\";");
-    expect(shellSource).toContain("role={statusRetryable ? \"button\" : undefined}");
-    expect(shellSource).toContain("tabIndex={statusRetryable ? 0 : undefined}");
-    expect(shellSource).toContain('t("systemStatusRetryHint")');
-    expect(shellSource).toContain("queryKeys.backendHealth()");
-    expect(shellSource).toContain("queryKeys.runtimeSummary()");
-    expect(shellSource).toContain("event.key === \"Enter\" || event.key === \" \"");
-    expect(styles.settingsStatusRetry).toContain("cursor-pointer");
-    expect(styles.settingsStatusRetry).toContain("focus-visible:ring-2");
+    expect(shellSource).toContain('className={styles.settingsStatus} title={statusSummaryTitle} aria-label={statusSummaryAriaLabel}');
+    expect(shellSource).toContain('aria-label={lang === "zh" ? "重试连接检查" : "Retry connection check"} onPress={retryStatusProbes}');
+    expect(shellSource).not.toContain("role={statusRetryable ? \"button\" : undefined}");
+    const retryStart = shellSource.indexOf("const retryStatusProbes = useCallback(() => {");
+    const retryEnd = shellSource.indexOf("}, [emitBrowserTelemetry, queryClient]);", retryStart);
+    const retryBody = retryStart >= 0 && retryEnd > retryStart ? shellSource.slice(retryStart, retryEnd) : "";
+    expect(retryBody).toContain("invalidateQueries({ queryKey: queryKeys.backendHealth() })");
+    expect(retryBody).toContain("invalidateQueries({ queryKey: queryKeys.runtimeSummary() })");
   });
 
   it("refreshes the shell status probes as soon as the window returns to the foreground", () => {
@@ -513,24 +511,19 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("document.addEventListener(\"visibilitychange\", handleVisibleRefetch)");
   });
 
-  it("tracks popover-switch grace timers in a ref and clears them on open changes", () => {
-    // A-8: the 80ms switch timer must not resurrect a popover after the user
-    // clicked somewhere else.
-    expect(shellSource).toContain("const popoverSwitchTimerRef = useRef<number | null>(null);");
-    expect(shellSource).toContain("schedulePopoverSwitch(() => setActiveWorkOpen(true))");
-    expect(shellSource).toContain("schedulePopoverSwitch(() => setUtilityOpen(true))");
-    expect(shellSource).not.toContain("window.setTimeout(() => setActiveWorkOpen(true), 80)");
-    expect(shellSource).not.toContain("window.setTimeout(() => setUtilityOpen(true), 80)");
-    const onOpenChangeBlocks = shellSource.match(/clearPopoverSwitchTimer\(\);/g) ?? [];
-    expect(onOpenChangeBlocks.length).toBeGreaterThanOrEqual(2);
-    expect(shellSource).toContain("useEffect(() => clearPopoverSwitchTimer, [clearPopoverSwitchTimer])");
+  it("uses the project rail for task details instead of a second title-bar popover", () => {
+    expect(shellSource).toContain('openProjectUtilityRail("project_tasks")');
+    expect(shellSource).not.toContain("activeWorkOpen");
+    expect(shellSource).not.toContain("popoverSwitchTimerRef");
+    expect(shellSource).not.toContain("schedulePopoverSwitch");
+    expect(shellSource).not.toContain("renderActiveWorkItem");
   });
 
-  it("uniquifies active-work rows and deep-links self evolution to its board", () => {
+  it("uniquifies active-work rows inside the task rail", () => {
     // A-6: kind+runId can repeat when the backend mirrors one run in both the
     // active snapshot and its activeItems list.
-    expect(shellSource).toContain("key={`${item.kind}-${item.runId || item.status}-${index}`}");
-    expect(shellSource).toContain("(item: ActiveWorkIndicatorItem, index: number)");
+    expect(runtimeTasksPanelSource).toContain("key={`${item.kind}-${item.runId || item.status}-${index}`}");
+    expect(runtimeTasksPanelSource).toContain("visibleActiveWork.map((item, index) => (");
   });
 
   it("distinguishes a dirty-workspace behind banner from a moved-ahead main", () => {
@@ -544,14 +537,11 @@ describe("AppShell layout contract", () => {
   });
 
   it("renders terminal failed runs as a caution leftover section instead of hiding them", () => {
-    expect(shellSource).toContain("activeWorkStaleFailures");
-    expect(shellSource).toContain("activeWorkStaleFailures.map(renderActiveWorkItem)");
-    expect(shellSource).toContain("className={styles.activeWorkStaleSection}");
-    expect(shellSource).toContain('t("activeWorkStaleFailureSection")');
-    expect(shellSource).toContain('t("activeWorkEmptyStaleFailure")');
-    expect(shellSource).toContain('t("activeWorkEmpty")');
-    // The trigger dot turns caution while leftover failures exist.
-    expect(shellSource).toContain("activeWorkTriggerTone");
+    expect(runtimeTasksPanelSource).toContain("visibleStaleFailures.length");
+    expect(runtimeTasksPanelSource).toContain("visibleStaleFailures.map");
+    expect(runtimeTasksPanelSource).toContain("styles.staleRow");
+    expect(runtimeTasksPanelSource).toContain("copy.staleFailures");
+    expect(runtimeTasksPanelSource).toContain("copy.activeWork");
     // Running work shows an interruption notice; it never disables the user restart.
     const restartDisabledRegion = shellSource.slice(
       shellSource.indexOf("const updateBannerRestartDisabled"),
@@ -565,20 +555,15 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("activeWorkIndicator?.items.map((item) => item.label)");
     expect(shellSource).not.toContain("restartActiveWorkNoticeMessage(lang, activeWorkDetailsTitle)");
 
-    expect(styles.activeWorkStaleSection).toContain("border-t");
-    expect(styles.activeWorkStaleHeader).toContain("var(--state-warning)");
+    expect(runtimeTasksPanelStylesSource).toContain("const staleRow =");
+    expect(runtimeTasksPanelStylesSource).toContain("var(--state-warning)");
   });
 
-  it("bounds active work details inside their own popover", () => {
-    expect(shellSource).not.toContain("activeWorkInlineDetails");
-    expect(shellSource).not.toContain("activeWorkInlineItem");
-    expect(styles.activeWorkPopoverContent).toContain("overflow-y-auto");
-    expect(styles.activeWorkPopoverContent).toContain("w-[min(370px,calc(100vw-20px))]");
-    expect(shellStyles).toContain("max-height: min(330px, 45vh)");
-    expect(styles.activeWorkDetailCopy).toContain("[&_p]:truncate");
-    expect(styles.activeWorkDetailList).not.toContain("max-h-");
-    expect(shellStyles).not.toContain("activeWorkChip:hover .activeWorkInlineDetails");
-    expect(shellStyles).not.toContain("activeWorkInlineItem");
+  it("bounds task lists and details inside the shared rail's scrollable workspace", () => {
+    expect(runtimeTasksPanelSource).toContain("className={styles.content}");
+    expect(runtimeTasksPanelSource).toContain("className={styles.detailScroll}");
+    expect(runtimeTasksPanelStylesSource).toContain("overflow-auto overflow-x-hidden");
+    expect(runtimeTasksPanelStylesSource).toContain("grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden");
   });
 
   it("keeps active work in the title bar without swallowing the drag region", () => {
@@ -586,30 +571,22 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf('<header className={styles.topBar}>'),
       shellSource.indexOf("</header>"),
     );
-    expect(titleBar).toContain("activeWorkIndicator");
+    expect(titleBar).toContain("projectTaskCount(activeWorkIndicator, shellAuxTasksQuery.data?.running ?? [])");
     expect(titleBar).toContain("activeWorkSlot");
     expect(titleBar).toContain('data-shell-group="active-work"');
     expect(titleBar.indexOf('data-shell-group="window-drag-region"')).toBeLessThan(titleBar.indexOf('data-shell-group="active-work"'));
-    // Empty states live in the shell dictionary (zh/en) via t("activeWorkEmpty").
-    expect(shellSource).toContain('t("activeWorkEmpty")');
     expect(shellSource).toContain('activeWorkUnavailable ? "—"');
   });
 
-  it("keeps active work compact without nested cards or horizontal overflow", () => {
-    expect(shellSource).toContain("className={styles.activeWorkPanel}");
-    expect(shellStyles).toContain("overflow-x: hidden");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailHeader");
-    expect(shellStyles).toContain("padding: 6px 8px 9px");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailList");
-    expect(shellStyles).toContain("padding: 0");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailCopy");
-    expect(shellStyles).toContain("background: transparent");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailTitle");
-    expect(shellStyles).toContain("grid-template-columns: 7px minmax(0, 1fr) max-content");
-    expect(shellStyles).toContain("border: 0");
-    expect(shellStyles).toContain("text-overflow: ellipsis");
-
-    expect(styles.activeWorkPopoverContent).toContain("calc(100dvh-70px)");
+  it("keeps task details out of the title bar and within the project task rail", () => {
+    const titleBar = shellSource.slice(
+      shellSource.indexOf('<header className={styles.topBar}>'),
+      shellSource.indexOf("</header>"),
+    );
+    expect(titleBar).not.toContain("activeWorkIndicator.items");
+    expect(titleBar).not.toContain("activeWorkDetail");
+    expect(runtimeTasksPanelSource).toContain("activeWorkBlock");
+    expect(runtimeTasksPanelSource).toContain("renderTaskDetail");
   });
 
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
@@ -760,7 +737,7 @@ describe("AppShell layout contract", () => {
 
     expect(shellSource).not.toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
     expect(shellSource).not.toContain("UPDATE_BANNER_SHELL_GRID_ROWS");
-    expect(shellSource).toContain('<main className={styles.mainArea}>');
+    expect(shellSource).toContain('<div className={styles.mainArea}>');
 
     // It rides the whitelisted code-freshness poll — no per-second ticker.
     expect(shellSource).not.toContain("setClockNow");

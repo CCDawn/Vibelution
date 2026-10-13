@@ -1,13 +1,17 @@
+import { VDialog } from "../components/vui/primitives/VDialog";
+import { VSplitWorkspace } from "../components/vui/layout/VSplitWorkspace";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
+import { collapseProjectUtilityRail, openProjectUtilityRail, useProjectUtilityRail } from "./projectUtilityRail";
+import { projectTaskCount } from "./projectTaskCount";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
   Bell,
   GitBranch,
   ChevronDown,
   ChevronRight,
-  ListTree,
   LoaderCircle,
   Menu,
   Settings,
@@ -82,7 +86,6 @@ import {
   pickPrimarySystemStatusCard,
   runtimeControllerTone,
   shouldRenderStartupOverlay,
-  type ActiveWorkIndicatorItem,
   type SystemStatusCard,
   type SystemStatusTone,
 } from "./systemStatus";
@@ -137,16 +140,15 @@ import { VButton } from "../components/vui/primitives/VButton";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { VPopover } from "../components/vui/primitives/VPopover";
 import { VRouteLinkButton } from "../components/vui/primitives/VRouteLinkButton";
-import { VStatusChip, type VStatusTone } from "../components/vui";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
-import { serializeChatRouteSelection } from "../routes/chat/chatSelectionProjection";
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
 
+const ShellProjectUtilities = lazy(() => import("./ShellProjectUtilities").then((module) => ({ default: module.ShellProjectUtilities })));
 const LazyAppShellSettingsMenu = lazy(() =>
   import("./AppShellSettingsMenu")
     .then((module) => ({ default: module.AppShellSettingsMenu }))
@@ -180,13 +182,6 @@ export function isShellPrimaryNavActive(pathname: string, to: string): boolean {
     );
   }
   return path === target || path.startsWith(`${target}/`);
-}
-
-function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
-  if (tone === "running") return "success";
-  if (tone === "caution") return "warning";
-  if (tone === "failed") return "danger";
-  return "neutral";
 }
 
 function systemToneToDotClass(tone: SystemStatusTone): string {
@@ -1046,7 +1041,7 @@ export function shouldTreatShutdownAsLocallyComplete({
 }
 
 export function AppShell() {
-  const { lang, t, statusLabel } = useShellI18n();
+  const { lang, t } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
   const chatRoute = useChatRouteSelection();
@@ -1062,8 +1057,18 @@ export function AppShell() {
   const [lifecycleAction, setLifecycleAction] = useState<"shutdown" | "restart" | "">("");
   const [lifecycleCommandId, setLifecycleCommandId] = useState("");
   const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
+  const projectUtilities = useProjectUtilityRail();
+  const [compactProjectUtilities, setCompactProjectUtilities] = useState(() => typeof window !== "undefined" && window.innerWidth <= 1050);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia("(max-width: 1050px)");
+    const update = () => setCompactProjectUtilities(media.matches);
+    update(); media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const projectUtilityFallback = projectUtilities.opened && !projectUtilities.hosted;
+  const projectUtilityOverlay = compactProjectUtilities || location.pathname.startsWith("/finance") || location.pathname === "/chat";
   const [utilityOpen, setUtilityOpen] = useState(false);
-  const [activeWorkOpen, setActiveWorkOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
@@ -1239,6 +1244,7 @@ export function AppShell() {
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
   const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState<number | null>(() => readStoredAgentBroadcastReadAtMs());
+  useEffect(() => { if (projectUtilities.readAtMs > 0) setAgentBroadcastReadAtMs((current) => Math.max(current ?? 0, projectUtilities.readAtMs)); }, [projectUtilities.readAtMs]);
   const agentBroadcastLatestEvent = useMemo(() => {
     const events = agentBroadcastLatestQuery.data?.events;
     return events && events.length ? events[events.length - 1] : undefined;
@@ -1265,27 +1271,12 @@ export function AppShell() {
   const agentBroadcastTriggerLabel = agentBroadcastHasUnread
     ? `${agentBroadcastLabel}，${t("agentBroadcastUnread")}`
     : agentBroadcastLabel;
-  const markAgentBroadcastSeen = useCallback(() => {
-    // Advance to the latest known event; a newer event landing after this
-    // query snapshot still counts as unseen, so nothing is silently swallowed.
-    const nextCursorMs = agentBroadcastLatestEventMs > 0 ? agentBroadcastLatestEventMs : Date.now();
-    storeAgentBroadcastReadAtMs(nextCursorMs);
-    setAgentBroadcastReadAtMs(nextCursorMs);
-  }, [agentBroadcastLatestEventMs]);
   const shellGitStatus = shellGitStatusQuery.data;
-  const shellGitNeedsAttention = Boolean(
-    shellGitStatus?.available
-    && ((shellGitStatus.worktrees?.withCommits ?? 0) > 0 || (shellGitStatus.upstream?.ahead ?? 0) > 0),
-  );
   const shellGitTriggerTitle = shellGitStatus?.available && shellGitStatus.summary
     ? `${t("navGit")}：${shellGitStatus.summary}`
     : t("navGit");
-  // Aux-center entry + running badge (text count, ZCode badge shape; >9 clamps).
-  const shellAuxRunningCount = shellAuxTasksQuery.data?.running.length ?? 0;
-  const shellAuxRunningBadge = shellAuxRunningCount > 0
-    ? (shellAuxRunningCount > 9 ? "9+" : String(shellAuxRunningCount))
-    : "";
   const auxCenterLabel = lang === "en" ? "Background tasks" : "后台任务";
+
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
 
@@ -1470,17 +1461,6 @@ export function AppShell() {
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const activeWorkUnavailable = !runtimeQuery.data && (backendHealthQuery.isError || configQuery.isError || runtimeQuery.isError);
   const activeWorkLoading = !runtimeQuery.data && !activeWorkUnavailable;
-  const activeWorkCountDisplay = activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : String(activeWorkIndicator?.count ?? 0);
-  // Terminal failed runs parked in the active slot: caution-grade leftovers,
-  // never counted as running work but always visible in the popover.
-  const activeWorkStaleFailures = activeWorkIndicator?.staleFailures ?? [];
-  const activeWorkTriggerTone: SystemStatusTone = activeWorkUnavailable
-    ? "failed"
-    : activeWorkStaleFailures.length
-      ? "caution"
-      : activeWorkIndicator
-        ? "running"
-        : "idle";
   // Human-readable only (no raw session ids). Used for shutdown copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
@@ -1529,33 +1509,7 @@ export function AppShell() {
   }, []);
   useEffect(() => {
     closeUtilityMenu();
-    setActiveWorkOpen(false);
   }, [location.key, closeUtilityMenu]);
-
-  const closeActiveWorkMenu = useCallback(() => {
-    setActiveWorkOpen(false);
-  }, []);
-
-  // Popover-switch grace timer (one click switches popovers, incl. touch):
-  // tracked in a ref and cleared whenever either popover's open state changes
-  // or the shell unmounts, so a click elsewhere cannot resurrect a popover
-  // 80ms after the switch intent was abandoned.
-  const popoverSwitchTimerRef = useRef<number | null>(null);
-  const clearPopoverSwitchTimer = useCallback(() => {
-    if (popoverSwitchTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(popoverSwitchTimerRef.current);
-    popoverSwitchTimerRef.current = null;
-  }, []);
-  useEffect(() => clearPopoverSwitchTimer, [clearPopoverSwitchTimer]);
-  const schedulePopoverSwitch = useCallback((open: () => void) => {
-    clearPopoverSwitchTimer();
-    popoverSwitchTimerRef.current = window.setTimeout(() => {
-      popoverSwitchTimerRef.current = null;
-      open();
-    }, 80);
-  }, [clearPopoverSwitchTimer]);
 
   const frontendStateLabel = {
     connected: t("systemFrontend_connected"),
@@ -2806,38 +2760,6 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.backendHealth() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
   }, [emitBrowserTelemetry, queryClient]);
-  // Shared renderer for active-work rows and stale-failure rows so both
-  // sections in the popover stay one visual language.
-  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem, index: number) => {
-    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
-    const detailCopy = (
-      <div className={styles.activeWorkDetailCopy}>
-        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
-        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
-      </div>
-    );
-    return (
-      // Index suffix: kind+runId can repeat when the backend mirrors one run in
-      // both the active snapshot and its activeItems list.
-      <li key={`${item.kind}-${item.runId || item.status}-${index}`} className={styles.activeWorkDetailItem}>
-        <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass(item.tone)}`} aria-hidden="true" />
-        {item.href ? (
-          <Link
-            className={styles.activeWorkDetailLink}
-            to={item.href}
-            aria-label={item.staleFailure ? `${detailAria} · ${t("activeWorkStaleFailureHint")}` : detailAria}
-            title={item.staleFailure ? t("activeWorkStaleFailureHint") : undefined}
-            onClick={closeActiveWorkMenu}
-          >
-            {detailCopy}
-          </Link>
-        ) : detailCopy}
-        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
-          {statusLabel(item.status)}
-        </VStatusChip>
-      </li>
-    );
-  };
 
   return (
     <div
@@ -3046,146 +2968,36 @@ export function AppShell() {
           </VPopover>
         ) : null}
         <div className={styles.activeWorkSlot} data-shell-group="active-work">
-          <VPopover
-            open={activeWorkOpen}
-            onOpenChange={(open) => {
-              clearPopoverSwitchTimer();
-              setActiveWorkOpen(open);
-              if (open) closeUtilityMenu();
-            }}
-            align="end"
-            side="bottom"
-            sideOffset={8}
-            aria-label={activeConversationsLabel}
-            contentClassName={styles.activeWorkPopoverContent}
-            trigger={(
-              <VButton
-                type="button"
-                variant="ghost"
-                contentLayout="plain"
-                className={styles.activeWorkTrigger}
-                aria-expanded={activeWorkOpen}
-                aria-label={activeWorkUnavailable
-                  ? `${activeConversationsLabel}，${lang === "en" ? "unavailable" : "状态暂不可用"}`
-                  : activeWorkLoading
-                    ? `${activeConversationsLabel}，${lang === "en" ? "checking" : "正在检查"}`
-                    : `${activeConversationsLabel}，${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}${activeWorkStaleFailures.length ? `，${t("activeWorkStaleFailureSection")}` : ""}`}
-                aria-busy={activeWorkLoading}
-                title={activeConversationsLabel}
-                onPointerDownCapture={() => {
-                  // Let Radix finish closing the other popover before opening this one.
-                  if (utilityOpen) schedulePopoverSwitch(() => setActiveWorkOpen(true));
-                  closeUtilityMenu();
-                }}
-              >
-                <span className={styles.activeWorkTriggerContent}>
-                  <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(activeWorkTriggerTone)}`} aria-hidden="true" />
-                  <span className={styles.activeWorkTriggerLabel}>{lang === "en" ? "Active" : "进行中"}</span>
-                  <strong>{activeWorkCountDisplay}</strong>
-                  <ChevronDown size={13} aria-hidden="true" />
-                </span>
-              </VButton>
-            )}
-          >
-            <section className={styles.activeWorkPanel} aria-label={activeConversationsLabel}>
-              <div className={styles.activeWorkDetailHeader}>
-                <strong>{activeConversationsLabel}</strong>
-                <span>{activeWorkUnavailable
-                  ? (lang === "en" ? "Unavailable" : "暂不可用")
-                  : activeWorkLoading
-                    ? (lang === "en" ? "Checking" : "正在检查")
-                    : `${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}`}</span>
-              </div>
-              {activeWorkIndicator && activeWorkIndicator.items.length ? (
-                <ul className={styles.activeWorkDetailList}>
-                  {activeWorkIndicator.items.map(renderActiveWorkItem)}
-                </ul>
-              ) : null}
-              {activeWorkStaleFailures.length ? (
-                <div className={styles.activeWorkStaleSection}>
-                  <div className={styles.activeWorkStaleHeader}>
-                    <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass("caution")}`} aria-hidden="true" />
-                    <strong>{t("activeWorkStaleFailureSection")}</strong>
-                  </div>
-                  <ul className={styles.activeWorkDetailList}>
-                    {activeWorkStaleFailures.map(renderActiveWorkItem)}
-                  </ul>
-                </div>
-              ) : null}
-              {!activeWorkIndicator?.items.length ? <p className={styles.activeWorkEmpty}>{activeWorkUnavailable
-                ? (lang === "en" ? "Unable to read active conversations." : "暂时无法读取进行中的会话。")
-                : activeWorkLoading
-                  ? (lang === "en" ? "Checking active conversations…" : "正在检查进行中的会话…")
-                  : activeWorkIndicator && activeWorkStaleFailures.length
-                    ? t("activeWorkEmptyStaleFailure")
-                    : t("activeWorkEmpty")}</p> : null}
-            </section>
-          </VPopover>
+          <VButton type="button" variant="ghost" contentLayout="plain" className={styles.activeWorkTrigger}
+            aria-label={lang === "en" ? "Tasks" : "任务"}
+            aria-pressed={projectUtilities.opened && projectUtilities.selected && projectUtilities.model.activeId === "project_tasks"}
+            title={`${activeConversationsLabel} · ${statusSummaryTitle}`}
+            onPress={() => { closeUtilityMenu(); openProjectUtilityRail("project_tasks"); }}>
+            <span className={styles.activeWorkTriggerContent}>
+              <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} aria-hidden="true" />
+              <span>{lang === "en" ? "Tasks" : "任务"}</span>
+              <strong>{activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : projectTaskCount(activeWorkIndicator, shellAuxTasksQuery.data?.running ?? [])}</strong>
+              <ChevronDown size={13} aria-hidden="true" />
+            </span>
+          </VButton>
         </div>
       <div className={styles.settingsSlot} data-shell-group="settings">
-        <span
-          className={statusRetryable
-            ? `${styles.settingsStatus} ${styles.settingsStatusRetry}`
-            : styles.settingsStatus}
-          title={statusRetryable ? `${statusSummaryTitle} · ${t("systemStatusRetryHint")}` : statusSummaryTitle}
-          aria-label={statusRetryable
-            ? `${statusSummaryAriaLabel}，${t("systemStatusRetryHint")}`
-            : statusSummaryAriaLabel}
-          role={statusRetryable ? "button" : undefined}
-          tabIndex={statusRetryable ? 0 : undefined}
-          onClick={statusRetryable ? retryStatusProbes : undefined}
-          onKeyDown={statusRetryable
-            ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                retryStatusProbes();
-              }
-            }
-            : undefined}
-        >
-          <span aria-hidden="true" className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} />
-          <span>{effectivePrimaryStatusCard.value}</span>
-        </span>
-
-        <VRouteLinkButton to="/git" variant="ghost" className={styles.settingsTrigger} aria-label={t("navGit")} title={shellGitTriggerTitle}>
-          <span className={styles.settingsTriggerIconSlot}>
-            <GitBranch size={17} />
-            {shellGitNeedsAttention ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}
-          </span>
-        </VRouteLinkButton>
-        <VRouteLinkButton to="/aux" variant="ghost" className={styles.settingsTrigger} aria-label={auxCenterLabel} title={auxCenterLabel}>
-          <span className={styles.settingsTriggerIconSlot}>
-            <ListTree size={17} />
-            {shellAuxRunningBadge ? (
-              <span className={styles.settingsTriggerCountBadge} aria-hidden="true">{shellAuxRunningBadge}</span>
-            ) : null}
-          </span>
-        </VRouteLinkButton>
-        <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={agentBroadcastTriggerLabel} title={agentBroadcastTriggerLabel} onClick={(event) => {
-          // Any left click counts as "went to look" — modifier clicks hand the
-          // navigation to the browser's new-tab behaviour, which still shows
-          // the broadcast surface. Right click (context menu) does not.
-          if (event.button === 0) {
-            markAgentBroadcastSeen();
-          }
-          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          chatRoute.openProjectBus({ telemetrySource: "shell_settings" });
-          closeUtilityMenu();
-        }}>
-          <span className={styles.settingsTriggerIconSlot}>
-            <Bell size={17} />
-            {agentBroadcastHasUnread ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}
-          </span>
-        </VRouteLinkButton>
+        <VButton variant="ghost" className={styles.settingsTrigger} aria-label={lang === "en" ? "Changes" : "变更"} title={shellGitTriggerTitle}
+          aria-pressed={projectUtilities.opened && projectUtilities.selected && projectUtilities.model.activeId === "project_git"}
+          onPress={() => { closeUtilityMenu(); openProjectUtilityRail("project_git"); }}>
+          <span className={styles.settingsTriggerIconSlot}><GitBranch size={17} />{(shellGitStatus?.counts.total ?? 0) > 0 ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}</span>
+        </VButton>
+        <VButton variant="ghost" className={styles.settingsTrigger} aria-label={lang === "en" ? "Notifications" : "通知"} title={agentBroadcastTriggerLabel}
+          aria-pressed={projectUtilities.opened && projectUtilities.selected && projectUtilities.model.activeId === "project_notices"}
+          onPress={() => { closeUtilityMenu(); openProjectUtilityRail("project_notices"); }}>
+          <span className={styles.settingsTriggerIconSlot}><Bell size={17} />{agentBroadcastHasUnread ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}</span>
+        </VButton>
 
         <VPopover
           open={utilityOpen}
           onOpenChange={(open) => {
-            clearPopoverSwitchTimer();
             setUtilityOpen(open);
-            if (open) setActiveWorkOpen(false);
-            else {
+            if (!open) {
               setMobileNavigationOpen(false);
             }
           }}
@@ -3206,17 +3018,18 @@ export function AppShell() {
               title={settingsLabel}
               onPointerEnter={() => preloadSettingsSurfaceChunk("pointerenter", "settings-menu", { soft: true })}
               onFocus={() => preloadSettingsSurfaceChunk("focus", "settings-menu", { soft: true })}
-              onPointerDownCapture={() => {
-                // Switching popovers should take one click, including on touch screens.
-                if (activeWorkOpen) schedulePopoverSwitch(() => setUtilityOpen(true));
-                setActiveWorkOpen(false);
-              }}
+
             >
               <Settings size={17} aria-hidden="true" />
             </VButton>
           )}
         >
           <div className={styles.settingsPopoverBody}>
+             <div className={styles.settingsStatus} title={statusSummaryTitle} aria-label={statusSummaryAriaLabel}>
+               <span className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} aria-hidden="true" />
+               <span>{effectivePrimaryStatusCard.value}</span>
+               {statusRetryable ? <VButton variant="ghost" density="compact" aria-label={lang === "zh" ? "重试连接检查" : "Retry connection check"} onPress={retryStatusProbes}>{lang === "zh" ? "重试" : "Retry"}</VButton> : null}
+             </div>
             <VButton
               type="button"
               variant="ghost"
@@ -3281,10 +3094,14 @@ export function AppShell() {
       </div>
       </header>
 
-      <main className={styles.mainArea}>
-        <CompanionDesktopAttention />
-        <Outlet />
-      </main>
+      <div className={styles.mainArea}>
+        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><Outlet /></>}
+          aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
+          resize={{ layoutId: WORKBENCH_LAYOUT_IDS.projectUtilities, aside: { defaultWidth: 420, minWidth: 320, maxWidth: 640 } }} />
+      </div>
+      <VDialog open={projectUtilityFallback && projectUtilityOverlay} onOpenChange={(open) => { if (!open) collapseProjectUtilityRail(); }} title={lang === "zh" ? "项目工具" : "Project tools"} size="xl" hideClose contentClassName={styles.projectUtilityOverlay}>
+        <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense>
+      </VDialog>
 
     </div>
   );

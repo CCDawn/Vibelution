@@ -47,6 +47,8 @@ import {
 } from "./chatRightRailModel";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import styles from "./ChatRightRail.styles";
+import { isProjectUtilityKind } from "../../app/projectUtilityRail";
+import { ProjectUtilityPanel } from "./ProjectUtilityPanel";
 
 const CliAgentRunTerminalPanel = lazy(() =>
   import("./CliAgentRunTerminalPanel").then((module) => ({
@@ -138,6 +140,8 @@ type ChatRightRailProps = {
   terminalMountedInCenter: boolean;
   onTerminalSessionChange?: (runId: string, session: CliAgentTerminalSession) => void;
   onOpenFile: (path: string) => void;
+  onOpenSession?: (sessionId: string) => void;
+  id?: string;
   sideClient?: ChatRightRailSideClient;
 };
 
@@ -536,6 +540,8 @@ export function ChatRightRail({
   terminalMountedInCenter,
   onTerminalSessionChange,
   onOpenFile,
+  onOpenSession,
+  id = "chat-status-pane",
   sideClient = defaultSideClient,
 }: ChatRightRailProps) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -621,7 +627,7 @@ export function ChatRightRail({
       directoryEndedEmpty: "Nothing has finished",
     };
   const active = activeChatRightRailTab(model);
-  const launcher = chatRightRailLauncherKinds(sessionKind);
+  const launcher = chatRightRailLauncherKinds(sessionKind).filter((kind) => Boolean(sessionId) || isProjectUtilityKind(kind));
   const matches = searchChatRightRailTabs(model, searchQuery);
   const devtoolsView = projectChatRightRailDevtools(devtools);
   const browserUrl = active?.kind === "browser" ? normalizeChatRightRailBrowserUrl(active.url || "") : null;
@@ -636,7 +642,7 @@ export function ChatRightRail({
     setSearchOpen(false);
   };
   return (
-    <section id="chat-status-pane" className={`${styles.shell} ${className}`} aria-label={copy.rail}>
+    <section id={id} className={`${styles.shell} ${className}`} aria-label={copy.rail}>
       <div className={styles.toolbar}>
         <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
           {model.tabs.map((tab) => {
@@ -646,6 +652,7 @@ export function ChatRightRail({
               <div
                 key={tab.id}
                 role="tab"
+                aria-label={label}
                 aria-selected={selected}
                 data-chat-right-rail-tab={tab.id}
                 draggable
@@ -852,6 +859,7 @@ export function ChatRightRail({
         </div>
       ) : null}
       <div className={styles.body}>
+        {active && isProjectUtilityKind(active.kind) ? <ProjectUtilityPanel kind={active.kind} lang={lang} sessionId={sessionId || undefined} onOpenSession={onOpenSession} /> : null}
         {model.tabs.length === 0 ? (
           <div className={styles.launcher}>
             <VEmptyState title={copy.openTab} align="start">

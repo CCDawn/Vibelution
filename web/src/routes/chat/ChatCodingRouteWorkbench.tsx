@@ -1,3 +1,5 @@
+import { collapseProjectUtilityRail, selectSessionUtilityRail, setProjectUtilityHost } from "../../app/projectUtilityRail";
+import { useProjectAwareRightRail } from "./useProjectAwareRightRail";
 /**
  * Chat Coding workbench implementation (R01).
  * Entry re-export: web/src/routes/ChatCodingRoute.tsx
@@ -2061,22 +2063,10 @@ export function ChatCodingRouteWorkbench() {
 
   const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
   const [changeRailOpened, setChangeRailOpened] = useState(false);
-  const [railsBySession, setRailsBySession] = useState<Record<string, ChatRightRailModel>>({});
+  const { railsBySession, setRailsBySession, railModel, updateRailModel, project: projectRail } = useProjectAwareRightRail(activeSessionId);
   const [reviewPick, setReviewPick] = useState<{ sessionId: string; source: "session" | "git"; path: string } | null>(null);
   const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
-  const railModel = activeSessionId ? (railsBySession[activeSessionId] ?? EMPTY_CHAT_RIGHT_RAIL) : EMPTY_CHAT_RIGHT_RAIL;
   const activeRailTab = activeChatRightRailTab(railModel);
-  const updateRailModel = (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => {
-    if (!activeSessionId) {
-      return;
-    }
-    const sessionId = activeSessionId;
-    setRailsBySession((current) => {
-      const previous = current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
-      const next = typeof update === "function" ? update(previous) : update;
-      return { ...current, [sessionId]: next };
-    });
-  };
   const changeRail = useMemo(
     () => buildChatChangeRail({
       companion: verifiedCompanionMode,
@@ -2175,6 +2165,7 @@ export function ChatCodingRouteWorkbench() {
         };
       });
       if (requestSessionId === activeSessionId) {
+        selectSessionUtilityRail();
         setChangeRailOpened(true);
         if (responsiveLayout.rightVisible) {
           setRightPaneCollapsed(false);
@@ -2191,6 +2182,22 @@ export function ChatCodingRouteWorkbench() {
     setResponsiveOverlayPane,
     setRightPaneCollapsed,
   ]);
+  useEffect(() => {
+    setProjectUtilityHost(ordinaryChangeRail);
+    return () => setProjectUtilityHost(false);
+  }, [ordinaryChangeRail]);
+  useEffect(() => {
+    if (!ordinaryChangeRail || !projectRail.selected) return;
+    if (!projectRail.opened) {
+      setRightPaneCollapsed(true);
+      setResponsiveOverlayPane(null);
+      return;
+    }
+    setSessionBrowserOpen(false);
+    setChangeRailOpened(true);
+    if (responsiveLayout.rightVisible) setRightPaneCollapsed(false);
+    else setResponsiveOverlayPane("right");
+  }, [ordinaryChangeRail, projectRail.opened, projectRail.selected, projectRail.model.activeId, responsiveLayout.rightVisible, setRightPaneCollapsed, setResponsiveOverlayPane]);
   const changedFiles = new Set(changedFileList);
   const changedPathSet = new Set(
     changedFileList.map((path) => String(path || "").replace(/\\/g, "/").trim()),
@@ -2200,6 +2207,7 @@ export function ChatCodingRouteWorkbench() {
     : "agent";
   const changeRailVisible = ordinaryChangeRail && (changeRail.show || changeRailOpened) && !statusRailCollapsed;
   const toggleChangeRail = () => {
+    if (changeRailVisible || statusRailOverlayOpen) collapseProjectUtilityRail();
     if (!ordinaryChangeRail) {
       setResponsiveOverlayPane((current) => current === "right" ? null : "right");
       return;
@@ -3923,6 +3931,7 @@ export function ChatCodingRouteWorkbench() {
     }
     const sessionId = activeSessionId;
     const titleBase = lang === "zh" ? "辅助对话" : "Side chat";
+    selectSessionUtilityRail();
     setRailsBySession((current) => ({
       ...current,
       [sessionId]: openFreshChatRightRailSideTab(current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL, {
@@ -4288,6 +4297,7 @@ export function ChatCodingRouteWorkbench() {
         sessionKind={detail?.sessionKind}
         model={railModel}
         onModelChange={updateRailModel}
+        onOpenSession={(id) => openSession(id, { telemetrySource: "right_rail_project" })}
         onCollapse={toggleChangeRail}
         devtools={detail ? {
           phase: detail.currentPhase,

@@ -118,6 +118,9 @@ describe("chat right rail model", () => {
       "terminal",
       "browser",
       "devtools",
+      "project_tasks",
+      "project_git",
+      "project_notices",
     ]);
     expect(chatRightRailLauncherKinds("child")).not.toContain("side");
   });

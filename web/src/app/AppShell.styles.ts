@@ -25,6 +25,8 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
+  projectWorkspace: "h-full min-h-0 [&>[data-vui=split-main]]:h-full [&>[data-vui=split-main]]:overflow-hidden",
+  projectUtilityOverlay: "flex h-[calc(100dvh-80px)] w-[min(560px,calc(100vw-20px))] max-w-none flex-col gap-0 overflow-hidden p-0 [&>[data-slot=dialog-header]]:hidden [&>[data-slot=dialog-body]]:flex [&>[data-slot=dialog-body]]:min-h-0 [&>[data-slot=dialog-body]]:flex-1 [&>[data-slot=dialog-body]]:overflow-hidden [&>[data-slot=dialog-body]]:p-0",
   actionButton:
     `vui-app-appshell actionButton min-w-0 flex flex-wrap items-center gap-1.5 ${vuiControlQuietChromeClass}`,
   actionIconButton:

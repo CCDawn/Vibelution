@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { routeLocationKey } from "./AppShell";
 import appShellSource from "./AppShell.tsx?raw";
+import projectUtilityPanelSource from "../routes/chat/ProjectUtilityPanel.tsx?raw";
 
 function isWindowHistoryExpression(node: ts.Expression): boolean {
   return ts.isPropertyAccessExpression(node)
@@ -283,15 +284,21 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).not.toContain('t("navChatRooms")');
   });
 
-  it("keeps the retired utility file tree out of the shell and the project-bus shortcut wired", () => {
+  it("keeps project utilities in the shared rail and the full notifications view on the project bus", () => {
     expect(appShellSource).toContain("LazyAppShellSettingsMenu");
     expect(appShellSource).not.toContain("filterUtilityFileTree");
     expect(appShellSource).not.toContain("renderUtilityFileTree");
     expect(appShellSource).not.toContain("utility-file-navigator");
-    // The retired AppShellUtilityMenu kept the bus entry behind a navigation
-    // click; the shell bell now owns the same telemetry semantics directly.
-    expect(appShellSource).toContain('serializeChatRouteSelection("", { kind: "project_bus" })');
-    expect(appShellSource).toContain('chatRoute.openProjectBus({ telemetrySource: "shell_settings" })');
+    // Top-bar tools select right-rail tabs; they do not switch pages or chats.
+    expect(appShellSource).toContain('openProjectUtilityRail("project_tasks")');
+    expect(appShellSource).toContain('openProjectUtilityRail("project_git")');
+    expect(appShellSource).toContain('openProjectUtilityRail("project_notices")');
+    expect(appShellSource).not.toContain('to="/aux"');
+    expect(appShellSource).not.toContain('to="/git"');
+    expect(appShellSource).not.toContain("serializeChatRouteSelection(\"\", { kind: \"project_bus\" })");
+    expect(appShellSource).not.toContain('chatRoute.openProjectBus({ telemetrySource: "shell_settings" })');
+    // The complete notifications action opens the same project bus surface.
+    expect(projectUtilityPanelSource).toContain('chatRoute.openProjectBus({ telemetrySource: "project_notifications_expand" })');
   });
 
   it("keeps Agent management top-level while memory is a separate primary surface", () => {

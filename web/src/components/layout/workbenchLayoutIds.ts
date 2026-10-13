@@ -4,6 +4,7 @@
  */
 
 export const WORKBENCH_LAYOUT_IDS = {
+  projectUtilities: "project-utilities",
   /** Aux conversations center (VListDetailPage sidebar width memory). */
   auxConversations: "aux-conversations",
   agentPerception: "agent-perception",
