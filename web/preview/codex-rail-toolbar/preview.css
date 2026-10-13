@@ -24,10 +24,11 @@
 .preview-agent strong { display:block; font-size:13px; font-weight:500; }
 .preview-agent small { display:block; color:#777d83; font-size:12px; margin-top:4px; }
 .preview-center { height:calc(100% - 4px); margin:0 4px 4px; display:flex; flex-direction:column; min-width:0; }
-.preview-tab-strip { display:flex; align-items:center; height:44px; flex-shrink:0; gap:3px; padding:0 4px; min-width:0; }
-.preview-session-tabs { display:flex; align-items:flex-end; height:100%; flex:1; min-width:0; gap:2px; overflow:hidden; }
+.preview-tab-strip { display:flex; align-items:center; height:44px; flex-shrink:0; gap:3px; padding:0 12px; min-width:0; }
+.preview-session-tabs { display:flex; align-items:flex-end; height:100%; flex:1; min-width:0; gap:2px; overflow-x:clip; overflow-y:visible; }
 .codex-alignment-preview .preview-session-tab { min-width:0; max-width:216px; height:32px; min-height:32px; padding:0 10px; gap:8px; border:0; border-radius:8px 8px 0 0; background:transparent; background-image:none; box-shadow:none; font-size:13px; font-weight:400; color:#6e7277; }
-.codex-alignment-preview .preview-session-tab-active { background:#fff; color:#303338; font-weight:400; }
+.codex-alignment-preview .preview-session-tab-active { position:relative; z-index:1; background:#fff; color:#303338; font-weight:400; }
+.codex-alignment-preview .preview-session-tab-active:after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:#fff; pointer-events:none; }
 .preview-session-tab span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .preview-session-tab > :last-child { margin-left:8px; color:#75787c; }
 .preview-tab-add { align-self:center; }
@@ -52,8 +53,6 @@
 .preview-composer > div span { display:flex; align-items:center; gap:4px; }
 .preview-composer .preview-model { margin-left:auto; }
 .preview-right { position:relative; height:calc(100% - 4px); padding:0 4px 0 0; }
-.preview-right:before { content:""; position:absolute; left:-.5px; top:12px; bottom:12px; width:1px; background:#252629; opacity:0; }
-.preview-right:hover:before { opacity:.35; }
 .preview-real-rail .toolbar { height:44px; padding:0 4px; gap:3px; }
 .preview-real-rail .toolbar:has(.tabs:empty):before { content:"侧栏"; font-size:13px; font-weight:500; padding-left:8px; color:#555b62; }
 .preview-real-rail .tabs { gap:1px; }
