@@ -93,6 +93,63 @@ describe("workbench pane preference synchronization", () => {
     expect(readPaneLayout("finance")).toEqual(widths(304));
   });
 
+  it("acknowledges submitted pane values even when the server retains other pane keys", async () => {
+    await start();
+    vi.mocked(saveWorkbenchUiPreferences).mockResolvedValue({ ok: true, preferences: {
+      ...server, paneLayouts: { ...server.paneLayouts, finance: { ...widths(304), legacyPane: 300 } },
+    } });
+    writePaneLayout("finance", widths(304));
+    await flushWorkbenchUiPreferencesToServer();
+    expect(localStorage.getItem(pendingKey)).toBeNull();
+  });
+
+  it("does not hydrate after the last subscriber stops", async () => {
+    writePaneLayout("finance", widths(304));
+    let hydrate!: (preferences: WorkbenchUiPreferences) => void;
+    vi.mocked(getWorkbenchUiPreferences).mockImplementationOnce(() => new Promise(resolve => { hydrate = resolve; }));
+    stop = startWorkbenchUiPreferencesSync();
+    stop();
+    hydrate(server);
+    await settle();
+    expect(readPaneLayout("finance")).toEqual(widths(304));
+    expect(saveWorkbenchUiPreferences).not.toHaveBeenCalled();
+  });
+
+  it("keeps observing while another subscriber is still mounted", async () => {
+    await start();
+    const stopFirst = stop!;
+    stop = startWorkbenchUiPreferencesSync();
+    stopFirst();
+    writePaneLayout("finance", widths(304));
+    await flushWorkbenchUiPreferencesToServer();
+    expect(saveWorkbenchUiPreferences).toHaveBeenCalledExactlyOnceWith({ paneLayout: { layoutId: "finance", widths: widths(304) } });
+  });
+
+  it("serializes the new mount behind an old request without letting its response acknowledge the new edit", async () => {
+    await start();
+    let first!: (value: Awaited<ReturnType<typeof saveWorkbenchUiPreferences>>) => void;
+    let second!: typeof first;
+    vi.mocked(saveWorkbenchUiPreferences)
+      .mockImplementationOnce(() => new Promise(resolve => { first = resolve; }))
+      .mockImplementationOnce(() => new Promise(resolve => { second = resolve; }));
+    writePaneLayout("finance", widths(304));
+    const saving = flushWorkbenchUiPreferencesToServer();
+    stop!();
+    stop = startWorkbenchUiPreferencesSync();
+    await settle();
+    writePaneLayout("finance", widths(328));
+    expect(saveWorkbenchUiPreferences).toHaveBeenCalledTimes(1);
+    first(reply(304));
+    await saving;
+    await settle();
+    expect(saveWorkbenchUiPreferences).toHaveBeenCalledTimes(2);
+    expect(saveWorkbenchUiPreferences).toHaveBeenLastCalledWith({ paneLayout: { layoutId: "finance", widths: widths(328) } });
+    expect(localStorage.getItem(pendingKey)).toContain("finance");
+    second(reply(328));
+    await settle();
+    expect(localStorage.getItem(pendingKey)).toBeNull();
+  });
+
   it("serializes changed generations and never acknowledges a newer resize with an older response", async () => {
     await start();
     let first!: (value: Awaited<ReturnType<typeof saveWorkbenchUiPreferences>>) => void;

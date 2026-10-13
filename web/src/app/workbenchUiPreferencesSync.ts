@@ -31,6 +31,7 @@ let observedLayouts: PaneLayoutsMap = {};
 let flushPromise: Promise<void> | null = null;
 let flushRequested = false;
 let syncEpoch = 0;
+const subscribers = new Set<symbol>();
 
 // Widths remain in the shared canonical store; this only records unacknowledged edits.
 const PENDING_LAYOUTS_KEY = "vibelution.workbench-ui-pending-layouts.v1";
@@ -144,7 +145,7 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
   if (flushPromise) { flushRequested = true; return flushPromise; }
   const epoch = syncEpoch;
   const attempted = new Map<string, string>();
-  flushPromise = (async () => {
+  const saving = (async () => {
     do {
       flushRequested = false;
       for (const [layoutId, generation] of Object.entries(readPendingLayouts())) {
@@ -157,7 +158,8 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
           const result = await saveWorkbenchUiPreferences({ paneLayout: { layoutId, widths } });
           if (epoch !== syncEpoch) return;
           const pending = readPendingLayouts();
-          if (result.ok && sameWidths(result.preferences.paneLayouts?.[layoutId], widths)
+          const savedWidths = result.preferences.paneLayouts?.[layoutId];
+          if (result.ok && savedWidths && Object.keys(widths).every(key => savedWidths[key] === widths[key])
             && pending[layoutId] === generation && sameWidths(readPaneLayout(layoutId), widths)) {
             delete pending[layoutId];
             writePendingLayouts(pending);
@@ -168,9 +170,29 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
       }
     } while (flushRequested && epoch === syncEpoch);
   })().finally(() => {
-    if (epoch === syncEpoch) flushPromise = null;
+    if (flushPromise !== saving) return;
+    flushPromise = null;
+    // A remount must wait behind the old request, but its pending edits still need a new flush.
+    if (readyToSave && flushRequested) void flushWorkbenchUiPreferencesToServer();
   });
+  flushPromise = saving;
   return flushPromise;
+}
+
+function onStorage(event: StorageEvent): void {
+  if (event.key === PANE_LAYOUT_STORAGE_KEY && event.newValue) observeLocalChanges();
+}
+
+function stopSync(): void {
+  setPaneLayoutPersistHook(null);
+  window.removeEventListener("storage", onStorage);
+  hydratePromise = null;
+  readyToSave = false;
+  applyingServer = false;
+  observedLayouts = {};
+  flushRequested = false;
+  syncEpoch += 1;
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
 }
 
 /**
@@ -181,6 +203,8 @@ export function startWorkbenchUiPreferencesSync(): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
+  const subscriber = Symbol("workbench-ui-sync");
+  subscribers.add(subscriber);
 
   if (!hydratePromise) {
     const epoch = syncEpoch;
@@ -204,34 +228,17 @@ export function startWorkbenchUiPreferencesSync(): () => void {
 
   setPaneLayoutPersistHook(observeLocalChanges);
 
-  // Cross-tab: other tabs writing localStorage.
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === PANE_LAYOUT_STORAGE_KEY && event.newValue) {
-      observeLocalChanges();
-    }
-  };
+  // Cross-tab: other tabs writing localStorage. The shared hook stays until the last cleanup.
   window.addEventListener("storage", onStorage);
 
   return () => {
-    setPaneLayoutPersistHook(null);
-    window.removeEventListener("storage", onStorage);
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
+    if (!subscribers.delete(subscriber)) return;
+    if (!subscribers.size) stopSync();
   };
 }
 
 export function resetWorkbenchUiPreferencesSyncForTests(): void {
-  hydratePromise = null;
-  readyToSave = false;
-  applyingServer = false;
-  observedLayouts = {};
+  if (typeof window !== "undefined") stopSync();
+  subscribers.clear();
   flushPromise = null;
-  flushRequested = false;
-  syncEpoch += 1;
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
 }
