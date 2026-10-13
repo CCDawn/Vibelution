@@ -26,6 +26,7 @@ import {
   ThoughtStreamingSummary,
   progressTextExceedsClamp,
 } from "./conversationThoughtUnits";
+import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
 import styles from "./ConversationView.styles";
 
 export function reasoningExpansionSectionId(cell: Pick<CodexTranscriptCell, "id" | "sourceItemId">) {
@@ -73,7 +74,9 @@ export function createCodexTranscriptCellRenderers({
       settledDurationSeconds?: number;
     },
   ) {
-    const fullText = String(input.text || "").trim();
+    // Narration lanes render plain text only: terminal SGR artifacts from
+    // tool output or model prose are presentation noise, not content.
+    const fullText = stripAnsiArtifacts(input.text || "").trim();
     if (!fullText) {
       return null;
     }
@@ -153,11 +156,12 @@ export function createCodexTranscriptCellRenderers({
     cell: CodexTranscriptCell,
     text: string,
   ) {
+    const cleanText = stripAnsiArtifacts(text);
     const sectionId = reasoningExpansionSectionId(cell);
     const isLive = cell.status === "running" || cell.status === "pending";
     const defaultExpanded = false;
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
-    const canExpand = progressTextExceedsClamp(text);
+    const canExpand = progressTextExceedsClamp(cleanText);
     const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
     const headerContent = (
       <>
@@ -216,7 +220,7 @@ export function createCodexTranscriptCellRenderers({
             {headerContent}
           </div>
         )}
-        <ProgressScrollBody text={text} streaming={isLive} clamped={!expanded} />
+        <ProgressScrollBody text={cleanText} streaming={isLive} clamped={!expanded} />
       </section>
     );
   }
