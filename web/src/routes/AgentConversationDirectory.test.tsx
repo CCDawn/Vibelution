@@ -117,7 +117,7 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain("sessionCountByAgentId");
     expect(directorySource).toContain('aria-current={active ? "page" : undefined}');
     expect(directorySource).toContain('data-selected={active ? "true" : undefined}');
-    expect(directorySource).toContain("onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}");
+    expect(directorySource).toContain("onContextMenu(event, agent, latestSession ?? null)");
     expect(directorySource).toContain("onPress={() => onOpenAgent(agent, latestSession ?? null)}");
   });
 
@@ -157,7 +157,7 @@ describe("AgentConversationDirectory", () => {
 
   it("nests team chat and member agents under collapsible team blocks", () => {
     expect(directorySource).toContain("buildAgentDirectoryPartition");
-    expect(directorySource).toContain("teamBlocks.map(renderTeamBlock)");
+    expect(directorySource).toContain("visibleTeamBlocks.map(renderTeamBlock)");
     expect(directorySource).toContain("TeamConversationIndexItem");
     expect(directorySource).toContain('displayTitle={lang === "zh" ? "团队群聊" : "Team chat"}');
     expect(directorySource).toContain("onOpenGroupRoom");
@@ -311,7 +311,7 @@ describe("AgentConversationDirectory", () => {
   it("renders separate conversation and special Agent section labels and team blocks", () => {
     expect(directorySource).toContain('lang === "zh" ? "会话 Agent" : "Conversation Agents"');
     expect(directorySource).toContain('lang === "zh" ? "特殊 Agent" : "Special Agents"');
-    expect(directorySource).toContain("teamBlocks.map(renderTeamBlock)");
+    expect(directorySource).toContain("visibleTeamBlocks.map(renderTeamBlock)");
   });
 
   it("keeps each Agent directory section independently collapsible and accessible", () => {
