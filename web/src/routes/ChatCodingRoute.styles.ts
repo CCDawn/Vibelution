@@ -42,7 +42,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.,
   centerPane:
-    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--fg-primary)_9%,transparent)] ${vuiChatFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
+    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--fg-primary)_9%,transparent)] ${vuiRailFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
   // Column placement is separate from the pane. The built stylesheet emits
   // grid-column:3 after grid-column:1, so both utilities on one node keep column 3.
   centerPaneDocked:
@@ -50,7 +50,7 @@ const styles: Record<string, string> = {
   centerPaneOverlay:
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
-    `vui-routes-chatcodingroute centerSurface grid h-full min-h-0 w-full overflow-hidden ${vuiChatFillClass} [&_.vui-components-conversationview.surface]:rounded-none [&_.vui-components-conversationview.surface]:border-0 [&_.vui-components-conversationview.surface]:shadow-none`,
+    `vui-routes-chatcodingroute centerSurface grid h-full min-h-0 w-full overflow-hidden rounded-t-[12px] ${vuiChatFillClass} [&_.vui-components-conversationview.surface]:rounded-none [&_.vui-components-conversationview.surface]:border-0 [&_.vui-components-conversationview.surface]:shadow-none`,
   // Compact back chip: never compete with session tabs for width.
   chatReturnLink:
     "vui-routes-chatcodingroute chatReturnLink inline-flex h-7 max-w-[7.5rem] shrink-0 items-center gap-1 self-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 no-underline [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate",
