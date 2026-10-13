@@ -29,13 +29,25 @@ const iconStyles = Object.fromEntries(icons.map((Icon, index) => [`--launcher-ic
 const headerStyles = { ...routeStyles, tabStrip: "preview-tab-strip", tabStripSessions: "preview-session-tabs", overlayPaneControls: "preview-controls", overlayPaneToggle: "preview-quiet preview-toggle", tabActive: "preview-toggle-active" };
 const FINANCE_TITLE = "主题 · 人工智能算力产业链的竞争格局与风险";
 
-function App() {
+type Variant = "flat" | "attached";
+type SessionHeaderProps = {
+  title: string; onTitleChange: (title: string) => void; browse: boolean;
+  onToggleBrowse: () => void; railOpen: boolean; onToggleRail: () => void;
+};
+function SessionHeader({ title, onTitleChange, browse, onToggleBrowse, railOpen, onToggleRail }: SessionHeaderProps) {
+  return <ChatCenterTabStrip styles={headerStyles} lang="zh" agentSessionLabel="炒股智能体" chatReturnTarget={null} chatReturnLabel="返回" groupPanelActive={false} projectBusActive={false} showSessionTabs showAgentFallbackTab={false} workspaceActiveTab="agent"
+    sessionTabs={<><VButton role="tab" aria-selected={title === "炒股智能体"} className={`preview-session-tab ${title === "炒股智能体" ? "preview-session-tab-active" : ""}`} contentLayout="plain" onClick={() => onTitleChange("炒股智能体")} icon={<Bot size={14} strokeWidth={1.5}/>}><span>炒股智能体</span><X size={13} strokeWidth={1.5}/></VButton><VButton role="tab" aria-selected={title !== "炒股智能体"} className={`preview-session-tab ${title !== "炒股智能体" ? "preview-session-tab-active" : ""}`} contentLayout="plain" onClick={() => onTitleChange(FINANCE_TITLE)} icon={<Bot size={14} strokeWidth={1.5}/>}><span>{title === "炒股智能体" ? FINANCE_TITLE : title}</span><X size={13} strokeWidth={1.5}/></VButton><VIconButton label="在当前 Agent 下新建会话" className="preview-quiet preview-tab-add" icon={<Plus size={16} strokeWidth={1.5}/>}/></>}
+    fileTabs={null} sessionBrowserControl={<div className="preview-controls"><VIconButton label="浏览会话" className={`preview-quiet preview-browse ${browse ? "preview-toggle-active" : ""}`} icon={<List size={16} strokeWidth={1.5}/>} aria-pressed={browse} onClick={onToggleBrowse}/><VIconButton label="侧栏" className="preview-quiet preview-browse" icon={railOpen ? <PanelRightClose size={16} strokeWidth={1.5}/> : <PanelRightOpen size={16} strokeWidth={1.5}/>} aria-expanded={railOpen} onClick={onToggleRail}/><VDropdownMenu aria-label="会话操作" trigger={<VIconButton label="会话操作" icon={<MoreHorizontal size={16}/>} className="preview-quiet"/>} items={[{id:"export",label:"导出 HTML",onSelect:()=>{}}]}/></div>}
+    leftOverlayVisible rightOverlayVisible={false} statusRailAvailable={false} rightRailLabel={undefined} rightRailOpen={railOpen} conversationIndexOverlayOpen={false} statusRailOverlayOpen={railOpen} onActivateAgentFallbackTab={() => {}} onToggleLeftOverlay={() => {}} onToggleRightOverlay={onToggleRail}/>;
+}
+
+function App({ variant = "flat" }: { variant?: Variant }) {
   const [railModel, setRailModel] = useState<ChatRightRailModel>(EMPTY_CHAT_RIGHT_RAIL);
   const [railOpen, setRailOpen] = useState(true);
   const [browse, setBrowse] = useState(false);
-  const [title, setTitle] = useState(FINANCE_TITLE);
+  const [title, setTitle] = useState("炒股智能体");
   const [text, setText] = useState("");
-  return <div className="codex-alignment-preview" style={iconStyles}>
+  return <div className={`codex-alignment-preview variant-${variant}`} style={iconStyles}>
     <header className="preview-global-bar">
       <VIconButton label="返回" icon={<ArrowLeft size={16}/>} className="preview-quiet"/>
       <nav aria-label="主导航">{["对话", "智能体", "团队", "进化", "记忆库", "Agent 管理"].map(label => <VButton key={label} className={`preview-quiet ${label === "对话" ? "preview-nav-active" : ""}`}>{label}</VButton>)}</nav>
@@ -50,12 +62,8 @@ function App() {
         {["炒股智能体", "资料 Agent", "能力顾问"].map((label, index) => <VButton key={label} className={`preview-agent ${index === 0 ? "preview-agent-selected" : ""}`} contentLayout="plain"><span className="preview-avatar"><Bot size={23}/></span><span><strong>{label}</strong><small>{["阿里云 DashScope Qwen3.8 Flash", "广域检索", "科研组织顾问"][index]}</small></span></VButton>)}
       </div>}
       main={<section className="preview-center">
-        <ChatCenterTabStrip styles={headerStyles} lang="zh" agentSessionLabel={title} chatReturnTarget={null} chatReturnLabel="返回" groupPanelActive={false} projectBusActive={false} showSessionTabs showAgentFallbackTab={false} workspaceActiveTab="agent"
-          sessionTabs={<><VButton role="tab" aria-selected={title === "炒股智能体"} className={`preview-session-tab ${title === "炒股智能体" ? "preview-session-tab-active" : ""}`} contentLayout="plain" onClick={() => setTitle("炒股智能体")} icon={<Bot size={14} strokeWidth={1.5}/>}><span>炒股智能体</span><X size={13} strokeWidth={1.5}/></VButton><VButton role="tab" aria-selected={title !== "炒股智能体"} className={`preview-session-tab ${title !== "炒股智能体" ? "preview-session-tab-active" : ""}`} contentLayout="plain" onClick={() => setTitle(FINANCE_TITLE)} icon={<Bot size={14} strokeWidth={1.5}/>}><span>{title === "炒股智能体" ? FINANCE_TITLE : title}</span><X size={13} strokeWidth={1.5}/></VButton><VIconButton label="在当前 Agent 下新建会话" className="preview-quiet preview-tab-add" icon={<Plus size={16} strokeWidth={1.5}/>}/></>}
-          fileTabs={null} sessionBrowserControl={<div className="preview-controls"><VIconButton label="浏览会话" className={`preview-quiet preview-browse ${browse ? "preview-toggle-active" : ""}`} icon={<List size={16} strokeWidth={1.5}/>} aria-pressed={browse} onClick={() => setBrowse(!browse)}/><VIconButton label="侧栏" className="preview-quiet preview-browse" icon={railOpen ? <PanelRightClose size={16} strokeWidth={1.5}/> : <PanelRightOpen size={16} strokeWidth={1.5}/>} aria-expanded={railOpen} onClick={() => setRailOpen(!railOpen)}/></div>}
-          leftOverlayVisible rightOverlayVisible={false} statusRailAvailable={false} rightRailLabel={undefined} rightRailOpen={railOpen} conversationIndexOverlayOpen={false} statusRailOverlayOpen={railOpen} onActivateAgentFallbackTab={() => {}} onToggleLeftOverlay={() => {}} onToggleRightOverlay={() => setRailOpen(!railOpen)}/>
+        <SessionHeader title={title} onTitleChange={setTitle} browse={browse} onToggleBrowse={() => setBrowse(!browse)} railOpen={railOpen} onToggleRail={() => setRailOpen(!railOpen)}/>
         <div className="preview-main-body">
-          <div className="preview-body-tools"><VDropdownMenu aria-label="会话操作" trigger={<VIconButton label="会话操作" icon={<MoreHorizontal size={16}/>} className="preview-quiet"/>} items={[{id:"export",label:"导出 HTML",onSelect:()=>{}}]}/></div>
           {browse ? <div className="preview-browse-page"><h2>会话</h2><p>炒股智能体</p>{["问候", "继续对话", "新会话"].map((name,index)=><VButton className="preview-session-row" key={name} contentLayout="plain" onClick={()=>{setTitle(name);setBrowse(false);}}><Bot size={18}/><span><strong>{name}</strong><small>{["今天 10:32","昨天 18:10","10 月 10 日"][index]}</small></span><ChevronRight size={14}/></VButton>)}</div> : <><div className="preview-transcript"><div className="preview-user-heading">Administrator <small>今天 10:32</small><span>A</span></div><div className="preview-user-message">帮我梳理当前资料，并给出下一步建议。</div><div className="preview-assistant-heading"><Bot size={24}/><span>炒股智能体</span><small>今天 10:32</small></div><p>可以先核对资料来源，再整理关键结论与待确认的问题。</p></div><div className="preview-composer"><VTextarea aria-label="发送消息" placeholder="描述下一步要做什么..." value={text} onChange={event=>setText(event.target.value)}/><div><VIconButton label="选择附件" icon={<Plus size={16}/>} className="preview-quiet"/><span>请求批准 <ChevronDown size={11}/></span><span className="preview-model">OpenAI GPT-5.5 <ChevronDown size={11}/></span></div></div></>}
         </div>
       </section>}
@@ -63,6 +71,31 @@ function App() {
     <div className="preview-disclosure">设计预览 · 会话与工具数据为模拟</div>
   </div>;
 }
+
+function HeaderSample({ variant }: { variant: Variant }) {
+  const [title, setTitle] = useState("炒股智能体");
+  const [browse, setBrowse] = useState(false);
+  const [rail, setRail] = useState(true);
+  return <div className={`codex-alignment-preview variant-${variant} header-sample`}>
+    <section className="preview-center">
+      <SessionHeader title={title} onTitleChange={setTitle} browse={browse} onToggleBrowse={() => setBrowse(!browse)} railOpen={rail} onToggleRail={() => setRail(!rail)}/>
+      <div className="preview-main-body"><div className="sample-body-label"><Bot size={20} strokeWidth={1.5}/><span>{browse ? "会话索引" : "炒股智能体"}</span></div></div>
+    </section>
+  </div>;
+}
+
+function Comparison() {
+  return <main className="preview-comparison-page">
+    <header><h1>会话顶栏对照</h1><p>点击标签切换选中状态；两版保留相同的功能与名称。</p></header>
+    {(["flat", "attached"] as const).map((variant, index) => <section className="comparison-option" aria-label={variant === "flat" ? "方案 A 平整标题栏" : "方案 B 低轮廓标签"} key={variant}>
+      <div className="comparison-caption"><h2>{index === 0 ? "A · 平整标题栏" : "B · 低轮廓标签"}{index === 0 ? <span>推荐</span> : null}</h2><VButton variant="ghost" onClick={() => { window.location.href = `/codex-rail-toolbar-preview.html?variant=${variant}&revision=shape-4`; }}>查看完整界面</VButton></div>
+      <HeaderSample variant={variant}/>
+      <p>{index === 0 ? "标题栏与正文共用一个白色圆角面，选中状态用浅灰底表示，减少突起和转折。" : "保留标签与正文连接的轮廓，压低高度和留白，延续现在的操作习惯。"}</p>
+    </section>)}
+    <footer>设计预览 · 模拟数据 · 正式界面未修改</footer>
+  </main>;
+}
 const previewRoot = createRoot(document.getElementById("root")!);
 if (import.meta.hot) import.meta.hot.dispose(() => previewRoot.unmount());
-previewRoot.render(<QueryClientProvider client={queryClient}><BrowserRouter><App/></BrowserRouter></QueryClientProvider>);
+const previewParameters = new URLSearchParams(window.location.search);
+previewRoot.render(<QueryClientProvider client={queryClient}><BrowserRouter>{previewParameters.get("view") === "compare" ? <Comparison/> : <App variant={previewParameters.get("variant") === "attached" ? "attached" : "flat"}/>}</BrowserRouter></QueryClientProvider>);
