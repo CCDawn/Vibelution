@@ -65,6 +65,17 @@ class ClaimRecord(BaseModel):
     evidence: ClaimEvidence | None
     error: ClaimError | None
     lesson: LessonRecord | None
+    lessonState: Literal["active", "superseded", "revoked", "absent"] = "absent"
+    lessonHistory: list["LessonHistory"] = Field(default_factory=list)
+
+
+class LessonHistory(BaseModel):
+    lessonId: str
+    text: str
+    state: Literal["active", "superseded", "revoked"]
+    createdAt: str
+    supersededBy: str | None = None
+    revokedAt: str | None = None
 
 
 class ClaimPage(BaseModel):
@@ -82,6 +93,16 @@ class LessonRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, max_length=500)
     clientRequestId: str = Field(min_length=36, max_length=36)
+
+
+class LessonRevisionRequest(LessonRequest):
+    expectedLessonId: str = Field(min_length=1, max_length=160)
+
+
+class LessonRevocationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    clientRequestId: str = Field(min_length=36, max_length=36)
+    expectedLessonId: str = Field(min_length=1, max_length=160)
 
 
 class ReflectionContext(BaseModel):

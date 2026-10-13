@@ -147,6 +147,41 @@ async function input(label: string, value: string) {
 }
 
 describe("financial assistant page", () => {
+  it("refreshes lessons at launch and excludes a lesson revoked after the page loaded", async () => {
+    vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [{ id: "old-lesson", text: "已作废的复盘结论", createdAt: "2026-01-01T00:00:00Z", refs: [] }] });
+    await render("/finance?session=native-session&finance_tab=overview");
+    vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [] });
+    const readsBefore = vi.mocked(fetchFinancialReflection).mock.calls.length;
+    await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); });
+    await settle();
+    expect(fetchFinancialReflection).toHaveBeenCalledTimes(readsBefore + 1);
+    expect(nativeSubmit).toHaveBeenCalledTimes(1);
+    expect(nativeSubmit.mock.calls[0][0]).not.toContain("已作废的复盘结论");
+  });
+  it("does not submit cached lessons if the fresh launch read fails", async () => {
+    await render("/finance?session=native-session&finance_tab=overview");
+    vi.mocked(fetchFinancialReflection).mockRejectedValue(new Error("fresh reflection unavailable"));
+    await act(async () => button("开始研究")!.click());
+    await settle();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("fresh reflection unavailable");
+    vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [] });
+    await act(async () => button("开始研究")!.click());
+    await settle();
+    expect(nativeSubmit).toHaveBeenCalledTimes(1);
+  });
+  it("abandons a pending lesson read when research parameters change", async () => {
+    await render("/finance?session=native-session&finance_tab=overview");
+    let resolve!: (value: { items: [] }) => void;
+    vi.mocked(fetchFinancialReflection).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await act(async () => button("开始研究")!.click());
+    await input("报告期", "changed-while-loading");
+    await act(async () => resolve({ items: [] }));
+    await settle();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+    expect(createChatSession).not.toHaveBeenCalled();
+  });
   it("includes confirmed lessons in the native research request", async () => {
     vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [{ id: "lesson-a", text: "判断方向前补充可核验依据", createdAt: "2026-01-01T00:00:00Z", refs: [{ type: "item", id: "validation-a" }] }] });
     await render("/finance?session=native-session&finance_tab=overview");

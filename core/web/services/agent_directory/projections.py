@@ -33,14 +33,19 @@ def _service():
 def _format_personal_episodes_context(episodes: list[dict[str, Any]]) -> list[str]:
     s = _service()
     from . import episodic_memory as episodic_memory_mod
+    from .personal_memory_selection import (
+        PROMPT_EPISODE_LIMIT,
+        select_prompt_personal_episodes,
+    )
 
-    if not episodes:
+    selected = select_prompt_personal_episodes(episodes)
+    if not selected:
         return ["## 个人记忆", "无"]
     lines = [
         "## 个人记忆",
         "本轮必须使用。这是当前 Agent 的跨会话私有记忆，不是世代交接，也不是团队/公共知识。",
     ]
-    for item in episodes[: episodic_memory_mod.PROMPT_LIST_LIMIT]:
+    for item in selected[:PROMPT_EPISODE_LIMIT]:
         episode_id = str(item.get("episodeId") or item.get("eventId") or "").strip()
         kind = str(item.get("kind") or "note").strip() or "note"
         text = s.trim_lines(str(item.get("text") or ""), max_lines=episodic_memory_mod.PROMPT_TEXT_LINES)
@@ -313,14 +318,17 @@ def build_agent_runtime_context_block(
         else s.resolve_memory_policy_for_agent(agent_id)
     )
     from . import episodic_memory as episodic_memory_mod
+    from .personal_memory_selection import select_prompt_personal_episodes
 
     from core.web.services.agent_perception.access import allows_personal_prefetch
 
     if bool(memory_policy.get("enabled", True)) and allows_personal_prefetch(agent):
-        episodes = (
+        episodes = select_prompt_personal_episodes(
             list(episodic_events_snapshot)
             if episodic_events_snapshot is not None
-            else s.list_current_episodic_events(agent_id, limit=episodic_memory_mod.PROMPT_LIST_LIMIT)
+            else episodic_memory_mod.list_episodic_events(
+                agent_id, include_superseded=False
+            )
         )
     else:
         # 记忆开关关闭：与个人记忆零接触——既不读 episodic JSONL，也不注入该段。

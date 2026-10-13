@@ -1,5 +1,5 @@
 import { fetchJson } from "./client";
-import type { FinancialBacktestRequest, FinancialBacktestResult, FinancialClaim, FinancialClaimPage, FinancialClaimRequest, FinancialLesson } from "./types/financialEvaluation";
+import type { FinancialBacktestRequest, FinancialBacktestResult, FinancialClaim, FinancialClaimPage, FinancialClaimRequest, FinancialLesson, FinancialLessonRevisionRequest, FinancialLessonRevocationRequest } from "./types/financialEvaluation";
 
 export const financialEvaluationKeys = {
   claims: (agentId: string) => ["finance", "validation", agentId] as const,
@@ -13,5 +13,7 @@ export const createFinancialClaim = (agentId: string, payload: FinancialClaimReq
 export const checkFinancialClaim = (agentId: string, id: string) => post<FinancialClaim>(`${claimPath(agentId, id)}/check`);
 export const fetchFinancialFeedback = (agentId: string, id: string) => fetchJson<{ id: string; text: string }>(`${claimPath(agentId, id)}/feedback`);
 export const saveFinancialLesson = (agentId: string, id: string, text: string, clientRequestId: string) => post<FinancialLesson>(`${claimPath(agentId, id)}/lesson`, { text, clientRequestId });
+export const reviseFinancialLesson = (agentId: string, id: string, payload: FinancialLessonRevisionRequest) => fetchJson<FinancialClaim>(`${claimPath(agentId, id)}/lesson`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export const revokeFinancialLesson = (agentId: string, id: string, payload: FinancialLessonRevocationRequest) => fetchJson<FinancialClaim>(`${claimPath(agentId, id)}/lesson`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 export const fetchFinancialReflection = (agentId: string, symbol: string, analysisDate: string, signal?: AbortSignal) => fetchJson<{ items: FinancialLesson[] }>(`${base(agentId)}/reflection-context?${new URLSearchParams({ symbol, analysisDate })}`, { signal });
 export const runFinancialBacktest = (agentId: string, payload: FinancialBacktestRequest, signal?: AbortSignal) => post<FinancialBacktestResult>(`${base(agentId)}/backtest`, payload, signal);

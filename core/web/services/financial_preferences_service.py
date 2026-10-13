@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import threading
 from uuid import UUID
 
 from core.web.services import agent_directory_service as directory
+from core.web.services.agent_directory import episodic_memory
 from core.web.services.financial_assistant_service import PROFILE, ROLE
 
-_LOCK = threading.RLock()
 _REF_PREFIX = "finance-preference:"
 
 
@@ -36,10 +35,10 @@ def _agent(agent_id: str) -> dict:
     return agent
 
 
-def _rows(agent_id: str) -> list[dict]:
+def _rows(agent_id: str, events: list[dict] | None = None) -> list[dict]:
     return [
         row
-        for row in directory.list_current_episodic_events(agent_id, limit=200)
+        for row in (events if events is not None else episodic_memory.list_episodic_events(agent_id))
         if row.get("kind") == "preference"
         and any(
             ref.get("type") == "item"
@@ -58,7 +57,7 @@ def list_preferences(agent_id: str) -> dict:
     return {
         "agentId": agent_id,
         "memoryEnabled": (agent.get("memoryPolicy") or {}).get("enabled") is not False,
-        "items": [_project(row) for row in _rows(agent_id)],
+        "items": [_project(row) for row in _rows(agent_id)[:200]],
         "limit": 200,
     }
 
@@ -72,45 +71,45 @@ def save_preference(agent_id: str, text: str, client_request_id: str) -> dict:
         or any(ord(char) < 32 and char not in "\n\t\r" for char in text)
     ):
         raise FinancialPreferenceError("偏好需为1至1000字，最多20行")
+    text = directory.trim_lines(text, max_lines=20)
     try:
         request_id = str(UUID(client_request_id))
     except (ValueError, TypeError, AttributeError) as exc:
         raise FinancialPreferenceError("保存请求标识无效") from exc
     ref_id = _REF_PREFIX + request_id
-    with _LOCK:
-        agent = _agent(agent_id)
-        if (agent.get("memoryPolicy") or {}).get("enabled") is False:
-            raise FinancialPreferenceError("此助手的个人记忆已关闭", 409)
-        for row in _rows(agent_id):
-            if any(
-                ref.get("type") == "item" and ref.get("id") == ref_id
-                for ref in row.get("refs") or []
-            ):
-                if row["text"] != text:
-                    raise FinancialPreferenceError("此保存标识已用于另一条偏好", 409)
-                return _project(row)
-        try:
-            row = directory.append_episodic_event(
-                agent_id,
+    _agent(agent_id)
+    try:
+        with episodic_memory.episodic_transaction(agent_id) as tx:
+            for row in _rows(agent_id, tx.events):
+                if any(
+                    ref.get("type") == "item" and ref.get("id") == ref_id
+                    for ref in row.get("refs") or []
+                ):
+                    if row.get("validUntil"):
+                        raise FinancialPreferenceError("此保存请求对应的偏好已移除，请使用新的请求标识", 409)
+                    if row["text"] != text:
+                        raise FinancialPreferenceError("此保存标识已用于另一条偏好", 409)
+                    return _project(row)
+            row = tx.append(
                 kind="preference",
                 text=text,
                 refs=[{"type": "item", "id": ref_id}],
             )
-        except directory.AgentDirectoryError as exc:
-            raise FinancialPreferenceError(str(exc), 409) from exc
         return _project(row)
+    except directory.AgentDirectoryError as exc:
+        raise FinancialPreferenceError(str(exc), 409) from exc
 
 
 def remove_preference(agent_id: str, preference_id: str) -> dict:
-    with _LOCK:
-        _agent(agent_id)
-        if not any(row.get("episodeId") == preference_id for row in _rows(agent_id)):
-            raise FinancialPreferenceError("偏好不存在或不属于当前助手", 404)
-        try:
-            directory.supersede_episodic_event(agent_id, preference_id)
-        except directory.AgentDirectoryError as exc:
-            raise FinancialPreferenceError(str(exc), 409) from exc
+    _agent(agent_id)
+    try:
+        with episodic_memory.episodic_transaction(agent_id, require_enabled=False) as tx:
+            if not any(row.get("episodeId") == preference_id for row in _rows(agent_id, tx.events)):
+                raise FinancialPreferenceError("偏好不存在或不属于当前助手", 404)
+            tx.supersede(preference_id)
         return {"id": preference_id, "removed": True}
+    except directory.AgentDirectoryError as exc:
+        raise FinancialPreferenceError(str(exc), 409) from exc
 
 
 def get_workspace_settings(agent_id: str) -> dict:

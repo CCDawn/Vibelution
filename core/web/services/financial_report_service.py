@@ -84,6 +84,16 @@ def save_report_lesson(agent_id: str, validation_id: str, text: str, request_id:
     return save_lesson(agent_id, validation_id, text, request_id)
 
 
+def revise_report_lesson(agent_id: str, validation_id: str, text: str, request_id: str, expected_id: str) -> dict:
+    from .financial_report.validation import revise_lesson
+    return revise_lesson(agent_id, validation_id, text, request_id, expected_id)
+
+
+def revoke_report_lesson(agent_id: str, validation_id: str, request_id: str, expected_id: str) -> dict:
+    from .financial_report.validation import revoke_lesson
+    return revoke_lesson(agent_id, validation_id, request_id, expected_id)
+
+
 def report_reflection_context(agent_id: str, symbol: str, analysis_cutoff: str) -> dict:
     from .financial_report.validation import reflection_context
     return {"items": reflection_context(agent_id, symbol, analysis_cutoff=analysis_cutoff)}

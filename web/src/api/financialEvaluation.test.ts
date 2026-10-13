@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { fetchJson } from "./client";
-import { checkFinancialClaim, createFinancialClaim, fetchFinancialReflection, runFinancialBacktest, saveFinancialLesson } from "./financialEvaluation";
+import { checkFinancialClaim, createFinancialClaim, fetchFinancialReflection, revokeFinancialLesson, reviseFinancialLesson, runFinancialBacktest, saveFinancialLesson } from "./financialEvaluation";
 
 vi.mock("./client", () => ({ fetchJson: vi.fn().mockResolvedValue({}) }));
 it("uses the private report owner and structured exact-report payload", async () => {
@@ -11,6 +11,12 @@ it("uses the private report owner and structured exact-report payload", async ()
   expect(fetchJson).toHaveBeenLastCalledWith("/api/financial-reports/agent%2Fa/validations/claim%2F1/check", expect.objectContaining({ method: "POST" }));
   await saveFinancialLesson("a", "c", "核实数据时间", "request-2");
   expect(fetchJson).toHaveBeenLastCalledWith("/api/financial-reports/a/validations/c/lesson", expect.objectContaining({ body: JSON.stringify({ text: "核实数据时间", clientRequestId: "request-2" }) }));
+  const revision = { text: "核对经营现金流和应收变化", clientRequestId: "request-revise", expectedLessonId: "lesson-current" };
+  await reviseFinancialLesson("a", "c", revision);
+  expect(fetchJson).toHaveBeenLastCalledWith("/api/financial-reports/a/validations/c/lesson", expect.objectContaining({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(revision) }));
+  const revocation = { clientRequestId: "request-revoke", expectedLessonId: "lesson-current" };
+  await revokeFinancialLesson("a", "c", revocation);
+  expect(fetchJson).toHaveBeenLastCalledWith("/api/financial-reports/a/validations/c/lesson", expect.objectContaining({ method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(revocation) }));
   await fetchFinancialReflection("a", "sz000001", "2026-09-01");
   expect(fetchJson).toHaveBeenLastCalledWith("/api/financial-reports/a/reflection-context?symbol=sz000001&analysisDate=2026-09-01", expect.any(Object));
   const params = { symbol: "sz000001", startDate: "2026-08-01", endDate: "2026-09-01", window: 20, commissionBps: 3, slippageBps: 5 };

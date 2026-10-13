@@ -9,7 +9,7 @@ from core.web.services import financial_report_service as service
 from core.web.services.financial_preferences_service import FinancialPreferenceError
 from .financial_evaluation_models import (
     BacktestRequest, BacktestResult, ClaimPage, ClaimRecord, ClaimRequest,
-    FeedbackPrompt, LessonRecord, LessonRequest, ReflectionContext,
+    FeedbackPrompt, LessonRecord, LessonRequest, LessonRevisionRequest, LessonRevocationRequest, ReflectionContext,
 )
 
 router = APIRouter(tags=["financial-reports"])
@@ -51,6 +51,16 @@ def report_feedback(assistant_agent_id: str, validation_id: str) -> dict:
 @router.post("/financial-reports/{assistant_agent_id}/validations/{validation_id}/lesson", response_model=LessonRecord)
 def report_lesson(assistant_agent_id: str, validation_id: str, payload: LessonRequest) -> dict:
     return _evaluation(service.save_report_lesson, assistant_agent_id, validation_id, payload.text, payload.clientRequestId)
+
+
+@router.patch("/financial-reports/{assistant_agent_id}/validations/{validation_id}/lesson", response_model=ClaimRecord)
+def revise_report_lesson(assistant_agent_id: str, validation_id: str, payload: LessonRevisionRequest) -> dict:
+    return _evaluation(service.revise_report_lesson, assistant_agent_id, validation_id, payload.text, payload.clientRequestId, payload.expectedLessonId)
+
+
+@router.delete("/financial-reports/{assistant_agent_id}/validations/{validation_id}/lesson", response_model=ClaimRecord)
+def revoke_report_lesson(assistant_agent_id: str, validation_id: str, payload: LessonRevocationRequest) -> dict:
+    return _evaluation(service.revoke_report_lesson, assistant_agent_id, validation_id, payload.clientRequestId, payload.expectedLessonId)
 
 
 @router.get("/financial-reports/{assistant_agent_id}/reflection-context", response_model=ReflectionContext)

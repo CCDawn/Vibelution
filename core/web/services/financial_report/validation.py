@@ -250,11 +250,22 @@ def _project_record(record: dict[str, Any], *, today: date | None = None) -> dic
     return projected
 
 
+def _project_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    from core.web.services.agent_directory import episodic_memory
+    from .lessons import project
+    return project(entry, episodic_memory.list_episodic_events(
+        entry["record"]["agentId"], include_superseded=True,
+    ))
+
+
 def list_validations(agent_id: str) -> dict[str, Any]:
     normalized_agent_id = _normalize_identifier(agent_id, "assistantAgentId")
     _agent(normalized_agent_id)
     path = _store_path(normalized_agent_id)
+    from .lessons import project
+    from core.web.services.agent_directory import episodic_memory
     with _locked_store(path, normalized_agent_id) as store:
+        episodes = episodic_memory.list_episodic_events(normalized_agent_id, include_superseded=True)
         entries = sorted(
             store["entries"],
             key=lambda entry: (
@@ -264,7 +275,7 @@ def list_validations(agent_id: str) -> dict[str, Any]:
             reverse=True,
         )
         items = [
-            _project_record(entry["record"])
+            project(entry, episodes)
             for entry in entries[:_LIST_LIMIT]
             if isinstance(entry.get("record"), dict)
         ]
@@ -419,7 +430,7 @@ def create_validation(agent_id: str, payload: dict) -> dict[str, Any]:
         if existing is not None:
             if existing.get("payloadHash") != payload_hash:
                 raise FinancialValidationError("此保存标识已用于另一条到期核验", 409)
-            return _project_record(existing["record"])
+            return _project_entry(existing)
         if len(store["entries"]) >= _MAX_ENTRIES:
             raise FinancialValidationError("此金融助手已达到 100 条核验记录上限", 409)
 
@@ -484,7 +495,7 @@ def create_validation(agent_id: str, payload: dict) -> dict[str, Any]:
         if existing is not None:
             if existing.get("payloadHash") != payload_hash:
                 raise FinancialValidationError("此保存标识已用于另一条到期核验", 409)
-            return _project_record(existing["record"])
+            return _project_entry(existing)
         if len(store["entries"]) >= _MAX_ENTRIES:
             raise FinancialValidationError("此金融助手已达到 100 条核验记录上限", 409)
         store["entries"].append(entry)
@@ -495,7 +506,7 @@ def create_validation(agent_id: str, payload: dict) -> dict[str, Any]:
         record,
         reason="retrospective_not_counted" if retrospective else "",
     )
-    return _project_record(record)
+    return _project_entry(entry)
 
 
 def _record_entry(agent_id: str, validation_id: str) -> tuple[Path, dict[str, Any]]:
@@ -737,17 +748,17 @@ def _commit_check(
         current = _find_entry(store, validation_id)
         current_record = current["record"]
         if current_record.get("status") == "verified":
-            return copy.deepcopy(current_record)
+            return _project_entry(current)
         if current_record.get("revision") != expected_revision:
             # A concurrent checker or lesson writer won. Never replace its
             # newer snapshot with a stale quote result.
-            return copy.deepcopy(current_record)
+            return _project_entry(current)
         attempt_evidence = updated.pop("_lastAttemptEvidence", None)
         updated["revision"] = int(current_record.get("revision") or 0) + 1
         current["record"] = updated
         current["lastAttemptEvidence"] = copy.deepcopy(attempt_evidence)
         _save_locked(path, store)
-        result = copy.deepcopy(updated)
+        result = _project_entry(current)
         committed = True
     if committed:
         error = result.get("error") if isinstance(result.get("error"), dict) else {}
@@ -765,12 +776,12 @@ def check_validation(agent_id: str, validation_id: str) -> dict[str, Any]:
     record = entry["record"]
     if record.get("status") == "verified":
         _verify_frozen_source(record["agentId"], record, entry)
-        return copy.deepcopy(record)
+        return _project_entry(entry)
     now = _now()
     today = _beijing_today(now)
     due_date = date.fromisoformat(record["dueDate"])
     if today <= due_date:
-        return copy.deepcopy(record)
+        return _project_entry(entry)
     checked_at = _utc_iso(now)
     if record.get("ruleVersion") and record.get("ruleVersion") != _RULE_VERSION:
         updated = _unavailable_result(
@@ -894,7 +905,7 @@ def _safe_json_block(payload: dict[str, Any]) -> str:
 
 def feedback_prompt(agent_id: str, validation_id: str) -> dict[str, str]:
     _path, entry, request_text, report_text = _entry_and_source(agent_id, validation_id)
-    record = entry["record"]
+    record = _project_entry(entry)
     payload = {
         "kind": "financial_report_due_validation",
         "originalRequest": request_text,
@@ -914,7 +925,7 @@ def feedback_prompt(agent_id: str, validation_id: str) -> dict[str, str]:
         "因果限制和可确认的流程教训，不套用完整投资研究的章节模板。"
         "若 retrospective 为 true，明确这是事后回顾，不纳入事前预测统计。\n"
         "字段口径：revision 是核验记录的版本号，不是原报告改写次数；"
-        "lesson 为 null 表示用户尚未点击确认研究教训，不代表缺少保存机制。"
+        "lesson 是当前有效教训；为 null 时结合 lessonState 和 lessonHistory 区分未确认、已替代和已作废，不代表缺少保存机制。"
         "ruleVersion=cn-qfq-close-v1 表示 A 股前复权完整收盘核验；"
         "不能据此断言复权口径未记录。材料没有交易日序列时，不推算交易天数。\n"
         "请对这次股票研究做一次复盘。先说明到期核验结果是否为命中或未命中；"
@@ -955,82 +966,20 @@ def save_lesson(
     text: str,
     client_request_id: str,
 ) -> dict[str, Any]:
-    normalized_agent_id = _normalize_identifier(agent_id, "assistantAgentId")
-    agent = _agent(normalized_agent_id)
-    normalized_request_id = _normalize_uuid(client_request_id, "保存请求标识")
-    normalized_text = str(text or "").strip()
-    if not normalized_text or len(normalized_text) > 500 or any(
-        ord(char) < 32 and char not in "\n\r\t" for char in normalized_text
-    ):
-        raise FinancialValidationError("教训需为 1 至 500 字")
-    try:
-        normalized_validation_id = str(UUID(validation_id))
-    except (ValueError, TypeError, AttributeError):
-        raise FinancialValidationError("到期核验记录不存在", 404) from None
-    path = _store_path(normalized_agent_id)
-    request_ref = _LESSON_REQUEST_REF_PREFIX + normalized_request_id
-    lesson_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
-    with _locked_store(path, normalized_agent_id) as store:
-        entry = _find_entry(store, normalized_validation_id)
-        record = entry["record"]
-        if record.get("status") != "verified" or record.get("outcome") not in {"hit", "miss"}:
-            raise FinancialValidationError("只有已核验的研究才能保存教训", 409)
-        _verify_frozen_source(normalized_agent_id, record, entry)
-        for other in store["entries"]:
-            if other.get("lessonClientRequestId") == normalized_request_id:
-                if other is not entry or other.get("lessonTextHash") != lesson_hash:
-                    raise FinancialValidationError("此保存标识已用于另一条教训", 409)
-                return copy.deepcopy(record["lesson"])
-        if entry.get("lessonClientRequestId"):
-            if entry.get("lessonClientRequestId") == normalized_request_id and entry.get("lessonTextHash") == lesson_hash:
-                return copy.deepcopy(record.get("lesson"))
-            raise FinancialValidationError("此核验记录已保存过一条确认教训", 409)
-        existing_lesson = record.get("lesson")
-        if isinstance(existing_lesson, dict):
-            raise FinancialValidationError("此核验记录已保存过一条确认教训", 409)
-        if (agent.get("memoryPolicy") or {}).get("enabled") is False:
-            raise FinancialValidationError("此助手的个人记忆已关闭", 409)
-        try:
-            memory_policy = directory.resolve_memory_policy_for_agent(normalized_agent_id)
-            if memory_policy.get("enabled") is False:
-                raise FinancialValidationError("此助手的个人记忆已关闭", 409)
-            existing_events = directory.list_current_episodic_events(normalized_agent_id, limit=200)
-            replay = _lesson_by_request(existing_events, request_ref)
-            if replay is not None:
-                if str(replay.get("text") or "") != normalized_text:
-                    raise FinancialValidationError("此保存标识已用于另一条教训", 409)
-                event = replay
-            else:
-                refs = [
-                    {"type": "item", "id": _LESSON_REF_PREFIX + normalized_validation_id},
-                    {"type": "session", "id": record["sessionId"]},
-                    {"type": "item", "id": _TURN_REF_PREFIX + record["turnId"]},
-                    {"type": "item", "id": request_ref},
-                ]
-                event = directory.append_episodic_event(
-                    normalized_agent_id,
-                    kind="note",
-                    text=normalized_text,
-                    refs=refs,
-                )
-        except directory.AgentDirectoryError as exc:
-            raise FinancialValidationError(str(exc), 409) from exc
-        lesson = _lesson_view(event)
-        record["lesson"] = lesson
-        record["revision"] = int(record.get("revision") or 0) + 1
-        entry["lessonClientRequestId"] = normalized_request_id
-        entry["lessonTextHash"] = lesson_hash
-        entry["lessonRefs"] = copy.deepcopy(lesson.get("refs") or [])
-        _save_locked(path, store)
-        saved_lesson = copy.deepcopy(lesson)
-        saved_record = copy.deepcopy(record)
-    _record_validation_scene_event(
-        "financial.validation.lesson_saved",
-        "lesson",
-        saved_record,
-        reason="lesson_saved",
-    )
-    return saved_lesson
+    from .lessons import mutate
+    return mutate(agent_id, validation_id, action="save", text=text, client_request_id=client_request_id)
+
+
+def revise_lesson(agent_id: str, validation_id: str, text: str, client_request_id: str, expected_lesson_id: str) -> dict:
+    from .lessons import mutate
+    return mutate(agent_id, validation_id, action="revise", text=text,
+                  client_request_id=client_request_id, expected_lesson_id=expected_lesson_id)
+
+
+def revoke_lesson(agent_id: str, validation_id: str, client_request_id: str, expected_lesson_id: str) -> dict:
+    from .lessons import mutate
+    return mutate(agent_id, validation_id, action="revoke", client_request_id=client_request_id,
+                  expected_lesson_id=expected_lesson_id)
 
 
 def _cutoff_end(value: object) -> datetime:
@@ -1078,7 +1027,8 @@ def reflection_context(
     with _locked_store(path, normalized_agent_id) as store:
         entries = copy.deepcopy(store["entries"])
     try:
-        episodes = directory.list_current_episodic_events(normalized_agent_id, limit=200)
+        from core.web.services.agent_directory import episodic_memory
+        episodes = episodic_memory.list_episodic_events(normalized_agent_id, include_superseded=True)
     except directory.AgentDirectoryError as exc:
         raise FinancialValidationError(str(exc), 409) from exc
     by_episode_id = {
@@ -1086,9 +1036,10 @@ def reflection_context(
         for item in episodes
         if isinstance(item, dict)
     }
+    from .lessons import project
     results: list[dict[str, Any]] = []
     for entry in entries:
-        record = entry.get("record") or {}
+        record = project(entry, episodes)
         if (
             record.get("status") != "verified"
             or record.get("symbol") != normalized_symbol

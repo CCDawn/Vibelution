@@ -500,7 +500,11 @@ def search_perception_sources(
                 calls += 1
                 memory_policy = _directory().resolve_memory_policy_for_agent(agent_id) or {}
                 if memory_policy.get("enabled") is not False:
-                    episodes = _directory().list_current_episodic_events(agent_id, limit=100)
+                    from core.web.services.agent_directory import episodic_memory
+
+                    episodes = episodic_memory.list_episodic_events(
+                        agent_id, include_superseded=False
+                    )
                     results.extend(_search_episodic_events(query, episodes, limit=limit))
                     read_sources.add(source)
 
@@ -701,14 +705,16 @@ def _search_episodic_events(
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
+    from core.web.services.agent_directory.personal_memory_selection import (
+        select_searchable_personal_episodes,
+    )
+
     terms = _episodic_query_terms(query)
     if not terms:
         return []
     phrase = " ".join(str(query or "").casefold().split())
     ranked: list[tuple[int, str, dict[str, Any]]] = []
-    for item in events:
-        if not isinstance(item, dict) or str(item.get("validUntil") or "").strip():
-            continue
+    for item in select_searchable_personal_episodes(events):
         text = str(item.get("text") or "")
         normalized = " ".join(text.casefold().split())
         score = sum(1 for term in terms if term in normalized)

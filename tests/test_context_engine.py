@@ -5,6 +5,7 @@ import pytest
 from core.orchestration import context_engine
 from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, prompt_template_service, research_organization_service
+from core.web.services.agent_directory import episodic_memory
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
@@ -124,13 +125,13 @@ def test_build_agent_context_stops_before_later_stages(tmp_path, monkeypatch):
         direct_session_id="session-stop",
     )
     stages: list[str] = []
-    original_episodic = agent_directory_service.list_current_episodic_events
+    original_episodic = episodic_memory.list_episodic_events
 
     def episodic(*args, **kwargs):
         stages.append("episodic")
         return original_episodic(*args, **kwargs)
 
-    monkeypatch.setattr(agent_directory_service, "list_current_episodic_events", episodic)
+    monkeypatch.setattr(episodic_memory, "list_episodic_events", episodic)
 
     def interrupt_checker():
         return "operator requested stop" if "episodic" in stages else ""
@@ -1470,13 +1471,19 @@ def test_build_agent_context_skips_episodic_read_when_memory_disabled(tmp_path, 
     agent_directory_service.update_agent_instance(agent["agentId"], memory_policy={"enabled": False})
 
     episodic_calls: list[str] = []
-    real_episodic = agent_directory_service.list_current_episodic_events
+    real_episodic = getattr(episodic_memory, "list_episodic_events", None)
 
-    def tracked_episodic(episodic_agent_id, *args, **kwargs):
+    def tracked_episodic(episodic_agent_id, *, include_superseded=False):
         episodic_calls.append(str(episodic_agent_id))
-        return real_episodic(episodic_agent_id, *args, **kwargs)
+        if callable(real_episodic):
+            return real_episodic(
+                episodic_agent_id, include_superseded=include_superseded
+            )
+        return []
 
-    monkeypatch.setattr(agent_directory_service, "list_current_episodic_events", tracked_episodic)
+    monkeypatch.setattr(
+        episodic_memory, "list_episodic_events", tracked_episodic, raising=False
+    )
 
     packet = context_engine.build_agent_context(
         agent["agentId"],
@@ -1501,13 +1508,19 @@ def test_build_agent_context_still_reads_episodic_when_memory_enabled(tmp_path, 
     )
 
     episodic_calls: list[str] = []
-    real_episodic = agent_directory_service.list_current_episodic_events
+    real_episodic = getattr(episodic_memory, "list_episodic_events", None)
 
-    def tracked_episodic(episodic_agent_id, *args, **kwargs):
+    def tracked_episodic(episodic_agent_id, *, include_superseded=False):
         episodic_calls.append(str(episodic_agent_id))
-        return real_episodic(episodic_agent_id, *args, **kwargs)
+        if callable(real_episodic):
+            return real_episodic(
+                episodic_agent_id, include_superseded=include_superseded
+            )
+        return []
 
-    monkeypatch.setattr(agent_directory_service, "list_current_episodic_events", tracked_episodic)
+    monkeypatch.setattr(
+        episodic_memory, "list_episodic_events", tracked_episodic, raising=False
+    )
 
     packet = context_engine.build_agent_context(
         agent["agentId"],
