@@ -17,6 +17,10 @@ from zoneinfo import ZoneInfo
 _ANALYSIS_DATE = re.compile(
     r"(?:分析日期|分析截至|研究日期)\s*[:：]?\s*(?P<day>\d{4}-\d{2}-\d{2})"
 )
+_UNTRUSTED_DATE_BLOCK = re.compile(
+    r"(?ms)^[ \t]*UNTRUSTED_(?P<kind>FINANCIAL_FEEDBACK|REFERENCE_MATERIALS)_JSON_BEGIN[ \t]*(?:\r?\n|\Z)"
+    r".*?(?:^[ \t]*UNTRUSTED_(?P=kind)_JSON_END[ \t]*(?:\r?\n|\Z)|\Z)"
+)
 _QUOTE_SENTENCE = re.compile(
     r"行情快照（[^，\n]{1,40}，可能延迟）：(?P<timestamp>[^，\n]{8,64})，价格 [^。\n]{1,120}。这是带时点的报价，不是已审核财报证据。"
 )
@@ -28,7 +32,9 @@ _AS_OF: ContextVar[date | None] = ContextVar(
 
 def analysis_date_in_text(text: object) -> date | None:
     found: date | None = None
-    for match in _ANALYSIS_DATE.finditer(str(text or "")):
+    # Frozen/quoted research dates are source data, never this Turn's tool cutoff.
+    trusted_request = _UNTRUSTED_DATE_BLOCK.sub("\n", str(text or ""))
+    for match in _ANALYSIS_DATE.finditer(trusted_request):
         try:
             found = date.fromisoformat(match.group("day"))
         except ValueError:
