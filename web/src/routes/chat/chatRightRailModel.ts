@@ -116,7 +116,9 @@ const CONTEXT_TITLE_KINDS = new Set<ChatRightRailKind>([
 ]);
 
 export function chatRightRailLauncherKinds(sessionKind: string | undefined): ChatRightRailKind[] {
-  if (sessionKind === "child") {
+  // Group rooms have no parent session for side chats; review, terminal,
+  // browser and devtools stay available.
+  if (sessionKind === "child" || sessionKind === "group") {
     return CHAT_RIGHT_RAIL_LAUNCHER_KINDS.filter((kind) => kind !== "side");
   }
   return [...CHAT_RIGHT_RAIL_LAUNCHER_KINDS];

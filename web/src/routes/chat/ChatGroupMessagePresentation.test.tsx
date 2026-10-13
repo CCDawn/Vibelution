@@ -34,6 +34,23 @@ const bodyProps = {
 };
 
 describe("ChatGroupMessageBody", () => {
+  it("opens workspace file links through the right-rail contract when a root is provided", () => {
+    const html = renderToStaticMarkup(<ChatGroupMessageBody {...bodyProps}
+      message={message({ content: "改动见 [LoginForm](LoginForm.tsx) 与 [说明](https://example.com)" })}
+      workspaceRoot="C:/repo/app"
+      onOpenRailFile={() => undefined}
+    />);
+    expect(html).toContain("markdownWorkspaceFileLink");
+    expect(html).toContain('href="https://example.com"');
+  });
+
+  it("keeps file-shaped links inert without a workspace root", () => {
+    const html = renderToStaticMarkup(<ChatGroupMessageBody {...bodyProps}
+      message={message({ content: "改动见 [LoginForm](LoginForm.tsx)" })}
+    />);
+    expect(html).not.toContain("markdownWorkspaceFileLink");
+  });
+
   it("renders rich prose and mentions while leaving code and link labels literal", () => {
     const html = renderToStaticMarkup(<ChatGroupMessageBody {...bodyProps}
       mentionTargets={[{ kind: "all", displayName: "全体成员", label: "@all" }]}

@@ -40,7 +40,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions } from "../../api/chat";
+import { listSessionChildSessions, fetchSessionLlmOptions } from "../../api/chat";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import { archiveAgent } from "../../api/agents";
 import {
@@ -48,21 +48,16 @@ import {
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
 import { fetchKnowledgeOverview, listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
-import { fetchFileContent } from "../../api/files";
 import { ArchivedSessionRail } from "./ArchivedSessionRail";
 import { ChatRightRail } from "./ChatRightRail";
-import { buildChatChangeRail } from "./chatChangeRailModel";
 import {
-  activeChatRightRailTab,
   EMPTY_CHAT_RIGHT_RAIL,
-  noteReviewAutoOpen,
   openChatRightRailTab,
   openFreshChatRightRailSideTab,
   type ChatRightRailModel,
 } from "./chatRightRailModel";
 import { requestChatRightRailOpen, subscribeChatRightRailOpen } from "./chatRightRailRequests";
-import { useChatChangePreview } from "./useChatChangePreview";
-import { useChatGitRail } from "./useChatGitRail";
+import { useChatRailPreview } from "./useChatRailPreview";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -1076,7 +1071,12 @@ export function ChatCodingRouteWorkbench() {
     () => (showArchivedSessions ? archivedSessionsQuery.data?.items ?? [] : []),
     [archivedSessionsQuery.data, showArchivedSessions],
   );
-  const { sessionArchiveMutation, pinSessionMutation, renameAgentMutation } = useChatSessionMutations({
+  const {
+    sessionArchiveMutation,
+    pinSessionMutation,
+    renameAgentMutation,
+    handleForkSessionFromNode,
+  } = useChatSessionMutations({
     queryClient,
     chatWorkspaceCache,
     lang,
@@ -1084,6 +1084,9 @@ export function ChatCodingRouteWorkbench() {
     setSessionComposerErrors,
     latestDirectSessionSelectionRef,
     directSessionSelectionGenerationRef,
+    activeSessionId,
+    syncSessionDetail,
+    openSession,
   });
   const agentPermissionPresetMutation = useAgentPermissionPresetMutation({
     onSuccess: (_agent, input) => {
@@ -1714,66 +1717,39 @@ export function ChatCodingRouteWorkbench() {
 
   const activeCliAgentRunId = cliAgentRunIdFromTabId(workspace.activeTab);
   const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;
-  const fileContentQuery = useQuery({
-    queryKey: queryKeys.fileContent(activeFilePath ?? ""),
-    enabled: Boolean(activeFilePath),
-    queryFn: () => fetchFileContent(activeFilePath ?? ""),
+  const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
+  // Group rooms share the ordinary right rail (review/git, file preview,
+  // devtools); session-scoped kinds (side chats, subagent directory) stay
+  // hidden through the launcher filter, and rail state keys off the room id.
+  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface;
+  const {
+    fileContentQuery,
+    changeRail,
+    changeRailOpened,
+    setChangeRailOpened,
+    railsBySession,
+    setRailsBySession,
+    railModel,
+    activeRailTab,
+    updateRailModel,
+    project: projectRail,
+    gitRail,
+    reviewSource,
+    sessionReviewPath,
+    gitReviewPath,
+    setReviewPick,
+    changePreview,
+  } = useChatRailPreview({
+    activeSessionId: groupPanelActive ? `group:${activeGroupRoomId}` : activeSessionId,
+    activeFilePath,
+    workspace,
+    changedFileList,
+    ordinaryChangeRail,
+    companion: verifiedCompanionMode,
+    finance: financeSurface,
+    group: groupPanelActive,
   });
 
-  const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
-  const [changeRailOpened, setChangeRailOpened] = useState(false);
-  const { railsBySession, setRailsBySession, railModel, updateRailModel, project: projectRail } = useProjectAwareRightRail(activeSessionId);
-  const [reviewPick, setReviewPick] = useState<{ sessionId: string; source: "session" | "git"; path: string } | null>(null);
-  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
-  const activeRailTab = activeChatRightRailTab(railModel);
-  const changeRail = useMemo(
-    () => buildChatChangeRail({
-      companion: verifiedCompanionMode,
-      finance: financeSurface,
-      group: groupPanelActive,
-      changedFiles: changedFileList,
-      openTabs: workspace.openTabs,
-      activeTab: workspace.activeTab,
-    }),
-    [
-      verifiedCompanionMode,
-      financeSurface,
-      groupPanelActive,
-      changedFileList,
-      workspace.openTabs,
-      workspace.activeTab,
-    ],
-  );
-  const gitRail = useChatGitRail(
-    ordinaryChangeRail && activeRailTab?.kind === "review" && (changeRail.show || changeRailOpened),
-  );
-  const reviewPickForSession = reviewPick && reviewPick.sessionId === activeSessionId ? reviewPick : null;
-  const reviewSource = reviewPickForSession?.source ?? "session";
-  const sessionReviewPath = reviewSource === "session" && reviewPickForSession && changeRail.paths.includes(reviewPickForSession.path)
-    ? reviewPickForSession.path
-    : changeRail.selectedPath;
-  const gitReviewPath = reviewSource === "git" && reviewPickForSession && gitRail.paths.includes(reviewPickForSession.path)
-    ? reviewPickForSession.path
-    : null;
-  const changePreview = useChatChangePreview(
-    activeRailTab?.kind === "review"
-      ? (reviewSource === "git" ? gitReviewPath : sessionReviewPath)
-      : null,
-  );
-  useEffect(() => {
-    if (!ordinaryChangeRail || !activeSessionId || !changeRail.show) {
-      return;
-    }
-    const sessionId = activeSessionId;
-    setRailsBySession((current) => {
-      const model = current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
-      const noted = noteReviewAutoOpen(model, "审查");
-      if (noted.model === model) {
-        return current;
-      }
-      return { ...current, [sessionId]: noted.model };
-    });
-  }, [activeSessionId, changeRail.show, ordinaryChangeRail]);
   const sessionBrowserVisible = sessionBrowserOpen && !financeSurface && !verifiedCompanionMode && !groupPanelActive;
   const {
     layoutRef,
@@ -2571,41 +2547,6 @@ export function ChatCodingRouteWorkbench() {
     }
     setSessionImageAttachments((current) => clearUnsupportedSessionImageAttachments(current, activeSessionId));
   }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
-
-  // Branch feature fork exit: ConversationView owns the scope dialog; this
-  // handler executes the fork, caches the returned detail, and navigates to
-  // the new session. Errors surface on the source session composer and keep
-  // the dialog open for retry.
-  const handleForkSessionFromNode = useCallback(
-    async (message: ConversationMessage, scope: ConversationForkScope) => {
-      const sourceSessionId = activeSessionId;
-      const nodeId = String(message.nodeId || "").trim();
-      if (!sourceSessionId || !nodeId) {
-        return;
-      }
-      try {
-        const nextDetail = await forkSessionFromNode(sourceSessionId, { nodeId, scope });
-        const nextId = String(nextDetail.id || "").trim();
-        if (!nextId) {
-          return;
-        }
-        queryClient.setQueryData(queryKeys.session(nextId), nextDetail);
-        updateSessionSummaryCaches(queryClient, (sessions) =>
-          mergeSessionDetailIntoSummaries(sessions, nextDetail),
-        );
-        syncSessionDetail(nextDetail);
-        openSession(nextId);
-      } catch (exc) {
-        setSessionComposerErrors((current) => ({
-          ...current,
-          [sourceSessionId]: `${t("forkSessionFailed")}: ${describeError(exc, lang === "zh" ? "分叉会话失败" : "Failed to fork session")}`,
-        }));
-        throw exc;
-      }
-    },
-    [activeSessionId, describeError, lang, openSession, queryClient, setSessionComposerErrors, syncSessionDetail, t],
-  );
-
 
   const {
     activeSurfaceTitle,
@@ -3508,9 +3449,11 @@ export function ChatCodingRouteWorkbench() {
   ]);
 
   const openOrdinaryRailFile = useCallback((path: string) => {
-    const requestSessionId = activeSessionId?.trim() || "";
     const filePath = path.trim();
-    if (!ordinaryChangeRail || !requestSessionId || detail?.sessionKind === "child" || !filePath) {
+    const requestSessionId = groupPanelActive
+      ? `group:${activeGroupRoomId}`
+      : (activeSessionId?.trim() || "");
+    if (!ordinaryChangeRail || !requestSessionId || (!groupPanelActive && detail?.sessionKind === "child") || !filePath) {
       return;
     }
     const title = filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
@@ -3520,7 +3463,7 @@ export function ChatCodingRouteWorkbench() {
       title,
       filePath,
     });
-  }, [activeSessionId, detail?.sessionKind, ordinaryChangeRail]);
+  }, [activeGroupRoomId, activeSessionId, detail?.sessionKind, groupPanelActive, ordinaryChangeRail]);
 
   // Conversation surface model, memoized so unrelated workbench renders (rails,
   // dialogs, composer state) do not re-render ConversationView: the memo gate
@@ -3853,8 +3796,8 @@ export function ChatCodingRouteWorkbench() {
       <ChatRightRail
         className={statusRailClassName}
         lang={lang}
-        sessionId={activeSessionId ?? ""}
-        sessionKind={detail?.sessionKind}
+        sessionId={groupPanelActive ? "" : (activeSessionId ?? "")}
+        sessionKind={groupPanelActive ? "group" : detail?.sessionKind}
         model={railModel}
         onModelChange={updateRailModel}
         onOpenSession={(id) => openSession(id, { telemetrySource: "right_rail_project" })}
@@ -3872,7 +3815,7 @@ export function ChatCodingRouteWorkbench() {
             openPreviewTab(activeSessionId, path);
           }
         }}
-        preface={<FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
+        preface={groupPanelActive ? null : <FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
         review={{
           sessionTitle: lang === "zh" ? "这次对话" : "This chat",
           sessionEmptyLabel: lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet",
@@ -3906,11 +3849,12 @@ export function ChatCodingRouteWorkbench() {
             openPreviewTab(activeSessionId, path);
           },
           onSelectGitFile: (path) => {
-            if (!activeSessionId) {
+            const reviewKey = groupPanelActive ? `group:${activeGroupRoomId}` : activeSessionId;
+            if (!reviewKey) {
               return;
             }
             gitRail.selectPath(path);
-            setReviewPick({ sessionId: activeSessionId, source: "git", path });
+            setReviewPick({ sessionId: reviewKey, source: "git", path });
           },
         }}
       />
@@ -4199,6 +4143,8 @@ export function ChatCodingRouteWorkbench() {
                     : [...current, messageId],
                 )
               }
+              workspaceRoot={detail?.workspaceRoot || detail?.workspacePath || directSessionActiveSummary?.workspacePath || undefined}
+              onOpenRailFile={openOrdinaryRailFile}
             />
             )}
             sessionWorkspace={(

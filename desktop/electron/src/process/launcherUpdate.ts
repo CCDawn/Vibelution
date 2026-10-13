@@ -41,6 +41,21 @@ export async function executeLauncherUpdate(input: {
   return { schemaVersion: 1, accepted: true, operation: "restart-latest-shell", message: "准备完成，正在退出并在后台完成 Launcher 换版。" };
 }
 
+export function desktopShellVersionKnown(shell: DesktopShellStatus | undefined): shell is DesktopShellStatus {
+  return Boolean(shell && shell.currentElectronTree && shell.reason !== "frontend_inspection_failed" && !shell.reason.endsWith("_unavailable")
+    && (shell.stale || shell.reason === "current"));
+}
+
+/** A missed shell read must not erase the last reading that identified a version. */
+export function retainKnownDesktopShell(
+  previous: DesktopShellStatus | undefined,
+  next: DesktopShellStatus | undefined,
+): DesktopShellStatus | undefined {
+  if (desktopShellVersionKnown(next)) return next;
+  if (desktopShellVersionKnown(previous)) return previous;
+  return undefined;
+}
+
 export function projectLauncherUpdateFreshness(input: {
   raw: unknown;
   packaged: boolean;
@@ -50,10 +65,9 @@ export function projectLauncherUpdateFreshness(input: {
 }): Record<string, unknown> {
   const raw = typeof input.raw === "object" && input.raw !== null ? input.raw as Record<string, unknown> : {};
   const shell = input.shell;
-  const known = Boolean(shell && shell.currentElectronTree && shell.reason !== "frontend_inspection_failed" && !shell.reason.endsWith("_unavailable")
-    && (shell.stale || shell.reason === "current"));
-  const current = input.packaged ? (known ? !shell!.stale : null) : raw.current;
-  const shellStale = input.packaged ? (known && shell?.stale === true) : raw.shellStale === true;
+  const known = desktopShellVersionKnown(shell);
+  const current = input.packaged ? (known ? !shell.stale : null) : raw.current;
+  const shellStale = input.packaged ? (known && shell.stale === true) : raw.shellStale === true;
   return {
     ...raw,
     current: current === true ? true : current === false ? false : null,

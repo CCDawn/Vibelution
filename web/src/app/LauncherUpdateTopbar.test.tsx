@@ -107,8 +107,11 @@ describe("shared Launcher update topbar", () => {
     expect(api.getLauncherFreshness).toHaveBeenCalledTimes(callsBefore);
     expect(button("确认更新").disabled).toBe(false);
     await click("取消");
+    const afterCancel = api.getLauncherFreshness.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });
-    expect(api.getLauncherFreshness.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(afterCancel);
+    await act(async () => { await vi.advanceTimersByTimeAsync(55_000); });
+    expect(api.getLauncherFreshness.mock.calls.length).toBeGreaterThan(afterCancel);
   });
 
   it("treats accepted:false as a visible failure and allows a confirmed retry", async () => {
@@ -122,6 +125,17 @@ describe("shared Launcher update topbar", () => {
     await click("重试更新");
     await click("确认更新");
     expect(api.restartLatestLauncher).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a settled version label while a later check is still running", async () => {
+    api.getLauncherFreshness
+      .mockResolvedValueOnce({ current: true, label: "current", updateAvailable: false, activeWorkState: "idle", activeWorkCount: 0, runningShort: "aaaa", headShort: "aaaa" })
+      .mockImplementation(() => new Promise(() => {}));
+    await mount();
+    expect(host.querySelector("[data-testid='launcher-update-trigger']")?.textContent).toContain("已是最新版本");
+    await click("已是最新版本");
+    expect(host.querySelector("[data-testid='launcher-update-trigger']")?.textContent).toContain("已是最新版本");
+    expect(host.textContent).not.toContain("正在检测版本");
   });
 
   it("shows failed version reads as unknown instead of up to date", async () => {

@@ -39,7 +39,6 @@ export function LauncherShell() {
 
     const invalidateBranchInstances = () => {
       void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherFreshness() });
     };
     const unsubscribe = onLauncherStateChanged(() => {
       invalidateBranchInstances();

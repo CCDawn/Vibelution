@@ -13,6 +13,7 @@ export type LauncherUpdateTopbarViewProps = {
   branchName?: string;
   freshness?: LauncherFreshness;
   checking: boolean;
+  rechecking?: boolean;
   checkFailed: boolean;
   updating: boolean;
   error?: string;
@@ -24,7 +25,7 @@ export type LauncherUpdateTopbarViewProps = {
 
 /** Shared chrome for both Launcher routes; closing details never dismisses the reminder. */
 export function LauncherUpdateTopbarView({
-  lang, branchName, freshness, checking, checkFailed, updating, error,
+  lang, branchName, freshness, checking, rechecking = false, checkFailed, updating, error,
   onCheck, onUpdate, onDetailsChange, onConfirmationChange,
 }: LauncherUpdateTopbarViewProps) {
   const zh = lang === "zh";
@@ -33,10 +34,10 @@ export function LauncherUpdateTopbarView({
   const hasUpdate = Boolean(freshness && (freshness.updateAvailable || freshness.current === false || freshness.shellStale));
   const busy = updating || freshness?.updateInProgress === true;
   const failure = error || freshness?.refreshError || "";
-  const unknown = checkFailed || !freshness || (freshness.current === null && !hasUpdate);
+  const unknown = !hasUpdate && (!freshness || freshness.current === null);
   const active = freshness?.activeWorkState === "active";
   const taskUnknown = freshness?.activeWorkState !== "idle" && !active;
-  const disabled = checkFailed || taskUnknown;
+  const disabled = taskUnknown || (checkFailed && !freshness);
   const label = busy ? (zh ? "正在更新…" : "Updating…")
     : failure ? (zh ? "更新失败 · 重试" : "Update failed · Retry")
       : hasUpdate ? (zh ? "有新版本 · 请更新" : "Update available")
@@ -95,7 +96,7 @@ export function LauncherUpdateTopbarView({
             </div>
           </div> : <div className={styles.actions}>
             <VButton className={styles.button} variant="ghost" onPress={() => changeOpen(false)}>{zh ? "关闭详情" : "Close details"}</VButton>
-            {!busy ? <VButton className={styles.button} variant="ghost" isPending={checking} onPress={onCheck}>{zh ? "重新检测" : "Check again"}</VButton> : null}
+            {!busy ? <VButton className={styles.button} variant="ghost" isPending={checking || rechecking} onPress={onCheck}>{zh ? "重新检测" : "Check again"}</VButton> : null}
             {hasUpdate || failure ? <VButton className={styles.button} variant="primary" isPending={busy} isDisabled={disabled || unknown} onPress={() => changeConfirm(true)}>
               {busy ? (zh ? "正在更新…" : "Updating…") : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}
             </VButton> : null}
@@ -108,14 +109,13 @@ export function LauncherUpdateTopbarView({
 }
 
 export function LauncherUpdateTopbar({ lang, branchName }: Pick<LauncherUpdateTopbarViewProps, "lang" | "branchName">) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const updateLock = useRef(false);
   const freshnessQuery = useQuery({
     queryKey: queryKeys.launcherFreshness(),
     queryFn: getLauncherFreshness,
-    refetchInterval: confirming || accepted || updateLock.current ? false : detailsOpen ? 5_000 : 60_000,
+    refetchInterval: confirming || accepted || updateLock.current ? false : 60_000,
     retry: false,
   });
   const updateMutation = useMutation({
@@ -128,7 +128,7 @@ export function LauncherUpdateTopbar({ lang, branchName }: Pick<LauncherUpdateTo
     onSettled: () => { updateLock.current = false; void freshnessQuery.refetch(); },
   });
   return <LauncherUpdateTopbarView lang={lang} branchName={branchName} freshness={freshnessQuery.data}
-    checking={freshnessQuery.isFetching} checkFailed={freshnessQuery.isError}
+    checking={freshnessQuery.isPending} rechecking={freshnessQuery.isFetching && !freshnessQuery.isPending} checkFailed={freshnessQuery.isError}
     updating={updateMutation.isPending || accepted}
     error={updateMutation.error instanceof Error ? updateMutation.error.message : undefined}
     onCheck={() => { updateMutation.reset(); void freshnessQuery.refetch(); }}
@@ -138,5 +138,5 @@ export function LauncherUpdateTopbar({ lang, branchName }: Pick<LauncherUpdateTo
       updateMutation.mutate();
     }}
     onConfirmationChange={setConfirming}
-    onDetailsChange={(open) => { setDetailsOpen(open); if (open) void freshnessQuery.refetch(); }} />;
+    onDetailsChange={(open) => { if (open) void freshnessQuery.refetch(); }} />;
 }

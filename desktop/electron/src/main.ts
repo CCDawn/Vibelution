@@ -182,7 +182,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
-import { executeLauncherUpdate, projectLauncherUpdateFreshness } from "./process/launcherUpdate.js";
+import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "./process/launcherUpdate.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
@@ -396,6 +396,7 @@ let trayRestartAllInFlight = false;
 let trayQuitAllInFlight = false;
 let trayRestartLauncherInFlight = false;
 let shellRefreshInFlight = false;
+let lastKnownDesktopShell: DesktopShellStatus | undefined;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
 
 type DesktopActionLoopContext = {
@@ -2695,12 +2696,28 @@ async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise
 }
 
 async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
-  const [raw, shell, activeWork] = await Promise.all([
+  const [rawResult, shellResult, activeWorkResult] = await Promise.allSettled([
     orchestrateLauncherApi("freshness", { schemaVersion: 1, path: "freshness" }),
-    app.isPackaged ? inspectCurrentDesktopShell().catch(() => undefined) : Promise.resolve(undefined),
+    app.isPackaged ? inspectCurrentDesktopShell() : Promise.resolve(undefined),
     resolveLauncherUpdateActiveWork()
   ]);
-  return projectLauncherUpdateFreshness({ raw, shell, activeWork, packaged: app.isPackaged, updating: shellRefreshInFlight });
+  if (app.isPackaged) {
+    const inspected = shellResult.status === "fulfilled" ? shellResult.value : undefined;
+    lastKnownDesktopShell = retainKnownDesktopShell(lastKnownDesktopShell, inspected);
+  }
+  if (rawResult.status !== "fulfilled") {
+    throw rawResult.reason;
+  }
+  const activeWork = activeWorkResult.status === "fulfilled"
+    ? activeWorkResult.value
+    : { state: "unknown" as const, message: "Launcher task status is unavailable." };
+  return projectLauncherUpdateFreshness({
+    raw: rawResult.value,
+    shell: app.isPackaged ? lastKnownDesktopShell : undefined,
+    activeWork,
+    packaged: app.isPackaged,
+    updating: shellRefreshInFlight
+  });
 }
 
 async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
