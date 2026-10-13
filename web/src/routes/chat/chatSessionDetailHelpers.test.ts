@@ -22,8 +22,31 @@ import { queryKeys } from "../../api/queryKeys";
 import { vi } from "vitest";
 import { resolveAssistantTurnRenderSurface } from "../chatTurnProtocol";
 import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
+import { mergeSessionDetailMessageWindowWithOutcome } from "../chatSessionState";
 
 describe("chatSessionDetailHelpers", () => {
+  it.each([
+    { id: "q-1", position: 1, status: "paused", content: "甲", sendNow: false },
+    { id: "q-1", position: 1, status: "queued", content: "乙", sendNow: false },
+    { id: "q-1", position: 1, status: "queued", content: "甲", sendNow: true },
+    { id: "q-2", position: 1, status: "queued", content: "甲", sendNow: false },
+  ])("accepts a same-second authoritative queue change through the SSE merge guard: %j", row => {
+    const previous = {
+      id: "session-1", status: "ready", updatedAt: "2026-10-13T08:00:00Z", ledgerSeq: 10, messages: [],
+      queuedTurns: [{ id: "q-1", position: 1, status: "queued", content: "甲", sendNow: false }],
+    } as SessionDetail;
+    const outcome = mergeSessionDetailMessageWindowWithOutcome(previous, { ...previous, queuedTurns: [row] } as SessionDetail);
+    expect(outcome.authorityAccepted).toBe(true);
+    // This is the workbench's snapshot fast path after the real SSE merge.
+    const cached = sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(outcome.detail) ? previous : outcome.detail;
+    expect(cached.queuedTurns).toEqual([row]);
+  });
+
+  it("accepts a new ledger event while the wall-clock timestamp and messages are unchanged", () => {
+    const detail = { id: "session-1", updatedAt: "2026-10-13T08:00:00Z", ledgerSeq: 10, messages: [] } as SessionDetail;
+    expect(sessionDetailSnapshotKey({ ...detail, ledgerSeq: 11 })).not.toBe(sessionDetailSnapshotKey(detail));
+    expect(sessionDetailSnapshotKey({ ...detail, queuedTurns: [] })).toBe(sessionDetailSnapshotKey(detail));
+  });
   it("aborts an owned unobserved neighbor warmup on page exit", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     let signal: AbortSignal | undefined;

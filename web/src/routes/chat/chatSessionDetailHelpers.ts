@@ -328,6 +328,10 @@ export function sessionDetailSnapshotKey(detail: SessionDetail): string {
     detail.messages?.length ?? 0,
     latestSessionMessageId(detail),
     latestSessionMessageSignal(detail),
+    normalizedLedgerSeq(detail.ledgerSeq),
+    // Queue writes may share the same second and do not change the transcript.
+    // Their exact control facts must still pass the SSE snapshot fast path.
+    JSON.stringify(detail.queuedTurns ?? []),
   ].join("|");
 }
 
