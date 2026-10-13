@@ -151,7 +151,7 @@ const styles: Record<string, string> = {
   tabActive:
     `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
-    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[46px] min-h-[46px] items-center gap-1.5 overflow-hidden border-b border-[color-mix(in_srgb,var(--fg-primary)_6%,transparent)] bg-transparent px-2.5 py-[5px] max-[700px]:px-1.5",
+    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-end gap-1.5 overflow-hidden bg-[var(--shell-surface)] px-2 pt-1.5 pb-0 max-[700px]:px-1.5 [&>.overlayPaneControls]:self-center",
 
 };
 
