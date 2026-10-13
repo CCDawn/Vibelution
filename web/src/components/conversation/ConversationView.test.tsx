@@ -843,7 +843,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.composerAttachmentChip).toContain("overflow-hidden");
     expect(styles.composerAttachmentChip).toContain("rounded-xl");
     expect(styles.composerAttachmentPreview).toContain("!h-14");
-    expect(styles.composerAttachmentPreview).toContain("!rounded-[var(--vui-radius-soft)]");
+    expect(styles.composerAttachmentPreview).toContain("!rounded-vui-soft");
     expect(styles.composerAttachmentThumb).toContain("size-full");
     expect(styles.composerAttachmentThumb).toContain("object-cover");
     expect(styles.composerAttachmentName).toContain("truncate");
