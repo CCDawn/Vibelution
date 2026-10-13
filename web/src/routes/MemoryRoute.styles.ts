@@ -56,6 +56,7 @@ const styles = {
   // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (left/right pane ids).
   workspace:
     `workspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-2 ${vuiWorkspaceFillClass}`,
+  srOnly: "sr-only",
 } as const;
 
 export default styles;

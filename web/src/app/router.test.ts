@@ -216,6 +216,59 @@ describe("router route contracts", () => {
     );
   });
 
+  it("keeps each remaining workbench frame while its route chunk loads", () => {
+    const regions: Record<string, string> = {
+      agents: "agents-workspace",
+      "agents/prompts": "prompts-workspace",
+      "agents/tools": "tools-workspace",
+      "agents/skills": "skills-workspace",
+      "evolution/workspace": "evolution-workspace",
+      "supervised-evolution": "evolution-workspace",
+      "supervised-evolution/runs": "evolution-runs",
+      "supervised-evolution/library": "evolution-library",
+      "supervised-evolution/review": "review-workspace",
+      "self-evolution": "evolution-workspace",
+      memory: "memory-personal",
+      "memory/agents": "memory-personal",
+      "memory/team": "memory-cards",
+      "memory/library": "memory-cards",
+      "memory/knowledge": "memory-knowledge",
+      "memory/graph": "memory-graph",
+      "memory/manage": "memory-ops",
+      "memory/cleanup": "memory-ops",
+      kernel: "kernel-workspace",
+      aux: "aux-workspace",
+      git: "git-workspace",
+      usage: "usage-workspace",
+      logs: "logs-workspace",
+      pet: "pet-workspace",
+      reset: "reset-workspace",
+      companions: "companions-card",
+    };
+    for (const [path, region] of Object.entries(regions)) {
+      const markup = lazyFallbackMarkup(findWorkbenchRoute(path));
+      expect(markup, path).toContain(`data-loading-region="${region}"`);
+      expect(markup, path).toContain('role="status"');
+      expect(markup, path).toContain("正在打开工作台");
+      expect(markup, path).not.toContain("animate-spin");
+    }
+
+    const launcher = findTopRoute("/launcher");
+    const launcherIndex = launcher.children?.find((item) => item.index) as RouteObject;
+    const launcherTools = launcher.children?.find((item) => item.path === "tools") as RouteObject;
+    expect(lazyFallbackMarkup(launcherIndex)).toContain('data-loading-region="launcher-workspace"');
+    expect(lazyFallbackMarkup(launcherTools)).toContain('data-loading-region="launcher-tools-workspace"');
+    expect(lazyFallbackMarkup(findTopRoute("/desktop-pet"))).not.toContain('data-loading-region="pet-workspace"');
+
+    const companions = lazyFallbackMarkup(findWorkbenchRoute("companions"));
+    expect(companions).toContain("min-h-[min(590px,calc(100dvh-250px))]");
+    expect(lazyFallbackMarkup(findWorkbenchRoute("usage"))).toContain("min-h-[96px]");
+    expect(lazyFallbackMarkup(findWorkbenchRoute("git"))).toContain("min-h-[48px]");
+    expect(lazyFallbackMarkup(findWorkbenchRoute("git"))).toContain("340px");
+    expect(lazyFallbackMarkup(findWorkbenchRoute("kernel"))).toContain("min-h-[72px]");
+    expect(lazyFallbackMarkup(findWorkbenchRoute("aux"))).toContain("min-h-14");
+  });
+
   it("keeps the companion lobby separate while the native Chat route owns person conversations", () => {
     const lobbyRoute = findWorkbenchRoute("companions");
     expectRouteErrorSurface(lobbyRoute, "workbench");

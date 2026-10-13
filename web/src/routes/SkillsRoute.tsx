@@ -342,7 +342,15 @@ export function SkillsRoute() {
             {libraryQuery.isError ? (
               <VStateSurface className={styles.emptyStateClass} tone="error" title={copy.loadFailed} />
             ) : libraryQuery.isPending ? (
-              <VStateSurface className={styles.emptyStateClass} tone="loading" title={copy.loading} skeletonLines={3} />
+              <div className={styles.loadingListClass} role="status" aria-busy="true">
+                <span className={styles.srOnlyClass}>{copy.loading}</span>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <div key={index} className={styles.loadingRowClass} aria-hidden="true">
+                    <span className={styles.loadingCheckClass} />
+                    <span className={styles.loadingNameClass} />
+                  </div>
+                ))}
+              </div>
             ) : filteredSkills.length === 0 ? (
               <VStateSurface className={styles.emptyStateClass} tone="empty" title={copy.emptyList} />
             ) : (
@@ -450,7 +458,13 @@ export function SkillsRoute() {
                     </VButton>
                   </div>
                 ) : detailQuery.isPending && !detailQuery.data ? (
-                  <VStateSurface tone="loading" title={copy.loading} skeletonLines={3} />
+                  <div className={styles.loadingDetailClass} role="status" aria-busy="true">
+                    <span className={styles.srOnlyClass}>{copy.loading}</span>
+                    <span className={styles.loadingLineClass} aria-hidden="true" />
+                    <span className={styles.loadingLineClass} aria-hidden="true" />
+                    <span className={styles.loadingLineClass} aria-hidden="true" />
+                    <span className={styles.loadingLineShortClass} aria-hidden="true" />
+                  </div>
                 ) : (
                   <pre className={styles.contentPreClass}>{detailQuery.data?.content ?? activeSkill.preview}</pre>
                 )}

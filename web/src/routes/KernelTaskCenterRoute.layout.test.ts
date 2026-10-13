@@ -148,7 +148,10 @@ describe("KernelTaskCenterRoute layout contract", () => {
 
   it("uses one stable borderless layout while initial task data is pending", () => {
     expect(routeSource).toContain("const initialTaskLoad = taskQuery.isLoading && !taskQuery.data");
-    expect(routeSource).toContain('variant="list"');
+    expect(routeSource).toContain("taskLoadingRowClass");
+    expect(routeSource).not.toContain('variant="list"');
+    expect(styles.taskLoadingRowClass).toContain("min-h-[72px]");
+    expect(styles.taskLoadingRowClass).not.toContain("border");
     expect(routeSource).toContain('variant="detail"');
     expect(routeSource).toContain("actions={initialTaskLoad ? undefined");
     expect(routeSource).toContain('{initialTaskLoad ? null : <strong className={styles.panelCountClass}>{tasks.length}</strong>}');

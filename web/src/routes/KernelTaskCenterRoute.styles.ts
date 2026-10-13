@@ -56,6 +56,13 @@ const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui
 const statusPillBaseClass = "!min-h-[22px] max-w-full truncate !px-2 ![font-size:var(--vui-font-xs)]";
 const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-control)] !border-0 bg-vui-surface-row p-2.5 shadow-none";
 const loadingRegionClass = "min-h-0 min-w-0 [&_[aria-hidden=true]>div]:!border-0";
+const taskLoadingStackClass = "grid min-w-0 content-start gap-1";
+const taskLoadingRowClass = "grid min-h-[72px] content-center gap-1.5 px-2 py-1.5";
+const taskLoadingBone =
+  "block animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none";
+const taskLoadingTitleClass = `${taskLoadingBone} h-3 w-24`;
+const taskLoadingMetaClass = `${taskLoadingBone} h-2.5 w-14`;
+const srOnlyClass = "sr-only";
 
 const styles = {
   rawGoalClass: "whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
@@ -111,6 +118,11 @@ const styles = {
   statusPillBaseClass,
   emptyStateClass,
   loadingRegionClass,
+  taskLoadingStackClass,
+  taskLoadingRowClass,
+  taskLoadingTitleClass,
+  taskLoadingMetaClass,
+  srOnlyClass,
 } as const;
 
 export default styles;

@@ -10,6 +10,7 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
+import { MemoryBodyLoading, type MemoryBodyKind } from "../app/PageFrameLoadingShell";
 import { FinancialAssistantStatusNote } from "./finance/FinancialAssistantStatusNote";
 
 import {
@@ -2467,6 +2468,14 @@ function invalidateMemoryQueries(queryClient: ReturnType<typeof useQueryClient>)
   void queryClient.invalidateQueries({ queryKey: ["memory", "agents"] });
 }
 
+function memoryBodyKind(view: MemoryRouteView): MemoryBodyKind {
+  if (view === "knowledge") return "knowledge";
+  if (view === "graph") return "graph";
+  if (isPersonalMemoryView(view)) return "personal";
+  if (view === "team" || isLibraryMemoryView(view)) return "cards";
+  return "ops";
+}
+
 export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
@@ -4501,11 +4510,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       <div className={viewStackClassName} data-vui-region="memory-main">
         <Suspense
           fallback={(
-            <VStateSurface
-              density="compact"
-              tone="loading"
-              title={lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
-            />
+            <div role="status" aria-busy="true" className={styles.viewStack}>
+              <span className={styles.srOnly}>{lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}</span>
+              <MemoryBodyLoading kind={memoryBodyKind(forcedView)} />
+            </div>
           )}
         >
           {forcedView === "knowledge"

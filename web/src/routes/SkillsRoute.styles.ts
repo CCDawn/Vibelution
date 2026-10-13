@@ -16,6 +16,17 @@ const detailSurfaceClass =
   `${vuiFlatPanelClass}`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
 const workspaceClass = "grid min-h-0 grid-cols-[clamp(280px,26vw,420px)_minmax(0,1fr)] gap-4 px-4 pb-4 pt-3 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
+const loadingBone =
+  "block animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none";
+const loadingListClass = "grid min-w-0 content-start gap-1";
+const loadingRowClass = "grid min-h-11 min-w-0 grid-cols-[28px_minmax(0,1fr)] items-center gap-1 px-1";
+const loadingCheckClass =
+  "block size-4 animate-pulse rounded-[4px] bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none";
+const loadingNameClass = `${loadingBone} h-3 w-24`;
+const loadingDetailClass = "grid min-w-0 content-start gap-2.5 py-2";
+const loadingLineClass = `${loadingBone} h-2.5 w-full`;
+const loadingLineShortClass = `${loadingBone} h-2.5 w-[64%]`;
+const srOnlyClass = "sr-only";
 const panelClass = "grid min-h-0 min-w-0 content-start gap-2";
 const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]`;
 const detailPanelClass = `${panelClass} overflow-auto`;
@@ -104,6 +115,14 @@ const styles = {
   bulkSummaryTitleClass,
   bulkReadOnlyNoteClass,
   skillListClass,
+  loadingListClass,
+  loadingRowClass,
+  loadingCheckClass,
+  loadingNameClass,
+  loadingDetailClass,
+  loadingLineClass,
+  loadingLineShortClass,
+  srOnlyClass,
   selectableRowClass,
   rowSelectClass,
   hiddenCheckboxClass,
