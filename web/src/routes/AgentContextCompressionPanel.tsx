@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 
 import { VButton, VCheckbox, VFieldRow, VNativeInput, VStringSelect, VTooltip } from "../components/vui";
 import styles from "./AgentContextCompressionPanel.styles";
+import { agentConfigControlClass, agentConfigSelectClass, agentConfigQuietButtonClass } from "./agentConfigForm.styles";
 
 export type AgentContextCompressionPolicyDraft = {
   mode: "inherit" | "custom";
@@ -65,6 +66,7 @@ export function AgentContextCompressionPanel({
           </VTooltip>
         </h3>
         <VStringSelect
+          className={agentConfigSelectClass}
           ariaLabel={copy.contextCompressionPolicy}
           value={policy.mode}
           onValueChange={(value) => onPolicyChange({
@@ -86,7 +88,7 @@ export function AgentContextCompressionPanel({
             {copy.contextCompressionEnabled}
           </VCheckbox>
           <VFieldRow label={copy.contextCompressionMaxTokenLimit}>
-            <VNativeInput
+            <VNativeInput className={agentConfigControlClass}
               type="number"
               min={1}
               value={policy.maxTokenLimit}
@@ -94,7 +96,7 @@ export function AgentContextCompressionPanel({
             />
           </VFieldRow>
           <VFieldRow label={copy.contextCompressionMaxCount}>
-            <VNativeInput
+            <VNativeInput className={agentConfigControlClass}
               type="number"
               min={0}
               value={policy.maxCompressionsPerSession}
@@ -104,7 +106,7 @@ export function AgentContextCompressionPanel({
         </div>
         <div className={styles.compressionPolicySubgrid}>
         <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "轻量" : "Light"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             max={100}
@@ -113,7 +115,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "标准" : "Standard"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             max={100}
@@ -122,7 +124,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "深度" : "Deep"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             max={100}
@@ -131,7 +133,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "紧急" : "Emergency"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             max={100}
@@ -140,7 +142,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "轻量" : "Light"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             value={policy.lightSummaryChars}
@@ -148,7 +150,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "标准" : "Standard"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             value={policy.standardSummaryChars}
@@ -156,7 +158,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "深度" : "Deep"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             value={policy.deepSummaryChars}
@@ -164,7 +166,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
         <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "紧急" : "Emergency"}`}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={1}
             value={policy.emergencySummaryChars}
@@ -174,7 +176,7 @@ export function AgentContextCompressionPanel({
       </div>
         <div className={styles.compressionPolicyFooter}>
         <VFieldRow label={copy.contextCompressionKeepAi}>
-          <VNativeInput
+          <VNativeInput className={agentConfigControlClass}
             type="number"
             min={0}
             value={policy.keepAiMessages}
@@ -198,6 +200,7 @@ export function AgentContextCompressionPanel({
       ) : null}
         <div className={styles.configDeepLinkRow}>
           <VButton
+            className={agentConfigQuietButtonClass}
             type="button"
             variant="secondary"
             icon={<ExternalLink size={15} />}

@@ -10,6 +10,7 @@ import {
   draftFromAgent,
   draftEqualsAgent,
   expertiseFromDraft,
+  isContextCompressionPolicyDraftValid,
   isWorkSessionAgent,
   personaDraftEqualsDraft,
   personaDraftFromAgent,
@@ -86,6 +87,53 @@ describe("agentRouteDraftModel", () => {
     const policy = contextCompressionPolicyFromDraft(customDraft);
     expect(policy.mode).toBe("custom");
     expect(policy.maxTokenLimit).toBe(8000);
+  });
+
+  it("validates custom compression numbers while allowing zero counts", () => {
+    const valid = {
+      ...DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT,
+      maxCompressionsPerSession: "0",
+      keepAiMessages: "0",
+      lightThreshold: "1",
+      standardThreshold: "100",
+    };
+    expect(isContextCompressionPolicyDraftValid(valid)).toBe(true);
+
+    const invalidValues = [
+      { maxTokenLimit: "" },
+      { maxTokenLimit: "0" },
+      { maxTokenLimit: "1.5" },
+      { maxCompressionsPerSession: "" },
+      { maxCompressionsPerSession: "-1" },
+      { maxCompressionsPerSession: "1.5" },
+      { lightThreshold: "0" },
+      { standardThreshold: "101" },
+      { deepThreshold: "99.5" },
+      { emergencyThreshold: "" },
+      { lightSummaryChars: "" },
+      { standardSummaryChars: "0" },
+      { deepSummaryChars: "2.5" },
+      { emergencySummaryChars: "-1" },
+      { keepAiMessages: "" },
+      { keepAiMessages: "-1" },
+      { keepAiMessages: "1.5" },
+    ] as const;
+    for (const invalid of invalidValues) {
+      expect(isContextCompressionPolicyDraftValid({ ...valid, ...invalid })).toBe(false);
+    }
+  });
+
+  it("does not validate hidden custom numbers while compression inherits", () => {
+    expect(isContextCompressionPolicyDraftValid({
+      ...DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT,
+      mode: "inherit",
+      maxTokenLimit: "",
+      maxCompressionsPerSession: "-1",
+      lightThreshold: "0",
+      standardThreshold: "101",
+      deepSummaryChars: "0",
+      keepAiMessages: "-1",
+    })).toBe(true);
   });
 
   it("does not treat an untouched compression form as a patch field", () => {

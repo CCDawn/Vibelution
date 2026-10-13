@@ -73,6 +73,35 @@ export function percentToRatio(value: string, fallback: number) {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed / 100)) : fallback;
 }
 
+function isIntegerTextInRange(value: string, minimum: number, maximum?: number) {
+  const text = value.trim();
+  if (!/^\d+$/.test(text)) {
+    return false;
+  }
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed)
+    && parsed >= minimum
+    && (maximum === undefined || parsed <= maximum);
+}
+
+export function isContextCompressionPolicyDraftValid(draft: AgentContextCompressionPolicyDraft) {
+  if (draft.mode === "inherit") {
+    return true;
+  }
+
+  return isIntegerTextInRange(draft.maxTokenLimit, 1)
+    && isIntegerTextInRange(draft.maxCompressionsPerSession, 0)
+    && isIntegerTextInRange(draft.lightThreshold, 1, 100)
+    && isIntegerTextInRange(draft.standardThreshold, 1, 100)
+    && isIntegerTextInRange(draft.deepThreshold, 1, 100)
+    && isIntegerTextInRange(draft.emergencyThreshold, 1, 100)
+    && isIntegerTextInRange(draft.lightSummaryChars, 1)
+    && isIntegerTextInRange(draft.standardSummaryChars, 1)
+    && isIntegerTextInRange(draft.deepSummaryChars, 1)
+    && isIntegerTextInRange(draft.emergencySummaryChars, 1)
+    && isIntegerTextInRange(draft.keepAiMessages, 0);
+}
+
 export function positiveIntegerFromText(value: string, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : fallback;

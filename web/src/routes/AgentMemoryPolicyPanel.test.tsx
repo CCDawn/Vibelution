@@ -72,7 +72,13 @@ describe("AgentMemoryPolicyPanel", () => {
     );
 
     expect(markup).toContain("memory-policy");
+    expect(markup).toContain("记忆策略");
+    expect(markup).toContain("知识库权限");
+    expect(markup).toContain('data-vui-recipe="settings-form-page"');
+    expect(markup).toContain('data-vui="settings-form-footer"');
+    expect((markup.match(/data-vui="field-row"/g) ?? []).length).toBe(8);
     expect(markup).toContain("保存");
+    expect(markup).toContain('aria-label="重置记忆配置"');
     expect(markup).toContain("启用个人记忆");
     expect(markup).toContain('tabindex="0"');
     expect(markup).not.toContain(">C:/Users/agent/memory<");
@@ -91,7 +97,7 @@ describe("AgentMemoryPolicyPanel", () => {
   });
 });
 
-describe("AgentMemoryPolicyPanel memory switch interaction", () => {
+describe("AgentMemoryPolicyPanel interactions", () => {
   let container: HTMLDivElement | null = null;
   let root: Root | null = null;
 
@@ -128,5 +134,42 @@ describe("AgentMemoryPolicyPanel memory switch interaction", () => {
     });
 
     expect(onDraftChange).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("keeps the shared-group and knowledge-base ACL add/remove callbacks wired", () => {
+    const onAddMemoryGroup = vi.fn();
+    const onRemoveMemoryGroup = vi.fn();
+    const onAddKnowledgeBaseId = vi.fn();
+    const draft = {
+      ...baseDraft,
+      readSharedGroups: ["research-team"],
+      newReadGroup: "project-shared",
+      newReadKnowledgeBaseId: "research-kb",
+    };
+    flushSync(() => {
+      root?.render(
+        <AgentMemoryPolicyPanel
+          {...baseProps}
+          draft={draft}
+          onAddMemoryGroup={onAddMemoryGroup}
+          onRemoveMemoryGroup={onRemoveMemoryGroup}
+          onAddKnowledgeBaseId={onAddKnowledgeBaseId}
+        />,
+      );
+    });
+
+    const removeGroupButton = container?.querySelector<HTMLButtonElement>('button[aria-label="移除 research-team"]');
+    const knowledgeBaseInput = container?.querySelector<HTMLInputElement>('input[aria-label="读取知识库"]');
+    const knowledgeBaseRow = knowledgeBaseInput?.closest('[data-vui="field-row"]');
+    const addKnowledgeBaseButton = Array.from(knowledgeBaseRow?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((button) => button.textContent?.trim() === copy.addSharedGroup);
+
+    flushSync(() => {
+      removeGroupButton?.click();
+      addKnowledgeBaseButton?.click();
+    });
+
+    expect(onRemoveMemoryGroup).toHaveBeenCalledWith("readSharedGroups", "research-team");
+    expect(onAddKnowledgeBaseId).toHaveBeenCalledWith("readKnowledgeBaseIds", "research-kb");
   });
 });

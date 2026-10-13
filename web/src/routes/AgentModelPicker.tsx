@@ -2,7 +2,7 @@ import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
-import { VButton, VConfirmDialog, VContextualHint, VDialog, VNativeInput, VStateSurface } from "../components/vui";
+import { VButton, VConfirmDialog, VPopover, VNativeInput, VStateSurface } from "../components/vui";
 import styles from "./AgentModelPicker.styles";
 
 export type AgentModelCandidateGroup = {
@@ -28,6 +28,7 @@ export function expandedAgentModelProviderIds(
 }
 
 type AgentModelPickerProps = {
+  lang?: "zh" | "en";
   candidates: AgentModelChoice[];
   slot: AgentLlmSlotDefinition;
   selectedModelRef: string;
@@ -151,15 +152,8 @@ export function agentModelChoiceDisabledReason(
   return "";
 }
 
-function candidateStatus(candidate: AgentModelChoice) {
-  if (candidate.catalogStale || candidate.verificationStatus === "stale") return "已过期";
-  if (candidate.source === "both") return "已添加 · 已发现";
-  if (candidate.source === "pinned") return "已添加";
-  if (candidate.verificationStatus === "verified") return "已发现 · 已验证";
-  return "已发现 · 未验证";
-}
-
 export function AgentModelPicker({
+  lang = "zh",
   candidates,
   slot,
   selectedModelRef,
@@ -252,7 +246,11 @@ export function AgentModelPicker({
 
   function openPicker() {
     setQuery("");
-    setManuallyExpandedProviderIds(new Set());
+    const selectedProvider = selected?.providerId;
+    const initialProvider = menuCandidates.some(candidate => candidate.providerId === selectedProvider)
+      ? selectedProvider
+      : menuCandidates[0]?.providerId;
+    setManuallyExpandedProviderIds(new Set(initialProvider ? [initialProvider] : []));
     setSearchCollapsedProviderIds(new Set());
     setActiveModelRef("");
     setOpen(true);
@@ -324,11 +322,13 @@ export function AgentModelPicker({
     }
   }
 
-  const dialogTitle = `选择 ${slot.label}`;
+  const dialogTitle = lang === "zh" ? `选择 ${slot.label}` : `Select ${slot.label}`;
 
   return (
     <>
       <div className={styles.root}>
+        <VPopover open={open} onOpenChange={handleOpenChange} align="end" side="bottom" sideOffset={8}
+          aria-label={dialogTitle} contentClassName={styles.dialogContent} trigger={(
         <VButton
           ref={triggerRef}
           type="button"
@@ -337,44 +337,27 @@ export function AgentModelPicker({
           isDisabled={disabled}
           aria-haspopup="dialog"
           aria-expanded={open}
-          onPress={openPicker}
+          aria-label={dialogTitle}
         >
           <span className={styles.triggerCopy}>
             <span className={styles.triggerLabel}>
-              {selected?.label || selectedModelRef || "选择模型"}
+              {selected?.label || selectedModelRef || (slot.required ? (lang === "zh" ? "选择模型" : "Select model") : (lang === "zh" ? "默认" : "Default"))}
             </span>
             <span className={styles.triggerMeta}>{selected?.providerLabel || ""}</span>
           </span>
           <ChevronDown size={14} aria-hidden="true" />
-        </VButton>
-        <VDialog
-          open={open}
-          onOpenChange={handleOpenChange}
-          title={(
-            <span className={styles.contextualHintRow}>
-              <span>{dialogTitle}</span>
-              <VContextualHint
-                label="模型选择说明"
-                content="按服务商分组。可直接搜索模型名 / gpt / luna。已添加的点「使用」；未添加的点「添加并使用」会先加入模型库再绑定。"
-                width="wide"
-              />
-            </span>
-          )}
-          description="按服务商分组浏览；搜索支持模型名、Provider 与 modelRef。"
-          size="xl"
-          contentClassName={styles.dialogContent}
-          aria-label={dialogTitle}
-        >
+        </VButton>)}>
           <div className={styles.dialogBody} onKeyDown={handlePanelKeyDown}>
             <VNativeInput
               ref={searchRef}
               className={styles.search}
               value={query}
               aria-label="搜索模型"
-              placeholder="快速过滤：模型名 / gpt-5 / luna / Provider"
+              placeholder={lang === "zh" ? "搜索模型" : "Search models"}
               onChange={(event) => setQuery(event.target.value)}
             />
             <div className={styles.list} aria-label={`${slot.label}模型候选`}>
+              {!slot.required ? <VButton className={styles.option} isDisabled={disabled} contentLayout="plain" onPress={() => { onSelectPinned(""); closePicker(); }}><span>{lang === "zh" ? "默认" : "Default"}</span>{!selectedModelRef ? <Check size={14}/> : null}</VButton> : null}
               {groups.map((group, groupIndex) => {
                 const groupExpanded = expandedProviderIds.has(group.providerId);
                 const groupPanelId = `agent-model-provider-${groupIndex}-${group.providerId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -429,18 +412,11 @@ export function AgentModelPicker({
                         <span className={styles.optionCopy}>
                           <span className={styles.optionTitle}>
                             <span>{candidate.label || candidate.upstreamId}</span>
-                            <span className={styles.badge}>{candidateStatus(candidate)}</span>
                             {selectedRow ? <Check className={styles.check} size={14} aria-hidden="true" /> : null}
-                          </span>
-                          <span className={styles.optionMeta}>
-                            {candidate.reasoningEffortValues?.length
-                              ? <span>{candidate.reasoningEffortValues.join(" / ")}</span>
-                              : <span>标准推理</span>}
-                            <span>{candidate.transport || candidate.providerKind}</span>
                           </span>
                         </span>
                         <span className={styles.action}>
-                          {pending ? "处理中…" : candidate.runtimeSelectable ? "使用" : "添加并使用"}
+                          {pending ? (lang === "zh" ? "处理中…" : "Pending…") : candidate.runtimeSelectable ? "" : (lang === "zh" ? "添加" : "Add")}
                         </span>
                         {reason ? <span className={styles.reason}>{reason}</span> : null}
                       </VButton>
@@ -453,7 +429,7 @@ export function AgentModelPicker({
               {!groups.length ? <VStateSurface tone="empty" title="没有匹配的模型" /> : null}
             </div>
           </div>
-        </VDialog>
+        </VPopover>
       </div>
       <VConfirmDialog
         open={Boolean(pendingPromote)}

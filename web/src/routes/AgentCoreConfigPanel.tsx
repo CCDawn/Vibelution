@@ -6,7 +6,7 @@ import {
   type AgentModelChoice,
   type AgentPermissionPreset,
 } from "../api/types";
-import { VButton, VContextualHint, VFieldRow, VNativeInput, VStringSelect } from "../components/vui";
+import { VButton, VFieldRow, VNativeInput, VSettingsFormPage, VStringSelect } from "../components/vui";
 import { AgentPermissionPresetControl } from "../components/vui/product/agent-management";
 import {
   AgentContextCompressionPanel,
@@ -79,6 +79,11 @@ export type AgentCoreConfigPanelCopy = AgentContextCompressionPanelCopy & {
 };
 
 type AgentCoreConfigPanelProps = {
+  section?: "all" | "models" | "basic";
+  groupDirty?: { models: boolean; basic: boolean };
+  groupCanSave?: { models: boolean; basic: boolean };
+  onSaveGroup?: (group: "models" | "basic") => void;
+  onResetGroup?: (group: "models" | "basic") => void;
   copy: AgentCoreConfigPanelCopy;
   lang: "zh" | "en";
   agentName: string;
@@ -111,368 +116,93 @@ type AgentCoreConfigPanelProps = {
 };
 
 function healthGuideToneClass(tone: AgentCoreConfigHealthView["tone"]) {
-  const toneKey = `healthGuide_${tone}` as keyof typeof styles;
-  return styles[toneKey] || styles.healthGuide_info;
+  return tone === "blocking" ? styles.healthGuide_blocking : styles.healthGuide_info;
 }
 
 function fallbackReasoningEffortLabel(copy: AgentCoreConfigPanelCopy, value: string) {
-  switch (value) {
-    case "low":
-      return copy.reasoningEffortLow;
-    case "medium":
-      return copy.reasoningEffortMedium;
-    case "high":
-      return copy.reasoningEffortHigh;
-    default:
-      return value;
-  }
-}
-
-function AgentLlmSlotField({
-  slot,
-  selectedModelId,
-  candidates,
-  supportsReasoningEffort,
-  reasoningEffort,
-  reasoningEffortOptions,
-  copy,
-  lang,
-  pending,
-  pendingModelRef,
-  configDraftDirty,
-  dirty,
-  compact = false,
-  hideLabel = false,
-  onLlmSlotModelChange,
-  onPromoteModel,
-  onReasoningEffortChange,
-}: {
-  slot: AgentCoreConfigLlmSlotView["slot"];
-  selectedModelId: string;
-  candidates: AgentModelChoice[];
-  supportsReasoningEffort: boolean;
-  reasoningEffort: string;
-  reasoningEffortOptions: AgentCoreConfigLlmSlotView["reasoningEffortOptions"];
-  copy: AgentCoreConfigPanelCopy;
-  lang: "zh" | "en";
-  pending: boolean;
-  pendingModelRef: string;
-  configDraftDirty: boolean;
-  dirty: boolean;
-  compact?: boolean;
-  hideLabel?: boolean;
-  onLlmSlotModelChange: AgentCoreConfigPanelProps["onLlmSlotModelChange"];
-  onPromoteModel: AgentCoreConfigPanelProps["onPromoteModel"];
-  onReasoningEffortChange: AgentCoreConfigPanelProps["onReasoningEffortChange"];
-}) {
-  const slotHint = `${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`;
-  return (
-    <section
-      className={compact ? styles.llmSlotFieldCompact : styles.llmSlotField}
-      aria-label={slotHint}
-    >
-      {hideLabel ? null : (
-        <div className={styles.contextualHintRow}>
-          <strong>{slot.label}</strong>
-          <VContextualHint
-            content={slotHint}
-            label={`${slot.label} ${lang === "zh" ? "说明" : "details"}`}
-            width="wide"
-          />
-        </div>
-      )}
-      <AgentModelPicker
-        candidates={candidates}
-        slot={slot}
-        selectedModelRef={selectedModelId}
-        disabled={pending}
-        pendingModelRef={pendingModelRef}
-        configDraftDirty={configDraftDirty}
-        agentDraftDirty={dirty}
-        onSelectPinned={(modelRef) => onLlmSlotModelChange(slot, modelRef)}
-        onPromote={(candidate) => onPromoteModel(slot, candidate)}
-      />
-      {!slot.required ? (
-        <VButton type="button" variant="ghost" isDisabled={pending || !selectedModelId} onPress={() => onLlmSlotModelChange(slot, "")}>
-          {copy.inheritDialogueModel}
-        </VButton>
-      ) : null}
-      {supportsReasoningEffort && reasoningEffortOptions.length > 0 ? (
-        <VStringSelect
-          ariaLabel={`${slot.label} ${copy.reasoningEffort}`}
-          value={reasoningEffort}
-          onValueChange={(value) => onReasoningEffortChange(slot.slot, value)}
-          options={[
-            { value: "", label: `${copy.reasoningEffort}: ${copy.reasoningEffortDefault}` },
-            ...reasoningEffortOptions.map((option) => ({
-              value: option.value,
-              label: `${copy.reasoningEffort}: ${option.label || fallbackReasoningEffortLabel(copy, option.value)}`,
-            })),
-          ]}
-        />
-      ) : null}
-    </section>
-  );
+  return ({ low: copy.reasoningEffortLow, medium: copy.reasoningEffortMedium, high: copy.reasoningEffortHigh } as Record<string, string>)[value] || value;
 }
 
 export function AgentCoreConfigPanel({
-  copy,
-  lang,
-  agentName,
-  draft,
-  dirty,
-  configDraftDirty,
-  canSave,
-  pending,
-  notice,
-  title,
-  health,
-  llmSlots,
-  pendingModelRef,
-  promptTemplateOptions,
-  toolPolicyOptions,
-  toolPolicyTooltip,
-  memoryPolicyOptions,
-  memoryPolicyTooltip,
-  contextCompressionTitle,
-  onDraftChange,
-  onLlmSlotModelChange,
-  onPromoteModel,
-  onReasoningEffortChange,
-  onContextCompressionChange,
-  onOpenModelConfig,
-  onOpenPromptConfig,
-  onOpenContextConfig,
-  onReset,
-  onSave,
+  section = "all", groupDirty, groupCanSave, onSaveGroup, onResetGroup,
+  copy, lang, agentName, draft, dirty, configDraftDirty, canSave, pending, notice,
+  title, health, llmSlots, pendingModelRef, promptTemplateOptions,
+  toolPolicyOptions, toolPolicyTooltip, memoryPolicyOptions, memoryPolicyTooltip,
+  contextCompressionTitle, onDraftChange, onLlmSlotModelChange, onPromoteModel,
+  onReasoningEffortChange, onContextCompressionChange, onOpenModelConfig,
+  onOpenPromptConfig, onOpenContextConfig, onReset, onSave,
 }: AgentCoreConfigPanelProps) {
   const primaryLlmSlot = llmSlots.find(({ slot }) => slot.slot === "dialogue") ?? llmSlots[0];
   const advancedLlmSlots = llmSlots.filter((item) => item !== primaryLlmSlot);
-  const advancedLabel = lang === "zh" ? "高级模型与上下文" : "Advanced models and context";
-  const primaryModelLabel = lang === "zh" ? "主要对话模型" : "Primary conversation model";
-  return (
-    <section className={styles.configEditor} aria-label={title}>
-      <div className={styles.panelHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{copy.configTitle}</p>
-          <h3 className={styles.contextualHintRow}>
-            <span className={styles.panelTitle}>{lang === "zh" ? "基本配置" : "Basics"}</span>
-            <VContextualHint
-              content={title}
-              label={`${agentName} ${lang === "zh" ? "配置说明" : "configuration details"}`}
-              width="wide"
-            />
-          </h3>
-        </div>
-        <span className={dirty ? styles.dirtyPill : styles.cleanPill}>
-          {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-        </span>
+  const showModels = section !== "basic";
+  const showBasic = section !== "models";
+  const group = section === "models" ? "models" : "basic";
+  const groupIsDirty = section === "all" ? dirty : groupDirty?.[group] ?? dirty;
+  const groupMaySave = section === "all" ? canSave : groupCanSave?.[group] ?? canSave;
+  const text = (zh: string, en: string) => lang === "zh" ? zh : en;
+  void toolPolicyTooltip; void memoryPolicyTooltip;
+  const reasoning = (view: AgentCoreConfigLlmSlotView) => view.supportsReasoningEffort && view.reasoningEffortOptions.length > 0 ? (
+    <VFieldRow label={copy.reasoningEffort} className={styles.fieldRow}>
+      <VStringSelect className={styles.selectControl} isDisabled={pending}
+        ariaLabel={`${view.slot.label} ${copy.reasoningEffort}`} value={view.reasoningEffort}
+        onValueChange={(value) => onReasoningEffortChange(view.slot.slot, value)}
+        options={[{ value: "", label: copy.reasoningEffortDefault }, ...view.reasoningEffortOptions.map(option => ({ value: option.value, label: option.label || fallbackReasoningEffortLabel(copy, option.value) }))]}/>
+    </VFieldRow>
+  ) : null;
+  const model = (view: AgentCoreConfigLlmSlotView, label: string) => {
+    const { slot, selectedModelId, candidates } = view;
+    return <VFieldRow label={label} className={styles.fieldRow}>
+      <div className={styles.modelControl}>
+        <AgentModelPicker candidates={candidates} slot={slot} selectedModelRef={selectedModelId}
+          disabled={pending} pendingModelRef={pendingModelRef} configDraftDirty={configDraftDirty}
+          agentDraftDirty={dirty} lang={lang}
+          onSelectPinned={(modelRef) => onLlmSlotModelChange(slot, modelRef)}
+          onPromote={(candidate) => onPromoteModel(slot, candidate)}/>
+        {!slot.required && selectedModelId ? <VButton className={styles.quietButton} isDisabled={pending} onPress={() => onLlmSlotModelChange(slot, "")}>{text("恢复默认", "Reset to default")}</VButton> : null}
       </div>
-      {health.tone === "blocking" ? (
-        <section className={`${styles.healthGuidePanel} ${healthGuideToneClass(health.tone)}`}>
-          <div>
-            <span>{health.label}</span>
-            <strong>{health.headline}</strong>
-          </div>
-          <p><strong>{health.nextStepLabel}</strong>{health.nextStep}</p>
-        </section>
-      ) : null}
-      <div className={styles.editorGrid}>
-        <section className={styles.configGroup}>
-          <h3 className={styles.groupTitle}>{lang === "zh" ? "身份与权限" : "Identity and permissions"}</h3>
-          <div className={styles.groupFields}>
-            <VFieldRow label="Agent">
-              <VNativeInput
-                value={draft.displayName}
-                onChange={(event) => onDraftChange({ displayName: event.target.value })}
-              />
-            </VFieldRow>
-            <VFieldRow label={copy.status}>
-              <VStringSelect
-                ariaLabel={copy.status}
-                value={draft.status}
-                onValueChange={(status) => onDraftChange({ status })}
-                options={[{ value: "active", label: lang === "zh" ? "活跃" : "Active" }]}
-              />
-            </VFieldRow>
-            <VFieldRow
-              label={lang === "zh" ? "工具调用批准" : "Tool approval"}
-              tooltip={lang === "zh"
-                ? "这是此 Agent 的工具调用批准方式；可用工具范围请到“工具”页配置。消息框中的选择会写回同一字段，并从下一回合生效。"
-                : "This sets how tool calls are approved for this Agent. Configure the available tool scope on the Tools page. Composer changes write to the same field and apply next turn."}
-            >
-              <AgentPermissionPresetControl
-                value={draft.permissionPreset}
-                lang={lang}
-                surface="settings"
-                disabled={pending}
-                pending={pending}
-                agentName={agentName}
-                onChange={(permissionPreset) => onDraftChange({ permissionPreset })}
-              />
-            </VFieldRow>
-          </div>
-        </section>
-        <section className={styles.configGroup}>
-          <h3 className={styles.groupTitle}>{lang === "zh" ? "模型与提示词" : "Model and prompt"}</h3>
-          <div className={styles.groupFields}>
-            {primaryLlmSlot ? (
-              <section className={styles.fieldWide} aria-label={copy.llmSlotsHint}>
-                <div className={styles.contextualHintRow}>
-                  <span>{primaryModelLabel}</span>
-                  <VContextualHint
-                    content={copy.llmSlotsHint}
-                    label={`${primaryModelLabel} ${lang === "zh" ? "说明" : "details"}`}
-                    width="wide"
-                  />
-                </div>
-                <div className={styles.primaryLlmSlot}>
-                  <AgentLlmSlotField
-                    {...primaryLlmSlot}
-                    copy={copy}
-                    lang={lang}
-                    pending={pending}
-                    pendingModelRef={pendingModelRef}
-                    configDraftDirty={configDraftDirty}
-                    dirty={dirty}
-                    compact
-                    hideLabel
-                    onLlmSlotModelChange={onLlmSlotModelChange}
-                    onPromoteModel={onPromoteModel}
-                    onReasoningEffortChange={onReasoningEffortChange}
-                  />
-                </div>
-              </section>
-            ) : null}
-            <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
-              <span>{copy.prompt}</span>
-              <div className={styles.promptConfigRow}>
-                <VStringSelect
-                  ariaLabel={copy.prompt}
-                  placeholder={lang === "zh" ? "请选择提示词" : "Select prompt"}
-                  value={draft.promptTemplateId}
-                  onValueChange={(promptTemplateId) => onDraftChange({ promptTemplateId })}
-                  options={[
-                    { value: "", label: "-" },
-                    ...promptTemplateOptions.map((template) => ({
-                      value: template.value,
-                      label: template.label,
-                    })),
-                  ]}
-                />
-                <VButton
-                  type="button"
-                  variant="secondary"
-                  icon={<SquarePen size={15} />}
-                  onPress={onOpenPromptConfig}
-                >
-                  {lang === "zh" ? "配置提示词" : "Configure prompt"}
-                </VButton>
-              </div>
-            </section>
-            <div className={styles.configDeepLinkRow}>
-              <VButton
-                type="button"
-                variant="secondary"
-                icon={<ExternalLink size={15} />}
-                onPress={onOpenModelConfig}
-              >
-                {lang === "zh" ? "去模型库配置" : "Open model library"}
-              </VButton>
-              <VButton
-                type="button"
-                variant="ghost"
-                icon={<ExternalLink size={15} />}
-                onPress={onOpenContextConfig}
-              >
-                {lang === "zh" ? "去上下文配置" : "Open context config"}
-              </VButton>
-            </div>
-          </div>
-        </section>
-        <section className={styles.configGroup}>
-          <h3 className={styles.groupTitle}>{lang === "zh" ? "工具与记忆" : "Tools and memory"}</h3>
-          <div className={styles.groupFields}>
-            <div className={styles.bindingRow}>
-              <VFieldRow
-                label={copy.tools}
-                tooltip={toolPolicyTooltip}
-              >
-                <VStringSelect
-                  ariaLabel={copy.tools}
-                  placeholder={lang === "zh" ? "请选择工具策略" : "Select tools"}
-                  value={draft.toolPolicyId}
-                  onValueChange={(toolPolicyId) => onDraftChange({ toolPolicyId })}
-                  options={toolPolicyOptions.map((policy) => ({
-                    value: policy.value,
-                    label: policy.label,
-                    description: policy.title,
-                  }))}
-                />
-              </VFieldRow>
-              <VFieldRow label={copy.memory} tooltip={memoryPolicyTooltip}>
-                <VStringSelect
-                  ariaLabel={copy.memory}
-                  placeholder={lang === "zh" ? "请选择记忆策略" : "Select memory"}
-                  value={draft.memoryPolicyId}
-                  onValueChange={(memoryPolicyId) => onDraftChange({ memoryPolicyId })}
-                  options={memoryPolicyOptions.map((policy) => ({
-                    value: policy.value,
-                    label: policy.label,
-                    description: policy.title,
-                  }))}
-                />
-              </VFieldRow>
-            </div>
-          </div>
-        </section>
-        <details className={styles.advancedConfig}>
-          <summary>
-            <span>{advancedLabel}</span>
-            <small>{advancedLlmSlots.length}</small>
-          </summary>
-          <div className={styles.advancedConfigBody}>
-            {advancedLlmSlots.length ? (
-              <div className={styles.llmSlotGrid}>
-                {advancedLlmSlots.map((slotView) => (
-                  <AgentLlmSlotField
-                    key={slotView.slot.slot}
-                    {...slotView}
-                    copy={copy}
-                    lang={lang}
-                    pending={pending}
-                    pendingModelRef={pendingModelRef}
-                    configDraftDirty={configDraftDirty}
-                    dirty={dirty}
-                    onLlmSlotModelChange={onLlmSlotModelChange}
-                    onPromoteModel={onPromoteModel}
-                    onReasoningEffortChange={onReasoningEffortChange}
-                  />
-                ))}
-              </div>
-            ) : null}
-            <AgentContextCompressionPanel
-              copy={copy}
-              lang={lang}
-              policy={draft.contextCompressionPolicy}
-              title={contextCompressionTitle}
-              onPolicyChange={onContextCompressionChange}
-              onOpenContextConfig={onOpenContextConfig}
-            />
-          </div>
-        </details>
-      </div>
-      {notice ? (
-        <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
-      ) : null}
-      <div className={styles.editorActions}>
-        <VButton type="button" variant="secondary" isDisabled={!dirty || pending} onPress={onReset}>
-          {copy.resetConfig}
-        </VButton>
-        <VButton type="button" variant="primary" isDisabled={!canSave || pending} onPress={onSave}>
-          {pending ? copy.savingConfig : copy.saveConfig}
-        </VButton>
-      </div>
-    </section>
+    </VFieldRow>;
+  };
+  const select = (label: string, value: string, options: AgentCoreConfigSelectOption[], onChange: (value: string) => void) => (
+    <VFieldRow label={label} className={styles.fieldRow}>
+      <VStringSelect className={styles.selectControl} isDisabled={pending} ariaLabel={label}
+        value={value} options={options} onValueChange={onChange}/>
+    </VFieldRow>
   );
+  return <VSettingsFormPage title={text("Agent 配置", "Agent configuration")} ariaLabel={title}
+    className={styles.configEditor} headerClassName="hidden" bodyClassName={styles.editorBody}
+    footerClassName={styles.footer} footer={(
+      <div className={styles.editorActions}>
+        <span role="status" className={styles.saveStatus}>{groupIsDirty ? text("未保存", "Unsaved") : text("已保存", "Saved")}</span>
+        <div className={styles.actionButtons}>
+          <VButton className={styles.quietButton} variant="secondary" isDisabled={!groupIsDirty || pending} onPress={() => section !== "all" && onResetGroup ? onResetGroup(group) : onReset()}>{text("还原", "Reset")}</VButton>
+          <VButton className={styles.saveButton} variant="primary" aria-label={text(group === "models" ? "保存模型配置" : "保存基本配置", group === "models" ? "Save model settings" : "Save basic settings")} isDisabled={!groupMaySave || pending} onPress={() => section !== "all" && onSaveGroup ? onSaveGroup(group) : onSave()}>{pending ? text("保存中…", "Saving…") : text("保存", "Save")}</VButton>
+        </div>
+      </div>
+    )}>
+    <div className={styles.editorGrid}>
+      {health.tone === "blocking" ? <p role="alert" className={`${styles.healthGuidePanel} ${healthGuideToneClass(health.tone)}`}>{health.headline}</p> : null}
+      {notice ? <p role={notice.tone === "error" ? "alert" : "status"} className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p> : null}
+      {showModels && primaryLlmSlot ? <section className={styles.configGroup} aria-label={copy.llmSlotsHint}>
+        <div className={styles.groupHeader}><h3 className={styles.groupTitle}>{text("主模型", "Primary model")}</h3><VButton className={styles.quietButton} variant="ghost" icon={<ExternalLink size={13}/>} onPress={onOpenModelConfig}>{text("模型库", "Model library")}</VButton></div>
+        <div className={styles.groupFields}>{model(primaryLlmSlot, text("模型", "Model"))}{reasoning(primaryLlmSlot)}</div>
+      </section> : null}
+      {showModels && advancedLlmSlots.length > 0 ? <details className={styles.advancedConfig}>
+        <summary>{text("专用模型", "Specialized models")}</summary>
+        <div className={styles.llmSlotGrid}>{advancedLlmSlots.map(view => <div key={view.slot.slot} className={styles.llmSlotField}>{model(view, view.slot.label)}{reasoning(view)}</div>)}</div>
+      </details> : null}
+      {showBasic ? <>
+        <section className={styles.configGroup}><h3 className={styles.groupTitle}>{text("基本信息", "Basic information")}</h3><div className={styles.groupFields}>
+          <VFieldRow label={text("显示名称", "Display name")} className={styles.fieldRow}><VNativeInput className={styles.control} aria-label={text("显示名称", "Display name")} disabled={pending} value={draft.displayName} onChange={event => onDraftChange({ displayName: event.target.value })}/></VFieldRow>
+          <VFieldRow label={text("提示词模板", "Prompt template")} className={styles.fieldRow}><div className={styles.promptConfigRow}><VStringSelect className={styles.selectControl} isDisabled={pending} ariaLabel={copy.prompt} value={draft.promptTemplateId} options={[{value:"",label:"-"},...promptTemplateOptions]} onValueChange={promptTemplateId => onDraftChange({promptTemplateId})}/><VButton className={styles.quietButton} variant="ghost" aria-label={text("配置提示词", "Configure prompt")} icon={<SquarePen size={14}/>} onPress={onOpenPromptConfig}/></div></VFieldRow>
+          {select(copy.status, draft.status, [{value:"active",label:text("活跃", "Active")}], status => onDraftChange({status}))}
+        </div></section>
+        <section className={styles.configGroup}><h3 className={styles.groupTitle}>{text("权限与策略", "Permissions and policies")}</h3><div className={styles.groupFields}>
+          <VFieldRow label={text("工具调用批准", "Tool approval")} className={styles.fieldRow}><div className={styles.permissionControl}><AgentPermissionPresetControl value={draft.permissionPreset} lang={lang} surface="settings" disabled={pending} pending={pending} agentName={agentName} onChange={permissionPreset => onDraftChange({permissionPreset})}/></div></VFieldRow>
+          {select(copy.tools, draft.toolPolicyId, toolPolicyOptions, toolPolicyId => onDraftChange({toolPolicyId}))}
+          {select(copy.memory, draft.memoryPolicyId, memoryPolicyOptions, memoryPolicyId => onDraftChange({memoryPolicyId}))}
+        </div></section>
+        <details className={styles.advancedConfig}><summary>{text("上下文压缩", "Context compression")}</summary><div className={styles.advancedConfigBody}><AgentContextCompressionPanel copy={copy} lang={lang} policy={draft.contextCompressionPolicy} title={contextCompressionTitle} onPolicyChange={onContextCompressionChange} onOpenContextConfig={onOpenContextConfig}/></div></details>
+      </> : null}
+    </div>
+  </VSettingsFormPage>;
 }

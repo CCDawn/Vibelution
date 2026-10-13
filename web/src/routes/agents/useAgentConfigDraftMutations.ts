@@ -21,6 +21,12 @@ import type {
 } from "../../api/types";
 import type { AgentConfigDraft } from "../AgentCoreConfigPanel";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import {
+  mergeAgentConfigDraftGroup,
+  sameAgentConfigDraftGroup,
+  type AgentConfigSaveGroup,
+} from "./agentRouteConfigGroupDraft";
+import { configDraftEqualsDraft } from "./agentRouteDraftModel";
 
 type Notice = { tone: "success" | "error"; text: string };
 type ChatCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -38,6 +44,7 @@ export type UseAgentConfigDraftMutationsOptions = {
   setConfigDraft: Dispatch<SetStateAction<AgentConfigDraft>>;
   draftSyncSourceRef: MutableRefObject<unknown>;
   getWorkspace: () => AgentConfigWorkspace | undefined;
+  getSelectedAgentId: () => string;
   draftFromAgent: (agent: AgentConfigWorkspaceAgent | null | undefined) => AgentConfigDraft;
   draftSyncSourceFromAgent: (
     workspace: AgentConfigWorkspace | undefined,
@@ -111,37 +118,45 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
       draft: AgentConfigDraft;
       modelChoices: AgentModelChoice[];
       sourceDraftId: string;
+      group?: AgentConfigSaveGroup;
     }) =>
       updateAgent(payload.agentId, (() => {
           // Full-form save used to always send compression; inherit mode then failed even when
           // the user only changed unrelated fields. Only patch compression when the form differs.
           const body: Record<string, unknown> = {
-            displayName: payload.draft.displayName,
-            llmBindings: options.normalizeAgentLlmBindings(payload.draft.llmBindings),
-            promptTemplateId: payload.draft.promptTemplateId,
-            permissionPreset: payload.draft.permissionPreset,
-            metadata: options.agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
-            status: payload.draft.status,
             expectedUpdatedAt: payload.agent.updatedAt,
             expectedConfigRevision: payload.agent.configRevision,
             sourceDraftId: payload.sourceDraftId,
           };
-          // Rebinding even the same template ID replaces Agent-owned inline policies.
-          // Preserve those overrides when saving a model, name or other unrelated field.
           const baselineDraft = options.draftFromAgent(payload.agent);
-          if (payload.draft.toolPolicyId !== baselineDraft.toolPolicyId) {
-            body.toolPolicyId = payload.draft.toolPolicyId;
+
+          if (!payload.group || payload.group === "models") {
+            body.llmBindings = options.normalizeAgentLlmBindings(payload.draft.llmBindings);
+            body.metadata = options.agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices);
           }
-          if (payload.draft.memoryPolicyId !== baselineDraft.memoryPolicyId) {
-            body.memoryPolicyId = payload.draft.memoryPolicyId;
-          }
-          const compressionChanged = options.contextCompressionPolicyChangedInDraft
-            ? options.contextCompressionPolicyChangedInDraft(payload.draft, payload.agent)
-            : true;
-          if (compressionChanged) {
-            body.contextCompressionPolicy = options.contextCompressionPolicyFromDraft(
-              payload.draft.contextCompressionPolicy,
-            );
+
+          if (!payload.group || payload.group === "basic") {
+            body.displayName = payload.draft.displayName;
+            body.promptTemplateId = payload.draft.promptTemplateId;
+            body.permissionPreset = payload.draft.permissionPreset;
+            body.status = payload.draft.status;
+
+            // Rebinding even the same template ID replaces Agent-owned inline policies.
+            // Preserve those overrides when saving unrelated basic fields.
+            if (payload.draft.toolPolicyId !== baselineDraft.toolPolicyId) {
+              body.toolPolicyId = payload.draft.toolPolicyId;
+            }
+            if (payload.draft.memoryPolicyId !== baselineDraft.memoryPolicyId) {
+              body.memoryPolicyId = payload.draft.memoryPolicyId;
+            }
+            const compressionChanged = options.contextCompressionPolicyChangedInDraft
+              ? options.contextCompressionPolicyChangedInDraft(payload.draft, payload.agent)
+              : true;
+            if (compressionChanged) {
+              body.contextCompressionPolicy = options.contextCompressionPolicyFromDraft(
+                payload.draft.contextCompressionPolicy,
+              );
+            }
           }
           return body;
         })()),
@@ -150,16 +165,30 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
     }),
     onSuccess: (agent, variables, context) => {
       context?.telemetry?.succeeded({ agentId: agent.agentId });
+      const savedDraft = options.draftFromAgent(agent);
+      options.setConfigDraft((current) => {
+        if (options.getSelectedAgentId() !== variables.agentId) {
+          return current;
+        }
+        if (variables.group) {
+          return sameAgentConfigDraftGroup(current, variables.draft, variables.group)
+            ? mergeAgentConfigDraftGroup(current, savedDraft, variables.group)
+            : current;
+        }
+        return configDraftEqualsDraft(current, variables.draft) ? savedDraft : current;
+      });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
         (current) => options.updatedAgentWorkspaceCache(current, agent),
       );
-      options.setNotice({
-        tone: "success",
-        text: options.lang === "zh"
-          ? `已保存 ${options.agentLabel(agent)} 的 Agent 配置`
-          : `Saved config for ${options.agentLabel(agent)}`,
-      });
+      if (options.getSelectedAgentId() === variables.agentId) {
+        options.setNotice({
+          tone: "success",
+          text: options.lang === "zh"
+            ? `已保存 ${options.agentLabel(agent)} 的 Agent 配置`
+            : `Saved config for ${options.agentLabel(agent)}`,
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
       // Config PATCH already setQueryData'd the workspace agent — do not thrash chat sessions.
       void options.chatWorkspaceCache.afterAgentConfigSaved(variables.agentId);
@@ -167,12 +196,14 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { agentId: variables.agentId });
       const message = error instanceof Error ? error.message : String(error);
-      options.setNotice({
-        tone: "error",
-        text: message.includes("agent_update_conflict")
-          ? (options.lang === "zh" ? "配置已被其他编辑更新，请刷新后再保存。" : "Configuration changed elsewhere. Refresh before saving again.")
-          : message,
-      });
+      if (options.getSelectedAgentId() === variables.agentId) {
+        options.setNotice({
+          tone: "error",
+          text: message.includes("agent_update_conflict")
+            ? (options.lang === "zh" ? "配置已被其他编辑更新，请刷新后再保存。" : "Configuration changed elsewhere. Refresh before saving again.")
+            : message,
+        });
+      }
     },
   });
 

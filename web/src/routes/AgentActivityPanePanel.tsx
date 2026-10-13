@@ -8,18 +8,20 @@ type AgentActivityPanePanelProps = {
   runtimeFocus: ComponentProps<typeof AgentRuntimeFocusPanel>;
   activityHistory: ComponentProps<typeof AgentActivityHistoryPanel>;
   runtimePolicy: ComponentProps<typeof AgentRuntimePolicyPanel>;
+  hideRuntimePolicy?: boolean;
 };
 
 export function AgentActivityPanePanel({
   runtimeFocus,
   activityHistory,
   runtimePolicy,
+  hideRuntimePolicy = false,
 }: AgentActivityPanePanelProps) {
   return (
     <>
       <AgentRuntimeFocusPanel {...runtimeFocus} />
       <AgentActivityHistoryPanel {...activityHistory} />
-      <AgentRuntimePolicyPanel {...runtimePolicy} />
+      {!hideRuntimePolicy ? <AgentRuntimePolicyPanel {...runtimePolicy} /> : null}
     </>
   );
 }
