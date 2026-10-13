@@ -35,7 +35,7 @@ const LAUNCHER_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
 
 type BranchLifecycleRequest = {
   instanceId: string;
-  operation: Extract<LauncherOperation, "start" | "stop" | "force-stop">;
+  operation: Extract<LauncherOperation, "start" | "stop" | "force-stop" | "restart">;
   requestId: string;
   localRevision: number;
 };
@@ -256,7 +256,7 @@ export function LauncherRoute() {
     : branchInstancesQuery.data?.currentId || "main";
   const requestInstanceLifecycle = (
     instanceId: string,
-    operation: Extract<LauncherOperation, "start" | "stop" | "force-stop">,
+    operation: Extract<LauncherOperation, "start" | "stop" | "force-stop" | "restart">,
   ): LifecycleRequestOutcome => {
     const instance = branchItems.find((item) => item.id === instanceId);
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
