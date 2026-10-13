@@ -3,10 +3,11 @@ import { Navigate } from "react-router-dom";
 
 import { fetchPublicConfig } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
-import { resolveWorkbenchHomePath } from "../app/workbenchContract";
+import { isWorkbenchModeEnabled, resolveWorkbenchHomePath } from "../app/workbenchContract";
 import { deriveQueryPresentation } from "../app/queryPresentation";
 import { RouteLoadingShell } from "../app/RouteLoadingShell";
 import { VButton, VStateSurface } from "../components/vui";
+import { readCurrentChatSelectionPreference } from "./chat/useChatSelectionPersistence";
 
 export function HomeRedirect() {
   const configQuery = useQuery({
@@ -37,5 +38,10 @@ export function HomeRedirect() {
     );
   }
 
-  return <Navigate to={resolveWorkbenchHomePath(configQuery.data)} replace />;
+  const lastSelection = readCurrentChatSelectionPreference();
+  const restoreLastAgent = Boolean(lastSelection?.agentId || lastSelection?.sessionId)
+    && isWorkbenchModeEnabled(configQuery.data, "chat");
+  // The bare Chat entry validates the preference against the current directory.
+  // Explicit session links never pass through this root-only redirect.
+  return <Navigate to={restoreLastAgent ? "/chat" : resolveWorkbenchHomePath(configQuery.data)} replace />;
 }
