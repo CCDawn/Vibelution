@@ -362,10 +362,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('data-vui-layout-id={EVOLUTION_LAYOUT_ID}');
 
     expect(runRecordsPanelSource).toContain("VUI_WORKBENCH_PANE_CLASS");
-    expect(runRecordsPanelSource).toContain("${styles.runDetailPanel} min-h-0 min-w-0 flex-1");
+    expect(runRecordsPanelSource).toContain("${styles.runDetailPanel} ${VUI_PAGE_BODY_SCROLL_CLASS}");
     expect(runRecordsPanelStyles.runDetailPanel).toContain("[overflow:auto]");
-    expect(supervisedLibraryViewSource).toContain("${VUI_WORKBENCH_PANE_CLASS} min-h-0 min-w-0 flex flex-col");
-    expect(supervisedLibraryViewSource).toContain("${styles.detailPanel} min-h-0 min-w-0 flex-1");
+    expect(supervisedLibraryViewSource).toContain("${VUI_WORKBENCH_PANE_CLASS} ${VUI_PAGE_BODY_FILL_CLASS}");
+    expect(supervisedLibraryViewSource).toContain("${styles.detailPanel} ${VUI_PAGE_BODY_SCROLL_CLASS}");
     expect(routeStyles.detailPanel).toContain("[overflow:auto]");
   });
 
