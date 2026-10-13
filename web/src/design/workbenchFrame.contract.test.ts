@@ -17,6 +17,8 @@ describe("shared workbench chrome ownership", () => {
       expect(source(path), path).toContain("data-vui-page=");
     }
     expect(source("routes/ConfigRoute.tsx").match(/data-vui-page="workspace"/g)?.length).toBe(3);
+    expect(source("routes/MemoryAgentMemoryPanel.tsx")).toContain('<VSplitWorkspace chrome="workbench"');
+    expect(source("routes/MemoryContentBrowsePanel.tsx")).toContain('${VUI_WORKBENCH_PANE_CLASS} ${styles.root}');
   });
   it("keeps pane paint in shared CSS instead of subtree inference or a domain whitelist", () => {
     const css = source("design/workbench-frame.css");
