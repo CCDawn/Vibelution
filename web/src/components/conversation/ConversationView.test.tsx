@@ -1446,6 +1446,61 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("lucide-list-plus");
     expect(html).toContain("lucide-circle-minus");
   });
+
+  it("shows the measured token usage on settled turns and stays quiet without wire facts", () => {
+    const answerItem = {
+      id: "message-assistant-usage-item-answer",
+      itemId: "message-assistant-usage-item-answer",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      version: 3,
+      revision: 1,
+      sequence: 1,
+      type: "agent_message",
+      phase: "final_answer",
+      text: "答案正文",
+      status: "completed",
+      terminal: true,
+    };
+    const withUsage = renderConversation([
+      {
+        id: "message-assistant-usage",
+        role: "assistant",
+        content: "答案正文",
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+        status: "completed",
+        turnItems: [answerItem],
+        usageStats: {
+          inputTokens: 12_400,
+          completionTokens: 860,
+          totalTokens: 13_260,
+          cachedInputTokens: 8_000,
+          elapsedMs: 4_200,
+          tokensPerSecond: 204.8,
+        },
+      },
+    ] as unknown as ConversationMessage[]);
+    expect(withUsage).toContain('data-conversation-turn-usage="1"');
+    expect(withUsage).toContain("tokens");
+    expect(withUsage).toContain("输入");
+    expect(withUsage).toContain("输出");
+    expect(withUsage).toContain("缓存");
+    expect(withUsage).toContain("205 tok/s");
+
+    const withoutUsage = renderConversation([
+      {
+        id: "message-assistant-no-usage",
+        role: "assistant",
+        content: "答案正文",
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+        status: "completed",
+        turnItems: [answerItem],
+      },
+    ] as unknown as ConversationMessage[]);
+    expect(withoutUsage).not.toContain('data-conversation-turn-usage="1"');
+  });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {
       composerReferences: [
