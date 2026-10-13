@@ -34,6 +34,7 @@ import {
   shouldApplyLifecycleMutationFeedback,
   shouldHoldOpenClickGuard,
   settleLifecycleIntentTable,
+  workbenchOpenAction,
 } from "./LauncherBranchInstancesPanel.model";
 
 function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBranchInstance {
@@ -709,6 +710,55 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(formatGitStatus(dirty, true)).toBe("有未提交 · 未合入 main");
     expect(canStartInstance(dirty)).toBe(false);
     expect(canStopInstance(dirty)).toBe(true);
+  });
+
+  it("chooses the workbench action from runtime backend health and window state", () => {
+    const healthyBackend = {
+      ...instance().runtime.backend,
+      alive: true,
+      healthy: true,
+      listening: true,
+    };
+    const windowOpenWithHealthyBackend = instance({
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: healthyBackend,
+        window: { open: true, pid: 2200, title: "task 台", titleObserved: true },
+      },
+    });
+    const windowOpenWithOfflineBackend = instance({
+      // This aggregate flag can be true because a window remains open.
+      alive: true,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: {
+          ...instance().runtime.backend,
+          alive: false,
+          healthy: false,
+          listening: false,
+        },
+        window: { open: true, pid: 2300, title: "task 台", titleObserved: true },
+      },
+    });
+    const backendWithoutWindow = instance({
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: healthyBackend,
+      },
+    });
+    const stopped = instance();
+    const failed = instance({
+      runtime: { ...instance().runtime, lifecycleState: "error" },
+    });
+
+    expect(workbenchOpenAction(windowOpenWithHealthyBackend, "running")).toBe("switch");
+    expect(workbenchOpenAction(windowOpenWithOfflineBackend, "running")).toBe("recover");
+    expect(workbenchOpenAction(backendWithoutWindow, "running")).toBe("open");
+    expect(workbenchOpenAction(stopped, "stopped")).toBe("start");
+    expect(workbenchOpenAction(failed, "failed")).toBe("retry");
   });
 
   it("keeps lifecycle controls fail-closed for a stale Launcher runtime contract", () => {

@@ -30,12 +30,14 @@ function instance(overrides: {
   state?: LauncherBranchInstance["runtime"]["lifecycleState"];
   alive?: boolean;
   windowOpen?: boolean;
+  backend?: Partial<LauncherBranchInstance["runtime"]["backend"]>;
   spawnIdentityStatus?: "match" | "dead" | "mismatch" | "unknown";
 } = {}): LauncherBranchInstance {
   const id = overrides.id ?? "worktree:task";
   const branch = overrides.branch ?? "codex/task";
   const state = overrides.state ?? "running";
   const alive = overrides.alive ?? state === "running";
+  const backendAlive = overrides.backend?.alive ?? alive;
   const windowOpen = overrides.windowOpen ?? false;
   return {
     id,
@@ -61,13 +63,14 @@ function instance(overrides: {
       observedState: state,
       phase: state === "building" ? "building" : "steady",
       backend: {
-        alive,
-        healthy: alive,
-        listening: alive,
-        port: alive ? 8000 : 0,
+        alive: backendAlive,
+        healthy: overrides.backend?.healthy ?? backendAlive,
+        listening: overrides.backend?.listening ?? backendAlive,
+        port: backendAlive ? 8000 : 0,
         portReserved: false,
         portConflict: false,
-        pid: alive ? 1234 : 0,
+        pid: backendAlive ? 1234 : 0,
+        ...overrides.backend,
       },
       frontend: { mode: "bundled_static_dist", ready: state !== "building" },
       window: { open: windowOpen, pid: 0, title: `${branch} 台`, titleObserved: false },
@@ -178,7 +181,52 @@ describe("Launcher branch workspace interactions", () => {
     expect(host.textContent).toContain("工作区刷新失败");
     expect(host.querySelector('[role="table"]')).not.toBeNull();
     expect(host.textContent).toContain("codex/cached");
-    expect(button("打开窗口").disabled).toBe(false);
+    expect(button("启动工作台").disabled).toBe(false);
+  });
+
+  it("labels the workbench action from backend health and window presence", async () => {
+    const healthyBackend = { alive: true, healthy: true, listening: true };
+    const items = [
+      instance({ id: "worktree:switch", branch: "codex/switch", windowOpen: true, backend: healthyBackend }),
+      instance({
+        id: "worktree:recover",
+        branch: "codex/recover",
+        windowOpen: true,
+        // The flat alive flag can include this open window.
+        alive: true,
+        backend: { alive: false, healthy: false, listening: false },
+      }),
+      instance({ id: "worktree:open", branch: "codex/open", backend: healthyBackend }),
+      instance({ id: "worktree:start", branch: "codex/start", state: "closed", alive: false }),
+      instance({ id: "worktree:retry", branch: "codex/retry", state: "error", alive: false }),
+    ];
+    await renderPanel(items);
+
+    const rowFor = (id: string) => [...host.querySelectorAll<HTMLElement>('[role="row"]')]
+      .find((row) => row.textContent?.includes(id));
+    const action = (id: string, label: string) => {
+      const row = rowFor(id);
+      if (!row) throw new Error(`row not found: ${id}`);
+      return button(label, row);
+    };
+
+    expect(action("codex/switch", "切换到工作台")).toBeTruthy();
+    expect(action("codex/recover", "恢复工作台")).toBeTruthy();
+    expect(action("codex/open", "打开工作台")).toBeTruthy();
+    expect(action("codex/start", "启动工作台")).toBeTruthy();
+    expect(action("codex/retry", "重试启动")).toBeTruthy();
+
+    for (const id of items.map((item) => item.id)) {
+      const labels: Record<string, string> = {
+        "worktree:switch": "切换到工作台",
+        "worktree:recover": "恢复工作台",
+        "worktree:open": "打开工作台",
+        "worktree:start": "启动工作台",
+        "worktree:retry": "重试启动",
+      };
+      await click(action(id.replace("worktree:", "codex/"), labels[id]));
+    }
+    expect(onLifecycle.mock.calls).toEqual(items.map((item) => [item.id, "start"]));
   });
 
   it("surfaces the window hint only when a running backend has no window", async () => {

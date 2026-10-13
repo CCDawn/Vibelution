@@ -27,6 +27,7 @@ import {
   lifecycleIntentRejectMessage,
   summarizeLifecycleFeedback,
   shouldHoldOpenClickGuard,
+  workbenchOpenAction,
   type InstanceListFilters,
   type LifecyclePendingInput,
   type LifecycleRequestOutcome,
@@ -135,9 +136,10 @@ export function LauncherBranchInstancesPanel({
         readiness: "启动准备",
         ready: "可以启动",
         startWorkbench: "启动工作台",
-        openWindow: "打开窗口",
-        focusWindow: "聚焦窗口",
-        retryStart: "重新启动",
+        openWorkbench: "打开工作台",
+        switchWorkbench: "切换到工作台",
+        recoverWorkbench: "恢复工作台",
+        retryStart: "重试启动",
         stop: "停止",
         forceStop: "强制停止",
         forceStopHint: "普通停止无法收口时使用",
@@ -199,8 +201,9 @@ export function LauncherBranchInstancesPanel({
         readiness: "Readiness",
         ready: "Ready to start",
         startWorkbench: "Start workbench",
-        openWindow: "Open window",
-        focusWindow: "Focus window",
+        openWorkbench: "Open workbench",
+        switchWorkbench: "Switch to workbench",
+        recoverWorkbench: "Recover workbench",
         retryStart: "Retry start",
         stop: "Stop",
         forceStop: "Force stop",
@@ -363,12 +366,17 @@ export function LauncherBranchInstancesPanel({
 
   const renderLifecycleActions = (item: LauncherBranchInstance) => {
     const state = instanceRuntimeState(item, pendingOperation);
-    const windowOpen = instanceWindowOpen(item);
     const startBusy = shouldHoldOpenClickGuard(state);
     const stopBusy = state === "stopping";
     const building = state === "building";
     const startingOrRestarting = state === "starting" || state === "restarting";
-    const openLabel = state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
+    const openLabel = {
+      start: labels.startWorkbench,
+      open: labels.openWorkbench,
+      switch: labels.switchWorkbench,
+      recover: labels.recoverWorkbench,
+      retry: labels.retryStart,
+    }[workbenchOpenAction(item, state)];
     const admissionBlocked = isAdmissionBlocked(item);
     // While a frontend build gates the start, the primary control stays
     // visible but disabled with a pending spinner so the wait reads as

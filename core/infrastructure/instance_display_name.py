@@ -12,16 +12,18 @@ from typing import Any
 MAIN_SHORT_NAME = "main"
 BRANCH_NAME_PREFIX = "branch+"
 RETIRED_NAME_PREFIX = "retired+"
-WORKBENCH_TITLE_SUFFIX = "台"
-LAUNCHER_TITLE_SUFFIX = "控"
 
 
 def workbench_window_title(short_name: str) -> str:
-    return f"{_clean_short_name(short_name) or MAIN_SHORT_NAME} {WORKBENCH_TITLE_SUFFIX}"
+    name = _clean_short_name(short_name) or MAIN_SHORT_NAME
+    if name == MAIN_SHORT_NAME:
+        return "Vibelution 工作台 · main"
+    label = name.removeprefix(BRANCH_NAME_PREFIX).removeprefix(RETIRED_NAME_PREFIX)
+    return f"Vibelution 测试工作台 · {label}"
 
 
 def launcher_window_title(short_name: str) -> str:
-    return f"{_clean_short_name(short_name) or MAIN_SHORT_NAME} {LAUNCHER_TITLE_SUFFIX}"
+    return "Vibelution 启动管理"
 
 
 def instance_short_name_base(

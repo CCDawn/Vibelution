@@ -147,6 +147,7 @@ import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryS
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
+import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 
 const ShellProjectUtilities = lazy(() => import("./ShellProjectUtilities").then((module) => ({ default: module.ShellProjectUtilities })));
 const LazyAppShellSettingsMenu = lazy(() =>
@@ -3094,6 +3095,14 @@ export function AppShell() {
       </div>
       </header>
 
+      <WorkbenchConnectionNotice
+        unavailable={(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen}
+        lang={lang}
+        desktopShell={desktopShell}
+        recovering={restartRequested || shutdownRequested}
+        onRecover={() => { void beginRestart(); }}
+        onRetry={() => { void backendHealthQuery.refetch(); }}
+      />
       <div className={styles.mainArea}>
         <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><Outlet /></>}
           aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
