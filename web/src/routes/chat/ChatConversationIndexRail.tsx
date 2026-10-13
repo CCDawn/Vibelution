@@ -1,17 +1,11 @@
 import {
-  Archive,
   Bot,
   ChevronRight,
-  LayoutList,
   MessageSquarePlus,
   MessageCircleHeart,
-  Search,
-  Plus,
-  PanelLeftClose,
-  X,
   UsersRound,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
 
 import type {
   AgentInstance,
@@ -25,13 +19,9 @@ import type {
 } from "../../api/types";
 import {
   VButton,
-  VCommandPalette,
   VContextualHint,
-  VDropdownMenu,
-  VIconButton,
   VNativeButton,
   VNativeInput,
-  VSessionSearchDialog,
   VStateSurface,
   VStringSelect,
   VTabs,
@@ -39,9 +29,6 @@ import {
 import type { VDropdownMenuItem } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { agentDisplayInfo } from "../agentDisplay";
-import { agentSessionStatusTone } from "../AgentSessionTabStrip";
-import { sessionActivityLabel } from "../sessionActivityIndicator";
-import { useSessionSearchQuery } from "../useSessionSearchQuery";
 import {
   contextUsagePercent,
   formatContextUsage,
@@ -50,6 +37,10 @@ import {
 import routeStyles from "../ChatCodingRoute.styles";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatConversationIndexRail.styles";
+import { ChatSessionIndexToolbar } from "./ChatSessionIndexToolbar";
+import { ChatSessionIndexSearch } from "./ChatSessionIndexSearch";
+import type { SessionListPreferences } from "./sessionListPreferences";
+import { SESSION_INDEX_SEARCH_EVENT } from "../../shortcuts/sessionSearchDispatch";
 
 export type ConversationIndexPanelKey = "conversations" | "members";
 
@@ -68,8 +59,10 @@ export type ChatConversationIndexRailProps = {
   onCollapseConversationIndex: () => void;
   conversationIndexOverlayOpen: boolean;
   conversationIndexPanel: ReactNode;
-  directoryFilterText: string;
-  onDirectoryFilterChange: (value: string) => void;
+  sessionListPreferences: SessionListPreferences;
+  onSessionListPreferencesChange: (patch: Partial<SessionListPreferences>) => void;
+  onOpenSearchAgent: (agent: AgentInstance) => void;
+  onOpenSearchTeam: (team: Team) => void;
   showArchivedSessions: boolean;
   onToggleShowArchivedSessions: () => void;
   conversationIndexPaneClassName: string;
@@ -158,8 +151,10 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     onCollapseConversationIndex,
     conversationIndexOverlayOpen,
     conversationIndexPanel,
-    directoryFilterText,
-    onDirectoryFilterChange,
+    sessionListPreferences,
+    onSessionListPreferencesChange,
+    onOpenSearchAgent,
+    onOpenSearchTeam,
     showArchivedSessions,
     onToggleShowArchivedSessions,
     conversationIndexPaneClassName,
@@ -214,27 +209,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [directorySearchOpen, setDirectorySearchOpen] = useState(false);
-  const directorySearchRef = useRef<HTMLButtonElement>(null);
-  const closeDirectorySearch = () => {
-    onDirectoryFilterChange("");
-    setDirectorySearchOpen(false);
-    directorySearchRef.current?.focus();
-  };
-  const searchItems = useMemo(() => Array.from(sessionsById.values()).map((session) => ({
-    id: session.id,
-    group: session.teamName || session.agentDisplayName || (lang === "zh" ? "会话" : "Chats"),
-    label: String(session.taskTitle || session.resultCard?.title || session.title || session.id).trim(),
-    detail: String(session.taskSummary || session.resultCard?.summary || session.agentDisplayName || "").trim() || undefined,
-    keywords: [
-      session.agentCode,
-      session.agentDisplayName,
-      session.workspacePath,
-      session.currentPhase,
-      session.status,
-    ].filter(Boolean).join(" "),
-    onRun: () => onOpenDirectSession(session.id),
-  })), [lang, onOpenDirectSession, sessionsById]);
+  const [optionsOpen, setOptionsOpen] = useState(false);
 
   const createItems = useMemo<VDropdownMenuItem[]>(() => [
     {
@@ -259,39 +234,32 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     },
   ], [createGroupRoomPending, createSessionPending, lang, onCreateAgent, onCreateSession, onToggleGroupComposer]);
 
-  const [catalogOpen, setCatalogOpen] = useState(false);
-  const [catalogQuery, setCatalogQuery] = useState("");
-  const [catalogAgentFilter, setCatalogAgentFilter] = useState("");
-  const [catalogTeamFilter, setCatalogTeamFilter] = useState("");
-  const catalogSearch = useSessionSearchQuery({
-    queryText: catalogQuery,
-    filters: { agentId: catalogAgentFilter, teamId: catalogTeamFilter },
-    enabled: catalogOpen,
-  });
-  const catalogApprovalSessionIds = new Set(
-    sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
-  );
-  const catalogRuntimeSessionIds = new Set(
-    runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
-  );
-
   useEffect(() => {
+    const openIndexSearch = (event: Event) => {
+      event.preventDefault();
+      setOptionsOpen(false);
+      setCreateMenuOpen(false);
+      setSearchOpen(true);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+      if (event.defaultPrevented || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
         return;
       }
       const key = event.key.toLocaleLowerCase();
-      if (key === "k") {
+      if (key === "n") {
         event.preventDefault();
-        setSearchOpen(true);
-      } else if (key === "n") {
-        event.preventDefault();
+        setOptionsOpen(false);
+        if (showArchivedSessions) onToggleShowArchivedSessions();
         setCreateMenuOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+    window.addEventListener(SESSION_INDEX_SEARCH_EVENT, openIndexSearch);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(SESSION_INDEX_SEARCH_EVENT, openIndexSearch);
+    };
+  }, [showArchivedSessions, onToggleShowArchivedSessions]);
 
   return (
       <aside
@@ -303,100 +271,13 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
         role={conversationIndexOverlayOpen ? "dialog" : undefined}
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
       >
-          <div className={styles.railTop}>
-            <h2 className={styles.railTitle}>{lang === "zh" ? "会话" : "Chats"}</h2>
-            <VNativeButton
-              ref={directorySearchRef}
-              type="button"
-              data-vui="icon-button"
-              className={styles.railActionButton}
-              aria-label={directorySearchOpen ? (lang === "zh" ? "关闭搜索" : "Close search") : (lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams")}
-              aria-expanded={directorySearchOpen}
-              aria-controls={directorySearchOpen ? "chat-directory-search" : undefined}
-              onClick={() => directorySearchOpen ? closeDirectorySearch() : setDirectorySearchOpen(true)}
-              title={lang === "zh" ? "搜索 Agent 或团队；Ctrl+K 搜索全部任务" : "Search Agents or teams; Ctrl+K searches all tasks"}
-            >
-              {directorySearchOpen ? <X size={16} aria-hidden="true" /> : <Search size={16} aria-hidden="true" />}
-            </VNativeButton>
-            <VNativeButton
-              type="button"
-              data-vui="session-catalog-entry"
-              className={styles.railActionButton}
-              aria-label={lang === "zh" ? "全部会话" : "All sessions"}
-              onClick={() => setCatalogOpen(true)}
-              title={lang === "zh" ? "全部会话" : "All sessions"}
-            >
-              <LayoutList size={16} aria-hidden="true" />
-            </VNativeButton>
-            <VButton
-              type="button"
-              data-vui="session-archive-toggle"
-              isIconOnly
-              className={styles.railActionButton}
-              aria-label={showArchivedSessions ? t("closeArchivedSessions") : t("showArchivedSessions")}
-              aria-pressed={showArchivedSessions}
-              onClick={onToggleShowArchivedSessions}
-              title={showArchivedSessions ? t("closeArchivedSessions") : t("showArchivedSessions")}
-              icon={
-                showArchivedSessions
-                  ? <X size={16} aria-hidden="true" />
-                  : <Archive size={16} aria-hidden="true" />
-              }
-            >
-              {null}
-            </VButton>
-            <VDropdownMenu
-              aria-label={lang === "zh" ? "新建任务" : "Create task"}
-              align="start"
-              side="bottom"
-              open={createMenuOpen}
-              onOpenChange={setCreateMenuOpen}
-              items={createItems}
-              trigger={(
-                <VNativeButton
-                  ref={createAgentButtonRef}
-                  id="chat-agent-create-trigger"
-                  type="button"
-                  data-vui="icon-button"
-                  className={styles.railActionButton}
-                  aria-label={lang === "zh" ? "新建任务" : "Create task"}
-                  aria-keyshortcuts="Control+N Meta+N"
-                  title={lang === "zh" ? "新建任务（Ctrl+N）" : "Create task (Ctrl+N)"}
-                >
-                  <Plus size={16} aria-hidden="true" />
-                </VNativeButton>
-              )}
-            />
-            <VIconButton
-              tooltip=""
-              id="chat-conversation-index-collapse"
-              type="button"
-              className={styles.railActionButton}
-              label={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
-              aria-expanded={true}
-              aria-controls="chat-conversation-index-pane"
-              onClick={onCollapseConversationIndex}
-              icon={<PanelLeftClose size={16} aria-hidden="true" />}
-            />
-            {directorySearchOpen ? (
-              <div id="chat-directory-search" className={styles.directorySearch}>
-                <VNativeInput
-                  autoFocus
-                  aria-label={lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams"}
-                  placeholder={lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams"}
-                  value={directoryFilterText}
-                  onChange={(event) => onDirectoryFilterChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      closeDirectorySearch();
-                    }
-                  }}
-                  className={styles.directorySearchInput}
-                />
-              </div>
-            ) : null}
-          </div>
+          <ChatSessionIndexToolbar
+            lang={lang} archived={showArchivedSessions} preferences={sessionListPreferences}
+            onPreferencesChange={onSessionListPreferencesChange} onToggleArchive={onToggleShowArchivedSessions}
+            onSearch={() => { setOptionsOpen(false); setCreateMenuOpen(false); setSearchOpen(true); }} onCollapse={onCollapseConversationIndex}
+            createItems={createItems} createOpen={createMenuOpen} onCreateOpenChange={setCreateMenuOpen}
+            createButtonRef={createAgentButtonRef} optionsOpen={optionsOpen} onOptionsOpenChange={setOptionsOpen}
+          />
 
         {standardGroupRoomActive ? (
           <div className={styles.railGroupHeader}>
@@ -730,96 +611,12 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             </div>
           )}
           </div>
-          <VCommandPalette
-            open={searchOpen}
-            onOpenChange={setSearchOpen}
-            items={searchItems}
-            labels={{
-              searchPlaceholder: lang === "zh" ? "搜索任务、会话摘要或工作区" : "Search tasks, summaries, or workspaces",
-              emptyTitle: lang === "zh" ? "没有找到匹配任务" : "No matching tasks",
-              hint: lang === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 关闭" : "↑↓ Select · Enter open · Esc close",
-            }}
-            maxVisible={7}
-            data-vui="chat-left-rail-search"
-          />
-          <VSessionSearchDialog
-            open={catalogOpen}
-            onOpenChange={setCatalogOpen}
-            query={catalogQuery}
-            onQueryChange={setCatalogQuery}
-            filters={
-              <>
-                <VStringSelect
-                  ariaLabel={lang === "zh" ? "按 Agent 过滤" : "Filter by agent"}
-                  value={catalogAgentFilter}
-                  onValueChange={setCatalogAgentFilter}
-                  options={[
-                    { value: "", label: lang === "zh" ? "全部 Agent" : "All agents" },
-                    ...[...agentsById.values()].map((agent) => ({
-                      value: agent.agentId,
-                      label: agent.displayName || agent.agentCode || agent.agentId,
-                    })),
-                  ]}
-                />
-                <VStringSelect
-                  ariaLabel={lang === "zh" ? "按团队过滤" : "Filter by team"}
-                  value={catalogTeamFilter}
-                  onValueChange={setCatalogTeamFilter}
-                  options={[
-                    { value: "", label: lang === "zh" ? "全部团队" : "All teams" },
-                    ...teams.map((team) => ({
-                      value: team.teamId,
-                      label: team.name || team.teamId,
-                    })),
-                  ]}
-                />
-              </>
-            }
-            items={catalogSearch.sessions.map((session) => {
-              const tone = agentSessionStatusTone(session.status || "", {
-                session,
-                isActive: session.id === activeSessionId,
-                needsApproval: catalogApprovalSessionIds.has(session.id),
-                isRuntimeRunning: catalogRuntimeSessionIds.has(session.id),
-              });
-              const searchAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-              return {
-                id: session.id,
-                title: session.title || searchAgent?.displayName || session.id,
-                detail: session.taskSummary || session.resultCard?.summary || "",
-                meta: [
-                  session.agentDisplayName || searchAgent?.displayName || "",
-                  sessionActivityLabel(tone, lang),
-                  session.updatedAt || session.lastActive || "",
-                ].filter(Boolean).join(" · "),
-                highlight: catalogSearch.debouncedQueryText,
-                active: session.id === activeSessionId,
-                onOpen: () => {
-                  if (session.id === activeSessionId) onSetActiveTab(session.id, "agent");
-                  else onOpenDirectSession(session.id);
-                },
-              };
-            })}
-            loading={catalogSearch.isLoading}
-            error={catalogSearch.searchError}
-            onRetry={() => void catalogSearch.retrySearch()}
-            retrying={catalogSearch.isFetching}
-            hasMore={catalogSearch.hasMore}
-            loadingMore={catalogSearch.isLoadingMore}
-            onLoadMore={() => void catalogSearch.loadMore()}
-            totalEstimate={catalogSearch.totalEstimate}
-            labels={{
-              searchPlaceholder: lang === "zh" ? "搜索标题、摘要或会话编号" : "Search titles, summaries or session IDs",
-              emptyTitle: lang === "zh" ? "没有匹配的会话" : "No matching sessions",
-              emptyHint: lang === "zh" ? "换个关键词，或清空过滤条件" : "Try another keyword or clear the filters",
-              loadMore: lang === "zh" ? "加载更多" : "Load more",
-              loadingMore: lang === "zh" ? "加载中…" : "Loading…",
-              errorTitle: lang === "zh" ? "搜索请求失败" : "Search request failed",
-              retry: lang === "zh" ? "重试" : "Retry",
-              resultSummary: (loaded, total) => (lang === "zh" ? `已加载 ${loaded} / ${total} 个会话` : `Loaded ${loaded} of ${total} sessions`),
-              hint: lang === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 关闭" : "↑↓ navigate · Enter open · Esc close",
-            }}
-            data-vui="chat-left-rail-session-catalog"
+          <ChatSessionIndexSearch
+            open={searchOpen} onOpenChange={setSearchOpen} lang={lang} agentsById={agentsById} teams={teams}
+            activeSessionId={activeSessionId} approvalSessionIds={sessionIdsNeedingApproval}
+            runningSessionIds={runtimeRunningSessionIds} knownSessions={sessionsById}
+            onOpenSession={(id) => id === activeSessionId ? onSetActiveTab(id, "agent") : onOpenDirectSession(id)}
+            onOpenAgent={onOpenSearchAgent} onOpenTeam={onOpenSearchTeam}
           />
         </aside>
   );

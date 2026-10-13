@@ -138,6 +138,8 @@
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
 | `ChatGroupArtifactDialog` | [product/conversation.md](./product/conversation.md#chatgroupartifactdialog) |
 | `ChatSessionBrowser` | [product/conversation.md](./product/conversation.md#chatsessionbrowser) |
+| `ChatSessionIndexToolbar` | [product/conversation.md](./product/conversation.md#chatsessionindextoolbar) |
+| `ChatSessionIndexSearch` | [product/conversation.md](./product/conversation.md#chatsessionindexsearch) |
 | `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |

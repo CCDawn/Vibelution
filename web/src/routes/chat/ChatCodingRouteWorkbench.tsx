@@ -20,7 +20,6 @@ import {
   Check,
   ChevronRight,
   HeartHandshake,
-  ListTree,
   MessageCircleHeart,
   RotateCcw,
   PanelLeftOpen,
@@ -105,7 +104,7 @@ import {
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VStringSelect, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { startUserAction } from "../../app/userActionTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
@@ -134,7 +133,6 @@ import {
 } from "../chatSessionIndexQuery";
 import {
   loadSessionListPreferences,
-  normalizeSessionListSortBy,
   saveSessionListPreferences,
   sessionListSortQueryValue,
   type SessionListPreferences,
@@ -765,7 +763,6 @@ export function ChatCodingRouteWorkbench() {
     editingSessionTitleRef.current = editingSessionTitle;
   }, [editingSessionTitle]);
 
-  const [directoryFilterText, setDirectoryFilterText] = useState("");
   const [sessionBrowserOpen, setSessionBrowserOpen] = useState(false);
   useEffect(() => {
     setSessionBrowserOpen(false);
@@ -3674,35 +3671,6 @@ export function ChatCodingRouteWorkbench() {
   })();
   const conversationIndexPanel = (
     <>
-    <div className={styles.sessionListControlsRow} data-vui="chat-session-list-controls">
-      <VStringSelect
-        ariaLabel={t("sessionListSortAria")}
-        className={styles.sessionListSortSelect}
-        value={sessionListPrefs.sortBy}
-        onValueChange={(value) => setSessionListPrefs((current) => ({
-          ...current,
-          sortBy: normalizeSessionListSortBy(value),
-        }))}
-        options={[
-          { value: "updatedAt", label: t("sessionListSortByUpdated") },
-          { value: "createdAt", label: t("sessionListSortByCreated") },
-        ]}
-      />
-      {showArchivedSessions ? null : (
-        <VIconButton
-          type="button"
-          data-vui="chat-session-timeline-toggle"
-          label={t("sessionListTimelineToggle")}
-          tooltip={t("sessionListTimelineToggle")}
-          aria-pressed={sessionListPrefs.timelineGrouping}
-          onClick={() => setSessionListPrefs((current) => ({
-            ...current,
-            timelineGrouping: !current.timelineGrouping,
-          }))}
-          icon={<ListTree size={16} aria-hidden="true" />}
-        />
-      )}
-    </div>
     <ChatConversationIndexPanelContent
       styles={styles}
       loadingLabel={t("loadingSession")}
@@ -3761,7 +3729,7 @@ export function ChatCodingRouteWorkbench() {
             activeGroupRoomId={activeGroupRoomId}
             agents={archiveVisibleAgents}
             avatarInitials={avatarInitials}
-            filterText={directoryFilterText}
+            filterText=""
             formatTime={formatConversationIndexTime}
             lang={lang}
             resolveModelLabel={resolveModelLabel}
@@ -4731,8 +4699,10 @@ export function ChatCodingRouteWorkbench() {
         agentsById={agentsById}
         numberFormatter={numberFormatter}
         conversationIndexPanel={conversationIndexPanel}
-        directoryFilterText={directoryFilterText}
-        onDirectoryFilterChange={setDirectoryFilterText}
+        sessionListPreferences={sessionListPrefs}
+        onSessionListPreferencesChange={(patch) => setSessionListPrefs(current => ({ ...current, ...patch }))}
+        onOpenSearchAgent={(agent) => { if (!handleOpenAgent(agent)) handleCreateAgentSession(agent); }}
+        onOpenSearchTeam={(team) => navigate(teamWorkspaceRoute(team.teamId))}
         showArchivedSessions={showArchivedSessions}
         onToggleShowArchivedSessions={() => setShowArchivedSessions((current) => !current)}
         groupComposerOpen={groupComposerOpen}

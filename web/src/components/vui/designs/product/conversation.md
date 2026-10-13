@@ -18,6 +18,36 @@
 - Windows 的最小化、最大化和关闭由 Electron `titleBarOverlay` 提供，网页保持原生 caption 区留白。
 - 顶栏保留原导航、操作与原生 Windows 控件留白，浏览器使用 44px 高的浅灰平面，Electron 跟随原生 caption 的 40px 高度；普通导航为 regular、当前项为 medium。Agent 目录保留 36px 头像、62px 最小行高、多行身份信息与 medium 标题；会话条目沿用原内容。
 
+## ChatSessionIndexToolbar
+
+### 功能
+会话索引栏保留一排「新建／搜索／更多／收起」。新建使用带文字的 VButton 与既有 VDropdownMenu；搜索与更多使用同款低强调 VIconButton。更多浮层组合 VPopover、VButton、VNativeInput radio 与 VCheckbox，承载查看归档、互斥排序和日期分组，不再在列表上方保留整行排序框。
+
+### 适用范围
+普通 Chat 索引栏。
+
+### 使用方式
+普通 Chat 索引栏；排序与分组仍由 route 的 SessionListPreferences 与既有存储管理。归档状态标题明确为「已归档」，返回按钮恢复会话目录；归档内不显示日期分组控件，返回后保留偏好。Ctrl+N 复用新建菜单，收起继续使用共享布局记忆。触控图标目标至少44px；不增加第二套菜单、排序状态或归档写入。
+
+### 实现落点
+`web/src/routes/chat/ChatSessionIndexToolbar.tsx` 与局部 styles；由 ChatConversationIndexRail 挂载。浮层开闭、焦点、Escape 交给既有 VUI/Radix。
+
+## ChatSessionIndexSearch
+
+### 功能
+统一放大镜与 Ctrl+K；使用 VSessionSearchDialog 和 VTabs 区分全部、会话、Agent、团队。会话结果复用 useSessionSearchQuery 的服务端防抖、分页、错误与重试；Agent/团队结果使用已有目录数据和原导航。普通 Agent 范围排除已归档及 Companion 身份。
+
+### 适用范围
+普通 Chat 索引栏。
+
+### 使用方式
+普通 Chat 索引栏。会话范围提供原 Agent/团队过滤；隐藏过滤条件不会影响全部范围。已加载会话补充任务标题、摘要和工作区命中，并沿用删除 tombstone，避免删除后从缓存恢复结果。Agent/团队范围不发会话搜索请求；默认全部先呈现会话，输入关键词后先呈现身份命中。
+
+全局快捷键分发通过可取消的 session-index-search 事件委托已挂载的普通 Chat 搜索；默认 Ctrl+K 和会话搜索命令 Ctrl+P 只打开这个面。其他页面继续使用原全局命令/搜索。用户改绑的命令面板键位保留全局命令语义，会话搜索改绑继续委托当前 Chat；不再用路由内硬编码 Ctrl+K 绕过用户设置。
+
+### 实现落点与边界
+`web/src/routes/chat/ChatSessionIndexSearch.tsx`；打开会话、Agent、团队委托原有 callbacks。范围与关键词只用于搜索 UI，不形成新的 session 索引、transcript 或持久化权威；不修改 Journal、worker、SSE、Companion 或权限。工作区补充只覆盖已加载会话；不宣称全文检索。
+
 ## ConversationTodoChecklist
 
 ### 功能

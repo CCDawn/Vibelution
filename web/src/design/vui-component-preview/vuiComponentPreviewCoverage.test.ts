@@ -42,6 +42,12 @@ const previewExemptDesignSections = new Set([
   // Route-owned composition: the authorized Session catalog and original route
   // actions supply its state. Covered by browse/return tests and the approved isolated workbench preview.
   "ChatSessionBrowser",
+  // Route-owned index compositions: the persisted list preferences, authorized
+  // paged session/directory queries and original navigation callbacks supply
+  // their states. Covered by toolbar/search/shortcut interaction tests, the
+  // approved single-row preview and the isolated workbench browser acceptance.
+  "ChatSessionIndexToolbar",
+  "ChatSessionIndexSearch",
 ]);
 
 function collectPreviewSources(directory: string): string {

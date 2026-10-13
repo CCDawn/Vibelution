@@ -14,6 +14,7 @@ import {
 
 const workbenchSource = readFileSync(resolve(import.meta.dirname, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
 const railSource = readFileSync(resolve(import.meta.dirname, "chat/ChatConversationIndexRail.tsx"), "utf8");
+const toolbarSource = readFileSync(resolve(import.meta.dirname, "chat/ChatSessionIndexToolbar.tsx"), "utf8");
 const menuSource = readFileSync(resolve(import.meta.dirname, "SessionContextMenu.tsx"), "utf8");
 const archiveCopySource = readFileSync(resolve(import.meta.dirname, "../i18n/domains/dictionarySessionArchive.ts"), "utf8");
 
@@ -145,11 +146,12 @@ describe("session archive UI wiring", () => {
   });
 
   it("toggles the archived view from the conversation index rail header", () => {
-    expect(railSource).toContain('data-vui="session-archive-toggle"');
-    expect(railSource).toContain("aria-pressed={showArchivedSessions}");
+    expect(railSource).toContain("<ChatSessionIndexToolbar");
+    expect(toolbarSource).toContain('data-vui="session-archive-toggle"');
+    expect(toolbarSource).toContain("aria-pressed={archived}");
     expect(railSource).toContain("onToggleShowArchivedSessions");
-    expect(railSource).toContain('t("showArchivedSessions")');
-    expect(railSource).toContain('t("closeArchivedSessions")');
+    expect(toolbarSource).toContain("查看已归档");
+    expect(toolbarSource).toContain("返回会话");
     expect(archiveCopySource).toContain("显示已归档会话");
     expect(archiveCopySource).toContain("关闭归档");
   });
@@ -166,6 +168,6 @@ describe("session archive UI wiring", () => {
     expect(workbenchSource).toContain("<ArchivedSessionRail");
     expect(workbenchSource).toContain("showArchivedSessions ? null : <>");
     expect(workbenchSource).not.toContain("readOnly: variables.archive");
-    expect(workbenchSource).toContain('data-vui="chat-session-timeline-toggle"');
+    expect(toolbarSource).toContain('data-vui="chat-session-timeline-toggle"');
   });
 });
