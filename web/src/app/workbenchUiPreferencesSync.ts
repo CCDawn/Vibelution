@@ -18,26 +18,80 @@ import {
   setPaneLayoutPersistHook,
   writeAllPaneLayouts,
   writePaneLayout,
+  type PaneLayoutsMap,
+  type PaneWidthMap,
 } from "../components/layout/paneLayoutPersistence";
 import { CHAT_PANE_LAYOUT_ID, useShellStore } from "../store/shellStore";
 
 let hydratePromise: Promise<void> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let lastShellFingerprint = "";
 let readyToSave = false;
+let applyingServer = false;
+let observedLayouts: PaneLayoutsMap = {};
+let flushPromise: Promise<void> | null = null;
+let flushRequested = false;
+let syncEpoch = 0;
 
-function shellFingerprint(state: {
-  leftPanelWidth: number;
-  rightPanelWidth: number;
-}): string {
-  return `${state.leftPanelWidth}|${state.rightPanelWidth}`;
+// Widths remain in the shared canonical store; this only records unacknowledged edits.
+const PENDING_LAYOUTS_KEY = "vibelution.workbench-ui-pending-layouts.v1";
+
+function readPendingLayouts(): Record<string, string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(PENDING_LAYOUTS_KEY) || "null");
+    if (value?.schemaVersion !== 1 || !value.layouts || typeof value.layouts !== "object" || Array.isArray(value.layouts)) return {};
+    return Object.fromEntries(Object.entries(value.layouts).filter(
+      (entry): entry is [string, string] => Boolean(entry[0] && typeof entry[1] === "string" && entry[1]),
+    ));
+  } catch {
+    return {};
+  }
+}
+
+function writePendingLayouts(layouts: Record<string, string>): void {
+  try {
+    if (Object.keys(layouts).length) {
+      window.localStorage.setItem(PENDING_LAYOUTS_KEY, JSON.stringify({ schemaVersion: 1, layouts }));
+    } else {
+      window.localStorage.removeItem(PENDING_LAYOUTS_KEY);
+    }
+  } catch {
+    // Storage may be unavailable; do not break pane interaction.
+  }
+}
+
+function sameWidths(left: PaneWidthMap | undefined, right: PaneWidthMap | undefined): boolean {
+  if (!left || !right) return left === right;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key => left[key] === right[key]);
+}
+
+function observeLocalChanges(): void {
+  if (applyingServer) return;
+  const current = readAllPaneLayouts();
+  const pending = readPendingLayouts();
+  let changed = false;
+  for (const [layoutId, widths] of Object.entries(current)) {
+    if (!sameWidths(widths, observedLayouts[layoutId])) {
+      pending[layoutId] = crypto.randomUUID();
+      changed = true;
+    }
+  }
+  observedLayouts = current;
+  if (changed) {
+    writePendingLayouts(pending);
+    if (flushPromise) flushRequested = true;
+    scheduleServerSave();
+  }
 }
 
 function applyServerPreferences(prefs: WorkbenchUiPreferences): void {
-  if (prefs.paneLayouts && Object.keys(prefs.paneLayouts).length) {
-    const local = readAllPaneLayouts();
-    writeAllPaneLayouts({ ...local, ...prefs.paneLayouts });
+  const local = readAllPaneLayouts();
+  const pending = readPendingLayouts();
+  const merged = { ...local };
+  for (const [layoutId, widths] of Object.entries(prefs.paneLayouts || {})) {
+    if (!pending[layoutId] || !local[layoutId]) merged[layoutId] = widths;
   }
+  writeAllPaneLayouts(merged);
 
   const canonical = readPaneLayout(CHAT_PANE_LAYOUT_ID);
   const hasCanonical = Boolean(canonical.left || canonical.right);
@@ -64,10 +118,11 @@ function applyServerPreferences(prefs: WorkbenchUiPreferences): void {
     chatPanelWidths: nextWidths,
   });
 
-  lastShellFingerprint = shellFingerprint({
-    leftPanelWidth: useShellStore.getState().chatPanelWidths.leftPanelWidth,
-    rightPanelWidth: useShellStore.getState().chatPanelWidths.rightPanelWidth,
-  });
+  observedLayouts = readAllPaneLayouts();
+  for (const layoutId of Object.keys(observedLayouts)) {
+    if (!prefs.paneLayouts?.[layoutId] && !pending[layoutId]) pending[layoutId] = crypto.randomUUID();
+  }
+  writePendingLayouts(pending);
 }
 
 function scheduleServerSave(): void {
@@ -84,27 +139,38 @@ function scheduleServerSave(): void {
 }
 
 export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
-  if (typeof window === "undefined") {
-    return;
-  }
-  const state = useShellStore.getState();
-  const fingerprint = shellFingerprint({
-    leftPanelWidth: state.chatPanelWidths.leftPanelWidth,
-    rightPanelWidth: state.chatPanelWidths.rightPanelWidth,
+  if (typeof window === "undefined" || !readyToSave) return;
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  if (flushPromise) { flushRequested = true; return flushPromise; }
+  const epoch = syncEpoch;
+  const attempted = new Map<string, string>();
+  flushPromise = (async () => {
+    do {
+      flushRequested = false;
+      for (const [layoutId, generation] of Object.entries(readPendingLayouts())) {
+        if (epoch !== syncEpoch) return;
+        if (attempted.get(layoutId) === generation) continue;
+        const widths = readPaneLayout(layoutId);
+        if (!Object.keys(widths).length) continue;
+        attempted.set(layoutId, generation);
+        try {
+          const result = await saveWorkbenchUiPreferences({ paneLayout: { layoutId, widths } });
+          if (epoch !== syncEpoch) return;
+          const pending = readPendingLayouts();
+          if (result.ok && sameWidths(result.preferences.paneLayouts?.[layoutId], widths)
+            && pending[layoutId] === generation && sameWidths(readPaneLayout(layoutId), widths)) {
+            delete pending[layoutId];
+            writePendingLayouts(pending);
+          }
+        } catch {
+          // Keep the edit pending across reload. Retry on a later change or flush.
+        }
+      }
+    } while (flushRequested && epoch === syncEpoch);
+  })().finally(() => {
+    if (epoch === syncEpoch) flushPromise = null;
   });
-  if (fingerprint === lastShellFingerprint) {
-    // Still push full pane-layouts map when local storage has more layouts.
-  }
-  lastShellFingerprint = fingerprint;
-
-  const paneLayouts = readAllPaneLayouts();
-  try {
-    await saveWorkbenchUiPreferences({
-      paneLayouts,
-    });
-  } catch {
-    // Offline / early boot — localStorage still holds the session copy.
-  }
+  return flushPromise;
 }
 
 /**
@@ -117,47 +183,36 @@ export function startWorkbenchUiPreferencesSync(): () => void {
   }
 
   if (!hydratePromise) {
+    const epoch = syncEpoch;
+    observedLayouts = readAllPaneLayouts();
     hydratePromise = getWorkbenchUiPreferences()
       .then((prefs) => {
-        applyServerPreferences(prefs);
+        if (epoch !== syncEpoch) return;
+        applyingServer = true;
+        try { applyServerPreferences(prefs); } finally { applyingServer = false; }
         readyToSave = true;
-        // If server empty but local has values, push once.
-        const localLayouts = readAllPaneLayouts();
-        const serverEmpty = !prefs.paneLayouts || Object.keys(prefs.paneLayouts).length === 0;
-        const localHas = Object.keys(localLayouts).length > 0;
-        if (serverEmpty && localHas) {
+        if (Object.keys(readPendingLayouts()).length) {
           void flushWorkbenchUiPreferencesToServer();
         }
       })
       .catch(() => {
+        if (epoch !== syncEpoch) return;
         // Keep localStorage-only until backend is reachable; still allow later saves.
         readyToSave = true;
       });
   }
 
-  const unsubscribe = useShellStore.subscribe((state, prev) => {
-    const widthsChanged =
-      state.chatPanelWidths.leftPanelWidth !== prev.chatPanelWidths.leftPanelWidth
-      || state.chatPanelWidths.rightPanelWidth !== prev.chatPanelWidths.rightPanelWidth;
-    if (widthsChanged) {
-      scheduleServerSave();
-    }
-  });
-
-  setPaneLayoutPersistHook(() => {
-    scheduleServerSave();
-  });
+  setPaneLayoutPersistHook(observeLocalChanges);
 
   // Cross-tab: other tabs writing localStorage.
   const onStorage = (event: StorageEvent) => {
     if (event.key === PANE_LAYOUT_STORAGE_KEY && event.newValue) {
-      scheduleServerSave();
+      observeLocalChanges();
     }
   };
   window.addEventListener("storage", onStorage);
 
   return () => {
-    unsubscribe();
     setPaneLayoutPersistHook(null);
     window.removeEventListener("storage", onStorage);
     if (saveTimer) {
@@ -169,8 +224,12 @@ export function startWorkbenchUiPreferencesSync(): () => void {
 
 export function resetWorkbenchUiPreferencesSyncForTests(): void {
   hydratePromise = null;
-  lastShellFingerprint = "";
   readyToSave = false;
+  applyingServer = false;
+  observedLayouts = {};
+  flushPromise = null;
+  flushRequested = false;
+  syncEpoch += 1;
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
