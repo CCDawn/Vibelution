@@ -36,7 +36,7 @@ def _size(value: dict) -> int:
 
 def load_public_filing(symbol: str, cutoff: date) -> dict:
     canonical = market.normalize_a_share_symbol(symbol)
-    return market._cached(("team-public-original-v1", canonical, cutoff.isoformat()),
+    return market._cached(("team-public-original-v2", canonical, cutoff.isoformat()),
         300, lambda: _load(canonical, cutoff))
 
 
@@ -75,11 +75,20 @@ def _load(symbol: str, cutoff: date) -> dict:
         result["warnings"] = [*result["warnings"], "仅为有限页码摘录，未覆盖完整财报；未自动审核入库。",
             "原件在本次研究时读取，披露日期不是历史快照存档证明。"]
         revisions = [value[3] for value in same_period if value[3].get("versionType") == "revision_notice"]
-        if revisions or any(row.get("versionType") == "unmapped_revision_notice"
-            for row in directory.get("items") or [] if isinstance(row, dict)):
+        unmapped_revisions = [row for row in directory.get("items") or []
+            if isinstance(row, dict) and row.get("symbol") == symbol
+            and row.get("versionType") == "unmapped_revision_notice"
+            and (published := _day(row.get("publishedDate"))) is not None and published <= cutoff]
+        result["revisionCandidates"] = [{key: row.get(key) for key in
+            ("title", "url", "publishedDate", "reportPeriod")} for row in revisions[:3]]
+        result["unmappedRevisionCandidates"] = [{key: row.get(key) for key in
+            ("title", "url", "publishedDate", "reportPeriod")} for row in unmapped_revisions[:3]]
+        result["revisionStatus"] = "same_period_candidates" if revisions else (
+            "unmapped_candidates" if unmapped_revisions else "none_in_returned_directory")
+        if revisions:
             result["warnings"].append("存在修订候选，尚未对照修订内容；不得将原版数字表述为已确认的最新口径。")
-            result["revisionCandidates"] = [{key: row.get(key) for key in
-                ("title", "url", "publishedDate", "reportPeriod")} for row in revisions[:3]]
+        if unmapped_revisions:
+            result["warnings"].append("更正公告尚未映射报告期，不能确认是否影响本期；空的同报告期候选不表示没有更正，原版数字不代表已确认的最新口径。")
         result["warnings"].extend(str(value)[:240] for value in (parsed.get("warnings") or [])[:3])
         for page in parsed.get("pages") or []:
             text = str(page.get("excerpt") or "")

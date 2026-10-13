@@ -122,6 +122,7 @@ function Harness({
     [sessionId]: referenceAttachments,
   });
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
+  const composerErrorsRef = useRef<Record<string, string>>({});
   const actions = useChatComposerSubmitActions({
     queryClient,
     lang: "zh",
@@ -134,11 +135,8 @@ function Harness({
     setSessionDrafts,
     sessionFollowupQueues,
     setSessionComposerErrors: (value) => {
-      if (typeof value === "function") {
-        onErrors?.(value({}));
-      } else {
-        onErrors?.(value);
-      }
+      composerErrorsRef.current = typeof value === "function" ? value(composerErrorsRef.current) : value;
+      onErrors?.(composerErrorsRef.current);
     },
     setSessionImageAttachments,
     setSessionReferenceAttachments,
@@ -1627,5 +1625,52 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     });
 
     expect(errors["session-1"] ?? "").toBe("");
+  });
+
+  it("starts the waiting clock again when an old paused row is resumed", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const row: SessionQueuedTurn = {
+      id: "qt-resumed", position: 1, status: "queued", content: "恢复的消息",
+      createdAt: new Date(Date.now() - 600_000).toISOString(),
+      updatedAt: new Date(Date.now() - 5_000).toISOString(),
+    };
+    await mount({ busy: true, draft: "", queues: {}, mutations, detailQueuedTurns: [row], onErrors: next => { errors = next; } });
+    expect(queuedTurnsWaitingBeyondMs([row], Date.now())).toEqual([]);
+    expect(errors["session-1"] ?? "").toBe("");
+  });
+
+  it("clears its timeout warning once the queued row starts or settles", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const props: HarnessProps = {
+      busy: true, draft: "", queues: {}, mutations,
+      detailQueuedTurns: [{ id: "qt-stale", position: 1, status: "queued", content: "旧消息", createdAt: new Date(Date.now() - 120_000).toISOString() }],
+      onErrors: next => { errors = next; },
+    };
+    await mount(props);
+    expect(errors["session-1"]).toContain("120 秒");
+    await act(async () => { root?.render(<Harness {...props} detailQueuedTurns={[]} />); });
+    expect(errors["session-1"] ?? "").toBe("");
+  });
+
+  it("reports the latest queued wait and preserves a newer editing error", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const props: HarnessProps = {
+      busy: true, draft: "", queues: {}, mutations,
+      detailQueuedTurns: [{ id: "q-1", position: 1, status: "queued", content: "消息", createdAt: new Date(Date.now() - 600_000).toISOString(), updatedAt: new Date(Date.now() - 120_000).toISOString() }],
+      onErrors: next => { errors = next; },
+    };
+    await mount(props);
+    expect(errors["session-1"]).toContain("120 秒");
+    vi.mocked(updateSessionQueuedTurn).mockRejectedValueOnce(new Error("新的编辑错误"));
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="update-queue"]')?.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(errors["session-1"]).toBe("新的编辑错误");
+    await act(async () => { root?.render(<Harness {...props} detailQueuedTurns={[]} />); });
+    expect(errors["session-1"]).toBe("新的编辑错误");
   });
 });

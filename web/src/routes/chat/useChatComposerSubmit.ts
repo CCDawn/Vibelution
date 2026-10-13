@@ -483,6 +483,14 @@ function isFailedUploadOutcome(outcome: ComposerAttachmentUploadOutcome): outcom
 export const QUEUED_TURN_STUCK_HINT_MS = 90_000;
 const QUEUED_TURN_STUCK_CHECK_INTERVAL_MS = 15_000;
 
+function queuedTurnWaitingSinceMs(row: SessionQueuedTurn): number {
+  const createdAt = Date.parse(String(row.createdAt || ""));
+  const updatedAt = Date.parse(String(row.updatedAt || ""));
+  // Resuming or editing re-queues the row. Time deliberately held in a pause
+  // does not indicate a stalled drain; old rows still fall back to creation.
+  return Number.isFinite(updatedAt) ? Math.max(Number.isFinite(createdAt) ? createdAt : updatedAt, updatedAt) : createdAt;
+}
+
 /** Queued rows that have waited beyond ``thresholdMs`` and are still waiting. */
 export function queuedTurnsWaitingBeyondMs(
   rows: SessionQueuedTurn[] | undefined,
@@ -494,11 +502,11 @@ export function queuedTurnsWaitingBeyondMs(
     if (String(row.status || "queued") !== "queued") {
       return false;
     }
-    const createdAtMs = Date.parse(String(row.createdAt || ""));
-    if (!Number.isFinite(createdAtMs)) {
+    const waitingSinceMs = queuedTurnWaitingSinceMs(row);
+    if (!Number.isFinite(waitingSinceMs)) {
       return false;
     }
-    return nowMs - createdAtMs >= thresholdMs;
+    return nowMs - waitingSinceMs >= thresholdMs;
   });
 }
 
@@ -1897,6 +1905,7 @@ export function useChatComposerSubmitActions({
   // row once its wait exceeds the threshold; forget a row when it leaves the
   // queue so a re-queued row can be hinted again.
   const queuedStuckHintedIdsRef = useRef<Set<string>>(new Set());
+  const queuedStuckErrorsRef = useRef<Map<string, { rowId: string; text: string }>>(new Map());
   const resolveComposerSessionId = useCallback((sessionId: string) => {
     let resolved = String(sessionId || "").trim();
     if (!resolved) return resolved;
@@ -1934,21 +1943,32 @@ export function useChatComposerSubmitActions({
           queuedStuckHintedIdsRef.current.delete(hinted);
         }
       }
-      const firstStuck = queuedTurnsWaitingBeyondMs(rows, Date.now())[0];
+      const stuckRows = queuedTurnsWaitingBeyondMs(rows, Date.now());
+      const previousHint = queuedStuckErrorsRef.current.get(sessionId);
+      if (previousHint && !stuckRows.some(row => row.id === previousHint.rowId)) {
+        queuedStuckErrorsRef.current.delete(sessionId);
+        queuedStuckHintedIdsRef.current.delete(previousHint.rowId);
+        // Clear only the hint owned by this effect, preserving newer errors.
+        setSessionComposerErrors(current => current[sessionId] === previousHint.text
+          ? { ...current, [sessionId]: "" }
+          : current);
+      }
+      const firstStuck = stuckRows[0];
       if (!firstStuck || queuedStuckHintedIdsRef.current.has(firstStuck.id)) {
         return;
       }
       queuedStuckHintedIdsRef.current.add(firstStuck.id);
       const waitedSeconds = Math.max(
         1,
-        Math.round((Date.now() - Date.parse(String(firstStuck.createdAt || ""))) / 1000),
+        Math.round((Date.now() - queuedTurnWaitingSinceMs(firstStuck)) / 1000),
       );
+      const text = lang === "zh"
+        ? `有排队消息等待超过 ${waitedSeconds} 秒仍未开始，当前轮可能卡住了。可停止当前轮让队列立即发送，或撤回后重发。`
+        : `A queued message has waited over ${waitedSeconds} seconds without starting; the current turn may be stuck. Stop the current turn to send the queue now, or withdraw it and resend.`;
+      queuedStuckErrorsRef.current.set(sessionId, { rowId: firstStuck.id, text });
       setSessionComposerErrors((current) => ({
         ...current,
-        [sessionId]:
-          lang === "zh"
-            ? `有排队消息等待超过 ${waitedSeconds} 秒仍未开始，当前轮可能卡住了。可停止当前轮让队列立即发送，或撤回后重发。`
-            : `A queued message has waited over ${waitedSeconds} seconds without starting; the current turn may be stuck. Stop the current turn to send the queue now, or withdraw it and resend.`,
+        [sessionId]: text,
       }));
     };
     surfaceStuckHints();

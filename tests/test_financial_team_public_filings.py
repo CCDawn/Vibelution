@@ -76,6 +76,31 @@ def test_revision_is_visible_without_silently_replacing_original(public_pdf, mon
     assert any("尚未对照修订" in value for value in snapshot["warnings"])
 
 
+def test_unmapped_revision_is_distinct_from_same_period_revision(public_pdf, monkeypatch):
+    ambiguous = notice(period="", published="2026-09-01", noticeCode="ambiguous",
+        versionType="unmapped_revision_notice", title="贵州茅台关于定期报告更正的公告")
+    monkeypatch.setattr(sources.official_pdf, "load_periodic_report_notices", lambda *_args, **_kw:
+        {"items": [notice(), ambiguous], "warnings": []})
+    snapshot = sources.load_public_filing("sh600519", date(2026, 10, 12))
+    assert snapshot["revisionCandidates"] == []
+    assert snapshot["unmappedRevisionCandidates"][0]["title"] == ambiguous["title"]
+    assert snapshot["revisionStatus"] == "unmapped_candidates"
+    assert any("尚未映射报告期" in value for value in snapshot["warnings"])
+    assert not any("存在修订候选，" in value for value in snapshot["warnings"])
+    assert sources.public_filing_reference(snapshot, "sh600519", date(2026, 10, 12))
+
+
+def test_unmapped_revision_reference_respects_issuer_and_cutoff(public_pdf, monkeypatch):
+    monkeypatch.setattr(sources.official_pdf, "load_periodic_report_notices", lambda *_args, **_kw:
+        {"items": [notice(),
+            notice(period="", published="2026-10-25", versionType="unmapped_revision_notice"),
+            notice(period="", symbol="sz000001", published="2026-09-01", versionType="unmapped_revision_notice")], "warnings": []})
+    snapshot = sources.load_public_filing("sh600519", date(2026, 10, 12))
+    assert snapshot["revisionStatus"] == "none_in_returned_directory"
+    assert snapshot["unmappedRevisionCandidates"] == []
+    assert not any("修订候选" in value for value in snapshot["warnings"])
+
+
 def test_public_failure_does_not_invent_original_or_read_private_library(public_pdf, monkeypatch):
     monkeypatch.setattr(sources.official_pdf, "fetch_and_extract_official_pdf", lambda *_:
         (_ for _ in ()).throw(sources.official_pdf.OfficialPdfError("source failed")))
