@@ -17,9 +17,11 @@ import type { ChatMentionTarget } from "../chatMentionTokens";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
+import messageStyles from "./ChatGroupMessagePresentation.styles";
+import { ConversationStreamingResponseContent } from "../../components/conversation/ConversationStreamingResponseContent";
 import { ChatGroupArtifactDialog } from "./ChatGroupArtifactDialog";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
-import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy, isAvailableGroupParticipant } from "./chatRoutePresentation";
+import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy, isAvailableGroupParticipant, shouldCollapseGroupMessage } from "./chatRoutePresentation";
 import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
 import type {
   GroupRoomTimelineProjection,
@@ -508,31 +510,39 @@ function GroupRoundsTimeline({
                         trailing={<span>{trailingLabel}</span>}
                       />
                     </div>
-                    {hasStreamText ? (
-                      <div className={styles.groupStreamCopy}>
-                        <ChatGroupMessageBody
-                          message={{
-                            messageId: `streaming:${round.roundId}:${participantId}`,
-                            participantId,
-                            sessionId: speakerStream?.sessionId || "",
-                            speakerCode: participant.agentCode,
-                            speakerTitle: "",
-                            status: "completed",
-                            content: streamText,
-                            summary: "",
-                            timestamp: "",
-                          }}
-                          identityName={identity.name}
-                          lang={lang}
-                          expandedMessageIds={expandedGroupMessageIds}
-                          mentionTargets={chatMentionTargets}
-                          onOpenMentionTarget={onOpenMentionTarget}
-                          onToggleExpanded={onToggleExpandedGroupMessage}
-                          workspaceRoot={workspaceRoot}
-                          onOpenRailFile={onOpenRailFile}
-                        />
-                      </div>
-                    ) : progress.state === "running" && typingStale ? (
+                    {hasStreamText ? (() => {
+                      // Ordinary-chat parity: stable prefix stays memoized, only the
+                      // live tail re-parses per delta; mentions resolve on settle.
+                      // The long-message collapse rule from settled bubbles still applies.
+                      const streamMessageId = `streaming:${round.roundId}:${participantId}`;
+                      const streamExpanded = expandedGroupMessageIds.includes(streamMessageId);
+                      const streamCollapsed = shouldCollapseGroupMessage(streamText) && !streamExpanded;
+                      return (
+                        <>
+                          <div className={streamCollapsed
+                            ? `${styles.groupStreamCopy} ${messageStyles.groupBubbleBodyCollapsed}`
+                            : styles.groupStreamCopy}>
+                            <ConversationStreamingResponseContent
+                              content={streamText}
+                              isStreaming
+                              workspaceRoot={workspaceRoot}
+                              language={lang}
+                              onOpenRailFile={onOpenRailFile}
+                            />
+                          </div>
+                          {streamCollapsed || streamExpanded ? (
+                            <VButton
+                              type="button"
+                              className={messageStyles.groupBubbleToggle}
+                              aria-expanded={streamExpanded}
+                              onClick={() => onToggleExpandedGroupMessage(streamMessageId)}
+                            >
+                              {streamExpanded ? (lang === "zh" ? "收起" : "Collapse") : (lang === "zh" ? "展开全文" : "Show full")}
+                            </VButton>
+                          ) : null}
+                        </>
+                      );
+                    })() : progress.state === "running" && typingStale ? (
                       <div className={styles.groupStreamCopy}>
                         <p className={styles.groupTypingStaleNote} role="status">{staleCopy}</p>
                       </div>
