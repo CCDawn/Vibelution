@@ -1658,6 +1658,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   it("applies per-operation status tones inside expanded command packages", () => {
     expect(conversationTimelineItemsSource).toContain("item.operations.map((operation) => {");
     expect(conversationTimelineItemsSource).toContain("styles[`operationIcon_${operationStatusToneClassName(operation)}` as keyof typeof styles]");
+    expect(conversationTimelineItemsSource).toContain("styles[`operationText_${statusTone}`");
+    expect(conversationTimelineItemsSource).toContain("styles[`operationStatus_${statusTone}`");
     expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
