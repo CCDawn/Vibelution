@@ -1485,6 +1485,36 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns?.[0]?.sendNow).not.toBe(true);
   });
 
+  it("preserves an intervening authoritative queue order when send-now is rejected", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1", activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let reject!: (error: Error) => void;
+    vi.mocked(sendNowSessionQueuedTurn).mockImplementationOnce(() => new Promise((_resolve, failure) => { reject = failure; }));
+    await mount({ busy: true, draft: "", queues: { "session-1": [{ id: "q-2", text: "第二条" }] }, mutations, queryClient });
+    await act(async () => { container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click(); });
+    await act(async () => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), current => current ? { ...current, queuedTurns: [
+        { id: "q-3", position: 1, status: "queued", content: "新消息" },
+        { id: "q-2", position: 2, status: "queued", content: "新的第二条", sendNow: true },
+        { id: "q-1", position: 3, status: "paused", content: "第一条" },
+      ] } : current);
+      reject(new Error("stop rejected"));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    const rows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(rows.map(row => row.id)).toEqual(["q-3", "q-2", "q-1"]);
+    expect(rows[1]?.content).toBe("新的第二条");
+    expect(rows[1]?.sendNow).not.toBe(true);
+    expect(rows[2]?.status).toBe("paused");
+  });
+
   it("waits for resume acknowledgement before send-now", async () => {
     const { mutations } = createMutations();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

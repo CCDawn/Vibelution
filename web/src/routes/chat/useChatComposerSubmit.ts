@@ -3131,15 +3131,19 @@ export function useChatComposerSubmitActions({
       queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
         detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
       );
+      const pinnedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns;
       void sendNowSessionQueuedTurn(sessionId, id, { expectedTurnId: expectedTurnId || undefined })
         .then((result) => syncQueuedTurnsIntoDetail(sessionId, result.queuedTurns))
         .catch((error) => {
-          // Roll back only this intent; authoritative rows that landed meanwhile stay.
+        // Restore our order only while the exact optimistic cache still owns it.
+        // A later snapshot owns its own order and fields; only our target pin is removed.
           queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
             detailState
               ? {
                 ...detailState,
-                queuedTurns: restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? []).map(row =>
+                queuedTurns: (detailState.queuedTurns === pinnedRows
+                  ? restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? [])
+                  : detailState.queuedTurns ?? []).map(row =>
                   row.id === id && row.sendNow === true ? { ...row, sendNow: snapshotRow?.sendNow } : row,
                 ),
               }
