@@ -644,7 +644,7 @@ export function ChatRightRail({
   const active = activeChatRightRailTab(model);
   const launcher = chatRightRailLauncherKinds(sessionKind).filter((kind) => Boolean(sessionId) || isProjectUtilityKind(kind));
   const matches = searchChatRightRailTabs(model, searchQuery);
-  const devtoolsView = projectChatRightRailDevtools(devtools);
+  const devtoolsView = projectChatRightRailDevtools(devtools, lang);
   const planProjection = useMemo(
     () => deriveSessionTodoChecklist(devtools?.messages),
     [devtools?.messages],
