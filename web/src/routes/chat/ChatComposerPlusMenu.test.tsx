@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment happy-dom */
+import React, { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { VuiProvider } from "../../components/vui";
+import { ChatComposerPlusMenu, ChatComposerSessionReferencesContext, type ChatComposerPlusMenuProps } from "./ChatComposerPlusMenu";
 
 import source from "./ChatComposerPlusMenu.tsx?raw";
 import stylesSource from "./ChatComposerPlusMenu.styles.ts?raw";
@@ -68,5 +73,75 @@ describe("ChatComposerPlusMenu contract", () => {
   it("keeps reference pickers as native button lists", () => {
     expect(source).not.toContain('role="listbox"');
     expect(source).not.toContain('role="option"');
+  });
+});
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+describe("composer reference context interaction", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement;
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+  const reference = { referenceId: "session:previous", kind: "session" as const, sessionId: "previous", title: "历史验收", createdAt: "2026-10-13T00:00:00Z" };
+  const options = [{ id: "previous", title: "历史验收", reference }];
+  async function render(scoped: typeof options | null, fallback = [] as typeof options, paginated = false) {
+    container = document.createElement("div"); document.body.append(container);
+    root = createRoot(container);
+    const onAddSessionReference = vi.fn();
+    const props: ChatComposerPlusMenuProps = {
+      lang: "zh", attachmentDisabled: false, sessionReferences: fallback, onAddSessionReference,
+      mentalModelEnabled: false, runtimeStatusEnabled: true, promptSuggestionEnabled: true,
+      capabilityDisabled: false, onMentalModelEnabledChange: vi.fn(),
+      onRuntimeStatusEnabledChange: vi.fn(), onPromptSuggestionEnabledChange: vi.fn(),
+    };
+    function Harness() {
+      const [loaded, setLoaded] = useState(false);
+      const nextPage = [{ ...options[0], id: "older-31", title: "第31条历史会话", reference: { ...reference, referenceId: "session:older-31", sessionId: "older-31" } }];
+      const value = scoped === null ? null : {
+        options: loaded ? [...scoped, ...nextPage] : scoped,
+        hasMore: paginated && !loaded, onLoadMore: () => setLoaded(true),
+      };
+      return <VuiProvider><ChatComposerSessionReferencesContext.Provider value={value}><ChatComposerPlusMenu {...props} /></ChatComposerSessionReferencesContext.Provider></VuiProvider>;
+    }
+    await act(async () => root!.render(<Harness />));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    return onAddSessionReference;
+  }
+  it("enables an empty-directory menu using scoped options and submits the native reference", async () => {
+    const onAdd = await render(options);
+    const action = document.querySelector<HTMLButtonElement>('[data-plus-menu-item="true"][data-action="reference-session"]')
+      ?? [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')].find(button => button.textContent?.includes("引用会话"));
+    expect(action?.disabled).toBe(false);
+    await act(async () => action!.click());
+    const candidate = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "历史验收");
+    expect(candidate).toBeDefined();
+    await act(async () => candidate!.click());
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith(reference);
+  });
+  it("keeps normal Chat props when there is no scoped override", async () => {
+    await render(null, options);
+    const action = [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')].find(button => button.textContent?.includes("引用会话"));
+    expect(action?.disabled).toBe(false);
+  });
+  it("does not fall back to global candidates when the scoped list is empty", async () => {
+    await render([], options);
+    const action = [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')].find(button => button.textContent?.includes("引用会话"));
+    expect(action?.disabled).toBe(true);
+  });
+  it("loads older candidates in the picker and selects a session beyond the first page", async () => {
+    const firstPage = Array.from({ length: 30 }, (_, i) => ({ ...options[0], id: `recent-${i}`, title: `近期 ${i}` }));
+    const onAdd = await render(firstPage, [], true);
+    const action = [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')].find(button => button.textContent?.includes("引用会话"));
+    await act(async () => action!.click());
+    const more = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "更多会话");
+    expect(more).toBeDefined();
+    await act(async () => more!.click());
+    const older = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "第31条历史会话");
+    expect(older).toBeDefined();
+    await act(async () => older!.click());
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionId: "older-31" }));
   });
 });

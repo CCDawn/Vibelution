@@ -12,7 +12,7 @@ import {
   Sparkles,
   UsersRound,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
@@ -26,6 +26,16 @@ export type ChatComposerSessionReferenceOption = {
   meta?: string;
   reference: SessionReferenceAttachment;
 };
+
+/** A scoped workspace can supply its existing directory without enabling global queries. */
+export type ChatComposerScopedSessionReferences = {
+  options: ChatComposerSessionReferenceOption[];
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  loadMoreError?: boolean;
+  onLoadMore?: () => void;
+};
+export const ChatComposerSessionReferencesContext = createContext<ChatComposerScopedSessionReferences | null>(null);
 
 export type ChatComposerPlusMenuLabels = {
   composerAttachFiles: string;
@@ -94,7 +104,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     showCapabilities = true,
     attachmentDisabled,
     onAddAttachments,
-    sessionReferences,
+    sessionReferences: defaultSessionReferences,
     onAddSessionReference,
     knowledgeReferenceOptions,
     onAddKnowledgeReference,
@@ -108,6 +118,9 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     directSession,
     group,
   } = props;
+  const scopedSessionReferences = useContext(ChatComposerSessionReferencesContext);
+  const sessionReferences = scopedSessionReferences?.options ?? defaultSessionReferences;
+  const canLoadMoreReferences = Boolean(scopedSessionReferences?.hasMore && scopedSessionReferences.onLoadMore);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -364,7 +377,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 id: "reference-session",
                 label: lang === "zh" ? "引用会话" : "Reference session",
                 icon: <MessageSquare size={16} />,
-                disabled: !onAddSessionReference || sessionReferences.length === 0,
+                disabled: !onAddSessionReference || (sessionReferences.length === 0 && !canLoadMoreReferences),
                 disabledReason: referenceUnavailableReason,
                 onSelect: () => {
                   setReferenceQuery("");
@@ -502,6 +515,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
               </p>
             ) : null}
           </div>
+          {scopedSessionReferences?.loadMoreError ? <p role="alert">{lang === "zh" ? "读取更多会话失败，请重试。" : "Could not load more sessions. Please retry."}</p> : null}
+          {canLoadMoreReferences ? <VButton variant="secondary" isPending={scopedSessionReferences?.loadingMore} onPress={scopedSessionReferences?.onLoadMore}>{lang === "zh" ? "更多会话" : "More sessions"}</VButton> : null}
         </div>
       </VDialog>
 
