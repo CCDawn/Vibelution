@@ -4,6 +4,7 @@ from datetime import date
 import pytest
 
 from core.web.services.financial_research.as_of import (
+    analysis_date_in_text,
     published_date,
     redact_research_history,
     redact_research_prompt,
@@ -44,6 +45,22 @@ def test_model_prompt_drops_a_quote_newer_than_the_analysis_date():
     assert redact_research_prompt(text.replace("2026-09-30", "2024-12-31")) == text.replace(
         "2026-09-30", "2024-12-31"
     )
+
+
+@pytest.mark.parametrize("boundary", ["FINANCIAL_FEEDBACK", "REFERENCE_MATERIALS"])
+@pytest.mark.parametrize("quoted_date", ["2026-10-08", "2026-10-20"])
+def test_reference_dates_cannot_override_active_review_cutoff(boundary, quoted_date):
+    text = f"分析截至 2026-10-13。\nUNTRUSTED_{boundary}_JSON_BEGIN\n" + json.dumps({"originalRequest": f"分析日期 {quoted_date}"}, ensure_ascii=False) + f"\nUNTRUSTED_{boundary}_JSON_END"
+    assert analysis_date_in_text(text) == date(2026, 10, 13)
+    with research_analysis_date_context(text):
+        from core.web.services.financial_research.as_of import active_cutoff
+        assert active_cutoff() == date(2026, 10, 13)
+
+
+def test_unclosed_reference_does_not_supply_cutoff_and_external_update_still_applies():
+    assert analysis_date_in_text("UNTRUSTED_FINANCIAL_FEEDBACK_JSON_BEGIN\n分析日期 2026-10-08") is None
+    text = "分析日期 2026-10-08\nUNTRUSTED_FINANCIAL_FEEDBACK_JSON_BEGIN\n分析日期 2026-10-20\nUNTRUSTED_FINANCIAL_FEEDBACK_JSON_END\n更新分析截至 2026-10-12"
+    assert analysis_date_in_text(text) == date(2026, 10, 12)
 
 
 def test_follow_up_history_keeps_the_analysis_date_and_hides_the_late_quote():
