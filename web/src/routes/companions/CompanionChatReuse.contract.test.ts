@@ -38,7 +38,9 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("const companionTransportAgentId = activeCompanion?.agentId;");
     expect(chatSource).toContain("const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);");
     expect(chatSource).toContain("companionAgentId: companionTransportAgentId");
-    expect(chatSource).toContain("composerDisabled: companionComposerDisabled");
+    expect(chatSource).toContain("composerDisabled: composerDisabledDuringModelParametersSave");
+    expect(chatSource).toContain("const composerDisabledDuringModelParametersSave = companionComposerDisabled || modelParametersSavePending;");
+    expect(chatSource).toContain("if (financeSurface || verifiedCompanionMode) return false;");
     expect(chatSource).toContain('actionMode: "send" as const');
     expect(chatSource).toContain("attachmentInputDisabled: companionComposerDisabled");
     expect(chatSource).not.toContain("companionAgentId: companionMode ? requestedCompanionId : undefined");

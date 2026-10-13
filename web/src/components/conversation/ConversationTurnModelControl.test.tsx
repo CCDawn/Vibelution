@@ -102,7 +102,11 @@ describe("ConversationTurnModelControl", () => {
     expect(validateModelContextWindow("", 128_000, "en").error).toBe("Enter a positive integer");
   });
 
-  it.each(["low", ""])("preserves reasoning %s when changing only context", async (reasoningEffort) => {
+  it.each([
+    ["low", false],
+    ["", false],
+    ["high", true],
+  ] as const)("preserves reasoning %s or explicitly restores the model default (%s)", async (reasoningEffort, clearEffort) => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -152,8 +156,16 @@ describe("ConversationTurnModelControl", () => {
         contextInput()?.dispatchEvent(new Event("change", { bubbles: true }));
       });
       expect(saveButton()?.disabled).toBe(false);
+      if (clearEffort) {
+        const select = document.body.querySelector<HTMLElement>('[role="combobox"][aria-label="思考强度"]');
+        await act(async () => select?.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })));
+        const defaultOption = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+          .find((option) => option.textContent === "默认");
+        expect(defaultOption).toBeDefined();
+        await act(async () => defaultOption?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+      }
       await act(async () => saveButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-      expect(onSave).toHaveBeenCalledWith({ contextWindow: 32_000, reasoningEffort });
+      expect(onSave).toHaveBeenCalledWith({ contextWindow: 32_000, reasoningEffort: clearEffort ? "" : reasoningEffort });
       expect(document.body.textContent).not.toContain("选择模型");
     } finally {
       await act(async () => root.unmount());

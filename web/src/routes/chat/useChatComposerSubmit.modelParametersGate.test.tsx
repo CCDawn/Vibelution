@@ -5,11 +5,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
+import { updateSessionQueuedTurn } from "../../api/chat";
 import type { ConversationMessage, SessionDetail } from "../../api/types";
 import type { ChatEditTarget } from "../chatComposerState";
 import { useChatComposerSubmitActions, type ChatComposerTurnMutations, type UseChatComposerSubmitActionsResult } from "./useChatComposerSubmit";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+vi.mock("../../api/chat", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../api/chat")>(),
+  updateSessionQueuedTurn: vi.fn().mockResolvedValue([]),
+}));
 
 const sessionId = "session-model-gate";
 const userMessage = { id: "user-1", role: "user", content: "原始请求", metadata: { turnId: "turn-1" } } as ConversationMessage;
@@ -119,6 +125,7 @@ describe("useChatComposerSubmit Agent model parameter save gate", () => {
     root = undefined;
     host = undefined;
     queryClient = undefined;
+    vi.clearAllMocks();
   });
 
   it("blocks same-frame new submissions while keeping stop available", async () => {
@@ -170,5 +177,36 @@ describe("useChatComposerSubmit Agent model parameter save gate", () => {
     expect(mutations.regenerateMutation.mutate).not.toHaveBeenCalled();
     expect(mutations.editResubmitMutation.mutate).not.toHaveBeenCalled();
     expect(mutations.stopTurnMutation.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for parameter saving before an edited failed queue item can retry", async () => {
+    queryClient = new QueryClient();
+    queryClient.setQueryData(queryKeys.session(sessionId), {
+      ...sessionDetail,
+      queuedTurns: [{ id: "failed-queue", content: "原消息", status: "blocked", attachments: [] }],
+    });
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const savePendingRef = { current: false };
+    const actionsRef: { current: UseChatComposerSubmitActionsResult | null } = { current: null };
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={queryClient!}>
+          <Harness queryClient={queryClient!} mutations={makeMutations()} savePendingRef={savePendingRef} actionsRef={actionsRef} />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      savePendingRef.current = true;
+      actionsRef.current?.handleFollowupQueueUpdate("failed-queue", "重试消息");
+    });
+    expect(updateSessionQueuedTurn).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns?.[0]?.content).toBe("原消息");
+    await act(async () => {
+      savePendingRef.current = false;
+      actionsRef.current?.handleFollowupQueueUpdate("failed-queue", "重试消息");
+    });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith(sessionId, "failed-queue", { content: "重试消息" });
   });
 });

@@ -2893,7 +2893,7 @@ export function useChatComposerSubmitActions({
   const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
     const sessionId = activeSessionId;
     const content = text.trim();
-    if (!sessionId) {
+    if (!sessionId || isModelParametersSavePendingNow()) {
       return;
     }
     // Optimistic edit (same pending-intent style as withdraw): the new text
@@ -2942,7 +2942,7 @@ export function useChatComposerSubmitActions({
           lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
         );
       });
-  }, [activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [activeSessionId, isModelParametersSavePendingNow, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleFollowupQueueRemove = useCallback((id: string) => {
     const sessionId = activeSessionId;

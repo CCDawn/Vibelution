@@ -567,3 +567,30 @@ def test_reasoning_override_applied_path_stays_silent(caplog):
 
     assert resolved.config.llm.profiles["primary"].reasoning_effort == "high"
     assert not [r for r in caplog.records if "reasoning-effort override skipped" in r.message]
+
+
+def test_clearing_model_reasoning_restores_default_instead_of_legacy_slot():
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        "reasoning_effort_values": ["low", "high"],
+        "default_reasoning_effort": "low",
+        "reasoning_effort_adapter": "reasoning_object",
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {
+            "llmReasoningEffort": {"dialogue": "high"},
+            "llmModelParameters": {"dialogue-model": {"reasoningEffort": ""}},
+        },
+    }
+    resolved = resolve_agent_llm(agent, "dialogue", config=config)
+    model_default = resolve_agent_llm({**agent, "metadata": {}}, "dialogue", config=config)
+    assert resolved.reasoning_effort_requested == model_default.reasoning_effort_requested
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == model_default.config.llm.profiles["primary"].reasoning_effort
+    assert resolved.reasoning_effort_requested != "high"
+    assert agent["metadata"]["llmReasoningEffort"]["dialogue"] == "high"

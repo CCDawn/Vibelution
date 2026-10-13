@@ -79,7 +79,7 @@ export function ConversationTurnModelControl({
     id: value,
     label: model?.reasoningEffortOptions?.find((option) => option.value === value)?.label || value,
   }));
-  if (!effectiveEffort && supportedEfforts.length) {
+  if (supportedEfforts.length) {
     effortOptions.unshift({ id: defaultEffortKey, label: zh ? "默认" : "Default" });
   }
   const maximumLabel = maxContextWindow > 0
@@ -229,7 +229,7 @@ export function ConversationTurnModelControl({
                 if (saveDisabled) return;
                 onSave({
                   contextWindow: parsedContextWindow,
-                  reasoningEffort: reasoningEffortDraft || effectiveEffort,
+                  reasoningEffort: reasoningEffortDraft,
                 });
               }}
               data-testid="conversation-model-parameters-save"
