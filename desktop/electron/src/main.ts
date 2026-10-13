@@ -4842,6 +4842,19 @@ ipcMain.handle(IPC_CHANNELS.requestWorkbenchRestart, async (event, trigger?: str
   });
 });
 
+ipcMain.handle(IPC_CHANNELS.getLauncherFreshness, async (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return await currentLauncherUpdateFreshness();
+});
+
+ipcMain.handle(IPC_CHANNELS.showLauncherWindow, async (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  if (windowProvider === null) {
+    throw new Error("Launcher window is unavailable.");
+  }
+  return await windowProvider.openLauncher();
+});
+
 ipcMain.handle(IPC_CHANNELS.getLauncherState, (event) => {
   assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
   return launcherStateStore.snapshot();
