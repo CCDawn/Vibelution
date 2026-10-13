@@ -46,21 +46,16 @@ import {
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
 import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
-import { fetchFileContent } from "../../api/files";
 import { ArchivedSessionRail } from "./ArchivedSessionRail";
 import { ChatRightRail } from "./ChatRightRail";
-import { buildChatChangeRail } from "./chatChangeRailModel";
 import {
-  activeChatRightRailTab,
   EMPTY_CHAT_RIGHT_RAIL,
-  noteReviewAutoOpen,
   openChatRightRailTab,
   openFreshChatRightRailSideTab,
   type ChatRightRailModel,
 } from "./chatRightRailModel";
 import { requestChatRightRailOpen, subscribeChatRightRailOpen } from "./chatRightRailRequests";
-import { useChatChangePreview } from "./useChatChangePreview";
-import { useChatGitRail } from "./useChatGitRail";
+import { useChatRailPreview } from "./useChatRailPreview";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -1680,78 +1675,35 @@ export function ChatCodingRouteWorkbench() {
 
   const activeCliAgentRunId = cliAgentRunIdFromTabId(workspace.activeTab);
   const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;
-  const fileContentQuery = useQuery({
-    queryKey: queryKeys.fileContent(activeFilePath ?? ""),
-    enabled: Boolean(activeFilePath),
-    queryFn: () => fetchFileContent(activeFilePath ?? ""),
+  const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
+  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
+  const {
+    fileContentQuery,
+    changeRail,
+    changeRailOpened,
+    setChangeRailOpened,
+    railsBySession,
+    setRailsBySession,
+    railModel,
+    activeRailTab,
+    updateRailModel,
+    gitRail,
+    reviewSource,
+    sessionReviewPath,
+    gitReviewPath,
+    setReviewPick,
+    changePreview,
+  } = useChatRailPreview({
+    activeSessionId,
+    activeFilePath,
+    workspace,
+    changedFileList,
+    ordinaryChangeRail,
+    companion: verifiedCompanionMode,
+    finance: financeSurface,
+    group: groupPanelActive,
   });
 
-  const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
-  const [changeRailOpened, setChangeRailOpened] = useState(false);
-  const [railsBySession, setRailsBySession] = useState<Record<string, ChatRightRailModel>>({});
-  const [reviewPick, setReviewPick] = useState<{ sessionId: string; source: "session" | "git"; path: string } | null>(null);
-  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
-  const railModel = activeSessionId ? (railsBySession[activeSessionId] ?? EMPTY_CHAT_RIGHT_RAIL) : EMPTY_CHAT_RIGHT_RAIL;
-  const activeRailTab = activeChatRightRailTab(railModel);
-  const updateRailModel = (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => {
-    if (!activeSessionId) {
-      return;
-    }
-    const sessionId = activeSessionId;
-    setRailsBySession((current) => {
-      const previous = current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
-      const next = typeof update === "function" ? update(previous) : update;
-      return { ...current, [sessionId]: next };
-    });
-  };
-  const changeRail = useMemo(
-    () => buildChatChangeRail({
-      companion: verifiedCompanionMode,
-      finance: financeSurface,
-      group: groupPanelActive,
-      changedFiles: changedFileList,
-      openTabs: workspace.openTabs,
-      activeTab: workspace.activeTab,
-    }),
-    [
-      verifiedCompanionMode,
-      financeSurface,
-      groupPanelActive,
-      changedFileList,
-      workspace.openTabs,
-      workspace.activeTab,
-    ],
-  );
-  const gitRail = useChatGitRail(
-    ordinaryChangeRail && activeRailTab?.kind === "review" && (changeRail.show || changeRailOpened),
-  );
-  const reviewPickForSession = reviewPick && reviewPick.sessionId === activeSessionId ? reviewPick : null;
-  const reviewSource = reviewPickForSession?.source ?? "session";
-  const sessionReviewPath = reviewSource === "session" && reviewPickForSession && changeRail.paths.includes(reviewPickForSession.path)
-    ? reviewPickForSession.path
-    : changeRail.selectedPath;
-  const gitReviewPath = reviewSource === "git" && reviewPickForSession && gitRail.paths.includes(reviewPickForSession.path)
-    ? reviewPickForSession.path
-    : null;
-  const changePreview = useChatChangePreview(
-    activeRailTab?.kind === "review"
-      ? (reviewSource === "git" ? gitReviewPath : sessionReviewPath)
-      : null,
-  );
-  useEffect(() => {
-    if (!ordinaryChangeRail || !activeSessionId || !changeRail.show) {
-      return;
-    }
-    const sessionId = activeSessionId;
-    setRailsBySession((current) => {
-      const model = current[sessionId] ?? EMPTY_CHAT_RIGHT_RAIL;
-      const noted = noteReviewAutoOpen(model, "审查");
-      if (noted.model === model) {
-        return current;
-      }
-      return { ...current, [sessionId]: noted.model };
-    });
-  }, [activeSessionId, changeRail.show, ordinaryChangeRail]);
   const {
     layoutRef,
     dragState,
