@@ -680,6 +680,7 @@ def require_financial_team_synthesis_recovery_ready(
                 or str(detail.get("status") or "").lower() in {"running", "pending"}
                 or submit._queued_submission_retry_state(
                     session_service, session_id=session_id, client_submission_id=submission_id,
+                    expected_turn_id=previous_turn_id,
                 ) != "failed"):
                 raise FinancialTeamRunNotReadyError("主助手原生 Turn 未确认失败或仍在执行，系统不会重复发送")
             return

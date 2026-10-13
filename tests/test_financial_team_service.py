@@ -753,6 +753,43 @@ def test_failed_synthesis_recovery_rejects_busy_or_mismatched_session(monkeypatc
     assert "synthesisAttempts" not in run
 
 
+@pytest.mark.parametrize(("journal_turn", "admission_turn"), [
+    ("journal-turn-B", None),
+    ("transcript-turn-A", "admission-turn-B"),
+    ("journal-turn-B", "transcript-turn-A"),
+])
+def test_synthesis_recovery_refuses_failed_journal_turn_that_differs_from_transcript(monkeypatch, journal_turn, admission_turn):
+    from core.web.services.session import submit
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    run["coordinationStatus"] = "blocked"
+    run["synthesis"].update(turnId="transcript-turn-A", submissionState="accepted")
+    for role in runs.ROLE_SPECS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda *_args: "已完成分析")
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: {
+        "status": "failed", "activeTurnId": "",
+        "messages": [{"role": "user", "metadata": {"clientSubmissionId": "submission-synthesis", "turnId": "transcript-turn-A"}}],
+    })
+    monkeypatch.setattr(submit, "get_development_submission_admission_runtime", lambda *_args: None if admission_turn is None else SimpleNamespace(existing=lambda **_kwargs: {"turnId": admission_turn}))
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_by_correlation", lambda *_args, **_kwargs: [SimpleNamespace(turn_id=journal_turn)])
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_cached", lambda *_args, **_kwargs: [SimpleNamespace(turn_id=turn, event_type=session_service.EVENT_TURN_FAILED) for turn in {journal_turn, admission_turn} if turn])
+    with pytest.raises(runs.FinancialTeamRunNotReadyError):
+        runs.begin_financial_team_synthesis_recovery("owner-1", "run-1")
+    assert run["synthesis"]["turnId"] == "transcript-turn-A"
+    assert "synthesisAttempts" not in run
+
+
+@pytest.mark.parametrize("expected_turn_id", ["", "matching-turn"])
+def test_native_retry_probe_accepts_matching_failed_authorities(monkeypatch, expected_turn_id):
+    from core.web.services.session import submit
+    monkeypatch.setattr(submit, "get_development_submission_admission_runtime", lambda *_args: SimpleNamespace(existing=lambda **_kwargs: {"turnId": "matching-turn"}))
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_by_correlation", lambda *_args, **_kwargs: [SimpleNamespace(turn_id="matching-turn")])
+    monkeypatch.setattr(submit.journal_bridge, "load_session_conversation_events_cached", lambda *_args, **_kwargs: [SimpleNamespace(turn_id="matching-turn", event_type=session_service.EVENT_TURN_FAILED)])
+    assert submit._queued_submission_retry_state(session_service, session_id="session-owner", client_submission_id="submission-synthesis", expected_turn_id=expected_turn_id) == "failed"
+
+
 @pytest.mark.parametrize(("depth", "limit"), [("brief", 800), ("standard", 2000), ("exhaustive", 3600)])
 def test_synthesis_output_is_bounded_by_research_depth(depth, limit):
     run = {"symbol": "sh600519", "periodDays": 30, "researchDate": "2026-10-13", "depth": depth, "analysts": {role: {} for role in runs.ROLE_SPECS}}
