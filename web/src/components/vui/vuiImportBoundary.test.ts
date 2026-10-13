@@ -18,7 +18,24 @@ const routeVisualUtilityPattern =
 const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
+// ConversationView's extracted transcript slices share its owning style map.
+// Keep this list explicit and verify the owner import below; no directory exemption.
+const conversationParentStyleConsumers = [
+  "components/conversation/conversationAuxiliaryPanels.tsx",
+  "components/conversation/conversationCodexSurface.tsx",
+  "components/conversation/conversationCodexToolDetails.tsx",
+  "components/conversation/conversationCodexTranscriptCells.tsx",
+  "components/conversation/conversationOperationGroups.tsx",
+  "components/conversation/conversationOperationRows.tsx",
+  "components/conversation/conversationReActRows.tsx",
+  "components/conversation/conversationResponseBlocks.tsx",
+  "components/conversation/conversationSpecialRows.tsx",
+  "components/conversation/conversationThoughtUnits.tsx",
+  "components/conversation/conversationTimelineItems.tsx",
+  "components/conversation/useComputerUseResults.tsx",
+];
 const productSharedParentStyleConsumers = [
+  ...conversationParentStyleConsumers,
   "app/SpecialistAgentMenu.tsx", // shell-owned nav geometry is passed via props
   // Settings-align wave 3: the extracted ConfigSectionEditor shares the owning
   // route's style module (ConfigRoute.styles) instead of owning a copy.
@@ -440,6 +457,14 @@ describe("VUI architecture boundary", () => {
       .filter((file) => !allowedSharedConsumers.has(file));
 
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps registered conversation slices on the ConversationView style owner", () => {
+    for (const file of conversationParentStyleConsumers) {
+      const source = readText(join(sourceRoot, file));
+      expect(source, file).toMatch(/from\s+["']\.\/ConversationView\.styles["']/);
+      expect(source, file).not.toMatch(localStylesObjectPattern);
+    }
   });
 
   it("keeps parent style-map sharing explicitly bounded to known surface subcomponents", () => {
