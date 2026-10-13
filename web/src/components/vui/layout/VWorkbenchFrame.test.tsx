@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { VWorkbenchFrame } from "./VWorkbenchFrame";
 import { VWorkbenchPage } from "./VWorkbenchPage";
 import { VSplitWorkspace } from "./VSplitWorkspace";
+import { VBoardWorkbenchPage } from "./VBoardWorkbenchPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -51,5 +52,11 @@ describe("persistent workbench chrome", () => {
     const splits = host.querySelectorAll('[data-vui="split-workspace"]');
     expect(splits[0].getAttribute("data-vui-split-chrome")).toBe("workbench");
     expect(splits[1].getAttribute("data-vui-split-chrome")).toBe("embedded");
+  });
+  it("lets a child workspace own chrome when a board is only its host", () => {
+    mount(<VWorkbenchFrame><VBoardWorkbenchPage title="Research" hideHeader chrome="embedded" rail={null} board={<VSplitWorkspace chrome="workbench" main="Canvas" aside="Inspector" />} /></VWorkbenchFrame>);
+    const splits = host.querySelectorAll('[data-vui="split-workspace"]');
+    expect(splits[0].getAttribute("data-vui-split-chrome")).toBe("embedded");
+    expect(splits[1].getAttribute("data-vui-split-chrome")).toBe("workbench");
   });
 });

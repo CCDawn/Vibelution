@@ -29,6 +29,8 @@ AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workben
 
 窗口 pane 的圆角使用 `--vui-workbench-radius`（12px），与内部卡片的 `--vui-radius-panel-soft`（8px）分开；不要修改卡片 token 来对齐窗口。`VSplitWorkspace chrome="workbench"` 绘制公共栏位，默认 `embedded` 保留内层编辑器/画布语义。List/Board/Canvas recipes 自动采用公共栏位；自定义尺寸控制器可用 `VUI_WORKBENCH_PANE_CLASS` / `VUI_WORKBENCH_RAIL_CLASS` / `VUI_WORKBENCH_TOOLBAR_CLASS`，不得为复用外观增加第二个 resize hook。颜色、圆角、边框、裁切和拖杆规则唯一落在 `design/workbench-frame.css`。
 
+`VBoardWorkbenchPage chrome="embedded"` 用于外层仅提供内容宿主、内层 Canvas 自己拥有栏位的场景（科研流程）。内层 recipe 负责白色主区与检查器的独立圆角，外层不截断它们或绘制额外白框。
+
 ## VWorkbenchFrame
 
 ### 功能

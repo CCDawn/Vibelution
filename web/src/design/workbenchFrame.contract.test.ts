@@ -31,7 +31,12 @@ describe("shared workbench chrome ownership", () => {
     for (const recipe of ["VListDetailPage", "VBoardWorkbenchPage", "VCanvasWorkbenchPage"]) {
       const code = source(`components/vui/layout/${recipe}.tsx`);
       expect(code).toContain('chrome="workspace"');
-      expect(code).toContain('chrome="workbench"');
+      if (recipe === "VBoardWorkbenchPage") {
+        expect(code).toContain('chrome = "workbench"');
+        expect(code).toContain('chrome={chrome}');
+      } else {
+        expect(code).toContain('chrome="workbench"');
+      }
     }
   });
 });
