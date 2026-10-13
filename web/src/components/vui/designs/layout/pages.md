@@ -478,5 +478,9 @@ import { VSplitWorkspace } from "@/components/vui";
 | `resize.collapse.*.collapsed` / `onCollapsedChange` | 受控折叠值与回调必须一起提供；`header` placement 必须受控 | 响应式策略归页面；`rail` 未提供时保持内部手动切换。撤销受控值时沿用 owner 最后接受的状态，不采用尚未接受的点击请求。收起只隐藏列、不卸载草稿；点击请求 owner 更新，不另建宽度记忆 |
 | columnsClassName | 固定列模板覆盖 | 默认列宽带 16rem 回退，未注入页面变量时仍保持桌面横向分栏 |
 
+### 共享拖动线的边界对齐
+
+`PaneResizeHandle` 与 `PaneCollapseHandle` 继续共用 1px 可见线和 12px 隐形命中区。布局可设置 `--pane-resize-rule-offset`，同时移动可见线和命中区；`--pane-resize-rule-top` / `--pane-resize-rule-bottom` 将可见线限制在圆角面板边框的直线段，默认均为 0px。外层可用 `--pane-resize-rule-color` 设置中性线色；未设置时保留现有 hover/focus/active 强调色。页面不重新绘制分隔线，也不改变共享键盘、拖动或持久化协议。
+
 ### 实现落点
 - `layout/VSplitWorkspace.tsx` + `usePersistedPaneResize`
