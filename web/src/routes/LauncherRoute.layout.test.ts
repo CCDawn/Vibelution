@@ -217,7 +217,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("restartDisabled={destructiveActionDisabled}");
     expect(branchInstancesPanelSource).toContain("onLifecycle");
     expect(branchInstancesPanelSource).toContain("onStopMany");
-    expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "start")');
+    expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, recovering ? "restart" : "start")');
     expect(routeSource).toContain("lifecycleIntents");
     expect(routeSource).toContain("acceptLifecycleIntent");
     expect(routeSource).toContain("shouldApplyLifecycleMutationFeedback");
@@ -261,7 +261,7 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("routes non-current force-stop through the branch lifecycle action", () => {
-    expect(homeRouteSource).toContain('Extract<LauncherOperation, "start" | "stop" | "force-stop">');
+    expect(homeRouteSource).toContain('Extract<LauncherOperation, "start" | "stop" | "force-stop" | "restart">');
     expect(homeRouteSource).toContain("onLifecycle={requestInstanceLifecycle}");
     expect(branchInstancesPanelSource).toContain("canForceStopInstance");
     expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "force-stop")');
@@ -471,7 +471,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("px-2");
     expect(routeStylesSource).toContain("w-fit");
     expect(routeStylesSource).toContain("whitespace-nowrap");
-    expect(launcherShellStylesSource).toContain("bg-vui-surface-panel");
+    expect(launcherShellStylesSource).toContain("bg-vui-surface-workspace");
+    expect(launcherShellSource).toContain('<VSurface as="div" tone="panel"');
+    expect(launcherShellStylesSource).toContain("!rounded-[12px]");
     expect(launcherShellStylesSource).toContain("text-vui-fg-primary");
   });
 

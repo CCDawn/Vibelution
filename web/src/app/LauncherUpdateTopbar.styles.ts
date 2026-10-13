@@ -1,5 +1,5 @@
 const styles = {
-  toolbar: "z-20 min-h-12 gap-3 border-b border-vui-border-subtle bg-vui-surface-panel px-4 max-[600px]:gap-2 max-[600px]:px-3",
+  toolbar: "z-20 min-h-11 gap-3 !border-0 !bg-vui-surface-workspace px-4 max-[600px]:gap-2 max-[600px]:px-3",
   title: "truncate text-vui-sm font-medium",
   branch: "flex min-w-0 items-center gap-1 border-l border-vui-border-subtle pl-3 text-vui-xs text-vui-fg-tertiary max-[600px]:hidden",
   button: "!min-h-8 !px-3 !text-vui-xs max-[600px]:!min-h-11",

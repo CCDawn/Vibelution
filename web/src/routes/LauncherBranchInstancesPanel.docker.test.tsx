@@ -388,5 +388,12 @@ describe("Launcher branch workspace interactions", () => {
     expect(host.textContent).toContain("返回分支列表");
     expect(host.textContent).toContain("概览");
     expect(host.textContent).toContain("codex/details");
+    expect(host.textContent).toContain("运行情况");
+    expect(host.textContent).toContain("工作区信息");
+    await click(button("查看完整路径"));
+    expect(host.textContent).toContain(branch.path);
+    expect(onLifecycle).not.toHaveBeenCalled();
+    await click(button("返回分支列表"));
+    expect(host.querySelector('[role="table"][aria-label="工作区分支列表"]')).toBeTruthy();
   });
 });
