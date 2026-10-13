@@ -40,7 +40,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions } from "../../api/chat";
+import { listSessionChildSessions, fetchSessionLlmOptions } from "../../api/chat";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import { archiveAgent } from "../../api/agents";
 import {
@@ -1076,7 +1076,12 @@ export function ChatCodingRouteWorkbench() {
     () => (showArchivedSessions ? archivedSessionsQuery.data?.items ?? [] : []),
     [archivedSessionsQuery.data, showArchivedSessions],
   );
-  const { sessionArchiveMutation, pinSessionMutation, renameAgentMutation } = useChatSessionMutations({
+  const {
+    sessionArchiveMutation,
+    pinSessionMutation,
+    renameAgentMutation,
+    handleForkSessionFromNode,
+  } = useChatSessionMutations({
     queryClient,
     chatWorkspaceCache,
     lang,
@@ -1084,6 +1089,9 @@ export function ChatCodingRouteWorkbench() {
     setSessionComposerErrors,
     latestDirectSessionSelectionRef,
     directSessionSelectionGenerationRef,
+    activeSessionId,
+    syncSessionDetail,
+    openSession,
   });
   const agentPermissionPresetMutation = useAgentPermissionPresetMutation({
     onSuccess: (_agent, input) => {
@@ -2571,41 +2579,6 @@ export function ChatCodingRouteWorkbench() {
     }
     setSessionImageAttachments((current) => clearUnsupportedSessionImageAttachments(current, activeSessionId));
   }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
-
-  // Branch feature fork exit: ConversationView owns the scope dialog; this
-  // handler executes the fork, caches the returned detail, and navigates to
-  // the new session. Errors surface on the source session composer and keep
-  // the dialog open for retry.
-  const handleForkSessionFromNode = useCallback(
-    async (message: ConversationMessage, scope: ConversationForkScope) => {
-      const sourceSessionId = activeSessionId;
-      const nodeId = String(message.nodeId || "").trim();
-      if (!sourceSessionId || !nodeId) {
-        return;
-      }
-      try {
-        const nextDetail = await forkSessionFromNode(sourceSessionId, { nodeId, scope });
-        const nextId = String(nextDetail.id || "").trim();
-        if (!nextId) {
-          return;
-        }
-        queryClient.setQueryData(queryKeys.session(nextId), nextDetail);
-        updateSessionSummaryCaches(queryClient, (sessions) =>
-          mergeSessionDetailIntoSummaries(sessions, nextDetail),
-        );
-        syncSessionDetail(nextDetail);
-        openSession(nextId);
-      } catch (exc) {
-        setSessionComposerErrors((current) => ({
-          ...current,
-          [sourceSessionId]: `${t("forkSessionFailed")}: ${describeError(exc, lang === "zh" ? "分叉会话失败" : "Failed to fork session")}`,
-        }));
-        throw exc;
-      }
-    },
-    [activeSessionId, describeError, lang, openSession, queryClient, setSessionComposerErrors, syncSessionDetail, t],
-  );
-
 
   const {
     activeSurfaceTitle,

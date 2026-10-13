@@ -1,11 +1,11 @@
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import { useCallback, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { useMutation, type QueryClient } from "@tanstack/react-query";
 
 import { updateAgent } from "../../api/agents";
-import { pinChatSession, unpinChatSession } from "../../api/chat";
+import { forkSessionFromNode, pinChatSession, unpinChatSession } from "../../api/chat";
 import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
 import { queryKeys } from "../../api/queryKeys";
-import type { AgentInstance, SessionSummary } from "../../api/types";
+import type { AgentInstance, ConversationMessage, SessionDetail, SessionSummary } from "../../api/types";
 import { startUserAction } from "../../app/userActionTelemetry";
 import {
   captureAgentSessionCacheSnapshots,
@@ -15,9 +15,12 @@ import {
   updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
+import { mergeSessionDetailIntoSummaries } from "../chatSessionState";
 import { describeChatRouteError as describeError } from "./chatCodingRouteViewModel";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { TranslationKey } from "../../i18n/dictionaryTypes";
+import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
+import type { ChatRouteNavigateOptions } from "./useChatRouteSelection";
 
 export type ChatSessionMutationsInput = {
   queryClient: QueryClient;
@@ -28,6 +31,9 @@ export type ChatSessionMutationsInput = {
   /** A select captured before an archive write must not restore old read-only flags. */
   latestDirectSessionSelectionRef: RefObject<string | null>;
   directSessionSelectionGenerationRef: RefObject<number>;
+  activeSessionId: string | null | undefined;
+  syncSessionDetail: (detail: SessionDetail, options?: { transcript?: "merge" | "preserve" }) => void;
+  openSession: (sessionId: string, options?: ChatRouteNavigateOptions) => void;
 };
 
 /**
@@ -43,6 +49,9 @@ export function useChatSessionMutations({
   setSessionComposerErrors,
   latestDirectSessionSelectionRef,
   directSessionSelectionGenerationRef,
+  activeSessionId,
+  syncSessionDetail,
+  openSession,
 }: ChatSessionMutationsInput) {
   // Session-level archive (ZCode-style metadata flip). Optimistic cache update
   // keeps the default list clean immediately; the archived listing refetches.
@@ -199,5 +208,39 @@ export function useChatSessionMutations({
     },
   });
 
-  return { sessionArchiveMutation, pinSessionMutation, renameAgentMutation };
+  // Branch feature fork exit: ConversationView owns the scope dialog; this
+  // handler executes the fork, caches the returned detail, and navigates to
+  // the new session. Errors surface on the source session composer and keep
+  // the dialog open for retry.
+  const handleForkSessionFromNode = useCallback(
+    async (message: ConversationMessage, scope: ConversationForkScope) => {
+      const sourceSessionId = activeSessionId;
+      const nodeId = String(message.nodeId || "").trim();
+      if (!sourceSessionId || !nodeId) {
+        return;
+      }
+      try {
+        const nextDetail = await forkSessionFromNode(sourceSessionId, { nodeId, scope });
+        const nextId = String(nextDetail.id || "").trim();
+        if (!nextId) {
+          return;
+        }
+        queryClient.setQueryData(queryKeys.session(nextId), nextDetail);
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, nextDetail),
+        );
+        syncSessionDetail(nextDetail);
+        openSession(nextId);
+      } catch (exc) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [sourceSessionId]: `${t("forkSessionFailed")}: ${describeError(exc, lang === "zh" ? "分叉会话失败" : "Failed to fork session")}`,
+        }));
+        throw exc;
+      }
+    },
+    [activeSessionId, lang, openSession, queryClient, setSessionComposerErrors, syncSessionDetail, t],
+  );
+
+  return { sessionArchiveMutation, pinSessionMutation, renameAgentMutation, handleForkSessionFromNode };
 }
