@@ -192,7 +192,7 @@ export function useFinancialResearchSessionBridge({
   }, [authorized, composerValue, onComposerChange, onFocusComposer, onTurnModelSelectionChange, request, sessionId, sessionLlmOptions, sessionLlmOptionsError, sessionLlmOptionsLoading, turnModelSelection]);
   useEffect(() => {
     const pending = pendingModelSelection.current;
-    if (!pending?.waitingForOptions || !authorized || !request || request.id !== pending.requestId || request.sessionId !== sessionId
+    if (!pending || (!pending.waitingForOptions && !pending.blocked) || !authorized || !request || request.id !== pending.requestId || request.sessionId !== sessionId
       || sessionLlmOptionsLoading || (!sessionLlmOptionsError && !optionsMatchSession) || !onTurnModelSelectionChange) return;
     const requestedSelection = request.modelSelection === undefined ? pending.previous : request.modelSelection;
     const selection = sessionLlmOptionsError || !currentSessionOptions
