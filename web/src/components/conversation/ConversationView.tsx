@@ -339,6 +339,7 @@ import { createConversationReActRows } from "./conversationReActRows";
 import { createConversationResponseBlocks } from "./conversationResponseBlocks";
 import { createConversationSpecialRows } from "./conversationSpecialRows";
 import { createConversationTimelineItems } from "./conversationTimelineItems";
+import { resolveConversationTurnUsageLabel } from "./conversationTurnUsageLabel";
 import { useComputerUseResults } from "./useComputerUseResults";
 import { useConversationFind } from "./useConversationFind";
 import { VActionGroup, VButton, VNativeInput, VNativeTextarea } from "../vui";
@@ -1810,6 +1811,16 @@ export const ConversationView = React.memo(function ConversationView({
               && !assistantTurnIsStreaming(message)
               ? responseText.trim()
               : "";
+            // Codex parity: settled turns carry a quiet measured token-usage
+            // label near the turn meta; streaming turns and surfaces without
+            // wire facts render nothing.
+            const turnUsageLabel = message.role === "assistant"
+              && !assistantTurnIsStreaming(message)
+              && !companionMode
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              ? resolveConversationTurnUsageLabel(message.usageStats, lang)
+              : null;
             // SFT curation actions share the copy affordance's gate and stay
             // out of companion/inbox/group surfaces by contract.
             const messageCurationGate = Boolean(copyableAnswerText)
@@ -2097,6 +2108,15 @@ export const ConversationView = React.memo(function ConversationView({
                 }
                 metaActions={
                   <>
+                    {turnUsageLabel ? (
+                      <span
+                        className={styles.turnUsageLabel}
+                        title={turnUsageLabel.titleLines.join("\n")}
+                        data-conversation-turn-usage="1"
+                      >
+                        {turnUsageLabel.label}
+                      </span>
+                    ) : null}
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
                     <span
                       className={isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions}
