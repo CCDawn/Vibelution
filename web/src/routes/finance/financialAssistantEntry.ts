@@ -61,7 +61,7 @@ export function financialConnectionFacts(row: FinancialAssistant, lang: "zh" | "
     {
       key: "report",
       label: zh ? "外部财报服务" : "Report service",
-      value: row.reportStatus === "configured"
+      value: row.reportStatus === "configured_unverified"
         ? (zh ? "已填写，还没验证能不能连上" : "Filled in, connection not verified")
         : (zh ? "还没配好" : "Not ready"),
     },
