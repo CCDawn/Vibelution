@@ -316,6 +316,8 @@ def _grant_default_references(agent: dict) -> bool:
         index_pending
         and INDEX_TOOL not in blocked_tools
         and (_default_read_policy(policy, _LEGACY_SCREEN_READ_TOOLS)
+             or (not session_reference_pending and _default_read_policy(
+                 policy, (*_LEGACY_SCREEN_READ_TOOLS, SESSION_REFERENCE_TOOL)))
              or grant_market or grant_market_screen)
     )
     legacy_default_tools = next(
@@ -351,7 +353,10 @@ def _grant_default_references(agent: dict) -> bool:
             tools = legacy_default_tools
         if grant_index and INDEX_TOOL not in tools:
             tools = (*tools, INDEX_TOOL)
-        if grant_session_reference:
+        if grant_session_reference or (
+            not session_reference_pending and SESSION_REFERENCE_TOOL in _names(policy, "allowedTools")
+            and _default_read_policy(policy, (*_LEGACY_SCREEN_READ_TOOLS, SESSION_REFERENCE_TOOL))
+        ):
             tools = (*tools, SESSION_REFERENCE_TOOL)
         updates["tool_policy"] = {
             **policy,
