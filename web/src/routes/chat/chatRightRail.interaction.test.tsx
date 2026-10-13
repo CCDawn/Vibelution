@@ -693,6 +693,68 @@ describe("chat right rail interaction", () => {
     expect(host.textContent).not.toContain("进行中");
   });
 
+  it("shows the live todo checklist in the plan tab from the session messages", async () => {
+    const client: ChatRightRailSideClient = {
+      createChild: async () => ({ childSessionId: "unused", parentSessionId: "parent-1" }),
+      submit: async () => undefined,
+      fetchDetail: async () => ({ currentPhase: "idle", status: "ready", messages: [] }),
+    };
+    const model = openChatRightRailTab(EMPTY_CHAT_RIGHT_RAIL, { kind: "plan", title: "计划" });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const railRoot = createRoot(host);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      railRoot.render(
+        <VuiProvider>
+          <QueryClientProvider client={queryClient}>
+            <MemoryRouter>
+              <ChatRightRail
+                className="rail"
+                lang="zh"
+                sessionId="parent-1"
+                model={model}
+                onModelChange={() => undefined}
+                onCollapse={() => undefined}
+                devtools={{
+                  phase: "running",
+                  status: "running",
+                  messages: [{
+                    id: "a1",
+                    role: "assistant",
+                    timestamp: "2026-10-12T10:00:00Z",
+                    turnId: "a1-turn",
+                    status: "running",
+                    turnItems: [{
+                      id: "t1", itemId: "t1", type: "tool_call", version: 3 as const,
+                      sessionId: "parent-1", turnId: "a1-turn", status: "completed",
+                      revision: 1, sequence: 1, callId: "call-1", toolName: "todo_write",
+                      input: JSON.stringify({ todos: [
+                        { content: "对齐过程行", activeForm: "对齐过程行", status: "completed" },
+                        { content: "接上计划页签", activeForm: "接上计划页签", status: "in_progress" },
+                      ] }),
+                    } as never],
+                  }],
+                }}
+                terminalRun={null}
+                terminalMountedInCenter={false}
+                onOpenFile={() => undefined}
+                review={emptyReview}
+                sideClient={client}
+              />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </VuiProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(host.textContent).toContain("对齐过程行");
+    expect(host.textContent).toContain("接上计划页签");
+    expect(host.textContent).toContain("1/2");
+    await act(async () => railRoot.unmount());
+    host.remove();
+  });
+
   it("renders the assistant note in the rail body and keeps the directory listing live", async () => {
     const client: ChatRightRailSideClient = {
       createChild: async () => ({ childSessionId: "unused", parentSessionId: "parent-1" }),

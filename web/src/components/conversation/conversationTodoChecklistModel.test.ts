@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionTurnItem } from "../../api/types/chat";
+import type { ConversationMessage } from "../../api/types";
 import {
   deriveLatestTodoChecklist,
+  deriveSessionTodoChecklist,
   type TodoChecklistSnapshot,
 } from "./conversationTodoChecklistModel";
 
@@ -112,5 +114,55 @@ describe("deriveLatestTodoChecklist", () => {
       activeForm: "祈使句",
       status: "in_progress",
     });
+  });
+});
+
+function assistantMessage(
+  id: string,
+  turnItems: SessionTurnItem[],
+  status: "completed" | "running",
+): ConversationMessage {
+  return {
+    id,
+    role: "assistant",
+    timestamp: "2026-10-12T10:00:00Z",
+    turnId: `${id}-turn`,
+    status,
+    turnItems,
+  };
+}
+
+describe("deriveSessionTodoChecklist", () => {
+  it("returns undefined when no assistant turn carried a checklist", () => {
+    expect(deriveSessionTodoChecklist(undefined)).toBeUndefined();
+    expect(deriveSessionTodoChecklist([])).toBeUndefined();
+    expect(deriveSessionTodoChecklist([
+      { id: "u1", role: "user", timestamp: "2026-10-12T10:00:00Z", content: "hi" },
+    ])).toBeUndefined();
+    expect(deriveSessionTodoChecklist([assistantMessage("a1", [assistantItem(1)], "completed")])).toBeUndefined();
+  });
+
+  it("projects the newest checklist turn and its settled state", () => {
+    const projection = deriveSessionTodoChecklist([
+      assistantMessage("a1", [
+        toolCallItem({ todos: SNAPSHOT_A.items }, { sequence: 1 }),
+        { ...assistantItem(2), terminal: true } as SessionTurnItem,
+      ], "completed"),
+      assistantMessage("a2", [assistantItem(1)], "running"),
+    ]);
+
+    expect(projection?.messageId).toBe("a1");
+    expect(projection?.turnSettled).toBe(true);
+    expect(projection?.snapshot.total).toBe(3);
+  });
+
+  it("marks the projection unsettled while the checklist turn is still running", () => {
+    const projection = deriveSessionTodoChecklist([
+      assistantMessage("a1", [assistantItem(1)], "completed"),
+      assistantMessage("a2", [toolCallItem({ todos: SNAPSHOT_A.items }, { sequence: 1 })], "running"),
+    ]);
+
+    expect(projection?.messageId).toBe("a2");
+    expect(projection?.turnSettled).toBe(false);
   });
 });
