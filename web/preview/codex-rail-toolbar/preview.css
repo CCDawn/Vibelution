@@ -91,6 +91,29 @@
 .preview-session-row strong { display:block; font-weight:500; }
 .preview-session-row small { display:block; margin-top:4px; color:#989b9f; font-size:12px; }
 .preview-disclosure { position:fixed; left:12px; bottom:7px; pointer-events:none; color:#8b9095; font-size:10px; }
+.variant-flat .preview-center { background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 0 0 1px #00000005; }
+.variant-flat .preview-tab-strip { background:#fff; padding:0 10px; }
+.variant-flat .preview-session-tabs { align-items:center; }
+.codex-alignment-preview.variant-flat .preview-session-tab { height:28px!important; min-height:28px!important; padding:0 8px; border-radius:6px; }
+.codex-alignment-preview.variant-flat .preview-session-tab-active { background:#eef0f2; color:#303338; }
+.codex-alignment-preview.variant-flat .preview-session-tab-active:after { content:none; }
+.variant-flat .preview-main-body { border-radius:0; }
+.codex-alignment-preview.variant-attached .preview-session-tab { height:28px!important; min-height:28px!important; }
+.preview-comparison-page { min-height:100dvh; background:#f4f5f6; padding:28px; color:#363a40; font-family:var(--font-ui); }
+.preview-comparison-page > header,.comparison-option,.preview-comparison-page > footer { max-width:1100px; margin:0 auto; }
+.preview-comparison-page h1 { font-size:20px; font-weight:500; margin:0 0 8px; }
+.preview-comparison-page > header p { font-size:13px; color:#797e84; margin:0 0 28px; }
+.comparison-option { margin-bottom:24px; }
+.comparison-caption { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 10px; }
+.comparison-caption h2 { font-size:14px; font-weight:500; display:flex; align-items:center; gap:8px; margin:0; }
+.comparison-caption h2 span { font-size:11px; font-weight:400; color:#6d767e; border-radius:5px; padding:2px 6px; background:#e9edef; }
+.comparison-caption button { font-size:12px; border:0; background:none; background-image:none; box-shadow:none; font-weight:400; }
+.comparison-option > p { margin:10px 0 0; color:#82878e; font-size:12px; line-height:1.6; }
+.codex-alignment-preview.header-sample { height:180px; padding:16px; border-radius:12px; background:#e9e9e9; }
+.header-sample .preview-center { height:100%; margin:0; }
+.sample-body-label { display:flex; align-items:center; gap:8px; color:#8d939a; font-size:12px; padding:24px 22px; }
+.preview-comparison-page > footer { color:#979ca2; font-size:11px; }
 @media(max-width:1000px) { .preview-workspace { grid-template-columns:minmax(0,1fr) 280px!important; } .preview-workspace>[data-vui="split-sidebar"] { display:none; } .preview-rail-closed { grid-template-columns:minmax(0,1fr)!important; } .preview-global-tools .preview-running { display:none; } }
 @media(max-width:700px) { .preview-workspace { grid-template-columns:minmax(0,1fr)!important; } .preview-workspace>[data-vui="split-aside"] { position:fixed; top:44px; right:0; bottom:0; width:min(86vw,320px); z-index:10; padding:0 0 4px 4px; background:#e9e9e9; box-shadow:-8px 0 24px #0000000c; } .preview-global-bar nav > :not(:first-child) { display:none; } .preview-global-tools .preview-connected { display:none; } .preview-session-tab { max-width:125px!important; } .preview-browse { width:28px!important; min-width:28px!important; padding:0!important; font-size:0!important; gap:0!important; } .preview-composer { width:calc(100% - 24px); } .preview-transcript { padding:24px 16px; } .preview-disclosure { display:none; } }
 @media(pointer:coarse) { .preview-real-rail .toolbar { height:48px; } .preview-real-rail .iconButton { height:44px!important; min-height:44px!important; width:44px!important; min-width:44px!important; } .preview-real-rail .launcherButton { height:44px!important; min-height:44px!important; } .preview-real-rail input,.preview-real-rail textarea { font-size:16px!important; } }
+@media(max-width:700px) { .codex-alignment-preview .preview-session-tab { max-width:105px!important; } .preview-comparison-page { padding:20px 12px; } .codex-alignment-preview.header-sample { padding:8px; } .comparison-caption h2 { font-size:13px; } .comparison-caption button { font-size:11px; padding:0 5px; } }

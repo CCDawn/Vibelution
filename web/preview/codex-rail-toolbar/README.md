@@ -9,3 +9,5 @@
 实际参考：2026-10-13 的本机 Codex 窗口。不是 Codex 源码或像素级复制。
 
 第二版：使用当前截图的双会话标题检验长标题；标签字重改为 regular；浏览会话与侧栏统一为 28px 裸图标，名称保留在 tooltip 与无障碍标签中。侧栏打开时入口不绘制白色凸起按钮。
+
+第四版提供 `?view=compare`：A 平整标题栏（推荐）与 B 低轮廓连接标签；均复用 SessionHeader 和真实 ChatCenterTabStrip。`?variant=flat` / `?variant=attached` 可查看完整工作台。A 将标题栏和正文合成一个白色圆角面；B 保留连接轮廓并把标签高度压低。导出菜单并入同一工具行，避免额外占一行。
