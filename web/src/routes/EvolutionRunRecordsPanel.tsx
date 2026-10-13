@@ -9,6 +9,8 @@ import {
   VTooltip,
   VUI_WORKBENCH_PANE_CLASS,
   VUI_WORKBENCH_RAIL_CLASS,
+  VUI_PAGE_BODY_FILL_CLASS,
+  VUI_PAGE_BODY_SCROLL_CLASS,
 } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
@@ -372,8 +374,8 @@ export function EvolutionRunRecordsPanel({
 
       {separator}
 
-      <section className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.workbenchDetailPane}`}>
-        <div className={`${styles.runDetailPanel} ${styles.workbenchDetailBody}`}>
+      <section className={`${VUI_WORKBENCH_PANE_CLASS} ${VUI_PAGE_BODY_FILL_CLASS}`}>
+        <div className={`${styles.runDetailPanel} ${VUI_PAGE_BODY_SCROLL_CLASS}`}>
           {selectedRun ? (
             <>
               <div className={styles.detailHeader}>

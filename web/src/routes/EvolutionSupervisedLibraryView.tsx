@@ -16,6 +16,8 @@ import {
   VTooltip,
   VUI_WORKBENCH_PANE_CLASS,
   VUI_WORKBENCH_RAIL_CLASS,
+  VUI_PAGE_BODY_FILL_CLASS,
+  VUI_PAGE_BODY_SCROLL_CLASS,
 } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import {
@@ -675,12 +677,12 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
 
             <VSurface
               as="section"
-              className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.workbenchDetailPane}`}
+              className={`${VUI_WORKBENCH_PANE_CLASS} ${VUI_PAGE_BODY_FILL_CLASS}`}
               elevation="panel"
               padding="none"
               tone="panel"
             >
-              <div className={`${styles.detailPanel} ${styles.workbenchDetailBody}`}>
+              <div className={`${styles.detailPanel} ${VUI_PAGE_BODY_SCROLL_CLASS}`}>
                 {selectedProposalSummary ? (
                   selectedProposalIsSelfCandidate ? (
                     renderSelfEvolutionCandidateDetail(selectedProposalSummary)

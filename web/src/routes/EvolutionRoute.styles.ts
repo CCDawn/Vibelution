@@ -25,8 +25,6 @@ const compactMetricSurface =
   `grid [gap:3px] min-w-0 ${rowSurfaceSoft} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-weight:600] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [min-height:36px] [padding:5px_7px]`;
 
 const styles = {
-  workbenchDetailPane: "min-h-0 min-w-0 flex flex-col",
-  workbenchDetailBody: "min-h-0 min-w-0 flex-1",
   supervisedLivePage: "!gap-0 !p-0",
   selfDetailsDialog: "!translate-none !transform-[translate(-50%,-50%)] !animate-none !h-[min(90dvh,1000px)] !w-[min(94vw,1400px)] !max-w-[calc(100vw-24px)] [&_[data-slot=dialog-body]]:min-h-0",
   supervisedSetupFrame: "flex h-full min-h-0 min-w-0 flex-1 flex-col",
