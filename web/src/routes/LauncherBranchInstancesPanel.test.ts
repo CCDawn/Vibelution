@@ -1069,7 +1069,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("isPending={startBusy || stopBusy}");
     expect(panelSource).toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
     expect(panelSource).toContain("{startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}");
-    expect(panelSource).toContain("title={building ? labels.buildingHint : undefined}");
+    expect(panelSource).toContain("title={building ? labels.buildingHint : recovering ? labels.recoverWorkbenchHint : undefined}");
     expect(panelSource).toContain('building: "构建中…"');
     expect(panelSource).toContain('building: "Building…"');
     expect(panelSource).toContain("buildingHint: \"前端代码有更新，正在构建新版本，约需几分钟。\"");

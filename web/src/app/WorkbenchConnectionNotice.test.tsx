@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import shellSource from "./AppShell.tsx?raw";
-import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
+import { connectionFailureIsPersistent, WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -57,5 +57,20 @@ describe("workbench connection recovery", () => {
     expect(shellSource).toContain("onRecover={() => { void beginRestart(); }}");
     expect(shellSource).toContain("<CompanionDesktopAttention /><Outlet />");
     expect(shellSource).not.toContain("unavailable ? null : <Outlet");
+    expect(shellSource.indexOf("<div className={styles.mainArea}>" )).toBeLessThan(shellSource.indexOf("<WorkbenchConnectionNotice"));
+    expect(shellSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(shellSource).toContain("lastHealthyAt={backendHealthQuery.dataUpdatedAt}");
+    expect(shellSource).toContain("failedAt={backendHealthQuery.errorUpdatedAt}");
+  });
+  it("offers connection checking first after a transient timeout with previously healthy data", async () => {
+    await act(async () => root.render(<WorkbenchConnectionNotice unavailable lang="zh" desktopShell recovering={false} lastHealthyAt={1000} failedAt={4000} onRecover={recover} onRetry={retry} />));
+    expect(host.textContent).toContain("连接检查暂未成功");
+    expect(button("恢复工作台")).toBeUndefined();
+    await act(async () => button("检查连接").click());
+    expect(retry).toHaveBeenCalledOnce();
+    expect(recover).not.toHaveBeenCalled();
+    expect(connectionFailureIsPersistent(1000, 15_999)).toBe(false);
+    expect(connectionFailureIsPersistent(1000, 16_000)).toBe(true);
+    expect(connectionFailureIsPersistent(0, 4000)).toBe(true);
   });
 });

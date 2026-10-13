@@ -212,21 +212,30 @@ describe("Launcher branch workspace interactions", () => {
 
     expect(action("codex/switch", "切换到工作台")).toBeTruthy();
     expect(action("codex/recover", "恢复工作台")).toBeTruthy();
+    expect(action("codex/recover", "恢复工作台").title).toContain("保存当前任务记录");
+    expect(action("codex/recover", "恢复工作台").title).toContain("重启工作台");
     expect(action("codex/open", "打开工作台")).toBeTruthy();
     expect(action("codex/start", "启动工作台")).toBeTruthy();
     expect(action("codex/retry", "重试启动")).toBeTruthy();
 
+    const labels: Record<string, string> = {
+      "worktree:switch": "切换到工作台",
+      "worktree:recover": "恢复工作台",
+      "worktree:open": "打开工作台",
+      "worktree:start": "启动工作台",
+      "worktree:retry": "重试启动",
+    };
     for (const id of items.map((item) => item.id)) {
-      const labels: Record<string, string> = {
-        "worktree:switch": "切换到工作台",
-        "worktree:recover": "恢复工作台",
-        "worktree:open": "打开工作台",
-        "worktree:start": "启动工作台",
-        "worktree:retry": "重试启动",
-      };
-      await click(action(id.replace("worktree:", "codex/"), labels[id]));
+      const openAction = action(id.replace("worktree:", "codex/"), labels[id]);
+      await click(openAction);
+      if (id === "worktree:recover") {
+        await click(openAction);
+      }
     }
-    expect(onLifecycle.mock.calls).toEqual(items.map((item) => [item.id, "start"]));
+    expect(onLifecycle.mock.calls).toEqual(items.map((item) => [
+      item.id,
+      item.id === "worktree:recover" ? "restart" : "start",
+    ]));
   });
 
   it("surfaces the window hint only when a running backend has no window", async () => {

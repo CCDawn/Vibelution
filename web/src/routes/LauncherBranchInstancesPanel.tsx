@@ -63,7 +63,7 @@ type LauncherBranchInstancesPanelProps = {
   lifecyclePending?: boolean;
   onLifecycle?: (
     instanceId: string,
-    operation: Extract<LauncherOperation, "start" | "stop" | "force-stop">,
+    operation: Extract<LauncherOperation, "start" | "restart" | "stop" | "force-stop">,
   ) => LifecycleRequestOutcome | void;
   onStopMany?: (instanceIds: string[]) => void;
   rowFeedback?: {
@@ -139,6 +139,7 @@ export function LauncherBranchInstancesPanel({
         openWorkbench: "打开工作台",
         switchWorkbench: "切换到工作台",
         recoverWorkbench: "恢复工作台",
+        recoverWorkbenchHint: "恢复将先保存当前任务记录，再重启工作台。",
         retryStart: "重试启动",
         stop: "停止",
         forceStop: "强制停止",
@@ -204,6 +205,7 @@ export function LauncherBranchInstancesPanel({
         openWorkbench: "Open workbench",
         switchWorkbench: "Switch to workbench",
         recoverWorkbench: "Recover workbench",
+        recoverWorkbenchHint: "Recovery saves the current task record before restarting the workbench.",
         retryStart: "Retry start",
         stop: "Stop",
         forceStop: "Force stop",
@@ -370,13 +372,15 @@ export function LauncherBranchInstancesPanel({
     const stopBusy = state === "stopping";
     const building = state === "building";
     const startingOrRestarting = state === "starting" || state === "restarting";
+    const openAction = workbenchOpenAction(item, state);
     const openLabel = {
       start: labels.startWorkbench,
       open: labels.openWorkbench,
       switch: labels.switchWorkbench,
       recover: labels.recoverWorkbench,
       retry: labels.retryStart,
-    }[workbenchOpenAction(item, state)];
+    }[openAction];
+    const recovering = openAction === "recover";
     const admissionBlocked = isAdmissionBlocked(item);
     // While a frontend build gates the start, the primary control stays
     // visible but disabled with a pending spinner so the wait reads as
@@ -396,7 +400,7 @@ export function LauncherBranchInstancesPanel({
       }
       openClickGuardsRef.current.add(item.id);
       try {
-        const outcome = onLifecycle?.(item.id, "start");
+        const outcome = onLifecycle?.(item.id, recovering ? "restart" : "start");
         if (outcome && outcome.accepted === false) {
           openClickGuardsRef.current.delete(item.id);
           setOpenReject({ id: item.id, reason: outcome.reason });
@@ -425,7 +429,7 @@ export function LauncherBranchInstancesPanel({
             density="compact"
             isDisabled={startBusy || stopBusy || admissionBlocked}
             isPending={startBusy || stopBusy}
-            title={building ? labels.buildingHint : undefined}
+            title={building ? labels.buildingHint : recovering ? labels.recoverWorkbenchHint : undefined}
             onPress={requestOpen}
           >
             {startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}
