@@ -64,6 +64,31 @@ def test_team_detail_light_route_skips_full_canvas_hydration(tmp_path, monkeypat
     assert "nodes" not in payload["canvas"]
 
 
+def test_team_member_responsibilities_survive_http_save_and_readback(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    client = _client()
+    member = {"agentId": agent["agentId"], "role": "lead", "responsibilities": ["收集证据"]}
+    created = client.post("/api/teams", json={"name": "职责验收", "members": [member]})
+    assert created.status_code == 201, created.text
+    team = created.json()
+    assert team["members"][0].get("responsibilities") == ["收集证据"]
+
+    member["memberId"] = team["members"][0]["memberId"]
+    member["responsibilities"] = ["验收职责一", "验收职责二"]
+    url = f"/api/teams/{team['teamId']}"
+    saved = client.patch(url, json={"members": [member]})
+    assert saved.status_code == 200, saved.text
+    for response in (saved, client.get(url), client.get(url + "?detail=light")):
+        assert response.status_code == 200, response.text
+        assert response.json()["members"][0].get("responsibilities") == member["responsibilities"]
+
+    member["responsibilities"] = []
+    cleared = client.patch(url, json={"members": [member]})
+    assert cleared.status_code == 200, cleared.text
+    assert client.get(url).json()["members"][0].get("responsibilities", []) == []
+
+
 def test_team_routes_repair_knowledge_expansion_team_agents(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
     client = _client()

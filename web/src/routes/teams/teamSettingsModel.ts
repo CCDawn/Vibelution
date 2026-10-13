@@ -127,6 +127,34 @@ export function createTeamSettingsDraft(team: Team | null | undefined): TeamSett
   };
 }
 
+/** Stage an editable member row; saving remains the only roster write. */
+export function addTeamSettingsMemberDraft(draft: TeamSettingsDraft): TeamSettingsDraft {
+  const agentId = trimmed(draft.addAgentId);
+  if (!agentId || draft.members.some((member) => !member.remove && (member.nextAgentId || member.agentId) === agentId)) {
+    return draft;
+  }
+  return {
+    ...draft,
+    members: [...draft.members, {
+      memberId: `draft-member-${draft.members.length + 1}`,
+      agentId,
+      role: teamMemberRoleFromInput(draft.addRole),
+      purpose: "",
+      responsibilitiesText: "",
+      nextAgentId: "",
+      remove: false,
+    }],
+    addRole: "",
+    addAgentId: "",
+  };
+}
+
+function teamSettingsMemberChanged(member: TeamSettingsMemberDraft, team: Team): boolean {
+  const original = originalTeamMember(team, member.memberId);
+  if (!original) return !member.remove;
+  return member.remove || Boolean(trimmed(member.nextAgentId)) || teamMemberRowDirty(member, original);
+}
+
 export function teamSettingsDirty(draft: TeamSettingsDraft, team: Team | null | undefined): boolean {
   if (!team) {
     return false;
@@ -135,12 +163,7 @@ export function teamSettingsDirty(draft: TeamSettingsDraft, team: Team | null | 
   if (draft.description.trim() !== (team.description || "")) return true;
   if (draft.purpose.trim() !== (team.purpose || "")) return true;
   if (
-    draft.members.some(
-      (member) =>
-        member.remove
-        || Boolean(trimmed(member.nextAgentId))
-        || teamMemberRowDirty(member, originalTeamMember(team, member.memberId)),
-    )
+    draft.members.some((member) => teamSettingsMemberChanged(member, team))
   ) {
     return true;
   }
@@ -172,12 +195,7 @@ export function buildTeamSettingsPayload(
     payload.purpose = draft.purpose.trim();
   }
   const membersChanged =
-    draft.members.some(
-      (member) =>
-        member.remove
-        || Boolean(trimmed(member.nextAgentId))
-        || teamMemberRowDirty(member, originalTeamMember(team, member.memberId)),
-    ) || Boolean(trimmed(draft.addAgentId));
+    draft.members.some((member) => teamSettingsMemberChanged(member, team)) || Boolean(trimmed(draft.addAgentId));
   if (membersChanged) {
     const members: NonNullable<TeamSettingsPayload["members"]> = [];
     for (const member of draft.members) {
@@ -189,7 +207,7 @@ export function buildTeamSettingsPayload(
         continue;
       }
       const row: NonNullable<TeamSettingsPayload["members"]>[number] = {
-        memberId: member.memberId,
+        memberId: originalTeamMember(team, member.memberId)?.memberId || "",
         agentId,
         role: teamMemberRoleFromInput(member.role),
         purpose: teamMemberPurposeFromInput(member.purpose),
@@ -372,9 +390,9 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
       modelConfigHint: "Configure model",
       lockedNotice: "System and archived teams are read-only here; workflows maintain them.",
       dangerHeading: "Danger zone",
-      dangerHint: "Archiving locks this team as read-only and deletes its linked chat room.",
+      dangerHint: "Archiving locks this team as read-only, archives its current member Agents, and deletes its linked chat room.",
       archiveAction: "Archive this team",
-      archiveConfirmHint: "Archive this team? It becomes read-only and its chat room is deleted.",
+      archiveConfirmHint: "Archive this team? It becomes read-only, its current member Agents are archived, and its chat room is deleted.",
       archiveConfirmAction: "Confirm archive",
       archiveCancelAction: "Keep team",
       archivePendingLabel: "Archiving…",
@@ -413,9 +431,9 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
     modelConfigHint: "配置模型",
     lockedNotice: "系统团队与归档团队在这里只读，由工作流自动维护。",
     dangerHeading: "危险操作",
-    dangerHint: "归档后团队转为只读，绑定的群聊房间会一并删除。",
+    dangerHint: "归档后团队转为只读，当前成员 Agent 会一并归档，绑定的群聊房间会一并删除。",
     archiveAction: "归档当前团队",
-    archiveConfirmHint: "确定归档该团队？归档后只读，群聊房间将被删除。",
+    archiveConfirmHint: "确定归档该团队？团队将变为只读，当前成员 Agent 会一并归档，群聊房间将被删除。",
     archiveConfirmAction: "确认归档",
     archiveCancelAction: "保留团队",
     archivePendingLabel: "归档中…",
