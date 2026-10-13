@@ -144,8 +144,23 @@ def _model_choices() -> list[dict]:
 
 def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: True)
-    monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda _session_id: "high")
+    monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda _session_id: "agent-live")
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {
+            "agentId": agent_id,
+            "configRevision": 7,
+            "llmBindings": {"dialogue": {"modelId": "ai-pixel/gpt-5.6-luna"}},
+        },
+    )
+    monkeypatch.setattr(session_service, "_session_agent_reasoning_effort", lambda _agent: "high")
+    monkeypatch.setattr(
+        session_service,
+        "_conversation_agent_dialogue_context_window_payload",
+        lambda *_args, **_kwargs: {"limit": 32000, "maxLimit": 64000},
+    )
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
@@ -156,6 +171,10 @@ def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest
     assert payload["sessionId"] == "session-live"
     assert payload["currentModelId"] == "ai-pixel/gpt-5.6-luna"
     assert payload["currentReasoningEffort"] == "high"
+    assert payload["agentId"] == "agent-live"
+    assert payload["configRevision"] == 7
+    assert payload["contextWindow"] == 32000
+    assert payload["maxContextWindow"] == 64000
     assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
     assert "models" not in payload
 
@@ -180,10 +199,17 @@ def test_session_llm_options_chain_ensures_and_loads_chat_state_once(monkeypatch
         "get_agent",
         lambda agent_id, **_kwargs: {
             "agentId": agent_id,
+            "configRevision": 1,
             "llmBindings": {"dialogue": {"modelId": "ai-pixel/gpt-5.6-luna"}},
         },
     )
     monkeypatch.setattr(session_service, "_session_llm_model_choices", _model_choices)
+    monkeypatch.setattr(session_service, "_session_agent_reasoning_effort", lambda _agent: "")
+    monkeypatch.setattr(
+        session_service,
+        "_conversation_agent_dialogue_context_window_payload",
+        lambda *_args, **_kwargs: {"limit": 32000, "maxLimit": 64000},
+    )
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
@@ -196,9 +222,19 @@ def test_session_llm_options_chain_ensures_and_loads_chat_state_once(monkeypatch
     assert ensure_calls[0]["session"] == "session-live"
     assert ensure_calls[0]["sync_wait"] is False
     assert chat_state_loads == ["session-live"]
-    assert set(payload) == {"sessionId", "currentModelId", "currentReasoningEffort", "model", "choices"}
+    assert set(payload) == {
+        "sessionId",
+        "agentId",
+        "configRevision",
+        "currentModelId",
+        "currentReasoningEffort",
+        "contextWindow",
+        "maxContextWindow",
+        "model",
+        "choices",
+    }
     assert payload["currentModelId"] == "ai-pixel/gpt-5.6-luna"
-    assert payload["currentReasoningEffort"] == ""
+    assert payload["currentReasoningEffort"] == "medium"
     assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
 
     # The chain memo is scoped to a single GET: the next GET re-runs the chain.

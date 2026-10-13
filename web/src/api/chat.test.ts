@@ -54,7 +54,7 @@ describe("Chat session tool approval API", () => {
     expect(lifecycleSource).not.toContain('fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`');
   });
 
-  it("owns session turn-command transport outside chat route hooks", () => {
+  it("owns session turn-command and Agent model-parameter transport outside chat route hooks", () => {
     expect(apiSource).toContain("/messages");
     expect(apiSource).toContain("/messages/edit-resubmit");
     expect(apiSource).toContain("/messages/regenerate");
@@ -62,15 +62,19 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("/guidance");
     expect(apiSource).toContain("/attachments");
     expect(apiSource).toContain("/llm-options");
-    expect(apiSource).toContain("/reasoning-effort");
+    expect(apiSource).toContain("/model-parameters");
+    expect(apiSource).toContain("expectedAgentId");
+    expect(apiSource).toContain("expectedModelRef");
     expect(composerSource).toContain("submitSessionMessage");
     expect(composerSource).toContain("editResubmitSessionMessage");
     expect(composerSource).toContain("regenerateSessionMessage");
     expect(composerSource).toContain("stopSessionTurn");
     expect(composerSource).toContain("submitSessionGuidance");
     expect(composerModelSource).toContain("postSessionImageAttachment");
-    expect(mutationSource).toContain("updateSessionReasoningEffort");
+    expect(mutationSource).toContain("updateSessionModelParameters");
     expect(routeSource).toContain("fetchSessionLlmOptions");
+    expect(routeSource).toContain("expectedAgentId: options.agentId");
+    expect(routeSource).not.toContain("updateSessionReasoningEffort");
     expect(composerSource).not.toContain("/api/sessions/");
     expect(composerModelSource).not.toContain("/api/sessions/");
     expect(mutationSource).not.toContain("/reasoning-effort");

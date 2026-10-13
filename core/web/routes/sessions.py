@@ -40,6 +40,7 @@ from core.web.routes.session_side_models import (
 from core.web.routes.session_turn_models import (
     SessionAttachmentResponse,
     SessionLlmOptionsResponse,
+    SessionModelParametersPayload,
     SessionTurnCommandResponse,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -71,6 +72,7 @@ from core.web.services.session_service import (
     SessionIdempotencyConflictError,
     SessionIdempotencyReplayGoneError,
     SessionMessageCurationStateError,
+    SessionModelParametersConflictError,
     SessionModelSelectionError,
     SessionNotFoundError,
     SessionRewindConflictError,
@@ -109,6 +111,7 @@ from core.web.services.session_service import (
     update_chat_session,
     update_chat_session_title,
     update_session_reasoning_effort,
+    update_session_model_parameters,
     preview_session_rewind,
     apply_session_rewind,
 )
@@ -617,6 +620,32 @@ def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEf
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/sessions/{session_id}/model-parameters",
+    response_model=SessionLlmOptionsResponse,
+    response_model_exclude_unset=True,
+)
+def session_model_parameters_update(
+    session_id: str,
+    payload: SessionModelParametersPayload,
+) -> dict:
+    try:
+        return update_session_model_parameters(
+            session_id,
+            expected_agent_id=payload.expectedAgentId,
+            expected_model_ref=payload.expectedModelRef,
+            expected_config_revision=payload.expectedConfigRevision,
+            context_window=payload.contextWindow,
+            reasoning_effort=payload.reasoningEffort,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionModelParametersConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

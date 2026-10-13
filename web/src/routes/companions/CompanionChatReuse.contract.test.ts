@@ -81,7 +81,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
     expect(chatSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined");
     expect(chatSource).toContain("permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent");
-    expect(chatSource).toContain("llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl");
+    expect(chatSource).toContain("llmControl: undefined");
+    expect(chatSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl");
     expect(chatSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
     expect(chatSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
     expect(chatSource).toContain("statusRail={verifiedCompanionMode ? (");

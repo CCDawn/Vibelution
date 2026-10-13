@@ -3,8 +3,9 @@ import { useRef, type Dispatch, type SetStateAction } from "react";
 
 import { resolveAgentToolGovernanceRequest } from "../../api/agents";
 import {
+  isFetchJsonHttpError,
   resolveSessionToolApprovalDecision,
-  updateSessionReasoningEffort,
+  updateSessionModelParameters,
   type SessionToolApprovalDecision,
 } from "../../api/chat";
 import { postPetAction } from "../../api/pet";
@@ -14,11 +15,10 @@ import type {
   PetActionResponse,
   SessionDetail,
   SessionLlmOptions,
+  SessionModelParametersUpdate,
   SessionToolApprovalRequest,
-  SessionSummary,
 } from "../../api/types";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
-import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
@@ -37,10 +37,10 @@ export type UseChatSessionDetailMutationsOptions = {
 };
 
 export type UseChatSessionDetailMutationsResult = {
-  sessionReasoningEffortMutation: UseMutationResult<
+  sessionModelParametersMutation: UseMutationResult<
     SessionLlmOptions,
     Error,
-    { sessionId: string; reasoningEffort: string },
+    { sessionId: string; parameters: SessionModelParametersUpdate },
     unknown
   >;
   loadEarlierSessionMessagesMutation: UseMutationResult<
@@ -64,7 +64,7 @@ export type UseChatSessionDetailMutationsResult = {
 };
 
 /**
- * Session-detail local mutations: reasoning effort, history paging,
+ * Session-detail local mutations: Agent model parameters, history paging,
  * and tool-approval resolve. No EventSource ownership.
  */
 export function useChatSessionDetailMutations({
@@ -77,28 +77,47 @@ export function useChatSessionDetailMutations({
 }: UseChatSessionDetailMutationsOptions): UseChatSessionDetailMutationsResult {
   const approvalOperationSequence = useRef(0);
   const approvalOperations = useRef(new Map<string, number>());
-  const sessionReasoningEffortMutation = useMutation({
-    mutationFn: (variables: { sessionId: string; reasoningEffort: string }) =>
-      updateSessionReasoningEffort(variables.sessionId, variables.reasoningEffort),
-    onMutate: (variables) => {
-      setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
-    },
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const sessionModelParametersMutation = useMutation({
+    mutationFn: (variables: { sessionId: string; parameters: SessionModelParametersUpdate }) =>
+      updateSessionModelParameters(variables.sessionId, variables.parameters),
     onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.sessionLlmOptions(variables.sessionId), payload);
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) => current ? {
-        ...current,
-        reasoningEffort: payload.currentReasoningEffort,
-      } : current);
-      updateSessionSummaryCaches(queryClient, (sessions: SessionSummary[] | undefined) => sessions?.map((session) => session.id === variables.sessionId ? {
-        ...session,
-        reasoningEffort: payload.currentReasoningEffort,
-      } : session));
+      const expected = variables.parameters;
+      const key = queryKeys.sessionLlmOptions(variables.sessionId);
+      let cacheMatched = false;
+      if (
+        activeSessionIdRef.current === variables.sessionId
+        && payload.sessionId === variables.sessionId
+        && payload.agentId === expected.expectedAgentId
+        && payload.model?.modelRef === expected.expectedModelRef
+      ) {
+        queryClient.setQueryData<SessionLlmOptions>(key, (current) => {
+          if (
+            !current
+            || current.agentId !== expected.expectedAgentId
+            || current.model?.modelRef !== expected.expectedModelRef
+            || current.configRevision !== expected.expectedConfigRevision
+          ) {
+            return current;
+          }
+          cacheMatched = true;
+          return payload;
+        });
+      }
+      if (activeSessionIdRef.current === variables.sessionId && !cacheMatched) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
     },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, lang === "zh" ? "思考强度切换失败" : "Failed to change reasoning effort"),
-      }));
+    onError: (_error, variables) => {
+      const isRevisionConflict = isFetchJsonHttpError(_error) && _error.status === 409;
+      if (isRevisionConflict && activeSessionIdRef.current === variables.sessionId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionLlmOptions(variables.sessionId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      }
     },
   });
 
@@ -209,7 +228,7 @@ export function useChatSessionDetailMutations({
   });
 
   return {
-    sessionReasoningEffortMutation,
+    sessionModelParametersMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
