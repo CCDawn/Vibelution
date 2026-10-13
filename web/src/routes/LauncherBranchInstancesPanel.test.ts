@@ -108,9 +108,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     // Stop stays a row-level control, never an overflow item.
     expect(panelSource).toMatch(/\{showStop \? \(\s*<VButton[\s\S]{0,400}?askBatchStop\(\[item\.id\], "stop"\)/);
     // Force-stop is tiered by verified process liveness: the inline button
-    // renders for the danger/secondary tiers with the variant (and tooltip)
-    // keyed off the tier, while a backend-verified dead spawn leaves the row
-    // and enters the overflow menu.
+    // renders for the danger/secondary tiers. A row shown as stopped with no
+    // live runtime is hidden. A verified-dead spawn that is not shown as
+    // stopped leaves the row and enters the overflow menu.
     expect(panelSource).toMatch(/\{showForceStop \? \(\s*<VButton[\s\S]{0,400}?variant=\{forceStopTierValue === "danger" \? "danger" : "secondary"\}[\s\S]{0,400}?setForceStopId\(item\.id\)/);
     expect(panelSource).toContain('title={forceStopTierValue === "danger" ? labels.forceStopHint : labels.forceStopStaleHint}');
     expect(panelSource).not.toContain('{ id: "stop"');
@@ -599,21 +599,24 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     });
     const current = instance({ current: true, id: "main", kind: "main", branch: "main" });
 
-    // Reachability is unchanged: any non-current row can still reach the
-    // force-stop confirm dialog, whatever its tier.
+    // Reachability stays true for any non-current row. A stopped row with no
+    // live runtime does not present the button.
     expect(canForceStopInstance(stale)).toBe(true);
     expect(canForceStopInstance(stoppedUnverified)).toBe(true);
     expect(canForceStopInstance(verifiedDead)).toBe(true);
     expect(canForceStopInstance(current)).toBe(false);
-    // Presentation tiers: live signals (runtime or a verified match) keep the
-    // red row button; a stopped row without a verified identity softens to
-    // secondary because the recorded state may be stale; a backend-verified
-    // dead spawn collapses into the overflow menu.
+    // Live or in-flight rows keep the red button. A row shown as stopped,
+    // including a verified match or a verified-dead spawn, hides force-stop.
     expect(forceStopTier(stale)).toBe("danger");
-    expect(forceStopTier(verifiedMatch)).toBe("danger");
-    expect(forceStopTier(stoppedUnverified)).toBe("secondary");
-    expect(forceStopTier(suspiciousMismatch)).toBe("secondary");
-    expect(forceStopTier(verifiedDead)).toBe("menu");
+    expect(forceStopTier(verifiedMatch)).toBe("hidden");
+    expect(forceStopTier(stoppedUnverified)).toBe("hidden");
+    expect(forceStopTier(suspiciousMismatch)).toBe("hidden");
+    expect(forceStopTier(verifiedDead)).toBe("hidden");
+    const failedDead = instance({
+      alive: false,
+      runtime: { ...instance().runtime, lifecycleState: "error", spawnIdentityStatus: "dead" },
+    });
+    expect(forceStopTier(failedDead)).toBe("menu");
   });
 
   it("keeps a force-stop exit for the current/main row while its lifecycle is stuck in error", () => {

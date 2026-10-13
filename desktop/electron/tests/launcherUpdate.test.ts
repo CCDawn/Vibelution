@@ -46,10 +46,20 @@ describe("guarded local Launcher update", () => {
     expect(input.scheduleReplacement).not.toHaveBeenCalled();
   });
 
-  it("still rejects an unknown owner state for an operator update", async () => {
+  it("lets an operator update continue when task status cannot be confirmed", async () => {
     const input = { ...updateInputs({ state: "unknown", message: "" }), interruptActiveWork: true };
-    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: false, code: "active_work_status_unavailable" });
-    expect(input.stopWorkspaces).not.toHaveBeenCalled();
+    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: true });
+    expect(input.prepare).toHaveBeenCalledOnce();
+    expect(input.stopWorkspaces).toHaveBeenCalledOnce();
+    expect(input.scheduleReplacement).toHaveBeenCalledOnce();
+  });
+
+  it("lets an operator update continue when the task probe rejects", async () => {
+    const input = { ...updateInputs(), interruptActiveWork: true };
+    input.activeWork.mockRejectedValue(new Error("offline"));
+    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: true });
+    expect(input.stopWorkspaces).toHaveBeenCalledOnce();
+    expect(input.scheduleReplacement).toHaveBeenCalledOnce();
   });
 
   it("keeps windows alive on preparation failure", async () => {

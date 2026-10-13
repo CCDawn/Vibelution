@@ -94,12 +94,17 @@ describe("shared Launcher update topbar", () => {
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
 
-  it("blocks an update when task status cannot be confirmed", async () => {
+  it("keeps operator update available when task status cannot be confirmed", async () => {
     api.getLauncherFreshness.mockResolvedValue({ ...available, activeWorkState: "unknown" });
     await mount();
     await click("有新版本 · 请更新");
-    expect(button("更新并重启").disabled).toBe(true);
-    expect(api.restartLatestLauncher).not.toHaveBeenCalled();
+    expect(button("更新并重启").disabled).toBe(false);
+    expect(document.body.textContent).toContain("暂时无法确认任务状态");
+    expect(document.body.textContent).not.toContain("更新已暂停");
+    await click("更新并重启");
+    expect(button("确认更新").disabled).toBe(false);
+    await click("确认更新");
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
 
   it("allows confirmation using cached freshness while a background read is pending", async () => {
