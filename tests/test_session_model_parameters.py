@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
 from core.web.services import session_service
 
 
-def test_llm_options_model_and_parameters_share_one_agent_revision(monkeypatch):
+@pytest.mark.parametrize("runtime_effort", ["high", ""])
+def test_llm_options_model_and_parameters_share_one_agent_revision(monkeypatch, runtime_effort):
     from core.web.services.session import agent_runtime
 
     old = {
@@ -25,6 +27,7 @@ def test_llm_options_model_and_parameters_share_one_agent_revision(monkeypatch):
     monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda *_args: "agent-a")
     monkeypatch.setattr(session_service, "get_agent", read_agent)
+    monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *_args: SimpleNamespace(reasoning_effort_requested=runtime_effort))
     monkeypatch.setattr(session_service, "_session_llm_model_choices", lambda: [
         {"modelId": ref, "modelRef": ref, "reasoningEffortValues": ["low", "high"], "defaultReasoningEffort": "low"}
         for ref in ("provider/model-a", "provider/model-b")
@@ -40,7 +43,7 @@ def test_llm_options_model_and_parameters_share_one_agent_revision(monkeypatch):
     assert result["model"]["modelRef"] == "provider/model-a"
     assert result["configRevision"] == 4
     assert result["contextWindow"] == 64000
-    assert result["currentReasoningEffort"] == "high"
+    assert result["currentReasoningEffort"] == runtime_effort
 
 
 def _patch_update_dependencies(monkeypatch, *, agent_id="agent-a", model_ref="provider/model-a"):

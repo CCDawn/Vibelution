@@ -102,7 +102,7 @@ describe("ConversationTurnModelControl", () => {
     expect(validateModelContextWindow("", 128_000, "en").error).toBe("Enter a positive integer");
   });
 
-  it("saves only a valid context value and the current model's reasoning level", async () => {
+  it.each(["low", ""])("preserves reasoning %s when changing only context", async (reasoningEffort) => {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -120,7 +120,7 @@ describe("ConversationTurnModelControl", () => {
               model={luna}
               contextWindow={64_000}
               maxContextWindow={128_000}
-              currentReasoningEffort="low"
+              currentReasoningEffort={reasoningEffort}
               onSave={onSave}
             />
           </QueryClientProvider>,
@@ -153,7 +153,7 @@ describe("ConversationTurnModelControl", () => {
       });
       expect(saveButton()?.disabled).toBe(false);
       await act(async () => saveButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-      expect(onSave).toHaveBeenCalledWith({ contextWindow: 32_000, reasoningEffort: "low" });
+      expect(onSave).toHaveBeenCalledWith({ contextWindow: 32_000, reasoningEffort });
       expect(document.body.textContent).not.toContain("选择模型");
     } finally {
       await act(async () => root.unmount());

@@ -664,8 +664,6 @@ export type UseChatComposerTurnMutationsOptions = {
   setSessionReferenceAttachments: Dispatch<SetStateAction<Record<string, SessionReferenceAttachment[]>>>;
   setSessionEditTargets: Dispatch<SetStateAction<Record<string, ChatEditTarget>>>;
   companionAgentId?: string;
-  /** Synchronous Agent-scoped settings-save gate; omitted on other surfaces. */
-  isModelParametersSavePending?: () => boolean;
 };
 
 /**
@@ -1793,6 +1791,8 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   setRuntimeStatusEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   companionAgentId?: string;
+  /** Synchronous Agent-scoped settings-save gate; omitted on other surfaces. */
+  isModelParametersSavePending?: () => boolean;
 };
 
 export type UseChatComposerSubmitActionsResult = {

@@ -325,6 +325,14 @@ def get_session_llm_options(session_id: str) -> dict[str, Any]:
             else ""
         )
         try:
+            resolved = s._resolve_session_agent_llm(agent, "dialogue")
+            resolved_effort = s.normalize_reasoning_effort(resolved.reasoning_effort_requested)
+            current_reasoning_effort = resolved_effort if resolved_effort in supported_efforts else ""
+        except s.SessionValidationError:
+            # Keep metadata readable while an incomplete model configuration
+            # is being repaired through the existing Agent management surface.
+            pass
+        try:
             context_payload = s._conversation_agent_dialogue_context_window_payload(
                 s.get_config(),
                 {"agentId": agent_id, "_agent": agent},

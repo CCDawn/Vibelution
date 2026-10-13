@@ -47,6 +47,7 @@ export function InteractiveCatalog() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [modelParameters, setModelParameters] = useState({ contextWindow: 64000, reasoningEffort: "medium" });
 
   return (
     <VuiPreviewSection title="Interactive">
@@ -68,7 +69,14 @@ export function InteractiveCatalog() {
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTurnModelControl">
         <ConversationTurnModelControl
+          sessionId="preview-session"
+          agentId="preview-agent"
+          configRevision={1}
           model={turnModelChoices[0]}
+          contextWindow={modelParameters.contextWindow}
+          maxContextWindow={128000}
+          currentReasoningEffort={modelParameters.reasoningEffort}
+          onSave={setModelParameters}
         />
       </VuiPreviewCard>
       <VuiPreviewCard name="VRouteLinkButton">

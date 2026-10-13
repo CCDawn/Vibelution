@@ -72,14 +72,16 @@ export function ConversationTurnModelControl({
   const supportedEfforts = model?.reasoningEffortValues ?? [];
   const normalizedEffort = supportedEfforts.includes(currentReasoningEffort)
     ? currentReasoningEffort
-    : supportedEfforts.includes(model?.defaultReasoningEffort ?? "")
-      ? model?.defaultReasoningEffort ?? ""
-      : supportedEfforts[0] ?? "";
-  const effectiveEffort = normalizedEffort || currentReasoningEffort;
+    : "";
+  const effectiveEffort = normalizedEffort;
+  const defaultEffortKey = "__model_default__";
   const effortOptions = supportedEfforts.map((value) => ({
     id: value,
     label: model?.reasoningEffortOptions?.find((option) => option.value === value)?.label || value,
   }));
+  if (!effectiveEffort && supportedEfforts.length) {
+    effortOptions.unshift({ id: defaultEffortKey, label: zh ? "默认" : "Default" });
+  }
   const maximumLabel = maxContextWindow > 0
     ? maxContextWindow.toLocaleString(zh ? "zh-CN" : "en-US")
     : "";
@@ -88,6 +90,7 @@ export function ConversationTurnModelControl({
   const contextWindowValid = contextValidation.valid;
   const contextWindowError = dirty ? contextValidation.error : "";
   const reasoningEffortValid = supportedEfforts.length === 0
+    || reasoningEffortDraft === ""
     || supportedEfforts.includes(reasoningEffortDraft);
   const canConfigure = Boolean(
     agentId
@@ -199,13 +202,13 @@ export function ConversationTurnModelControl({
               <span className={styles.fieldHeader}>{zh ? "思考强度" : "Reasoning effort"}</span>
               <VSelect
                 options={effortOptions}
-                selectedKey={reasoningEffortDraft || effectiveEffort}
+                selectedKey={reasoningEffortDraft || defaultEffortKey}
                 isDisabled={pending}
                 aria-label={zh ? "思考强度" : "Reasoning effort"}
                 data-vui="model-reasoning-effort-select"
                 onSelectionChange={(key) => {
                   if (key === null) return;
-                  setReasoningEffortDraft(String(key));
+                  setReasoningEffortDraft(key === defaultEffortKey ? "" : String(key));
                   setDirty(true);
                 }}
               />

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -156,6 +157,7 @@ def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest
         },
     )
     monkeypatch.setattr(session_service, "_session_agent_reasoning_effort", lambda _agent: "high")
+    monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *_args: SimpleNamespace(reasoning_effort_requested="high"))
     monkeypatch.setattr(
         session_service,
         "_conversation_agent_dialogue_context_window_payload",
@@ -205,6 +207,7 @@ def test_session_llm_options_chain_ensures_and_loads_chat_state_once(monkeypatch
     )
     monkeypatch.setattr(session_service, "_session_llm_model_choices", _model_choices)
     monkeypatch.setattr(session_service, "_session_agent_reasoning_effort", lambda _agent: "")
+    monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *_args: SimpleNamespace(reasoning_effort_requested="medium"))
     monkeypatch.setattr(
         session_service,
         "_conversation_agent_dialogue_context_window_payload",
