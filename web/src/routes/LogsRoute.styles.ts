@@ -15,7 +15,6 @@ import {
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
-  vuiRailFillClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
@@ -73,7 +72,7 @@ const styles = {
   filterGroup:
     "filterGroup min-w-0 inline-flex w-fit max-w-full flex-wrap items-center gap-1.5",
   header:
-    "header min-w-0 flex flex-wrap items-center gap-1.5",
+    "header min-w-0",
   headerMeta:
     "headerMeta min-w-0 flex flex-wrap items-center gap-1.5",
   logPreviewStack:
@@ -135,7 +134,7 @@ const styles = {
     "panelSearchInput min-w-0 flex-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   previewActions: `previewActions min-w-0 flex flex-wrap items-center gap-1.5 ${vuiFlatPanelClass} p-1.5`,
   previewPane:
-    "previewPane min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 grid min-h-0 grid-rows-[minmax(0,1fr)] gap-1.5 overflow-auto overflow-x-hidden",
+    "previewPane min-w-0 max-w-full p-1.5 grid min-h-0 grid-rows-[minmax(0,1fr)] gap-1.5 overflow-auto overflow-x-hidden",
   previewStateFlow: `previewStateFlow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-1 max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]`,
   previewStateHeader:
     "previewStateHeader min-w-0 flex flex-wrap items-center gap-1.5",
@@ -180,7 +179,7 @@ const styles = {
   rootStateMissing:
     "rootStateMissing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_9%,transparent)] text-[var(--state-warning)]",
   route:
-    `route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
+    "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
   sceneCardButton:
     `sceneCardButton min-w-0 ${vuiControlQuietClass}`,
   sceneCardMeta: `sceneCardMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
@@ -195,7 +194,7 @@ const styles = {
   selectionToolbar:
     "selectionToolbar min-w-0 flex flex-wrap items-center gap-1",
   sidebar:
-    `sidebar min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden max-[760px]:max-h-[34vh] ${vuiRailFillClass}`,
+    "sidebar min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden max-[760px]:max-h-[34vh]",
   sidebarEyebrow:
     "sidebarEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sidebarHeader:

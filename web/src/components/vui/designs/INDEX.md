@@ -83,6 +83,7 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `VPage` | [layout/pages.md](./layout/pages.md#vpage) |
+| `VWorkbenchFrame` | [layout/pages.md](./layout/pages.md#vworkbenchframe) |
 | `VWorkbenchPage` | [layout/pages.md](./layout/pages.md#vworkbenchpage) |
 | `VDenseOpsPage` | [layout/pages.md](./layout/pages.md#vdenseopspage) |
 | `VListDetailPage` | [layout/pages.md](./layout/pages.md#vlistdetailpage) |

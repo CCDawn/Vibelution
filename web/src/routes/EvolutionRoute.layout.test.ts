@@ -354,6 +354,21 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain("runRecordIdentity");
   });
 
+  it("keeps Evolution panes on the shared workbench frame while preserving detail scrolling and saved widths", () => {
+    expect(routeSource).toContain('chrome="workspace"');
+    expect(routeSource).toContain("usePersistedPaneResize");
+    expect(routeSource).toContain('"runs-queue": EVOLUTION_RUNS_QUEUE_WIDTH_KEY');
+    expect(routeSource).toContain('"library-list": EVOLUTION_LIBRARY_LIST_WIDTH_KEY');
+    expect(routeSource).toContain('data-vui-layout-id={EVOLUTION_LAYOUT_ID}');
+
+    expect(runRecordsPanelSource).toContain("VUI_WORKBENCH_PANE_CLASS");
+    expect(runRecordsPanelSource).toContain("${styles.runDetailPanel} min-h-0 min-w-0 flex-1");
+    expect(runRecordsPanelStyles.runDetailPanel).toContain("[overflow:auto]");
+    expect(supervisedLibraryViewSource).toContain("${VUI_WORKBENCH_PANE_CLASS} min-h-0 min-w-0 flex flex-col");
+    expect(supervisedLibraryViewSource).toContain("${styles.detailPanel} min-h-0 min-w-0 flex-1");
+    expect(routeStyles.detailPanel).toContain("[overflow:auto]");
+  });
+
   it("keeps run records as a dense queue/detail work surface instead of a card wall", () => {
     expect(runRecordsPanelStylesSource).not.toContain("surface-card");
     expect(runRecordsPanelStyles.surface).toContain("[border-radius:8px]");

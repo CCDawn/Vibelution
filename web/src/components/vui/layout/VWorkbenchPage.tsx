@@ -4,8 +4,10 @@ import { cn } from "../lib/cn";
 import { VUI_PAGE_FILL_CLASS, VUI_PAGE_STACK_FILL_CLASS } from "./pageRecipeClasses";
 
 export type VWorkbenchPageFillLayout = "header-body" | "stack";
+export type VWorkbenchPageChrome = "surface" | "workspace";
 
 export type VWorkbenchPageProps = ComponentPropsWithoutRef<"section"> & {
+  chrome?: VWorkbenchPageChrome;
   ariaLabel?: string;
   children: ReactNode;
   /**
@@ -79,6 +81,7 @@ export const VWorkbenchPage = forwardRef<HTMLElement, VWorkbenchPageProps>(funct
     className,
     fill = false,
     fillLayout = "header-body",
+    chrome = "surface",
     ...props
   },
   ref,
@@ -96,6 +99,7 @@ export const VWorkbenchPage = forwardRef<HTMLElement, VWorkbenchPageProps>(funct
       {...props}
       ref={ref}
       data-vui="workbench-page"
+      data-vui-page={chrome}
       data-fill={fill ? "true" : "false"}
       data-fill-layout={fill ? fillLayout : undefined}
       aria-label={ariaLabel}

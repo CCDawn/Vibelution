@@ -2844,7 +2844,7 @@ export function AgentsRoute() {
 
   return (
     // Domain shell: list-detail recipe lives in AgentWorkspaceLayoutPanel.
-    <div className={styles.routeHost} data-vui-recipe="agents-management-workbench">
+    <div className={styles.routeHost} data-vui-page="workspace" data-vui-recipe="agents-management-workbench">
       <AgentWorkspaceLayoutPanel
         className={styles.route}
         ariaLabel={copy.title}

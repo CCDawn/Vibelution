@@ -414,7 +414,7 @@ const styles = {
   truncateText:
     "min-w-0 [max-width:100%] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
   viewStack:
-    "grid [gap:16px] [align-content:start] min-h-0 [overflow:auto] [padding-right:4px]",
+    "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] content-stretch gap-2 overflow-hidden max-[900px]:h-auto max-[900px]:grid-rows-none max-[900px]:overflow-auto",
   workflowStepButton:
     "!grid w-full [grid-template-columns:minmax(0,_1fr)] [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:7px] [background:var(--vui-surface-row)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_var(--vui-alpha-line-strong),_var(--vui-border-subtle))] hover:[background:var(--vui-surface-row-hover)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_var(--vui-alpha-line-strong),_var(--vui-border-subtle))] focus-visible:[background:var(--vui-surface-row-hover)] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
   workflowStepButtonActive:

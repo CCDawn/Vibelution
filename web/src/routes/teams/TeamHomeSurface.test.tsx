@@ -140,6 +140,9 @@ describe("TeamHomeSurface", () => {
   it("shows recent round messages through the shared group renderer and links to the room", () => {
     const html = renderSurface();
 
+    expect(html).toContain('data-vui-region="team-home-surface"');
+    expect(html).toContain("vui-workbench-toolbar");
+    expect(html).toContain("vui-workbench-rail");
     expect(html).toContain("完整发言");
     expect(html).toContain("顾言初");
     expect(html).toContain("打开群聊");

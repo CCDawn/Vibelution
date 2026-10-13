@@ -60,6 +60,10 @@ describe("Usage settings page", () => {
     expect(settingsSource).toContain('to="/usage"');
     expect(styles.page).toContain("overflow-y-auto");
     expect(styles.metrics).toContain("max-[700px]:grid-cols-2");
+    expect(routeSource).toContain('data-vui-page="surface"');
+    expect(styles.sheet).toContain("max-w-[1120px]");
+    expect(styles.sheet).toContain("px-10 py-7");
+    expect(styles.sheet).not.toMatch(/rounded-|border|bg-/);
   });
   it("defaults to seven days and switches all metrics without using latest-call source as global state", async () => {
     await render();

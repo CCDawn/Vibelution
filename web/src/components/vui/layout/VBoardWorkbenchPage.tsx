@@ -83,6 +83,7 @@ export function VBoardWorkbenchPage({
 
   return (
     <VWorkbenchPage
+      chrome="workspace"
       ariaLabel={ariaLabel}
       data-vui-recipe="board-workbench-page"
       data-vui-domain-recipe={domainRecipe}
@@ -102,6 +103,7 @@ export function VBoardWorkbenchPage({
       )}
       <div data-vui="board-workbench-body" className={cn(VUI_PAGE_BODY_FILL_CLASS, "min-h-0 flex-1")}>
         <VSplitWorkspace
+          chrome="workbench"
           className={cn("h-full min-h-0", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}

@@ -4,7 +4,16 @@ import { ArrowUpRight, GitBranch, MessageSquare, Play, Square } from "lucide-rea
 
 import { queryKeys } from "../../api/queryKeys";
 import type { ChatRoomDetail, ChatRoomMessage, ChatRoomRound, Team } from "../../api/types";
-import { VButton, VConfirmDialog, VRouteLinkButton, VStateSurface, VStatusChip, VTextarea } from "../../components/vui";
+import {
+  VButton,
+  VConfirmDialog,
+  VRouteLinkButton,
+  VStateSurface,
+  VStatusChip,
+  VTextarea,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_WORKBENCH_TOOLBAR_CLASS,
+} from "../../components/vui";
 import { ChatGroupMessageBody } from "../chat/ChatGroupMessagePresentation";
 import { useGroupRoomTimeline } from "../chat/useGroupRoomTimeline";
 import { DevTeamTaskBoard, speakingTeamMemberIdFromRoom } from "./DevTeamTaskBoard";
@@ -261,8 +270,8 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   };
 
   return (
-    <div className={styles.frame} data-testid="team-home-surface">
-      <header className={styles.header}>
+    <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
+      <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header}`}>
         <div className={styles.headerCopy}>
           <p className={styles.eyebrow}>{lang === "zh" ? "当前任务" : "Current task"}</p>
           <h2 className={styles.title}>{currentTitle}</h2>
@@ -338,7 +347,7 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
           </section>
         </div>
 
-        <aside className={styles.actionRail}>
+        <aside className={`${VUI_WORKBENCH_RAIL_CLASS} ${styles.actionRail}`}>
           <section aria-labelledby="team-home-round-action">
             <h3 id="team-home-round-action" className={styles.sectionTitle}>
               {linkedRoomBusy ? (lang === "zh" ? "本轮正在运行" : "Round in progress") : (lang === "zh" ? "开始下一轮" : "Start next round")}

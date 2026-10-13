@@ -19,13 +19,26 @@
 
 ### 工作台外壳（用户批准的 A）
 
-AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workbench-shell.css` 承载外框：灰色 shell 底色、桌面左右与底部 4px 留白（700px 以下 2px）、白色对话表面、12px 外圆角和弱边界。外壳不改变页面内部列表、画布、表单、导航或宽度记忆；内部滚动继续归各 recipe 所有，简单页与用量页保留根滚动。
+AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workbench-frame.css` 承载外框：灰色 shell 底色、桌面左右与底部 4px 留白（700px 以下 2px）、白色对话表面、12px 外圆角和弱边界。外壳不改变页面内部列表、画布、表单、导航或宽度记忆；内部滚动继续归各 recipe 所有，简单页与用量页保留根滚动。
 
-分栏页的页面根保持灰色，最外层 VSplitWorkspace 的 main / aside 各自使用白色 12px 圆角，sidebar 与顶栏同灰；不得将所有列圈进第二个白色大框。仅匹配路由内没有 split 祖先的最外层 split，嵌套编辑器和画布不重复套框。窄屏设置页保留根滚动以容纳竖向排列的表单。
+分栏页的页面根保持灰色，最外层 VSplitWorkspace 的 main / aside 各自使用白色 12px 圆角，sidebar 与顶栏同灰；不得将所有列圈进第二个白色大框。页面分栏显式声明 chrome=workbench，嵌套编辑器使用 embedded，不重复套框。窄屏设置页保留根滚动以容纳竖向排列的表单。
 
 圆角衔接由外层 pane 独占：同尺寸的 Board/Canvas/Agent pane-root 不重复画 8px 内框；灰 sidebar 的 recipe 根不保留矩形边框。页级标题不再套第二张圆角卡片；分栏页的页级工具条与外框同灰，白 pane 内的工具条继续与正文相连；Dense 页的页头和正文共用同一白色基底。共享拖动线使用正文色，贴左右 pane 边界且上下各避开 12px 弧段；保留原命中区、键盘和宽度记忆。
 
-选择器仅命中 AppShell 项目 split 的直属路由根，同时支持 connection-notice 的 `workbench-content-frame` 宿主。不得匹配嵌套工作台、弹窗或已独立实现圆角边界的主会话壳。非 VUI route root 使用已有 `data-vui-domain-recipe` / `data-vui-recipe` 登记，避免依靠业务 class 名或给所有后代 section 统一背景。用量页标记为 `usage-workbench`。
+壳的唯一入口是 AppShell / LauncherShell 中常驻的 `VWorkbenchFrame`。页根由 `data-vui-page="surface|workspace|session"` 显式声明；公共页框不再根据域名或 `:has()` 推断内部布局。`VWorkbenchPage` / `VPage` 自动登记，少量已有自定义根使用相同标记。简单滚动页和窄屏设置通过 `data-vui-page-scroll="true"` 保留根滚动。
+
+窗口 pane 的圆角使用 `--vui-workbench-radius`（12px），与内部卡片的 `--vui-radius-panel-soft`（8px）分开；不要修改卡片 token 来对齐窗口。`VSplitWorkspace chrome="workbench"` 绘制公共栏位，默认 `embedded` 保留内层编辑器/画布语义。List/Board/Canvas recipes 自动采用公共栏位；自定义尺寸控制器可用 `VUI_WORKBENCH_PANE_CLASS` / `VUI_WORKBENCH_RAIL_CLASS` / `VUI_WORKBENCH_TOOLBAR_CLASS`，不得为复用外观增加第二个 resize hook。颜色、圆角、边框、裁切和拖杆规则唯一落在 `design/workbench-frame.css`。
+
+## VWorkbenchFrame
+
+持久的窗口内容宿主（`data-vui="workbench-frame"`），位于 Outlet 和其 Suspense 外。AppShell 与 LauncherShell 是两个实际消费者。children 是路由正文，不缓存、不保留已离开的业务页面，不管理 Session、查询或尺寸持久化。
+
+| Prop | 说明 |
+| --- | --- |
+| children | 内容页、加载态或错误态，均沿用相同宿主 |
+| flush | 会话 recipe 自己拥有 4px inset 时使用；不重复增加边距 |
+
+Frame 用 memo，消费者提供稳定的 Outlet 元素，以隔离全局状态轮询引起的父级更新；React Router context 和正文自己的状态更新仍正常传播。验证必须同时证明无关父级更新不重绘正文、导航仍切页、正文状态仍更新以及 frame DOM 节点保留。
 
 ---
 

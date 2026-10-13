@@ -41,7 +41,24 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTabs, VTooltip } from "../components/vui";
+import {
+  cn,
+  VActionGroup,
+  VButton,
+  VConfirmDialog,
+  VDenseOpsPage,
+  VIconButton,
+  VNativeButton,
+  VNativeInput,
+  VStateSurface,
+  VStatusStrip,
+  VSurface,
+  VTabs,
+  VTooltip,
+  VUI_WORKBENCH_PANE_CLASS,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_WORKBENCH_TOOLBAR_CLASS,
+} from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
 import { paneWidthCssVar } from "../components/layout/paneCssVariables";
@@ -837,8 +854,9 @@ export function LogsRoute() {
 
   return (
     <VDenseOpsPage
+      chrome="workspace"
       className={styles.route}
-      headerClassName={styles.header}
+      headerClassName={`${styles.header} ${VUI_WORKBENCH_TOOLBAR_CLASS}`}
       data-vui-domain-recipe="logs-workbench"
       ariaLabel={t("logsSubtitle")}
       eyebrow={t("navLogs")}
@@ -880,7 +898,7 @@ export function LogsRoute() {
               as="aside"
               tone="rail"
               padding="none"
-              className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar}
+              className={cn(styles.sidebar, VUI_WORKBENCH_RAIL_CLASS, sidebarCollapsed && styles.paneCollapsed)}
               aria-hidden={sidebarCollapsed}
             >
               <div className={styles.sidebarHeader}>
@@ -1066,7 +1084,7 @@ export function LogsRoute() {
               onKeyDown={handleResizeKeyDown}
             />
 
-            <section className={styles.previewPane}>
+            <section className={`${styles.previewPane} ${VUI_WORKBENCH_PANE_CLASS}`}>
               {!activeRoot ? (
                 renderLogPreviewState({
                   title: t("loadingLogs"),
@@ -1234,7 +1252,7 @@ export function LogsRoute() {
           as="aside"
           tone="rail"
           padding="none"
-          className={rightRailCollapsed ? `${styles.rightRail} ${styles.paneCollapsed}` : styles.rightRail}
+          className={cn(styles.rightRail, VUI_WORKBENCH_PANE_CLASS, rightRailCollapsed && styles.paneCollapsed)}
           aria-hidden={rightRailCollapsed}
         >
           <div className={styles.railHeader}>

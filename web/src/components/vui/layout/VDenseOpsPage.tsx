@@ -4,10 +4,11 @@ import { cn } from "../lib/cn";
 import { VEmptyState } from "./VEmptyState";
 import { VRouteHeader } from "./VRouteHeader";
 import { VToolbar } from "./VToolbar";
-import { VWorkbenchPage } from "./VWorkbenchPage";
+import { VWorkbenchPage, type VWorkbenchPageChrome } from "./VWorkbenchPage";
 import { VUI_PAGE_BODY_FILL_CLASS } from "./pageRecipeClasses";
 
 export type VDenseOpsPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
+  chrome?: VWorkbenchPageChrome;
   ariaLabel?: string;
   eyebrow?: ReactNode;
   title?: ReactNode;
