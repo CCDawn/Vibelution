@@ -2,7 +2,7 @@ const border = "border-[var(--vui-border-subtle)]";
 const muted = "text-[var(--fg-tertiary)]";
 
 export default {
-  page: "grid min-w-0 content-start gap-3 p-3 lg:p-4",
+  page: "grid min-w-0 content-start gap-3",
   heading: "flex min-w-0 items-center justify-between gap-2 [&_h1]:m-0 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:text-[var(--fg-primary)]",
   grid: "grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(17rem,1fr)]",
   mainColumn: "grid min-w-0 content-start gap-3",

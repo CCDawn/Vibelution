@@ -204,7 +204,17 @@ export function KernelTaskCenterRoute() {
       {describeError(taskQuery.error, copy.loadFailed)}
     </VStateSurface>
   ) : taskQuery.isLoading ? (
-    <ProgressiveRegionSkeleton variant="list" label={copy.loading} className={styles.loadingRegionClass} />
+    <div className={styles.loadingRegionClass} role="status" aria-busy="true">
+      <span className={styles.srOnlyClass}>{copy.loading}</span>
+      <div className={styles.taskLoadingStackClass} aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className={styles.taskLoadingRowClass}>
+            <span className={styles.taskLoadingTitleClass} />
+            <span className={styles.taskLoadingMetaClass} />
+          </div>
+        ))}
+      </div>
+    </div>
   ) : tasks.length === 0 ? (
     <VStateSurface fill className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty" />
   ) : (

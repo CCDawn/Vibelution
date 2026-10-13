@@ -121,7 +121,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toMatch(/import \{ LauncherDiagnosticsPanel \} from/);
     expect(routeSource).toContain("<Suspense");
     expect(routerSource).toContain("const LauncherToolsRoute = lazyRoute");
-    expect(routerSource).toContain('{ path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher") }');
+    expect(routerSource).toContain('{ path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher", "launcher-tools") }');
   });
 
   it("mounts the Launcher as an independent top-level control surface", () => {
@@ -129,7 +129,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routerSource).toContain("const LauncherRoute = lazyRoute");
     expect(routerSource).toContain('path: "/launcher"');
     expect(routerSource).toContain("element: <LauncherShell />");
-    expect(routerSource).toContain('guardedLazyElement(<LauncherRoute />, "launcher")');
+    expect(routerSource).toContain('guardedLazyElement(<LauncherRoute />, "launcher", "launcher")');
     expect(routerSource).not.toContain('{ path: "launcher", element: lazyElement(<LauncherRoute />) }');
     expect(shellSource).toContain("LazyAppShellSettingsMenu");
     // The launcher hand-off lives in the settings gear menu (the retired

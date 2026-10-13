@@ -1328,7 +1328,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps the routed team knowledge workbench reachable from the knowledge view", () => {
-    expect(routerSource).toContain('path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />)');
+    expect(routerSource).toContain('path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />, "workbench", "memory-knowledge")');
     expect(routeSource).toContain("renderKnowledgeView()");
     expect(routeSource.indexOf("? renderKnowledgeView()")).toBeLessThan(routeSource.indexOf("? createTeamBrowsePanel()"));
     expect(routeSource).toContain("styles.knowledgeViewStack");

@@ -1,8 +1,8 @@
 export default {
-  page: "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto p-6",
+  page: "flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
   heading: "m-0 text-lg font-semibold",
   card: "grid min-w-0 gap-4 !border !border-[var(--vui-border-subtle)]",
-  field: "grid min-w-0 gap-2 text-xs text-[var(--fg-secondary)]",
+  field: "grid min-w-0 gap-2 text-xs text-[var(--fg-secondary)] [&_textarea]:!h-auto [&_textarea]:!min-h-24",
   actions: "flex min-w-0 flex-wrap items-end gap-3",
   examples: "grid min-w-0 gap-2",
   example: "!h-auto !justify-start !whitespace-normal !py-3 text-left",

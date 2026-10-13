@@ -186,8 +186,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("const hasAnyItems = items.length > 0");
     expect(panelSource).toContain("const showListLoading = (listLoading && !hasAnyItems) || waitingUnmergedMetadata");
     expect(panelSource).toContain("const filteredEmpty = hasAnyItems && visibleItems.length === 0 && !waitingUnmergedMetadata");
-    expect(panelSource).toContain("showListLoading ? <VStateSurface");
-    expect(panelSource).toContain('tone="loading"');
+    expect(panelSource).toContain("showListLoading ? (");
+    expect(panelSource).toContain('data-loading-region="launcher-instance-rows"');
+    expect(panelStyles.instanceLoadingRow).toContain("min-h-11");
+    expect(panelSource).not.toContain('tone="loading"');
     expect(panelSource).toContain(": !hasAnyItems ? <VEmptyState");
     expect(panelSource).toContain("labels.filteredEmptyTitle");
     expect(panelSource).toContain("labels.filteredEmptyHint");

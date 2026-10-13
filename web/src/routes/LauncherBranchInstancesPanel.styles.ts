@@ -39,6 +39,13 @@ const styles = {
   tabHint: "m-0 min-w-0 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
   tabHeaderActions: "ml-auto flex min-w-0 flex-wrap items-center gap-1.5",
   globalEmpty: "mx-7 my-5",
+  srOnly: "sr-only",
+  instanceLoading: "mx-7 my-2 grid min-w-0 content-start gap-1",
+  instanceLoadingRow: "grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2",
+  instanceLoadingBone:
+    "block h-3 w-40 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none",
+  instanceLoadingMeta:
+    "block h-2.5 w-14 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none",
   pager: "inline-flex min-w-0 items-center gap-1.5",
   rangeLabel: "min-w-0 truncate text-[var(--fg-muted)]",
   notice: "min-w-0 flex-auto truncate text-[var(--fg-secondary)]",

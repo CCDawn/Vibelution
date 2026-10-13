@@ -38,6 +38,7 @@ const portraitBlink = "pointer-events-none absolute left-1/2 top-[31%] z-[3] fle
 const onlineDot = "absolute bottom-3 right-3 z-[3] size-2.5 rounded-full border-2 border-vui-surface-rail bg-[var(--state-success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--state-success)_12%,transparent)] data-[compact=true]:bottom-0 data-[compact=true]:right-0";
 const footer = "mx-auto mt-4 flex max-w-[1220px] items-center justify-between gap-5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary max-[760px]:flex-col max-[760px]:items-start";
 const stateHost = "mx-auto max-w-[860px] py-12";
+const srOnly = "sr-only";
 
 export default {
   route,
@@ -80,4 +81,5 @@ export default {
   onlineDot,
   footer,
   stateHost,
+  srOnly,
 } as const;

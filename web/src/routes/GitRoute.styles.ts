@@ -88,6 +88,12 @@ export const gitRouteStyles = {
   fileBadgeSelected:
     "inline-flex min-h-[19px] items-center rounded-full border border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-tint-strong),transparent)] px-1.5 [font-size:var(--vui-font-xs)] leading-none text-[var(--state-success)]",
   diffPanel: "min-h-0 min-w-0",
+  diffLoading: "grid min-h-0 content-start gap-2.5 p-3",
+  diffLoadingLine:
+    "block h-2.5 w-full animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none",
+  diffLoadingLineShort:
+    "block h-2.5 w-[64%] animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none",
+  srOnly: "sr-only",
   objectDetailPanel:
     "min-h-0 min-w-0 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-2 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   emptyPreview:

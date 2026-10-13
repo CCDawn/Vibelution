@@ -28,7 +28,7 @@ export default {
   workspacePlaceholder: "min-h-0 min-w-0 flex-1 px-3",
   workspaceToolbar: `h-11 shrink-0 !justify-between border-b ${border} px-4 !py-0`,
   workspaceGroupTabs: "min-w-0 shrink-0 px-4 py-1.5",
-  workspaceMarketSearch: "min-w-0 shrink-0 px-5 pb-3",
+  workspaceMarketSearch: "min-w-0 shrink-0 px-4 pb-3",
   workspaceMarketToolbar: "gap-3",
   workspaceMarketIcon: "shrink-0 text-vui-fg-tertiary",
   workspaceMarketSelect: "!w-24 shrink-0",

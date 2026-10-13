@@ -157,8 +157,8 @@ export const router = createBrowserRouter([
     element: <LauncherShell />,
     errorElement: routeErrorElement("launcher"),
     children: [
-      { index: true, ...guardedLazyElement(<LauncherRoute />, "launcher") },
-      { path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher") },
+      { index: true, ...guardedLazyElement(<LauncherRoute />, "launcher", "launcher") },
+      { path: "tools", ...guardedLazyElement(<LauncherToolsRoute />, "launcher", "launcher-tools") },
     ],
   },
   {
@@ -194,6 +194,8 @@ export const router = createBrowserRouter([
           <WorkbenchDomainRoute domain="chat">
             <CompanionsRoute />
           </WorkbenchDomainRoute>,
+          "workbench",
+          "companions",
         ),
       },
       {
@@ -205,6 +207,8 @@ export const router = createBrowserRouter([
           <WorkbenchDomainRoute domain="evolution">
             <EvolutionRoute />
           </WorkbenchDomainRoute>,
+          "workbench",
+          "evolution",
         ),
       },
       {
@@ -213,6 +217,8 @@ export const router = createBrowserRouter([
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="live" />
           </WorkbenchModeRoute>,
+          "workbench",
+          "evolution",
         ),
       },
       {
@@ -221,6 +227,8 @@ export const router = createBrowserRouter([
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="runs" />
           </WorkbenchModeRoute>,
+          "workbench",
+          "evolution-runs",
         ),
       },
       {
@@ -229,6 +237,8 @@ export const router = createBrowserRouter([
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="library" />
           </WorkbenchModeRoute>,
+          "workbench",
+          "evolution-library",
         ),
       },
       {
@@ -237,6 +247,8 @@ export const router = createBrowserRouter([
           <WorkbenchModeRoute mode="supervised_evolution">
             <SupervisedReviewRoute />
           </WorkbenchModeRoute>,
+          "workbench",
+          "review",
         ),
       },
       {
@@ -245,30 +257,32 @@ export const router = createBrowserRouter([
           <WorkbenchModeRoute mode="self_evolution">
             <EvolutionRoute forcedTrack="self" />
           </WorkbenchModeRoute>,
+          "workbench",
+          "evolution",
         ),
       },
-      { path: "agents", ...guardedLazyElement(<AgentsRoute />) },
-      { path: "agents/prompts", ...guardedLazyElement(<PromptTemplatesRoute />) },
-      { path: "agents/tools", ...guardedLazyElement(<ToolsRoute />) },
-      { path: "agents/skills", ...guardedLazyElement(<SkillsRoute />) },
-      { path: "memory", ...guardedLazyElement(<MemoryRoute forcedView="personal" />) },
-      { path: "memory/team", ...guardedLazyElement(<MemoryRoute forcedView="team" />) },
-      { path: "memory/library", ...guardedLazyElement(<MemoryRoute forcedView="library" />) },
-      { path: "memory/agents", ...guardedLazyElement(<MemoryRoute forcedView="personal" />) },
-      { path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />) },
-      { path: "memory/manage", ...guardedLazyElement(<MemoryRoute forcedView="manage" />) },
-      { path: "memory/sources", ...guardedLazyElement(<MemoryRoute forcedView="manage" />) },
-      { path: "memory/effective", ...guardedLazyElement(<MemoryRoute forcedView="manage" />) },
-      { path: "memory/cleanup", ...guardedLazyElement(<MemoryRoute forcedView="cleanup" />) },
-      { path: "memory/graph", ...guardedLazyElement(<MemoryRoute forcedView="graph" />) },
+      { path: "agents", ...guardedLazyElement(<AgentsRoute />, "workbench", "agents") },
+      { path: "agents/prompts", ...guardedLazyElement(<PromptTemplatesRoute />, "workbench", "prompts") },
+      { path: "agents/tools", ...guardedLazyElement(<ToolsRoute />, "workbench", "tools") },
+      { path: "agents/skills", ...guardedLazyElement(<SkillsRoute />, "workbench", "skills") },
+      { path: "memory", ...guardedLazyElement(<MemoryRoute forcedView="personal" />, "workbench", "memory-browse") },
+      { path: "memory/team", ...guardedLazyElement(<MemoryRoute forcedView="team" />, "workbench", "memory-cards") },
+      { path: "memory/library", ...guardedLazyElement(<MemoryRoute forcedView="library" />, "workbench", "memory-cards") },
+      { path: "memory/agents", ...guardedLazyElement(<MemoryRoute forcedView="personal" />, "workbench", "memory-browse") },
+      { path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />, "workbench", "memory-knowledge") },
+      { path: "memory/manage", ...guardedLazyElement(<MemoryRoute forcedView="manage" />, "workbench", "memory-ops") },
+      { path: "memory/sources", ...guardedLazyElement(<MemoryRoute forcedView="manage" />, "workbench", "memory-ops") },
+      { path: "memory/effective", ...guardedLazyElement(<MemoryRoute forcedView="manage" />, "workbench", "memory-ops") },
+      { path: "memory/cleanup", ...guardedLazyElement(<MemoryRoute forcedView="cleanup" />, "workbench", "memory-ops") },
+      { path: "memory/graph", ...guardedLazyElement(<MemoryRoute forcedView="graph" />, "workbench", "memory-graph") },
       { path: "teams", ...guardedLazyElement(<TeamsRoute />, "workbench", "teams") },
-      { path: "kernel", ...guardedLazyElement(<KernelTaskCenterRoute />) },
-      { path: "aux", ...guardedLazyElement(<AuxConversationsRoute />) },
-      { path: "git", ...guardedLazyElement(<GitRoute />) },
-      { path: "usage", ...guardedLazyElement(<UsageRoute />) },
-      { path: "logs", ...guardedLazyElement(<LogsRoute />) },
-      { path: "pet", ...guardedLazyElement(<PetRoute />) },
-      { path: "reset", ...guardedLazyElement(<ResetRoute />) },
+      { path: "kernel", ...guardedLazyElement(<KernelTaskCenterRoute />, "workbench", "kernel") },
+      { path: "aux", ...guardedLazyElement(<AuxConversationsRoute />, "workbench", "aux") },
+      { path: "git", ...guardedLazyElement(<GitRoute />, "workbench", "git") },
+      { path: "usage", ...guardedLazyElement(<UsageRoute />, "workbench", "usage") },
+      { path: "logs", ...guardedLazyElement(<LogsRoute />, "workbench", "logs") },
+      { path: "pet", ...guardedLazyElement(<PetRoute />, "workbench", "pet") },
+      { path: "reset", ...guardedLazyElement(<ResetRoute />, "workbench", "reset") },
       { path: "config", ...guardedLazyElement(<ConfigRoute />, "workbench", "config") },
     ],
   },

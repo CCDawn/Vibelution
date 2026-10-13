@@ -711,7 +711,15 @@ export function GitRoute() {
               onKeyDown={handleChangePanelResizeKeyDown}
             />
             {statusInitialLoading ? (
-              <VStateSurface className={styles.diffPanel} tone="loading" title={gitStatusLoading} skeletonLines />
+              <div className={styles.diffPanel} role="status" aria-busy="true">
+                <span className={styles.srOnly}>{gitStatusLoading}</span>
+                <div className={styles.diffLoading} aria-hidden="true">
+                  <span className={styles.diffLoadingLine} />
+                  <span className={styles.diffLoadingLine} />
+                  <span className={styles.diffLoadingLine} />
+                  <span className={styles.diffLoadingLineShort} />
+                </div>
+              </div>
             ) : (
               <VStateSurface
                 className={styles.diffPanel}

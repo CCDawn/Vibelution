@@ -1,9 +1,16 @@
 import { ChatRouteLoadingShell } from "./ChatRouteLoadingShell";
+import { PageFrameLoading, type PageFrameLayout } from "./PageFrameLoadingShell";
 import { FinanceResearchLoading } from "../routes/finance/FinanceResearchFrame";
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
 import styles from "./RouteLoadingShell.styles";
 
-export type RouteLoadingLayout = "chat" | "config" | "default" | "finance" | "teams";
+export type RouteLoadingLayout =
+  | "chat"
+  | "config"
+  | "default"
+  | "finance"
+  | "teams"
+  | PageFrameLayout;
 
 export type RouteLoadingShellProps = {
   label?: string;
@@ -122,6 +129,25 @@ export function RouteLoadingShell({
         label={label ?? "正在加载对话"}
         surface={surface}
       />
+    );
+  }
+  if (layout !== "config" && layout !== "teams" && layout !== "default") {
+    const frameLabel = label ?? (
+      surface === "launcher" ? "正在打开启动器" : "正在打开工作台"
+    );
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        data-vui-app={surface}
+        data-route-loading={layout}
+        className={styles.surfaceQuiet}
+      >
+        <span className={styles.srOnly}>{frameLabel}</span>
+        <span className={styles.srOnly}>{meta ?? "正在加载页面内容"}</span>
+        <PageFrameLoading layout={layout} />
+      </div>
     );
   }
 

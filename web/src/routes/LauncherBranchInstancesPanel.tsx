@@ -600,7 +600,17 @@ export function LauncherBranchInstancesPanel({
       </div>
       {notice ? <p role="status" className={noticeTone === "error" ? styles.noticeError : styles.notice}>{notice}</p> : null}
       {listError && hasAnyItems ? <VStateSurface tone="error" className={styles.listError} title={listError} /> : null}
-      {listError && !hasAnyItems ? <VStateSurface tone="error" className={styles.globalEmpty} title={listError} /> : showListLoading ? <VStateSurface className={styles.globalEmpty} tone="loading" title={labels.listLoadingTitle} skeletonLines={3} /> : !hasAnyItems ? <VEmptyState className={styles.globalEmpty} title={labels.globalEmptyTitle} icon={<GitBranch size={18} />}>{labels.globalEmptyHint}</VEmptyState> : filteredEmpty || activeRows.length === 0 ? <VEmptyState className={styles.globalEmpty} title={labels.filteredEmptyTitle} actions={<VButton variant="secondary" onPress={clearSearch}>{labels.clearSearch}</VButton>}>{labels.filteredEmptyHint}</VEmptyState> : (
+      {listError && !hasAnyItems ? <VStateSurface tone="error" className={styles.globalEmpty} title={listError} /> : showListLoading ? (
+        <div className={styles.instanceLoading} role="status" aria-busy="true" data-loading-region="launcher-instance-rows">
+          <span className={styles.srOnly}>{labels.listLoadingTitle}</span>
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className={styles.instanceLoadingRow} aria-hidden="true">
+              <span className={styles.instanceLoadingBone} />
+              <span className={styles.instanceLoadingMeta} />
+            </div>
+          ))}
+        </div>
+      ) : !hasAnyItems ? <VEmptyState className={styles.globalEmpty} title={labels.globalEmptyTitle} icon={<GitBranch size={18} />}>{labels.globalEmptyHint}</VEmptyState> : filteredEmpty || activeRows.length === 0 ? <VEmptyState className={styles.globalEmpty} title={labels.filteredEmptyTitle} actions={<VButton variant="secondary" onPress={clearSearch}>{labels.clearSearch}</VButton>}>{labels.filteredEmptyHint}</VEmptyState> : (
         <div className={styles.tabBody}>
           <div className={styles.desktopList}><VDenseTable ariaLabel={activeHint} className={styles.statusTable} resizable rows={activeRows} emptyText={tabEmptyText} getRowKey={(item) => item.id}
             onRowClick={(item) => { onSelect(item.id); setDetailId(item.id); }}

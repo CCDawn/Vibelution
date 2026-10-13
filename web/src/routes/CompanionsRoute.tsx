@@ -6,6 +6,7 @@ import { ArrowRight, Clock3, Sparkles } from "lucide-react";
 import { listVirtualHumanCompanions } from "../api/agentPlugins";
 import { queryKeys } from "../api/queryKeys";
 import { VButton, VPage, VRouteLinkButton, VStateSurface, VStatusChip } from "../components/vui";
+import { CompanionCardSkeleton } from "../app/PageFrameLoadingShell";
 import { usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatRouteSelection } from "./chat/useChatRouteSelection";
@@ -117,9 +118,10 @@ export function CompanionsRoute() {
       </header>
 
       {companionsQuery.isPending ? (
-        <div className={styles.stateHost}>
-          <VStateSurface title={copy.loading} tone="loading" busy skeletonLines={3} />
-        </div>
+        <section className={styles.grid} aria-label={copy.title} aria-busy="true">
+          <span className={styles.srOnly}>{copy.loading}</span>
+          <CompanionCardSkeleton />
+        </section>
       ) : companionsQuery.isError ? (
         <div className={styles.stateHost}>
           <VStateSurface
