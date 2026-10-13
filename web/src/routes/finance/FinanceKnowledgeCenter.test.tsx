@@ -21,6 +21,13 @@ async function render(mode: "memory" | "skills" | "learning") {
   await settle();
 }
 function button(text: string) { return [...container.querySelectorAll("button")].find((node) => node.textContent?.includes(text))!; }
+async function searchSkills(text: string) {
+  const input = container.querySelector("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 beforeEach(() => {
   vi.resetAllMocks();
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
@@ -31,6 +38,38 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); });
 
 describe("Finance knowledge center", () => {
+  it("finds the annual filing workflow with a financial-report synonym", async () => {
+    api.skills.mockResolvedValue({ skills: [] });
+    await render("skills");
+    await searchSkills("  财报  ");
+    expect(button("核对一份年报")).toBeTruthy();
+    expect(container.textContent).not.toContain("没有匹配流程");
+    await act(async () => button("准备研究").click());
+    expect(draft).toHaveBeenCalledWith(expect.stringContaining("已审核原始年报"));
+  });
+  it("shows a matching workflow instead of the previously selected hidden detail", async () => {
+    api.skills.mockResolvedValue({ skills: [] });
+    await render("skills");
+    await searchSkills("经营、财务、行业");
+    expect(button("建立风险清单").getAttribute("aria-pressed")).toBe("true");
+    expect(container.textContent).not.toContain("核对一份年报");
+    await act(async () => button("准备研究").click());
+    expect(draft).toHaveBeenCalledWith(expect.stringContaining("经营、财务、行业"));
+    await searchSkills("not-a-matching-stock-workflow");
+    expect(container.textContent).toContain("没有匹配流程");
+    expect(button("准备研究")).toBeUndefined();
+  });
+  it("hides a native skill detail when its command no longer matches the filter", async () => {
+    const skill = { name: "Evidence review", command: "/evidence-review", description: "核对股票财报原始证据", source: "agents", content: "Native evidence instructions" };
+    api.skills.mockResolvedValue({ skills: [skill] }); api.detail.mockResolvedValue(skill);
+    await render("skills");
+    await act(async () => button(skill.name).click()); await settle();
+    expect(container.textContent).toContain(skill.content);
+    await searchSkills("not-a-matching-stock-workflow");
+    expect(container.textContent).not.toContain(skill.content);
+    expect(button("用此技能研究")).toBeUndefined();
+    expect(draft).not.toHaveBeenCalled();
+  });
   it("reads only the same Agent and saves preferences once after an explicit click", async () => {
     let resolve!: (value: unknown) => void;
     api.save.mockImplementation(() => new Promise((done) => { resolve = done; }));

@@ -8,7 +8,7 @@ export const FINANCE_LESSONS = [
 ] as const;
 
 export const FINANCE_GUIDES = [
-  { id: "annual", title: "核对一份年报", prompt: "从已审核原始年报核对公司、报告期、审计意见、收入、利润、现金流及原文页码，指出尚未取得的证据" },
+  { id: "annual", title: "核对一份年报", keywords: "财报 财务报表 financial report annual filing", prompt: "从已审核原始年报核对公司、报告期、审计意见、收入、利润、现金流及原文页码，指出尚未取得的证据" },
   { id: "news", title: "识别新闻与公告", prompt: "比较公司公告与相关新闻的发布日期、事件发生日期和事实来源，区分公告事实、媒体解读与市场推测" },
   { id: "pe", title: "避免估值口径混用", prompt: "核对静态PE、TTM和预测PE的来源与日期，解释不同口径的可比性及周期影响" },
   { id: "dividend", title: "理解复权和分红", prompt: "核对公司公开分红与除权信息，解释前复权K线和真实历史成交价的区别" },
