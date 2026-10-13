@@ -81,7 +81,9 @@ describe("workbench CodeMirror syntax theme", () => {
     expect(styleFor(tags.string)?.color).toBe(
       "color-mix(in srgb, var(--state-success) 78%, var(--fg-primary) 22%)",
     );
-    expect(styleFor(tags.keyword)?.color).toBe("var(--accent-cool-2)");
+    expect(styleFor(tags.keyword)?.color).toBe(
+      "color-mix(in srgb, var(--accent-cool-2) 80%, var(--fg-primary) 20%)",
+    );
   });
 
   it("keeps every colored syntax category readable on dark, light, and active-line surfaces", () => {
