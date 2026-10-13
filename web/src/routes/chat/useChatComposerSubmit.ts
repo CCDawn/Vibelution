@@ -1887,6 +1887,7 @@ export function useChatComposerSubmitActions({
   // in flight must not re-send the DELETE, while different rows stay free to
   // race in parallel.
   const pendingQueueWithdrawalIdsRef = useRef<Set<string>>(new Set());
+  const pendingQueueStatusRef = useRef<Map<string, Promise<boolean>>>(new Map());
   // This hook owns every composer object URL, including URLs for attachments
   // that are rejected after classification. Files remain in the session tray
   // when its preview URLs are released, so returning to a session can restore
@@ -2867,7 +2868,7 @@ export function useChatComposerSubmitActions({
   const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
     const sessionId = activeSessionId;
     const content = text.trim();
-    if (!sessionId || !content) {
+    if (!sessionId) {
       return;
     }
     // Optimistic edit (same pending-intent style as withdraw): the new text
@@ -2876,6 +2877,7 @@ export function useChatComposerSubmitActions({
     // the pre-edit text without clobbering fields that moved meanwhile.
     const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
     const snapshotRow = rowsAtIntent.find((row) => row.id === id);
+    if (!content && !snapshotRow?.attachments?.length) return;
     if (snapshotRow) {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
         detailState
@@ -3082,18 +3084,20 @@ export function useChatComposerSubmitActions({
   // resuming re-queues it at the tail, mirroring the server semantics.
   const handleFollowupQueueTogglePause = useCallback((id: string, paused: boolean) => {
     const sessionId = activeSessionId;
-    if (!sessionId) {
+    const statusKey = `${sessionId}:${id}`;
+    if (!sessionId || pendingQueueStatusRef.current.has(statusKey)) {
       return;
     }
-    void updateSessionQueuedTurn(sessionId, id, { status: paused ? "paused" : "queued" })
-      .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
-      .catch((error) => reportQueuedTurnError(
-        sessionId,
-        error,
-        paused
+    const saving = updateSessionQueuedTurn(sessionId, id, { status: paused ? "paused" : "queued" })
+      .then((rows) => { syncQueuedTurnsIntoDetail(sessionId, rows); return true; })
+      .catch((error) => {
+        reportQueuedTurnError(sessionId, error, paused
           ? (lang === "zh" ? "暂停排队消息失败" : "Failed to pause the queued message")
-          : (lang === "zh" ? "恢复排队消息失败" : "Failed to resume the queued message"),
-      ));
+          : (lang === "zh" ? "恢复排队消息失败" : "Failed to resume the queued message"));
+        return false;
+      })
+      .finally(() => { pendingQueueStatusRef.current.delete(statusKey); });
+    pendingQueueStatusRef.current.set(statusKey, saving);
   }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   // Send-now (Codex sendQueuedNow parity): pin one queued row at the head and
@@ -3105,47 +3109,60 @@ export function useChatComposerSubmitActions({
     if (!sessionId || pendingQueueWithdrawalIdsRef.current.has(id)) {
       return;
     }
-    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
-    if (!rowsAtIntent.some((row) => row.id === id)) {
-      return;
-    }
-    // Optimistic pin (same pending-intent style as the other queue intents):
-    // the row paints at the head with the send-now flag at click time; the
-    // API response rebases the authoritative rows and a rejected stop (the
-    // running turn changed or settled meanwhile) restores the pre-click order.
-    const optimisticRows = rowsAtIntent
-      .map((row) => (row.sendNow ? { ...row, sendNow: false } : row))
-      .filter((row) => row.id !== id);
-    const snapshotRow = rowsAtIntent.find((row) => row.id === id);
-    if (snapshotRow) {
-      optimisticRows.unshift({ ...snapshotRow, sendNow: true });
-    }
-    pendingQueueWithdrawalIdsRef.current.add(id);
-    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
-      detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
-    );
     const expectedTurnId = resolveSessionStopTurnId(detail, activeTurnId);
-    void sendNowSessionQueuedTurn(sessionId, id, { expectedTurnId: expectedTurnId || undefined })
-      .then((result) => syncQueuedTurnsIntoDetail(sessionId, result.queuedTurns))
-      .catch((error) => {
-        // Roll back only this intent; authoritative rows that landed meanwhile stay.
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
-          detailState
-            ? {
-              ...detailState,
-              queuedTurns: restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? []),
-            }
-            : detailState,
-        );
-        reportQueuedTurnError(
-          sessionId,
-          error,
-          lang === "zh" ? "立即发送排队消息失败" : "Failed to send the queued message now",
-        );
-      })
-      .finally(() => {
-        pendingQueueWithdrawalIdsRef.current.delete(id);
-      });
+    const promote = () => {
+      if (pendingQueueWithdrawalIdsRef.current.has(id)) return;
+      const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+      if (!rowsAtIntent.some((row) => row.id === id)) {
+        return;
+      }
+      // Optimistic pin (same pending-intent style as the other queue intents):
+      // the row paints at the head with the send-now flag at click time; the
+      // API response rebases the authoritative rows and a rejected stop (the
+      // running turn changed or settled meanwhile) restores the pre-click order.
+      const optimisticRows = rowsAtIntent
+        .map((row) => (row.sendNow ? { ...row, sendNow: false } : row))
+        .filter((row) => row.id !== id);
+      const snapshotRow = rowsAtIntent.find((row) => row.id === id);
+      if (snapshotRow) {
+        optimisticRows.unshift({ ...snapshotRow, sendNow: true });
+      }
+      pendingQueueWithdrawalIdsRef.current.add(id);
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
+      );
+      void sendNowSessionQueuedTurn(sessionId, id, { expectedTurnId: expectedTurnId || undefined })
+        .then((result) => syncQueuedTurnsIntoDetail(sessionId, result.queuedTurns))
+        .catch((error) => {
+          // Roll back only this intent; authoritative rows that landed meanwhile stay.
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+            detailState
+              ? {
+                ...detailState,
+                queuedTurns: restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? []).map(row =>
+                  row.id === id && row.sendNow === true ? { ...row, sendNow: snapshotRow?.sendNow } : row,
+                ),
+              }
+              : detailState,
+          );
+          reportQueuedTurnError(
+            sessionId,
+            error,
+            lang === "zh" ? "立即发送排队消息失败" : "Failed to send the queued message now",
+          );
+        })
+        .finally(() => {
+          pendingQueueWithdrawalIdsRef.current.delete(id);
+        });
+    };
+    const pendingStatus = pendingQueueStatusRef.current.get(`${sessionId}:${id}`);
+    if (pendingStatus) {
+      // A visible resume intent is not yet an acknowledged server status.
+      // Keep the original turn identity while waiting; never stop a newer turn.
+      void pendingStatus.then(saved => { if (saved) promote(); });
+    } else {
+      promote();
+    }
   }, [activeSessionId, activeTurnId, detail, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleSubmitTurn = useCallback(() => {

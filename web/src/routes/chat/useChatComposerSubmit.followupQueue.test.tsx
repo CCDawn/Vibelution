@@ -250,6 +250,12 @@ function Harness({
       >
         send-now
       </button>
+      <button type="button" data-testid="resume-q2" onClick={() => actions.handleFollowupQueueTogglePause("q-2", false)}>
+        resume q2
+      </button>
+      <button type="button" data-testid="clear-q1-text" onClick={() => actions.handleFollowupQueueUpdate("q-1", "")}>
+        clear text
+      </button>
     </div>
   );
 }
@@ -1461,6 +1467,74 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     });
 
     expect(sendNowSessionQueuedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a rejected send-now pin even when the target was already first", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1", activeTurnId: "turn-session-1",
+      queuedTurns: [{ id: "q-2", position: 1, status: "queued", content: "第二条" }],
+    } as SessionDetail);
+    vi.mocked(sendNowSessionQueuedTurn).mockRejectedValueOnce(new Error("stop rejected"));
+    await mount({ busy: true, draft: "", queues: { "session-1": [{ id: "q-2", text: "第二条" }] }, mutations, queryClient });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns?.[0]?.sendNow).not.toBe(true);
+  });
+
+  it("waits for resume acknowledgement before send-now", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1", activeTurnId: "turn-session-1",
+      queuedTurns: [{ id: "q-2", position: 1, status: "paused", content: "第二条" }],
+    } as SessionDetail);
+    let resume!: (rows: SessionQueuedTurn[]) => void;
+    vi.mocked(updateSessionQueuedTurn).mockImplementationOnce(() => new Promise(resolve => { resume = resolve; }));
+    await mount({ busy: true, draft: "", queues: { "session-1": [{ id: "q-2", text: "第二条", status: "paused" }] }, mutations, queryClient });
+    await act(async () => { container?.querySelector<HTMLButtonElement>('[data-testid="resume-q2"]')?.click(); });
+    await act(async () => { container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click(); });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-2", { status: "queued" });
+    expect(sendNowSessionQueuedTurn).not.toHaveBeenCalled();
+    await act(async () => {
+      resume([{ id: "q-2", position: 1, status: "queued", content: "第二条" }]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(sendNowSessionQueuedTurn).toHaveBeenCalledExactlyOnceWith("session-1", "q-2", { expectedTurnId: "turn-session-1" });
+  });
+
+  it("does not send-now after the preceding resume fails", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1", activeTurnId: "turn-session-1",
+      queuedTurns: [{ id: "q-2", position: 1, status: "paused", content: "第二条" }],
+    } as SessionDetail);
+    let rejectResume!: (error: Error) => void;
+    vi.mocked(updateSessionQueuedTurn).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectResume = reject; }));
+    await mount({ busy: true, draft: "", queues: { "session-1": [{ id: "q-2", text: "第二条", status: "paused" }] }, mutations, queryClient });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="resume-q2"]')?.click();
+      container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click();
+      rejectResume(new Error("resume failed"));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(sendNowSessionQueuedTurn).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns?.[0]?.status).toBe("paused");
+  });
+
+  it("allows clearing queue text when the persisted row still has an attachment", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1", queuedTurns: [{ id: "q-1", position: 1, status: "paused", content: "保留图片", attachments: [{ artifactId: "image-1" }] }],
+    } as SessionDetail);
+    await mount({ busy: true, draft: "", queues: { "session-1": [{ id: "q-1", text: "保留图片", attachmentCount: 1 }] }, mutations, queryClient });
+    await act(async () => { container?.querySelector<HTMLButtonElement>('[data-testid="clear-q1-text"]')?.click(); });
+    expect(updateSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-1", { content: "" });
   });
 
   it("pauses and resumes queued turns through the server status patch", async () => {

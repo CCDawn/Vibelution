@@ -125,6 +125,7 @@ export function ConversationFollowupQueueBar({
       <div className={styles.followupQueueRows}>
         {visibleItems.map((item, index) => {
           const editing = editingId === item.id;
+          const canSaveEdit = Boolean(editDraft.trim() || item.attachmentCount);
           const paused = item.status === "paused";
           const systemReturn = item.kind === "task_notification" || item.kind === "subagent_message";
           // The send-now pin only paints while the promoted row still waits:
@@ -242,6 +243,7 @@ export function ConversationFollowupQueueBar({
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
+                      if (!canSaveEdit) return;
                       onUpdate(item.id, editDraft);
                       setEditingId(null);
                     } else if (event.key === "Escape") {
@@ -314,7 +316,9 @@ export function ConversationFollowupQueueBar({
                     <VButton
                       density="compact"
                       variant="secondary"
+                      isDisabled={!canSaveEdit}
                       onPress={() => {
+                        if (!canSaveEdit) return;
                         onUpdate(item.id, editDraft);
                         setEditingId(null);
                       }}

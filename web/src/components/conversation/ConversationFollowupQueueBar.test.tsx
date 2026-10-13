@@ -161,6 +161,24 @@ describe("ConversationFollowupQueueBar inline edit", () => {
     });
     expect(onUpdate).toHaveBeenCalledWith("q-1", "按 Enter 保存");
   });
+
+  it("keeps a text-only empty edit open and disables saving by click or Enter", async () => {
+    const onUpdate = vi.fn();
+    await renderBar({ items: [{ id: "q-1", text: "保留这条消息" }], onUpdate });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>(`button[aria-label="${EDIT_LABEL}"]`)?.click();
+    });
+    const editor = container!.querySelector<HTMLInputElement>(`input[aria-label="${EDIT_LABEL} 1"]`)!;
+    await act(async () => { setNativeValue(editor, "   "); });
+    const save = [...container!.querySelectorAll("button")].find(button => button.textContent === SAVE_LABEL)!;
+    expect(save.disabled).toBe(true);
+    await act(async () => {
+      save.click();
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(container?.querySelector(`input[aria-label="${EDIT_LABEL} 1"]`)).toBe(editor);
+  });
 });
 
 describe("ConversationFollowupQueueBar drag reorder", () => {
