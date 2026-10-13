@@ -16,12 +16,12 @@ let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
 
-async function mount() {
+async function mount(desktop = false) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" branchName="main" /></QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" branchName="main" desktop={desktop} /></QueryClientProvider>));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
 }
 
@@ -47,6 +47,22 @@ afterEach(async () => {
 });
 
 describe("shared Launcher update topbar", () => {
+  it("reserves native caption space and confines window dragging to the desktop spacer", async () => {
+    await mount(true);
+    const toolbar = document.querySelector('[data-testid="launcher-topbar"]');
+    expect(toolbar?.className).toContain("138px");
+    expect(toolbar?.className).toContain("[-webkit-app-region:no-drag]");
+    expect(toolbar?.querySelector('[aria-hidden="true"].self-stretch')?.className).toContain("[-webkit-app-region:drag]");
+    await click("有新版本 · 请更新");
+    expect(button("更新并重启")).toBeTruthy();
+  });
+
+  it("does not reserve native caption controls in a browser", async () => {
+    await mount();
+    expect(document.querySelector('[data-testid="launcher-topbar"]')?.className).not.toContain("138px");
+    expect(document.querySelector('[aria-hidden="true"].self-stretch')).toBeNull();
+  });
+
   it("keeps the reminder after closing details and never updates automatically", async () => {
     await mount();
     await click("有新版本 · 请更新");

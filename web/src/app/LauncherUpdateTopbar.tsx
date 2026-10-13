@@ -11,6 +11,7 @@ import styles from "./LauncherUpdateTopbar.styles";
 export type LauncherUpdateTopbarViewProps = {
   lang: "zh" | "en";
   branchName?: string;
+  desktop?: boolean;
   freshness?: LauncherFreshness;
   checking: boolean;
   rechecking?: boolean;
@@ -25,7 +26,7 @@ export type LauncherUpdateTopbarViewProps = {
 
 /** Shared chrome for both Launcher routes; closing details never dismisses the reminder. */
 export function LauncherUpdateTopbarView({
-  lang, branchName, freshness, checking, rechecking = false, checkFailed, updating, error,
+  lang, branchName, desktop = false, freshness, checking, rechecking = false, checkFailed, updating, error,
   onCheck, onUpdate, onDetailsChange, onConfirmationChange,
 }: LauncherUpdateTopbarViewProps) {
   const zh = lang === "zh";
@@ -60,11 +61,11 @@ export function LauncherUpdateTopbarView({
   };
 
   return (
-    <VToolbar ariaLabel={zh ? "Launcher 顶栏" : "Launcher top bar"} wrap={false} className={styles.toolbar} data-testid="launcher-topbar">
+    <VToolbar ariaLabel={zh ? "Launcher 顶栏" : "Launcher top bar"} wrap={false} className={`${styles.toolbar} ${desktop ? styles.desktopToolbar : ""}`} data-testid="launcher-topbar">
       <Monitor size={16} className={styles.appIcon} aria-hidden="true" />
       <strong className={styles.title}>Vibelution <span className={styles.launcherName}>Launcher</span></strong>
       {branchName ? <span className={styles.branch}><GitBranch size={13} aria-hidden="true" />{branchName}</span> : null}
-      <div className={styles.spacer} />
+      <div className={`${styles.spacer} ${desktop ? styles.windowDragRegion : ""}`} aria-hidden="true" />
       <VPopover open={open} onOpenChange={changeOpen} side="bottom" align="end" sideOffset={8}
         aria-label={zh ? "Launcher 更新详情" : "Launcher update details"} contentClassName={styles.popover}
         trigger={<VButton variant="ghost" contentLayout="plain" className={`${styles.button} ${styles.trigger} ${hasUpdate || failure ? styles.updateTone : styles.mutedTone}`} aria-label={label} data-testid="launcher-update-trigger">
@@ -108,7 +109,7 @@ export function LauncherUpdateTopbarView({
   );
 }
 
-export function LauncherUpdateTopbar({ lang, branchName }: Pick<LauncherUpdateTopbarViewProps, "lang" | "branchName">) {
+export function LauncherUpdateTopbar({ lang, branchName, desktop }: Pick<LauncherUpdateTopbarViewProps, "lang" | "branchName" | "desktop">) {
   const [accepted, setAccepted] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const updateLock = useRef(false);
@@ -127,7 +128,7 @@ export function LauncherUpdateTopbar({ lang, branchName }: Pick<LauncherUpdateTo
     onSuccess: () => setAccepted(true),
     onSettled: () => { updateLock.current = false; void freshnessQuery.refetch(); },
   });
-  return <LauncherUpdateTopbarView lang={lang} branchName={branchName} freshness={freshnessQuery.data}
+  return <LauncherUpdateTopbarView lang={lang} branchName={branchName} desktop={desktop} freshness={freshnessQuery.data}
     checking={freshnessQuery.isPending} rechecking={freshnessQuery.isFetching && !freshnessQuery.isPending} checkFailed={freshnessQuery.isError}
     updating={updateMutation.isPending || accepted}
     error={updateMutation.error instanceof Error ? updateMutation.error.message : undefined}

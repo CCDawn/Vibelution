@@ -159,6 +159,7 @@ import { VToolbar, VButton } from "@/components/vui";
 ### 视觉与状态
 - 作为工作台顶端的操作带时，背景使用 `--vui-surface-toolbar`，以细分隔线与内容区区分；单纯语义分组不强制增加卡片背景或固定高度。
 - 子操作沿用统一控件面与 compact/normal 密度，窄屏按 recipe 收缩，不把预览窗口尺寸写成生产 toolbar 尺寸。
+- Launcher 的 Electron 顶栏沿用工作台窗口方案：透明 native caption overlay 与 44px `VToolbar` 共用 `--vui-surface-workspace` 背景，不再另绘系统标题带。右侧按 `titlebar-area-*` 和 138px fallback 为系统按钮留位；仅空白 spacer 是 drag 区域，工具条和更新按钮保持 no-drag。普通浏览器不保留系统按钮占位。
 
 ### 实现落点
 - `layout/VToolbar.tsx`

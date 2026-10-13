@@ -82,7 +82,7 @@ export function LauncherShell() {
       data-shell="launcher"
       data-browser-role="launcher_control_surface"
     >
-      <LauncherUpdateTopbar lang={lang} branchName={branchInstancesQuery.data?.currentShortName} />
+      <LauncherUpdateTopbar lang={lang} branchName={branchInstancesQuery.data?.currentShortName} desktop={stateBridgeAvailable} />
       <VSplitWorkspace
         className={styles.workspace}
         columnsClassName={styles.columns}

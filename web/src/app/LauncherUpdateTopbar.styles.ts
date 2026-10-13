@@ -1,5 +1,7 @@
 const styles = {
   toolbar: "z-20 min-h-11 gap-3 !border-0 !bg-vui-surface-workspace px-4 max-[600px]:gap-2 max-[600px]:px-3",
+  desktopToolbar: "h-11 !pr-[max(138px,calc(100vw_-_env(titlebar-area-x,0px)_-_env(titlebar-area-width,calc(100vw_-_138px))))] [-webkit-app-region:no-drag]",
+  windowDragRegion: "min-w-6 self-stretch [-webkit-app-region:drag]",
   title: "truncate text-vui-sm font-medium",
   branch: "flex min-w-0 items-center gap-1 border-l border-vui-border-subtle pl-3 text-vui-xs text-vui-fg-tertiary max-[600px]:hidden",
   button: "!min-h-8 !px-3 !text-vui-xs max-[600px]:!min-h-11",
