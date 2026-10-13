@@ -88,6 +88,31 @@ def _install_fake_invoke(monkeypatch, text: str = "跑一下测试"):
     return calls
 
 
+@pytest.mark.parametrize("text", [
+    "工具已挂载，重新查询一次", "权限已经启用，继续操作", "服务已恢复，重新测试",
+    "I have enabled the missing tool", "The tool is already installed",
+    "I enabled the missing tool", "I installed the tool", "I fixed the service",
+    "The tool was enabled", "The tools were configured", "I've installed the tool",
+])
+def test_suggestions_do_not_invent_completed_environment_changes(monkeypatch, text):
+    _register(reply="引用工具不可用，无法读取原文。")
+    calls = _install_fake_invoke(monkeypatch, text)
+    result = prompt_suggestion.generate_prompt_suggestion("session-1", after_turn_id="turn-2")
+    assert result["suggestion"] is None
+    assert result["reason"] == "filtered:unverified_completion"
+    assert len(calls) == 1
+    assert prompt_suggestion.generate_prompt_suggestion("session-1", after_turn_id="turn-2")["suggestion"] is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("text", ["检查工具是否已挂载", "启用引用工具后再试", "Check whether the tool is installed"])
+def test_suggestions_can_request_checks_or_future_changes(monkeypatch, text):
+    _register(reply="引用工具不可用，无法读取原文。")
+    _install_fake_invoke(monkeypatch, text)
+    result = prompt_suggestion.generate_prompt_suggestion("session-1", after_turn_id="turn-2")
+    assert result["suggestion"] == text
+
+
 def test_turn_request_capture_scope_collects_last_request():
     collector: dict = {}
     with turn_request_capture_scope(collector):
