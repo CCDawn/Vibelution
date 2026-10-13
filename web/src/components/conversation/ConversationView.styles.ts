@@ -1370,7 +1370,7 @@ timeline:
   turnVersionLabel:
     `vui-components-conversationview turnVersionLabel min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] items-center justify-center bg-[var(--vui-control-muted)] px-1.5 text-[var(--fg-secondary)] text-vui-xs font-medium tabular-nums leading-none`,
   turnUsageLabel:
-    "vui-components-conversationview turnUsageLabel min-w-0 shrink-0 text-vui-xs leading-tight text-[var(--fg-tertiary)] tabular-nums",
+    "vui-components-conversationview turnUsageLabel min-w-0 shrink-0 whitespace-nowrap text-vui-xs leading-tight text-[var(--fg-tertiary)] tabular-nums",
   turnMeta:
     "vui-components-conversationview turnMeta inline-flex min-w-0 items-center justify-start gap-2 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
   turnMetaActions:
