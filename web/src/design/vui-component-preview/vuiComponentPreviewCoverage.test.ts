@@ -42,6 +42,11 @@ const previewExemptDesignSections = new Set([
   // Route-owned composition: the authorized Session catalog and original route
   // actions supply its state. Covered by browse/return tests and the approved isolated workbench preview.
   "ChatSessionBrowser",
+  // Route-owned composition of the existing ChatRightRail renderer, scoped
+  // project/session tab models and server-backed task/Git/notification panels.
+  // Covered by adapter/panel interaction tests and production-source desktop,
+  // 390px and non-chat browser acceptance; it has no standalone VUI export.
+  "ProjectUtilityRightRail",
   // Route-owned index compositions: the persisted list preferences, authorized
   // paged session/directory queries and original navigation callbacks supply
   // their states. Covered by toolbar/search/shortcut interaction tests, the
