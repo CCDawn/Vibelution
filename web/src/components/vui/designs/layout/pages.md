@@ -17,6 +17,14 @@
 
 共享几何 class：`layout/pageRecipeClasses.ts`。
 
+### 工作台外壳（用户批准的 A）
+
+AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workbench-shell.css` 承载外框：灰色 shell 底色、桌面左右与底部 4px 留白（700px 以下 2px）、白色对话表面、12px 外圆角和弱边界。外壳不改变页面内部列表、画布、表单、导航或宽度记忆；内部滚动继续归各 recipe 所有，简单页与用量页保留根滚动。
+
+分栏页的页面根保持灰色，最外层 VSplitWorkspace 的 main / aside 各自使用白色 12px 圆角，sidebar 与顶栏同灰；不得将所有列圈进第二个白色大框。仅匹配路由内没有 split 祖先的最外层 split，嵌套编辑器和画布不重复套框。窄屏设置页保留根滚动以容纳竖向排列的表单。
+
+选择器仅命中 AppShell 项目 split 的直属路由根，同时支持 connection-notice 的 `workbench-content-frame` 宿主。不得匹配嵌套工作台、弹窗或已独立实现圆角边界的主会话壳。非 VUI route root 使用已有 `data-vui-domain-recipe` / `data-vui-recipe` 登记，避免依靠业务 class 名或给所有后代 section 统一背景。用量页标记为 `usage-workbench`。
+
 ---
 
 ## VPage

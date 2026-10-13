@@ -156,6 +156,106 @@
   padding-top: var(--shell-topbar-height);
 }
 
+/*
+ * Approved A chrome for secondary routes. The AppShell split is the boundary:
+ * never match nested recipe roots, dialogs or the independently framed chat.
+ * Support the connection-notice host as well as the direct Outlet host.
+ * Utilities layer keeps this contract above route-owned important fills.
+ */
+@layer utilities {
+  :is(.vui-app-appshell.mainArea, [data-testid="workbench-content-frame"])
+    > [data-vui="split-workspace"] > [data-vui="split-main"] {
+    &:has(> :is(
+      [data-vui="workbench-page"],
+      [data-vui="page"],
+      [data-vui-recipe="agents-management-workbench"],
+      [data-vui-domain-recipe="config-settings"],
+      [data-vui-domain-recipe="financial-assistant-workspace"],
+      [data-vui-domain-recipe="usage-workbench"]
+    ):not([data-vui-domain-recipe="chat-session-workbench"])) {
+      padding: 0 4px 4px;
+      background: var(--shell-surface);
+    }
+
+    > :is(
+      [data-vui="workbench-page"],
+      [data-vui="page"],
+      [data-vui-recipe="agents-management-workbench"],
+      [data-vui-domain-recipe="config-settings"],
+      [data-vui-domain-recipe="financial-assistant-workspace"],
+      [data-vui-domain-recipe="usage-workbench"]
+    ):not([data-vui-domain-recipe="chat-session-workbench"]) {
+      min-width: 0;
+      min-height: 0;
+      max-width: 100%;
+      height: 100%;
+      border: 1px solid color-mix(in srgb, var(--fg-primary) 5%, transparent);
+      border-radius: 12px;
+      background: var(--vui-surface-chat) !important;
+      background-image: none !important;
+      box-shadow: 0 1px 3px color-mix(in srgb, var(--fg-primary) 3%, transparent);
+      /* Clip child backgrounds at the outer corners; inner recipes own scroll. */
+      overflow: hidden;
+
+      /* Split routes keep the directory flush with the gray window chrome. */
+      &:has([data-vui="split-workspace"]) {
+        border: 0;
+        border-radius: 0;
+        background: var(--shell-surface) !important;
+        box-shadow: none;
+      }
+
+      /* Only outermost route splits: deeper editors/canvases keep their chrome. */
+      & [data-vui="split-workspace"]:not(& [data-vui="split-workspace"] [data-vui="split-workspace"]) {
+        background: var(--shell-surface) !important;
+
+        > :is([data-vui="split-main"], [data-vui="split-aside"]) {
+          --vui-surface-workspace: var(--vui-surface-chat);
+          min-height: 0;
+          border: 1px solid color-mix(in srgb, var(--fg-primary) 5%, transparent);
+          border-radius: 12px;
+          background: var(--vui-surface-chat) !important;
+          overflow: hidden;
+
+          > * {
+            background: var(--vui-surface-chat) !important;
+          }
+        }
+
+        > [data-vui="split-sidebar"] {
+          --vui-surface-panel: var(--shell-surface);
+          --vui-surface-workspace: var(--shell-surface);
+          background: var(--shell-surface) !important;
+
+          > * {
+            border-radius: 0;
+            background: var(--shell-surface) !important;
+            box-shadow: none;
+          }
+        }
+      }
+    }
+
+    > :is([data-vui="page"], [data-vui-domain-recipe="usage-workbench"], [data-vui-domain-recipe="config-settings"]) {
+      /* Lobby/report and narrow settings routes retain their root scroll. */
+      overflow-y: auto !important;
+    }
+  }
+
+  @media (max-width: 700px) {
+    :is(.vui-app-appshell.mainArea, [data-testid="workbench-content-frame"])
+      > [data-vui="split-workspace"] > [data-vui="split-main"]:has(> :is(
+        [data-vui="workbench-page"], [data-vui="page"],
+        [data-vui-recipe="agents-management-workbench"],
+        [data-vui-domain-recipe="config-settings"],
+        [data-vui-domain-recipe="financial-assistant-workspace"],
+        [data-vui-domain-recipe="usage-workbench"]
+      ):not([data-vui-domain-recipe="chat-session-workbench"])) {
+      padding: 0 2px 2px;
+    }
+  }
+}
+
 :where(.vui-app-appshell).brandBlock,
 :where(.vui-app-appshell).nav {
   min-width: 0;
