@@ -117,6 +117,7 @@ describe("conversation starter cards and builtin slash commands", () => {
     onSubmit?: () => void;
     slashCommandSuggestions?: SkillLibraryItem[];
     withLlmControl?: boolean;
+    onOpenAgentModelConfig?: () => void;
   }) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -144,6 +145,7 @@ describe("conversation starter cards and builtin slash commands", () => {
             composerActionMode="send"
             composerPending={false}
             onCreateSession={options.onCreateSession}
+            onOpenAgentModelConfig={options.onOpenAgentModelConfig}
             onOpenComposerContextDetail={options.onOpenComposerContextDetail}
             llmControl={options.withLlmControl ? llmControl : undefined}
             slashCommandSuggestions={options.slashCommandSuggestions ?? []}
@@ -259,11 +261,13 @@ describe("conversation starter cards and builtin slash commands", () => {
     expect(onOpenComposerContextDetail).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the inference menu via the /模型 builtin", async () => {
+  it("opens Agent management via /模型 without opening a composer menu", async () => {
     vi.stubGlobal("fetch", fetchRoutes({ command: "", starters: [] }));
     seedControlTokenForTests();
 
+    const onOpenAgentModelConfig = vi.fn();
     await renderConversation({
+      onOpenAgentModelConfig,
       composerValue: "/模",
       withLlmControl: true,
       onComposerChange: () => undefined,
@@ -279,7 +283,9 @@ describe("conversation starter cards and builtin slash commands", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(trigger?.getAttribute("aria-expanded")).toBe("true");
+    expect(onOpenAgentModelConfig).toHaveBeenCalledTimes(1);
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+    expect(container?.querySelector('[data-vui="conversation-turn-model-menu"]')).toBeNull();
   });
 
   it("merges builtins before skills, supports keyboard navigation, and Tab-completes a skill", async () => {
@@ -291,6 +297,7 @@ describe("conversation starter cards and builtin slash commands", () => {
     await renderConversation({
       composerValue: "/",
       onCreateSession,
+      onOpenAgentModelConfig: () => undefined,
       onOpenComposerContextDetail: () => undefined,
       withLlmControl: true,
       slashCommandSuggestions: [skillItem("/research-plan")],

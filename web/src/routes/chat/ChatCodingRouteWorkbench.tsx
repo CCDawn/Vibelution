@@ -66,15 +66,6 @@ import { useChatGitRail } from "./useChatGitRail";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
-import {
-  composerModelLeavesSessionDefault,
-  displayedComposerEffort,
-  EMPTY_COMPOSER_MODEL_CHOICES,
-  findComposerModelChoice,
-  normalizeStoredComposerModelSelection,
-  selectionAfterModelPick,
-  selectionsEqual,
-} from "../../components/conversation/composerModelEffort";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
@@ -591,8 +582,8 @@ export function ChatCodingRouteWorkbench() {
   // Per-session opt-in; the backend only holds the latest capture per session,
   // so remember the operator choice per session instead of globally.
   const [promptSuggestionEnabledBySession, setPromptSuggestionEnabledBySession] = useState<Record<string, boolean>>({});
-  // Sticky per-session model for later sends. Null follows the session
-  // default. A different model also carries a thinking level that model allows.
+  // Retain the financial-assistant bridge's existing draft contract. Ordinary
+  // Agent chat ignores these legacy selections and always uses Agent bindings.
   const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>(storedDraftState.turnModelSelections);
   const setTurnModelSelectionForSession = useCallback((sessionId: string, selection: SessionModelSelection | null) => {
     setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
@@ -1251,6 +1242,8 @@ export function ChatCodingRouteWorkbench() {
     enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
     queryFn: () => fetchSessionLlmOptions(activeSessionId ?? ""),
     staleTime: 30_000,
+    // Re-read the Agent binding when returning from Agent management.
+    refetchOnMount: "always",
   });
   // Explicit missing/archived session keeps its URL and renders the blocking
   // unavailable surface. Background misses must never fall back to another
@@ -2520,7 +2513,8 @@ export function ChatCodingRouteWorkbench() {
     activeReferenceAttachments,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
-    turnModelSelection: activeSessionId ? turnModelSelections[activeSessionId] ?? null : null,
+    // Ordinary Agent chat must never restore a legacy composer model override.
+    turnModelSelection: financeSurface && activeSessionId ? turnModelSelections[activeSessionId] ?? null : null,
     resolvedEditTarget,
     activeEditTarget,
     composerDisabled: companionComposerDisabled,
@@ -2552,102 +2546,22 @@ export function ChatCodingRouteWorkbench() {
   }, [activeSessionId]);
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const turnModelSelection = activeSessionId ? turnModelSelections[activeSessionId] ?? null : null;
-  const sessionDefaultModelId = sessionLlmOptions?.currentModelId || "";
+  const agentModel = sessionLlmOptions?.model ?? null;
   const sessionEffort = sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "";
-  const modelChoices = sessionLlmOptions?.choices ?? EMPTY_COMPOSER_MODEL_CHOICES;
-  const followingSessionModel = !composerModelLeavesSessionDefault(sessionDefaultModelId, turnModelSelection);
-  const sessionModel = findComposerModelChoice(modelChoices, sessionDefaultModelId) ?? sessionLlmOptions?.model ?? null;
-  const overrideModel = followingSessionModel
-    ? null
-    : findComposerModelChoice(modelChoices, turnModelSelection?.modelId || "") ?? null;
-  const effectiveComposerModel = followingSessionModel ? sessionModel : overrideModel;
-  const shownComposerEffort = displayedComposerEffort({
-    sessionDefaultModelId,
-    sessionEffort,
-    selection: turnModelSelection,
-    model: effectiveComposerModel,
-  });
-  useEffect(() => {
-    if (!activeSessionId || !modelChoices.length || !turnModelSelection?.modelId) {
-      return;
-    }
-    const normalized = normalizeStoredComposerModelSelection({
-      sessionDefaultModelId,
-      sessionEffort,
-      selection: turnModelSelection,
-      choices: modelChoices,
-    });
-    if (selectionsEqual(turnModelSelection, normalized)) {
-      return;
-    }
-    setTurnModelSelections((current) => {
-      const latest = current[activeSessionId] ?? null;
-      if (selectionsEqual(latest, normalized)) {
-        return current;
-      }
-      return { ...current, [activeSessionId]: normalized };
-    });
-  }, [activeSessionId, modelChoices, sessionDefaultModelId, sessionEffort, turnModelSelection]);
-  const turnModelControl = activeSessionId && modelChoices.length ? {
-    choices: modelChoices,
-    sessionDefaultModelId,
-    selection: turnModelSelection,
-    disabled: (
-      sessionLlmOptionsQuery.isLoading
-      || sessionLlmOptionsQuery.isError
-      || companionComposerDisabled
-    ),
-    onSelectionChange: (selection: SessionModelSelection | null) => {
-      if (!activeSessionId) {
-        return;
-      }
-      setTurnModelSelections((current) => ({
-        ...current,
-        [activeSessionId]: selectionAfterModelPick({
-          sessionDefaultModelId,
-          sessionEffort,
-          previousSelection: current[activeSessionId] ?? null,
-          previousModel: effectiveComposerModel,
-          next: selection,
-          choices: modelChoices,
-        }),
-      }));
-    },
+  const turnModelControl = activeSessionId ? {
+    model: agentModel,
+    loading: sessionLlmOptionsQuery.isLoading,
+    error: sessionLlmOptionsQuery.isError,
   } : undefined;
-  const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
-    model: effectiveComposerModel,
+  const sessionLlmControl = activeSessionId && agentModel ? {
+    model: agentModel,
     sessionId: activeSessionId,
-    currentReasoningEffort: shownComposerEffort,
-    // Do not allow switching effort while options failed/loading for this session.
-    disabled: (
-      sessionBusy
-      || sessionLlmOptionsQuery.isLoading
-      || sessionLlmOptionsQuery.isError
-      || !effectiveComposerModel
-    ),
+    currentReasoningEffort: sessionEffort,
+    disabled: sessionBusy || sessionLlmOptionsQuery.isLoading || sessionLlmOptionsQuery.isError,
     pending: sessionReasoningEffortMutation.isPending,
     onReasoningEffortChange: (reasoningEffort: string) => {
-      if (!activeSessionId || sessionLlmOptionsQuery.isError) {
-        return;
-      }
-      if (!followingSessionModel && overrideModel) {
-        const allowed = overrideModel.reasoningEffortValues ?? [];
-        if (allowed.length && !allowed.includes(reasoningEffort)) {
-          return;
-        }
-        setTurnModelSelections((current) => ({
-          ...current,
-          [activeSessionId]: {
-            modelId: overrideModel.modelRef || overrideModel.modelId,
-            ...(reasoningEffort ? { reasoningEffort } : {}),
-          },
-        }));
-        return;
-      }
-      sessionReasoningEffortMutation.mutate({
-        sessionId: activeSessionId,
-        reasoningEffort,
-      });
+      if (!activeSessionId || sessionLlmOptionsQuery.isError) return;
+      sessionReasoningEffortMutation.mutate({ sessionId: activeSessionId, reasoningEffort });
     },
   } : undefined;
 
@@ -3724,6 +3638,9 @@ export function ChatCodingRouteWorkbench() {
       } : undefined,
       llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl,
       turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl,
+      onOpenAgentModelConfig: !financeSurface && !verifiedCompanionMode && activeSessionAgent
+        ? () => handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? "") ?? null)
+        : undefined,
       composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing,
       onOpenComposerContextDetail: !financeSurface && !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
       onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
@@ -3848,6 +3765,8 @@ export function ChatCodingRouteWorkbench() {
       selectedChatAgent,
       sessionBusy,
       sessionLlmControl,
+      activeSessionAgent,
+      handleOpenAgentConfig,
       sessionBindingMismatchLine,
       sessionTranscriptPending,
       setGroupManageDialogOpen,

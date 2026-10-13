@@ -224,6 +224,25 @@ describe("financial native composer bridge", () => {
     expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe(JSON.stringify(previous));
   });
 
+  it("recovers the same pending draft after model options are retried successfully", async () => {
+    const root = setup();
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium"]),
+      modelOption("alternate", "provider/alternate", ["low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "brief" as const } };
+    const render = (optionsError: boolean) => act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={null} options={optionsError ? undefined : options} optionsError={optionsError} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    await render(true);
+    expect(submitSelection).not.toHaveBeenCalled();
+    await render(false);
+    await render(false);
+    expect(submitSelection).toHaveBeenCalledExactlyOnceWith({ modelId: "provider/default", reasoningEffort: "minimal" });
+  });
+
   it("does not let a ready per-turn model bypass an invalid assistant default", async () => {
     const root = setup();
     const previous = { modelId: "provider/alternate", reasoningEffort: "medium" };

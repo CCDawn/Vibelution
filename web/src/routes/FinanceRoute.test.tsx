@@ -343,16 +343,18 @@ describe("financial assistant page", () => {
     expect(nativeSubmit).not.toHaveBeenCalled();
   });
 
-  it("distinguishes session model-options request failures from assistant configuration and retries that request", async () => {
+  it.each(["/finance?session=native-session&finance_area=screen", "/finance?session=native-session"])("shows model-options request failures and retries the current session in %s", async (path) => {
     modelOptionsError = true;
     const invalidate = vi.spyOn(client, "invalidateQueries");
-    await render("/finance?session=native-session&finance_area=screen");
+    await render(path);
 
     expect(container.textContent).toContain("模型选项读取失败");
     expect(container.textContent).not.toContain("请检查助手默认模型");
     expect(container.textContent).toContain("无法从服务端读取模型选项，请重试。");
     await act(async () => button("重试读取")!.click());
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessionLlmOptions("native-session"), exact: true });
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
   });
 
   it.each(["needs_continue", "paused_limit"]) (

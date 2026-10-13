@@ -674,6 +674,7 @@ export const ConversationView = React.memo(function ConversationView({
   toolApproval = null,
   llmControl,
   turnModelControl,
+  onOpenAgentModelConfig,
   composerContextRing = null,
   onOpenComposerContextDetail,
   onCreateSession,
@@ -1143,7 +1144,7 @@ export const ConversationView = React.memo(function ConversationView({
       description: t("slashBuiltinNewSessionDescription"),
     });
   }
-  if (llmControl) {
+  if (onOpenAgentModelConfig) {
     builtinSlashCommands.push({
       id: "model",
       command: t("slashBuiltinModelCommand"),
@@ -1176,7 +1177,6 @@ export const ConversationView = React.memo(function ConversationView({
   // (including the builtin clearing the draft) re-arms suggestions.
   const [slashDismissedAtValue, setSlashDismissedAtValue] = useState<string | null>(null);
   const [slashActiveIndex, setSlashActiveIndex] = useState(-1);
-  const [modelMenuOpenSignal, setModelMenuOpenSignal] = useState("");
   useEffect(() => {
     setSlashActiveIndex(-1);
     setReferenceActiveIndex(-1);
@@ -1303,7 +1303,7 @@ export const ConversationView = React.memo(function ConversationView({
         onCreateSession?.();
         break;
       case "model":
-        setModelMenuOpenSignal(`model-${Date.now()}`);
+        onOpenAgentModelConfig?.();
         break;
       case "compress_context":
         onOpenComposerContextDetail?.();
@@ -4751,8 +4751,8 @@ export const ConversationView = React.memo(function ConversationView({
               ) : null}
             </div>
             <div className={styles.composerToolbarEnd}>
-              {turnModelControl ? <ConversationTurnModelControl {...turnModelControl} openSignal={modelMenuOpenSignal} /> : null}
-              {llmControl ? <ConversationInferenceControl {...llmControl} openSignal={turnModelControl ? "" : modelMenuOpenSignal} /> : null}
+              {turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null}
+              {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
               {composerContextRing ? (
                 <ComposerContextRing
                   model={composerContextRing}

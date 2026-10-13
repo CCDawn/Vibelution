@@ -4,11 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { SessionLlmModelOption } from "../../api/types";
-import {
-  ConversationTurnModelControl,
-  effectiveTurnModelId,
-  resolveTurnModelSelectionLabel,
-} from "./ConversationTurnModelControl";
+import { ConversationTurnModelControl } from "./ConversationTurnModelControl";
 import controlSource from "./ConversationTurnModelControl.tsx?raw";
 import styles from "./ConversationTurnModelControl.styles";
 
@@ -32,17 +28,6 @@ const luna: SessionLlmModelOption = {
   isDefault: true,
 };
 
-const sol: SessionLlmModelOption = {
-  ...luna,
-  modelId: "ai-pixel/sol-4",
-  modelRef: "ai-pixel/sol-4",
-  label: "Sol 4",
-  model: "sol-4",
-  isDefault: false,
-};
-
-const choices = [luna, sol];
-
 function renderControl(
   overrides: Partial<React.ComponentProps<typeof ConversationTurnModelControl>> = {},
 ) {
@@ -56,11 +41,7 @@ function renderControl(
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <ConversationTurnModelControl
-        choices={choices}
-        sessionDefaultModelId="ai-pixel/gpt-5.6-luna"
-        selection={null}
-        disabled={false}
-        onSelectionChange={() => undefined}
+        model={luna}
         {...overrides}
       />
     </QueryClientProvider>,
@@ -68,62 +49,30 @@ function renderControl(
 }
 
 describe("ConversationTurnModelControl", () => {
-  it("follows the session default model when no override is pinned", () => {
+  it("shows the Agent model as text without a model-changing control", () => {
     const html = renderControl();
     expect(html).toContain("Luna 5.6");
-    expect(html).not.toContain("本轮模型");
-    expect(html).toContain('aria-label="模型: Luna 5.6"');
-    expect(html).not.toContain('data-override="true"');
+    expect(html).toContain('aria-label="Agent 模型: Luna 5.6"');
+    expect(html).toContain("请到 Agent 管理页修改");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("aria-haspopup");
+    expect(html).not.toContain("listbox");
+    expect(html).not.toContain("data-override");
   });
 
-  it("marks a pinned non-default override with the ≠default chip state", () => {
-    const html = renderControl({ selection: { modelId: "ai-pixel/sol-4" } });
-    expect(html).toContain("Sol 4");
-    expect(html).toContain('aria-label="模型: Sol 4"');
-    expect(html).toContain('data-override="true"');
+  it("does not keep the previous Agent model during loading or error", () => {
+    expect(renderControl({ loading: true })).toContain("读取模型…");
+    expect(renderControl({ loading: true })).not.toContain("Luna 5.6");
+    expect(renderControl({ error: true })).toContain("模型读取失败");
+    expect(renderControl({ error: true })).not.toContain("Luna 5.6");
+    expect(renderControl({ model: null })).toContain("未绑定模型");
   });
 
-  it("shows the model name and keeps the follow or override tooltip", () => {
-    expect(controlSource).toContain('lang === "zh" ? "模型" : "Model"');
-    expect(controlSource).not.toContain("本轮模型");
-    expect(controlSource).not.toContain("effortSection");
-    expect(controlSource).not.toContain("turnModelEffortFollowSession");
-    expect(controlSource).toContain("groupComposerModelChoices");
-    expect(controlSource).toContain('onSelectionChange(isSessionDefault ? null : { modelId: choiceId })');
-    expect(controlSource).toContain('t("turnModelOverrideTooltip").replace("{model}", effectiveLabel)');
-    expect(controlSource).toContain('t("turnModelFollowTooltip").replace("{model}", effectiveLabel)');
-    expect(controlSource).toContain("tooltip={turnModelTooltip}");
-    expect(controlSource).toContain("max-w-32 truncate");
-  });
-
-  it("does not mark an override that re-pins the session default model", () => {
-    const html = renderControl({ selection: { modelId: "ai-pixel/gpt-5.6-luna" } });
-    expect(html).not.toContain('data-override="true"');
-  });
-
-  it("hosts the menu on VPopover with a flat panel, never a hand-placed portal", () => {
-    expect(controlSource).toContain("<VPopover");
-    expect(controlSource).toContain('data-vui="conversation-turn-model-menu"');
-    expect(controlSource).toContain("contentClassName={styles.menu}");
-    expect(controlSource).not.toContain("createPortal(");
-    expect(styles.menu).toContain("overflow-y-auto");
-    expect(styles.menu).not.toContain("absolute");
-    expect(styles.option).toContain("!grid-cols-[minmax(0,1fr)_0.875rem]");
-    expect(styles.option).toContain("data-[selected=true]");
-  });
-
-  it("keeps the ≠default marker on a token-based accent, not a raw hex color", () => {
-    expect(styles.overrideDot).toContain("var(--accent-cool)");
-    expect(styles.overrideDot).not.toMatch(/#[0-9a-fA-F]{3,8}/);
-    expect(styles.triggerOverride).toContain("var(--accent-cool)");
-  });
-
-  it("resolves labels through modelRef then library id", () => {
-    expect(resolveTurnModelSelectionLabel(choices, "ai-pixel/sol-4")).toBe("Sol 4");
-    expect(resolveTurnModelSelectionLabel(choices, "unknown/model")).toBe("unknown/model");
-    expect(effectiveTurnModelId("ai-pixel/gpt-5.6-luna", null)).toBe("ai-pixel/gpt-5.6-luna");
-    expect(effectiveTurnModelId("ai-pixel/gpt-5.6-luna", { modelId: "ai-pixel/sol-4" })).toBe(
-      "ai-pixel/sol-4",
-    );
+  it("falls back to the upstream name and constrains long labels", () => {
+    expect(renderControl({ model: { ...luna, label: "" } })).toContain("gpt-5.6-luna");
+    expect(styles.label).toContain("truncate");
+    expect(styles.label).toContain("max-w-32");
+    expect(controlSource).not.toContain("onSelectionChange");
+    expect(controlSource).not.toContain("VPopover");
   });
 });

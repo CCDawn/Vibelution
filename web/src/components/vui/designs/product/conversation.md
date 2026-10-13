@@ -1013,57 +1013,47 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 ## ConversationTurnModelControl
 
 ### 功能
-composer 工具栏上的模型按钮，和旁边的思考强度按钮指向同一个「下一条会用的模型」。默认显示会话当前模型；用户改选后粘在这个会话上，直到再改或选「跟随会话默认」。不改 Agent 钉住的默认模型。非会话默认时触发高亮 chip（accent 环 + 圆点）。菜单按服务商分组，只列模型，不再内嵌思考档位。
-
-思考强度按钮只列出当前这个模型的档位。模型没有档位时不显示该按钮。跟会话默认时，改强度写回会话；选了别的模型时，强度跟这条模型选择一起走。换模型时，旧档位这个模型也支持就留下，否则用它自己的默认档。
+普通 Agent 会话的 composer 工具栏只读展示当前 Agent 绑定的对话模型，不提供切换模型的按钮、下拉菜单或会话覆盖。模型绑定的唯一用户修改入口是 Agent 管理页现有的 `AgentModelPicker`。`/模型` 导航到当前 Agent 的配置页，并保留返回当前会话的路径。
 
 ### 适用范围
-- **适用**：普通会话 composer 的工具栏尾部；模型按钮仅当会话 llm-options 返回 `choices` 时渲染。`/模型` 打开模型菜单。
-- **不适用**：Agent 管理里的默认模型绑定（`AgentModelPicker`）；虚拟人 Companion 与金融面（两个按钮都不渲染）。
-
-| 场景 | 选择 |
-| --- | --- |
-| 这个会话接下来换模型 | `ConversationTurnModelControl` |
-| 改 Agent 默认模型 | Agent 管理（`AgentModelPicker`） |
-| 改当前模型的思考强度 | `ConversationInferenceControl`（跟会话默认时写回会话，否则写在模型选择上） |
+- **适用**：普通会话 composer 工具栏；读取 llm-options 的 `model`，不消费完整 `choices`。
+- **不适用**：Companion 和金融专用 composer；沿用它们已有的独立入口和契约。
+- 思考强度按钮继续只显示 Agent 模型支持的档位，修改仍写回会话；不借此覆盖模型。
 
 ### 使用方式
 ```tsx
-import { ConversationTurnModelControl } from "../../conversation/ConversationTurnModelControl";
-
 <ConversationTurnModelControl
-  choices={sessionLlmOptions.choices}
-  sessionDefaultModelId={sessionLlmOptions.currentModelId}
-  selection={turnModelSelection}
-  disabled={composerDisabled}
-  onSelectionChange={setTurnModelSelection}
+  model={sessionLlmOptions?.model ?? null}
+  loading={sessionLlmOptionsLoading}
+  error={sessionLlmOptionsError}
 />
 ```
 
-| Prop / 槽位 | 说明 | 设计注意 |
-| --- | --- | --- |
-| choices | llm-options 的完整可选模型列表 | 只读展示，不做发现/添加 |
-| sessionDefaultModelId | 会话当前模型（modelRef 优先） | 跟随会话切换；菜单内标注「会话默认」 |
-| selection | 粘性覆盖；null = 跟随会话 | 压在同一模型上不显示覆盖标记 |
-| onSelectionChange(null) | 恢复跟随会话 | 必须可达，不允许粘死 |
-
-### 非职责
-- 不发送消息；覆盖值随下一次提交走 `POST /messages` 的 `modelSelection`，排队轮由后端队列行持久化。
-- 不改 Agent 绑定。跟会话默认时，思考强度仍是会话上的那一档。
+| Prop | 说明 |
+| --- | --- |
+| model | 后端从当前 Agent 绑定解析的模型；无绑定时为 null |
+| loading | 显示「读取模型…」，不暂时显示前一个 Agent 的名称 |
+| error | 显示「模型读取失败」，不把缓存中的模型冒充当前有效配置 |
 
 ### 视觉与状态
-- 触发器只显示模型名，与思考强度控件同字号同灰阶；覆盖态用 `--accent-cool` 混色底 + 细环 + 圆点，禁止原始十六进制色。
-- 菜单：首行「跟随会话默认」；其余按服务商分组，组内保持 llm-options 顺序。行上保留「会话默认」和「未配置 Key」，不再重复服务商名，也不再放思考档位。
-- 禁止把覆盖状态写成第二套配色体系；一切标记走 token。
+- 维持工具栏原有紧凑字号、灰阶和模型图标；名称过长时截断，tooltip/title 保留完整名称。
+- 使用 `VTooltip`，提示「模型由 Agent 配置决定，请到 Agent 管理页修改」。
+- 静态文本不显示下拉箭头、覆盖圆点、按下/选中态，也不进入按钮键盘序列。
+
+### 数据与行为边界
+- 普通聊天提交始终不携带 composer 的 `modelSelection`；历史草稿中存有模型覆盖也不恢复到普通聊天发送链路。
+- Agent 管理保存后，返回聊天时重新读取绑定；不修改历史 Turn 的模型记录。
+- 金融专用桥接和原生后端的单轮覆盖协议保持原有契约；这里不创建第二套模型写入者。
 
 ### 实现落点
-- 源码：`web/src/components/conversation/ConversationTurnModelControl.tsx`
-- 样式：`ConversationTurnModelControl.styles.ts`
-- 类型：`web/src/api/types/chat.ts` 的 `SessionModelSelection`；提交通道 `useChatComposerSubmit`（`SubmitTurnVariables.modelSelection`）
+- `web/src/components/conversation/ConversationTurnModelControl.tsx` 和 `.styles.ts`
+- `web/src/components/conversation/conversationViewTypes.ts`
+- `web/src/routes/chat/ChatCodingRouteWorkbench.tsx`
 
 ### 反冗余
-- 不复制 `AgentModelPicker`（发现/添加模型、槽位兼容）能力；这里只消费 llm-options 的 `choices`。
-- 不把思考档位再做进模型菜单。强度只在 `ConversationInferenceControl`，候选项来自当前模型。
+- 复用 Agent 管理现有 `AgentModelPicker` 和配置导航，不复制发现/添加/兼容性校验能力。
+- 展示只接收一个 Agent 模型，禁止重新渲染全模型目录或恢复会话覆盖选择器。
+
 ## ConversationTurnNavigator
 
 ### 功能
