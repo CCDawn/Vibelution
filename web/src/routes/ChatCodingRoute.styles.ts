@@ -113,7 +113,7 @@ const styles: Record<string, string> = {
   overlayPaneToggle:
     "vui-routes-chatcodingroute overlayPaneToggle inline-flex !h-7 !min-h-7 items-center !rounded-[6px] !border-0 !bg-transparent !bg-none px-2 !shadow-none [font-size:var(--vui-font-xs)] font-normal text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
   toolbarIconButton:
-    "vui-routes-chatcodingroute toolbarIconButton !h-7 !min-h-7 !w-7 !min-w-7 !px-0 !rounded-[6px] !border-0 !bg-transparent !bg-none !shadow-none font-normal text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute toolbarIconButton !h-7 !min-h-7 !w-7 !min-w-7 !px-0 !rounded-[6px] !border-0 !bg-transparent !bg-none !shadow-none font-normal text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] [&[aria-pressed=true]]:!bg-[var(--vui-control-muted-hover)] [&[aria-expanded=true]]:!bg-[var(--vui-control-muted-hover)] max-[700px]:!size-11 max-[700px]:!min-h-11 max-[700px]:!min-w-11 [@media(pointer:coarse)]:!size-11 [@media(pointer:coarse)]:!min-h-11 [@media(pointer:coarse)]:!min-w-11",
   sessionListControlsRow:
     "vui-routes-chatcodingroute sessionListControlsRow flex min-w-0 items-center gap-1 px-2 pb-1",
   sessionListSortSelect: "vui-routes-chatcodingroute sessionListSortSelect min-w-0 flex-1",

@@ -1110,3 +1110,9 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 
 ### 实现与边界
 源码与样式归 `web/src/routes/chat/ChatSessionBrowser.tsx` 和 `ChatSessionBrowser.styles.ts`，组合 VUI 的既有按钮、输入和状态表面；`ChatCenterTabStrip` 提供浏览入口槽位，`ChatCenterSessionSurface` 保持原工作区挂载。数据、头像解析、状态语义与时间分组复用原有 owners，不建立第二份会话索引或 transcript。
+
+#### 标签行操作的状态与触屏
+
+浏览、侧栏和更多菜单组成同一操作组。布局按钮保留 tooltip 与 `aria-pressed` / `aria-expanded`，打开态用中性浅底；侧栏的名称说明展开或收起动作。导出菜单前用细分隔线区分视图与会话操作，标签仍可独立横向滚动。桌面操作按钮为 28px；不足 700px 或粗指针时至少 44×44px，沿用已确认的标题栏与面板形状。
+
+导出复用 `ConversationShareExportButton` 的 `presentation="menu"` 和现有 Dialog，传入同一 `conversationModel.sessionId/messages`。关闭时通过 `VDialog.onCloseAutoFocus` 回到入口，切换会话由既有 key 关闭旧对话框；空消息禁用导出，CLI、文件页及不可用会话不新增导出。Finance、Companion 保留原有入口，普通 Chat 移除独立导出行；不改变导出 API、Session 或 ConversationView。

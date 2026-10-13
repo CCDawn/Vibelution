@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { cloneElement, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 
 import type { ConversationMessage } from "../../api/types";
@@ -30,16 +30,19 @@ export function ConversationShareExportButton({
 }: ConversationShareExportButtonProps) {
   const zh = language === "zh";
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <>
-      {presentation === "menu" ? (
+      {presentation === "menu" ? (<>
+        <span className={styles.menuDivider} aria-hidden="true" />
         <VDropdownMenu
           aria-label={zh ? "会话操作" : "Conversation actions"}
           align="end"
-          trigger={<VIconButton label={zh ? "会话操作" : "Conversation actions"} className={styles.menuTrigger} icon={<MoreHorizontal size={16} aria-hidden="true" />} />}
-          items={[{ id: "export-html", label: zh ? "导出 HTML" : "Export HTML", disabled: isDisabled, onSelect: () => setOpen(true) }]}
+          trigger={cloneElement(<VIconButton variant="ghost" label={zh ? "更多会话操作" : "More session actions"} className={styles.menuTrigger} icon={<MoreHorizontal size={16} aria-hidden="true" />} />, { ref: triggerRef })}
+          items={[{ id: "export-html", label: zh ? "导出 HTML…" : "Export HTML…", disabled: isDisabled, onSelect: () => setOpen(true) }]}
         />
-      ) : <VButton
+      </>) : <VButton
+        ref={triggerRef}
         data-vui="conversation-share-export-button"
         variant="ghost"
         density="compact"
@@ -54,6 +57,12 @@ export function ConversationShareExportButton({
         messages={messages}
         language={language}
         onOpenChange={setOpen}
+        onCloseAutoFocus={(event) => {
+          if (triggerRef.current?.isConnected) {
+            event.preventDefault();
+            triggerRef.current.focus({ preventScroll: true });
+          }
+        }}
       />
     </>
   );

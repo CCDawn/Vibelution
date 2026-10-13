@@ -77,7 +77,7 @@ describe("ConversationShareExportButton", () => {
       );
     });
 
-    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="会话操作"]');
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="更多会话操作"]');
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }));
@@ -92,6 +92,11 @@ describe("ConversationShareExportButton", () => {
     });
     expect(document.body.textContent).toContain("导出会话为 HTML");
     expect(document.body.textContent).toContain("问题");
+    await act(async () => {
+      Array.from(document.querySelectorAll("button")).find(button => button.textContent === "取消")!.click();
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("keeps the export menu item disabled without opening the dialog", async () => {
@@ -108,7 +113,7 @@ describe("ConversationShareExportButton", () => {
       );
     });
 
-    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="会话操作"]');
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="更多会话操作"]');
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }));
