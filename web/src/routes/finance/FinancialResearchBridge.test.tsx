@@ -226,7 +226,10 @@ describe("financial native composer bridge", () => {
 
   it("recovers the same pending draft after model options are retried successfully", async () => {
     const root = setup();
-    const options = financialLlmOptions(modelOption("default", "provider/default", ["minimal", "low", "medium"]));
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium"]),
+      modelOption("alternate", "provider/alternate", ["low", "medium"]),
+    );
     const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "brief" as const } };
     const render = (optionsError: boolean) => act(async () => root.render(
       <FinancialResearchBridgeContext.Provider value={bridge}>
