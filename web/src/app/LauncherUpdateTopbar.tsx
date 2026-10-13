@@ -38,7 +38,7 @@ export function LauncherUpdateTopbarView({
   const unknown = !hasUpdate && (!freshness || freshness.current === null);
   const active = freshness?.activeWorkState === "active";
   const taskUnknown = freshness?.activeWorkState !== "idle" && !active;
-  const disabled = taskUnknown || (checkFailed && !freshness);
+  const disabled = checkFailed && !freshness;
   const label = busy ? (zh ? "正在更新…" : "Updating…")
     : failure ? (zh ? "更新失败 · 重试" : "Update failed · Retry")
       : hasUpdate ? (zh ? "有新版本 · 请更新" : "Update available")
@@ -86,7 +86,7 @@ export function LauncherUpdateTopbarView({
             <dt className={styles.metadata}>{zh ? "本地最新" : "Local code"}</dt><dd className={styles.version}>{freshness.headShort ? `@${freshness.headShort}` : (zh ? "未知" : "Unknown")}</dd>
           </dl> : null}
           {active ? <p className={`${styles.description} ${styles.warning}`}>{zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。更新会中断任务并保存已有记录，启动后可回到会话继续。` : "Updating will interrupt active tasks and save existing records. You can return to the conversation after restart."}</p> : null}
-          {hasUpdate && taskUnknown && !busy ? <p className={`${styles.description} ${styles.warning}`}>{zh ? "暂时无法确认任务状态，更新已暂停。请重新检测。" : "Task status is unavailable. Updates are paused; please check again."}</p> : null}
+          {hasUpdate && taskUnknown && !busy ? <p className={`${styles.description} ${styles.warning}`}>{zh ? "暂时无法确认任务状态。确认后仍会保存已有记录，然后关闭并重新打开。" : "Task status is unavailable. Confirming still saves existing records, then closes and reopens."}</p> : null}
           {busy ? <p className={`${styles.description} ${styles.busyDescription}`}><LoaderCircle size={14} className={styles.busyIcon} aria-hidden="true" />{zh ? "正在构建前端和桌面壳。准备完成后关闭窗口，在后台完成换版并重新打开。" : "Building the frontend and desktop shell. The windows will close for final replacement and reopen afterwards."}</p> : null}
           {failure ? <p className={`${styles.description} ${styles.failure}`}>{failure}</p> : null}
           {confirm && !busy ? <div className={styles.confirmation}>
