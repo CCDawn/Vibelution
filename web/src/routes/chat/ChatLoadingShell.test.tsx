@@ -13,6 +13,9 @@ describe("chat structural loading shells", () => {
 
     expect(markup).toContain('data-testid="conversation-index-loading-shell"');
     expect(markup).toContain('aria-label="加载会话中"');
+    expect(markup).toContain("min-h-[44px]");
+    expect(markup).toContain("grid-cols-[32px_minmax(0,1fr)]");
+    expect(markup).toContain("size-8");
     expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(5);
   });
 
@@ -22,6 +25,8 @@ describe("chat structural loading shells", () => {
     expect(markup).toContain('data-testid="conversation-workspace-loading-shell"');
     expect(markup).toContain('aria-label="加载会话中"');
     expect(markup).toContain("grid-rows-[minmax(0,1fr)_auto]");
-    expect(markup).toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(markup).toContain("min-h-[104px]");
+    expect(markup).toContain("min-h-[48px]");
+    expect(markup).toContain("grid-cols-[2rem_minmax(0,1fr)]");
   });
 });

@@ -13,8 +13,8 @@ import { VSkeleton } from "../../components/vui";
 export type ProgressiveRegionSkeletonProps = {
   label: string;
   className?: string;
-  /** list = stacked rows; detail = header + body cards; panel = section blocks; canvas = node grid */
-  variant?: "list" | "detail" | "panel" | "canvas" | "conversation";
+  /** list = stacked rows; session = chat session row; detail = header + body cards; panel = section blocks; canvas = node grid */
+  variant?: "list" | "session" | "detail" | "panel" | "canvas" | "conversation";
 };
 
 export function ProgressiveRegionSkeleton({
@@ -34,6 +34,7 @@ export function ProgressiveRegionSkeleton({
     >
       <span className="sr-only">{label}</span>
       {variant === "list" ? <ListSkeleton /> : null}
+      {variant === "session" ? <SessionSkeleton /> : null}
       {variant === "detail" ? <DetailSkeleton /> : null}
       {variant === "panel" ? <PanelSkeleton /> : null}
       {variant === "canvas" ? <CanvasSkeleton /> : null}
@@ -128,31 +129,47 @@ function CanvasSkeleton() {
   );
 }
 
+function SessionSkeleton() {
+  return (
+    <div className="grid min-w-0 content-start gap-0.5" aria-hidden="true">
+      {Array.from({ length: 5 }, (_, index) => (
+        <div
+          key={index}
+          className="grid min-h-[44px] grid-cols-[32px_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius-control)] px-2 py-1.5"
+        >
+          <VSkeleton shape="circle" className="size-8" />
+          <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
+            <VSkeleton className="h-3 w-16" />
+            <VSkeleton className="h-2.5 w-8" />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ConversationSkeleton() {
   return (
-    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-2" aria-hidden="true">
-      <div className="grid min-h-0 content-start gap-3 overflow-hidden p-1">
-        <div className="grid max-w-[85%] grid-cols-[28px_minmax(0,1fr)] gap-2">
-          <VSkeleton shape="circle" className="size-7" />
-          <span className="grid gap-1.5">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto]" aria-hidden="true">
+      <div className="mx-auto grid w-full max-w-[760px] content-start gap-7 px-[clamp(24px,5vw,64px)] py-9">
+        <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3">
+          <VSkeleton shape="circle" className="size-8" />
+          <span className="grid min-w-0 gap-2.5 pt-1">
             <VSkeleton className="h-3 w-24" />
-            <VSkeleton className="h-2.5 w-full" />
-            <VSkeleton className="h-2.5 w-[88%] opacity-80" />
+            <VSkeleton className="h-2.5 w-[86%]" />
+            <VSkeleton className="h-2.5 w-[64%] opacity-80" />
           </span>
         </div>
-        <div className="ml-auto grid w-[70%] gap-1.5">
-          <VSkeleton className="h-10 w-full rounded-[var(--radius-control)]" />
-        </div>
-        <div className="grid max-w-[85%] grid-cols-[28px_minmax(0,1fr)] gap-2">
-          <VSkeleton shape="circle" className="size-7" />
-          <span className="grid gap-1.5">
-            <VSkeleton className="h-3 w-20" />
-            <VSkeleton className="h-2.5 w-full" />
-            <VSkeleton className="h-2.5 w-[76%] opacity-80" />
-          </span>
+        <div className="ml-auto grid w-[min(420px,62%)]">
+          <VSkeleton className="h-10 w-full rounded-[12px]" />
         </div>
       </div>
-      <VSkeleton className="h-11 w-full rounded-[var(--radius-control)]" />
+      <div className="mx-auto mb-[18px] grid w-[min(calc(100%_-_36px),760px)] min-h-[104px] gap-1.5 rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)] bg-[var(--vui-surface-panel)] px-3.5 py-2.5">
+        <VSkeleton className="min-h-[48px] w-[42%]" />
+        <span className="flex min-h-8 items-center justify-end pt-1.5">
+          <VSkeleton className="h-8 w-16 rounded-[var(--radius-control)]" />
+        </span>
+      </div>
     </div>
   );
 }

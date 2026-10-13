@@ -173,7 +173,7 @@ const styles = {
     "vui-app-appshell startupOverlay min-w-0",
   startupPanel: `vui-app-appshell startupPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   startupSpinner:
-    "vui-app-appshell startupSpinner min-w-0 animate-spin",
+    "vui-app-appshell startupSpinner min-w-0",
   statusBadge:
     `vui-app-appshell statusBadge min-w-0 ${vuiControlPillClass}`,
   statusBadgeLabel:

@@ -47,7 +47,7 @@ export function ChatRouteLoadingShell({
             <ProgressiveRegionSkeleton
               className={styles.indexSkeleton}
               label={label}
-              variant="list"
+              variant="session"
             />
           </div>
         )}

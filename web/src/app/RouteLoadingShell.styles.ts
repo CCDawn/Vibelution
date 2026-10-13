@@ -1,24 +1,12 @@
 const styles = {
   surface: "grid min-h-[min(520px,calc(100dvh_-_96px))] w-full p-3 sm:p-4",
-  surfaceDefault: "place-items-center",
+  surfaceQuiet: "min-h-[min(520px,calc(100dvh_-_96px))] w-full",
   surfaceStructured: "content-start",
-  panel: [
-    "w-[min(360px,100%)] rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass",
-    "px-4 py-4 text-vui-fg-primary shadow-none backdrop-blur-md",
-  ].join(" "),
+  srOnly: "sr-only",
   structuredPanel: [
     "grid min-h-[min(540px,calc(100dvh_-_120px))] w-full gap-3 overflow-auto rounded-[var(--radius-panel)] md:overflow-hidden",
     "border border-vui-border-subtle bg-vui-surface-panel p-3 text-vui-fg-primary shadow-none",
   ].join(" "),
-  loadingHeader: "flex min-w-0 items-center gap-2.5",
-  spinnerFrame: [
-    "grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] border",
-    "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] text-[var(--accent-cool)]",
-  ].join(" "),
-  spinner: "animate-spin motion-reduce:animate-none",
-  loadingCopy: "grid min-w-0 gap-0.5",
-  title: "block [font-size:var(--vui-font-chat)] font-bold leading-[1.35]",
-  meta: "block [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-tertiary",
   skeletonLine: [
     "block h-2.5 w-full max-w-[340px] animate-pulse rounded-full",
     "bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] motion-reduce:animate-none",

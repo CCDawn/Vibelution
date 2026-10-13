@@ -12,23 +12,17 @@ export function ConversationIndexLoadingShell({ label }: LoadingShellProps) {
   return (
     <section className={styles.indexShell} role="status" aria-label={label} data-testid="conversation-index-loading-shell">
       <span className="sr-only">{label}</span>
-      {[2, 1, 1].map((cardCount, groupIndex) => (
-        <div key={groupIndex} className={styles.indexGroup} aria-hidden="true">
-          <div className={styles.indexGroupHeader}>
-            <Pulse className={styles.indexGroupTitle} />
-            <Pulse className={styles.indexGroupCount} />
+      <div className={styles.indexShell} aria-hidden="true">
+        {Array.from({ length: 5 }, (_, cardIndex) => (
+          <div key={cardIndex} className={styles.indexCard}>
+            <Pulse className={styles.indexAvatar} />
+            <span className={styles.indexCopy}>
+              <Pulse className={styles.indexTitle} />
+              <Pulse className={styles.indexMeta} />
+            </span>
           </div>
-          {Array.from({ length: cardCount }, (_, cardIndex) => (
-            <div key={cardIndex} className={styles.indexCard}>
-              <Pulse className={styles.indexAvatar} />
-              <span className={styles.indexCopy}>
-                <Pulse className={styles.indexTitle} />
-                <Pulse className={styles.indexMeta} />
-              </span>
-            </div>
-          ))}
-        </div>
-      ))}
+        ))}
+      </div>
     </section>
   );
 }
@@ -61,10 +55,7 @@ export function ConversationWorkspaceLoadingShell({ label }: LoadingShellProps) 
       <div className={styles.composerWrap} aria-hidden="true">
         <Pulse className={styles.composerInput} />
         <div className={styles.composerToolbar}>
-          <span className={styles.composerTools}>
-            <Pulse className={styles.composerToolSmall} />
-            <Pulse className={styles.composerTool} />
-          </span>
+          <Pulse className={styles.composerTool} />
           <Pulse className={styles.composerSend} />
         </div>
       </div>

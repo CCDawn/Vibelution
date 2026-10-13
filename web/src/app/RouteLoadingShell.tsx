@@ -1,5 +1,3 @@
-import { LoaderCircle } from "lucide-react";
-
 import { ChatRouteLoadingShell } from "./ChatRouteLoadingShell";
 import { FinanceResearchLoading } from "../routes/finance/FinanceResearchFrame";
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
@@ -13,20 +11,6 @@ export type RouteLoadingShellProps = {
   meta?: string;
   surface?: RouteErrorSurface;
 };
-
-function LoadingHeader({ label, meta }: { label: string; meta: string }) {
-  return (
-    <div className={styles.loadingHeader}>
-      <span className={styles.spinnerFrame}>
-        <LoaderCircle className={styles.spinner} size={18} aria-hidden="true" />
-      </span>
-      <span className={styles.loadingCopy}>
-        <strong className={styles.title}>{label}</strong>
-        <span className={styles.meta}>{meta}</span>
-      </span>
-    </div>
-  );
-}
 
 function SkeletonLine({ compact = false }: { compact?: boolean }) {
   return <span className={compact ? styles.skeletonLineCompact : styles.skeletonLine} />;
@@ -153,7 +137,7 @@ export function RouteLoadingShell({
   const resolvedMeta = meta ?? (
     layout === "default" ? "加载界面模块" : "正在加载页面内容"
   );
-  const structured = layout !== "default";
+  const structured = layout === "config" || layout === "teams";
 
   return (
     <div
@@ -162,13 +146,16 @@ export function RouteLoadingShell({
       aria-busy="true"
       data-vui-app={surface}
       data-route-loading={layout}
-      className={[styles.surface, structured ? styles.surfaceStructured : styles.surfaceDefault].join(" ")}
+      className={structured ? `${styles.surface} ${styles.surfaceStructured}` : styles.surfaceQuiet}
     >
-      <div className={structured ? styles.structuredPanel : styles.panel}>
-        <LoadingHeader label={resolvedLabel} meta={resolvedMeta} />
-        {layout === "config" ? <ConfigLoadingLayout /> : null}
-        {layout === "teams" ? <TeamsLoadingLayout /> : null}
-      </div>
+      <span className={styles.srOnly}>{resolvedLabel}</span>
+      <span className={styles.srOnly}>{resolvedMeta}</span>
+      {structured ? (
+        <div className={styles.structuredPanel}>
+          {layout === "config" ? <ConfigLoadingLayout /> : null}
+          {layout === "teams" ? <TeamsLoadingLayout /> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
