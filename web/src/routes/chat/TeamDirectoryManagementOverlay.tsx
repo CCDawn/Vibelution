@@ -74,8 +74,8 @@ export function TeamDirectoryManagementOverlay({ action, team, teams, lang, onCl
   }
   if (action.mode === "archive") {
     return <VConfirmDialog open title={zh ? "归档团队" : "Archive team"} tone="danger"
-      description={zh ? `确定归档“${team?.name || action.teamId}”？团队将变为只读，关联群聊房间会被删除。若只想收起左栏，请取消并选择“隐藏团队”。`
-        : `Archive “${team?.name || action.teamId}”? The team becomes read-only and linked chat rooms are deleted. To keep records, cancel and choose Hide team.`}
+      description={zh ? `确定归档“${team?.name || action.teamId}”？团队将变为只读，当前成员 Agent 会一并归档，关联群聊房间会被删除。若只想收起左栏，请取消并选择“隐藏团队”。`
+        : `Archive “${team?.name || action.teamId}”? The team becomes read-only, its current member Agents are archived, and linked chat rooms are deleted. To keep records, cancel and choose Hide team.`}
       confirmLabel={zh ? "确认归档" : "Confirm archive"} cancelLabel={zh ? "保留团队" : "Keep team"}
       confirmPending={pending} confirmDisabled={locked} onConfirm={() => { if (!locked) submitOnce(() => settings.archive(action.teamId)); }}
       onOpenChange={(open) => { if (!open) close(); }}>{error}</VConfirmDialog>;
