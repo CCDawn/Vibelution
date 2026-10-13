@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import json
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -686,6 +688,78 @@ def test_synthesis_recovery_requires_all_finals_reserved_id_and_empty_transcript
     assert recovered["coordinationStatus"] == "waiting"
     assert run["synthesis"]["clientSubmissionId"] == "submission-synthesis"
     assert run["synthesis"]["turnId"] == ""
+
+
+@pytest.mark.parametrize("native_state", ["failed", "unknown", "unaccepted"])
+def test_synthesis_recovery_retries_only_proven_failed_native_turn(monkeypatch, native_state):
+    from core.web.services.session import submit
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    run["coordinationStatus"] = "blocked"
+    run["synthesis"].update(turnId="failed-synthesis", submissionState="accepted")
+    original_ref = dict(run["synthesis"])
+    for role in runs.ROLE_SPECS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    original_analysts = copy.deepcopy(run["analysts"])
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda *_args: "已完成分析")
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+    monkeypatch.setattr(submit, "_queued_submission_retry_state", lambda *_args, **_kwargs: native_state)
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: {
+        "id": "session-owner", "status": "failed", "activeTurnId": "",
+        "messages": [{"role": "user", "metadata": {"clientSubmissionId": "submission-synthesis", "turnId": "failed-synthesis"}}],
+    })
+    if native_state != "failed":
+        with pytest.raises(runs.FinancialTeamRunNotReadyError):
+            runs.begin_financial_team_synthesis_recovery("owner-1", "run-1")
+        assert run["synthesis"] == original_ref
+        return
+    recovered = runs.begin_financial_team_synthesis_recovery("owner-1", "run-1")
+    assert recovered["coordinationStatus"] == "waiting"
+    assert run["synthesis"]["clientSubmissionId"] != original_ref["clientSubmissionId"]
+    assert run["synthesis"]["turnId"] == ""
+    assert run["synthesis"]["submissionState"] == "reserved"
+    assert run["synthesisAttempts"][-1] == original_ref
+    assert run["analysts"] == original_analysts
+    assert captured["submissions"] == []
+    retry_id = run["synthesis"]["clientSubmissionId"]
+    runs.begin_financial_team_synthesis_recovery("owner-1", "run-1", allow_waiting=True)
+    assert run["synthesis"]["clientSubmissionId"] == retry_id
+    assert len(run["synthesisAttempts"]) == 1
+
+
+@pytest.mark.parametrize("change", [
+    {"activeTurnId": "other-running-turn"},
+    {"status": "running"},
+    {"metadataTurn": "different-turn"},
+])
+def test_failed_synthesis_recovery_rejects_busy_or_mismatched_session(monkeypatch, change):
+    from core.web.services.session import submit
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    run["coordinationStatus"] = "blocked"
+    run["synthesis"].update(turnId="failed-synthesis", submissionState="accepted")
+    for role in runs.ROLE_SPECS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda *_args: "已完成分析")
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+    monkeypatch.setattr(submit, "_queued_submission_retry_state", lambda *_args, **_kwargs: "failed")
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: {
+        "status": change.get("status", "failed"), "activeTurnId": change.get("activeTurnId", ""),
+        "messages": [{"role": "user", "metadata": {"clientSubmissionId": "submission-synthesis", "turnId": change.get("metadataTurn", "failed-synthesis")}}],
+    })
+    with pytest.raises(runs.FinancialTeamRunNotReadyError):
+        runs.begin_financial_team_synthesis_recovery("owner-1", "run-1")
+    assert run["synthesis"]["turnId"] == "failed-synthesis"
+    assert "synthesisAttempts" not in run
+
+
+@pytest.mark.parametrize(("depth", "limit"), [("brief", 800), ("standard", 2000), ("exhaustive", 3600)])
+def test_synthesis_output_is_bounded_by_research_depth(depth, limit):
+    run = {"symbol": "sh600519", "periodDays": 30, "researchDate": "2026-10-13", "depth": depth, "analysts": {role: {} for role in runs.ROLE_SPECS}}
+    prompt = runs._synthesis_prompt(run, {role: "研究" for role in runs.ROLE_SPECS})
+    assert f"最终正文不超过 {limit} 个汉字" in prompt
+    assert "不要逐字复述分析员全文或历史轮次" in prompt
+    assert "来源与口径" in prompt
 
 
 @pytest.mark.parametrize(

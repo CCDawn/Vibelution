@@ -546,6 +546,23 @@ describe("Finance analyst team", () => {
     expect(container.textContent).not.toContain("工具额度已耗尽，本轮停止");
   });
 
+  it("shows a terminal failure even when no assistant message was emitted", async () => {
+    currentRun = makeRun(); currentRun.coordinationStatus = "blocked";
+    for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.synthesis.turnId = "turn-synthesis";
+    const fetchDetail = api.session.getMockImplementation()!;
+    api.session.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== "session-assistant") return fetchDetail(sessionId);
+      const detail = detailFor(sessionId, currentRun!.synthesis, "");
+      return { ...detail, messages: detail.messages?.filter(message => message.role === "user"), status: "failed", terminalReason: "failed_runtime", lastTurnTerminalTurnId: "turn-synthesis" };
+    });
+    await render();
+    expect(container.textContent).toContain("汇总失败");
+    expect(container.textContent).not.toContain("等待主助手汇总");
+    expect(container.textContent).not.toContain("等待响应");
+    expect(api.synthesis).not.toHaveBeenCalled();
+  });
+
   it("reuses the same run-creation key after an ambiguous transport failure", async () => {
     api.create.mockRejectedValueOnce(new Error("network timeout"));
     await render();

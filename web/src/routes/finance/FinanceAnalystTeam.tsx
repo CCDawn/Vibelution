@@ -135,11 +135,12 @@ function projectNativeTurn(detail: SessionDetail | undefined, ref: { clientSubmi
       : latestActivity?.type === "status"
         ? latestActivity.text
         : "正在分析";
-  const exactTerminal = turn && detail?.lastTurnTerminalTurnId === turn.turnId ? String(detail.terminalReason ?? "").toLowerCase() : "";
+  const expectedTurnId = turn?.turnId || ref.turnId;
+  const exactTerminal = expectedTurnId && detail?.lastTurnTerminalTurnId === expectedTurnId ? String(detail.terminalReason ?? "").toLowerCase() : "";
   const stopped = /stop|cancel|abort/.test(exactTerminal);
   const failed = turn?.status === "failed" || /failed|error|needs_continue|paused_limit|superseded/.test(exactTerminal);
   const state: RoleState = !turn
-    ? !detail && ref.turnId ? "loading" : submissionSeen || ref.turnId ? "waiting" : "missing"
+    ? stopped ? "stopped" : failed ? "failed" : !detail && ref.turnId ? "loading" : submissionSeen || ref.turnId ? "waiting" : "missing"
     : turn.status === "pending" || turn.status === "running" ? "running"
       : stopped ? "stopped"
         : failed ? "failed"
