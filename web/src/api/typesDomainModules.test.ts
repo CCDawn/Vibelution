@@ -34,6 +34,7 @@ const expectedBarrel = [
   'export * from "./types/financialPortfolio";',
   'export * from "./types/financialJobs";',
   'export * from "./types/financialReports";',
+  'export * from "./types/financialBacktests";',
 ].join("\n");
 
 const domainSources = [
