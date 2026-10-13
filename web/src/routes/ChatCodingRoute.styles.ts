@@ -42,7 +42,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.,
   centerPane:
-    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--fg-primary)_9%,transparent)] ${vuiRailFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
+    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--fg-primary)_5%,transparent)] ${vuiChatFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
   // Column placement is separate from the pane. The built stylesheet emits
   // grid-column:3 after grid-column:1, so both utilities on one node keep column 3.
   centerPaneDocked:
@@ -50,7 +50,7 @@ const styles: Record<string, string> = {
   centerPaneOverlay:
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
-    `vui-routes-chatcodingroute centerSurface grid h-full min-h-0 w-full overflow-hidden rounded-t-[12px] ${vuiChatFillClass} [&_.vui-components-conversationview.surface]:rounded-none [&_.vui-components-conversationview.surface]:border-0 [&_.vui-components-conversationview.surface]:shadow-none`,
+    `vui-routes-chatcodingroute centerSurface grid h-full min-h-0 w-full overflow-hidden ${vuiChatFillClass} [&_.vui-components-conversationview.surface]:rounded-none [&_.vui-components-conversationview.surface]:border-0 [&_.vui-components-conversationview.surface]:shadow-none`,
   // Compact back chip: never compete with session tabs for width.
   chatReturnLink:
     "vui-routes-chatcodingroute chatReturnLink inline-flex h-7 max-w-[7.5rem] shrink-0 items-center gap-1 self-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 no-underline [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate",
@@ -58,7 +58,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute chatReturnLinkIcon shrink-0 text-[var(--fg-tertiary)]",
   // Session + file tabs share one scroll region so the back chip stays pinned left.
   tabStripSessions:
-    "vui-routes-chatcodingroute tabStripSessions min-w-0 flex flex-1 items-end gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]",
+    "vui-routes-chatcodingroute tabStripSessions min-w-0 flex flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]",
   contextCompositionSegmentAgent:
     `vui-routes-chatcodingroute contextCompositionSegmentAgent min-w-0 ${vuiStateCoolInfoClass}`,
   contextCompositionSegmentAttachments:
@@ -105,13 +105,15 @@ const styles: Record<string, string> = {
   // ml-auto only when this block is the last flex child (narrow overlay toggles).
   // Never put ml-auto on the first tabStrip child — it pushes session tabs to the right.
   overlayPaneControls:
-    "vui-routes-chatcodingroute overlayPaneControls ml-auto flex min-w-0 shrink-0 items-center gap-1",
+    "vui-routes-chatcodingroute overlayPaneControls flex min-w-0 shrink-0 items-center gap-0.5",
   overlayPaneLeft:
     "vui-routes-chatcodingroute overlayPaneLeft left-0",
   overlayPaneRight:
     "vui-routes-chatcodingroute overlayPaneRight right-0",
   overlayPaneToggle:
-    "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[var(--vui-control-height-sm)] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute overlayPaneToggle inline-flex !h-7 !min-h-7 items-center !rounded-[6px] !border-0 !bg-transparent !bg-none px-2 !shadow-none [font-size:var(--vui-font-xs)] font-normal text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
+  toolbarIconButton:
+    "vui-routes-chatcodingroute toolbarIconButton !h-7 !min-h-7 !w-7 !min-w-7 !px-0 !rounded-[6px] !border-0 !bg-transparent !bg-none !shadow-none font-normal text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] [&[aria-pressed=true]]:!bg-[var(--vui-control-muted-hover)] [&[aria-expanded=true]]:!bg-[var(--vui-control-muted-hover)] max-[700px]:!size-11 max-[700px]:!min-h-11 max-[700px]:!min-w-11 [@media(pointer:coarse)]:!size-11 [@media(pointer:coarse)]:!min-h-11 [@media(pointer:coarse)]:!min-w-11",
   sessionListControlsRow:
     "vui-routes-chatcodingroute sessionListControlsRow flex min-w-0 items-center gap-1 px-2 pb-1",
   sessionListSortSelect: "vui-routes-chatcodingroute sessionListSortSelect min-w-0 flex-1",
@@ -122,7 +124,7 @@ const styles: Record<string, string> = {
   resizeHandleLeft:
     "vui-routes-chatcodingroute resizeHandleLeft h-full w-full min-w-0 max-[860px]:block [--pane-resize-rule-offset:4.5px] [--pane-resize-rule-top:12px] [--pane-resize-rule-bottom:16px] [grid-column:2] [grid-row:1]",
   resizeHandleRight:
-    "vui-routes-chatcodingroute resizeHandleRight h-full w-full min-w-0 max-[860px]:block [--pane-resize-rule-offset:-4.5px] [--pane-resize-rule-top:12px] [--pane-resize-rule-bottom:16px] [grid-column:4] [grid-row:1]",
+    "vui-routes-chatcodingroute resizeHandleRight h-full w-full min-w-0 max-[860px]:block [--pane-resize-rule-offset:-4.5px] [--pane-resize-rule-top:56px] [--pane-resize-rule-bottom:16px] [grid-column:4] [grid-row:1]",
   resourceMetric:
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:
@@ -151,7 +153,7 @@ const styles: Record<string, string> = {
   tabActive:
     `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
-    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-end gap-1.5 overflow-hidden bg-[var(--shell-surface)] px-2 pt-1.5 pb-0 max-[700px]:px-1.5 [&>.overlayPaneControls]:self-center",
+    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-center gap-1.5 overflow-hidden bg-vui-surface-chat px-2.5 py-0 max-[700px]:px-1.5",
 
 };
 

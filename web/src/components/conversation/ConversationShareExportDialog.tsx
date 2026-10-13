@@ -15,6 +15,7 @@ export type ConversationShareExportDialogProps = {
   messages: ConversationMessage[];
   language: "zh" | "en";
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 type ExportOutcome = {
@@ -58,6 +59,7 @@ export function ConversationShareExportDialog({
   messages,
   language,
   onOpenChange,
+  onCloseAutoFocus,
 }: ConversationShareExportDialogProps) {
   const zh = language === "zh";
   const turns = useMemo(() => buildConversationShareExportTurns(messages), [messages]);
@@ -119,6 +121,7 @@ export function ConversationShareExportDialog({
   return (
     <VDialog
       data-vui="conversation-share-export-dialog"
+      onCloseAutoFocus={onCloseAutoFocus}
       open
       onOpenChange={(next) => {
         if (!next && !exporting) onOpenChange(false);

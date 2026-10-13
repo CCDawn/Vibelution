@@ -10,8 +10,8 @@ from core.infrastructure.instance_display_name import (
 
 def test_main_kind_uses_fixed_short_name():
     assert instance_short_name_base(kind="main", branch="main") == MAIN_SHORT_NAME
-    assert workbench_window_title(MAIN_SHORT_NAME) == "main 台"
-    assert launcher_window_title(MAIN_SHORT_NAME) == "main 控"
+    assert workbench_window_title(MAIN_SHORT_NAME) == "Vibelution 工作台 · main"
+    assert launcher_window_title(MAIN_SHORT_NAME) == "Vibelution 启动管理"
 
 
 def test_worktree_keeps_full_branch_name():
@@ -88,8 +88,8 @@ def test_assign_names_disambiguates_collisions_and_marks_current():
     assign_instance_display_names(items)
 
     assert items[0]["shortName"] == "main"
-    assert items[0]["workbenchTitle"] == "main 台"
-    assert items[0]["launcherTitle"] == "main 控"
+    assert items[0]["workbenchTitle"] == "Vibelution 工作台 · main"
+    assert items[0]["launcherTitle"] == "Vibelution 启动管理"
     assert items[1]["shortName"] == "branch+codex/slot-supervisor-registry"
     assert items[2]["shortName"] == "branch+codex/slot-supervisor-registry-2"
-    assert current_instance_display(items)["workbenchTitle"] == "main 台"
+    assert current_instance_display(items)["workbenchTitle"] == "Vibelution 工作台 · main"

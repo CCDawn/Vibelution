@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { cloneElement, useRef, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 
 import type { ConversationMessage } from "../../api/types";
-import { VButton } from "../vui";
+import { VButton, VDropdownMenu, VIconButton } from "../vui";
 import { ConversationShareExportDialog } from "./ConversationShareExportDialog";
+import styles from "./ConversationShareExportButton.styles";
 
 export type ConversationShareExportButtonProps = {
   sessionId: string;
@@ -10,6 +12,7 @@ export type ConversationShareExportButtonProps = {
   messages: ConversationMessage[];
   language?: "zh" | "en";
   isDisabled?: boolean;
+  presentation?: "button" | "menu";
 };
 
 /**
@@ -23,12 +26,23 @@ export function ConversationShareExportButton({
   messages,
   language = "zh",
   isDisabled = false,
+  presentation = "button",
 }: ConversationShareExportButtonProps) {
   const zh = language === "zh";
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <VButton
+      {presentation === "menu" ? (<>
+        <span className={styles.menuDivider} aria-hidden="true" />
+        <VDropdownMenu
+          aria-label={zh ? "会话操作" : "Conversation actions"}
+          align="end"
+          trigger={cloneElement(<VIconButton variant="ghost" label={zh ? "更多会话操作" : "More session actions"} className={styles.menuTrigger} icon={<MoreHorizontal size={16} aria-hidden="true" />} />, { ref: triggerRef })}
+          items={[{ id: "export-html", label: zh ? "导出 HTML…" : "Export HTML…", disabled: isDisabled, onSelect: () => setOpen(true) }]}
+        />
+      </>) : <VButton
+        ref={triggerRef}
         data-vui="conversation-share-export-button"
         variant="ghost"
         density="compact"
@@ -36,13 +50,19 @@ export function ConversationShareExportButton({
         onPress={() => setOpen(true)}
       >
         {zh ? "导出 HTML" : "Export HTML"}
-      </VButton>
+      </VButton>}
       <ConversationShareExportDialog
         open={open}
         sessionId={sessionId}
         messages={messages}
         language={language}
         onOpenChange={setOpen}
+        onCloseAutoFocus={(event) => {
+          if (triggerRef.current?.isConnected) {
+            event.preventDefault();
+            triggerRef.current.focus({ preventScroll: true });
+          }
+        }}
       />
     </>
   );

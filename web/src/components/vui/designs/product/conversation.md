@@ -8,7 +8,9 @@
 - Chat 保留现有单侧索引栏、顶部全局导航和共享宽度记忆；文件/变更面板继续按现有显式打开语义显示。
 - 单侧索引栏与主面板外围留白使用顶栏相同的 `--shell-surface` 底色，取消索引栏渐变和内高光，使三者构成连续的窗口框架；主内容区继续使用独立的对话表面。
 - 拖动分隔线在悬停、键盘聚焦及拖动时使用 1px 的正文色细线，贴合主面板对应边框的直线段；圆角段不额外画竖线。12px 隐形命中区跟随这条边框，继续复用共享拖动、键盘与宽度记忆。
-- 会话标签栏为 44px 高的 shell 底色。标签为 32px 高、8px 上圆角，当前标签使用正文同色表面并贴合下方正文，未选中标签透明；内部标题按钮必须去除背景图，避免通用按钮渐变把标签切成两种底色。标签字号使用 13px 层级，当前标题 medium、其余 regular，关闭及新建按钮保持裸图标与原有交互。
+- 用户批准 A 平整标题栏：44px 高的标题栏与正文共用对话表面，整体只保留外层 12px 圆角。会话标签为 28px 高、6px 四角圆角，选中使用中性浅灰底、标题 regular；未选中透明。内部标题、关闭、新建及工具按钮均去除背景图与凸起边框。浏览会话、侧栏与会话操作使用同一排 28px VIconButton；窄屏仍保留原会话列入口与横向标签滚动。
+- 普通会话的导出 HTML 入口归入标题栏的会话操作菜单，继续复用 ConversationShareExportButton/Dialog 与 conversationModel 的 settled transcript；面板通过 hideExportControl 省去重复工具行。其他会话表面保留原导出入口，ConversationView 不增加导出状态或新数据权威。
+- 右栏顶部为 44px shell 底色，工具与标签使用低强调控件，内容为 12px 圆角对话表面。空状态使用轻提示和带线性图标的紧凑入口列表；保留辅助对话、审查、终端、浏览器、开发者工具及桌面项目工具。普通右栏取消边界悬浮收起按钮，复用 PaneResizeHandle 与原布局宽度记忆；右栏内部悬停不显示装饰竖线，边界拖动反馈避开工具栏。
 - 索引条目使用紧凑标题和辅助信息，摘要不占第三行；选中底色使用 `--vui-selection-bg`，内高光使用 `--vui-sheen`。搜索、归档、排序、状态与批量操作沿用真实组件。
 - 对话正文和 composer 使用相同的阅读宽度；用户消息、输入区与文件交付通过已有 VUI 表面和 elevation token 表达轻微层次，助手正文不增加外层卡片。
 - 主内容面把原有会话标签、正文与输入区包在同一个 12px 圆角边界内，桌面左右及底部留白 4px、窄屏 2px；外围使用不透明的 shell 底色，避免背景图在分栏间形成粗深色条。内层 ConversationView 不重复绘制边界。布局继续使用原轨道与已保存宽度。
@@ -1108,3 +1110,9 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 
 ### 实现与边界
 源码与样式归 `web/src/routes/chat/ChatSessionBrowser.tsx` 和 `ChatSessionBrowser.styles.ts`，组合 VUI 的既有按钮、输入和状态表面；`ChatCenterTabStrip` 提供浏览入口槽位，`ChatCenterSessionSurface` 保持原工作区挂载。数据、头像解析、状态语义与时间分组复用原有 owners，不建立第二份会话索引或 transcript。
+
+#### 标签行操作的状态与触屏
+
+浏览、侧栏和更多菜单组成同一操作组。布局按钮保留 tooltip 与 `aria-pressed` / `aria-expanded`，打开态用中性浅底；侧栏的名称说明展开或收起动作。导出菜单前用细分隔线区分视图与会话操作，标签仍可独立横向滚动。桌面操作按钮为 28px；不足 700px 或粗指针时至少 44×44px，沿用已确认的标题栏与面板形状。
+
+导出复用 `ConversationShareExportButton` 的 `presentation="menu"` 和现有 Dialog，传入同一 `conversationModel.sessionId/messages`。关闭时通过 `VDialog.onCloseAutoFocus` 回到入口，切换会话由既有 key 关闭旧对话框；空消息禁用导出，CLI、文件页及不可用会话不新增导出。Finance、Companion 保留原有入口，普通 Chat 移除独立导出行；不改变导出 API、Session 或 ConversationView。

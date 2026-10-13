@@ -318,6 +318,27 @@ export function instanceWindowOpen(item: LauncherBranchInstance): boolean {
   return Boolean(item.runtime.window.open);
 }
 
+export type WorkbenchOpenAction = "start" | "open" | "switch" | "recover" | "retry";
+
+export function workbenchOpenAction(
+  item: LauncherBranchInstance,
+  state: InstanceRuntimeState,
+): WorkbenchOpenAction {
+  const windowOpen = instanceWindowOpen(item);
+  if (state === "failed" && !windowOpen) {
+    return "retry";
+  }
+
+  // The flat item.alive field may include the workbench window. Decide from
+  // the backend's own health evidence so an orphaned window cannot look healthy.
+  const backend = item.runtime.backend;
+  const backendHealthy = backend.alive && backend.healthy && backend.listening;
+  if (windowOpen) {
+    return backendHealthy ? "switch" : "recover";
+  }
+  return backendHealthy ? "open" : "start";
+}
+
 export function instanceHasLiveRuntime(item: LauncherBranchInstance): boolean {
   const backend = item.runtime.backend;
   return Boolean(backend.alive || backend.listening || instanceWindowOpen(item));

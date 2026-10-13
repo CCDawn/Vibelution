@@ -484,6 +484,9 @@ def test_feedback_prompt_quotes_untrusted_original_turn_and_result(harness, monk
     validation.check_validation(AGENT_ID, record["id"])
     prompt = validation.feedback_prompt(AGENT_ID, record["id"])
     assert prompt["id"] == record["id"]
+    assert "不调用任何工具" in prompt["text"]
+    assert "正文不超过800个汉字" in prompt["text"]
+    assert "若 retrospective 为 true" in prompt["text"]
     assert "命中只表示预先登记的方向和阈值满足" in prompt["text"]
     assert "UNTRUSTED_FINANCIAL_FEEDBACK_JSON_BEGIN" in prompt["text"]
     assert prompt["text"].count(validation._FEEDBACK_END) == 1

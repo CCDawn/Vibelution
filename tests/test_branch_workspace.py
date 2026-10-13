@@ -168,12 +168,12 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     assert by_id["main"]["kind"] == "main"
     assert by_id["main"]["current"] is True
     assert by_id["main"]["shortName"] == "main"
-    assert by_id["main"]["workbenchTitle"] == "main 台"
-    assert by_id["main"]["launcherTitle"] == "main 控"
+    assert by_id["main"]["workbenchTitle"] == "Vibelution 工作台 · main"
+    assert by_id["main"]["launcherTitle"] == "Vibelution 启动管理"
     assert by_id["worktree:feat-task"]["shortName"] == "branch+codex/feat-task"
-    assert by_id["worktree:feat-task"]["workbenchTitle"] == "branch+codex/feat-task 台"
+    assert by_id["worktree:feat-task"]["workbenchTitle"] == "Vibelution 测试工作台 · codex/feat-task"
     assert payload["currentShortName"] == "main"
-    assert payload["currentWorkbenchTitle"] == "main 台"
+    assert payload["currentWorkbenchTitle"] == "Vibelution 工作台 · main"
     assert by_id["worktree:feat-task"]["legacy"] is False
     assert by_id["worktree:feat-task"]["alive"] is False
     assert by_id["worktree:feat-task"]["observedState"] == "idle"
@@ -232,8 +232,8 @@ def test_pool_external_detached_checkout_short_name_stays_leaf(tmp_path):
     assert "/" not in short_name
     assert ":" not in short_name
     assert "\\" not in short_name
-    assert detached["workbenchTitle"] == "branch+Vibelution 台"
-    assert detached["launcherTitle"] == "branch+Vibelution 控"
+    assert detached["workbenchTitle"] == "Vibelution 测试工作台 · Vibelution"
+    assert detached["launcherTitle"] == "Vibelution 启动管理"
 
 
 def test_pool_reparse_entry_is_removed_without_touching_external_target(tmp_path):

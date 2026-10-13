@@ -147,6 +147,7 @@ import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryS
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
+import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 
 const ShellProjectUtilities = lazy(() => import("./ShellProjectUtilities").then((module) => ({ default: module.ShellProjectUtilities })));
 const LazyAppShellSettingsMenu = lazy(() =>
@@ -3095,9 +3096,21 @@ export function AppShell() {
       </header>
 
       <div className={styles.mainArea}>
+      <div className={styles.contentFrame} data-testid="workbench-content-frame">
+      <div><WorkbenchConnectionNotice
+        unavailable={(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen}
+        lang={lang}
+        desktopShell={desktopShell}
+        recovering={restartRequested || shutdownRequested}
+        lastHealthyAt={backendHealthQuery.dataUpdatedAt}
+        failedAt={backendHealthQuery.errorUpdatedAt}
+        onRecover={() => { void beginRestart(); }}
+        onRetry={() => { void backendHealthQuery.refetch(); }}
+      /></div>
         <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><Outlet /></>}
           aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
           resize={{ layoutId: WORKBENCH_LAYOUT_IDS.projectUtilities, aside: { defaultWidth: 420, minWidth: 320, maxWidth: 640 } }} />
+      </div>
       </div>
       <VDialog open={projectUtilityFallback && projectUtilityOverlay} onOpenChange={(open) => { if (!open) collapseProjectUtilityRail(); }} title={lang === "zh" ? "项目工具" : "Project tools"} size="xl" hideClose contentClassName={styles.projectUtilityOverlay}>
         <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense>
