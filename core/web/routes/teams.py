@@ -54,6 +54,7 @@ class TeamMemberPayload(BaseModel):
     agentId: str = ""
     role: str = ""
     purpose: str = ""
+    responsibilities: list[str] = Field(default_factory=list)
 
 
 class TeamCreatePayload(BaseModel):

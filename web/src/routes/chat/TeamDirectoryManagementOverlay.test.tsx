@@ -63,6 +63,7 @@ describe("team directory management", () => {
     const onClose = vi.fn();
     await render(<TeamDirectoryManagementOverlay action={{ teamId: team.teamId, mode: "archive" }} team={team} teams={[team]} lang="zh" onClose={onClose} />);
     expect(document.body.textContent).toContain("群聊房间会被删除");
+    expect(document.body.textContent).toContain("当前成员 Agent 会一并归档");
     expect(archiveTeam).not.toHaveBeenCalled();
     await act(async () => button("确认归档").click());
     await flush();

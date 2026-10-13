@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
 import {
+  addTeamSettingsMemberDraft,
   buildTeamSettingsPayload,
   createTeamSettingsDraft,
   teamMemberModelStatus,
@@ -52,6 +53,26 @@ const memberWithRole = (role: string, extra: Record<string, unknown> = {}) => ({
 });
 
 describe("teamSettingsModel", () => {
+  it("stages multiple members with separate editable rows and no draft IDs in the roster payload", () => {
+    const team = makeTeam({ members: [memberWithRole("lead")] });
+    let draft = createTeamSettingsDraft(team);
+    draft = addTeamSettingsMemberDraft({ ...draft, addRole: "reviewer", addAgentId: "agent-2" });
+    draft = addTeamSettingsMemberDraft({ ...draft, addRole: "researcher", addAgentId: "agent-3" });
+    expect(draft.members).toHaveLength(3);
+    expect(new Set(draft.members.map((member) => member.memberId)).size).toBe(3);
+    expect(draft.addAgentId).toBe("");
+    expect(draft.addRole).toBe("");
+    expect(teamSettingsDirty(draft, team)).toBe(true);
+    expect(buildTeamSettingsPayload(draft, team).members?.map((member) => [member.memberId, member.role])).toEqual([
+      ["member-1", "lead"], ["", "reviewer"], ["", "researcher"],
+    ]);
+    const duplicate = { ...draft, addAgentId: "agent-2" };
+    expect(addTeamSettingsMemberDraft(duplicate)).toBe(duplicate);
+    draft.members.slice(1).forEach((member) => { member.remove = true; });
+    expect(teamSettingsDirty(draft, team)).toBe(false);
+    expect(buildTeamSettingsPayload(draft, team)).toEqual({});
+  });
+
   it("creates a draft from the team and reports clean state", () => {
     const team = makeTeam({
       members: [

@@ -21,7 +21,7 @@
 TeamDirectoryManagementOverlay 为延迟挂载的会话左栏 dialog host。打开设置时才加载完整团队和 Agent 配置；加载失败显示重试，不能用摘要名单覆盖完整成员。
 
 ### 使用方式
-复用 useTeamSettingsActions 的写入、日志和 query invalidation。改名只 PATCH name，不提交成员；失败保持弹窗与输入并显示错误。归档说明团队只读及关联群聊删除，失败保留原列表。
+复用 useTeamSettingsActions 的写入、日志和 query invalidation。改名只 PATCH name，不提交成员；失败保持弹窗与输入并显示错误。归档说明团队只读、当前成员 Agent 一并归档及关联群聊删除，失败保留原列表。
 
 ## 隐藏与恢复
 
