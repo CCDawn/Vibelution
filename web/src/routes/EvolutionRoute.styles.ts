@@ -201,11 +201,11 @@ const styles = {
   filterButtonActive:
     "[background:color-mix(in_srgb,_var(--accent-warm)_16%,_transparent)] [color:var(--accent-warm-2)]",
   filterField:
-    "grid [gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)]",
+    "grid min-w-0 [gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)]",
   filterMeta:
     "flex [align-items:center] [justify-content:space-between] [gap:12px] [flex-wrap:wrap]",
   filterRow:
-    "grid [grid-template-columns:minmax(0,_1.7fr)_repeat(2,_minmax(150px,_1fr))] [gap:10px] max-[1200px]:[grid-template-columns:1fr]",
+    "grid min-w-0 [grid-template-columns:minmax(0,_1fr)] [gap:10px]",
   filterSegmented:
     "inline-flex [align-items:center] [gap:6px] [padding:3px] [border-radius:var(--radius-panel)] [border:1px_solid_var(--border-soft)] [background:var(--vui-surface-panel)]",
   formField:
