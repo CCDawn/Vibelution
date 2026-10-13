@@ -854,6 +854,11 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.composerFieldCodex).toContain("!flex !flex-col");
     expect(styles.composerFieldCodex).toContain("[&_textarea]:!min-h-[48px]");
     expect(styles.composerFieldCodex).not.toContain("grid-rows-");
+    expect(styles.inputCodex).toContain("![background:transparent]");
+    expect(styles.inputCodex).toContain("!shadow-none");
+    expect(styles.inputCodex).not.toContain("!bg-transparent");
+    expect(styles.input).toContain("![background:transparent]");
+    expect(styles.input).toContain("!shadow-none");
 
     const composerActionStackSource = conversationViewSource.slice(
       conversationViewSource.indexOf("const composerActions = ("),
