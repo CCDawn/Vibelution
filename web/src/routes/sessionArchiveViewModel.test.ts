@@ -13,6 +13,8 @@ import {
 } from "./conversationIndexModel";
 
 const workbenchSource = readFileSync(resolve(import.meta.dirname, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
+const indexPanelSource = readFileSync(resolve(import.meta.dirname, "chat/ChatConversationIndexPanel.tsx"), "utf8");
+const sessionMutationsSource = readFileSync(resolve(import.meta.dirname, "chat/useChatSessionMutations.ts"), "utf8");
 const railSource = readFileSync(resolve(import.meta.dirname, "chat/ChatConversationIndexRail.tsx"), "utf8");
 const toolbarSource = readFileSync(resolve(import.meta.dirname, "chat/ChatSessionIndexToolbar.tsx"), "utf8");
 const menuSource = readFileSync(resolve(import.meta.dirname, "SessionContextMenu.tsx"), "utf8");
@@ -158,15 +160,15 @@ describe("session archive UI wiring", () => {
 
   it("replaces the live directory with a flat archived rail", () => {
     expect(workbenchSource).toContain("sessionArchiveMutation");
-    expect(workbenchSource).toContain("archiveChatSession");
-    expect(workbenchSource).toContain("unarchiveChatSession");
+    expect(sessionMutationsSource).toContain("archiveChatSession");
+    expect(sessionMutationsSource).toContain("unarchiveChatSession");
     expect(workbenchSource).toContain("handleArchiveSession");
     expect(workbenchSource).toContain("includeArchivedSessions: showArchivedSessions");
     expect(workbenchSource).toContain("rawSessionsWithArchived");
-    expect(workbenchSource).toContain("onArchive={handleArchiveSession}");
+    expect(indexPanelSource).toContain("onArchive={handleArchiveSession}");
     expect(workbenchSource).toContain('queryKey: queryKeys.sessionArchive()');
-    expect(workbenchSource).toContain("<ArchivedSessionRail");
-    expect(workbenchSource).toContain("showArchivedSessions ? null : <>");
+    expect(indexPanelSource).toContain("<ArchivedSessionRail");
+    expect(indexPanelSource).toContain("showArchivedSessions ? null : <>");
     expect(workbenchSource).not.toContain("readOnly: variables.archive");
     expect(toolbarSource).toContain('data-vui="chat-session-timeline-toggle"');
   });
