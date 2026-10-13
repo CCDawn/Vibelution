@@ -130,15 +130,16 @@ describe("composerModelEffort", () => {
     })).toEqual({ modelId: "missing/model", reasoningEffort: "high" });
   });
 
-  it("wires the chat composer so the thinking control follows the picked model", () => {
+  it("keeps ordinary chat thinking on the Agent-bound model", () => {
     const workbench = readFileSync(
       new URL("../../routes/chat/ChatCodingRouteWorkbench.tsx", import.meta.url),
       "utf8",
     );
-    expect(workbench).toContain("selectionAfterModelPick(");
-    expect(workbench).toContain("model: effectiveComposerModel");
-    expect(workbench).toContain("currentReasoningEffort: shownComposerEffort");
-    expect(workbench).toContain("if (!followingSessionModel && overrideModel)");
+    expect(workbench).toContain("model: agentModel");
+    expect(workbench).toContain("currentReasoningEffort: sessionEffort");
+    expect(workbench).toContain("sessionReasoningEffortMutation.mutate({ sessionId: activeSessionId, reasoningEffort })");
+    expect(workbench).not.toContain("selectionAfterModelPick(");
+    expect(workbench).not.toContain("if (!followingSessionModel && overrideModel)");
   });
 
   it("groups models by provider without reordering", () => {
