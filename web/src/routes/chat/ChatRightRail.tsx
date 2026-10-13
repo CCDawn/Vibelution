@@ -1,4 +1,4 @@
-import { PanelRightClose, Plus, Search, X } from "lucide-react";
+import { Bell, Code2, FileDiff, FileSearch, Globe, ListTodo, MessageSquare, PanelRightClose, Plus, Search, Terminal, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -47,8 +47,14 @@ import {
 } from "./chatRightRailModel";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import styles from "./ChatRightRail.styles";
+
 import { isProjectUtilityKind } from "../../app/projectUtilityRail";
 import { ProjectUtilityPanel } from "./ProjectUtilityPanel";
+
+const LAUNCHER_ICONS: Partial<Record<ChatRightRailKind, typeof Search>> = {
+  side: MessageSquare, review: FileSearch, terminal: Terminal, browser: Globe, devtools: Code2,
+  project_tasks: ListTodo, project_git: FileDiff, project_notices: Bell,
+};
 
 const CliAgentRunTerminalPanel = lazy(() =>
   import("./CliAgentRunTerminalPanel").then((module) => ({
@@ -644,6 +650,7 @@ export function ChatRightRail({
   return (
     <section id={id} className={`${styles.shell} ${className}`} aria-label={copy.rail}>
       <div className={styles.toolbar}>
+        {model.tabs.length === 0 ? <span className={styles.title}>{lang === "zh" ? "侧栏" : "Side"}</span> : null}
         <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
           {model.tabs.map((tab) => {
             const selected = tab.id === model.activeId;
@@ -862,23 +869,25 @@ export function ChatRightRail({
         {active && isProjectUtilityKind(active.kind) ? <ProjectUtilityPanel kind={active.kind} lang={lang} sessionId={sessionId || undefined} onOpenSession={onOpenSession} /> : null}
         {model.tabs.length === 0 ? (
           <div className={styles.launcher}>
-            <VEmptyState title={copy.openTab} align="start">
-              {copy.rail}
-            </VEmptyState>
+            <p className={styles.launcherHint}>{copy.openTab}</p>
             <ul className={styles.launcherList}>
-              {launcher.map((kind) => (
-                <li key={kind}>
-                  <VButton
-                    type="button"
-                    variant="ghost"
-                    contentLayout="plain"
-                    className={styles.launcherButton}
-                    onClick={() => activate(kind)}
-                  >
-                    {chatRightRailKindLabel(kind, lang)}
-                  </VButton>
-                </li>
-              ))}
+              {launcher.map((kind) => {
+                const Icon = LAUNCHER_ICONS[kind];
+                return (
+                  <li key={kind}>
+                    <VButton
+                      type="button"
+                      variant="ghost"
+                      contentLayout="plain"
+                      className={styles.launcherButton}
+                      onClick={() => activate(kind)}
+                    >
+                      {Icon ? <Icon size={16} strokeWidth={1.5} className={styles.launcherIcon} aria-hidden="true" /> : null}
+                      {chatRightRailKindLabel(kind, lang)}
+                    </VButton>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ) : null}

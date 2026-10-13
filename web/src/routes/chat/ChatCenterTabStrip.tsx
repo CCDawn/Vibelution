@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Suspense } from "react";
 
-import { VButton } from "../../components/vui";
+import { VButton, VIconButton } from "../../components/vui";
 
 export type ChatCenterTabStripProps = {
   /** Route style map (ChatCodingRoute.styles is Record<string, string>). */
@@ -23,6 +23,7 @@ export type ChatCenterTabStripProps = {
   sessionTabs: ReactNode;
   fileTabs: ReactNode;
   sessionBrowserControl?: ReactNode;
+  sessionActionsControl?: ReactNode;
   companionHeader?: ReactNode;
   conversationIndexControl?: ReactNode;
   leftOverlayVisible: boolean;
@@ -57,6 +58,7 @@ export function ChatCenterTabStrip({
   sessionTabs,
   fileTabs,
   sessionBrowserControl,
+  sessionActionsControl,
   companionHeader,
   conversationIndexControl,
   leftOverlayVisible,
@@ -106,9 +108,9 @@ export function ChatCenterTabStrip({
         ) : null)}
         {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
-      {sessionBrowserControl}
-      {!leftOverlayVisible || showRightToggle ? (
+      {sessionBrowserControl || sessionActionsControl || !leftOverlayVisible || showRightToggle ? (
         <div className={styles.overlayPaneControls}>
+          {sessionBrowserControl}
           {!leftOverlayVisible ? (
             <VButton
               id="chat-conversation-index-toggle"
@@ -121,7 +123,15 @@ export function ChatCenterTabStrip({
               {lang === "zh" ? "会话" : "Chats"}
             </VButton>
           ) : null}
-          {showRightToggle ? (
+          {showRightToggle && rightRailLabel ? <VIconButton
+            id="chat-status-toggle"
+            label={rightRailLabel}
+            className={styles.toolbarIconButton}
+            aria-expanded={railOpen}
+            aria-controls="chat-status-pane"
+            icon={railOpen ? <PanelRightClose size={16} aria-hidden="true"/> : <PanelRightOpen size={16} aria-hidden="true"/>}
+            onClick={onToggleRightOverlay}
+          /> : showRightToggle ? (
             <VButton
               id="chat-status-toggle"
               type="button"
@@ -136,6 +146,7 @@ export function ChatCenterTabStrip({
               {rightRailLabel ?? (lang === "zh" ? "状态" : "Status")}
             </VButton>
           ) : null}
+          {sessionActionsControl}
         </div>
       ) : null}
     </div>
