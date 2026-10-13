@@ -210,6 +210,32 @@ afterEach(async () => {
 });
 
 describe("LauncherRoute lifecycle intent ordering", () => {
+  it("clears a previous refusal without showing a success footer for an accepted retry", async () => {
+    apiMocks.requestBranchInstanceLifecycle
+      .mockResolvedValueOnce({ accepted: false, message: "启动请求被拒绝" })
+      .mockResolvedValueOnce({ accepted: true, message: "生命周期操作已提交。" });
+    await renderRoute();
+    await click("请求启动");
+    await waitFor(() => document.body.textContent?.includes("启动请求被拒绝") === true, "refusal remains visible");
+    expect(document.querySelector('[data-testid="row-feedback"]')?.textContent).toBe("启动请求被拒绝");
+    expect(document.querySelector("main > p")?.textContent).toContain("启动请求被拒绝");
+
+    await click("请求停止");
+    await waitFor(() => apiMocks.getLauncherBranchInstances.mock.calls.length > 2, "accepted retry refreshes state");
+    expect(document.querySelector("main > p")).toBeNull();
+    expect(document.body.textContent).not.toContain("生命周期操作已提交。");
+    expect(document.body.textContent).not.toContain("启动请求被拒绝");
+  });
+
+  it("keeps the shell freshness feedback on the row without adding a success footer", async () => {
+    apiMocks.requestBranchInstanceLifecycle.mockResolvedValue({ accepted: true, shellStale: true });
+    await renderRoute();
+    await click("请求启动");
+    await waitFor(() => apiMocks.getLauncherBranchInstances.mock.calls.length > 1, "accepted request refreshes state");
+    expect(document.querySelector('[data-testid="row-feedback"]')?.textContent).toContain("桌面壳仍是旧版本");
+    expect(document.querySelector("main > p")).toBeNull();
+  });
+
   it("keeps the newer Stop intent and feedback when an older Start is rejected", async () => {
     const start = deferred<unknown>();
     const stop = deferred<unknown>();

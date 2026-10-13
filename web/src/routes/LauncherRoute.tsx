@@ -164,9 +164,7 @@ export function LauncherRoute() {
           return next;
         });
       }
-      const fallback = response.accepted
-        ? (lang === "zh" ? "生命周期操作已提交。" : "Lifecycle operation submitted.")
-        : (lang === "zh" ? "Launcher 拒绝了该操作。" : "Launcher rejected the operation.");
+      const fallback = lang === "zh" ? "Launcher 拒绝了该操作。" : "Launcher rejected the operation.";
       const message = response.message || fallback;
       // A refusal must stay visible on the row it belongs to: name the branch
       // and flag the notice as an error instead of a neutral status line.
@@ -187,10 +185,11 @@ export function LauncherRoute() {
               message,
             },
       );
-      showNotice(
-        response.accepted ? message : withBranchLabel(request.instanceId, message),
-        response.accepted ? "info" : "error",
-      );
+      if (response.accepted) {
+        setNotice("");
+      } else {
+        showNotice(withBranchLabel(request.instanceId, message), "error");
+      }
       refreshLauncherData();
     },
     onError: (error, request) => {

@@ -279,7 +279,7 @@ describe("LauncherRoute layout contract", () => {
   it("names the branch and raises the notice tone when a lifecycle request is refused", () => {
     expect(homeRouteSource).toContain("const withBranchLabel = (instanceId: string, message: string)");
     expect(homeRouteSource).toContain("withBranchLabel(request.instanceId, message)");
-    expect(homeRouteSource).toContain("response.accepted ? \"info\" : \"error\"");
+    expect(homeRouteSource).toContain('showNotice(withBranchLabel(request.instanceId, message), "error")');
     expect(homeRouteSource).toContain("tone={noticeTone}");
     expect(homeRouteSource).not.toContain("setNotice(response.message");
   });
