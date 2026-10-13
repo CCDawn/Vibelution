@@ -9,8 +9,12 @@ export function createLauncherWindow(url: string, paths: DesktopPaths): BrowserW
     height: 760,
     title: instanceWindowTitle("launcher"),
     icon: resolveWorkspaceIconPath(paths),
-    backgroundColor: "#f7fafc",
-    titleBarStyle: "default",
+    backgroundColor: "#e9e9e9",
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#00000000",
+      height: 44
+    },
     skipTaskbar: false,
     autoHideMenuBar: true,
     webPreferences: {

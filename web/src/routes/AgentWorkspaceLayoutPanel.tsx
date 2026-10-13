@@ -12,7 +12,7 @@ import {
 } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { AgentFilterRail } from "../components/vui/product/agent-management";
-import { VButton, VListDetailPage, VNativeButton } from "../components/vui";
+import { VButton, VListDetailPage, VNativeButton, VPanelHeader } from "../components/vui";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
 import { AgentInspectorRailPanel } from "./AgentInspectorRailPanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
@@ -38,6 +38,7 @@ const RIGHT_ASIDE = {
 type AgentWorkspaceLayoutPanelProps = {
   /** Module bar / chrome above the list-detail split. */
   toolbar: ReactNode;
+  directoryActions?: ReactNode;
   detailWorkspace: ComponentProps<typeof AgentDetailWorkspacePanel>;
   filterRail: ComponentProps<typeof AgentFilterRail>;
   listWorkspace: ComponentProps<typeof AgentListWorkspacePanel>;
@@ -75,6 +76,7 @@ function migrateLegacyAgentWidths(): void {
 
 export function AgentWorkspaceLayoutPanel({
   toolbar,
+  directoryActions,
   detailWorkspace,
   filterRail,
   listWorkspace,
@@ -125,10 +127,19 @@ export function AgentWorkspaceLayoutPanel({
         toolbar={toolbar}
         list={(
           <div
-            className={styles.directory}
+            className={[styles.directory, directoryActions ? styles.directoryWithActions : ""].filter(Boolean).join(" ")}
             data-agent-pane="directory"
             data-vui-region="agents-directory"
           >
+            {directoryActions ? (
+              <VPanelHeader
+                title="Agent"
+                headingLevel={2}
+                actions={directoryActions}
+                className={styles.directoryHeader}
+                data-vui="agent-directory-header"
+              />
+            ) : null}
             <div className={styles.directoryFilter}>
               <AgentFilterRail {...filterRail} />
             </div>

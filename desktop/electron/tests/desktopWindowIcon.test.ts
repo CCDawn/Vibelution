@@ -38,18 +38,18 @@ describe("Electron desktop window icons", () => {
     loadedUrls.length = 0;
   });
 
-  it("uses native Windows chrome and keeps the Launcher in the taskbar", () => {
+  it("overlays native caption controls on the Launcher toolbar and keeps it in the taskbar", () => {
     createLauncherWindow("http://127.0.0.1:8765/launcher", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
       title: instanceWindowTitle("launcher"),
       icon: resolveWorkspaceIconPath(desktopPaths),
-      backgroundColor: "#f7fafc",
-      titleBarStyle: "default",
+      backgroundColor: "#e9e9e9",
+      titleBarStyle: "hidden",
+      titleBarOverlay: { color: "#00000000", height: 44 },
       skipTaskbar: false,
       autoHideMenuBar: true
     });
-    expect(browserWindowOptions[0]).not.toHaveProperty("titleBarOverlay");
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
   });
 

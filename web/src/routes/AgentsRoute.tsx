@@ -89,7 +89,7 @@ import {
   type AgentFocusedOverviewAttention,
   type AgentFocusedOverviewPanelProps,
 } from "./AgentFocusedOverviewPanel";
-import { AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
+import { AgentManagementDirectoryActions, AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
 import {
   type AgentOverviewFact,
   type AgentOverviewModeMembership,
@@ -2803,8 +2803,9 @@ export function AgentsRoute() {
         title={copy.title}
         narrowDetailTarget={requestedAgentId}
         narrowBackLabel={lang === "zh" ? "返回 Agent 列表" : "Back to Agent list"}
-        toolbar={(
-          <AgentManagementHeaderPanel
+        toolbar={<AgentManagementHeaderPanel />}
+        directoryActions={(
+          <AgentManagementDirectoryActions
             copy={{
               createAgent: copy.createAgent,
               refresh: copy.refresh,

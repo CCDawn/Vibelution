@@ -15,6 +15,8 @@ const styles = {
   workspaceNarrowDetail:
     "max-[680px]:[&>[data-vui=split-sidebar]]:!hidden max-[680px]:[&>[data-vui=split-main]]:!flex max-[680px]:[&>[data-vui=split-main]]:!w-full max-[680px]:[&>[role=separator]]:!hidden",
   directory: `grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-r border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] ${vuiRailFillClass} max-[860px]:min-h-[320px]`,
+  directoryWithActions: "!grid-rows-[auto_auto_minmax(0,1fr)]",
+  directoryHeader: "min-h-10 !items-center gap-2 px-2 [&_h2]:text-vui-sm [&_h2]:font-semibold",
   directoryFilter:
     "min-h-0 min-w-0 overflow-hidden border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [&_[data-vui-product=agent-workspace-panel]]:rounded-none [&_[data-vui-product=agent-workspace-panel]]:border-0 [&_[data-vui-product=agent-workspace-panel]]:p-2 [&_[data-vui-product=agent-workspace-panel]]:shadow-none",
   directoryList:
