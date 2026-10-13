@@ -385,6 +385,26 @@ describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
     expect(extractToolDisplayCommand({ cmd: "echo hi" })).toBe("echo hi");
     expect(extractToolDisplayCommand({})).toBe("");
   });
+
+  it("strips ANSI artifacts from terminal payload text at the presentation boundary", () => {
+    expect(completedToolPresentationSummary({
+      toolSummary: "生成计划[1m加粗[0m正文",
+      toolName: "exec_command",
+      status: "completed",
+      language: "zh",
+    })).not.toContain("[1m");
+
+    const pills = buildCodexToolActivityPills({
+      toolName: "exec_command",
+      status: "running",
+      language: "zh",
+      displayCommand: "pnpm test[1m",
+      toolSummary: "运行[0m中",
+    });
+    expect(pills.subject).not.toContain("[1m");
+    expect(pills.subject).not.toContain("[0m");
+    expect(pills.statusLabel).not.toContain("[0m");
+  });
 });
 
 describe("buildCodexToolActivityPills", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./ChatCodingRouteWorkbench.tsx?raw";
 import actionsSource from "./useChatAgentDirectoryActions.ts?raw";
+import sessionMutationsSource from "./useChatSessionMutations.ts?raw";
 
 describe("useChatAgentDirectoryActions contract", () => {
   it("owns agent directory context-menu actions", () => {
@@ -26,8 +27,9 @@ describe("useChatAgentDirectoryActions contract", () => {
   });
 
   it("does not treat Agent rename as a structural workspace invalidation", () => {
-    expect(routeSource).toContain("afterAgentRenamed(updatedAgent.agentId)");
-    expect(routeSource).not.toContain("afterAgentWorkspaceChanged()");
+    expect(routeSource).toContain("useChatSessionMutations({");
+    expect(sessionMutationsSource).toContain("afterAgentRenamed(updatedAgent.agentId)");
+    expect(sessionMutationsSource).not.toContain("afterAgentWorkspaceChanged()");
   });
 
   it("is wired from ChatCodingRoute", () => {

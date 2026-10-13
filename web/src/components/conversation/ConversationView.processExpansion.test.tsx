@@ -8,6 +8,8 @@ import { dictionary } from "../../i18n/dictionary";
 import { ConversationView } from "./ConversationView";
 import styles from "./ConversationView.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
+import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
 
 function renderConversation(messages: ConversationMessage[]) {
   const queryClient = new QueryClient({
@@ -56,10 +58,12 @@ describe("ConversationView process expansion defaults", () => {
   });
 
   it("keeps legacy feedback details flat under the process disclosure", () => {
-    const feedbackStart = conversationViewSource.indexOf("function renderFeedbackTimelineGroup(");
-    const feedbackEnd = conversationViewSource.indexOf("function renderAnswerOnlyProcessGroup(", feedbackStart);
-    const feedbackRenderer = conversationViewSource.slice(feedbackStart, feedbackEnd);
+    const feedbackStart = conversationOperationGroupsSource.indexOf("function renderFeedbackTimelineGroup(");
+    const feedbackEnd = conversationOperationGroupsSource.indexOf("\n  return {", feedbackStart);
+    const feedbackRenderer = conversationOperationGroupsSource.slice(feedbackStart, feedbackEnd);
 
+    expect(feedbackStart).toBeGreaterThan(-1);
+    expect(feedbackEnd).toBeGreaterThan(feedbackStart);
     expect(feedbackRenderer).toContain("renderFeedbackTimelineDetails(messageId, operations)");
     expect(feedbackRenderer).not.toContain("renderReActOperationGroup(");
   });
@@ -79,5 +83,5 @@ describe("ConversationView process expansion defaults", () => {
     expect(handler).toContain("captureConversationProcessScrollAnchor(summary)");
     expect(handler).toContain("restoreConversationProcessScrollAnchor(timeline, summary, anchor)");
     expect(handler).not.toContain("scrollIntoView");
-    expect(conversationViewSource).toContain("onUserToggle={handleProcessDisclosureUserToggle}");
+    expect(conversationCodexSurfaceSource).toContain("onUserToggle={handleProcessDisclosureUserToggle}");
   });});

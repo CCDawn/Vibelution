@@ -22,6 +22,12 @@ import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent
 import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
+import conversationOperationRowsSource from "./conversationOperationRows.tsx?raw";
+import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
+import conversationResponseBlocksSource from "./conversationResponseBlocks.tsx?raw";
+import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
+import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -319,10 +325,10 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
   });
 
   it("feeds the file deliveries panel disk-truth metadata for the rewind entry", () => {
-    expect(conversationViewSource).toContain("conversationChangedFilesFromMetadata(message.metadata)");
-    expect(conversationViewSource).toContain("changedFiles={conversationChangedFilesFromMetadata(message.metadata)}");
-    expect(conversationViewSource).toContain("sessionId={sessionId}");
-    expect(conversationViewSource).toContain('turnId={message.role === "assistant" ? message.turnId : undefined}');
+    expect(conversationCodexSurfaceSource).toContain("conversationChangedFilesFromMetadata(message.metadata)");
+    expect(conversationCodexSurfaceSource).toContain("changedFiles={conversationChangedFilesFromMetadata(message.metadata)}");
+    expect(conversationCodexSurfaceSource).toContain("sessionId={sessionId}");
+    expect(conversationCodexSurfaceSource).toContain('turnId={message.role === "assistant" ? message.turnId : undefined}');
   });
 });
 
@@ -937,7 +943,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("parseConversationMarkdownBlocks");
     // Answer bodies keep the shared lazy markdown renderer; only group-transcript
     // chat lines delegate to the pure inline renderer.
-    expect(conversationViewSource).toContain("<LazyConversationMarkdownRenderer");
+    expect(conversationResponseBlocksSource).toContain("<LazyConversationMarkdownRenderer");
     expect(conversationViewSource).toContain(
       "renderConversationInlineMarkdown(assistantFinalAnswerText(message), groupTranscriptInlineClassNames)",
     );
@@ -954,9 +960,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // Settle must not swap renderer component types: the transcript cell
     // keeps ConversationStreamingResponseContent mounted and the streaming
     // decision travels as the isStreaming prop instead.
-    expect(conversationViewSource).toContain("function renderAssistantTranscriptResponseText(");
-    expect(conversationViewSource).toContain("isStreaming={isStreaming}");
-    expect(conversationViewSource).toContain(
+    expect(conversationResponseBlocksSource).toContain("function renderAssistantTranscriptResponseText(");
+    expect(conversationResponseBlocksSource).toContain("isStreaming={isStreaming}");
+    expect(conversationCodexSurfaceSource).toContain(
       "renderAssistantTranscriptResponseText(\n            text,\n            assistantTurnIsStreaming(message),",
     );
     expect(conversationViewSource).not.toContain("renderStreamingResponseText");
@@ -976,9 +982,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     );
     // Segment bodies, the assistant transcript cell, and the settled file-reference
     // chip row each forward the root and the chrome language together.
-    expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(3);
+    expect(conversationResponseBlocksSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(3);
     expect(
-      conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
+      conversationResponseBlocksSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
     ).toBe(3);
     // Prop lives on the shared view contract so the composer bridge passes it
     // through its ConversationViewProps-derived spread.
@@ -987,25 +993,26 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // markdown subtree (settled answers render through the same renderer).
     expect(conversationStreamingResponseContentSource).toContain("workspaceRoot={workspaceRoot}");
     expect(conversationStreamingResponseContentSource).toContain("language={language}");
-    expect(conversationViewSource).toContain("onOpenRailFile={onOpenRailFile}");
+    expect(conversationResponseBlocksSource).toContain("onOpenRailFile={onOpenRailFile}");
     expect(conversationStreamingResponseContentSource).toContain("onOpenRailFile={onOpenRailFile}");
     expect(chatRouteSource).toContain("onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== \"child\" ? openOrdinaryRailFile : undefined");
   });
 
   it("keeps tool detail expansion work off collapsed renders", () => {
-    expect(conversationViewSource).toContain('from "./ConversationOperationDetails"');
+    expect(conversationViewSource).toContain('from "./conversationTimelineItems"');
+    expect(conversationTimelineItemsSource).toContain('from "./ConversationOperationDetails"');
     expect(conversationViewSource).not.toContain("function DeferredOperationDetails");
     expect(conversationViewSource).not.toContain("useDeferredValue");
     expect(conversationOperationDetailsSource).toContain("export function DeferredOperationDetails");
     expect(conversationOperationDetailsSource).toContain("const deferredExpanded = useDeferredValue(expanded)");
     expect(conversationOperationDetailsSource).toContain("const detailRows = deferredExpanded ? buildDetailRows(operation) : []");
-    expect(conversationViewSource).toContain("const canExpandDetails = hasOperationDetails(operation)");
-    expect(conversationViewSource).toContain("<DeferredOperationDetails");
+    expect(conversationTimelineItemsSource).toContain("const canExpandDetails = hasOperationDetails(operation)");
+    expect(conversationTimelineItemsSource).toContain("<DeferredOperationDetails");
     expect(conversationViewSource).not.toContain("OPERATION_DETAILS_CLASS_NAMES");
     expect(conversationViewSource).not.toContain("classNames={OPERATION_DETAILS_CLASS_NAMES}");
     expect(conversationOperationDetailsSource).toContain('import styles from "./ConversationOperationDetails.styles"');
     expect(conversationOperationDetailsSource).toContain("classNames = styles");
-    expect(conversationViewSource).toContain("buildOperationDetailRows(detailOperation, operationDetailLabels)");
+    expect(conversationTimelineItemsSource).toContain("buildOperationDetailRows(detailOperation, operationDetailLabels)");
     expect(conversationViewSource).not.toContain("function operationDetailRows(");
     expect(conversationViewSource).not.toContain("function readableOperationResult(");
     expect(conversationViewSource).not.toContain("function structuredResultSummary(");
@@ -1159,14 +1166,14 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
     expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
   });it("colors operation rows from each operation status instead of the operation kind", () => {
-    expect(conversationViewSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
-    expect(conversationViewSource).toContain("operationStatusTone(operation)");
-    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
-    expect(conversationViewSource).toContain("styles[`operationItem_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationIcon_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles.timelineCellBody");
-    expect(conversationViewSource).toContain("styles.timelineCellTitle");
+    expect(conversationOperationRowsSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
+    expect(conversationOperationRowsSource).toContain("operationStatusTone(operation)");
+    expect(conversationOperationGroupsSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationOperationGroupsSource).toContain("styles[`operationItem_${statusTone}`]");
+    expect(conversationOperationGroupsSource).toContain("styles[`operationIcon_${statusTone}`]");
+    expect(conversationOperationGroupsSource).toContain("styles[`operationText_${statusTone}`]");
+    expect(conversationTimelineItemsSource).toContain("styles.timelineCellBody");
+    expect(conversationTimelineItemsSource).toContain("styles.timelineCellTitle");
     expect(styles.operationItem_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationItem_success).not.toContain("state-success");
     expect(styles.operationItem_failed).toContain("!text-[var(--state-error)]");
@@ -1178,15 +1185,15 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("normalizes incomplete live timeline fields at the render boundary", () => {
-    expect(conversationViewSource).toContain('const status = String(operation.status ?? "").trim().toLowerCase();');
-    expect(conversationViewSource).toContain('const rawTimelineTitle = String(item.title ?? "").trim();');
-    expect(conversationViewSource).toContain('const itemSummary = String(item.summary ?? "").trim();');
+    expect(conversationOperationRowsSource).toContain('const status = String(operation.status ?? "").trim().toLowerCase();');
+    expect(conversationTimelineItemsSource).toContain('const rawTimelineTitle = String(item.title ?? "").trim();');
+    expect(conversationTimelineItemsSource).toContain('const itemSummary = String(item.summary ?? "").trim();');
   });
 
   it("keeps successful child tool rows neutral inside a failed process group", () => {
-    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
-    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
+    expect(conversationReActRowsSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationReActRowsSource).toContain("styles[`operationText_${statusTone}`]");
+    expect(conversationReActRowsSource).toContain("styles[`operationStatus_${statusTone}`]");
     expect(styles.reActToolName).toContain("text-[var(--fg-primary)]");
     expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationStatus_success).toContain("!text-[var(--fg-tertiary)]");
@@ -1453,6 +1460,61 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("lucide-list-plus");
     expect(html).toContain("lucide-circle-minus");
   });
+
+  it("shows the measured token usage on settled turns and stays quiet without wire facts", () => {
+    const answerItem = {
+      id: "message-assistant-usage-item-answer",
+      itemId: "message-assistant-usage-item-answer",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      version: 3,
+      revision: 1,
+      sequence: 1,
+      type: "agent_message",
+      phase: "final_answer",
+      text: "答案正文",
+      status: "completed",
+      terminal: true,
+    };
+    const withUsage = renderConversation([
+      {
+        id: "message-assistant-usage",
+        role: "assistant",
+        content: "答案正文",
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+        status: "completed",
+        turnItems: [answerItem],
+        usageStats: {
+          inputTokens: 12_400,
+          completionTokens: 860,
+          totalTokens: 13_260,
+          cachedInputTokens: 8_000,
+          elapsedMs: 4_200,
+          tokensPerSecond: 204.8,
+        },
+      },
+    ] as unknown as ConversationMessage[]);
+    expect(withUsage).toContain('data-conversation-turn-usage="1"');
+    expect(withUsage).toContain("tokens");
+    expect(withUsage).toContain("输入");
+    expect(withUsage).toContain("输出");
+    expect(withUsage).toContain("缓存");
+    expect(withUsage).toContain("205 tok/s");
+
+    const withoutUsage = renderConversation([
+      {
+        id: "message-assistant-no-usage",
+        role: "assistant",
+        content: "答案正文",
+        timestamp: "2026-05-22T00:01:00Z",
+        turnId: "turn-1",
+        status: "completed",
+        turnItems: [answerItem],
+      },
+    ] as unknown as ConversationMessage[]);
+    expect(withoutUsage).not.toContain('data-conversation-turn-usage="1"');
+  });
   it("renders composer session reference chips", () => {
     const html = renderConversation([], {
       composerReferences: [
@@ -1655,18 +1717,18 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("wake: not requested");
     expect(html).toContain("Agent 私信 · A014 · 能力管家");
   });it("keeps command group expansion state scoped to the parent message during history reveal", () => {
-    expect(conversationViewSource).toContain("renderCommandGroupTimelineItem(message, item, rowIdentity, isActiveTimelineItem)");
-    expect(conversationViewSource).toContain("const expanded = getExpansionState(message.id, item.id, false)");
-    expect(conversationViewSource).toContain("onClick={() => toggleSection(message.id, item.id, false)}");
-    expect(conversationViewSource).not.toContain("const expanded = getExpansionState(item.id, \"details\", false)");
-    expect(conversationViewSource).not.toContain("onClick={() => toggleSection(item.id, \"details\", false)}");
+    expect(conversationTimelineItemsSource).toContain("renderCommandGroupTimelineItem(message, item, rowIdentity, isActiveTimelineItem)");
+    expect(conversationTimelineItemsSource).toContain("const expanded = getExpansionState(message.id, item.id, false)");
+    expect(conversationTimelineItemsSource).toContain("onClick={() => toggleSection(message.id, item.id, false)}");
+    expect(conversationTimelineItemsSource).not.toContain("const expanded = getExpansionState(item.id, \"details\", false)");
+    expect(conversationTimelineItemsSource).not.toContain("onClick={() => toggleSection(item.id, \"details\", false)}");
   });
 
   it("applies per-operation status tones inside expanded command packages", () => {
-    expect(conversationViewSource).toContain("item.operations.map((operation) => {");
-    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
-    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
-    expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
+    expect(conversationTimelineItemsSource).toContain("item.operations.map((operation) => {");
+    expect(conversationTimelineItemsSource).toContain("styles[`operationIcon_${operationStatusToneClassName(operation)}` as keyof typeof styles]");
+    expect(conversationTimelineItemsSource).toContain("styles[`operationText_${statusTone}`");
+    expect(conversationTimelineItemsSource).toContain("styles[`operationStatus_${statusTone}`");
     expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
@@ -2400,9 +2462,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("does not use an animated spinner for the answer-only process summary icon", () => {
-    const start = conversationViewSource.indexOf("function processSummaryIcon");
-    const end = conversationViewSource.indexOf("function hasOperationDetails", start);
-    const processSummaryIconSource = conversationViewSource.slice(start, end);
+    const start = conversationOperationRowsSource.indexOf("function processSummaryIcon");
+    const end = conversationOperationRowsSource.indexOf("function hasOperationDetails", start);
+    const processSummaryIconSource = conversationOperationRowsSource.slice(start, end);
 
     expect(processSummaryIconSource).toContain("function processSummaryIcon");
     expect(end).toBeGreaterThan(start);
