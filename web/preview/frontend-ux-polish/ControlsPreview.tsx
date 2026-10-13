@@ -1,20 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 
-import type { AgentInstance, SessionLlmModelOption, SessionModelSelection } from "../../src/api/types";
+import type { AgentInstance, SessionLlmModelOption } from "../../src/api/types";
 import { queryKeys } from "../../src/api/queryKeys";
 import { VPanel, VPanelHeader } from "../../src/components/vui";
-import {
-  composerModelLeavesSessionDefault,
-  displayedComposerEffort,
-  findComposerModelChoice,
-  selectionAfterModelPick,
-} from "../../src/components/conversation/composerModelEffort";
 import { ConversationInferenceControl } from "../../src/components/conversation/ConversationInferenceControl";
-import {
-  ConversationTurnModelControl,
-  effectiveTurnModelId,
-} from "../../src/components/conversation/ConversationTurnModelControl";
+import { ConversationTurnModelControl } from "../../src/components/conversation/ConversationTurnModelControl";
 import { dictionary } from "../../src/i18n/dictionary";
 import { dictionaryDomainsQueryKey, normalizeDictionaryDomains } from "../../src/i18n/dictionaryDomainIds";
 import { ToolsRouteAgentScopePanel } from "../../src/routes/ToolsRouteAgentScopePanel";
@@ -57,17 +48,6 @@ const previewModel: SessionLlmModelOption = {
   isDefault: true,
 };
 
-const alternateModel: SessionLlmModelOption = {
-  ...previewModel,
-  modelId: "preview/sol",
-  modelRef: "preview/sol",
-  label: "Sol 4",
-  model: "sol-4",
-  providerId: "other",
-  providerLabel: "Other",
-  isDefault: false,
-};
-
 const previewQueryClient = () => {
   const client = new QueryClient({
     defaultOptions: {
@@ -91,22 +71,9 @@ const previewQueryClient = () => {
   return client;
 };
 
-const previewChoices = [previewModel, alternateModel];
-
 export function ControlsPreview() {
   const [queryClient] = useState(previewQueryClient);
   const [reasoningEffort, setReasoningEffort] = useState("high");
-  const [modelSelection, setModelSelection] = useState<SessionModelSelection | null>(null);
-  const sessionDefaultModelId = previewModel.modelRef;
-  const effectiveModelId = effectiveTurnModelId(sessionDefaultModelId, modelSelection);
-  const effectiveModel = findComposerModelChoice(previewChoices, effectiveModelId) ?? previewModel;
-  const shownEffort = displayedComposerEffort({
-    sessionDefaultModelId,
-    sessionEffort: reasoningEffort,
-    selection: modelSelection,
-    model: effectiveModel,
-  });
-  const followingSession = !composerModelLeavesSessionDefault(sessionDefaultModelId, modelSelection);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -140,41 +107,17 @@ export function ControlsPreview() {
         <VPanel ariaLabel="对话输入区模型控件预览" className="grid min-w-0 gap-2 p-3">
           <VPanelHeader title="对话输入区控件 · 本地交互" />
           <p className="m-0 text-vui-xs leading-[var(--vui-line-readable)] text-vui-fg-secondary">
-            左边是下一条会用的模型，右边是这个模型的思考强度。换模型后强度只保留这个模型支持的档位。状态仅保存在此预览中。
+            左边只展示 Agent 绑定的模型，修改请到 Agent 管理页；右边仍可调整当前会话的思考强度。状态仅保存在此预览中。
           </p>
           <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="模型与思考强度">
-            <ConversationTurnModelControl
-              choices={previewChoices}
-              sessionDefaultModelId={sessionDefaultModelId}
-              selection={modelSelection}
-              disabled={false}
-              onSelectionChange={(next) => {
-                setModelSelection(selectionAfterModelPick({
-                  sessionDefaultModelId,
-                  sessionEffort: reasoningEffort,
-                  previousSelection: modelSelection,
-                  previousModel: effectiveModel,
-                  next,
-                  choices: previewChoices,
-                }));
-              }}
-            />
+            <ConversationTurnModelControl model={previewModel} />
             <ConversationInferenceControl
-              model={effectiveModel}
+              model={previewModel}
               sessionId="frontend-ux-preview-session"
-              currentReasoningEffort={shownEffort}
+              currentReasoningEffort={reasoningEffort}
               disabled={false}
               pending={false}
-              onReasoningEffortChange={(effort) => {
-                if (!followingSession) {
-                  setModelSelection({
-                    modelId: effectiveModel.modelRef || effectiveModel.modelId,
-                    reasoningEffort: effort,
-                  });
-                  return;
-                }
-                setReasoningEffort(effort);
-              }}
+              onReasoningEffortChange={setReasoningEffort}
             />
           </div>
         </VPanel>
