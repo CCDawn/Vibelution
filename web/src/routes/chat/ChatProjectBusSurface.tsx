@@ -13,7 +13,7 @@ import type { ChatMentionTarget } from "../chatMentionTokens";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
 import { ChatMentionedText } from "./ChatGroupMessagePresentation";
-import styles from "./ChatGroupCenterSurface.styles";
+import styles from "./ChatProjectBusSurface.styles";
 
 export type ChatProjectBusSurfaceProps = {
   lang: "zh" | "en";

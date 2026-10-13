@@ -29,7 +29,7 @@ import type {
   GroupTimelineMemberChangeRow,
 } from "./useGroupRoomTimeline";
 import type { ChatGroupCenterSurfaceProps } from "./ChatGroupCenterSurface";
-import styles from "./ChatGroupCenterSurface.styles";
+import styles from "./ChatGroupRoundsTimeline.styles";
 
 const GROUP_TYPING_STALE_AFTER_MS = 150_000;
 const GROUP_TYPING_STALE_TICK_MS = 15_000;
