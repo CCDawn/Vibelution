@@ -1,0 +1,9 @@
+@import "tailwindcss" source(none);
+@import "../../src/design/theme.tailwind.css";
+@source "./*.tsx";
+@source "../../src/components/vui/**/*.{ts,tsx}";
+@source "../../src/components/layout/**/*.{ts,tsx}";
+
+html, body, #root { height: 100%; min-width: 1100px; }
+p, h1, h2, h3 { margin: 0; }
+[data-vui="dialog-content"] { animation: none !important; }
