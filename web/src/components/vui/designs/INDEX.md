@@ -8,6 +8,7 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| 团队左栏管理 | [product/team-directory.md](./product/team-directory.md) |
 | `SupervisedConversationWorkspace` | [product/evolution.md](./product/evolution.md#supervisedconversationworkspace) |
 | `SelfEvolutionConversationWorkspace` | [product/evolution.md](./product/evolution.md#selfevolutionconversationworkspace) |
 | `EvolutionSupervisedLiveSetupPanel` | [product/evolution.md](./product/evolution.md#evolutionsupervisedlivesetuppanel) |

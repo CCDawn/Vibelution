@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { useId, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
 import { VNativeButton } from "../components/vui";
 import styles from "./ConversationIndexSection.styles";
@@ -13,6 +13,8 @@ type ConversationIndexSectionProps = {
   expanded: boolean;
   label: string;
   onToggle: () => void;
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void;
 };
 
 export function ConversationIndexSection({
@@ -24,6 +26,8 @@ export function ConversationIndexSection({
   expanded,
   label,
   onToggle,
+  onContextMenu,
+  onKeyDown,
 }: ConversationIndexSectionProps) {
   const sectionId = useId();
   const headerId = `${sectionId}-header`;
@@ -38,6 +42,9 @@ export function ConversationIndexSection({
         type="button"
         className={styles.conversationGroupHeader}
         onClick={onToggle}
+        onContextMenu={onContextMenu}
+        onKeyDown={onKeyDown}
+        aria-haspopup={onContextMenu ? "menu" : undefined}
         aria-expanded={expanded}
         aria-controls={listId}
       >

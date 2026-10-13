@@ -1,8 +1,9 @@
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useNavigate } from "react-router-dom";
 
 import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VDialog } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import {
   agentDirectoryBucket,
@@ -25,6 +26,12 @@ import {
 } from "./sessionActivityIndicator";
 import styles from "./AgentConversationDirectory.styles";
 import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
+import { TeamContextMenu } from "./teams/TeamContextMenu";
+import { useTeamDirectoryManagement } from "./chat/useTeamDirectoryManagement";
+
+const TeamDirectoryManagementOverlay = lazy(() => import("./chat/TeamDirectoryManagementOverlay").then((module) => ({
+  default: module.TeamDirectoryManagementOverlay,
+})));
 
 export type AgentConversationDirectoryProps = {
   activeAgentId: string;
@@ -172,11 +179,13 @@ export function AgentConversationDirectory({
   onOpenAgent,
   onOpenGroupRoom,
 }: AgentConversationDirectoryProps) {
+  const management = useTeamDirectoryManagement(teams);
   const partition = useMemo(
     () => buildAgentDirectoryPartition({ agents, teams, sessions, filterText, lang, resolveModelLabel }),
     [agents, teams, sessions, filterText, lang, resolveModelLabel],
   );
-  const { conversationAgents, specialAgents, teamBlocks, listedAgentIds } = partition;
+  const { conversationAgents, specialAgents, teamBlocks } = partition;
+  const visibleTeamBlocks = teamBlocks.filter((block) => !management.hiddenTeamIds.includes(block.team.teamId));
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => ({
     ...DEFAULT_COLLAPSED_DIRECTORY_SECTIONS,
@@ -294,7 +303,7 @@ export function AgentConversationDirectory({
         data-selected={active ? "true" : undefined}
         aria-current={active ? "page" : undefined}
         tooltip={details}
-        onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}
+        onContextMenu={(event) => { management.setMenu(null); onContextMenu(event, agent, latestSession ?? null); }}
         onPress={() => onOpenAgent(agent, latestSession ?? null)}
       >
         <span className={styles.agentAvatar} aria-hidden="true">
@@ -392,6 +401,10 @@ export function AgentConversationDirectory({
         expanded={expanded}
         label={block.team.name || teamId}
         onToggle={() => toggleSection(sectionKey, defaultCollapsed)}
+        onContextMenu={(event) => management.openMenu(event, block.team)}
+        onKeyDown={(event) => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) management.openMenu(event, block.team);
+        }}
       >
         <div className={styles.agentDirectoryList}>
           <TeamConversationIndexItem
@@ -457,14 +470,14 @@ export function AgentConversationDirectory({
     );
   };
 
-  const hasContent = listedAgentIds.length > 0 || teamBlocks.length > 0;
+  const hasContent = conversationAgents.length > 0 || specialAgents.length > 0 || visibleTeamBlocks.length > 0;
 
   return (
     <nav className={styles.agentDirectory} aria-label={lang === "zh" ? "Agent 目录" : "Agent directory"}>
       {hasContent ? (
         <>
           {renderAgentSection("conversation", conversationAgents)}
-          {teamBlocks.map(renderTeamBlock)}
+          {visibleTeamBlocks.map(renderTeamBlock)}
           {renderAgentSection("special", specialAgents)}
         </>
       ) : (
@@ -474,6 +487,39 @@ export function AgentConversationDirectory({
             : (lang === "zh" ? "暂无可用 Agent。新建 Agent 后可在其下建立多个会话。" : "No available Agents. Create an Agent, then add sessions under it.")}
         </p>
       )}
+      {management.hiddenTeams.length ? <VButton variant="ghost" density="compact" className="w-full justify-start"
+        onPress={() => management.setRestoreOpen(true)}>
+        {lang === "zh" ? `已隐藏团队（${management.hiddenTeams.length}）` : `Hidden teams (${management.hiddenTeams.length})`}
+      </VButton> : null}
+      {management.restoreOpen ? <VDialog open title={lang === "zh" ? "已隐藏团队" : "Hidden teams"}
+        description={lang === "zh" ? "仅在当前浏览器的左栏隐藏，团队、成员和全部记录均保留。" : "Hidden only from this browser's rail. Teams, members and records are preserved."}
+        size="sm" onOpenChange={management.setRestoreOpen}>
+        <div className="flex flex-col gap-2">
+          {management.hiddenTeams.length ? management.hiddenTeams.map((team) => <div key={team.teamId} className="flex items-center justify-between gap-3">
+            <span className="min-w-0 truncate" title={team.name}>{team.name}</span>
+            <VButton variant="secondary" density="compact" onPress={() => management.restore(team.teamId)}
+              aria-label={lang === "zh" ? `恢复 ${team.name}` : `Restore ${team.name}`}>{lang === "zh" ? "恢复" : "Restore"}</VButton>
+          </div>) : <p>{lang === "zh" ? "没有隐藏的团队。" : "No hidden teams."}</p>}
+        </div>
+      </VDialog> : null}
+      {management.menu ? <TeamDirectoryContextMenu lang={lang} management={management} /> : null}
+      {management.action ? <Suspense fallback={null}>
+        <TeamDirectoryManagementOverlay key={`${management.action.teamId}:${management.action.mode}`}
+          action={management.action} team={teams.find((team) => team.teamId === management.action?.teamId) ?? null}
+          teams={teams} lang={lang} onClose={() => management.setAction(null)} />
+      </Suspense> : null}
     </nav>
   );
+}
+
+/** Navigation is mounted only with an open menu; static directory consumers need no Router. */
+function TeamDirectoryContextMenu({ lang, management }: {
+  lang: "zh" | "en"; management: ReturnType<typeof useTeamDirectoryManagement>;
+}) {
+  const navigate = useNavigate();
+  return management.menu ? <TeamContextMenu lang={lang} state={management.menu}
+    onRename={(team) => management.begin(team, "rename")} onManage={(team) => management.begin(team, "settings")}
+    onArchive={(team) => management.begin(team, "archive")} onHide={management.hide}
+    onOpenWorkspace={(team) => { management.setMenu(null); navigate(teamWorkspaceRoute(team.teamId)); }}
+    onDismiss={() => management.setMenu(null)} /> : null;
 }
