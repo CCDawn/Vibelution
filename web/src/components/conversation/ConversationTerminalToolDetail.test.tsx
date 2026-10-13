@@ -53,11 +53,17 @@ describe("ConversationTerminalToolDetail", () => {
       <ConversationTerminalToolDetail detail={detail!} language="zh" />,
     );
 
-    expect(html).toContain(">Shell<");
+    expect(html).toContain(">终端<");
     expect(html).toContain("$ python -c");
     expect(html).toContain("ConversationToolActivity.tsx");
     expect(html).toContain('aria-label="输出"');
     expect(html).toContain("ChevronDown, CircleAlert, LoaderCircle");
+
+    const enHtml = renderToStaticMarkup(
+      <ConversationTerminalToolDetail detail={detail!} language="en" />,
+    );
+    expect(enHtml).toContain(">Shell<");
+    expect(enHtml).toContain('aria-label="Output"');
   });
 
   it("ignores polluted write_stdin display commands while preserving their output", () => {

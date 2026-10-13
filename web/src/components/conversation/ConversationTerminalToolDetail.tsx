@@ -151,7 +151,7 @@ export function ConversationTerminalToolDetail({
 }: ConversationTerminalToolDetailProps) {
   return (
     <section className={styles.root} data-codex-terminal-detail="true">
-      <div className={styles.header}>Shell</div>
+      <div className={styles.header}>{language === "zh" ? "终端" : "Shell"}</div>
       {detail.command ? (
         <pre className={styles.command} aria-label={language === "zh" ? "命令" : "Command"} tabIndex={0}>
           {`$ ${detail.command}`}
