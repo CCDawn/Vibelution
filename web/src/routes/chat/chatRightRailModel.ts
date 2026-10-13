@@ -455,11 +455,7 @@ export function normalizeChatRightRailBrowserUrl(value: string): string | null {
 export type ChatRightRailDevtoolsInput = {
   phase?: string;
   status?: string;
-  messages?: readonly {
-    role?: string;
-    turnItems?: readonly { type?: string }[];
-    usageStats?: { totalTokens?: number };
-  }[];
+  messages?: readonly ConversationMessage[];
 } | null | undefined;
 
 export type ChatRightRailDevtoolsRow = {
@@ -481,6 +477,9 @@ export function projectChatRightRailDevtools(input: ChatRightRailDevtoolsInput):
   let tokens = 0;
   let sawTokens = false;
   for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
     for (const item of message.turnItems ?? []) {
       if (item.type === "tool_call") {
         toolCalls += 1;

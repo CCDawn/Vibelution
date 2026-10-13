@@ -18,6 +18,8 @@ import { auxTaskStatusLabel } from "../auxConversations/auxTaskPresentation";
 import { assistantTurnIsInFlight } from "../chatTurnProtocol";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { ChatChangeRail } from "./ChatChangeRail";
+import { ConversationTodoChecklist } from "../../components/conversation/ConversationTodoChecklist";
+import { deriveSessionTodoChecklist } from "../../components/conversation/conversationTodoChecklistModel";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 import { encodeUtf8Base64 } from "./chatComposerSubmitModel";
 import {
@@ -631,6 +633,10 @@ export function ChatRightRail({
   const launcher = chatRightRailLauncherKinds(sessionKind);
   const matches = searchChatRightRailTabs(model, searchQuery);
   const devtoolsView = projectChatRightRailDevtools(devtools);
+  const planProjection = useMemo(
+    () => deriveSessionTodoChecklist(devtools?.messages),
+    [devtools?.messages],
+  );
   const browserUrl = active?.kind === "browser" ? normalizeChatRightRailBrowserUrl(active.url || "") : null;
   const activate = (kind: ChatRightRailKind) => {
     if (kind === "side") {
@@ -1082,7 +1088,20 @@ export function ChatRightRail({
             </VRouteLinkButton>
           </div>
         ) : null}
-        {active && (active.kind === "plan" || active.kind === "workflow" || active.kind === "trajectory" || active.kind === "bash" || (active.kind === "subagent" && !active.targetId)) ? (
+        {active?.kind === "plan" ? (
+          planProjection ? (
+            <div className={styles.plain}>
+              <ConversationTodoChecklist
+                snapshot={planProjection.snapshot}
+                lang={lang}
+                turnSettled={planProjection.turnSettled}
+              />
+            </div>
+          ) : (
+            <VEmptyState title={copy.contextualEmpty} />
+          )
+        ) : null}
+        {active && (active.kind === "workflow" || active.kind === "trajectory" || active.kind === "bash" || (active.kind === "subagent" && !active.targetId)) ? (
           <VEmptyState title={copy.contextualEmpty} />
         ) : null}
       </div>
