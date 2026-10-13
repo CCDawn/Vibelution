@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { queryKeys } from "../../src/api/queryKeys";
 import type { SessionLlmModelOption } from "../../src/api/types";
 import { VuiProvider } from "../../src/components/vui/VuiProvider";
-import { ConversationTurnModelControl } from "../../src/components/conversation/ConversationTurnModelControl";
+import { PreviewModelParametersControl } from "./PreviewModelParametersControl";
 import { dictionaryDomainsQueryKey, normalizeDictionaryDomains } from "../../src/i18n/dictionaryDomainIds";
 import { loadDictionaryDomains } from "../../src/i18n/loadDictionaryDomains";
 import "../../src/design/tokens.css";
@@ -146,11 +146,12 @@ function App() {
   return (
     <main className="preview-page">
       <header className="preview-heading">
-        <span className="preview-kicker">COMPOSER / MODEL PARAMETERS</span>
         <h1>消息栏模型参数</h1>
       </header>
 
-      <section className="preview-controls" aria-label="Preview controls">
+      <details className="preview-controls" aria-label="Preview controls">
+        <summary>预览状态</summary>
+        <div className="preview-state-controls">
         <label className="preview-scenario">
           <span>保存结果</span>
           <select
@@ -175,7 +176,8 @@ function App() {
           显示失败
         </button>
         <span className="preview-status" role="status">{status}</span>
-      </section>
+        </div>
+      </details>
 
       <section className="chat-preview" aria-label="Composer preview">
         <div className="sample-message">
@@ -187,7 +189,7 @@ function App() {
           <div className="composer-footer">
             <span className="composer-add" aria-hidden="true">+</span>
             <div className="composer-model-slot">
-              <ConversationTurnModelControl
+              <PreviewModelParametersControl
                 sessionId={agent.sessionId}
                 agentId={agent.agentId}
                 configRevision={agent.configRevision}
@@ -200,13 +202,12 @@ function App() {
                 onSave={handleSave}
               />
             </div>
-            <span className="composer-context">64K / {Math.round(agent.contextWindow / 1_000)}K</span>
+            <span className="composer-context">64K / {agent.contextWindow % 1_000 === 0 ? `${agent.contextWindow / 1_000}K` : agent.contextWindow.toLocaleString("zh-CN")}</span>
           <button className="composer-send" type="button" aria-label="发送预览" disabled={pending}>↑</button>
           </div>
         </div>
       </section>
 
-      <p className="preview-caption">控件显示绑定模型；面板只编辑当前模型的上下文上限与思考强度。</p>
     </main>
   );
 }
