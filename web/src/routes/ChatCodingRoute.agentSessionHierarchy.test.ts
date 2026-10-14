@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
+import workbenchDialogsSource from "./chat/ChatCodingWorkbenchDialogs.tsx?raw";
 import indexPanelSource from "./chat/ChatConversationIndexPanel.tsx?raw";
 import visibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?raw";
 import agentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
@@ -20,14 +21,15 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(agentSessionTabsSource).toContain("agentId: selectedChatAgentId");
     expect(agentSessionTabsSource).toContain("limit: 100");
     expect(indexPanelSource).toContain("<AgentConversationDirectory");
-    expect(routeSource).toContain('import("../agent-create/AgentCreateWizardDialog")');
+    expect(routeSource).toContain("<ChatCodingWorkbenchDialogs");
+    expect(workbenchDialogsSource).toContain('import("../agent-create/AgentCreateWizardDialog")');
     // Open wizard lives in directory actions hook (not inline in workbench).
     expect(agentDirectoryActionsSource).toContain("setAgentCreateWizardOpen(true)");
-    expect(routeSource).toContain("<AgentCreateWizardDialog");
-    expect(routeSource).toContain("{agentCreateWizardOpen ? (");
-    expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
+    expect(workbenchDialogsSource).toContain("<AgentCreateWizardDialog");
+    expect(workbenchDialogsSource).toContain("{agentCreateWizardOpen ? (");
+    expect(workbenchDialogsSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(routeSource).toContain("createAgentButtonRef={agentCreateTriggerRef}");
-    expect(routeSource).toContain("if (!agent.directSessionId) return false");
+    expect(workbenchDialogsSource).toContain("if (!agent.directSessionId) return false");
     expect(routeSource).toContain("handleOpenAgent(agent)");
     expect(routeSource).not.toContain("handleOpenDirectSession(latestSession.id)");
     expect(indexPanelSource).toContain("onOpenAgent={(agent) => {");

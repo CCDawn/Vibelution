@@ -32,7 +32,7 @@ import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
-import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import { ConversationView } from "./ConversationView";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
@@ -1000,7 +1000,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // workspacePath; without a root the markdown link classifier keeps
     // workspace-file hrefs inert (legacy anchor).
     expect(conversationViewSource).toContain("sessionWorkspacePath,");
-    expect(chatRouteSource).toContain(
+    expect(chatConversationSurfaceModelSource).toContain(
       "sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,",
     );
     // Segment bodies, the assistant transcript cell, and the settled file-reference
@@ -1018,7 +1018,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationStreamingResponseContentSource).toContain("language={language}");
     expect(conversationResponseBlocksSource).toContain("onOpenRailFile={onOpenRailFile}");
     expect(conversationStreamingResponseContentSource).toContain("onOpenRailFile={onOpenRailFile}");
-    expect(chatRouteSource).toContain("onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== \"child\" ? openOrdinaryRailFile : undefined");
+    expect(chatConversationSurfaceModelSource).toContain("onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== \"child\" ? openOrdinaryRailFile : undefined");
   });
 
   it("keeps tool detail expansion work off collapsed renders", () => {
