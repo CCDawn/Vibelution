@@ -1513,7 +1513,7 @@ def test_selector_keeps_plain_serial_files_beside_load_dist_batch(tmp_path: Path
     assert result["validationLayers"] == ["focused", "local-serial"]
 
 
-def test_selector_real_matrix_load_dist_override_for_serial_route_batch():
+def test_selector_real_matrix_keeps_serial_route_modules_in_separate_workers():
     result = select_tests.select_tests(
         ["core/web/services/session_service.py"],
         select_tests.load_matrix(),
@@ -1525,7 +1525,7 @@ def test_selector_real_matrix_load_dist_override_for_serial_route_batch():
         if "tests/test_chat_room_service.py" in command
     )
     assert route_batch.endswith(
-        "tests/test_chat_room_routes.py -n 4 --dist load -q --maxfail=0"
+        "tests/test_chat_room_routes.py -n 3 --dist loadfile -q --maxfail=0"
     )
     assert '-m "not serial"' not in route_batch
     filtered_subset = next(
