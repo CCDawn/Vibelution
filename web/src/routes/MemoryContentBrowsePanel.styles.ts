@@ -11,7 +11,7 @@ const styles = {
   body:
     "body min-w-0 whitespace-pre-wrap break-words text-vui-sm leading-7 text-vui-fg-secondary",
   card:
-    "card !grid !min-h-12 min-w-0 cursor-pointer gap-1 !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-3 !py-2.5 !shadow-none text-left hover:!bg-vui-surface-row-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--vui-control-focus-ring)]",
+    "card !grid !w-full !min-h-12 min-w-0 cursor-pointer !justify-stretch !justify-items-start gap-1 !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-3 !py-2.5 !shadow-none text-left hover:!bg-vui-surface-row-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--vui-control-focus-ring)]",
   cardGrid:
     "cardGrid grid w-full min-w-0 content-start gap-1",
   cardMeta:
@@ -31,7 +31,7 @@ const styles = {
   fieldValue:
     "fieldValue min-w-0 whitespace-pre-wrap break-words text-vui-sm leading-7 text-vui-fg-secondary",
   group:
-    "group grid min-w-0 content-start gap-2 [&_[data-vui=section-header]]:px-3 [&_h3]:text-vui-2xs [&_h3]:font-medium",
+    "group grid min-w-0 content-start gap-2 [&_[data-vui=section-header]]:px-3 [&_h2]:text-vui-micro-13 [&_h2]:font-medium [&_h3]:text-vui-2xs [&_h3]:font-medium",
   list:
     "list grid min-w-0 gap-1 pl-4 text-vui-sm leading-7 text-vui-fg-secondary",
   root: "memoryContentWorkspace h-full min-h-0 min-w-0 flex-1 !gap-0 overflow-hidden max-md:[&>[role=separator]]:!hidden",
