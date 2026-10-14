@@ -1,7 +1,7 @@
 import { isValidElement, type ComponentType, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { RouteObject } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createBrowserRouterMock = vi.hoisted(() => vi.fn((routes: RouteObject[]) => ({ routes })));
 const postBrowserTelemetryMock = vi.hoisted(() => vi.fn());
@@ -25,9 +25,11 @@ import {
   loadChatCodingRouteChunk,
   loadEvolutionRouteChunk,
   loadMemoryRouteChunk,
+  loadRouteChunkWithRecovery,
   loadTeamsRouteChunk,
   router,
 } from "./router";
+import routerSource from "./router.tsx?raw";
 
 type CapturedRouter = {
   routes: RouteObject[];
@@ -293,5 +295,109 @@ describe("router route contracts", () => {
     }
     // The warm pass uses the telemetry-free chat import (no chunk telemetry).
     expect(typeof importChatCodingRouteChunk).toBe("function");
+  });
+});
+
+function trackPromise<T>(promise: Promise<T>) {
+  const state = {
+    status: "pending" as "pending" | "fulfilled" | "rejected",
+    reason: undefined as unknown,
+    value: undefined as T | undefined,
+  };
+  promise.then(
+    (result) => {
+      state.status = "fulfilled";
+      state.value = result;
+    },
+    (error) => {
+      state.status = "rejected";
+      state.reason = error;
+    },
+  );
+  return state;
+}
+
+function stubChunkRecoveryWindow(pathname = "/teams") {
+  const reload = vi.fn();
+  const storage = new Map<string, string>();
+  const win = {
+    location: {
+      pathname,
+      search: "",
+      hash: "",
+      href: `http://127.0.0.1:8787${pathname}`,
+      origin: "http://127.0.0.1:8787",
+      reload,
+    },
+    sessionStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    },
+    navigator: { onLine: true },
+  };
+  vi.stubGlobal("window", win as unknown as Window & typeof globalThis);
+  return { reload };
+}
+
+describe("lazy route chunk recovery degrade wiring", () => {
+  beforeEach(() => {
+    postBrowserTelemetryMock.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the route suspended during the grace window, then degrades a vetoed reload to the original error", async () => {
+    vi.useFakeTimers();
+    const { reload } = stubChunkRecoveryWindow();
+    const chunkError = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8787/assets/TeamsRoute-old.js");
+    const tracked = trackPromise(loadRouteChunkWithRecovery(() => Promise.reject(chunkError)));
+
+    // The loader rejection lands on a microtask; flush it so recovery runs.
+    await vi.advanceTimersByTimeAsync(0);
+    // The recovery reload was requested; the lazy route stays suspended while
+    // it could still tear this document down.
+    expect(reload).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(tracked.status).toBe("pending");
+
+    // The reload never took effect (vetoed by the project-close guard): the
+    // original error now reaches React Router's errorElement.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tracked.status).toBe("rejected");
+    expect(tracked.reason).toBe(chunkError);
+    expect(postBrowserTelemetryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "recovery",
+        eventCode: "browser.route_chunk_recovery.reload_vetoed",
+        level: "error",
+      }),
+    );
+  });
+
+  it("rethrows non-recovery loader errors immediately instead of suspending", async () => {
+    const { reload } = stubChunkRecoveryWindow();
+    const ordinaryError = new Error("ordinary loader failure");
+
+    await expect(loadRouteChunkWithRecovery(() => Promise.reject(ordinaryError))).rejects.toBe(ordinaryError);
+    expect(reload).not.toHaveBeenCalled();
+    expect(postBrowserTelemetryMock).not.toHaveBeenCalled();
+  });
+
+  it("passes successful chunk loads through untouched", async () => {
+    const LoadedRoute: ComponentType = () => null;
+    const loaded = await loadRouteChunkWithRecovery(async () => ({ default: LoadedRoute }));
+
+    expect(loaded.default).toBe(LoadedRoute);
+  });
+
+  it("wires the grace promise into the lazy route source contract", () => {
+    expect(routerSource).toContain("createReloadGracePromise");
+    expect(routerSource).toContain("recoverFromDynamicImportFetchError");
+    // The eternal pending placeholder for vetoed reloads must stay gone.
+    expect(routerSource).not.toContain("new Promise<{ default: T }>(() => undefined)");
   });
 });
