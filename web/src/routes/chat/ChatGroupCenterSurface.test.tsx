@@ -493,6 +493,26 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).not.toContain("!bg-vui-surface-row");
   });
 
+  it.each(["legacy", "timeline"])("omits task inputs from the member feed while preserving outputs (%s)", (source) => {
+    const round = {
+      roundId: "member-feed", status: "completed", topic: "你被点名了。只用一句话确认。",
+      summary: "成员确认已完成", messages: [{ messageId: "reply", participantId: "p1", status: "completed", content: "登录按钮显示正在登录" }],
+    };
+    const props = baseProps({
+      showRoundTopics: false,
+      userDisplayName: "Administrator",
+      activeGroupRoom: { ...baseProps().activeGroupRoom!, rounds: [round] } as never,
+      ...(source === "timeline" ? { groupTimeline: { items: [{ kind: "round", round }] } as never } : {}),
+    });
+    const html = renderToStaticMarkup(<ChatGroupCenterSurface {...props} />);
+    expect(html).not.toContain("你被点名了");
+    expect(html).not.toContain("Administrator");
+    expect(html).not.toContain("group-stream-topic-identity");
+    expect(html).toContain("登录按钮显示正在登录");
+    expect(html).toContain("成员确认已完成");
+    expect(html).toContain("第 1 轮");
+  });
+
   it("renders round summary markdown as a table instead of raw pipe text", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface

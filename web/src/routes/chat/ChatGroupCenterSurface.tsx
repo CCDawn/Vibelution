@@ -56,6 +56,8 @@ export type ChatGroupCenterSurfaceProps = {
   expandedGroupMessageIds: string[];
   chatMentionTargets: ChatMentionTarget[];
   userDisplayName: string;
+  /** Team member feeds omit task inputs; the full room retains round context. */
+  showRoundTopics?: boolean;
   composerLeadingControl?: ReactNode;
   projectBusRefreshing: boolean;
   projectBusRefreshError: string;
@@ -126,6 +128,7 @@ export function ChatGroupCenterSurface({
   expandedGroupMessageIds,
   chatMentionTargets,
   userDisplayName,
+  showRoundTopics = true,
   composerLeadingControl,
   projectBusRefreshing,
   projectBusRefreshError,
@@ -318,6 +321,7 @@ export function ChatGroupCenterSurface({
               items={timelineItems}
               purposeFallback={activeGroupRoom?.purpose ?? "discussion"}
               userDisplayName={userDisplayName}
+              showRoundTopics={showRoundTopics}
               lang={lang}
               formatTime={formatTime}
               statusLabel={statusLabel}
