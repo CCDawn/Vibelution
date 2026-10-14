@@ -32,6 +32,7 @@ const conversationParentStyleConsumers = [
   "components/conversation/conversationSpecialRows.tsx",
   "components/conversation/conversationThoughtUnits.tsx",
   "components/conversation/conversationTimelineItems.tsx",
+  "components/conversation/conversationTimelineRows.tsx",
   "components/conversation/useComputerUseResults.tsx",
 ];
 const productSharedParentStyleConsumers = [
@@ -77,6 +78,7 @@ const productSharedParentStyleConsumers = [
   "components/conversation/conversationSpecialRows.tsx",
   "components/conversation/conversationThoughtUnits.tsx",
   "components/conversation/conversationTimelineItems.tsx",
+  "components/conversation/conversationTimelineRows.tsx",
   "components/conversation/useComputerUseResults.tsx",
   "routes/chat/CacheDetailDialog.tsx",
   "routes/chat/ChatConversationIndexPanel.tsx",

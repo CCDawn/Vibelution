@@ -13,6 +13,7 @@ import {
 } from "./conversationSpecialMessagePresentation";
 
 const conversationViewSource = readFileSync(new URL("./ConversationView.tsx", import.meta.url), "utf8");
+const conversationTimelineRowsSource = readFileSync(new URL("./conversationTimelineRows.tsx", import.meta.url), "utf8");
 const timelineProcessProjectionSource = readFileSync(
   new URL("./timelineMessageProcessProjection.ts", import.meta.url),
   "utf8",
@@ -30,7 +31,8 @@ function message(overrides: Partial<ConversationMessage>): ConversationMessage {
 
 describe("conversation special message presentation", () => {
   it("keeps special-message helpers outside ConversationView", () => {
-    expect(conversationViewSource).toContain("./conversationSpecialMessagePresentation");
+    expect(conversationTimelineRowsSource).toContain("./conversationSpecialMessagePresentation");
+    expect(conversationViewSource).not.toContain("./conversationSpecialMessagePresentation");
     expect(conversationViewSource).not.toContain("function cliAgentLifecycleLabel");
     expect(conversationViewSource).not.toContain("function cliAgentLifecycleDetail");
     expect(conversationViewSource).not.toContain("function agentInboxSourceLabel");

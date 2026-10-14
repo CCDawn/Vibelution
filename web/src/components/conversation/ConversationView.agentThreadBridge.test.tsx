@@ -10,6 +10,7 @@ import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import { ConversationView } from "./ConversationView";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 
 function renderConversation(messages: ConversationMessage[], activeTurnMessage?: ConversationMessage) {
   const queryClient = new QueryClient({
@@ -86,7 +87,7 @@ describe("ConversationView agent thread bridge", () => {
 
     expect(html).toContain('data-agent-message-id="user-context"');
     expect(html).toContain('data-agent-section-kinds="content context"');
-    expect(conversationViewSource).toContain(
+    expect(conversationTimelineRowsSource).toContain(
       "<AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />",
     );
     expect(contextHtml).toContain('data-agent-context-section-id="user-context-section-context-1"');
