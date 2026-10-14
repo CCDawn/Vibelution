@@ -43,7 +43,6 @@ import {
   getLocalBranchInstances,
   getLauncherFreshness,
   hasLauncherFreshnessBridge,
-  showLauncherWindow,
   isLauncherControlPlaneNotReady,
   requestWorkbenchWindowCloseOnPageHide,
 } from "../api/launcher";
@@ -64,7 +63,7 @@ import {
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import {
   isLauncherUpdateAvailable,
-  launcherUpdateReplacesWorkbenchRestart,
+  isUpdateBannerVerdict,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -1113,13 +1112,12 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
-  const [launcherWindowError, setLauncherWindowError] = useState("");
   const [updateBannerDismissedHead, setUpdateBannerDismissedHead] = useState(readStoredUpdateBannerDismissedHead);
   const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const restartCompletionDismissTimerRef = useRef<number | null>(null);
-  // True from "立即重启" until this document reloads. The workbench snapshot
+  // True from "重启更新" until this document reloads. The workbench snapshot
   // stays "open and healthy" for the whole request, so it must not count as
   // a finished restart.
   const restartWaitsForDocumentReloadRef = useRef(false);
@@ -1510,14 +1508,10 @@ export function AppShell() {
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
   // Workbench and Launcher versions share the delayed 120s polling cadence.
-  // A stale shell opens Launcher only when the workbench code is already current.
-  // A behind frontend or backend keeps restart, which is what loads the new UI.
+  // Either kind of update restarts this window. The banner does not send the
+  // user to Launcher to find a second button.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
   const launcherUpdateAvailable = isLauncherUpdateAvailable(launcherFreshnessQuery.data);
-  const launcherUpdateReplacesRestart = launcherUpdateReplacesWorkbenchRestart({
-    verdict: updateBannerVerdict,
-    launcherFreshness: launcherFreshnessQuery.data,
-  });
   const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
   const updateBannerVisible = shouldShowUpdateBanner({
     verdict: updateBannerVerdict,
@@ -1525,7 +1519,7 @@ export function AppShell() {
     dismissedHead: updateBannerDismissedHead,
     launcherFreshness: launcherFreshnessQuery.data,
   });
-  const updateBannerText = launcherUpdateReplacesRestart
+  const updateBannerText = !isUpdateBannerVerdict(updateBannerVerdict) && launcherUpdateAvailable
     ? launcherUpdateBannerCopy(lang)
     : updateBannerVerdict === "frontend_behind"
       ? frontendUpdateBannerCopy(lang)
@@ -1550,12 +1544,6 @@ export function AppShell() {
     setUpdateBannerDismissedHead(updateBannerDiskHead);
     storeUpdateBannerDismissedHead(updateBannerDiskHead);
   }, [updateBannerDiskHead]);
-  const openLauncherFromBanner = useCallback(() => {
-    setLauncherWindowError("");
-    void showLauncherWindow().catch((error: unknown) => {
-      setLauncherWindowError(error instanceof Error ? error.message : (lang === "en" ? "Could not open Launcher." : "无法打开启动管理。"));
-    });
-  }, [lang]);
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -3010,34 +2998,16 @@ export function AppShell() {
                 <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
                 <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
               </div>
-              {!launcherUpdateReplacesRestart && updateBannerRestartNotice ? (
+              {updateBannerRestartNotice ? (
                 <span className={styles.updateBannerNote}>{updateBannerRestartNotice}</span>
               ) : null}
-              {launcherUpdateAvailable && !launcherUpdateReplacesRestart ? (
-                <span className={styles.updateBannerNote}>
-                  {lang === "en"
-                    ? "The desktop shell also has an update. This restart loads the new interface. Open Launcher to replace the shell."
-                    : "桌面壳也有更新。这次重启先换上新界面；更换桌面壳请打开启动管理。"}
-                </span>
-              ) : null}
-              {launcherUpdateAvailable && launcherWindowError ? <span className={styles.updateBannerNote}>{launcherWindowError}</span> : null}
               <div className={styles.updateBannerActions}>
-                {launcherUpdateReplacesRestart ? (
-                  <VButton type="button" variant="secondary" className={styles.updateBannerRestartButton}
-                    onPress={openLauncherFromBanner}>
-                    {lang === "en" ? "Open Launcher" : "打开启动管理"}
-                  </VButton>
-                ) : <VButton type="button" variant="secondary"
+                <VButton type="button" variant="secondary"
                   className={styles.updateBannerRestartButton}
                   onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
                   title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
-                </VButton>}
-                {launcherUpdateAvailable && !launcherUpdateReplacesRestart ? (
-                  <VButton type="button" variant="ghost" onPress={openLauncherFromBanner}>
-                    {lang === "en" ? "Open Launcher" : "打开启动管理"}
-                  </VButton>
-                ) : null}
+                </VButton>
                 <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
                   title={updateBannerDismissActionLabel}>
                   {lang === "en" ? "Dismiss" : "暂不提醒"}
