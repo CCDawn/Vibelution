@@ -125,6 +125,81 @@ def list_knowledge_overview(
     }
 
 
+def list_team_knowledge_catalog(*, agent_id: str = "") -> dict[str, Any]:
+    """List team-owned knowledge bases for the operator memory page.
+
+    Titles and counts stay visible when the actor cannot read. Item and
+    proposal bodies stay behind the existing read gate.
+    """
+
+    _sync_roots()
+    actor = str(agent_id or "").strip()
+    catalog_bases: list[dict[str, Any]] = []
+    pending_proposals = 0
+    item_count = 0
+    source_count = 0
+    teams = team_service.list_teams_compact(include_archived=False).get("teams") or []
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        team_id = str(team.get("teamId") or "").strip()
+        if not team_id:
+            continue
+        owner = _owner_context("team", team_id, team=team)
+        readers: list[dict[str, str]] = []
+        for member in list(team.get("members") or []):
+            if len(readers) >= 8 or not isinstance(member, dict):
+                continue
+            member_id = str(member.get("agentId") or "").strip()
+            if not member_id:
+                continue
+            display_name = str(member.get("agentName") or member.get("agentCode") or member_id).strip() or member_id
+            readers.append({"agentId": member_id, "displayName": display_name})
+        for base in _knowledge_bases_for_owner(owner):
+            if str(base.get("ownerType") or "team").strip().lower() not in {"", "team"}:
+                continue
+            if str(base.get("status") or "active").strip().lower() == "archived":
+                continue
+            knowledge_base_id = str(base.get("knowledgeBaseId") or "")
+            can_read = bool(actor) and _can_access(owner, base, actor, "read")
+            if can_read:
+                reason = "allowed"
+            elif not actor:
+                reason = "no_actor"
+            else:
+                reason = "not_member"
+            stats = _knowledge_base_stats_for_owner(owner, knowledge_base_id)
+            item_count += stats["itemCount"]
+            source_count += stats["sourceArtifactCount"]
+            if can_read:
+                pending_proposals += stats["pendingProposalCount"]
+            catalog_bases.append(
+                {
+                    **_knowledge_base_to_api(base, owner),
+                    "stats": stats,
+                    "pendingProposals": _pending_proposals_for_base(owner, knowledge_base_id) if can_read else [],
+                    "permissions": _permissions_for_actor(owner, base, actor),
+                    "access": {
+                        "canRead": can_read,
+                        "reason": reason,
+                        "readers": readers,
+                    },
+                }
+            )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": actor,
+        "summary": {
+            "knowledgeBaseCount": len(catalog_bases),
+            "pendingProposalCount": pending_proposals,
+            "itemCount": item_count,
+            "sourceArtifactCount": source_count,
+        },
+        "knowledgeBases": catalog_bases,
+        "updatedAt": utc_now_iso(),
+    }
+
+
 def get_knowledge_steward_overview(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return the default knowledge steward Agent and its read-only governance posture."""
 

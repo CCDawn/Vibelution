@@ -767,6 +767,34 @@ def test_knowledge_overview_returns_visible_team_knowledge(tmp_path, monkeypatch
     assert payload["knowledgeBases"][0]["knowledgeBaseId"] == base["knowledgeBaseId"]
 
 
+def test_team_knowledge_catalog_stays_visible_when_overview_is_empty(tmp_path, monkeypatch):
+    client, _team, _lead, member, outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{_team['teamId']}/knowledge-bases",
+        json={"name": "Visible KB", "actorAgentId": _lead["agentId"]},
+    ).json()
+
+    outsider_overview = client.get("/api/knowledge/overview", params={"agentId": outsider["agentId"]})
+    assert outsider_overview.status_code == 200
+    assert outsider_overview.json()["summary"]["knowledgeBaseCount"] == 0
+
+    outsider_catalog = client.get("/api/knowledge/team-catalog", params={"agentId": outsider["agentId"]})
+    assert outsider_catalog.status_code == 200
+    outsider_row = outsider_catalog.json()["knowledgeBases"][0]
+    assert outsider_row["knowledgeBaseId"] == base["knowledgeBaseId"]
+    assert outsider_row["access"]["canRead"] is False
+    assert outsider_row["access"]["reason"] == "not_member"
+    assert outsider_row["pendingProposals"] == []
+
+    member_catalog = client.get("/api/knowledge/team-catalog", params={"agentId": member["agentId"]})
+    assert member_catalog.status_code == 200
+    assert member_catalog.json()["knowledgeBases"][0]["permissions"]["canRead"] is True
+
+    anonymous_catalog = client.get("/api/knowledge/team-catalog")
+    assert anonymous_catalog.status_code == 200
+    assert anonymous_catalog.json()["knowledgeBases"][0]["access"]["reason"] == "no_actor"
+
+
 def test_agent_knowledge_routes_create_private_formal_base_and_rag(tmp_path, monkeypatch):
     client, _team, _lead, member, outsider = _setup(tmp_path, monkeypatch)
 

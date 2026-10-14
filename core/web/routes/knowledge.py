@@ -41,6 +41,7 @@ from core.web.services.team_knowledge_service import (
     list_knowledge_steward_recommendations,
     list_knowledge_items,
     list_knowledge_overview,
+    list_team_knowledge_catalog,
     list_rating_suggestions,
     list_owner_source_inbox,
     list_team_knowledge_bases,
@@ -282,6 +283,15 @@ class RatingSuggestionBulkReviewPayload(BaseModel):
 )
 def knowledge_overview(agentId: str = "") -> dict:
     return list_knowledge_overview(agent_id=agentId)
+
+
+@router.get(
+    "/knowledge/team-catalog",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
+def knowledge_team_catalog(agentId: str = "") -> dict:
+    return list_team_knowledge_catalog(agent_id=agentId)
 
 
 @router.get(

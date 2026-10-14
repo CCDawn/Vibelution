@@ -185,6 +185,7 @@ export const queryKeys = {
   memoryKnowledgeGraphNodeDetail: (nodeId: string, agentId = "") => ["memory", "knowledge-graph", "node-detail", nodeId, agentId] as const,
   // Knowledge platform — web/src/api/knowledge.ts; do not merge with memory.* keys
   knowledgeDashboardSnapshot: (agentId = "") => ["knowledge", "dashboard-snapshot", agentId] as const,
+  teamKnowledgeCatalog: (agentId = "") => ["knowledge", "team-catalog", agentId] as const,
   knowledgeItems: (knowledgeBaseId: string, agentId = "") => ["knowledge", "items", knowledgeBaseId, agentId] as const,
   knowledgeSearch: (knowledgeBaseId: string, agentId: string, query: string, tags: string, mode = "") =>
     ["knowledge", "search", knowledgeBaseId, agentId, query, tags, mode] as const,
