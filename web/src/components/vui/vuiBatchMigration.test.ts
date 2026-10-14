@@ -155,6 +155,11 @@ const cssModuleFreeTargets = [
 
 const routeShellTargets = [
   {
+    path: "routes/teams/TeamWorkspaceFrame.tsx",
+    expected: ["VCanvasWorkbenchPage", "VPanel", "VPanelHeader"],
+    forbidden: ["renderers/shadcn"],
+  },
+  {
     path: "routes/LauncherRoute.tsx",
     expected: ["VDenseOpsPage"],
     forbidden: ["<header className={styles.header}"],
@@ -176,7 +181,7 @@ const routeShellTargets = [
   },
   {
     path: "routes/teams/research-workflow/ResearchProcessWorkspace.tsx",
-    expected: ["VCanvasWorkbenchPage", "ResearchWorkflowCanvasPane"],
+    expected: ["TeamWorkspaceFrame", "ResearchWorkflowCanvasPane"],
     forbidden: ["ChallengeCupStageRail", "ChallengeCupOperationsWorkspace"],
   },
   {
