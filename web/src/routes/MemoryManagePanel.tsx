@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 
 import { Brain, Pencil, Search, Square, SquareCheckBig, Trash2, Undo2 } from "lucide-react";
 
-import { VButton, VNativeInput, VSection, VStateSurface, VSurface, VTabs } from "../components/vui";
+import { VButton, VNativeInput, VSection, VSplitWorkspace, VStateSurface, VSurface, VTabs } from "../components/vui";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import styles from "./MemoryManagePanel.styles";
 
 export type MemoryManageFilterView = {
@@ -107,8 +108,9 @@ export function MemoryManagePanel({
   return (
     <>
       {warningStrip}
-      <div className={`${styles.workspace} ${styles.manageWorkspace}`}>
-        <VSurface as="main" className={styles.manageListPanel} elevation="panel" tone="rail">
+      <VSplitWorkspace chrome="workbench" className={styles.manageWorkspace}
+        resize={{layoutId: WORKBENCH_LAYOUT_IDS.memory, sidebar: {id: "manage-list", defaultWidth: 304, minWidth: 260, maxWidth: 480}}}
+        sidebar={<VSurface as="section" className={styles.manageListPanel} elevation="flat" tone="rail" padding="none">
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.management}</p>
@@ -190,10 +192,10 @@ export function MemoryManagePanel({
             </VButton>
           </section>
           {memoryList}
-        </VSurface>
-
-        <VSurface className={styles.manageFormPanel} elevation="panel" tone="rail">
-          <div className={styles.managementHeader}>
+        </VSurface>}
+        main={<div className={styles.manageDetailStack}>
+        <VSurface className={styles.manageFormPanel} elevation="flat" tone="panel" padding="none">
+          {!editMode ? <div className={styles.managementHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.management}</p>
               <h2>{editMode ? (editMode === "create" ? copy.addMemory : copy.editMemory) : copy.manageConfigPanel}</h2>
@@ -203,7 +205,7 @@ export function MemoryManagePanel({
             >
               <span>{copy.addMemory}</span>
             </VButton>
-          </div>
+          </div> : null}
           {managementEditor}
           {selectedConfig}
           {showEmptySelection ? (
@@ -214,7 +216,7 @@ export function MemoryManagePanel({
         </VSurface>
 
         {detailPanel}
-      </div>
+      </div>} />
     </>
   );
 }

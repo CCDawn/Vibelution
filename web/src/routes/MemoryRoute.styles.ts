@@ -9,7 +9,6 @@ import {
 import {
   vuiFlatPanelClass,
   vuiStateDangerSoftClass,
-  vuiStateSelectedRowClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
@@ -18,21 +17,23 @@ const styles = {
     "browseViewStack min-w-0 h-full min-h-0 flex flex-col overflow-hidden",
   libraryBrowseFill:
     "libraryBrowseFill min-h-0 min-w-0 flex-1 overflow-hidden",
+  librarySupplement:
+    "librarySupplement mb-4 min-w-0 border-b border-vui-border-subtle pb-3 text-vui-micro-13 [&>summary]:cursor-pointer [&>summary]:py-2 [&>summary]:text-vui-fg-secondary [&>div]:mt-3",
   controlStrip:
-    "controlStrip min-w-0 flex items-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 pb-1",
+    "controlStrip min-w-0 flex items-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 py-2",
   graphViewStack:
     "graphViewStack min-w-0 !flex h-full min-h-0 flex-col overflow-hidden [&>section]:flex-1",
   knowledgeGovernanceDeck:
     "knowledgeGovernanceDeck min-w-0 grid hidden max-[900px]:grid-cols-[minmax(0,1fr)]",
   knowledgeMain:
-    "knowledgeMain min-w-0 grid h-full min-h-0 content-start gap-1.5 overflow-auto p-0.5 [&_.managementPanel]:content-start",
+    "knowledgeMain min-w-0 grid h-full min-h-0 auto-rows-max content-start gap-4 overflow-auto overscroll-contain px-5 py-3 [&_.managementPanel]:content-start max-[640px]:px-4 max-[640px]:[&_button]:!min-h-11 max-[640px]:[&_input]:!min-h-11 max-[640px]:[&_[data-vui=select]]:!min-h-11",
   knowledgeWorkbenchPage:
     "min-w-0 h-full min-h-0 flex-1 overflow-hidden",
   knowledgeViewStack:
     "knowledgeViewStack min-w-0 grid !flex h-full flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] max-[720px]:[&>.summaryGrid]:[grid-template-columns:repeat(2,minmax(0,1fr))] max-[460px]:[&>.summaryGrid]:[grid-template-columns:minmax(0,1fr)] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
   // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (left/right pane ids).
   knowledgeWorkspace:
-    `knowledgeWorkspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-2 ${vuiWorkspaceFillClass}`,
+    `knowledgeWorkspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-0 ${vuiWorkspaceFillClass}`,
   panelError: `panelError min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateDangerSoftClass}`,
   panelNotice: `panelNotice min-w-0 ${vuiFlatPanelClass} p-2`,
   route:
@@ -46,16 +47,16 @@ const styles = {
   statusPillVisible:
     "statusPillVisible min-w-0",
   subnav:
-    "subnav min-w-0 inline-flex w-fit max-w-full items-center justify-self-start gap-1 overflow-x-auto overflow-y-hidden p-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
+    "subnav min-w-0 inline-flex w-fit max-w-full items-center justify-self-start gap-1 overflow-x-auto overflow-y-hidden border-0 bg-transparent p-0",
   subnavLink:
-    "subnavLink min-w-0 inline-flex shrink-0 items-center justify-center min-h-[24px] w-fit min-w-[74px] max-w-[9.5rem] px-2 rounded-[var(--radius-control)] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[var(--vui-control-muted-hover)]",
+    "subnavLink min-w-0 inline-flex shrink-0 items-center justify-center min-h-8 w-fit max-w-[9.5rem] px-3 rounded-[var(--radius-control)] text-vui-micro-13 text-vui-fg-secondary font-medium no-underline whitespace-nowrap hover:text-vui-fg-primary hover:bg-vui-surface-row-hover max-md:min-h-11",
   subnavLinkActive:
-    `subnavLinkActive min-w-0 ${vuiStateSelectedRowClass}`,
+    "subnavLinkActive min-w-0 !bg-[var(--vui-selection-bg)] !text-vui-fg-primary",
   viewStack:
     "viewStack min-w-0 flex h-full min-h-0 flex-col overflow-hidden [&>.workspace]:flex-1 [&>.workspace]:min-h-0 [&>.cleanupWorkspace]:flex-1 [&>.cleanupWorkspace]:min-h-0 [&>.overviewStack]:flex-1 [&>.overviewStack]:min-h-0 [&>.overviewGrid]:flex-1 [&>.overviewGrid]:min-h-0 [&>.effectiveGrid]:flex-1 [&>.effectiveGrid]:min-h-0 [&>.summaryGrid]:shrink-0 [&>.githubProjectsPanel]:shrink-0 [&>.libraryBrowseFill]:flex-1 [&>.libraryBrowseFill]:min-h-0",
   // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (left/right pane ids).
   workspace:
-    `workspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-2 ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-0 ${vuiWorkspaceFillClass}`,
   srOnly: "sr-only",
 } as const;
 

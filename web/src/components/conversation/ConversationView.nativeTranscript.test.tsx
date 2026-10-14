@@ -280,6 +280,74 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain('data-companion-typing-status="true"');
   });
 
+  it("shows one companion reply and does not repeat it in the follow-up", () => {
+    const fullReply = "今天有点累，想早点休息。";
+    const turnItem = (
+      itemId: string,
+      type: "reasoning" | "agent_message",
+      text: string,
+      sequence: number,
+      phase?: "commentary" | "final_answer",
+    ) => ({
+      id: `${itemId}:1`,
+      itemId,
+      version: 3 as const,
+      sessionId: "session-1",
+      turnId: "turn-companion-repeat",
+      type,
+      ...(phase ? { phase } : {}),
+      status: "completed" as const,
+      revision: 1,
+      sequence,
+      terminal: true,
+      text,
+    });
+    const first = {
+      id: "assistant-companion-repeat",
+      role: "assistant" as const,
+      timestamp: "2026-10-14T03:00:00Z",
+      turnId: "turn-companion-repeat",
+      status: "completed" as const,
+      turnItems: [
+        turnItem("companion-reason", "reasoning", "这段内部推理不能出现在虚拟人的聊天里。", 1),
+        turnItem("companion-note", "agent_message", "先在心里过一遍。", 2, "commentary"),
+        turnItem("companion-partial", "agent_message", "今天有点累", 3, "final_answer"),
+        turnItem("companion-final", "agent_message", fullReply, 4, "final_answer"),
+      ],
+    };
+    const followup = {
+      id: "assistant-companion-followup",
+      role: "assistant" as const,
+      timestamp: "2026-10-14T03:01:00Z",
+      turnId: "turn-companion-followup",
+      status: "completed" as const,
+      turnItems: [
+        turnItem("followup-final", "agent_message", fullReply, 1, "final_answer"),
+      ],
+    };
+    const continued = {
+      id: "assistant-companion-continued",
+      role: "assistant" as const,
+      timestamp: "2026-10-14T03:02:00Z",
+      turnId: "turn-companion-continued",
+      status: "completed" as const,
+      turnItems: [
+        turnItem("continued-final", "agent_message", `${fullReply}明天再聊。`, 1, "final_answer"),
+      ],
+    };
+
+    const html = renderConversation([first, followup, continued], "trace", true);
+    expect(html.split(fullReply).length - 1).toBe(1);
+    expect(html).toContain("明天再聊。");
+    expect(html).not.toContain("这段内部推理不能出现在虚拟人的聊天里。");
+    expect(html).not.toContain("先在心里过一遍。");
+    expect(html).not.toContain('data-codex-transcript-cell-kind="reasoning_summary"');
+
+    const ordinary = renderConversation([first], "trace", false);
+    expect(ordinary).toContain("这段内部推理不能出现在虚拟人的聊天里。");
+    expect(ordinary).toContain("先在心里过一遍。");
+  });
+
   it("leaves the native process transcript unchanged for ordinary Agent sessions", () => {
     const html = renderConversation([
       {

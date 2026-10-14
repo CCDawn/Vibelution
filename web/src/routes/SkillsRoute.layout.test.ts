@@ -70,7 +70,13 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("bulkReadOnlyNoteClass");
     expect(routeSource).not.toContain("title={copy.bulkReadOnlyReason}");
     expect(routeSource).toContain("<VDenseToolbar");
-    expect(styles.listPanelClass).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
+    expect(routeSource).toContain("useState(false)");
+    expect(routeSource).toContain("{bulkSelectionMode ? <VDenseToolbar");
+    expect(routeSource).toContain("{bulkSelectionMode ? <VTooltip");
+    expect(routeSource).toContain("{selectedSkills.length ? <VButton");
+    expect(routeSource).toContain("copy.bulkSelect}");
+    expect(styles.listPanelClass).toContain("flex-col");
+    expect(styles.skillListClass).toContain("flex-1");
     expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).not.toContain('method: "POST"');
     expect(routeSource).not.toContain('method: "PUT"');
@@ -80,10 +86,12 @@ describe("SkillsRoute layout contract", () => {
 
   it("keeps the narrow skill workspace in normal document flow with compact empty details", () => {
     expect(routeSource).toContain("workspaceClass");
-    expect(stylesSource).toContain("clamp(280px,26vw,420px)");
-    expect(stylesSource).toContain("minmax(0,1fr)");
-    expect(stylesSource).toContain("max-[920px]:grid-cols-1");
-    expect(stylesSource).toContain("max-[920px]:content-start");
+    expect(routeSource).toContain("layoutId={WORKBENCH_LAYOUT_IDS.skills}");
+    expect(routeSource).toContain("defaultWidth: 304, minWidth: 300, maxWidth: 520");
+    expect(styles.workspaceClass).toContain("max-[920px]:!flex-col");
+    expect(styles.workspaceClass).toContain("[&>[data-vui=split-sidebar]]:!w-full");
+    expect(styles.workspaceClass).toContain("[&>[data-vui=split-main]]:!shrink-0");
+    expect(styles.workspaceClass).toContain("[&>[role=separator]]:!hidden");
     expect(stylesSource).toContain("max-[920px]:overflow-auto");
     expect(routeSource).toContain("listPanelClass");
     expect(routeSource).toContain("detailPanelClass");
@@ -94,11 +102,11 @@ describe("SkillsRoute layout contract", () => {
 
   it("removes the redundant route header while keeping the route background-aware", () => {
     const routeClass = extractConstClass("routeClass");
-    const headerClass = extractConstClass("headerClass");
 
     expect(routeClass).not.toContain("surface-page");
     expect(routeClass).not.toMatch(/\bbg-\[(?:var\(--surface-page\)|color-mix\(in_srgb,var\(--surface-page\))/);
-    expect(headerClass).toBe("hidden");
+    expect(routeSource).toContain("hideHeader");
+    expect(routeSource).not.toContain("headerClassName=");
   });
 
   it("keeps Skills surfaces lightweight instead of building nested opaque card walls", () => {
@@ -136,8 +144,26 @@ describe("SkillsRoute layout contract", () => {
     expect(skillButtonBaseClass).toContain("w-full");
     expect(skillButtonBaseClass).toContain("!h-auto");
     expect(skillButtonBaseClass).toContain("!grid");
-    expect(skillButtonBaseClass).toContain("grid-cols-[10px_minmax(0,1fr)]");
+    expect(skillButtonBaseClass).toContain("grid-cols-[auto_minmax(0,1fr)]");
     expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,180}styles\.skillButtonBaseClass/);
+  });
+
+  it("uses shared rail and pane boundaries with flat neutral list rows", () => {
+    expect(styles.listPanelClass).toContain("vui-workbench-rail");
+    expect(styles.detailPanelClass).toContain("!border-0");
+    expect(styles.detailPanelClass).toContain("!bg-transparent");
+    expect(styles.skillButtonBaseClass).toContain("!bg-transparent");
+    expect(styles.skillButtonBaseClass).toContain("!border-0");
+    expect(styles.skillButtonBaseClass).toContain("!shadow-none");
+    expect(styles.skillButtonActiveClass).toBe("aria-pressed:!bg-[var(--vui-selection-bg)]");
+    expect(routeSource).toContain("aria-pressed={activeCommand === skill.command}");
+    expect(routeSource).toContain("<small className={styles.sourceCaptionClass}>");
+    expect(routeSource).not.toContain("sourcePillClass");
+    expect(styles.contentPreClass).toContain("border-0 bg-transparent");
+    expect(styles.contentPreClass).toContain("leading-[1.7]");
+    [styles.primaryButtonClass, styles.filterTabsTriggerClass, styles.searchInputClass, styles.metadataSummaryClass]
+      .forEach((className) => expect(className).toContain("min-h-11"));
+    expect(styles.rowSelectClass).toContain("max-[920px]:w-11");
   });
 
   it("keeps detail chrome and command rows responsive on narrow viewports", () => {

@@ -3,13 +3,12 @@ import {
 } from "../design/vuiChromeRecipes";
 
 import {
-  vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
-  root: `root min-w-0 ${vuiFlatPanelClass} p-2 grid min-h-0 content-start gap-2`,
+  root: "root grid min-h-0 min-w-0 content-start gap-2 !rounded-none !border-0 !border-b !border-vui-border-subtle !bg-transparent px-0 py-3 !shadow-none",
   toolbar:
     "toolbar min-w-0 grid gap-2 lg:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]",
   formRow:
