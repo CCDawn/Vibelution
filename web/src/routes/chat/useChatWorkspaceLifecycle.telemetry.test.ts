@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const lifecycleSource = readFileSync(join(here, "useChatWorkspaceLifecycle.ts"), "utf8");
+const groupWorkspaceSource = readFileSync(join(here, "useChatGroupWorkspaceMutations.ts"), "utf8");
 const routeSelectionSource = readFileSync(join(here, "useChatRouteSelection.ts"), "utf8");
 const actionsSource = readFileSync(join(here, "useChatWorkspaceActions.ts"), "utf8");
 
@@ -20,14 +21,15 @@ describe("chat workspace user-action telemetry contract", () => {
   });
 
   it("tracks group room and project bus mutations", () => {
-    expect(lifecycleSource).toContain('startUserAction("group_room_create"');
-    expect(lifecycleSource).toContain('startUserAction("group_room_update"');
-    expect(lifecycleSource).toContain('startUserAction("group_room_delete"');
-    expect(lifecycleSource).toContain('startUserAction("group_room_reset"');
-    expect(lifecycleSource).toContain('startUserAction("group_round_start"');
-    expect(lifecycleSource).toContain('startUserAction("group_round_stop"');
-    expect(lifecycleSource).toContain('startUserAction("project_bus_send"');
-    expect(lifecycleSource).toContain('startUserAction("project_bus_revoke"');
+    expect(groupWorkspaceSource).toContain('startUserAction("group_room_create"');
+    expect(groupWorkspaceSource).toContain('startUserAction("group_room_update"');
+    expect(groupWorkspaceSource).toContain('startUserAction("group_room_delete"');
+    expect(groupWorkspaceSource).toContain('startUserAction("group_room_reset"');
+    expect(groupWorkspaceSource).toContain('startUserAction("group_round_start"');
+    expect(groupWorkspaceSource).toContain('startUserAction("group_round_stop"');
+    expect(groupWorkspaceSource).toContain('startUserAction("project_bus_send"');
+    expect(groupWorkspaceSource).toContain('startUserAction("project_bus_revoke"');
+    expect(lifecycleSource).toContain("useChatGroupWorkspaceMutations(");
   });
 
   it("records delete focus handoff fields for session delete", () => {
