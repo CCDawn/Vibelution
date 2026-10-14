@@ -28,6 +28,8 @@ import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
 import conversationResponseBlocksSource from "./conversationResponseBlocks.tsx?raw";
 import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
 import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
+import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
+import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -42,8 +44,9 @@ describe("composer leading control contract", () => {
     expect(html).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
   });
   it("lets Chat replace the legacy image button without changing other routes", () => {
-    expect(conversationViewSource).toContain("composerLeadingControl ?? (");
-    expect(conversationViewSource).toContain("attachmentInputRef.current?.click()");
+    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerSource).toContain("composerLeadingControl ?? (");
+    expect(conversationComposerSource).toContain("attachmentInputRef.current?.click()");
   });
 
   it("keeps the native attachment input hidden independently of field layout", () => {
@@ -240,14 +243,19 @@ describe("ConversationView VUI control contract", () => {
   it("routes conversation controls through VUI primitives", () => {
     expect(conversationViewSource).toContain('from "../vui"');
     expect(conversationViewSource).toContain("<VButton");
-    expect(conversationViewSource).toContain("<VNativeInput");
-    expect(conversationViewSource).toContain("<VNativeTextarea");
+    expect(conversationComposerSource).toContain('from "../vui"');
+    expect(conversationComposerSource).toContain("<VNativeInput");
+    expect(conversationComposerSource).toContain("<VNativeTextarea");
     expect(conversationViewSource).not.toMatch(/<button\b/);
     expect(conversationViewSource).not.toMatch(/<input\b/);
     expect(conversationViewSource).not.toMatch(/<select\b/);
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
-    expect(conversationViewSource).toContain("primaryActionIsQueueSubmit");
-    expect(conversationViewSource).toContain("ConversationFollowupQueueBar");
+    expect(conversationComposerSource).not.toMatch(/<button\b/);
+    expect(conversationComposerSource).not.toMatch(/<input\b/);
+    expect(conversationComposerSource).not.toMatch(/<select\b/);
+    expect(conversationComposerSource).not.toMatch(/<textarea\b/);
+    expect(conversationComposerSource).toContain("primaryActionIsQueueSubmit");
+    expect(conversationComposerSource).toContain("ConversationFollowupQueueBar");
   });
 });
 
@@ -316,12 +324,22 @@ describe("ConversationView stop feedback", () => {
   });
 });
 
+describe("ConversationView timeline row extraction", () => {
+  it("renders each timeline row from the extracted module", () => {
+    expect(conversationViewSource).toContain('from "./conversationTimelineRows"');
+    expect(conversationViewSource).toContain("createConversationTimelineRows({");
+    expect(conversationViewSource).not.toContain("function renderTimelineRow");
+    expect(conversationTimelineRowsSource).toContain("function renderTimelineRow");
+    expect(conversationTimelineRowsSource).toContain("function ConversationUserInlineEditor");
+  });
+});
+
 describe("ConversationView Codex-like transcript adapter integration", () => {
   it("builds codex transcript cells from the AgentMessage projection before rendering turns", () => {
     expect(conversationViewSource).toContain('from "./codexTranscriptCells"');
     expect(conversationViewSource).toContain("buildCodexTranscriptCells(");
     expect(conversationViewSource).toContain("agentCodexSurfacesByMessageId");
-    expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
+    expect(conversationTimelineRowsSource).toContain("data-codex-transcript-cell-count");
   });
 
   it("feeds the file deliveries panel disk-truth metadata for the rewind entry", () => {
@@ -470,16 +488,16 @@ describe("ConversationView session recovery presentation", () => {
 
 describe("ConversationView compact active-turn status rails", () => {
   it("does not force-OR compact placeholder over process/feedback gates", () => {
-    expect(conversationViewSource).not.toContain("Force Thinking/waiting when in-flight with no visible paint");
-    expect(conversationViewSource).not.toMatch(
+    expect(conversationTimelineRowsSource).not.toContain("Force Thinking/waiting when in-flight with no visible paint");
+    expect(conversationTimelineRowsSource).not.toMatch(
       /assistantTurnIsInFlight\(message\)\s*&&\s*!displayPlan\.shouldRenderCodexSurface/,
     );
-    expect(conversationViewSource).toContain("inFlight: assistantTurnIsInFlight(message)");
+    expect(conversationTimelineRowsSource).toContain("inFlight: assistantTurnIsInFlight(message)");
   });
 
   it("suppresses turnStatusNode when compact active-turn placeholder is shown", () => {
-    expect(conversationViewSource).toContain("showCompactActiveTurnPlaceholder");
-    expect(conversationViewSource).toContain(
+    expect(conversationTimelineRowsSource).toContain("showCompactActiveTurnPlaceholder");
+    expect(conversationTimelineRowsSource).toContain(
       "!showCompactActiveTurnPlaceholder\n              && !displayPlan.suppressProjectedTurnStatus",
     );
   });
@@ -767,8 +785,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-full");
     expect(styles.assistantTurnContinuation).not.toContain("[&_.turnAvatar]:hidden");
     expect(styles.assistantTurnContinuation).not.toContain("[&_.turnMeta]:hidden");
-    expect(conversationViewSource).toContain("compactHeader={false}");
-    expect(conversationViewSource).not.toContain("compactTurnHeader\n                    ? null");
+    expect(conversationTimelineRowsSource).toContain("compactHeader={false}");
+    expect(conversationTimelineRowsSource).not.toContain("compactTurnHeader\n                    ? null");
     expect(styles.turnContent).toContain("gap-2");
     expect(styles.turnMeta).toContain("inline-flex");
     expect(styles.turnSpeaker).toContain("truncate");
@@ -843,7 +861,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.composerAttachmentChip).toContain("overflow-hidden");
     expect(styles.composerAttachmentChip).toContain("rounded-xl");
     expect(styles.composerAttachmentPreview).toContain("!h-14");
-    expect(styles.composerAttachmentPreview).toContain("!rounded-[var(--vui-radius-soft)]");
+    expect(styles.composerAttachmentPreview).toContain("!rounded-vui-soft");
     expect(styles.composerAttachmentThumb).toContain("size-full");
     expect(styles.composerAttachmentThumb).toContain("object-cover");
     expect(styles.composerAttachmentName).toContain("truncate");
@@ -860,17 +878,17 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.input).toContain("![background:transparent]");
     expect(styles.input).toContain("!shadow-none");
 
-    const composerActionStackSource = conversationViewSource.slice(
-      conversationViewSource.indexOf("const composerActions = ("),
-      conversationViewSource.indexOf("\n\n  return (", conversationViewSource.indexOf("const composerActions = (")),
+    const composerActionStackSource = conversationComposerSource.slice(
+      conversationComposerSource.indexOf("const composerActions = ("),
+      conversationComposerSource.indexOf("\n\n  const composerSurface", conversationComposerSource.indexOf("const composerActions = (")),
     );
     expect(composerActionStackSource).not.toContain("className={styles.attachButton}");
     expect(composerActionStackSource).toContain("className={primaryActionClassName}");
-    expect(conversationViewSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
-    expect(conversationViewSource).toContain("className={styles.attachButton}");
-    expect(conversationViewSource).toContain("<ConversationTurnModelControl {...turnModelControl} />");
-    expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
-    expect(conversationViewSource).toContain("<ComposerContextRing");
+    expect(conversationComposerSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
+    expect(conversationComposerSource).toContain("className={styles.attachButton}");
+    expect(conversationComposerSource).toContain("<ConversationTurnModelControl {...turnModelControl} />");
+    expect(conversationComposerSource).toContain("<ConversationInferenceControl {...llmControl} />");
+    expect(conversationComposerSource).toContain("<ComposerContextRing");
     // Ring internals are owned by ComposerContextRing.test.tsx; keep only the
     // regressions that would silently slip back in at this call site.
     expect(ringSource).toContain('role="progressbar"');
@@ -884,18 +902,18 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(ringStyles.ring).not.toContain("overflow-hidden");
     expect(ringStyles.ring.split(/\s+/)).not.toContain("ring");
     expect(conversationViewSource).toContain("composerContextRing");
-    expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
-    expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
+    expect(conversationComposerSource).toContain('composerVariant === "codex" ? composerActions : null');
+    expect(conversationComposerSource).toContain('composerVariant === "compact" ? composerActions : null');
     expect(styles.composerToolbar).toContain("items-center");
     expect(styles.composerToolbarEnd).toContain("max-w-full");
     expect(styles.composerToolbarEnd).not.toContain("max-w-[min(200px");
-    expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
-    expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
+    expect(conversationComposerSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
+    expect(conversationComposerSource).toContain("styles.composerEditSubmitButton");
     // Labeled edit/rerun must not inherit square icon-only geometry.
-    expect(conversationViewSource).not.toContain("composerEditSubmitButton} ${styles.composerRoundButtonPrimary}");
-    expect(conversationViewSource).toContain("styles.composerRoundButtonPrimary");
-    expect(conversationViewSource).toContain("icon={");
-    expect(conversationViewSource).toContain("<RefreshCw");
+    expect(conversationComposerSource).not.toContain("composerEditSubmitButton} ${styles.composerRoundButtonPrimary}");
+    expect(conversationComposerSource).toContain("styles.composerRoundButtonPrimary");
+    expect(conversationComposerSource).toContain("icon={");
+    expect(conversationComposerSource).toContain("<RefreshCw");
   });
   it("keeps inline edit chrome compact after the composer edit bar removal", () => {
     // The composer bottom edit bar is gone: no orphaned keys may linger.
@@ -949,14 +967,14 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // Answer bodies keep the shared lazy markdown renderer; only group-transcript
     // chat lines delegate to the pure inline renderer.
     expect(conversationResponseBlocksSource).toContain("<LazyConversationMarkdownRenderer");
-    expect(conversationViewSource).toContain(
+    expect(conversationTimelineRowsSource).toContain(
       "renderConversationInlineMarkdown(assistantFinalAnswerText(message), groupTranscriptInlineClassNames)",
     );
-    expect(conversationViewSource).toContain('from "./conversationInlineMarkdown"');
+    expect(conversationTimelineRowsSource).toContain('from "./conversationInlineMarkdown"');
     expect(conversationViewSource).not.toContain('from "./ConversationMarkdownRenderer"');
-    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
-    expect(conversationViewSource).not.toContain("responseExpanded && !isResponseStreaming");
-    expect(conversationViewSource).toContain("? getCachedResponseSegments(responseText)");
+    expect(conversationTimelineRowsSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
+    expect(conversationTimelineRowsSource).not.toContain("responseExpanded && !isResponseStreaming");
+    expect(conversationTimelineRowsSource).toContain("? getCachedResponseSegments(responseText)");
     expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
     expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
   });
@@ -1131,10 +1149,12 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("scheduleTimelineHeightVersionBump");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
     // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
-    expect(conversationViewSource).toContain("function pinFollowLatestForSubmit");
-    expect(conversationViewSource).toContain("function handleSendAndFollowLatest");
-    expect(conversationViewSource).toContain("handleSendAndFollowLatest()");
-    expect(conversationViewSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");
+    expect(conversationViewSource).toContain("scrollTimelineToBottom,");
+    expect(conversationComposerSource).toContain("function pinFollowLatestForSubmit");
+    expect(conversationComposerSource).toContain("function handleSendAndFollowLatest");
+    expect(conversationComposerSource).toContain("handleSendAndFollowLatest()");
+    expect(conversationViewSource).toContain("handleSendAndFollowLatest,");
+    expect(conversationTimelineRowsSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");
     expect(conversationViewSource).toContain("timelineContentRef");
     expect(conversationViewSource).toContain("styles.timelineContent");
     // Content-host ResizeObserver still re-pins only while following latest.
@@ -1208,7 +1228,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("preserveCurrentExpansionDefaults();");
     expect(conversationViewSource).toContain("function preserveCurrentExpansionDefaults()");
-    expect(conversationViewSource).toContain("const responseExpanded = getExpansionState(message.id, \"response\", defaultResponseExpanded)");
+    expect(conversationTimelineRowsSource).toContain("const responseExpanded = getExpansionState(message.id, \"response\", defaultResponseExpanded)");
     expect(conversationViewSource).not.toContain("defaultExpansionRef.current = {};\n    responseSegmentCacheRef.current.clear();\n    markdownBlockCacheRef.current.clear();\n    setSectionExpansion({});\n  }, [sessionId, visibleMessageLimit]");
   });
 
@@ -1398,20 +1418,20 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
       expect(hoverClass).toContain("motion-reduce:transition-none");
     }
     // The hover reveal needs a group anchor on the row container.
-    expect(conversationViewSource).toContain('// Hover-reveal anchor: per-message action buttons fade in only');
-    const turnClassNameStart = conversationViewSource.indexOf("const turnClassName = [");
-    const turnClassNameBlock = conversationViewSource.slice(
+    expect(conversationTimelineRowsSource).toContain('// Hover-reveal anchor: per-message action buttons fade in only');
+    const turnClassNameStart = conversationTimelineRowsSource.indexOf("const turnClassName = [");
+    const turnClassNameBlock = conversationTimelineRowsSource.slice(
       turnClassNameStart,
-      conversationViewSource.indexOf('].filter(Boolean).join(" ");', turnClassNameStart),
+      conversationTimelineRowsSource.indexOf('].filter(Boolean).join(" ");', turnClassNameStart),
     );
     expect(turnClassNameBlock).toContain('"group",');
     expect(turnClassNameBlock.indexOf("// Hover-reveal anchor")).toBeGreaterThan(-1);
     // The meta action buttons (version switch, copy, fork, regenerate, edit)
     // stay in the DOM inside one hover-reveal container; the timestamp stays
     // outside it.
-    const metaActionsBlock = conversationViewSource.slice(
-      conversationViewSource.indexOf("metaActions={"),
-      conversationViewSource.indexOf("}</span>\n                  </>\n                }"),
+    const metaActionsBlock = conversationTimelineRowsSource.slice(
+      conversationTimelineRowsSource.indexOf("metaActions={"),
+      conversationTimelineRowsSource.indexOf("}</span>\n                  </>\n                }"),
     );
     expect(metaActionsBlock).toContain('data-conversation-hover-actions="1"');
     expect(metaActionsBlock).toContain('aria-label={t("copyAnswer")}');
@@ -1428,7 +1448,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // Editing keeps the (active) edit affordance visible without hover.
     expect(metaActionsBlock).toContain("isEditingMessage ? styles.turnHoverActionsVisible : styles.turnHoverActions");
     // The failed-turn retry uses the hover-reveal variant too.
-    expect(conversationViewSource).toContain("className={styles.turnErrorActionsHover}");
+    expect(conversationTimelineRowsSource).toContain("className={styles.turnErrorActionsHover}");
   });
 
   it("keeps message actions in the DOM inside the hover container when rendered", () => {
@@ -2024,7 +2044,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain('aria-label="待发送附件"');
     expect(html).toContain('role="list"');
     expect(html).toContain('role="listitem"');
-    expect(conversationViewSource).toContain("<X size={13} aria-hidden=\"true\" />");
+    expect(conversationComposerSource).toContain("<X size={13} aria-hidden=\"true\" />");
   });
 
   it("renders pending document attachments as file badges without image previews", () => {
@@ -2577,12 +2597,12 @@ describe("ConversationView historical failed turn retry", () => {
   });
 
   it("keeps the retry action wired to the regenerate handler with the busy/pending gates", () => {
-    expect(conversationViewSource).toContain("const canRetryFailedTurnMessage = message.role === \"assistant\"");
-    expect(conversationViewSource).toContain(
+    expect(conversationTimelineRowsSource).toContain("const canRetryFailedTurnMessage = message.role === \"assistant\"");
+    expect(conversationTimelineRowsSource).toContain(
       "onClick={() => onRegenerateAssistantMessage?.(message)}",
     );
-    expect(conversationViewSource).toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}");
-    expect(conversationViewSource).not.toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}\n                              title={t(\"regenerateAnswer\")}");
+    expect(conversationTimelineRowsSource).toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}");
+    expect(conversationTimelineRowsSource).not.toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}\n                              title={t(\"regenerateAnswer\")}");
   });
 
   it("does not show the retry action on successful or streaming turns", () => {
@@ -2773,7 +2793,7 @@ describe("composer attachment upload status contract", () => {
 
   it("wires the retry entry points through the route surface", () => {
     expect(conversationViewSource).toContain("onRetryComposerAttachmentUploads");
-    expect(conversationViewSource).toContain("onRetryComposerAttachment(attachment.id)");
+    expect(conversationComposerSource).toContain("onRetryComposerAttachment(attachment.id)");
   });
 });
 

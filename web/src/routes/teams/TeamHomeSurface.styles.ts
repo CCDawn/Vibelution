@@ -9,7 +9,8 @@ const styles = {
   messageTime: "shrink-0 text-xs text-[var(--fg-tertiary)]",
   messageBody: "mt-1 min-w-0 break-words text-[15px] leading-6 text-[var(--fg-secondary)]",
   earlierLink: "mt-2 !min-h-11 !px-0 text-sm",
-  frame: "m-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-elevation-1)] max-[600px]:m-2",
+  // The containing VCanvasWorkbenchPage owns the white 12px pane boundary.
+  frame: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
   header: "flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[var(--vui-border-subtle)] px-7 py-5 max-[600px]:flex-col max-[600px]:px-4 max-[600px]:py-4",
   headerCopy: "min-w-0 flex-1",
   eyebrow: "text-sm font-medium text-[var(--fg-tertiary)]",
@@ -31,7 +32,7 @@ const styles = {
   sectionIcon: "text-[var(--fg-tertiary)]",
   sectionTitle: "text-base font-semibold",
   spaceAbove: "mt-3",
-  actionRail: "min-w-0 border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] px-5 py-5 max-[900px]:border-l-0 max-[900px]:border-t max-[600px]:px-4 max-[600px]:py-4",
+  actionRail: "min-w-0 px-5 py-5 max-[900px]:border-t max-[600px]:px-4 max-[600px]:py-4",
   actionCopy: "text-sm leading-6 text-[var(--fg-secondary)]",
   spacedAction: "mt-3 !min-h-11",
   spacedCopy: "mt-3 text-sm leading-6 text-[var(--fg-secondary)]",

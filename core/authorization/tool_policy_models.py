@@ -16,12 +16,13 @@ TurnSource = Literal["session", "team", "research", "supervised", "self_evolutio
 # writeScopes 闸门的控制面豁免标签集。语义定案：本闸门管辖「工作区/产物
 # 写」（文件/内存/会话状态等落盘变更）；下列标签表达的是控制面操作——
 # 跨 agent 消息与唤醒（cross_agent_message / can_wake_agent）和团队工作流
-# 状态写（team_workflow_state_write，如任务看板）——由各自更细的门（板服务
-# apply_* 角色门、唤醒/协作策略）管辖，豁免于本闸门。写类标签全部落在此
+# 状态写（team_workflow_state_write，如任务看板）及演化事务与固定治理审计状态
+# （runtime_governance）——由各自角色授权及执行策略管辖，豁免于本闸门。
+# 审计事务不授予工作区写或权限管理；混合这类标签的工具仍受闸门约束。写类标签全部落在此
 # 集合内的工具（如 agent_message_tool / dev_task_board_tool）不受「声明空
 # 写范围即硬禁」影响，仍受 allowedTools / mutationAccess 等其他闸门管辖。
 WRITE_SCOPE_EXEMPT_RISK_TAGS = frozenset(
-    {"cross_agent_message", "can_wake_agent", "team_workflow_state_write"}
+    {"cross_agent_message", "can_wake_agent", "team_workflow_state_write", "runtime_governance"}
 )
 
 

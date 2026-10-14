@@ -2379,3 +2379,13 @@ Dialogue V2 完成时，用户可观察到人物有时一句说完、有时自�
 - Launcher 重开后，过期 revision `11` 被替换为 revision `12 / restart_review`，新唤醒时间 `15:37:30.625512Z`；原预约没有补执行。新的真实回合 `proactive-5d856c2ff60645c2` 根据当前时间和已完成作品安排次日 `07:30 +08:00` 的未来行动，三份作品校验值仍未变。
 
 自主计划、真实工具执行、系统窗口关闭、停机静止和过期重排已实测。共享全应用 shell 退出、整夜长期运行未测试；页面程序关闭旁路与首次页面加载迟延仍须由各自 owning surface 单独处理。默认模型认证失败不因替代模型成功而消除。
+
+### 34.5 剩余问题修复验收（2026-10-14）
+
+默认模型按用户明确选择改为 `relay_openai/gpt-6.1-sol`，通过配置工作区 API 的最新 baseHash 合并保存，活配置和工作区读回一致。原官方通道仍返回 `invalid_api_key`，没有更换或伪称修复官方凭据。配置页的 10 秒连接探测超时；随后对既有中转地址进行真实 Responses 工具往返，模型生成 `acceptance_echo(value=61)`，收到工具结果后返回预期文本，总耗时约 61 秒。隔离实例的人物原生 Session 明确使用同一模型，真实调用 `write_file_tool`，单次批准测试写入后，人物私有工作区 `acceptance-model/note.txt` 内容为 `MODEL_61_OK`。该原生回合停在 `needs_continue`，没有最终可见答复，因此只计原生工具执行成功，不计完整对话终态或三轮自主接续通过。
+
+聊天加载由独立普通 Session 修复任务处理：warm stream 重挂载时，对缺失、错 Session 或 `provisionalTranscript` 的缓存请求 canonical detail，不改变 Companion mailbox、原生 admission、Journal、worker 或 SSE 协议。Launcher 隔离实例 `4436719c` 的健康响应确认 backend HEAD、frontend builtFromCommit 和 workspaceRoot 都属于该任务。首次进入测试人物的无 `companion` Chat URL 后，页面自动补身份，用户历史在 7 秒检查点可见，无持续加载提示、无需 reload、无 pageerror。返回人物大厅再进入、延迟 canonical GET 两秒后也正常显示。普通 Session 无 Companion gate、无持续加载；真实浏览器日志记录 `warm_readback_requested / transcript_unhydrated`，覆盖空缓存 warm 恢复。宽屏桌面验收不代表窄屏或触摸场景。
+
+页面关闭修复归 Electron preload、窄 IPC 和窗口 provider：页面脚本执行前将 `window.close()` 接入现有 `BrowserWindow.close()` 生命周期边界；main 校验主 frame、真实 sender 窗口与 provider 登记 origin，不允许 payload 选择其它实例，不在失败时回退到破坏性 WebContents close。Launcher 与 pet 不获得 workbench 关闭桥。聚焦回归、Electron TypeScript 检查与桌面构建通过，独立审查无确认阻塞项。
+
+真实关闭测试使用一次性隐藏 Electron 42.5.0 窗口和本分支编译后的真实 preload/provider/IPC helper，私有 userData 位于任务缓存；连接的后端仍由正式 Launcher 启动。受控 IPC 拒绝时窗口保持、没有停止请求；重载后桥仍有效。正常 `window.close()` 仅触发一次原有关闭拦截，调用正式 Launcher 停止精确测试 worktree，健康端口停止响应后授权最终关闭窗口。测试人物事先归档，未改共享主窗口或停止共享 shell。此证据证明真实 Electron 关闭桥到 Launcher-owned 后端的停止链路；共享完整 shell 尚未加载本修复，完整主应用退出和整夜运行仍未实测，须在共享实例空闲后经 Launcher 正规刷新。

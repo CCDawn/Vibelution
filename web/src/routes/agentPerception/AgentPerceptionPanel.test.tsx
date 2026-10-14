@@ -166,12 +166,19 @@ function findButton(panel: HTMLElement, label: string) {
     .find((button) => button.getAttribute("aria-label") === label || button.textContent?.includes(label)) ?? null;
 }
 
-function setSelectValue(select: HTMLSelectElement | null, value: string) {
-  if (!select) throw new Error("Missing select");
+function openSelect(select: HTMLButtonElement | null) {
+  if (!select) throw new Error("Missing combobox");
   act(() => {
-    select.value = value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    select.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   });
+}
+
+function setSelectValue(select: HTMLButtonElement | null, label: string) {
+  openSelect(select);
+  const option = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
+    .find((item) => item.textContent?.trim() === label);
+  if (!option) throw new Error(`Missing option: ${label}`);
+  clickControl(option);
 }
 
 function setInputValue(input: HTMLInputElement | null, value: string) {
@@ -227,7 +234,7 @@ describe("AgentPerceptionPanel", () => {
     expect(panel.querySelector('[data-testid="perception-runtime-details"]')?.textContent).toContain("最近实际读取");
   });
 
-  it("keeps the complete source modes keyboard-readable in the wide control and native select", () => {
+  it("keeps the complete source modes keyboard-readable and synchronizes wide controls with the combobox", () => {
     const panel = renderPanel();
     const sourceTitle = "指定团队";
     const modeNames = ["关闭", "按需查询", "自动感知"];
@@ -237,13 +244,20 @@ describe("AgentPerceptionPanel", () => {
     const offButton = panel.querySelector<HTMLButtonElement>(`[aria-label="${sourceTitle} · 关闭"]`);
     expect(offButton?.getAttribute("aria-pressed")).toBe("true");
 
-    const compactSelect = panel.querySelector<HTMLSelectElement>(`select[aria-label="${sourceTitle} · 感知方式"]`);
+    const compactSelect = panel.querySelector<HTMLButtonElement>(`[role="combobox"][aria-label="${sourceTitle} · 感知方式"]`);
     expect(compactSelect).not.toBeNull();
-    expect(compactSelect?.value).toBe("off");
+    expect(compactSelect?.textContent).toContain("关闭");
+
+    openSelect(compactSelect);
+    expect(Array.from(document.querySelectorAll('[role="option"]')).map((option) => option.textContent?.trim()))
+      .toEqual(modeNames);
+    clickControl(Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find((option) => option.textContent?.trim() === "按需查询") ?? null);
+    expect(panel.querySelector<HTMLButtonElement>(`[aria-label="${sourceTitle} · 按需查询"]`)?.getAttribute("aria-pressed")).toBe("true");
+    expect(compactSelect?.textContent).toContain("按需查询");
 
     clickSourceMode(panel, sourceTitle, "自动感知");
     expect(panel.querySelector<HTMLButtonElement>(`[aria-label="${sourceTitle} · 自动感知"]`)?.getAttribute("aria-pressed")).toBe("true");
-    expect(panel.querySelector<HTMLSelectElement>(`select[aria-label="${sourceTitle} · 感知方式"]`)?.value).toBe("auto");
+    expect(compactSelect?.textContent).toContain("自动感知");
   });
 
   it("keeps the header status tied to the saved policy while the global switch is only a draft", () => {
@@ -305,14 +319,34 @@ describe("AgentPerceptionPanel", () => {
   it("keeps notification policy independently editable when background research is off", () => {
     const saved: AgentPerceptionConfiguration["policy"][] = [];
     const panel = renderPanel({ onSave: (next) => saved.push(next) });
-    const notificationPolicy = panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]');
+    const notificationPolicy = panel.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="通知策略"]');
     expect(notificationPolicy?.disabled).toBe(false);
-    setSelectValue(notificationPolicy, "quiet");
+    setSelectValue(notificationPolicy, "静音通知");
     clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
 
     expect(saved).toHaveLength(1);
     expect(saved[0].background.enabled).toBe(false);
     expect(saved[0].notifications.mode).toBe("quiet");
+  });
+
+  it("saves an all-authorized scope chosen through the combobox using the existing scope conversion", () => {
+    const policy = defaultAgentPerceptionPolicy();
+    policy.sources.knowledge.knowledgeBaseIds = ["knowledge-base-a"];
+    policy.sources.knowledge.excludedKnowledgeBaseIds = ["knowledge-base-a"];
+    const saved: AgentPerceptionConfiguration["policy"][] = [];
+    const panel = renderPanel({ config: configuration(policy), onSave: (next) => saved.push(next) });
+    clickButton(panel.querySelector<HTMLButtonElement>('[aria-label="授权知识库 · 编辑范围"]'));
+    const scope = panel.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="知识库范围"]');
+    expect(scope?.textContent).toContain("仅选定知识库");
+
+    setSelectValue(scope, "全部当前可读知识库");
+    expect(scope?.textContent).toContain("全部当前可读知识库");
+    clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].sources.knowledge.scope).toBe("all_authorized");
+    expect(saved[0].sources.knowledge.knowledgeBaseIds).toEqual([]);
+    expect(saved[0].sources.knowledge.excludedKnowledgeBaseIds).toEqual(["knowledge-base-a"]);
   });
 
   it("shows the canonical pending-change summary and discard restores the saved policy", () => {
@@ -334,20 +368,27 @@ describe("AgentPerceptionPanel", () => {
     policy.background.topics = ["部署安全"];
     const onSave = vi.fn();
     const panel = renderPanel({ config: configuration(policy), onSave });
-    setSelectValue(panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]'), "quiet");
+    clickButton(panel.querySelector<HTMLButtonElement>('[aria-label="授权知识库 · 编辑范围"]'));
+    setSelectValue(panel.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="通知策略"]'), "静音通知");
     clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
     expect(onSave).toHaveBeenCalledTimes(1);
     rerenderPanel({ savePending: true });
 
     const teamMode = panel.querySelector<HTMLButtonElement>('[aria-label="指定团队 · 自动感知"]');
     const topic = panel.querySelector<HTMLInputElement>('[aria-label="添加一个调研主题"]');
-    const notification = panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]');
+    const notification = panel.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="通知策略"]');
     const save = panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]');
 
     expect(panel.querySelector("fieldset[disabled]")?.getAttribute("disabled")).not.toBeNull();
     expect(teamMode?.closest("fieldset")?.disabled).toBe(true);
     expect(topic?.closest("fieldset")?.disabled).toBe(true);
     expect(notification?.closest("fieldset")?.disabled).toBe(true);
+    expect(notification?.disabled).toBe(true);
+    for (const select of panel.querySelectorAll<HTMLButtonElement>('[role="combobox"]')) {
+      expect(select.disabled).toBe(true);
+      clickControl(select);
+    }
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
     expect(save?.disabled).toBe(true);
     clickButton(save);
     clickButton(save);
@@ -357,11 +398,11 @@ describe("AgentPerceptionPanel", () => {
   it("retains a failed draft and allows an explicit retry", () => {
     const saved: AgentPerceptionConfiguration["policy"][] = [];
     const panel = renderPanel({ onSave: (next) => saved.push(next) });
-    setSelectValue(panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]'), "quiet");
+    setSelectValue(panel.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="通知策略"]'), "静音通知");
     rerenderPanel({ saveError: "保存失败，请重试" });
 
     expect(panel.textContent).toContain("保存失败，请重试");
-    expect(panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]')?.value).toBe("quiet");
+    expect(panel.querySelector('[role="combobox"][aria-label="通知策略"]')?.textContent).toContain("静音通知");
     clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
     expect(saved).toHaveLength(1);
     expect(saved[0].notifications.mode).toBe("quiet");

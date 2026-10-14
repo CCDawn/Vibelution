@@ -1,4 +1,5 @@
 import styles from "./PageFrameLoadingShell.styles";
+import { VUI_WORKBENCH_PANE_CLASS, VUI_WORKBENCH_RAIL_CLASS } from "../components/vui";
 
 type FramePane = "rows" | "checks" | "lines" | "tasks" | "short" | "handle";
 
@@ -93,7 +94,7 @@ function SplitBody({
           return <span key={index} aria-hidden="true" />;
         }
         return (
-          <div key={index} className={styles.pane}>
+          <div key={index} className={`${styles.pane} ${index === 0 ? VUI_WORKBENCH_RAIL_CLASS : VUI_WORKBENCH_PANE_CLASS}`}>
             {pane === "rows" ? <Rows count={6} rowClass={styles.row52} /> : null}
             {pane === "checks" ? <CheckRows count={6} /> : null}
             {pane === "short" ? <Rows count={6} rowClass={styles.row56} /> : null}

@@ -30,16 +30,20 @@ describe("VPopover contract", () => {
     expect(shell).not.toContain("onMouseEnter={() => setUtilityOpen(true)}");
   });
 
-  it("AppShell active-work details stay inside the settings VPopover", () => {
+  it("AppShell routes active-work details through the project task rail", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
-    const styles = readFileSync(resolve(vuiRoot, "../../app/AppShell.styles.ts"), "utf8");
-    // cdfe8b5f0 moved active work from the settings popover to a title-bar
-    // VPopover; the details must stay inside that popover, not a hover cluster.
+    const projectUtilityPanel = readFileSync(resolve(vuiRoot, "../../routes/chat/ProjectUtilityPanel.tsx"), "utf8");
+    const runtimeTasksPanel = readFileSync(resolve(vuiRoot, "../../routes/auxConversations/RuntimeTasksPanel.tsx"), "utf8");
+
+    expect(shell).toContain('openProjectUtilityRail("project_tasks")');
+    expect(shell).toContain('data-shell-group="active-work"');
     expect(shell).not.toContain('data-vui="active-work-popover"');
-    expect(shell).not.toContain("settingsActiveWork");
-    expect(shell).toContain("contentClassName={styles.activeWorkPopoverContent}");
-    expect(shell).toContain("activeWorkIndicator.items.map");
-    expect(styles).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
+    expect(shell).not.toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shell).not.toContain("activeWorkDetailLink");
+    expect(projectUtilityPanel).toContain("activeWork={deriveActiveWorkIndicator(runtime.data, lang)}");
+    expect(runtimeTasksPanel).toContain("visibleActiveWork.map((item, index) => (");
+    expect(runtimeTasksPanel).toContain("activeWorkSessionIdentity(item)");
+    expect(runtimeTasksPanel).toContain("item.href");
   });
 
   it("composer permission and inference menus use VPopover instead of createPortal", () => {

@@ -16,10 +16,15 @@ const conversationViewSource = readFileSync(
   new URL("./ConversationView.tsx", import.meta.url),
   "utf8",
 );
+const conversationTimelineRowsSource = readFileSync(
+  new URL("./conversationTimelineRows.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("conversationComputerUseState", () => {
   it("keeps computer-use state helpers outside ConversationView", () => {
-    expect(conversationViewSource).toContain("from \"./conversationComputerUseState\"");
+    expect(conversationTimelineRowsSource).toContain("from \"./conversationComputerUseState\"");
+    expect(conversationViewSource).not.toContain("from \"./conversationComputerUseState\"");
     expect(conversationViewSource).not.toContain("function computerUseResultForOperation(");
     expect(conversationViewSource).not.toContain("function computerUseSessionIdFromPreview(");
     expect(conversationViewSource).not.toContain("function computerUseSessionIdsForMessage(");

@@ -1,39 +1,32 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Repo-wide style contract for the P0 sweep.
- *
- * `components/vui` and `routes` have their own zero-baseline type contracts;
- * this one freezes the remaining debt in the rest of `web/src` so it may only
- * shrink. The builtin and arbitrary text ceilings match debt already present
- * outside those surfaces; new matches still fail. Type sizes must use the
- * `text-vui-*` ladder (see
- * `components/vui/designs/primitives/type-scale.md`); radius uses the container
- * hierarchy (xl -> lg -> md -> sm, 2xl only for the composer shell and the
- * conversation status panel); spacing should follow the 4px rhythm; colours use
- * semantic tokens rather than white/black alpha utilities.
+ * Shared P0 rules: alpha utilities stay forbidden, large fixed radii retain
+ * their ceiling, and existing literal spacing debt may only shrink.
+ * Font sizes and literal radii are owned by vuiTypeScaleContract and the
+ * per-file visualTokenEscalationContract ratchet. Do not duplicate their
+ * baselines with a second, stale repository-wide total here.
  */
 
 const srcRoot = resolve(import.meta.dirname);
 
-const BASELINES = {
-  builtinText: 25,
-  arbitraryText: 9,
-  arbitraryRadius: 21,
-  fixedRadius: 6,
-  alphaUtility: 0,
-  arbitrarySpacing: 0,
-};
+const FIXED_RADIUS = /rounded-(?:2xl|3xl)\b/g;
+const ALPHA_UTILITY = /\b(?:text|bg|border|ring|fill|stroke)-(?:white|black)\/[0-9]+/g;
+const LITERAL_SPACING = /\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|space-x|space-y)-\[[0-9.]+(?:px|rem)\]/g;
 
-const PATTERNS: Record<keyof typeof BASELINES, RegExp> = {
-  builtinText: /\btext-(?:sm|xs|base|lg|xl|2xl|3xl)\b/g,
-  arbitraryText: /text-\[[0-9.]+(?:px|rem)\]/g,
-  arbitraryRadius: /rounded(?:-[trblxy])?-\[[0-9.]+(?:px|rem)\]/g,
-  fixedRadius: /rounded-(?:2xl|3xl)\b/g,
-  alphaUtility: /\b(?:text|bg|border|ring|fill|stroke)-(?:white|black)\/[0-9]+/g,
-  arbitrarySpacing: /\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|space-x|space-y)-\[[0-9.]+(?:px|rem)\]/g,
+// Existing main debt at abac9115b. Exact values are tied to their original
+// file: removing debt elsewhere cannot fund new violations or larger values.
+const SPACING_DEBT: Record<string, Record<string, number>> = {
+  "routes/AgentConversationDirectory.styles.ts": { "py-[7px]": 1 },
+  "components/conversation/ConversationView.styles.ts": {
+    "mb-[18px]": 1, "mb-[10px]": 1, "mt-[18px]": 1, "py-[22px]": 1,
+  },
+  "routes/chat/ChatLoadingShell.styles.ts": { "mb-[18px]": 1, "mb-[10px]": 1 },
+  "routes/chat/ChatRightRail.styles.ts": { "py-[18px]": 2 },
+  "routes/chat/ChatSessionBrowser.styles.ts": { "px-[13px]": 1 },
+  "routes/shared/ProgressiveRegionSkeleton.tsx": { "mb-[18px]": 1 },
 };
 
 function collectSourceFiles(dir: string): string[] {
@@ -49,17 +42,36 @@ function collectSourceFiles(dir: string): string[] {
   });
 }
 
-function countMatches(pattern: RegExp): number {
-  return collectSourceFiles(srcRoot).reduce((total, file) => {
-    const source = readFileSync(file, "utf8");
-    return total + [...source.matchAll(pattern)].length;
-  }, 0);
+function spacingGrowth(file: string, source: string): string[] {
+  const counts: Record<string, number> = {};
+  for (const [token] of source.matchAll(LITERAL_SPACING)) counts[token] = (counts[token] ?? 0) + 1;
+  return Object.entries(counts)
+    .filter(([token, count]) => count > (SPACING_DEBT[file]?.[token] ?? 0))
+    .map(([token, count]) => `${file}: ${token} (${count} > ${SPACING_DEBT[file]?.[token] ?? 0})`);
 }
 
 describe("P0 style contract", () => {
-  for (const [name, pattern] of Object.entries(PATTERNS)) {
-    it(`keeps ${name} at or below the frozen baseline`, () => {
-      expect(countMatches(pattern)).toBeLessThanOrEqual(BASELINES[name as keyof typeof BASELINES]);
-    });
-  }
+  const files = collectSourceFiles(srcRoot);
+  const countMatches = (pattern: RegExp) => files.reduce(
+    (total, file) => total + [...readFileSync(file, "utf8").matchAll(pattern)].length, 0,
+  );
+  it("keeps fixedRadius at or below the frozen baseline", () => {
+    expect(countMatches(FIXED_RADIUS)).toBeLessThanOrEqual(6);
+  });
+  it("keeps alphaUtility at zero", () => {
+    expect(countMatches(ALPHA_UTILITY)).toBe(0);
+  });
+  it("does not grow literal spacing debt in any file or token", () => {
+    const offenders = files.flatMap((file) => spacingGrowth(
+      relative(srcRoot, file).replace(/\\/g, "/"), readFileSync(file, "utf8"),
+    ));
+    expect(offenders).toEqual([]);
+  });
+  it("rejects new spacing in a new file, new values and additional occurrences", () => {
+    expect(spacingGrowth("new.tsx", "py-[7px]")).toHaveLength(1);
+    expect(spacingGrowth("routes/AgentConversationDirectory.styles.ts", "py-[8px]")).toHaveLength(1);
+    expect(spacingGrowth("routes/AgentConversationDirectory.styles.ts", "py-[7px] py-[7px]")).toHaveLength(1);
+    expect(spacingGrowth("routes/AgentConversationDirectory.styles.ts", "py-[7px]")).toEqual([]);
+    expect(spacingGrowth("routes/AgentConversationDirectory.styles.ts", "py-2")).toEqual([]);
+  });
 });

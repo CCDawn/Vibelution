@@ -37,7 +37,7 @@ export type TeamStageCommandBarProps = {
 };
 
 const BAR_BASE =
-  "flex w-full min-w-0 flex-wrap items-center gap-2.5 rounded-[var(--vui-radius-soft)] border px-3 py-2.5 text-left " +
+  "flex w-full min-w-0 flex-wrap items-center gap-2.5 rounded-vui-soft border px-3 py-2.5 text-left " +
   "border-[color:var(--source-step-border,var(--border-soft))] bg-[color:var(--source-workbench-panel)] shadow-[var(--vui-elevation-1)]";
 
 const TITLE_STRONG =

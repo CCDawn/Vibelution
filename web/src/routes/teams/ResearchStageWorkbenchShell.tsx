@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { ArrowLeft, RefreshCw, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { VButton, VNativeButton, VStatusChip } from "../../components/vui";
+import { VButton, VNativeButton, VStatusChip, VWorkbenchPage, VUI_WORKBENCH_TOOLBAR_CLASS } from "../../components/vui";
 import { RESEARCH_STAGE_TERMS } from "./research-workflow/researchTerminology";
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import type { ResearchStageUnlock } from "./researchPrimaryActionModel";
@@ -48,6 +48,7 @@ export type ResearchStageWorkbenchShellProps = {
   testId?: string;
   className?: string;
   dataAttrs?: Record<string, string | undefined>;
+  chrome?: "surface" | "workspace";
 };
 
 export function ResearchStageWorkbenchShell({
@@ -74,6 +75,7 @@ export function ResearchStageWorkbenchShell({
   testId = "research-stage-workbench",
   className = "",
   dataAttrs,
+  chrome = "surface",
 }: ResearchStageWorkbenchShellProps) {
   const effectiveTeamId = teamId || RESEARCH_TEAM_ID;
   // Same destination as initial team home (flow + canvas), never board kanban wall.
@@ -96,7 +98,8 @@ export function ResearchStageWorkbenchShell({
   );
 
   return (
-    <section
+    <VWorkbenchPage
+      chrome={chrome}
       className={[styles.route, styles.sourceCollectionPage, className].filter(Boolean).join(" ")}
       data-testid={testId}
       data-product-workbench="true"
@@ -104,7 +107,7 @@ export function ResearchStageWorkbenchShell({
       data-team-rail="hidden"
       {...dataAttrProps}
     >
-      <header className={`${styles.header} ${styles.sourceCollectionPageHeader}`}>
+      <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header} ${styles.sourceCollectionPageHeader}`}>
         <div className={styles.sourceCollectionPageTitleBlock}>
           <div className={styles.sourceCollectionPageTitleLine}>
             <h1>{title}</h1>
@@ -156,7 +159,7 @@ export function ResearchStageWorkbenchShell({
         </div>
       </header>
       {children}
-    </section>
+    </VWorkbenchPage>
   );
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import apiSource from "./chat.ts?raw";
 import evolutionApiSource from "./evolution.ts?raw";
 import routeSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
 import composerSource from "../routes/chat/useChatComposerSubmit.ts?raw";
@@ -20,9 +21,11 @@ describe("Chat session tool approval API", () => {
   });
 
   it("keeps route orchestration free of direct session approval transport", () => {
-    expect(routeSource).toContain("listPendingSessionToolApprovals");
+    expect(routeSource).toContain("useSessionToolApprovalsQuery");
+    expect(querySeamsSource).toContain("listPendingSessionToolApprovals");
     expect(mutationSource).toContain("resolveSessionToolApprovalDecision");
     expect(routeSource).not.toContain("/tool-approvals?status=pending");
+    expect(querySeamsSource).not.toContain("/tool-approvals?status=pending");
     expect(mutationSource).not.toContain("/tool-approvals/");
   });
 

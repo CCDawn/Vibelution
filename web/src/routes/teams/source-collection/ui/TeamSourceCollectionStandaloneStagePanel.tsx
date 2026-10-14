@@ -135,6 +135,7 @@ export function TeamSourceCollectionStandaloneStagePanel({
         steps={commandSteps}
       />
       <VSplitWorkspace
+        chrome="workbench"
         className={styles.sourceCollectionPageSplit}
         data-testid="source-collection-page-split"
         resize={{

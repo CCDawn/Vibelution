@@ -29,6 +29,7 @@ export {
 } from "./primitives/VDropdownMenu";
 export { VIconButton, type VIconButtonProps } from "./primitives/VIconButton";
 export { VPopover, type VPopoverProps } from "./primitives/VPopover";
+export { VSelectionToolbar, type VSelectionToolbarProps } from "./primitives/VSelectionToolbar";
 export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
 export {
@@ -134,6 +135,7 @@ export {
   type VSessionWorkbenchPageProps,
 } from "./layout/VSessionWorkbenchPage";
 export { VPage, type VPageProps } from "./layout/VPage";
+export { VWorkbenchFrame, type VWorkbenchFrameProps } from "./layout/VWorkbenchFrame";
 export {
   VUI_BOARD_CONTENT_PAD_CLASS,
   VUI_CANVAS_SURFACE_CLASS,
@@ -146,6 +148,9 @@ export {
   VUI_RAIL_SURFACE_CLASS,
   VUI_REGION_STATE_HOST_CLASS,
   VUI_WORKBENCH_SURFACE_CLASS,
+  VUI_WORKBENCH_PANE_CLASS,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_WORKBENCH_TOOLBAR_CLASS,
 } from "./layout/pageRecipeClasses";
 export { VPanelHeader, type VPanelHeaderProps } from "./layout/VPanelHeader";
 export { VRouteHeader, type VRouteHeaderProps } from "./layout/VRouteHeader";

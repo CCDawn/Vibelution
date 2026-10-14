@@ -182,7 +182,7 @@ export function MemoryAgentMemoryPanel({
       pending={detailPending} fetching={detailFetching} error={detailErrorText} onSelectItem={onSelectItem} />
   </div>;
   return <div className={styles.agentMemoryWorkspace} data-vui-region="memory-agent-workspace">
-    <VSplitWorkspace className={styles.workspace} resize={{layoutId: WORKBENCH_LAYOUT_IDS.memory, sidebar: {id: "agent-list", defaultWidth: 220, minWidth: 180, maxWidth: 320}}} sidebar={rail} main={detail} />
+    <VSplitWorkspace chrome="workbench" className={styles.workspace} resize={{layoutId: WORKBENCH_LAYOUT_IDS.memory, sidebar: {id: "agent-list", defaultWidth: 220, minWidth: 180, maxWidth: 320}}} sidebar={rail} main={detail} />
     <VDialog open={showMobileAgents} onOpenChange={setShowMobileAgents} title={copy.privateMemorySwitchAgent} size="sm" contentClassName={styles.mobileDialog}>{showMobileAgents ? rail : null}</VDialog>
   </div>;
 }

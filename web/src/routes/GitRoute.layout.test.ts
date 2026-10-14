@@ -35,7 +35,7 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<main\b/);
     expect(routeSource).not.toContain("</main>");
     expect(routeSource).not.toContain('as="main"');
-    expect(routeSource).toContain('<section className={styles.gitOverviewPanel}>');
+    expect(routeSource).toContain("styles.gitOverviewPanel");
     expect(routeSource).toContain('as="section"');
     // The collapsed change panel must be aria-hidden and inert so keyboard focus cannot enter it.
     expect(routeSource).toContain("aria-hidden={changePanelCollapsed} inert={changePanelCollapsed}");
@@ -91,15 +91,22 @@ describe("GitRoute layout contract", () => {
     }
   });
 
-  it("keeps the Git route shell background-aware and header chrome-light", () => {
+  it("uses the shared workspace chrome and toolbar for the Git route", () => {
+    expect(routeSource).toContain('chrome="workspace"');
+    expect(routeSource).toContain("VUI_WORKBENCH_TOOLBAR_CLASS");
     expect(gitRouteStyles.route).not.toContain("surface-page");
     expect(gitRouteStyles.route).not.toContain("bg-[var(--surface-page)]");
     expect(gitRouteStyles.route).not.toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(gitRouteStyles.header).not.toContain("surface-panel");
-    expect(gitRouteStyles.header).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(gitRouteStyles.header).toContain("!bg-transparent");
-    expect(gitRouteStyles.header).toContain("!shadow-none");
-    expect(gitRouteStyles.header).toContain("!backdrop-blur-none");
+    expect(gitRouteStyles.header).not.toMatch(/shadow-|bg-|border|rounded-/);
+  });
+
+  it("assigns shared rail and pane roles to Git's first-level layout regions", () => {
+    expect(routeSource).toContain("VUI_WORKBENCH_RAIL_CLASS");
+    expect(routeSource).toContain("VUI_WORKBENCH_PANE_CLASS");
+    for (const key of ["changePanel", "commitPanel", "diffPanel", "objectDetailPanel", "gitOverviewPanel"] as const) {
+      expect(gitRouteStyles[key]).not.toMatch(/rounded-|border border|bg-\[|!bg-\[|var\(--vui-surface/);
+    }
   });
 
   it("keeps Git workspaces fluid on mobile and avoids hard desktop column floors", () => {
@@ -123,8 +130,6 @@ describe("GitRoute layout contract", () => {
 
   it("keeps Git large surfaces translucent and action controls content-sized", () => {
     const largeSurfaceKeys = [
-      "changePanel",
-      "commitPanel",
       "gitSituationCard",
       "cleanStateStrip",
       "emptyPreview",

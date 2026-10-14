@@ -46,7 +46,7 @@ export type ShadcnDropdownMenuProps = {
 const contentBaseClass = [
   "z-[100] min-w-[11.5rem] max-w-[min(100vw-1.5rem,16rem)]",
   "grid content-start gap-1 p-1",
-  "rounded-[var(--vui-radius-soft)] border border-[var(--vui-control-border)]",
+  "rounded-vui-soft border border-[var(--vui-control-border)]",
   "bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-[var(--vui-elevation-overlay)]",
   "outline-none",
 ].join(" ");

@@ -36,8 +36,7 @@ export function VRouteHeader({
           ? // Content-sized action chrome only — no full-width empty 1fr track.
             "flex w-fit max-w-full min-w-0 items-center justify-end gap-2 justify-self-end self-start"
           : "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
-        "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass px-3 py-2",
-        "shadow-[var(--vui-shadow-hairline)] backdrop-blur-md",
+        "vui-workbench-toolbar px-3 py-2",
         className,
       ]
         .filter(Boolean)

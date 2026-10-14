@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Suspense, lazy } from "react";
 
 import type { EvolutionLibraryEntry, EvolutionRun } from "../api/types";
-import { VSection, VTabs } from "../components/vui";
+import { VSection, VTabs, VUI_WORKBENCH_PANE_CLASS } from "../components/vui";
 import type { Language } from "../i18n/dictionary";
 import type { EvolutionRunRecordsLibraryView, EvolutionRunRecordsPanelLabels } from "./EvolutionRunRecordsPanel";
 import { supervisedRunBucketLabel } from "./evolution/evolutionRouteModel";
@@ -124,7 +124,7 @@ export function EvolutionSupervisedRunsView({
   return (
     <div className={styles.viewStack} data-vui-region="evolution-supervised-runs">
       <VSection
-        className={`${styles.surface} ${styles.runsCommandStrip}`}
+        className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.runsCommandStrip}`}
         eyebrow={t("recentRunPerformance")}
         title={t("runList")}
         actions={(

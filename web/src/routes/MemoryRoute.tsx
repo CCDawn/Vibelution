@@ -4120,6 +4120,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       {createMatrixPanel(copy.sourceAudit)}
       {createWarningStrip()}
       <VSplitWorkspace
+        chrome="workbench"
         className={styles.workspace}
         data-vui-recipe="memory-knowledge-workbench"
         data-vui-layout-id={MEMORY_LAYOUT_ID}
@@ -4496,6 +4497,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
 
   return (
     <VDenseOpsPage
+      chrome="workspace"
       className={styles.route}
       hideHeader
       data-vui-domain-recipe="memory-knowledge-workbench"

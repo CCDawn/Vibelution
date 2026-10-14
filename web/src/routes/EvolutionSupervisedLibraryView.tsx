@@ -14,6 +14,10 @@ import {
   VTabs,
   VTextarea,
   VTooltip,
+  VUI_WORKBENCH_PANE_CLASS,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_PAGE_BODY_FILL_CLASS,
+  VUI_PAGE_BODY_SCROLL_CLASS,
 } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import {
@@ -325,7 +329,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
   return (
 <div className={`${styles.viewStack} ${styles.libraryViewStack}`} data-vui-region="evolution-supervised-library">
           <div className={styles.librarySummaryBar}>
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
+            <section className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.summarySurface}`}>
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{t("recentLibraryAdditions")}</p>
@@ -370,7 +374,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
               <p className={styles.noticeText}>{t("batchDeleteHint")}</p>
             </section>
 
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
+            <section className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.summarySurface}`}>
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{t("selectedCount")}</p>
@@ -412,7 +416,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
               ) : null}
             </section>
 
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
+            <section className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.summarySurface}`}>
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{t("proposalStatus")}</p>
@@ -461,8 +465,8 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
               as="section"
               className={
                 libraryListCollapsed
-                  ? `${styles.surface} ${styles.listPanel} ${styles.paneCollapsed}`
-                  : `${styles.surface} ${styles.listPanel}`
+                  ? `${VUI_WORKBENCH_RAIL_CLASS} ${styles.listPanel} ${styles.paneCollapsed}`
+                  : `${VUI_WORKBENCH_RAIL_CLASS} ${styles.listPanel}`
               }
               aria-hidden={libraryListCollapsed}
               elevation="panel"
@@ -673,14 +677,15 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
 
             <VSurface
               as="section"
-              className={`${styles.surface} ${styles.detailPanel}`}
+              className={`${VUI_WORKBENCH_PANE_CLASS} ${VUI_PAGE_BODY_FILL_CLASS}`}
               elevation="panel"
               padding="none"
               tone="panel"
             >
-              {selectedProposalSummary ? (
-                selectedProposalIsSelfCandidate ? (
-                  renderSelfEvolutionCandidateDetail(selectedProposalSummary)
+              <div className={`${styles.detailPanel} ${VUI_PAGE_BODY_SCROLL_CLASS}`}>
+                {selectedProposalSummary ? (
+                  selectedProposalIsSelfCandidate ? (
+                    renderSelfEvolutionCandidateDetail(selectedProposalSummary)
                 ) : proposalDetail ? (
                   <>
                     <div className={styles.detailHeader}>
@@ -1002,9 +1007,10 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                     label={t("loadingRunDetails")}
                   />
                 )
-              ) : (
-                <VStateSurface fill className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />
-              )}
+                ) : (
+                  <VStateSurface fill className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />
+                )}
+              </div>
             </VSurface>
           </div>
         </div>

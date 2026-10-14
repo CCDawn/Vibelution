@@ -29,6 +29,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { deriveQueryPresentation, type QueryPresentation } from "../app/queryPresentation";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
+  cn,
   VActionGroup,
   VButton,
   VIconButton,
@@ -41,6 +42,9 @@ import {
   VStateSurface,
   VSurface,
   VTabs,
+  VUI_WORKBENCH_PANE_CLASS,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_WORKBENCH_TOOLBAR_CLASS,
 } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
@@ -627,8 +631,9 @@ export function GitRoute() {
 
   return (
     <VDenseOpsPage
+      chrome="workspace"
       className={styles.route}
-      headerClassName={styles.header}
+      headerClassName={`${styles.header} ${VUI_WORKBENCH_TOOLBAR_CLASS}`}
       data-vui-domain-recipe="git-workbench"
       ariaLabel={t("gitPageTitle")}
       eyebrow={t("navGit")}
@@ -682,12 +687,12 @@ export function GitRoute() {
         {statusInitialLoading || statusEmptyError ? (
           <>
             {statusInitialLoading ? (
-              <div className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}>
+              <div className={cn(styles.changePanel, VUI_WORKBENCH_RAIL_CLASS, changePanelCollapsed && styles.paneCollapsed)}>
                 <ProgressiveRegionSkeleton variant="list" label={gitStatusLoading} />
               </div>
             ) : (
               <VStateSurface
-                className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}
+                className={cn(styles.changePanel, VUI_WORKBENCH_RAIL_CLASS, changePanelCollapsed && styles.paneCollapsed)}
                 tone="error"
                 title={gitStatusError}
                 actions={(
@@ -711,7 +716,7 @@ export function GitRoute() {
               onKeyDown={handleChangePanelResizeKeyDown}
             />
             {statusInitialLoading ? (
-              <div className={styles.diffPanel} role="status" aria-busy="true">
+              <div className={cn(styles.diffPanel, VUI_WORKBENCH_PANE_CLASS)} role="status" aria-busy="true">
                 <span className={styles.srOnly}>{gitStatusLoading}</span>
                 <div className={styles.diffLoading} aria-hidden="true">
                   <span className={styles.diffLoadingLine} />
@@ -722,7 +727,7 @@ export function GitRoute() {
               </div>
             ) : (
               <VStateSurface
-                className={styles.diffPanel}
+                className={`${styles.diffPanel} ${VUI_WORKBENCH_PANE_CLASS}`}
                 tone="error"
                 title={gitStatusError}
                 actions={(
@@ -730,7 +735,7 @@ export function GitRoute() {
                 )}
               />
             )}
-            <aside className={styles.commitPanel}>
+            <aside className={`${styles.commitPanel} ${VUI_WORKBENCH_PANE_CLASS}`}>
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{t("gitHead")}</p>
@@ -743,7 +748,7 @@ export function GitRoute() {
           </>
         ) : noChangedFiles ? (
           <>
-            <section className={styles.gitOverviewPanel}>
+            <section className={`${styles.gitOverviewPanel} ${VUI_WORKBENCH_PANE_CLASS}`}>
               <VNativeButton type="button" className={styles.cleanStateStrip} onClick={selectCurrentBranch}>
                 <div>
                   <p className={styles.panelEyebrow}>{lang === "zh" ? "状态" : "Status"}</p>
@@ -807,7 +812,7 @@ export function GitRoute() {
                 </section>
               </div>
             </section>
-            <VSurface as="section" ariaLabel={t("gitFileDiff")} className={styles.objectDetailPanel} elevation="panel" padding="none" tone="rail">
+            <VSurface as="section" ariaLabel={t("gitFileDiff")} className={cn(styles.objectDetailPanel, VUI_WORKBENCH_PANE_CLASS)} padding="none" tone="rail">
               {activeObject ? (
                 <GitDiffView
                   path={activeObject.label}
@@ -828,7 +833,7 @@ export function GitRoute() {
                 </VStateSurface>
               )}
             </VSurface>
-            <VSurface as="aside" ariaLabel={t("gitRecentCommits")} className={`${styles.commitPanel} ${styles.historyPanel}`} elevation="panel" padding="none" tone="rail">
+            <VSurface as="aside" ariaLabel={t("gitRecentCommits")} className={cn(styles.commitPanel, styles.historyPanel, VUI_WORKBENCH_PANE_CLASS)} padding="none" tone="rail">
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{t("gitHead")}</p>
@@ -841,7 +846,7 @@ export function GitRoute() {
           </>
         ) : (
           <>
-            <VSurface as="aside" ariaLabel={t("gitChangedScope")} className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} elevation="panel" padding="none" tone="rail" aria-hidden={changePanelCollapsed} inert={changePanelCollapsed}>
+            <VSurface as="aside" ariaLabel={t("gitChangedScope")} className={cn(styles.changePanel, VUI_WORKBENCH_RAIL_CLASS, changePanelCollapsed && styles.paneCollapsed)} padding="none" tone="rail" aria-hidden={changePanelCollapsed} inert={changePanelCollapsed}>
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
@@ -929,7 +934,7 @@ export function GitRoute() {
               onKeyDown={handleChangePanelResizeKeyDown}
             />
 
-            <VSurface as="section" ariaLabel={t("gitFileDiff")} className={styles.diffPanel} elevation="panel" padding="none" tone="rail">
+            <VSurface as="section" ariaLabel={t("gitFileDiff")} className={cn(styles.diffPanel, VUI_WORKBENCH_PANE_CLASS)} padding="none" tone="rail">
               {activeObject ? (
                 <GitDiffView
                   path={activeObject.label}
@@ -965,7 +970,7 @@ export function GitRoute() {
               )}
             </VSurface>
 
-            <VSurface as="aside" ariaLabel={t("gitManualCommit")} className={styles.commitPanel} elevation="panel" padding="none" tone="rail">
+            <VSurface as="aside" ariaLabel={t("gitManualCommit")} className={cn(styles.commitPanel, VUI_WORKBENCH_PANE_CLASS)} padding="none" tone="rail">
           <section className={styles.manualCommitPanel}>
             <div className={styles.panelHeader}>
               <div>

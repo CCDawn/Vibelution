@@ -147,6 +147,12 @@ describe("SupervisedConversationWorkspace interactions", () => {
     const onSelectStep = vi.fn();
     const container = renderWorkspace({ onSelectStep });
     const rail = container.querySelector('aside[aria-label="运行导航"]')!;
+    const workspace = container.querySelector('[data-vui-region="supervised-conversation-workspace"]')!;
+
+    expect(workspace.className).not.toContain("vui-workbench-pane");
+    expect(container.querySelector("header")?.className).toContain("vui-workbench-toolbar");
+    expect(rail.className).toContain("vui-workbench-rail");
+    expect(container.querySelector('[data-vui="split-workspace"]')?.getAttribute("data-vui-split-chrome")).toBe("workbench");
     expect(rail.textContent).toContain("20 个样本 · 人工审批");
     expect(container.querySelector('header button[aria-label="进化阶段"]')).not.toBeNull();
     expect(container.querySelector('header button[aria-label="评估集"]')).toBeNull();
