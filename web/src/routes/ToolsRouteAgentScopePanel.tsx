@@ -91,7 +91,7 @@ export function ToolsRouteAgentScopePanel({
           />
         </label>
         <VContextualHint className={styles.scopeStats} label={`${copy.scope} · ${agentDisplayName(activeAgent)}`}
-          content={<div className="grid gap-2"><strong>{agentDisplayName(activeAgent)}</strong>
+          content={<div className={styles.scopeHintContent}><strong>{agentDisplayName(activeAgent)}</strong>
             <span>{dirty ? copy.unsaved : copy.synced}</span>
             <span>{copy.visible}: <strong>{scopeCounts.visible}</strong></span>
             <span>{copy.callable}: <strong>{scopeCounts.callable}</strong></span>

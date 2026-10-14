@@ -2052,7 +2052,7 @@ export function ToolsRoute() {
                     aria-setsize={row.total}
                     onClick={(event) => handleToolRowClick(tool, event)}
                   >
-                    <Wrench size={15} strokeWidth={1.5} className="mt-1 shrink-0 text-vui-fg-tertiary"/>
+                    <Wrench size={15} strokeWidth={1.5} className={styles.registryToolIcon}/>
                     <span className={styles.toolCopy}>
                       <strong>{tool.name}</strong>
                       <span>
@@ -2145,7 +2145,7 @@ export function ToolsRoute() {
             <summary>{lang === "zh" ? "搜索与批量操作" : "Search and bulk actions"}</summary>
             <label className={styles.searchBox}><Search size={15}/><VNativeInput aria-label={t("toolsSearchPlaceholder")} placeholder={t("toolsSearchPlaceholder")} value={searchText} onChange={(event) => setSearchText(event.target.value)}/></label>
             <VStringSelect ariaLabel={lang === "zh" ? "工具筛选" : "Tool filter"} value={activeFilter} onValueChange={(value) => setActiveFilter(value as ToolFilter)} options={FILTERS.map((filter) => ({ value: filter, label: `${filterLabel(filter, lang)} ${filterCounts[filter]}` }))}/>
-            <label className="flex items-center gap-2 text-vui-micro-13"><VNativeInput type="checkbox" aria-label={lang === "zh" ? "选择当前工具" : "Select current tool"} checked={Boolean(activeTool && selectedToolIds.has(activeTool.id))} disabled={!activeTool || bulkToolPending} onChange={(event) => activeTool && toggleBulkTool(activeTool.id, event.target.checked)}/>{lang === "zh" ? "选择当前工具" : "Select current tool"}</label>
+            <label className={styles.mobileToolToggle}><VNativeInput type="checkbox" aria-label={lang === "zh" ? "选择当前工具" : "Select current tool"} checked={Boolean(activeTool && selectedToolIds.has(activeTool.id))} disabled={!activeTool || bulkToolPending} onChange={(event) => activeTool && toggleBulkTool(activeTool.id, event.target.checked)}/>{lang === "zh" ? "选择当前工具" : "Select current tool"}</label>
             <div className={styles.detailActions}><span>{bulkCopy.selected} {selectedTools.length}</span><VButton variant="ghost" onPress={allVisibleToolsSelected ? clearBulkTools : selectVisibleBulkTools}>{allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}</VButton></div>
             {selectedTools.length ? <div className={styles.detailActions}><VButton isDisabled={bulkToolPending} onPress={() => bulkSetToolsEnabled(true)}>{bulkCopy.enable}</VButton><VButton isDisabled={bulkToolPending} onPress={() => bulkSetToolsEnabled(false)}>{bulkCopy.disable}</VButton><VButton isDisabled={bulkToolPending} onPress={() => setToolConfirm({ kind: "bulk-delete" })}>{bulkCopy.delete}</VButton></div> : null}
           </details> : null}

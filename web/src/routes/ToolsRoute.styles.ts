@@ -488,6 +488,8 @@ const styles = {
   mobileSelection: "hidden shrink-0 px-4 pb-3 max-[760px]:!block max-[760px]:[&_[data-vui=select]]:min-h-11",
   mobileLibraryControls: "hidden shrink-0 min-w-0 max-h-[42vh] overflow-auto px-4 pb-3 text-vui-micro-13 max-[760px]:!block [&>summary]:min-h-8 [&>summary]:cursor-pointer [&>summary]:text-vui-fg-secondary [&>label]:my-2 [&>div]:my-2 [&_[data-vui=select]]:min-h-11 [&_button]:min-h-11",
   libraryHeaderActions: "flex items-center gap-2",
+  registryToolIcon: "mt-1 shrink-0 text-vui-fg-tertiary",
+  mobileToolToggle: "flex items-center gap-2 text-vui-micro-13",
   bulkSelectionHeader: "flex min-w-0 items-center justify-between gap-2 px-2 py-2 text-vui-2xs text-vui-fg-secondary",
   toolRowSelecting: "!grid-cols-[28px_minmax(0,1fr)]",
   policyBundleList: "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain",
