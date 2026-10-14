@@ -25,7 +25,7 @@ from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
 from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
 
-from tests.helpers.chat_turn_harness import wait_for_matching_event
+from tests.helpers.chat_turn_harness import wait_for_condition, wait_for_matching_event
 
 
 @pytest.fixture(autouse=True)
@@ -5596,7 +5596,12 @@ def test_stop_chat_room_round_enters_stopping_then_publishes_ready_detail(tmp_pa
             agent_runner=blocking_runner,
             background=True,
         )
-        assert runner_started.wait(1.0)
+        # Await the runner boundary, not a startup performance target: native
+        # checkpoint/progress persistence runs before the injected speaker.
+        wait_for_condition(
+            "blocking room speaker to start", timeout_s=10.0,
+            predicate=runner_started.is_set,
+        )
 
         stopped = chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest user stop")
 
@@ -5933,7 +5938,12 @@ def test_stopped_round_keeps_completed_messages_on_room_timeline(tmp_path, monke
             agent_runner=staged_runner,
             background=True,
         )
-        assert second_speaker_started.wait(1.0)
+        # The first speaker's persisted message must precede this boundary.
+        # Startup/persistence latency is outside this stop-timeline contract.
+        wait_for_condition(
+            "second room speaker to start", timeout_s=10.0,
+            predicate=second_speaker_started.is_set,
+        )
         chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest stop sync")
     finally:
         release_runner.set()
