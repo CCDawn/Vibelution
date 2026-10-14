@@ -16,10 +16,10 @@ const pillSurfaceClass =
   `inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] ${vuiOpaqueRowClass} px-1.5 [font-size:var(--vui-font-xs)]`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
 const returnButtonClass = `${controlButtonClass} gap-1 text-[var(--accent-cool)] no-underline`;
-const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(280px,26vw,440px)_minmax(0,1fr)] gap-4 overflow-hidden px-4 pb-4 pt-3 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
+const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(280px,26vw,440px)_minmax(0,1fr)] gap-0 overflow-hidden max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:!flex-col max-[980px]:!overflow-y-auto max-[980px]:[&>[data-vui=split-sidebar]]:!h-[44vh] max-[980px]:[&>[data-vui=split-sidebar]]:!w-full max-[980px]:[&>[data-vui=split-sidebar]]:!min-w-0 max-[980px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[980px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[980px]:[&>[data-vui=split-main]]:!min-h-[600px] max-[980px]:[&>[data-vui=split-main]]:!shrink-0 max-[980px]:[&>[role=separator]]:!hidden";
 const panelBaseClass = "grid h-full min-h-0 min-w-0 content-start gap-2 overflow-hidden";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] max-[980px]:max-h-[44vh]`;
-const editorPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_minmax(260px,1fr)_auto_auto] content-stretch max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto] max-[980px]:overflow-auto`;
+const editorPanelClass = `${panelBaseClass} rounded-none border-0 shadow-none grid-rows-[auto_auto_auto_minmax(260px,1fr)_auto_auto] content-stretch max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto] max-[980px]:overflow-auto`;
 const editorPanelFocusedClass = "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--border-soft))]";
 const panelHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const panelEyebrowClass = "m-0 mb-px [font-size:var(--vui-font-xs)] uppercase tracking-[0.07em] text-vui-fg-tertiary";

@@ -173,6 +173,7 @@ from .agent_directory_service import (
     resolve_memory_policy_for_agent,
     supervised_role_runtime_tools,
     update_agent_instance,
+    update_agent_model_parameters_if_current,
 )
 from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
 from .session.list_cache import (
@@ -534,6 +535,7 @@ from core.web.services.session.agent_runtime import (
     _session_llm_model_choices,
     _session_agent_id_snapshot,
     get_session_llm_options,
+    update_session_model_parameters,
     _normalize_session_agent_profile_id,
     llm_bindings_for_profile_id,
     _session_agent_config_for_llm_bindings,
@@ -1468,6 +1470,10 @@ class SessionNotFoundError(ValueError):
 
 class SessionBusyError(RuntimeError):
     """Raised when a session already has an active running turn."""
+
+
+class SessionModelParametersConflictError(RuntimeError):
+    """Raised when the session Agent/model/revision changed during an edit."""
 
 
 class SessionValidationError(ValueError):

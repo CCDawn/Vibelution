@@ -141,14 +141,15 @@ describe("Teams clarity composers (① shell + F1/F4 controllers)", () => {
     expect(archive).toBeGreaterThan(editGate);
   });
 
-  it("opens ordinary teams on task home and offers a return from organization editing", () => {
+  it("keeps ordinary home canvas and messages inside one shared frame", () => {
+    const homeSource = readFileSync(new URL("./TeamHomeSurface.tsx", import.meta.url), "utf8");
     expect(canvasPageSource).toContain('key={props.effectiveTeamId || "no-team"}');
-    expect(canvasPageSource).toContain("const [organizationOpen, setOrganizationOpen] = useState(false)");
     expect(canvasPageSource).toContain("<TeamHomeSurface {...p.teamHome}");
-    expect(canvasPageSource).toContain("hideInspector={showTeamHome || p.hideInspector}");
-    expect(canvasPageSource).toContain("rail={showTeamHome ? undefined : p.teamShellRail}");
-    expect(canvasPageSource).toContain("toolbarLeadingAction={!p.researchWorkflowTeamSelected && p.teamHome && organizationOpen");
-    expect(canvasPageSource).toContain("返回任务首页");
+    expect(canvasPageSource).toContain("canvas: organizationCanvas");
+    expect(canvasPageSource).toContain("navigation: p.teamShellRail");
+    expect(homeSource).toContain("TeamWorkspaceFrame");
+    expect(homeSource).toContain('props.workspace ? "canvas" : "conversation"');
+    expect(homeSource).toContain('setHomeView("conversation")');
     expect(teamsCanvasComposerSource).toContain("responsive={{");
     expect(teamsCanvasComposerSource).toContain("enabled: true");
     expect(teamsCanvasComposerSource).toContain("rail: { label: responsiveRailLabel }");

@@ -148,7 +148,7 @@ describe("researchWorkspaceRouteContract", () => {
   });
 
   it("workspace uses VCanvasWorkbenchPage fill recipe like TeamsCanvasComposer", () => {
-    expect(workspaceSource).toContain("VCanvasWorkbenchPage");
+    expect(workspaceSource).toContain("TeamWorkspaceFrame");
     expect(workspaceSource).toContain("shouldShowResearchProcessInspector");
     expect(workspaceSource).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
     expect(workspaceSource).toContain("hideHeader");

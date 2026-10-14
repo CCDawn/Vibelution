@@ -38,7 +38,9 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("const companionTransportAgentId = activeCompanion?.agentId;");
     expect(chatSource).toContain("const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);");
     expect(chatSource).toContain("companionAgentId: companionTransportAgentId");
-    expect(chatSource).toContain("composerDisabled: companionComposerDisabled");
+    expect(chatSource).toContain("composerDisabled: composerDisabledDuringModelParametersSave");
+    expect(chatSource).toContain("const composerDisabledDuringModelParametersSave = companionComposerDisabled || modelParametersSavePending;");
+    expect(chatSource).toContain("if (financeSurface || verifiedCompanionMode) return false;");
     expect(chatSource).toContain('actionMode: "send" as const');
     expect(chatSource).toContain("attachmentInputDisabled: companionComposerDisabled");
     expect(chatSource).not.toContain("companionAgentId: companionMode ? requestedCompanionId : undefined");
@@ -81,7 +83,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
     expect(chatSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined");
     expect(chatSource).toContain("permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent");
-    expect(chatSource).toContain("llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl");
+    expect(chatSource).toContain("llmControl: undefined");
+    expect(chatSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl");
     expect(chatSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
     expect(chatSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
     expect(chatSource).toContain("statusRail={verifiedCompanionMode ? (");

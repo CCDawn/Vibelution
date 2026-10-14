@@ -43,9 +43,18 @@ export type ConversationLlmControl = {
 
 /** Read-only Agent model identity shown in the composer. */
 export type ConversationTurnModelControl = {
+  sessionId: string;
+  agentId?: string;
+  configRevision?: number;
   model: SessionLlmModelOption | null;
+  contextWindow?: number;
+  maxContextWindow?: number;
+  currentReasoningEffort: string;
   loading?: boolean;
   error?: boolean;
+  pending?: boolean;
+  errorMessage?: string;
+  onSave: (parameters: { contextWindow: number; reasoningEffort: string }) => void;
 };
 
 export type ConversationComposerVariant = "compact" | "codex";
@@ -160,7 +169,7 @@ export type ConversationViewProps = {
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;
   llmControl?: ConversationLlmControl;
-  /** Read-only model display; editing belongs to the Agent management page. */
+  /** Current Agent model and its context/reasoning settings; model switching is not exposed here. */
   turnModelControl?: ConversationTurnModelControl;
   /** /模型 opens the current Agent configuration. */
   onOpenAgentModelConfig?: () => void;

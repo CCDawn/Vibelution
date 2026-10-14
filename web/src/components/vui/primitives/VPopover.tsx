@@ -11,6 +11,7 @@ export type VPopoverProps = {
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   sideOffset?: number;

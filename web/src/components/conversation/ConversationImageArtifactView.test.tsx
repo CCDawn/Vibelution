@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ImageArtifactMessage } from "./conversationMessagePredicates";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 import styles from "./ConversationImageArtifactView.styles";
 
 const artifact: ImageArtifactMessage = {
@@ -22,7 +23,8 @@ const artifact: ImageArtifactMessage = {
 describe("ConversationImageArtifactView", () => {
   it("keeps image artifact rendering out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./ConversationImageArtifactView.tsx", import.meta.url))).toBe(true);
-    expect(conversationViewSource).toContain('from "./ConversationImageArtifactView"');
+    expect(conversationTimelineRowsSource).toContain('from "./ConversationImageArtifactView"');
+    expect(conversationViewSource).not.toContain('from "./ConversationImageArtifactView"');
     expect(conversationViewSource).not.toContain("function renderImageArtifact");
     expect(conversationViewSource).not.toContain("const metaItems = [artifact.size, artifact.quality, artifact.model]");
   });

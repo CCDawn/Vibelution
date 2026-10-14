@@ -11,11 +11,33 @@ vi.mock("./ChatConversationComposerBridge", () => ({ ChatConversationComposerBri
 vi.mock("./ChatRuntimeNoticeStack", () => ({ ChatRuntimeNoticeStack: () => null }));
 
 const props = {
-  activeSessionId: "sess-9", activeCliAgentRunId: "", activeCliAgentRunAvailable: false,
-  conversation: { sessionId: "sess-9", messages: [], composer: {} }, conversationFocused: false,
-  lang: "zh", workspaceActiveTab: "agent", notices: [], sessionsPending: false,
-  toolApproval: null, filePreview: {}, hasBlockingError: false, hasTransientError: false,
-  invalidChildSessionLinkMessage: "", onApproveToolApproval: () => {}, onRejectToolApproval: () => {},
+  lang: "zh",
+  sessionGate: {
+    activeSessionId: "sess-9",
+    sessionsPending: false,
+    noSessionsLabel: "",
+    loadingSessionLabel: "",
+  },
+  errorGate: {
+    hasBlockingError: false,
+    blockingErrorMessage: "",
+    hasTransientError: false,
+    invalidChildSessionLinkMessage: "",
+    transientErrorMessage: "",
+  },
+  alternateSurface: {
+    workspaceActiveTab: "agent",
+    activeCliAgentRunId: "",
+    activeCliAgentRunAvailable: false,
+    cliAgentRunEmptyLabel: "",
+    filePreview: {},
+  },
+  conversationFrame: {
+    conversation: { sessionId: "sess-9", messages: [], composer: {} },
+    conversationFocused: false,
+    notices: [],
+  },
+  toolApproval: null,
 } as unknown as ComponentProps<typeof ChatSessionWorkspacePanel>;
 
 describe("ChatSessionWorkspacePanel share export wiring", () => {
@@ -31,7 +53,9 @@ describe("ChatSessionWorkspacePanel share export wiring", () => {
   });
 
   it("removes the ordinary Chat export row while retaining the specialized fallback", () => {
-    const ordinary = renderToStaticMarkup(<ChatSessionWorkspacePanel {...props} hideExportControl />);
+    const ordinary = renderToStaticMarkup(
+      <ChatSessionWorkspacePanel {...props} conversationFrame={{ ...props.conversationFrame, hideExportControl: true }} />,
+    );
     const specialized = renderToStaticMarkup(<ChatSessionWorkspacePanel {...props} />);
     expect(ordinary).toContain("原会话与草稿");
     expect(ordinary).not.toContain("导出 HTML");
@@ -46,7 +70,7 @@ describe("ChatSessionWorkspacePanel share export wiring", () => {
     expect(workbenchSource).toContain("sessionId={conversationModel.sessionId}");
     expect(workbenchSource).toContain("messages={conversationModel.messages}");
     expect(workbenchSource).toContain("key={conversationModel.sessionId}");
-    expect(workbenchSource).toContain("hideExportControl={headerExportVisible}");
+    expect(workbenchSource).toContain("hideExportControl: headerExportVisible");
   });
 
   it("keeps the export entry out of ConversationView (W4 decoupling contract)", () => {

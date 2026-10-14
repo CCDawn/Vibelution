@@ -525,6 +525,12 @@ export function ChatCodingRouteWorkbench() {
     queryClient,
     setActiveTurnLayersBySession,
   });
+  const modelParametersSaveGateRef = useRef<{
+    operationId: number;
+    sessionId: string;
+    agentId: string;
+  } | null>(null);
+  const modelParametersSaveOperationRef = useRef(0);
 
   useEffect(() => {
     editingSessionIdRef.current = editingSessionId;
@@ -1471,7 +1477,7 @@ export function ChatCodingRouteWorkbench() {
   });
 
   const {
-    sessionReasoningEffortMutation,
+    sessionModelParametersMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
@@ -2234,9 +2240,6 @@ export function ChatCodingRouteWorkbench() {
   const {
     sessionIdsNeedingApproval,
     toolApproval,
-    handleApproveToolApproval,
-    handleApproveToolForSession,
-    handleRejectToolApproval,
   } = useChatToolApprovalBridge({
     detail,
     sessionToolApprovals: sessionToolApprovalsQuery.data,
@@ -2299,9 +2302,33 @@ export function ChatCodingRouteWorkbench() {
     activeTurnSettledByDetail,
   });
   const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);
+  const isModelParametersSavePendingNow = useCallback(() => {
+    if (financeSurface || verifiedCompanionMode) return false;
+    const gate = modelParametersSaveGateRef.current;
+    return Boolean(
+      gate
+        && (gate.sessionId === activeSessionId || (detail?.agentId && gate.agentId === detail.agentId)),
+    );
+  }, [activeSessionId, detail?.agentId, financeSurface, verifiedCompanionMode]);
+  const modelParametersSavePending = Boolean(
+    isModelParametersSavePendingNow()
+      || (
+        !financeSurface
+        && !verifiedCompanionMode
+        && activeSessionId
+        && sessionModelParametersMutation.isPending
+        && sessionModelParametersMutation.variables?.sessionId === activeSessionId
+      ),
+  );
+  const modelParametersControlPending = Boolean(
+    modelParametersSavePending
+      || (!financeSurface && !verifiedCompanionMode && sessionModelParametersMutation.isPending),
+  );
+  const composerDisabledDuringModelParametersSave = companionComposerDisabled || modelParametersSavePending;
   const companionConversationComposer = useMemo(
-    () => (companionMode
-      ? {
+    () => {
+      if (companionMode) {
+        return {
         ...conversationComposer,
         actionDisabled: companionComposerDisabled
           || submitPending
@@ -2312,9 +2339,20 @@ export function ChatCodingRouteWorkbench() {
           || conversationComposer.attachmentInputDisabled,
         disabled: companionComposerDisabled,
         pending: submitPending,
+        };
       }
-      : conversationComposer),
-    [companionComposerDisabled, companionMode, conversationComposer, sessionBusy, submitPending],
+      if (!modelParametersSavePending) return conversationComposer;
+      return {
+        ...conversationComposer,
+        actionDisabled: conversationComposer.actionMode === "stop"
+          ? conversationComposer.actionDisabled
+          : true,
+        attachmentInputDisabled: true,
+        disabled: true,
+        editUserMessageDisabled: true,
+      };
+    },
+    [companionComposerDisabled, companionMode, conversationComposer, modelParametersSavePending, sessionBusy, submitPending],
   );
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
@@ -2433,7 +2471,7 @@ export function ChatCodingRouteWorkbench() {
     turnModelSelection: financeSurface && activeSessionId ? turnModelSelections[activeSessionId] ?? null : null,
     resolvedEditTarget,
     activeEditTarget,
-    composerDisabled: companionComposerDisabled,
+    composerDisabled: composerDisabledDuringModelParametersSave,
     sessionBusy,
     sessionStopping,
     activePhase: detail?.currentPhase,
@@ -2445,6 +2483,7 @@ export function ChatCodingRouteWorkbench() {
     setMentalModelEnabledForNextTurn,
     setRuntimeStatusEnabledForNextTurn,
     companionAgentId: companionTransportAgentId,
+    isModelParametersSavePending: isModelParametersSavePendingNow,
   });
   rebaseComposerPreviewOwnersRef.current = rebaseComposerPreviewOwners;
   const activePromptSuggestionEnabled = activeSessionId
@@ -2463,21 +2502,67 @@ export function ChatCodingRouteWorkbench() {
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const turnModelSelection = activeSessionId ? turnModelSelections[activeSessionId] ?? null : null;
   const agentModel = sessionLlmOptions?.model ?? null;
-  const sessionEffort = sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "";
   const turnModelControl = activeSessionId ? {
+    sessionId: activeSessionId,
+    agentId: sessionLlmOptions?.agentId,
+    configRevision: sessionLlmOptions?.configRevision,
     model: agentModel,
+    contextWindow: sessionLlmOptions?.contextWindow,
+    maxContextWindow: sessionLlmOptions?.maxContextWindow,
+    currentReasoningEffort: sessionLlmOptions?.currentReasoningEffort ?? "",
     loading: sessionLlmOptionsQuery.isLoading,
     error: sessionLlmOptionsQuery.isError,
-  } : undefined;
-  const sessionLlmControl = activeSessionId && agentModel ? {
-    model: agentModel,
-    sessionId: activeSessionId,
-    currentReasoningEffort: sessionEffort,
-    disabled: sessionBusy || sessionLlmOptionsQuery.isLoading || sessionLlmOptionsQuery.isError,
-    pending: sessionReasoningEffortMutation.isPending,
-    onReasoningEffortChange: (reasoningEffort: string) => {
-      if (!activeSessionId || sessionLlmOptionsQuery.isError) return;
-      sessionReasoningEffortMutation.mutate({ sessionId: activeSessionId, reasoningEffort });
+    pending: modelParametersControlPending,
+    errorMessage: sessionModelParametersMutation.isError
+      && sessionModelParametersMutation.variables?.sessionId === activeSessionId
+      ? describeError(
+        sessionModelParametersMutation.error,
+        lang === "zh" ? "模型参数保存失败" : "Failed to save model settings",
+      )
+      : "",
+    onSave: ({ contextWindow, reasoningEffort }: { contextWindow: number; reasoningEffort: string }) => {
+      const options = sessionLlmOptionsQuery.data;
+      if (
+        !activeSessionId
+        || sessionModelParametersMutation.isPending
+        || financeSurface
+        || verifiedCompanionMode
+        || options?.sessionId !== activeSessionId
+        || !options.agentId
+        || !options.model?.modelRef
+        || options.configRevision === undefined
+        || (detail?.agentId && options.agentId !== detail.agentId)
+        || modelParametersSaveGateRef.current !== null
+      ) {
+        return;
+      }
+      const gate = {
+        operationId: ++modelParametersSaveOperationRef.current,
+        sessionId: activeSessionId,
+        agentId: options.agentId,
+      };
+      modelParametersSaveGateRef.current = gate;
+      sessionModelParametersMutation.mutate({
+        sessionId: activeSessionId,
+        parameters: {
+          expectedAgentId: options.agentId,
+          expectedModelRef: options.model.modelRef,
+          expectedConfigRevision: options.configRevision,
+          contextWindow,
+          reasoningEffort,
+        },
+      }, {
+        onSettled: (_payload, _error, variables) => {
+          const current = modelParametersSaveGateRef.current;
+          if (
+            current?.operationId === gate.operationId
+            && current.sessionId === variables.sessionId
+            && current.agentId === variables.parameters.expectedAgentId
+          ) {
+            modelParametersSaveGateRef.current = null;
+          }
+        },
+      });
     },
   } : undefined;
 
@@ -3312,7 +3397,7 @@ export function ChatCodingRouteWorkbench() {
           });
         },
       } : undefined,
-      llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl,
+      llmControl: undefined,
       turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl,
       onOpenAgentModelConfig: !financeSurface && !verifiedCompanionMode && activeSessionAgent
         ? () => handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? "") ?? null)
@@ -3351,13 +3436,13 @@ export function ChatCodingRouteWorkbench() {
           && switchHeadMutation.variables?.sessionId === activeSessionId)
       ),
       regenerableAssistantMessageId,
-      regenerateDisabled: sessionBusy || regenerateMutation.isPending,
+      regenerateDisabled: sessionBusy || regenerateMutation.isPending || modelParametersSavePending,
       regeneratePending: (
         regenerateMutation.isPending
         && regenerateMutation.variables?.sessionId === activeSessionId
       ),
       onRetryTurn: handleRetryFailedTurn,
-      retryTurnDisabled: sessionBusy || regenerateMutation.isPending,
+      retryTurnDisabled: sessionBusy || regenerateMutation.isPending || modelParametersSavePending,
       retryTurnPending: (
         regenerateMutation.isPending
         && regenerateMutation.variables?.sessionId === activeSessionId
@@ -3440,7 +3525,8 @@ export function ChatCodingRouteWorkbench() {
       runtime,
       selectedChatAgent,
       sessionBusy,
-      sessionLlmControl,
+      modelParametersSavePending,
+      sessionModelParametersMutation,
       activeSessionAgent,
       handleOpenAgentConfig,
       sessionBindingMismatchLine,
@@ -3883,37 +3969,42 @@ export function ChatCodingRouteWorkbench() {
             sessionWorkspace={(
             <FollowupQueueTogglePauseContext.Provider value={handleFollowupQueueTogglePause}>
             <ChatSessionWorkspacePanel
-              activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
-              activeCliAgentRunId={activeCliAgentRunId}
-              activeSessionId={activeSessionId}
-              activeTurnStreamState={activeTurnStreamState}
-              blockingErrorMessage={sessionDetailErrorMessage}
-              cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
-              conversation={conversationModel}
-              hideExportControl={headerExportVisible}
-              conversationFocused={statusRailCollapsed}
-              filePreview={{
-                changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
-                errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
-                file: fileContentQuery.data,
-                loadingLabel: t("loadingFilePreview"),
-                sourceLabel: detail?.title ?? t("currentSession"),
-              }}
-              hasBlockingError={sessionDetailErrorState.blockingError}
-              hasTransientError={sessionDetailErrorState.transientError}
-              invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
               lang={lang}
-              loadingSessionLabel={t("loadingSession")}
-              preface={null}
-              noSessionsLabel={t("noSessionsYet")}
-              notices={activeRuntimeNotices}
-              sessionsPending={sessionsQuery.isPending}
+              sessionGate={{
+                activeSessionId,
+                sessionsPending: sessionsQuery.isPending,
+                noSessionsLabel: t("noSessionsYet"),
+                loadingSessionLabel: t("loadingSession"),
+              }}
+              errorGate={{
+                hasBlockingError: sessionDetailErrorState.blockingError,
+                blockingErrorMessage: sessionDetailErrorMessage,
+                hasTransientError: sessionDetailErrorState.transientError,
+                invalidChildSessionLinkMessage,
+                transientErrorMessage: sessionDetailErrorMessage,
+              }}
+              alternateSurface={{
+                workspaceActiveTab: conversationWorkspaceTab,
+                activeCliAgentRunId,
+                activeCliAgentRunAvailable: Boolean(activeCliAgentRun),
+                cliAgentRunEmptyLabel: lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display.",
+                filePreview: {
+                  changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
+                  errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
+                  file: fileContentQuery.data,
+                  loadingLabel: t("loadingFilePreview"),
+                  sourceLabel: detail?.title ?? t("currentSession"),
+                },
+              }}
+              conversationFrame={{
+                conversation: conversationModel,
+                conversationFocused: statusRailCollapsed,
+                preface: null,
+                hideExportControl: headerExportVisible,
+                notices: activeRuntimeNotices,
+                activeTurnStreamState,
+              }}
               toolApproval={toolApproval}
-              transientErrorMessage={sessionDetailErrorMessage}
-              workspaceActiveTab={conversationWorkspaceTab}
-              onApproveToolApproval={handleApproveToolApproval}
-              onApproveToolForSession={handleApproveToolForSession}
-              onRejectToolApproval={handleRejectToolApproval}
             />
             </FollowupQueueTogglePauseContext.Provider>
             )}

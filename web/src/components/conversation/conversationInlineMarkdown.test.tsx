@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 
 const classNames = {
   inlineCode: "inline-code-class",
@@ -18,9 +19,11 @@ describe("conversation inline markdown boundary", () => {
     // delegates to it (group-transcript rows). No second parser may appear
     // inline in the heavy module.
     expect(existsSync(new URL("./conversationInlineMarkdown.tsx", import.meta.url))).toBe(true);
-    expect(conversationViewSource).toContain('from "./conversationInlineMarkdown"');
+    expect(conversationTimelineRowsSource).toContain('from "./conversationInlineMarkdown"');
     expect(conversationViewSource).not.toContain("function renderInlineMarkdown");
     expect(conversationViewSource).not.toContain("const inlinePattern =");
+    expect(conversationTimelineRowsSource).not.toContain("function renderInlineMarkdown");
+    expect(conversationTimelineRowsSource).not.toContain("const inlinePattern =");
   });
 
   it("renders strong, code, safe links, image downloads, and unsafe link text", async () => {

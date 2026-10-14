@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import {
   extractComposerImageDropFiles,
   extractComposerSessionReferenceDrop,
@@ -11,13 +12,14 @@ import {
 
 describe("conversation composer drop payload", () => {
   it("keeps composer drop helpers outside the React component file", () => {
-    expect(conversationViewSource).toContain("from \"./conversationComposerDropPayload\"");
+    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerSource).toContain("from \"./conversationComposerDropPayload\"");
     expect(conversationViewSource).not.toContain("export { COMPOSER_SESSION_REFERENCE_MIME } from \"./conversationConstants\"");
-    expect(conversationViewSource).not.toContain("export function extractComposerImageDropFiles");
-    expect(conversationViewSource).not.toContain("export function hasComposerImageDragPayload");
-    expect(conversationViewSource).not.toContain("export function extractComposerSessionReferenceDrop");
-    expect(conversationViewSource).not.toContain("export function hasComposerSessionReferenceDragPayload");
-    expect(conversationViewSource).not.toContain("type ComposerDragData =");
+    expect(conversationComposerSource).not.toContain("export function extractComposerImageDropFiles");
+    expect(conversationComposerSource).not.toContain("export function hasComposerImageDragPayload");
+    expect(conversationComposerSource).not.toContain("export function extractComposerSessionReferenceDrop");
+    expect(conversationComposerSource).not.toContain("export function hasComposerSessionReferenceDragPayload");
+    expect(conversationComposerSource).not.toContain("type ComposerDragData =");
   });
 
   it("filters composer drag payloads down to image files", () => {
