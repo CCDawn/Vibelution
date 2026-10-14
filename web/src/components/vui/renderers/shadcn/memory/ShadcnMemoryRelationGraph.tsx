@@ -32,6 +32,9 @@ const LABEL_WIDTH = 164;
 const LABEL_HEIGHT = 72;
 const buttonClass = "!h-auto min-h-11 min-w-0 !whitespace-normal break-words px-3 py-2 text-left aria-pressed:border-[var(--accent-cool)] aria-pressed:bg-[var(--vui-selection-bg)]";
 const graphButtonClass = `${buttonClass} absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2`;
+const nodeKind = (node: MemoryKnowledgeGraphNode) => node.type === "official_research_ref"
+  ? node.metadata.sourceType === "candidate" ? "入库记录" : node.metadata.sourceType === "review_record" ? "审核记录" : "科研引用"
+  : ({ knowledge_item: "知识条目", source_artifact: "来源资料", knowledge_base: "知识库", agent: "智能体", team: "团队", project: "平台", topic: "主题", concept: "概念" } as Record<string, string>)[node.type] ?? "关联记录";
 
 function columnFor(node: MemoryKnowledgeGraphNode): number {
   if (["source_artifact", "runtime_scene", "evolution", "supervision", "refinement_proposal"].includes(node.type)) return 2;
@@ -120,7 +123,7 @@ export function ShadcnMemoryRelationGraph({ nodes, edges, selectedNodeId, select
       {nodes.length === 0 ? <p className="p-4 text-vui-sm text-[var(--fg-tertiary)]" role="status">当前范围没有可见节点。</p> : !geometry ? (
         <div className="grid min-w-0 gap-4 p-4">
           <p className="text-vui-xs text-[var(--fg-tertiary)]">按关系阅读，点选查看解释与依据。</p>
-          {visibleEdges.length === 0 ? <p role="status" className="text-vui-sm text-[var(--fg-secondary)]">当前范围没有可见关系。</p> : null}
+          {visibleEdges.length === 0 ? <p role="status" className="text-vui-sm text-[var(--fg-secondary)]">当前范围没有可见关系，可阅读下方节点的标题和摘要。</p> : null}
           <ul className="m-0 grid min-w-0 list-none gap-3 p-0" aria-label="知识关系列表">
             {visibleEdges.map(edge => <li key={edge.id} className="min-w-0">
               <ShadcnButton className={`${buttonClass} w-full !justify-start ${candidate(edge) ? "!border-dashed" : ""}`} aria-label={relationName(edge)} aria-pressed={selectedEdgeId === edge.id}
@@ -135,7 +138,7 @@ export function ShadcnMemoryRelationGraph({ nodes, edges, selectedNodeId, select
           </ul>
           <div className="grid min-w-0 gap-2" role="group" aria-label="节点详情">
             {nodes.map(node => <ShadcnButton key={node.id} className={`${buttonClass} w-full !justify-start`}
-              aria-label={`查看${node.label}`} aria-pressed={selectedNodeId === node.id} data-node-id={node.id} onClick={() => onSelectNode(node.id)}>{node.label}</ShadcnButton>)}
+              aria-label={`查看${node.label}`} aria-pressed={selectedNodeId === node.id} data-node-id={node.id} onClick={() => onSelectNode(node.id)}><span className="block min-w-0"><small className="mb-1 block text-vui-xs text-[var(--fg-tertiary)]">{nodeKind(node)}</small><strong className="block font-medium">{node.label}</strong>{node.summary && <span className="mt-2 line-clamp-3 block text-vui-xs leading-relaxed text-[var(--fg-secondary)]">{node.summary}</span>}</span></ShadcnButton>)}
           </div>
         </div>
       ) : (

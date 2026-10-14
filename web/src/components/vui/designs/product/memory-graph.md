@@ -54,6 +54,8 @@ import { VMemoryGraphCanvas } from "../components/vui";
 
 关系 renderer 为 `renderers/shadcn/memory/ShadcnMemoryRelationGraph.tsx`。节点及关系按钮的位置与 SVG 路径是同一受控图表几何例外；页面不导入 renderer、不复制 Three 或 NebulaField。
 
+平台全景的主题名称来自可读内容分类；按标题关键词分组时明确展示依据，不将分组当作事实关系。主题归属线不进入「知识关联」，入库审核线在「证据关系」中默认隐藏，可显式勾选查看。没有内容关系时说明原因并显示收录知识，不补造连线。关系列表直接展示中文节点类型、完整标题与最多三行摘要；节点编号和来源哈希收在默认关闭的技术详情中，知识归属使用显示名称。
+
 ### 反冗余
 
 替换旧 route 自建 Three 交互，不保留第二套正式图谱引擎。隔离 example 是视觉方案记录，不接正式 API。页面继续复用 VCanvasWorkbenchPage、VButton、VNativeInput、VSurface 与 WORKBENCH_LAYOUT_IDS.memory。

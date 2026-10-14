@@ -219,7 +219,7 @@ export type MemoryKnowledgeGraphPayload = {
 export type PlatformKnowledgeGraphTopic = {
   id: string;
   label: string;
-  groupingBasis: "official_target_domain" | "tag" | "knowledge_base";
+  groupingBasis: "official_target_domain" | "tag" | "knowledge_base" | "title_keywords";
   nodeIds: string[];
 };
 
