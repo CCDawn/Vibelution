@@ -639,4 +639,131 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
     expect(onDeleteSession.mock.calls[0]?.[0]?.id).toBe("session-child");
     expect(onDeleteSession.mock.calls[0]?.[1]).toEqual({ confirmed: true });
   });
+
+  it("rapid close burst: after one confirmed close, a single click on another tab deletes immediately", async () => {
+    const onDeleteSession = vi.fn();
+    await mountStrip({
+      onDeleteSession,
+      sessions: [
+        session(),
+        session({ id: "session-child", title: "子任务标题", sessionKind: "child" }),
+      ],
+    });
+
+    // Cold start still needs the two-stage confirm.
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    expect(onDeleteSession).not.toHaveBeenCalled();
+    await act(async () => {
+      armedCloseButton()?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+
+    // Burst window: one click on the other tab deletes without arming.
+    await act(async () => {
+      closeButton("deleteSession 子任务标题")?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(2);
+    expect(onDeleteSession.mock.calls[1]?.[0]?.id).toBe("session-child");
+    expect(onDeleteSession.mock.calls[1]?.[1]).toEqual({ confirmed: true });
+    expect(armedCloseButton()).toBeNull();
+  });
+
+  it("rapid close burst expires after 2s and the two-stage confirm returns", async () => {
+    vi.useFakeTimers();
+    const onDeleteSession = vi.fn();
+    await mountStrip({
+      onDeleteSession,
+      sessions: [
+        session(),
+        session({ id: "session-child", title: "子任务标题", sessionKind: "child" }),
+      ],
+    });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    await act(async () => {
+      armedCloseButton()?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2001);
+    });
+    await act(async () => {
+      closeButton("deleteSession 子任务标题")?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+    expect(armedCloseButton()?.getAttribute("aria-label")).toBe("deleteSessionConfirmArmed 子任务标题");
+  });
+
+  it("Escape ends the rapid close burst early", async () => {
+    const onDeleteSession = vi.fn();
+    await mountStrip({
+      onDeleteSession,
+      sessions: [
+        session(),
+        session({ id: "session-child", title: "子任务标题", sessionKind: "child" }),
+      ],
+    });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    await act(async () => {
+      armedCloseButton()?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    await act(async () => {
+      closeButton("deleteSession 子任务标题")?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+    expect(armedCloseButton()).toBeTruthy();
+  });
+
+  it("each burst close refreshes the window so continuous strafing keeps single-click deletes", async () => {
+    vi.useFakeTimers();
+    const onDeleteSession = vi.fn();
+    await mountStrip({
+      onDeleteSession,
+      sessions: [
+        session(),
+        session({ id: "session-child", title: "子任务标题", sessionKind: "child" }),
+        session({ id: "session-third", title: "第三会话", sessionKind: "child" }),
+      ],
+    });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    await act(async () => {
+      armedCloseButton()?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    await act(async () => {
+      closeButton("deleteSession 子任务标题")?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(2);
+
+    // 1.9s after the burst refresh: still inside the window.
+    await act(async () => {
+      vi.advanceTimersByTime(1900);
+    });
+    await act(async () => {
+      closeButton("deleteSession 第三会话")?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(3);
+    expect(onDeleteSession.mock.calls[2]?.[0]?.id).toBe("session-third");
+    expect(onDeleteSession.mock.calls[2]?.[1]).toEqual({ confirmed: true });
+  });
 });

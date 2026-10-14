@@ -61,7 +61,8 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(primarySource).toContain("challengeCupResearchTeamSelected && researchWorkspaceView === \"overview\"");
     expect(primarySource).toContain("renderResearchProcessWorkflowSurface");
     expect(primarySource).toContain("toolbarLeading");
-    expect(workspaceSource).toContain("leading={toolbarLeading}");
+    expect(workspaceSource).toContain("railTitle={toolbarLeading ?? teamName}");
+    expect(workspaceSource).not.toContain("leading={toolbarLeading}");
     expect(workspaceSource).toContain("toolbarClassName={styles.toolbar}");
   });
 

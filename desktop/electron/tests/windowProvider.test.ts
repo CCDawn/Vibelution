@@ -391,6 +391,36 @@ describe("Electron window provider state", () => {
     await closePending;
   });
 
+  it("routes a renderer close only to its own managed isolated window", async () => {
+    const isolated = new FakeWindow(99, "", 9999);
+    const closeRequest = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createWorkbenchWindow: () => isolated,
+      onInstanceCloseRequest: closeRequest
+    });
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:task", url: "http://127.0.0.1:8004/" });
+    expect(() => provider.requestRendererWorkbenchClose(98, "http://127.0.0.1:8004/chat")).toThrow("managed workbench");
+    expect(() => provider.requestRendererWorkbenchClose(99, "http://127.0.0.1:8002/chat")).toThrow("managed workbench");
+    expect(closeRequest).not.toHaveBeenCalled();
+    provider.requestRendererWorkbenchClose(99, "http://127.0.0.1:8004/chat?session=test");
+    expect(closeRequest).toHaveBeenCalledWith("worktree:task");
+    expect(isolated.isDestroyed()).toBe(false);
+  });
+
+  it("routes a main renderer close through the existing transactional interceptor", async () => {
+    const mainWindow = new FakeWindow(42, "", 4242);
+    const closeRequest = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createWorkbenchWindow: () => mainWindow,
+      shouldInterceptWorkbenchClose: () => true,
+      onWorkbenchCloseRequest: closeRequest
+    });
+    await provider.openOrFocusWorkbench();
+    provider.requestRendererWorkbenchClose(42, "http://127.0.0.1:8002/chat");
+    expect(closeRequest).toHaveBeenCalledOnce();
+    expect(mainWindow.isDestroyed()).toBe(false);
+  });
+
   it("allows an authorized isolated close without starting another stop request", async () => {
     const isolated = new FakeWindow(99, "", 9999);
     const closeRequests: string[] = [];
@@ -1585,6 +1615,7 @@ describe("IPC channels", () => {
       "openPath",
       "refreshLauncherState",
       "requestDesktopShellExit",
+      "requestWindowClose",
       "requestWorkbenchRestart",
       "showItemInFolder",
       "showLauncherWindow"

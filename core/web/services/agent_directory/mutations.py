@@ -25,6 +25,10 @@ from ..agent_config_authority import (
     materialize_agent_config_identity,
     normalize_permission_preset,
 )
+from core.llm.agent_model_parameters import (
+    resolve_agent_model_parameters,
+    sync_dialogue_reasoning_effort_to_model,
+)
 from .avatar_model_defaults import model_default_avatar_filename
 
 # Local default for signature evaluation (facade remains SSOT).
@@ -36,6 +40,22 @@ def _service():
     from core.web.services import agent_directory_service
 
     return agent_directory_service
+
+
+def _agent_dialogue_model_ref(agent: dict[str, Any] | None) -> str:
+    s = _service()
+    model_id = s.agent_dialogue_model_id(agent)
+    if not model_id:
+        return ""
+    try:
+        from config.settings import get_config
+
+        config = get_config()
+        canonical_id = config.llm.resolve_model_ref(model_id)
+        entry = config.llm.model_library.get(canonical_id)
+        return str((entry or {}).get("model_ref") or canonical_id).strip()
+    except Exception:
+        return model_id
 
 
 def update_agent_instance(
@@ -87,6 +107,7 @@ def update_agent_instance(
         agent = s._find_agent(state, agent_id)
         if agent is None:
             raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+        previous_dialogue_model_ref = _agent_dialogue_model_ref(agent)
         try:
             current_config_revision = max(
                 0,
@@ -142,6 +163,33 @@ def update_agent_instance(
             agent["metadata"] = metadata_payload
         if llm_bindings is not None:
             agent["llmBindings"] = s.normalize_agent_llm_bindings(llm_bindings)
+            current_dialogue_model_ref = _agent_dialogue_model_ref(agent)
+            metadata_payload = dict(agent.get("metadata") or {})
+            legacy_efforts = metadata_payload.get("llmReasoningEffort")
+            legacy_efforts = dict(legacy_efforts) if isinstance(legacy_efforts, dict) else {}
+            if current_dialogue_model_ref != previous_dialogue_model_ref:
+                legacy_dialogue_effort = str(legacy_efforts.get("dialogue") or "").strip().lower()
+                if previous_dialogue_model_ref and legacy_dialogue_effort:
+                    previous_parameters = resolve_agent_model_parameters(agent, previous_dialogue_model_ref)
+                    if not previous_parameters["has_reasoning_effort"]:
+                        metadata_payload = sync_dialogue_reasoning_effort_to_model(
+                            metadata_payload,
+                            previous_dialogue_model_ref,
+                            legacy_dialogue_effort,
+                        )
+                legacy_efforts.pop("dialogue", None)
+            current_parameters = resolve_agent_model_parameters(agent, current_dialogue_model_ref)
+            if current_parameters["has_reasoning_effort"]:
+                current_effort = current_parameters["reasoning_effort"]
+                if current_effort:
+                    legacy_efforts["dialogue"] = current_effort
+                else:
+                    legacy_efforts.pop("dialogue", None)
+            if legacy_efforts:
+                metadata_payload["llmReasoningEffort"] = legacy_efforts
+            else:
+                metadata_payload.pop("llmReasoningEffort", None)
+            agent["metadata"] = metadata_payload
         if direct_session_id is not None:
             normalized_direct_session_id = str(direct_session_id or "").strip()
             s._ensure_active_direct_session_available(
@@ -161,12 +209,20 @@ def update_agent_instance(
             current.update(dict(metadata or {}))
             agent["metadata"] = current
         if reasoning_effort_by_slot is not None:
+            supplied_reasoning_efforts = dict(reasoning_effort_by_slot or {})
             metadata_payload = dict(agent.get("metadata") or {})
             metadata_payload["llmReasoningEffort"] = {
                 str(slot or "").strip(): str(effort or "").strip().lower()
-                for slot, effort in dict(reasoning_effort_by_slot or {}).items()
+                for slot, effort in supplied_reasoning_efforts.items()
                 if str(slot or "").strip() and str(effort or "").strip()
             }
+            current_dialogue_model_ref = _agent_dialogue_model_ref(agent)
+            if current_dialogue_model_ref and "dialogue" in supplied_reasoning_efforts:
+                metadata_payload = sync_dialogue_reasoning_effort_to_model(
+                    metadata_payload,
+                    current_dialogue_model_ref,
+                    supplied_reasoning_efforts.get("dialogue"),
+                )
             agent["metadata"] = metadata_payload
         if permission_preset is not None:
             try:

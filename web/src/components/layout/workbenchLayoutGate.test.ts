@@ -180,7 +180,9 @@ describe("workbench layout gate (Wave 5)", () => {
     );
     expect(ids).toContain("researchFlow");
     expect(canvasPane).toContain("VWorkflowCanvas");
-    expect(workspace).toContain("VCanvasWorkbenchPage");
+    expect(workspace).toContain("TeamWorkspaceFrame");
+    const frame = readFileSync(resolve(webSrc, "routes/teams/TeamWorkspaceFrame.tsx"), "utf-8");
+    expect(frame).toContain("VCanvasWorkbenchPage");
     expect(workspace).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
   });
 

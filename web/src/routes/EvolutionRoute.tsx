@@ -2187,6 +2187,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     <VTrackWorkbenchPage
       ref={evolutionLayoutRef}
       fill
+      chrome="workspace"
       className={activeTrack === "self" || evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page}
       ariaLabel={routeTitle}
       domainRecipe="evolution-multi-rail"

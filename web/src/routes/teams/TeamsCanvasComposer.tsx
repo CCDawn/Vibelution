@@ -3,9 +3,8 @@
  * Shell rail stays owned by the route; this owns canvas + inspector layout only.
  */
 import type { ReactNode } from "react";
-import { AlertTriangle, Eye, Link2 } from "lucide-react";
-
-import { VCanvasWorkbenchPage } from "../../components/vui";
+import { AlertTriangle, Eye } from "lucide-react";
+import { TeamWorkspaceFrame } from "./TeamWorkspaceFrame";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 
 export type TeamsCanvasComposerProps = {
@@ -17,6 +16,7 @@ export type TeamsCanvasComposerProps = {
   title: string;
   responsiveRailLabel?: string;
   rail: ReactNode;
+  teamSwitcher?: ReactNode;
   toolbar: ReactNode;
   canvas: ReactNode;
   /**
@@ -42,15 +42,14 @@ export function TeamsCanvasComposer({
   title,
   responsiveRailLabel = "Team list",
   rail,
+  teamSwitcher,
   toolbar,
   canvas,
   researchFlowSlot = null,
   inspectorTitle,
   inspectorBody,
-  researchWorkflowTeamSelected = false,
   researchCanvasReadOnly = false,
   hideInspector = false,
-  styles,
   validationValid = true,
 }: TeamsCanvasComposerProps) {
   const canvasBody = researchFlowSlot ? (
@@ -69,7 +68,7 @@ export function TeamsCanvasComposer({
   );
 
   return (
-    <VCanvasWorkbenchPage
+    <TeamWorkspaceFrame
       className={className}
       hideHeader
       domainRecipe="teams-organization-workbench"
@@ -85,35 +84,13 @@ export function TeamsCanvasComposer({
         inspector: { label: inspectorTitle },
       }}
       rail={rail}
+      railTitle={teamSwitcher}
+      railLabel={responsiveRailLabel}
       toolbar={toolbar}
-      canvasClassName="!border-0 !rounded-none"
-      inspectorClassName="!border-0 !rounded-none !bg-transparent"
       canvas={canvasBody}
-      inspector={
-        hideInspector ? undefined : (
-          <aside
-            className={[
-              styles.inspector,
-              researchWorkflowTeamSelected ? styles.researchInspector : "",
-              "min-h-0 h-full flex-1 !border-0 !rounded-none",
-            ].filter(Boolean).join(" ")}
-            data-vui-region="teams-inspector"
-            data-composer="teams-canvas"
-          >
-            <div className={styles.inspectorHeader}>
-              <strong>{inspectorTitle}</strong>
-              {!validationValid
-                ? <AlertTriangle size={16} />
-                : researchCanvasReadOnly
-                  ? <Eye size={16} />
-                  : <Link2 size={16} />}
-            </div>
-            <div className={styles.inspectorBody}>
-              {inspectorBody}
-            </div>
-          </aside>
-        )
-      }
+      inspectorTitle={inspectorTitle}
+      inspectorActions={!validationValid ? <AlertTriangle size={16} aria-label="画布校验异常" /> : researchCanvasReadOnly ? <Eye size={16} aria-label="只读画布" /> : undefined}
+      inspector={hideInspector ? undefined : <div data-vui-region="teams-inspector" data-composer="teams-canvas">{inspectorBody}</div>}
     />
   );
 }

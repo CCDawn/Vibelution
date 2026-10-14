@@ -41,6 +41,12 @@ def test_list_projects_only_configured_unverified_report_status(entry_env, monke
 
 
 
+def test_financial_assistant_read_tools_include_session_reference_tool():
+    assert service.SESSION_REFERENCE_TOOL in service.READ_TOOLS
+    assert service.SESSION_REFERENCE_TOOL in service.READ_POLICY["allowedTools"]
+    assert service.SESSION_REFERENCE_TOOL in service.READ_POLICY["preferredTools"]
+
+
 def test_explicit_setup_uses_native_identity_session_and_private_read_policy(entry_env):
     assert service.list_financial_assistants() == []
     result = service.create_financial_assistant()
@@ -60,6 +66,7 @@ def test_explicit_setup_uses_native_identity_session_and_private_read_policy(ent
     assert service.MARKET_SCREEN_TOOL in agent["toolPolicy"]["allowedTools"]
     assert service.MARKET_SCREEN_TOOL in agent["toolPolicy"]["preferredTools"]
     assert agent["metadata"][service._MARKET_SCREEN_REFERENCE_MARKER] is True
+    assert agent["metadata"][service._SESSION_REFERENCE_MARKER] is True
     assert row["marketToolStatus"] == "assigned"
     assert "financial_evidence_stage_tool" not in agent["toolPolicy"]["allowedTools"]
     assert "自行判断真伪" in agent["taskProfile"]["constraints"]
@@ -377,6 +384,64 @@ def test_created_assistant_policy_executes_authorized_market_screen(
     assert calls[0]["min_price"] == 100 and calls[0]["page_size"] == 3
 
 
+def test_created_assistant_policy_makes_session_reference_visible_and_executable(
+    entry_env, monkeypatch
+):
+    from core.authorization.tool_authorization_service import resolve_enforced_authorization
+    from core.web.services import tool_registry_service
+    from tools.session_reference_tools import session_reference_context
+
+    row = service.create_financial_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    registry = tool_registry_service.get_tool_registry()
+    report = resolve_enforced_authorization(
+        runtime={
+            "agentId": row["agentId"],
+            "turnId": "turn-finance-session-reference",
+            "agent": agent,
+            "toolPolicy": agent["toolPolicy"],
+        },
+        registry_payload=registry,
+    )
+    decision = report.decision
+    assert "session_reference_query_tool" in decision.visible_tools
+    assert "session_reference_query_tool" in decision.executable_tools
+    assert "session_reference_query_tool" in {
+        item["name"] for item in registry["descriptors"]
+    }
+
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda session_id: {
+            "title": "被引用会话",
+            "messages": [{"role": "assistant", "content": "财报中的现金流风险"}],
+        },
+    )
+    references = [
+        {
+            "referenceId": "session:reference-current-turn",
+            "kind": "session",
+            "sessionId": "reference-current-turn",
+            "title": "被引用会话",
+        }
+    ]
+    with session_reference_context(references):
+        with authorized_agent_tool_executor(
+            row["agentId"],
+            session_id=row["directSessionId"],
+            executable_tools=decision.executable_tools,
+        ) as execute:
+            raw, _ = execute(
+                "session_reference_query_tool",
+                {"reference_id": "session:reference-current-turn", "query": "现金流"},
+            )
+
+    result = json.loads(raw)
+    assert result["status"] == "ok"
+    assert result["messages"][0]["content"] == "财报中的现金流风险"
+
+
 def test_http_contract_rejects_unknown_fields_and_requires_control_token(entry_env):
     app = create_app()
     headers = {CONTROL_TOKEN_HEADER: get_control_token()}
@@ -546,6 +611,51 @@ def _rewind_stage_one(agent_id: str, *, max_calls: int = 8) -> None:
             "financialAssistantNewsReferenceGranted": False,
             "financialAssistantMarketReferenceGranted": False,
             service._INDEX_REFERENCE_MARKER: False,
+            service._SESSION_REFERENCE_MARKER: False,
+        },
+    )
+
+
+def _rewind_full_default_before_session_reference(agent_id: str, **policy_changes) -> None:
+    legacy_tools = list(service._LEGACY_DEFAULT_READ_TOOLS)
+    directory.update_agent_instance(
+        agent_id,
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": legacy_tools,
+            "preferredTools": legacy_tools,
+            **policy_changes,
+        },
+        metadata={
+            service._NEWS_REFERENCE_MARKER: True,
+            service._MARKET_REFERENCE_MARKER: True,
+            service._MARKET_SCREEN_REFERENCE_MARKER: True,
+            service._INDEX_REFERENCE_MARKER: True,
+            service._SESSION_REFERENCE_MARKER: False,
+        },
+    )
+
+
+def _rewind_legacy_default_before_session_reference(
+    agent_id: str, tools: tuple[str, ...], *, blocked_tools: list[str] | None = None
+) -> None:
+    directory.update_agent_instance(
+        agent_id,
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": list(tools),
+            "preferredTools": list(tools),
+            "maxCallsPerTurn": 3,
+            "blockedTools": list(blocked_tools or []),
+        },
+        persona_profile=service._NEWS_PERSONA,
+        task_profile=service._NEWS_TASK,
+        metadata={
+            service._NEWS_REFERENCE_MARKER: "news_search_tool" in tools,
+            service._MARKET_REFERENCE_MARKER: service.MARKET_TOOL in tools,
+            service._MARKET_SCREEN_REFERENCE_MARKER: service.MARKET_SCREEN_TOOL in tools,
+            service._INDEX_REFERENCE_MARKER: service.INDEX_TOOL in tools,
+            service._SESSION_REFERENCE_MARKER: False,
         },
     )
 
@@ -596,6 +706,8 @@ def test_stage_one_migration_happens_on_write_path_not_listing(entry_env):
     assert agent["metadata"]["delegationPolicy"]["allowSubagents"] is False
     assert set(agent["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
     assert set(agent["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
+    assert service.SESSION_REFERENCE_TOOL in agent["toolPolicy"]["allowedTools"]
+    assert agent["metadata"][service._SESSION_REFERENCE_MARKER] is True
     assert agent["toolPolicy"]["maxCallsPerTurn"] == 3
     assert agent["toolPolicy"]["policyVersion"] == before + 1
     assert agent["taskProfile"]["constraints"] == service.TASK["constraints"]
@@ -608,6 +720,236 @@ def test_stage_one_migration_happens_on_write_path_not_listing(entry_env):
     assert (
         directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
     )
+
+
+def test_session_reference_migration_is_explicit_single_write_and_preserves_policy_limits(
+    entry_env, monkeypatch
+):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_full_default_before_session_reference(
+        row["agentId"],
+        maxCallsPerTurn=3,
+        maxCallsPerTurnByModelFamily={"openai": 2},
+        blockedTools=["financial_evidence_stage_tool"],
+        approvalOverrides={"news_search_tool": "always"},
+        delegationAccess="assigned_only",
+    )
+    before = directory.get_agent(row["agentId"])
+    writes = []
+    real_update = directory.update_agent_instance
+
+    def count_update(*args, **kwargs):
+        writes.append(kwargs)
+        return real_update(*args, **kwargs)
+
+    monkeypatch.setattr(directory, "update_agent_instance", count_update)
+    listed = service.list_financial_assistants()
+    assert listed[0]["marketToolStatus"] == "assigned"
+    assert writes == []
+
+    result = service.create_financial_assistant("不要重命名")
+    after = directory.get_agent(row["agentId"])
+    assert result["created"] is False
+    assert result["assistant"]["displayName"] == before["displayName"]
+    assert len(writes) == 1
+    assert set(after["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
+    assert set(after["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
+    assert after["toolPolicy"]["policyVersion"] == before["toolPolicy"]["policyVersion"] + 1
+    for key in (
+        "maxCallsPerTurn",
+        "maxCallsPerTurnByModelFamily",
+        "blockedTools",
+        "approvalOverrides",
+        "delegationAccess",
+    ):
+        assert after["toolPolicy"][key] == before["toolPolicy"][key]
+    for marker in (
+        service._NEWS_REFERENCE_MARKER,
+        service._MARKET_REFERENCE_MARKER,
+        service._MARKET_SCREEN_REFERENCE_MARKER,
+        service._INDEX_REFERENCE_MARKER,
+        service._SESSION_REFERENCE_MARKER,
+    ):
+        assert after["metadata"][marker] is True
+
+    service.create_financial_assistant()
+    service.list_financial_assistants()
+    assert len(writes) == 1
+
+
+@pytest.mark.parametrize(
+    "legacy_tools",
+    [
+        service._PREVIOUS_READ_TOOLS,
+        service._NEWS_READ_TOOLS,
+        service._LEGACY_MARKET_READ_TOOLS,
+        service._LEGACY_SCREEN_READ_TOOLS,
+        service._LEGACY_DEFAULT_READ_TOOLS,
+    ],
+)
+def test_each_untouched_legacy_default_gains_session_reference_once(
+    entry_env, monkeypatch, legacy_tools
+):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_legacy_default_before_session_reference(row["agentId"], legacy_tools)
+    before = directory.get_agent(row["agentId"])
+    writes = []
+    real_update = directory.update_agent_instance
+
+    def count_update(*args, **kwargs):
+        writes.append(kwargs)
+        return real_update(*args, **kwargs)
+
+    monkeypatch.setattr(directory, "update_agent_instance", count_update)
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert len(writes) == 1
+    assert set(after["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
+    assert set(after["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
+    assert after["toolPolicy"]["maxCallsPerTurn"] == 3
+    assert after["toolPolicy"]["policyVersion"] == before["toolPolicy"]["policyVersion"] + 1
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is True
+
+    service.create_financial_assistant()
+    service.list_financial_assistants()
+    assert len(writes) == 1
+
+
+def test_reference_only_migration_does_not_add_market_or_index_tools(
+    entry_env, monkeypatch
+):
+    row = service.create_financial_assistant()["assistant"]
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": list(service._NEWS_READ_TOOLS),
+            "preferredTools": list(service._NEWS_READ_TOOLS),
+            "maxCallsPerTurn": 4,
+        },
+        metadata={
+            service._NEWS_REFERENCE_MARKER: True,
+            service._MARKET_REFERENCE_MARKER: True,
+            service._MARKET_SCREEN_REFERENCE_MARKER: True,
+            service._INDEX_REFERENCE_MARKER: True,
+            service._SESSION_REFERENCE_MARKER: False,
+        },
+    )
+    writes = []
+    real_update = directory.update_agent_instance
+
+    def count_update(*args, **kwargs):
+        writes.append(kwargs)
+        return real_update(*args, **kwargs)
+
+    monkeypatch.setattr(directory, "update_agent_instance", count_update)
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert len(writes) == 1
+    assert set(after["toolPolicy"]["allowedTools"]) == {
+        *service._NEWS_READ_TOOLS,
+        service.SESSION_REFERENCE_TOOL,
+    }
+    assert after["toolPolicy"]["maxCallsPerTurn"] == 4
+    assert service.MARKET_TOOL not in after["toolPolicy"]["allowedTools"]
+    assert service.MARKET_SCREEN_TOOL not in after["toolPolicy"]["allowedTools"]
+    assert service.INDEX_TOOL not in after["toolPolicy"]["allowedTools"]
+
+    service.create_financial_assistant()
+    assert len(writes) == 1
+
+
+def test_blocked_session_reference_does_not_block_existing_legacy_upgrade(
+    entry_env
+):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_legacy_default_before_session_reference(
+        row["agentId"],
+        service._NEWS_READ_TOOLS,
+        blocked_tools=[service.SESSION_REFERENCE_TOOL],
+    )
+
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert set(after["toolPolicy"]["allowedTools"]) == set(
+        service._LEGACY_DEFAULT_READ_TOOLS
+    )
+    assert service.SESSION_REFERENCE_TOOL not in after["toolPolicy"]["allowedTools"]
+    assert service.SESSION_REFERENCE_TOOL in after["toolPolicy"]["blockedTools"]
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is True
+
+    # Removing the explicit block later cannot silently retry the declined grant.
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={**after["toolPolicy"], "blockedTools": []},
+    )
+    service.create_financial_assistant()
+    assert service.SESSION_REFERENCE_TOOL not in directory.get_agent(row["agentId"])[
+        "toolPolicy"
+    ]["allowedTools"]
+
+
+def test_listing_does_not_migrate_legacy_full_default_to_session_reference(entry_env, monkeypatch):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_full_default_before_session_reference(row["agentId"])
+    before = directory.get_agent(row["agentId"])
+    writes = []
+    monkeypatch.setattr(
+        directory, "update_agent_instance", lambda *args, **kwargs: writes.append(kwargs)
+    )
+
+    assert len(service.list_financial_assistants()) == 1
+    after = directory.get_agent(row["agentId"])
+    assert writes == []
+    assert after["toolPolicy"] == before["toolPolicy"]
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is False
+    assert "session_reference_query_tool" not in after["toolPolicy"]["allowedTools"]
+
+
+@pytest.mark.parametrize(
+    "policy_changes",
+    [
+        {"blockedTools": [service.SESSION_REFERENCE_TOOL]},
+        {"allowedTools": [], "preferredTools": []},
+        {
+            "allowedTools": [*service._LEGACY_DEFAULT_READ_TOOLS, "web_search_tool"],
+        },
+        {"preferredTools": [*service._LEGACY_DEFAULT_READ_TOOLS[:-1]]},
+        {"networkAccess": "none"},
+        {"networkAccess": "unrestricted"},
+        {"mutationAccess": "controlled"},
+    ],
+)
+def test_session_reference_migration_preserves_custom_or_denied_policy_and_is_one_time(
+    entry_env, policy_changes
+):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_full_default_before_session_reference(row["agentId"], **policy_changes)
+    before = directory.get_agent(row["agentId"])
+
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert after["toolPolicy"] == before["toolPolicy"]
+    assert service.SESSION_REFERENCE_TOOL not in after["toolPolicy"]["allowedTools"]
+    assert service.SESSION_REFERENCE_TOOL not in after["toolPolicy"]["preferredTools"]
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is True
+
+    # Once declined, restoring the old default cannot silently grant the tool.
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **before["toolPolicy"],
+            "allowedTools": list(service._LEGACY_DEFAULT_READ_TOOLS),
+            "preferredTools": list(service._LEGACY_DEFAULT_READ_TOOLS),
+            "blockedTools": [],
+            "networkAccess": "controlled",
+            "mutationAccess": "none",
+        },
+    )
+    service.create_financial_assistant()
+    restored = directory.get_agent(row["agentId"])
+    assert service.SESSION_REFERENCE_TOOL not in restored["toolPolicy"]["allowedTools"]
+    assert restored["metadata"][service._SESSION_REFERENCE_MARKER] is True
 
 
 def test_create_upgrades_untouched_ready_assistant_without_renaming(entry_env):
@@ -674,6 +1016,7 @@ def _rewind_news_default(agent_id: str, **policy_changes) -> None:
             "financialAssistantNewsReferenceGranted": True,
             "financialAssistantMarketReferenceGranted": False,
             service._INDEX_REFERENCE_MARKER: False,
+            service._SESSION_REFERENCE_MARKER: False,
         },
     )
 
@@ -684,7 +1027,10 @@ def test_index_upgrade_is_explicit_and_keeps_untouched_policy_limits(entry_env):
         row["agentId"], tool_policy={**service.READ_POLICY,
             "allowedTools": list(service._LEGACY_SCREEN_READ_TOOLS),
             "preferredTools": list(service._LEGACY_SCREEN_READ_TOOLS), "maxCallsPerTurn": 3},
-        metadata={service._INDEX_REFERENCE_MARKER: False},
+        metadata={
+            service._INDEX_REFERENCE_MARKER: False,
+            service._SESSION_REFERENCE_MARKER: False,
+        },
     )
     before = directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"]
     assert service.list_financial_assistants()[0]["marketToolStatus"] == "upgrade_available"
@@ -692,27 +1038,54 @@ def test_index_upgrade_is_explicit_and_keeps_untouched_policy_limits(entry_env):
     service.create_financial_assistant()
     after = directory.get_agent(row["agentId"])
     assert service.INDEX_TOOL in after["toolPolicy"]["allowedTools"]
+    assert service.SESSION_REFERENCE_TOOL in after["toolPolicy"]["allowedTools"]
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is True
     assert after["toolPolicy"]["maxCallsPerTurn"] == 3
     assert after["toolPolicy"]["policyVersion"] == before + 1
     service.create_financial_assistant()
     assert directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
 
 
-@pytest.mark.parametrize("changes", [{"blockedTools": [service.INDEX_TOOL]},
-                                     {"networkAccess": "none"}, {"allowedTools": []}])
+@pytest.mark.parametrize("changes", [{"networkAccess": "none"}, {"allowedTools": []}])
 def test_index_upgrade_preserves_explicit_denial_or_custom_policy(entry_env, changes):
     row = service.create_financial_assistant()["assistant"]
     directory.update_agent_instance(
         row["agentId"], tool_policy={**service.READ_POLICY,
             "allowedTools": list(service._LEGACY_SCREEN_READ_TOOLS),
             "preferredTools": list(service._LEGACY_SCREEN_READ_TOOLS), **changes},
-        metadata={service._INDEX_REFERENCE_MARKER: False},
+        metadata={
+            service._INDEX_REFERENCE_MARKER: False,
+            service._SESSION_REFERENCE_MARKER: False,
+        },
     )
     before = directory.get_agent(row["agentId"])["toolPolicy"]
     service.create_financial_assistant()
     after = directory.get_agent(row["agentId"])["toolPolicy"]
     assert service.INDEX_TOOL not in after["allowedTools"]
     assert after == before
+
+
+def test_blocked_index_upgrade_still_grants_unblocked_session_reference(entry_env):
+    row = service.create_financial_assistant()["assistant"]
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": list(service._LEGACY_SCREEN_READ_TOOLS),
+            "preferredTools": list(service._LEGACY_SCREEN_READ_TOOLS),
+            "blockedTools": [service.INDEX_TOOL],
+        },
+        metadata={
+            service._INDEX_REFERENCE_MARKER: False,
+            service._SESSION_REFERENCE_MARKER: False,
+        },
+    )
+
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert service.INDEX_TOOL not in after["toolPolicy"]["allowedTools"]
+    assert service.SESSION_REFERENCE_TOOL in after["toolPolicy"]["allowedTools"]
+    assert service.INDEX_TOOL in after["toolPolicy"]["blockedTools"]
 
 
 def test_legacy_market_default_gains_screen_tool_only_on_explicit_write(entry_env, monkeypatch):
@@ -729,6 +1102,7 @@ def test_legacy_market_default_gains_screen_tool_only_on_explicit_write(entry_en
             service._MARKET_REFERENCE_MARKER: True,
             service._MARKET_SCREEN_REFERENCE_MARKER: False,
             service._INDEX_REFERENCE_MARKER: False,
+            service._SESSION_REFERENCE_MARKER: False,
         },
     )
     before = directory.get_agent(row["agentId"])
@@ -750,6 +1124,7 @@ def test_legacy_market_default_gains_screen_tool_only_on_explicit_write(entry_en
     assert len(writes) == 1
     assert set(after["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
     assert set(after["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is True
     assert service.MARKET_SCREEN_TOOL in after["toolPolicy"]["allowedTools"]
     assert service.MARKET_SCREEN_TOOL in after["toolPolicy"]["preferredTools"]
     assert after["toolPolicy"]["policyVersion"] == before["toolPolicy"]["policyVersion"] + 1
@@ -801,6 +1176,7 @@ def test_market_upgrade_is_explicit_single_write_and_preserves_limits(
         == before["toolPolicy"]["policyVersion"] + 1
     )
     assert set(after["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
+    assert after["metadata"][service._SESSION_REFERENCE_MARKER] is True
     for key in (
         "maxCallsPerTurn",
         "maxCallsPerTurnByModelFamily",
@@ -840,7 +1216,14 @@ def test_market_upgrade_does_not_expand_custom_or_denied_policies(
     assert service.list_financial_assistants()[0]["marketToolStatus"] == "not_assigned"
     service.create_financial_assistant()
     after = directory.get_agent(row["agentId"])
-    assert after["toolPolicy"] == before["toolPolicy"]
+    if policy_changes.get("blockedTools") == [service.MARKET_TOOL]:
+        assert set(after["toolPolicy"]["allowedTools"]) == {
+            *service._NEWS_READ_TOOLS,
+            service.SESSION_REFERENCE_TOOL,
+        }
+        assert after["toolPolicy"]["blockedTools"] == [service.MARKET_TOOL]
+    else:
+        assert after["toolPolicy"] == before["toolPolicy"]
     assert after["taskProfile"] == before["taskProfile"]
     assert after["personaProfile"] == before["personaProfile"]
     assert after["metadata"]["financialAssistantMarketReferenceGranted"] is True
@@ -894,7 +1277,10 @@ def test_stage_one_can_gain_news_without_overriding_market_blacklist(entry_env):
     )
     service.create_financial_assistant()
     after = directory.get_agent(row["agentId"])
-    assert set(after["toolPolicy"]["allowedTools"]) == set(service._NEWS_READ_TOOLS)
+    assert set(after["toolPolicy"]["allowedTools"]) == {
+        *service._NEWS_READ_TOOLS,
+        service.SESSION_REFERENCE_TOOL,
+    }
     assert after["toolPolicy"]["blockedTools"] == [service.MARKET_TOOL]
     assert after["taskProfile"]["constraints"] == service._NEWS_TASK["constraints"]
 

@@ -8,6 +8,10 @@ import {
   VEntityList,
   VErrorSummary,
   VPanelHeader,
+  VPage,
+  VWorkbenchFrame,
+  VSelectionToolbar,
+  type VSelectionToolbarProps,
   VSection,
   VSessionSearchDialog,
   type VSessionSearchDialogItem,
@@ -17,6 +21,8 @@ import {
   VToolbar,
 } from "../../../components/vui";
 import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
+import { ConversationToolActivity } from "../../../components/conversation/ConversationToolActivity";
+import { createCodexTranscriptToolActivity } from "../../../components/conversation/conversationToolActivityModel";
 import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
 import { ConversationFileDeliveries } from "../../../components/conversation/ConversationFileDeliveries";
 import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
@@ -159,9 +165,22 @@ const sessionSearchPreviewItems: VSessionSearchDialogItem[] = [
 
 export function StructureCatalog() {
   const [sessionSearchDialogOpen, setSessionSearchDialogOpen] = useState(false);
+  const [selectionToolbarAnchor, setSelectionToolbarAnchor] = useState<VSelectionToolbarProps["anchorRect"] | null>(null);
 
   return (
     <VuiPreviewSection title="Structure">
+      <VuiPreviewCard name="VWorkbenchFrame" className="min-h-40">
+        <div className="h-40 min-w-0">
+          <VWorkbenchFrame><VPage className="p-3"><VPanelHeader title="持久页面壳" /><p className="text-vui-sm">共享圆角、背景与面板边界。</p></VPage></VWorkbenchFrame>
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VSelectionToolbar" className="min-h-0">
+        <VButton onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setSelectionToolbarAnchor(selectionToolbarAnchor ? null : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height });
+        }}>{selectionToolbarAnchor ? "收起操作条" : "演示选区操作条"}</VButton>
+        {selectionToolbarAnchor ? <VSelectionToolbar anchorRect={selectionToolbarAnchor} ariaLabel="选区操作示例"><VButton onClick={() => setSelectionToolbarAnchor(null)}>关闭示例</VButton></VSelectionToolbar> : null}
+      </VuiPreviewCard>
       <VuiPreviewCard name="VPanelHeader" className="min-h-0">
         <VPanelHeader title="项目设置" />
       </VuiPreviewCard>
@@ -198,6 +217,19 @@ export function StructureCatalog() {
             onMove={() => undefined}
           />
         </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationToolActivity" className="col-span-full min-h-0">
+        <ConversationToolActivity
+          language="zh"
+          sessionId="component-preview-tool-activity"
+          activity={createCodexTranscriptToolActivity([
+            { id: "preview-tool-success", messageId: "preview-tools", kind: "tool_call", title: "shell", status: "completed", tone: "neutral", summary: "git status --short" },
+            { id: "preview-tool-failure", messageId: "preview-tools", kind: "tool_call", title: "shell", status: "failed", tone: "error", summary: "npm run build" },
+          ])}
+          renderToolDetails={(cell) => (
+            <p>{cell.status === "failed" ? "构建失败：请检查类型错误。" : "工作区状态已读取。"}</p>
+          )}
+        />
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTranscriptLoadingState" className="col-span-full min-h-0">
         <div className="h-[360px] w-full overflow-hidden rounded-xl border border-vui-border-subtle bg-vui-surface-panel">

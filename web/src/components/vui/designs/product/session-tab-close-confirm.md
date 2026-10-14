@@ -10,6 +10,8 @@
 「再次点击确认移除会话记录」。armed 态再次点击同一控件立即执行原 × 语义
 （移除会话记录，跳过确认弹窗）。armed 态在约 3 秒超时、按 Escape、或点击
 armed 控件以外任意区域（其它标签、标签条外）时自动回落为普通 ×。
+确认删除一次后进入约 2 秒的急速连关窗口（见下节）：窗口内点击其它标签的 ×
+直接执行删除，不再逐张重新 armed。
 
 ### 适用范围
 
@@ -81,3 +83,27 @@ onDeleteSession: (session: SessionSummary, options?: { confirmed?: boolean }) =>
 - `web/src/routes/AgentSessionTabStrip.styles.ts`（`agentSessionTabCloseButtonArmed`）
 - `web/src/routes/chat/useChatWorkspaceActions.ts`（`handleDeleteSession` 的 `confirmed` 直通分支）
 - `web/src/i18n/domains/dictionaryCore.ts`（`deleteSessionConfirmArmed` zh/en）
+
+## 急速连关窗口（rapid close burst）
+
+### 功能
+
+连续关闭多张会话标签时，两段式确认只收第一次的「门票」：任一 × 完成确认删除后
+开启约 2 秒（`RAPID_CLOSE_BURST_WINDOW_MS`）的急速连关窗口，窗口内点击其它
+标签的 × **单击直接删除**（等效 `confirmed`，跳过 armed 态）；每次连关点击都会
+刷新窗口时长，支持鼠标沿标签条一路点 × 连续归档。按 Escape 立即终止窗口，
+回落两段式。窗口无任何视觉标记（连关期间 × 外观保持普通态），纯时间判定。
+
+### 状态与数据语义
+
+- 窗口时间戳存组件内 `rapidCloseUntilRef`（ref，不触发渲染）；连关是 UI 瞬态，
+  不入 store、不持久化。
+- 连关点击仍走 `handleDeleteSession(session, { confirmed: true })` 原删除链，
+  busy phase / 同会话删除在途等禁用与防抖检查不回退（禁用控件本就不可点）。
+- 安全边界：删除为服务端归档语义（`directory_archived`），误关可从归档栏找回；
+  窗口短（2s）且需先完成一次显式确认才进入，冷启动首次关闭仍受两段式保护。
+
+### 实现落点
+
+- `web/src/routes/AgentSessionTabStrip.tsx`（`RAPID_CLOSE_BURST_WINDOW_MS` +
+  `rapidCloseUntilRef` + × onClick 分支 + Escape 终止）

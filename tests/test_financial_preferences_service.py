@@ -81,6 +81,40 @@ def test_only_owned_finance_preferences_can_be_removed(finance_env):
     )
 
 
+def test_explicit_removal_remains_available_when_memory_is_disabled(finance_env):
+    agent = _agent()
+    saved = service.save_preference(agent["agentId"], "先核对现金流", str(uuid4()))
+    directory.update_agent_instance(agent["agentId"], memory_policy={"enabled": False})
+    assert service.remove_preference(agent["agentId"], saved["id"]) == {
+        "id": saved["id"], "removed": True,
+    }
+    assert service.list_preferences(agent["agentId"])["items"] == []
+
+
+def test_retry_of_removed_save_request_cannot_resurrect_preference(finance_env):
+    agent = _agent()
+    request_id = str(uuid4())
+    saved = service.save_preference(agent["agentId"], "先核对现金流", request_id)
+    service.remove_preference(agent["agentId"], saved["id"])
+    with pytest.raises(service.FinancialPreferenceError) as error:
+        service.save_preference(agent["agentId"], "先核对现金流", request_id)
+    assert error.value.status_code == 409
+    assert service.list_preferences(agent["agentId"])["items"] == []
+    # An explicitly new save remains a separate, intentional action.
+    assert service.save_preference(agent["agentId"], "先核对现金流", str(uuid4()))["id"] != saved["id"]
+
+
+def test_notes_cannot_hide_old_preference_from_management_or_idempotency(finance_env):
+    agent = _agent()
+    request_id = str(uuid4())
+    saved = service.save_preference(agent["agentId"], "长期研究偏好", request_id)
+    for index in range(201):
+        directory.append_episodic_event(agent["agentId"], kind="note", text=f"较新的临时记录 {index}")
+    assert service.list_preferences(agent["agentId"])["items"] == [saved]
+    assert service.save_preference(agent["agentId"], "长期研究偏好", request_id) == saved
+    assert service.remove_preference(agent["agentId"], saved["id"])["removed"] is True
+
+
 def test_memory_switch_and_public_contract_are_preserved(finance_env):
     agent = _agent()
     app = FastAPI()

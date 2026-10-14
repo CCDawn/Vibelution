@@ -29,80 +29,113 @@ type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationCompos
  */
 const EMPTY_ACTIVE_TURN_STREAM_STATE: ActiveTurnStreamState = {};
 
-type ChatSessionWorkspacePanelProps = {
-  activeCliAgentRunAvailable: boolean;
-  activeCliAgentRunId: string;
+export type ChatSessionWorkspaceFilePreview = {
+  changed: boolean;
+  errorMessage: string;
+  file: FileContent | null | undefined;
+  loadingLabel: string;
+  sourceLabel: string;
+};
+
+/** Empty-session and hydration gate. Checked before any workspace surface. */
+export type ChatSessionWorkspaceSessionGate = {
   activeSessionId: string | null | undefined;
-  /** Guarded-stream transport state projected into the active-turn status note. */
-  activeTurnStreamState?: ActiveTurnStreamState;
-  blockingErrorMessage: string;
-  cliAgentRunEmptyLabel: string;
-  conversation: ConversationBridgeProps | null;
-  conversationFocused: boolean;
-  filePreview: {
-    changed: boolean;
-    errorMessage: string;
-    file: FileContent | null | undefined;
-    loadingLabel: string;
-    sourceLabel: string;
-  };
+  sessionsPending: boolean;
+  noSessionsLabel: string;
+  loadingSessionLabel: string;
+};
+
+/** Blocking, link, and transient session errors. Transient copy stays on the agent frame. */
+export type ChatSessionWorkspaceErrorGate = {
   hasBlockingError: boolean;
+  blockingErrorMessage: string;
   hasTransientError: boolean;
   invalidChildSessionLinkMessage: string;
-  lang: "zh" | "en";
-  loadingSessionLabel: string;
+  transientErrorMessage: string;
+};
+
+/** Non-agent center surfaces: CLI run placeholder, otherwise the file preview. */
+export type ChatSessionWorkspaceAlternateSurface = {
+  workspaceActiveTab: string;
+  activeCliAgentRunId: string;
+  activeCliAgentRunAvailable: boolean;
+  cliAgentRunEmptyLabel: string;
+  filePreview: ChatSessionWorkspaceFilePreview;
+};
+
+/** Agent-tab transcript frame. `conversation` null keeps the loading shell. */
+export type ChatSessionWorkspaceConversationFrame = {
+  conversation: ConversationBridgeProps | null;
+  conversationFocused: boolean;
   /** Fixed note at the start of one specialist chat. Ordinary sessions pass nothing. */
   preface?: ReactNode;
   hideExportControl?: boolean;
-  noSessionsLabel: string;
   notices: SessionRuntimeNotice[];
-  onApproveToolApproval: () => void;
-  onApproveToolForSession?: () => void;
-  onRejectToolApproval: () => void;
-  sessionsPending: boolean;
-  toolApproval: {
-    /** Stable identity for the pending request — keeps the dialog from remount-flashing. */
-    requestId?: string;
-    pending: boolean;
-    rawTitle: string;
-    riskLabel: string;
-    scopeLabel: string;
-    toolLabels: ChatToolApprovalLabel[];
-    actionPreview?: string;
-    sessionGrantScope?: Record<string, unknown>;
-    toolName?: string;
-  } | null;
-  transientErrorMessage: string;
-  workspaceActiveTab: string;
+  /** Guarded-stream transport state projected into the active-turn status note. */
+  activeTurnStreamState?: ActiveTurnStreamState;
+};
+
+export type ChatSessionWorkspaceToolApproval = {
+  /** Stable identity for the pending request — keeps the dialog from remount-flashing. */
+  requestId?: string;
+  pending: boolean;
+  rawTitle: string;
+  riskLabel: string;
+  scopeLabel: string;
+  toolLabels: ChatToolApprovalLabel[];
+  actionPreview?: string;
+  sessionGrantScope?: Record<string, unknown>;
+  toolName?: string;
+  onApprove: () => void;
+  onApproveForSession?: () => void;
+  onReject: () => void;
+};
+
+type ChatSessionWorkspacePanelProps = {
+  lang: "zh" | "en";
+  sessionGate: ChatSessionWorkspaceSessionGate;
+  errorGate: ChatSessionWorkspaceErrorGate;
+  alternateSurface: ChatSessionWorkspaceAlternateSurface;
+  conversationFrame: ChatSessionWorkspaceConversationFrame;
+  toolApproval: ChatSessionWorkspaceToolApproval | null;
 };
 
 export function ChatSessionWorkspacePanel({
-  activeCliAgentRunAvailable,
-  activeCliAgentRunId,
-  activeSessionId,
-  activeTurnStreamState,
-  blockingErrorMessage,
-  cliAgentRunEmptyLabel,
-  conversation,
-  conversationFocused,
-  filePreview,
-  hasBlockingError,
-  hasTransientError,
-  invalidChildSessionLinkMessage,
   lang,
-  loadingSessionLabel,
-  preface = null,
-  hideExportControl = false,
-  noSessionsLabel,
-  notices,
-  onApproveToolApproval,
-  onApproveToolForSession,
-  onRejectToolApproval,
-  sessionsPending,
+  sessionGate,
+  errorGate,
+  alternateSurface,
+  conversationFrame,
   toolApproval,
-  transientErrorMessage,
-  workspaceActiveTab,
 }: ChatSessionWorkspacePanelProps) {
+  const {
+    activeSessionId,
+    sessionsPending,
+    noSessionsLabel,
+    loadingSessionLabel,
+  } = sessionGate;
+  const {
+    hasBlockingError,
+    blockingErrorMessage,
+    hasTransientError,
+    invalidChildSessionLinkMessage,
+    transientErrorMessage,
+  } = errorGate;
+  const {
+    workspaceActiveTab,
+    activeCliAgentRunId,
+    activeCliAgentRunAvailable,
+    cliAgentRunEmptyLabel,
+    filePreview,
+  } = alternateSurface;
+  const {
+    conversation,
+    conversationFocused,
+    preface = null,
+    hideExportControl = false,
+    notices,
+    activeTurnStreamState,
+  } = conversationFrame;
   // Stable ReactNode/object identities so the memoized
   // ChatConversationComposerBridge below only re-renders when content changes.
   const conversationLoadingFallback = useMemo(
@@ -129,18 +162,15 @@ export function ChatSessionWorkspacePanel({
             sessionGrantScope={toolApproval.sessionGrantScope}
             toolName={toolApproval.toolName}
             variant="banner"
-            onApprove={onApproveToolApproval}
-            onApproveForSession={onApproveToolForSession}
-            onReject={onRejectToolApproval}
+            onApprove={toolApproval.onApprove}
+            onApproveForSession={toolApproval.onApproveForSession}
+            onReject={toolApproval.onReject}
           />
         </div>
       ),
     }
     : null), [
     lang,
-    onApproveToolApproval,
-    onApproveToolForSession,
-    onRejectToolApproval,
     toolApproval,
   ]);
 

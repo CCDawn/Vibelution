@@ -6,6 +6,7 @@
 // componentizes ToolsRoute.
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
+import { VUI_WORKBENCH_PANE_CLASS, VUI_WORKBENCH_RAIL_CLASS } from "../components/vui";
 import {
   vuiControlPillClass,
   vuiControlQuietClass,
@@ -87,7 +88,8 @@ const styles = {
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   detailPanel:
-    "detailPanel min-w-0 max-w-full grid content-start gap-4 overflow-auto",
+    "detailPanel h-full min-h-0 min-w-0 max-w-full grid content-start gap-4 overflow-auto",
+  detailPane: VUI_WORKBENCH_PANE_CLASS,
   emptyDetail:
     `emptyDetail min-w-0 max-w-full ${panelSurface} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   emptyState:
@@ -109,7 +111,7 @@ const styles = {
   image2ModelSummary:
     `image2ModelSummary min-w-0 max-w-full ${quietPanelSurface}`,
   listPanel:
-    `listPanel min-w-0 max-w-full ${panelSurface} ${scrollStack} max-[760px]:!max-h-none`,
+    `listPanel ${VUI_WORKBENCH_RAIL_CLASS} min-w-0 max-w-full ${panelSurface} ${scrollStack} max-[760px]:!max-h-none`,
   metaGrid:
     "metaGrid min-w-0 grid gap-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]",
   metaGridWide:
@@ -479,7 +481,7 @@ const styles = {
   ts:
     "ts min-w-0",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:!grid-cols-[minmax(0,1fr)] max-[760px]:!grid-rows-[minmax(420px,42vh)_minmax(420px,1fr)] max-[760px]:!overflow-y-auto max-[760px]:!overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-0 !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:!grid-cols-[minmax(0,1fr)] max-[760px]:!grid-rows-[minmax(420px,42vh)_minmax(420px,1fr)] max-[760px]:!overflow-y-auto max-[760px]:!overflow-x-hidden ${vuiWorkspaceFillClass}`,
   workspaceScopePanel:
     `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 px-2 py-1 [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
 } as const;

@@ -23,6 +23,7 @@ from core.research.workflow.contracts.discussion_scope import (
 )
 from core.web.services.session.signals_format import _current_session_route_fallback
 from core.web.services.session.timebase import parse_timestamp_utc
+from core.web.services.session import conversation_references
 
 
 logger = logging.getLogger(__name__)
@@ -1536,7 +1537,25 @@ def _normalize_messages(
         tool_calls = s._normalize_message_tool_calls(raw.get("tool_calls") or raw.get("toolCalls") or raw.get("tools") or [])
         feedback_events = s._normalize_message_feedback_events(raw.get("feedback_events") or raw.get("feedbackEvents") or [])
         attachments = s._normalize_message_attachments(raw.get("attachments") or raw.get("imageAttachments") or [])
-        references = s._normalize_session_references(raw.get("references") or (raw.get("metadata") or {}).get("sessionReferences") or [])
+        reference_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        raw_references = raw.get("references") or reference_metadata.get("sessionReferences") or []
+        references = []
+        seen_reference_ids: set[str] = set()
+        for raw_reference in list(raw_references):
+            if len(references) >= conversation_references.KNOWLEDGE_FILE_MAX_REFERENCES_PER_TURN:
+                break
+            if not isinstance(raw_reference, dict):
+                continue
+            kind = str(raw_reference.get("kind") or "session").strip().lower()
+            normalizer = (
+                s._normalize_session_references if kind == "session"
+                else conversation_references.normalize_knowledge_file_references
+            )
+            for reference in normalizer([raw_reference]):
+                reference_id = reference["referenceId"]
+                if reference_id not in seen_reference_ids:
+                    seen_reference_ids.add(reference_id)
+                    references.append(reference)
         if (
             not content
             and not thought

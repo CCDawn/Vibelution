@@ -52,7 +52,7 @@ import { VFieldRow, VInput } from "@/components/vui";
 ## VNativeInput
 
 ### 功能
-原生 input 门面：密集筛选、高度/class 完全由域样式控制。
+原生 input 门面：密集筛选、高度/class 完全由域样式控制。`type="range"` 配置 `rangeVariant="capsule"` 时显示离散胶囊滑条；键盘与指针交互仍由原生 input 提供。
 
 ### 适用范围
 - **适用**：密集筛选条、自定义高度很多的场景。
@@ -68,11 +68,32 @@ import { VFieldRow, VInput } from "@/components/vui";
 import { VNativeInput } from "@/components/vui";
 
 <VNativeInput className={styles.search} value={q} onChange={...} />
+
+<VNativeInput
+  type="range"
+  rangeVariant="capsule"
+  rangeTickCount={6}
+  min={0}
+  max={5}
+  step={1}
+  value={value}
+  onChange={(event) => setValue(Number(event.target.value))}
+/>
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| 原生 input 属性 | type/value/onChange | 视觉靠 className |
+| 原生 input 属性 | type/value/onChange/min/max/step | 常规输入维持原有外观和行为；range 的焦点、键盘及指针语义归原生 input |
+| rangeVariant | `type="range"` 的可选变体；`"capsule"` 显示胶囊滑条 | 只影响 range 的视觉呈现 |
+| rangeTickCount | 胶囊滑条的离散圆点数量 | 与 `min`/`max` 刻度对应；不替代原生 `step` |
+
+### 视觉状态
+- 轨道为胶囊灰底，已完成部分为黑色填充，滑块为 28px 白色圆形；离散刻度以圆点显示。
+- range 的焦点、键盘和指针操作仍落在原生 input 上。
+
+### 实现落点
+- `forms/VNativeInput.tsx` → 默认 `ShadcnInput`
+- `rangeVariant="capsule"` → `renderers/shadcn/ShadcnRange.tsx`
 
 ### 反冗余
 - 与 `VInput` 双轨有意；新场景默认 `VInput`。

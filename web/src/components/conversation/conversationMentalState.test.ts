@@ -64,8 +64,10 @@ function mentalSnapshot(overrides: Partial<AgentMentalSnapshot> = {}): AgentMent
 describe("conversation mental state helpers", () => {
   it("keeps mental-state pure helpers out of ConversationView", () => {
     const source = readFileSync(new URL("./ConversationView.tsx", import.meta.url), "utf8");
+    const timelineRowsSource = readFileSync(new URL("./conversationTimelineRows.tsx", import.meta.url), "utf8");
 
-    expect(source).toContain('from "./conversationMentalState"');
+    expect(timelineRowsSource).toContain('from "./conversationMentalState"');
+    expect(source).not.toContain('from "./conversationMentalState"');
     expect(source).not.toMatch(/function mentalSnapshotPreview\(/);
     expect(source).not.toMatch(/function mentalFeelingSummaryRow\(/);
     expect(source).not.toMatch(/function latestAgentMentalPart\(/);

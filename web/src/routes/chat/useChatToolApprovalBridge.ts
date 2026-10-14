@@ -15,6 +15,7 @@ import {
   toolApprovalActionPreview,
   toolApprovalDisplayName,
 } from "./toolApprovalPreview";
+import type { ChatSessionWorkspaceToolApproval } from "./ChatSessionWorkspacePanel";
 
 export interface UseChatToolApprovalBridgeParams {
   detail: SessionDetail | null | undefined;
@@ -43,20 +44,7 @@ export interface ChatToolApprovalBridgeState {
   pendingToolApprovalScope: string;
   pendingToolApprovalRisk: string;
   pendingToolApprovalPending: boolean;
-  toolApproval: {
-    requestId?: string;
-    pending: boolean;
-    rawTitle: string;
-    riskLabel: string;
-    scopeLabel: string;
-    toolLabels: Array<{ id: string; label: string }>;
-    actionPreview?: string;
-    sessionGrantScope?: Record<string, unknown>;
-    toolName?: string;
-  } | null;
-  handleApproveToolApproval: () => void;
-  handleApproveToolForSession: (() => void) | undefined;
-  handleRejectToolApproval: () => void;
+  toolApproval: ChatSessionWorkspaceToolApproval | null;
 }
 
 export function useChatToolApprovalBridge({
@@ -191,8 +179,14 @@ export function useChatToolApprovalBridge({
       actionPreview: pendingToolApprovalActionPreview,
       sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
       toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
+      onApprove: handleApproveToolApproval,
+      onApproveForSession: handleApproveToolForSession,
+      onReject: handleRejectToolApproval,
     };
   }, [
+    handleApproveToolApproval,
+    handleApproveToolForSession,
+    handleRejectToolApproval,
     pendingSessionToolApproval,
     pendingToolGovernanceApproval,
     pendingToolApprovalPending,
@@ -214,8 +208,5 @@ export function useChatToolApprovalBridge({
     pendingToolApprovalRisk,
     pendingToolApprovalPending,
     toolApproval,
-    handleApproveToolApproval,
-    handleApproveToolForSession,
-    handleRejectToolApproval,
   };
 }

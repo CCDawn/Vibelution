@@ -77,9 +77,11 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("toolbarClassName={styles.toolbar}");
     expect(workspaceStyles).toContain('toolbar: "!flex-nowrap overflow-hidden"');
     expect(workspaceStyles).toContain("max-w-full");
-    expect(toolbarStyles).toContain("flex-col");
-    expect(toolbarStyles).toContain("xl:flex-row");
-    expect(toolbarStyles.match(/overflow-x-auto/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    const frameStyles = readFileSync(resolve(root, "../TeamWorkspaceFrame.styles.ts"), "utf8");
+    expect(toolbarStyles).toContain("flex-row");
+    expect(toolbarStyles).not.toContain("flex-col");
+    expect(frameStyles).toContain("overflow-x-auto");
+    expect(frameStyles).toContain("[&>div:last-child]:justify-start");
   });
 
   it("mounts inspector panel leaves through the research workflow lazy pack", () => {

@@ -1,6 +1,5 @@
 import {
   Bot,
-  ChevronRight,
   Check,
   CircleAlert,
   CircleSlash,
@@ -543,12 +542,6 @@ function ToolActivityItem({
         }}
       >
         {content}
-        <ChevronRight
-          className={styles.itemChevron}
-          size={12}
-          aria-hidden="true"
-          data-codex-tool-detail-toggle="inline-symbol"
-        />
       </summary>
       {renderBody ? (
         <div id={detailsId} className={styles.itemDetailsBody} data-codex-tool-detail-body="true">
@@ -621,12 +614,6 @@ function ToolActivityBatch({
           <span className={styles.itemTitle}>{item.title}</span>
           <span className={styles.batchCount}>· {countLabel}</span>
         </span>
-        <ChevronRight
-          className={styles.itemChevron}
-          size={12}
-          aria-hidden="true"
-          data-codex-tool-detail-toggle="inline-symbol"
-        />
       </summary>
       <div className={styles.batchDetails}>
         <div className={styles.batchDetailsInner}>
@@ -744,7 +731,6 @@ function ToolActivityCategoryGroup({
           >
             {item.title}
           </span>
-          <span className={styles.batchCount}>· {countLabel}</span>
           {attentionLabel ? (
             failureDetail ? (
               <VTooltip width="compact" content={failureDetail}>
@@ -770,13 +756,8 @@ function ToolActivityCategoryGroup({
               </span>
             )
           ) : null}
+          <span className={styles.batchCount}>· {countLabel}</span>
         </span>
-        <ChevronRight
-          className={styles.itemChevron}
-          size={12}
-          aria-hidden="true"
-          data-codex-tool-detail-toggle="inline-symbol"
-        />
       </summary>
       {renderChildren ? (
         <div className={styles.categoryGroupDetails}>

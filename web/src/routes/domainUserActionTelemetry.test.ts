@@ -13,6 +13,7 @@ const teamShellSource = readFileSync(join(here, "teams/useTeamShellMutations.ts"
 const memoryKnowledgeSource = readFileSync(join(here, "memory/useMemoryKnowledgeMutations.ts"), "utf8");
 const researchProjectSource = readFileSync(join(here, "teams/research-projects/ResearchProjectSwitcher.tsx"), "utf8");
 const chatWorkbenchSource = readFileSync(join(here, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
+const chatSessionMutationsSource = readFileSync(join(here, "chat/useChatSessionMutations.ts"), "utf8");
 const chatArchiveQueueSource = readFileSync(join(here, "chat/useChatAgentArchiveQueue.ts"), "utf8");
 const challengeCupTelemetrySource = readFileSync(join(here, "teams/challengeCupTelemetry.ts"), "utf8");
 const challengeReviewFormSource = readFileSync(join(here, "teams/challenge-cup/ChallengeQuestionReviewForm.tsx"), "utf8");
@@ -37,7 +38,9 @@ describe("domain user-action telemetry contract", () => {
     expect(agentConfigSource).toContain('startUserAction("agent_update"');
     expect(agentWorkbenchSource).toContain('startUserAction("agent_archive"');
     expect(agentWorkbenchSource).toContain('startUserAction("agent_purge"');
-    expect(chatWorkbenchSource).toContain('startUserAction("agent_rename"');
+    expect(chatSessionMutationsSource).toContain('startUserAction("agent_rename"');
+    expect(chatWorkbenchSource).toContain("useChatSessionMutations({");
+    expect(chatWorkbenchSource).toContain("renameAgentMutation={renameAgentMutation}");
     expect(chatArchiveQueueSource).toContain('startUserAction("agent_archive"');
   });
 

@@ -2,7 +2,16 @@ import { ArrowUpRight, CheckCircle2, LoaderCircle, Sparkles, Trash2 } from "luci
 import type { CSSProperties, ReactNode } from "react";
 
 import type { EvolutionLibraryEntry, EvolutionRun } from "../api/types";
-import { VButton, VCheckbox, VStatusChip, VTooltip } from "../components/vui";
+import {
+  VButton,
+  VCheckbox,
+  VStatusChip,
+  VTooltip,
+  VUI_WORKBENCH_PANE_CLASS,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_PAGE_BODY_FILL_CLASS,
+  VUI_PAGE_BODY_SCROLL_CLASS,
+} from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import styles from "./EvolutionRunRecordsPanel.styles";
@@ -173,8 +182,8 @@ export function EvolutionRunRecordsPanel({
   const selectedRunIdSet = new Set(selectedRunIds);
   const displayDecisionLabel = (decision: string) => supervisedDecisionLabel(decision, lang, decisionLabel);
   const queueClassName = queueCollapsed
-    ? `${styles.surface} ${styles.runQueuePanel} ${styles.paneCollapsed}`
-    : `${styles.surface} ${styles.runQueuePanel}`;
+    ? `${VUI_WORKBENCH_RAIL_CLASS} ${styles.runQueuePanel} ${styles.paneCollapsed}`
+    : `${VUI_WORKBENCH_RAIL_CLASS} ${styles.runQueuePanel}`;
 
   const renderProposalLink = (item: EvolutionLibraryEntry, view: EvolutionRunRecordsLibraryView) => (
     <article key={item.id} className={styles.relatedRow}>
@@ -365,234 +374,236 @@ export function EvolutionRunRecordsPanel({
 
       {separator}
 
-      <section className={`${styles.surface} ${styles.runDetailPanel}`}>
-        {selectedRun ? (
-          <>
-            <div className={styles.detailHeader}>
-              <div>
-                <p className={styles.eyebrow}>{t("runDetail")}</p>
-                <h2 className={styles.detailTitle}>
-                  {buildSupervisedRunRecordDisplay(selectedRun, lang, { statusLabel, decisionLabel: displayDecisionLabel }).title}
-                </h2>
-                <p className={styles.detailSubtleId}>{selectedRun.id}</p>
+      <section className={`${VUI_WORKBENCH_PANE_CLASS} ${VUI_PAGE_BODY_FILL_CLASS}`}>
+        <div className={`${styles.runDetailPanel} ${VUI_PAGE_BODY_SCROLL_CLASS}`}>
+          {selectedRun ? (
+            <>
+              <div className={styles.detailHeader}>
+                <div>
+                  <p className={styles.eyebrow}>{t("runDetail")}</p>
+                  <h2 className={styles.detailTitle}>
+                    {buildSupervisedRunRecordDisplay(selectedRun, lang, { statusLabel, decisionLabel: displayDecisionLabel }).title}
+                  </h2>
+                  <p className={styles.detailSubtleId}>{selectedRun.id}</p>
+                </div>
+                <div className={styles.detailHeaderActions}>
+                  <span className={styles.secondaryPill}>{displayDecisionLabel(selectedRun.decision)}</span>
+                  <span className={styles.secondaryPill}>
+                    {supervisedProposalStatusLabel(
+                      selectedRun.outcomeSemantics.proposalStatus,
+                      selectedRun.outcomeSemantics.proposalStatusLabel,
+                      lang,
+                    )}
+                  </span>
+                </div>
               </div>
-              <div className={styles.detailHeaderActions}>
-                <span className={styles.secondaryPill}>{displayDecisionLabel(selectedRun.decision)}</span>
-                <span className={styles.secondaryPill}>
-                  {supervisedProposalStatusLabel(
-                    selectedRun.outcomeSemantics.proposalStatus,
-                    selectedRun.outcomeSemantics.proposalStatusLabel,
-                    lang,
-                  )}
-                </span>
-              </div>
-            </div>
 
-            <div className={styles.runDetailOverview}>
-              <div className={styles.runScorePanel}>
-                <span>{t("candidateScore")}</span>
-                <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
-                <p>{displaySupervisedRunSummary(selectedRun, lang, decisionLabel)}</p>
-                <div className={styles.runScoreDiagnosis}>
-                  <span>{t("diagnosis")}</span>
-                  <p>{selectedRun.diagnosis}</p>
+              <div className={styles.runDetailOverview}>
+                <div className={styles.runScorePanel}>
+                  <span>{t("candidateScore")}</span>
+                  <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
+                  <p>{displaySupervisedRunSummary(selectedRun, lang, decisionLabel)}</p>
+                  <div className={styles.runScoreDiagnosis}>
+                    <span>{t("diagnosis")}</span>
+                    <p>{selectedRun.diagnosis}</p>
+                  </div>
+                  <div className={styles.runScoreFacts}>
+                    <span>
+                      {t("baselineScore")}
+                      <strong>{selectedRun.baselineScore}</strong>
+                    </span>
+                    <span>
+                      {t("scoreDelta")}
+                      <strong>{selectedRun.deltaScore}</strong>
+                    </span>
+                    <span>
+                      {t("linkedItems")}
+                      <strong>{relatedProposalCount}</strong>
+                    </span>
+                  </div>
                 </div>
-                <div className={styles.runScoreFacts}>
-                  <span>
-                    {t("baselineScore")}
-                    <strong>{selectedRun.baselineScore}</strong>
-                  </span>
-                  <span>
-                    {t("scoreDelta")}
-                    <strong>{selectedRun.deltaScore}</strong>
-                  </span>
-                  <span>
-                    {t("linkedItems")}
-                    <strong>{relatedProposalCount}</strong>
-                  </span>
-                </div>
-              </div>
-              <div className={styles.runSignalStack}>
-                <h3>{t("resultLayersTitle")}</h3>
-                <div className={styles.runSignalGrid}>
-                  <article className={styles.compactFact}>
-                    <span>{t("runLayer")}</span>
-                    <strong>{displaySupervisedRunStatus(selectedRun, lang, statusLabel)}</strong>
-                  </article>
-                  <article className={styles.compactFact}>
-                    <span>{t("decision")}</span>
-                    <strong>{displayDecisionLabel(selectedRun.outcomeSemantics.decision || selectedRun.decision)}</strong>
-                  </article>
-                  <article className={styles.compactFact}>
-                    <span>{t("proposalLayer")}</span>
-                    <strong>
-                      {supervisedProposalStatusLabel(
-                        selectedRun.outcomeSemantics.proposalStatus,
-                        selectedRun.outcomeSemantics.proposalStatusLabel,
-                        lang,
-                      )}
-                    </strong>
-                  </article>
-                  <article className={styles.compactFact}>
-                    <span>{t("runtimeLayer")}</span>
-                    <strong>{selectedRun.outcomeSemantics.runtimeEffectLabel}</strong>
-                  </article>
-                  <article className={styles.compactFact}>
-                    <span>{t("nextRecommendedAction")}</span>
-                    <VTooltip content={selectedRun.runSemantics.nextAction || "--"} width="wide">
-                      <strong tabIndex={0}>
-                        {displaySupervisedTechnicalText(selectedRun.runSemantics.nextAction, selectedRun.decision, lang, decisionLabel) || "--"}
+                <div className={styles.runSignalStack}>
+                  <h3>{t("resultLayersTitle")}</h3>
+                  <div className={styles.runSignalGrid}>
+                    <article className={styles.compactFact}>
+                      <span>{t("runLayer")}</span>
+                      <strong>{displaySupervisedRunStatus(selectedRun, lang, statusLabel)}</strong>
+                    </article>
+                    <article className={styles.compactFact}>
+                      <span>{t("decision")}</span>
+                      <strong>{displayDecisionLabel(selectedRun.outcomeSemantics.decision || selectedRun.decision)}</strong>
+                    </article>
+                    <article className={styles.compactFact}>
+                      <span>{t("proposalLayer")}</span>
+                      <strong>
+                        {supervisedProposalStatusLabel(
+                          selectedRun.outcomeSemantics.proposalStatus,
+                          selectedRun.outcomeSemantics.proposalStatusLabel,
+                          lang,
+                        )}
                       </strong>
-                    </VTooltip>
-                  </article>
-                  <article className={styles.compactFact}>
-                    <span>{t("riskLevel")}</span>
-                    <strong>{riskLabel(selectedRun.riskLevel)}</strong>
-                  </article>
+                    </article>
+                    <article className={styles.compactFact}>
+                      <span>{t("runtimeLayer")}</span>
+                      <strong>{selectedRun.outcomeSemantics.runtimeEffectLabel}</strong>
+                    </article>
+                    <article className={styles.compactFact}>
+                      <span>{t("nextRecommendedAction")}</span>
+                      <VTooltip content={selectedRun.runSemantics.nextAction || "--"} width="wide">
+                        <strong tabIndex={0}>
+                          {displaySupervisedTechnicalText(selectedRun.runSemantics.nextAction, selectedRun.decision, lang, decisionLabel) || "--"}
+                        </strong>
+                      </VTooltip>
+                    </article>
+                    <article className={styles.compactFact}>
+                      <span>{t("riskLevel")}</span>
+                      <strong>{riskLabel(selectedRun.riskLevel)}</strong>
+                    </article>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-              <div className={styles.runRuntimeNote}>
-                <VTooltip content={selectedRun.outcomeSemantics.runtimeExplanation} width="wide">
-                  <p tabIndex={0}>
-                    {displaySupervisedTechnicalText(selectedRun.outcomeSemantics.runtimeExplanation, selectedRun.decision, lang, decisionLabel)}
-                  </p>
-                </VTooltip>
-                {selectedRun.riskReasons.length > 0 ? (
-                  <VTooltip content={selectedRun.riskReasons.join(" / ")} width="wide">
+              <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
+                <div className={styles.runRuntimeNote}>
+                  <VTooltip content={selectedRun.outcomeSemantics.runtimeExplanation} width="wide">
                     <p tabIndex={0}>
-                      {displaySupervisedTechnicalText(selectedRun.riskReasons.join(" / "), selectedRun.decision, lang, decisionLabel)}
+                      {displaySupervisedTechnicalText(selectedRun.outcomeSemantics.runtimeExplanation, selectedRun.decision, lang, decisionLabel)}
                     </p>
                   </VTooltip>
+                  {selectedRun.riskReasons.length > 0 ? (
+                    <VTooltip content={selectedRun.riskReasons.join(" / ")} width="wide">
+                      <p tabIndex={0}>
+                        {displaySupervisedTechnicalText(selectedRun.riskReasons.join(" / "), selectedRun.decision, lang, decisionLabel)}
+                      </p>
+                    </VTooltip>
+                  ) : null}
+                </div>
+                {selectedRun.availableActions.length > 0 ? (
+                  <div className={styles.actionRow}>
+                    {selectedRun.availableActions.map((action) => (
+                      <VButton
+                        key={action}
+                        type="button"
+                        className={styles.inlineAction}
+                        isDisabled={runLocked || actionPending}
+                        disabledReason={runLocked ? (lang === "zh" ? "运行仍被锁定，暂不能执行提案动作。" : "The run is locked, so proposal actions are unavailable.") : actionPending ? (lang === "zh" ? "提案动作正在执行。" : "A proposal action is in progress.") : undefined}
+                        onClick={() => onRunAction(selectedRun.id, action)}
+   icon={<Sparkles size={15}/>}>
+                          {proposalActionLabel(action)}
+                        </VButton>
+                    ))}
+                  </div>
                 ) : null}
+                {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
+                {actionError ? <p className={styles.errorText}>{actionError}</p> : null}
               </div>
-              {selectedRun.availableActions.length > 0 ? (
+
+              <div className={styles.detailSection}>
+                <h3>{t("caseDiagnostics")}</h3>
+                {selectedRun.caseDiagnostics.length > 0 ? (
+                  <div className={styles.relatedList}>
+                    {selectedRun.caseDiagnostics.slice(0, 3).map((item) => (
+                      <article key={item.caseId || item.summary} className={styles.relatedRow}>
+                        <div className={styles.listRowTop}>
+                          <strong>{item.caseId || "--"}</strong>
+                          <span>{item.caseType && item.caseType !== "static" ? item.caseType : item.decisionSignal || "--"}</span>
+                        </div>
+                        <p>{item.summary}</p>
+                        {compactCaseObject(item.expectedFinalState) ? (
+                          <p>expected final: {compactCaseObject(item.expectedFinalState)}</p>
+                        ) : null}
+                        {compactCaseObject(item.expectedInfeasibleOutcome) ? (
+                          <p>expected infeasible: {compactCaseObject(item.expectedInfeasibleOutcome)}</p>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p>{t("noCaseDiagnostics")}</p>
+                )}
+              </div>
+
+              <div className={styles.detailSection}>
+                <h3>{t("outputsWorthPromoting")}</h3>
+                {relatedLibraryItems.length === 0 && relatedPendingItems.length === 0 ? (
+                  <p>{t("noPromotionCandidates")}</p>
+                ) : (
+                  <div className={styles.relatedList}>
+                    {relatedLibraryItems.map((item) => renderProposalLink(item, "items"))}
+                    {relatedPendingItems.map((item) => renderProposalLink(item, "pending"))}
+                  </div>
+                )}
+                {libraryFeedback ? <p className={styles.feedbackText}>{libraryFeedback}</p> : null}
+                {deleteProposalError ? <p className={styles.errorText}>{deleteProposalError}</p> : null}
+              </div>
+
+              <div className={`${styles.detailSection} ${styles.dangerDetailSection}`}>
+                <h3>{t("deleteAndCleanup")}</h3>
+                <div className={styles.relatedList}>
+                  <article className={styles.relatedRow}>
+                    <strong>{selectedRun.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
+                    <span>
+                      {selectedRun.canDelete
+                        ? t("deleteRunRecord")
+                        : selectedRun.deleteBlockReason || "--"}
+                    </span>
+                  </article>
+                </div>
+                <p>{t("runDeleteImpact")}</p>
                 <div className={styles.actionRow}>
-                  {selectedRun.availableActions.map((action) => (
-                    <VButton
-                      key={action}
-                      type="button"
-                      className={styles.inlineAction}
-                      isDisabled={runLocked || actionPending}
-                      disabledReason={runLocked ? (lang === "zh" ? "运行仍被锁定，暂不能执行提案动作。" : "The run is locked, so proposal actions are unavailable.") : actionPending ? (lang === "zh" ? "提案动作正在执行。" : "A proposal action is in progress.") : undefined}
-                      onClick={() => onRunAction(selectedRun.id, action)}
- icon={<Sparkles size={15}/>}>
-                        {proposalActionLabel(action)}
-                      </VButton>
-                  ))}
-                </div>
-              ) : null}
-              {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
-              {actionError ? <p className={styles.errorText}>{actionError}</p> : null}
-            </div>
+                  <VButton
+                    type="button"
+                    variant="danger"
+                    className={styles.inlineAction}
+                    isDisabled={!selectedRun.canDelete || deleteRunRecordPending}
+                    tooltip={t("runDeleteImpact")}
+                    disabledReason={!selectedRun.canDelete ? selectedRun.deleteBlockReason || (lang === "zh" ? "当前运行记录不可删除。" : "This run record cannot be deleted.") : deleteRunRecordPending ? (lang === "zh" ? "运行记录正在删除。" : "Run record deletion is in progress.") : undefined}
+                    onClick={() => onDeleteRunRecord(selectedRun.id)}
 
-            <div className={styles.detailSection}>
-              <h3>{t("caseDiagnostics")}</h3>
-              {selectedRun.caseDiagnostics.length > 0 ? (
-                <div className={styles.relatedList}>
-                  {selectedRun.caseDiagnostics.slice(0, 3).map((item) => (
-                    <article key={item.caseId || item.summary} className={styles.relatedRow}>
-                      <div className={styles.listRowTop}>
-                        <strong>{item.caseId || "--"}</strong>
-                        <span>{item.caseType && item.caseType !== "static" ? item.caseType : item.decisionSignal || "--"}</span>
-                      </div>
-                      <p>{item.summary}</p>
-                      {compactCaseObject(item.expectedFinalState) ? (
-                        <p>expected final: {compactCaseObject(item.expectedFinalState)}</p>
-                      ) : null}
-                      {compactCaseObject(item.expectedInfeasibleOutcome) ? (
-                        <p>expected infeasible: {compactCaseObject(item.expectedInfeasibleOutcome)}</p>
-                      ) : null}
-                    </article>
-                  ))}
+                      icon={deleteRunRecordPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
+                    >
+                      {t("deleteRunRecord")}
+                    </VButton>
                 </div>
-              ) : (
-                <p>{t("noCaseDiagnostics")}</p>
-              )}
-            </div>
-
-            <div className={styles.detailSection}>
-              <h3>{t("outputsWorthPromoting")}</h3>
-              {relatedLibraryItems.length === 0 && relatedPendingItems.length === 0 ? (
-                <p>{t("noPromotionCandidates")}</p>
-              ) : (
-                <div className={styles.relatedList}>
-                  {relatedLibraryItems.map((item) => renderProposalLink(item, "items"))}
-                  {relatedPendingItems.map((item) => renderProposalLink(item, "pending"))}
-                </div>
-              )}
-              {libraryFeedback ? <p className={styles.feedbackText}>{libraryFeedback}</p> : null}
-              {deleteProposalError ? <p className={styles.errorText}>{deleteProposalError}</p> : null}
-            </div>
-
-            <div className={`${styles.detailSection} ${styles.dangerDetailSection}`}>
-              <h3>{t("deleteAndCleanup")}</h3>
-              <div className={styles.relatedList}>
+              </div>
+            </>
+          ) : (
+            <div className={styles.structuredEmptyState}>
+              <p className={styles.eyebrow}>{t("runDetail")}</p>
+              <h3>{hasRuns ? t("noRunMatches") : t("noSupervisedRunsYet")}</h3>
+              <p>{hasRuns ? t("runDetailFilterHint") : t("runDetailPlaceholder")}</p>
+              <div className={styles.detailFactGrid}>
                 <article className={styles.relatedRow}>
-                  <strong>{selectedRun.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
-                  <span>
-                    {selectedRun.canDelete
-                      ? t("deleteRunRecord")
-                      : selectedRun.deleteBlockReason || "--"}
-                  </span>
+                  <strong>{t("score")}</strong>
+                  <span>--</span>
+                </article>
+                <article className={styles.relatedRow}>
+                  <strong>{t("proposalStatus")}</strong>
+                  <span>--</span>
                 </article>
               </div>
-              <p>{t("runDeleteImpact")}</p>
               <div className={styles.actionRow}>
-                <VButton
-                  type="button"
-                  variant="danger"
-                  className={styles.inlineAction}
-                  isDisabled={!selectedRun.canDelete || deleteRunRecordPending}
-                  tooltip={t("runDeleteImpact")}
-                  disabledReason={!selectedRun.canDelete ? selectedRun.deleteBlockReason || (lang === "zh" ? "当前运行记录不可删除。" : "This run record cannot be deleted.") : deleteRunRecordPending ? (lang === "zh" ? "运行记录正在删除。" : "Run record deletion is in progress.") : undefined}
-                  onClick={() => onDeleteRunRecord(selectedRun.id)}
-
-                    icon={deleteRunRecordPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                  >
-                    {t("deleteRunRecord")}
+                {!hasRuns ? (
+                  <VButton
+                    type="button"
+                    className={styles.inlineAction}
+                    onClick={onReturnToOverview}
+   icon={<ArrowUpRight size={15} />}>
+                    {t("returnToOverview")}
                   </VButton>
+                ) : (
+                  <VButton
+                    type="button"
+                    className={styles.inlineAction}
+                    onClick={onShowAllRuns}
+                  >
+                    {t("allRuns")}
+                  </VButton>
+                )}
               </div>
             </div>
-          </>
-        ) : (
-          <div className={styles.structuredEmptyState}>
-            <p className={styles.eyebrow}>{t("runDetail")}</p>
-            <h3>{hasRuns ? t("noRunMatches") : t("noSupervisedRunsYet")}</h3>
-            <p>{hasRuns ? t("runDetailFilterHint") : t("runDetailPlaceholder")}</p>
-            <div className={styles.detailFactGrid}>
-              <article className={styles.relatedRow}>
-                <strong>{t("score")}</strong>
-                <span>--</span>
-              </article>
-              <article className={styles.relatedRow}>
-                <strong>{t("proposalStatus")}</strong>
-                <span>--</span>
-              </article>
-            </div>
-            <div className={styles.actionRow}>
-              {!hasRuns ? (
-                <VButton
-                  type="button"
-                  className={styles.inlineAction}
-                  onClick={onReturnToOverview}
- icon={<ArrowUpRight size={15} />}>
-                  {t("returnToOverview")}
-                </VButton>
-              ) : (
-                <VButton
-                  type="button"
-                  className={styles.inlineAction}
-                  onClick={onShowAllRuns}
-                >
-                  {t("allRuns")}
-                </VButton>
-              )}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </section>
     </div>
   );

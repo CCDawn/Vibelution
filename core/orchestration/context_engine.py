@@ -461,9 +461,15 @@ def build_agent_context(
     from core.web.services.agent_perception.access import allows_personal_prefetch
 
     if bool(memory_policy.get("enabled", True)) and allows_personal_prefetch(agent):
-        episodic_events = agent_directory_service.list_current_episodic_events(
-            normalized_agent_id,
-            limit=agent_directory_service.PROMPT_LIST_LIMIT,
+        from core.web.services.agent_directory import episodic_memory
+        from core.web.services.agent_directory.personal_memory_selection import (
+            select_prompt_personal_episodes,
+        )
+
+        episodic_events = select_prompt_personal_episodes(
+            episodic_memory.list_episodic_events(
+                normalized_agent_id, include_superseded=False
+            )
         )
     else:
         # 记忆开关关闭：预取与投影保持同一语义，零接触 episodic JSONL；

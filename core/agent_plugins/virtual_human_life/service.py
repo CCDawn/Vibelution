@@ -108,7 +108,11 @@ from .planning import (
     build_deterministic_schedule,
     validate_schedule_proposal,
 )
-from .prompt_pack import load_legacy_followup_prompt, load_prompt_pack, proactive_turn_orientation
+from .prompt_pack import (
+    load_legacy_followup_prompt,
+    load_prompt_pack,
+    proactive_turn_orientation,
+)
 from .reflection import (
     build_nightly_reflection_proposals,
     project_memory_strength,
@@ -123,6 +127,7 @@ from .rhythms import (
     project_rhythm_state,
     rhythm_constraints,
 )
+from .self_continuity import SelfContinuity
 from .social_circle import upsert_npc
 from .storage import VirtualHumanLifeStorageError, VirtualHumanLifeStore
 from .world_model import record_important_item, record_place_visit
@@ -241,6 +246,8 @@ class VirtualHumanLifeService:
         runtime_acceptance_provider: Callable[[], bool] | None = None,
         directory_visibility_manager: Callable[..., dict[str, Any]] | None = None,
         steward_provisioner: Callable[..., dict[str, Any]] | None = None,
+        self_wake_session_provider: Callable[[str], str] | None = None,
+        self_wake_canceller: Callable[[str, str, str], None] | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.store = VirtualHumanLifeStore(
@@ -273,10 +280,13 @@ class VirtualHumanLifeService:
         self.runtime_acceptance_provider = runtime_acceptance_provider
         self.directory_visibility_manager = directory_visibility_manager
         self.steward_provisioner = steward_provisioner
+        self.self_wake_session_provider = self_wake_session_provider
+        self.self_wake_canceller = self_wake_canceller
         self._agent_locks_guard = threading.Lock()
         self._agent_locks: dict[str, threading.RLock] = {}
         self._mailbox_dispatch_threads_guard = threading.Lock()
         self._mailbox_dispatch_threads: dict[str, threading.Thread] = {}
+        self.self_continuity = SelfContinuity(self)
 
     def plugin_root(self, agent_id: str) -> Path:
         return self.store.plugin_root(agent_id)
@@ -328,6 +338,8 @@ class VirtualHumanLifeService:
                 ),
                 None,
             )
+            if entry is None:
+                self.self_continuity.interrupt_for_user(normalized_agent_id)
             command: dict[str, Any] = {
                 "content": normalized_content,
                 "clientSubmissionId": normalized_submission_id,
@@ -1082,7 +1094,7 @@ class VirtualHumanLifeService:
                     entry=completed,
                     turn_id=turn_id,
                 )
-            elif str(entry.get("sourceKind") or "") == "proactive":
+            elif str(entry.get("sourceKind") or "") == "proactive" and delivery_kind != "self_wake":
                 self._start_proactive_dialogue_burst_v2(
                     agent_id,
                     entry=completed,
@@ -1332,7 +1344,7 @@ class VirtualHumanLifeService:
                         entry,
                         status="delivering",
                     )
-            elif source_kind == "proactive":
+            elif source_kind == "proactive" and delivery_kind != "self_wake":
                 self._start_proactive_dialogue_burst_v2(
                     agent_id,
                     entry=completed,
@@ -2163,7 +2175,17 @@ class VirtualHumanLifeService:
             else {}
         )
         trigger = self._attempt_for_turn(agent_id, run_id)
-        rules = load_prompt_pack()
+        reference = self.store.read_json(agent_id, "autonomy/native_session.json") or {}
+        internal_work = bool(
+            session_id and reference.get("sessionId") == session_id
+            and reference.get("agentId") == agent_id
+            and reference.get("runtimeAgentId") not in {None, "", agent_id}
+        )
+        # Native execution can begin before the admission receipt callback.
+        # The verified dedicated work identity still fixes the turn purpose.
+        if internal_work and not trigger:
+            trigger = {"deliveryKind": "self_wake", "reason": "internal_autonomous_action"}
+        rules = load_prompt_pack(self_wake=internal_work)
         if str((trigger or {}).get("deliveryKind") or "") == "followup":
             rules = f"{rules}\n\n{load_legacy_followup_prompt()}"
         local_now = self._local_now(binding)
@@ -2372,6 +2394,7 @@ class VirtualHumanLifeService:
                 else None
             ),
             "sessionId": str(session_id or "").strip(),
+            "selfWakePlan": self.self_continuity.snapshot(agent_id),
         }
         return [
             {
@@ -2423,12 +2446,14 @@ class VirtualHumanLifeService:
                 if isinstance(runtime_metadata.get("virtualHumanLife"), dict)
                 else {}
             )
-            if str(life_runtime.get("kind") or "").strip() == "tool_activity":
+            if str(life_runtime.get("kind") or "").strip() in {"tool_activity", "self_wake"}:
                 allowed_tools.update(
                     str(name or "").strip()
                     for name in list(life_runtime.get("requiredToolNames") or [])
                     if str(name or "").strip()
                 )
+            if life_runtime.get("kind") == "self_wake":
+                allowed_tools.discard("virtual_human_dialogue_decision_v2_tool")
             # ``names`` has already been intersected with the Agent ToolPolicy.
             # This second boundary keeps ordinary companion dialogue on the
             # dedicated plugin bundle while allowing a scheduled tool activity
@@ -4231,21 +4256,27 @@ class VirtualHumanLifeService:
         valid_for_minutes: int = 30,
         idempotency_key: str = "",
         tool_activity: dict[str, Any] | None = None,
+        _self_wake_id: str = "",
     ) -> dict[str, Any]:
         with self._lock_for(agent_id):
             binding = self._require_enabled_binding(agent_id)
+            self_wake = self.self_continuity.require_dispatch(agent_id, _self_wake_id) if _self_wake_id else {}
             if self.runtime_acceptance_provider is not None and not bool(
                 self.runtime_acceptance_provider()
             ):
                 raise VirtualHumanLifeError(
                     "Virtual human life runtime is stopping and no new proactive trigger is accepted."
                 )
-            if not bool(binding.get("proactiveMessagesEnabled", True)):
+            if not self_wake and not bool(binding.get("proactiveMessagesEnabled", True)):
                 raise BindingDisabledError("Proactive messages are disabled for this binding.")
             agent = self._agent(agent_id, include_archived=False)
             if not agent:
                 raise AgentUnavailableError("The bound Agent is not active.")
             session_id = str(agent.get("directSessionId") or "").strip()
+            if self_wake:
+                if self.self_wake_session_provider is None:
+                    raise VirtualHumanLifeError("Autonomous work Session provider is unavailable.")
+                session_id = self.self_wake_session_provider(agent_id)
             if not session_id:
                 raise AgentUnavailableError("The bound Agent has no direct session.")
             now = self._now()
@@ -4328,6 +4359,9 @@ class VirtualHumanLifeService:
             }
             if normalized_tool_activity:
                 attempt["toolActivity"] = normalized_tool_activity
+            if self_wake:
+                attempt["deliveryKind"] = "self_wake"
+                attempt["selfWake"] = self_wake
             self.store.append_jsonl(
                 agent_id,
                 "proactive/triggers.jsonl",
@@ -4350,7 +4384,7 @@ class VirtualHumanLifeService:
                 },
             )
             self.store.append_jsonl(agent_id, "proactive/deliveries.jsonl", attempt)
-            if self._inside_quiet_hours(local_now, binding.get("quietHours")):
+            if not self_wake and self._inside_quiet_hours(local_now, binding.get("quietHours")):
                 self._update_attempt(
                     agent_id,
                     delivery_token,
@@ -4360,7 +4394,7 @@ class VirtualHumanLifeService:
                 )
                 raise VirtualHumanLifeError("Current local time is inside quiet hours.")
             usage = self.proactive_usage(agent_id, local_now.date().isoformat())
-            if usage["remaining"] <= 0:
+            if not self_wake and usage["remaining"] <= 0:
                 self._update_attempt(
                     agent_id,
                     delivery_token,
@@ -4378,7 +4412,7 @@ class VirtualHumanLifeService:
                     DEFAULT_PROACTIVE_MINIMUM_INTERVAL_MINUTES,
                 )
             )
-            if latest_delivery:
+            if not self_wake and latest_delivery:
                 delivered_at = _parse_datetime(latest_delivery.get("deliveredAt"))
                 if delivered_at and now - delivered_at < minimum_interval:
                     self._update_attempt(
@@ -4422,6 +4456,7 @@ class VirtualHumanLifeService:
                     "sourceEventId": attempt["sourceEventId"],
                     "idempotencyKey": attempt["idempotencyKey"],
                     "validUntil": attempt["validUntil"],
+                    **({"deliveryKind": "self_wake", "selfWake": self_wake} if self_wake else {}),
                     **(
                         {"toolActivity": dict(attempt["toolActivity"])}
                         if isinstance(attempt.get("toolActivity"), dict)
@@ -4644,6 +4679,7 @@ class VirtualHumanLifeService:
             str(item.get("deliveryToken") or "").strip()
             for item in self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
             if str(item.get("status") or "").strip() == "delivered"
+            and item.get("deliveryKind") != "self_wake"
             and not is_companion_continuation_delivery_kind(
                 item.get("deliveryKind")
             )
@@ -6425,6 +6461,12 @@ class VirtualHumanLifeService:
             ends_at = _parse_datetime(activity.get("endAt"))
             if status in {"completed", "cancelled", "skipped", "failed", "unknown"}:
                 continue
+            if coalesced and starts_at is not None and starts_at < current:
+                activity["status"] = "skipped" if str(activity.get("kind") or "simulated") == "simulated" else "unknown"
+                activity["skipReason"] = "host_was_not_running"
+                activity["updatedAt"] = _iso(current)
+                changed = True
+                continue
             if starts_at and starts_at <= current and (not ends_at or current < ends_at):
                 if status == "planned":
                     activity["status"] = "active"
@@ -6916,6 +6958,7 @@ class VirtualHumanLifeService:
                 item
                 for item in reversed(self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl"))
                 if str(item.get("status") or "") == "delivered"
+                and item.get("deliveryKind") != "self_wake"
                 and not is_companion_continuation_delivery_kind(
                     item.get("deliveryKind")
                 )

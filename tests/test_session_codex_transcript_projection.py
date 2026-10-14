@@ -3,6 +3,48 @@ import json
 from core.web.services import session_service
 
 
+def test_user_transcript_preserves_all_native_reference_handles_without_resolved_content():
+    references = [
+        {"referenceId": "file:doc.txt", "kind": "file", "artifactId": "doc.txt", "title": "验收文件", "content": "resolved private body", "resolvedContent": "must not leak"},
+        {"referenceId": "session:older", "kind": "session", "sessionId": "older", "title": "历史会话"},
+        {"referenceId": "message:msg-1", "kind": "message", "sourceSessionId": "older", "sourceMessageId": "msg-1", "quote": "用户选中的原文", "title": "消息引用", "content": "unselected resolved body"},
+        {"referenceId": "knowledge-base:kb", "kind": "knowledge_base", "knowledgeBaseId": "kb", "title": "资料库"},
+        {"referenceId": "knowledge-item:item-1", "kind": "knowledge_item", "knowledgeItemId": "item-1", "knowledgeBaseId": "kb", "title": "已审核条目", "content": "resolved private body", "resolved_content": "must not leak"},
+    ]
+    projected = session_service._normalize_messages("session-references", [{
+        "role": "user", "content": "核对所选引用", "timestamp": "2026-10-13T10:00:00Z", "references": [*references, references[0], {"referenceId": "file:doc.txt", "kind": "session", "sessionId": "duplicate"}],
+    }])
+    assert [item["referenceId"] for item in projected[0]["references"]] == [item["referenceId"] for item in references]
+    assert all(not ({"content", "resolvedContent", "resolved_content"} & item.keys()) for item in projected[0]["references"])
+    assert projected[0]["references"][0]["artifactId"] == "doc.txt"
+    assert projected[0]["references"][4]["knowledgeItemId"] == "item-1"
+    assert projected[0]["references"][2]["quote"] == "用户选中的原文"
+
+
+def test_reference_only_user_message_survives_projection_and_rejects_invalid_handles():
+    projected = session_service._normalize_messages("session-references", [{
+        "role": "user", "content": "", "timestamp": "2026-10-13T10:00:00Z", "references": [
+            {"kind": "file", "artifactId": "doc.txt", "title": "验收文件"},
+            {"kind": "file", "title": "缺少id"},
+            {"kind": "unknown", "title": "未知类型"},
+        ],
+    }])
+    assert len(projected) == 1
+    assert projected[0]["references"] == [{"referenceId": "file:doc.txt", "kind": "file", "artifactId": "doc.txt", "title": "验收文件"}]
+
+
+def test_transcript_reference_projection_keeps_legacy_session_handles_and_the_native_six_item_limit():
+    projected = session_service._normalize_messages("session-references", [{
+        "role": "user", "content": "核对所选引用", "timestamp": "2026-10-13T10:00:00Z", "references": [
+            {"sessionId": "legacy"},
+            *[{"kind": "file", "artifactId": f"doc-{index}.txt"} for index in range(8)],
+        ],
+    }])
+    assert len(projected[0]["references"]) == 6
+    assert projected[0]["references"][0]["sessionId"] == "legacy"
+    assert projected[0]["references"][-1]["artifactId"] == "doc-4.txt"
+
+
 def test_assistant_session_projection_has_only_a_revisioned_turn_item_package():
     messages = session_service._normalize_messages(
         "session-codex",

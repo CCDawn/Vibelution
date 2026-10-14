@@ -84,28 +84,14 @@ def harness(tmp_path, monkeypatch):
         "resolve_memory_policy_for_agent",
         lambda _agent_id: {"enabled": state["memoryEnabled"]},
     )
-    monkeypatch.setattr(
-        validation.directory,
-        "list_current_episodic_events",
-        lambda _agent_id, limit=200: deepcopy(state["episodes"][:limit]),
-    )
-
-    def append_event(_agent_id, *, kind, text, refs):
-        event = {
-            "schemaVersion": 1,
-            "episodeId": f"episode-{uuid4()}",
-            "eventId": "",
-            "occurredAt": validation._utc_iso(state["now"]),
-            "kind": kind,
-            "text": text,
-            "refs": deepcopy(refs),
-            "validUntil": "",
-        }
-        event["eventId"] = event["episodeId"]
-        state["episodes"].insert(0, event)
-        return deepcopy(event)
-
-    monkeypatch.setattr(validation.directory, "append_episodic_event", append_event)
+    from core.web.services.agent_directory import episodic_memory
+    episode_path = tmp_path / "episodes.jsonl"
+    state["episodePath"] = episode_path
+    monkeypatch.setattr(episodic_memory, "_load_agent", get_agent)
+    monkeypatch.setattr(episodic_memory, "_episodic_events_path", lambda _agent: episode_path)
+    monkeypatch.setattr(validation.directory, "utc_now_iso", lambda: validation._utc_iso(state["now"]))
+    monkeypatch.setattr(validation.directory, "_record_memory_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(validation.directory, "record_agent_api_hydration_event_file_changed", lambda *_a: None)
     return state
 
 
@@ -541,7 +527,7 @@ def test_lesson_requires_verified_enabled_memory_is_idempotent_and_as_of(harness
     assert context[0]["id"] == lesson["id"]
     assert context[0]["refs"] == lesson["refs"]
 
-    harness["episodes"].clear()
+    harness["episodePath"].unlink()
     assert validation.reflection_context(
         AGENT_ID, "sh600519", analysis_cutoff="2024-10-14"
     ) == []

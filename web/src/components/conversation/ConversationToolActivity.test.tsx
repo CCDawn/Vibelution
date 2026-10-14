@@ -259,7 +259,7 @@ describe("ConversationToolActivity", () => {
     expect(styles.itemBody).toContain("text-[var(--fg-tertiary)]");
     expect(styles.itemBody).toContain("text-vui-xs");
     expect(styles.itemBody).toContain("items-center");
-    expect(styles.actionLabel).toContain("font-medium");
+    expect(styles.actionLabel).toContain("font-normal");
     expect(styles.actionLabel).not.toContain("rounded-full");
     expect(styles.actionPill).not.toContain("rounded-full");
     expect(styles.statusPill).not.toContain("rounded-full");
@@ -305,7 +305,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("详情 tool-4");
   });
 
-  it("keeps tool details expandable with a small inline disclosure chevron", () => {
+  it("keeps tool details expandable without a trailing disclosure chevron", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([toolCell("tool-1", "定位 ConversationLogger")])}
@@ -316,8 +316,8 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain("工具原始结果");
-    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
-    expect(html).toContain("itemChevron");
+    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).not.toContain("itemChevron");
     expect(html).not.toContain("执行完成");
     expect(styles.itemSummary).toContain("cursor-pointer");
     expect(styles.itemSummary).toContain("w-full");
@@ -361,7 +361,7 @@ describe("ConversationToolActivity", () => {
     );
 
     expect(html).toContain('data-codex-tool-detail="true"');
-    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).toContain("无更多详情");
     expect(html).not.toContain("itemStatic");
   });
@@ -616,6 +616,8 @@ describe("ConversationToolActivity", () => {
     );
     const failedSummary = summaryContaining(failedHtml, "探索");
     expect(failedSummary).toContain("1 项需关注");
+    expect(failedSummary.indexOf("1 项需关注")).toBeLessThan(failedSummary.indexOf("batchCount"));
+    expect(failedSummary).not.toContain("itemChevron");
     expect(failedSummary).toContain('data-codex-tool-status-kind="failed"');
     expect(failedSummary).toContain('data-codex-tool-status-kind="failed" data-slot="tooltip-trigger"');
   });

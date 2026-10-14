@@ -1,6 +1,7 @@
 // ChatCodingRoute styles (Wave 8D dead-key prune after 8C panel extraction).
 // Removed 116 unused keys; panel/component maps own former residue.
 
+import { VUI_WORKBENCH_PANE_CLASS } from "../components/vui";
 import {
   vuiControlPillClass,
   vuiControlQuietClass,
@@ -42,7 +43,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.,
   centerPane:
-    `vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--fg-primary)_5%,transparent)] ${vuiChatFillClass} shadow-[0_1px_3px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
+    `${VUI_WORKBENCH_PANE_CLASS} vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden ${vuiChatFillClass} max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
   // Column placement is separate from the pane. The built stylesheet emits
   // grid-column:3 after grid-column:1, so both utilities on one node keep column 3.
   centerPaneDocked:

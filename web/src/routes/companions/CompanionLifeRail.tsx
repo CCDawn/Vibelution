@@ -30,7 +30,7 @@ import type {
   VirtualHumanWorldProjection,
 } from "../../api/types";
 import { usePageVisibility } from "../../app/pollingPolicy";
-import { VButton, VStateSurface, VStatusChip, VTabs } from "../../components/vui";
+import { VButton, VStateSurface, VStatusChip, VTabs, VUI_WORKBENCH_RAIL_CLASS } from "../../components/vui";
 import {
   currentLifeActivity,
   currentLifeActivityLabel,
@@ -741,7 +741,7 @@ export function CompanionLifeRail({
 
   return (
     <aside
-      className={`${className} ${styles.lifeRail}`}
+      className={`${VUI_WORKBENCH_RAIL_CLASS} ${className} ${styles.lifeRail}`}
       aria-hidden={collapsed}
       role={overlayOpen ? "dialog" : undefined}
       aria-label={companion ? `${companion.displayName} 的生活` : stateCopy}

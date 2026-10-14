@@ -113,12 +113,29 @@ def _agent_context_window_limit(
     if not model_id:
         return 0
     if hydration is not None:
-        return int(hydration.model_context_window_limits_by_model_id.get(model_id) or 0)
+        declared_limit = int(hydration.model_context_window_limits_by_model_id.get(model_id) or 0)
+        from core.llm.agent_model_parameters import resolve_agent_model_context_window
+
+        model_ref = model_id
+        if isinstance((agent or {}).get("metadata", {}).get("llmModelParameters"), dict):
+            try:
+                from config import get_config
+
+                model_ref = get_config().llm.resolve_model_ref(model_id)
+            except Exception:
+                pass
+        return int(resolve_agent_model_context_window(agent, model_ref, declared_limit)["limit"])
     try:
         from config import get_config
         from config.public_config import resolve_llm_model_context_window
 
         config = get_config()
+        from core.llm.agent_model_parameters import resolve_agent_model_context_window
+
+        try:
+            model_id = config.llm.resolve_model_ref(model_id)
+        except Exception:
+            pass
         model_library = getattr(config.llm, "model_library", {}) or {}
         entry = model_library.get(model_id) if isinstance(model_library, dict) else None
         if not isinstance(entry, dict):
@@ -127,7 +144,9 @@ def _agent_context_window_limit(
         provider_id = str(entry.get("provider_id") or "").strip()
         if provider_id:
             provider = config.llm.get_provider(provider_id)
-        return resolve_llm_model_context_window(entry, provider)
+        declared_limit = resolve_llm_model_context_window(entry, provider)
+        model_ref = str(entry.get("model_ref") or model_id).strip()
+        return int(resolve_agent_model_context_window(agent, model_ref, declared_limit)["limit"])
     except Exception:
         return 0
 

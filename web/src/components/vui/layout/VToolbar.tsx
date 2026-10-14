@@ -14,6 +14,7 @@ export function VToolbar({ ariaLabel, className, wrap = true, ...props }: VToolb
       role="toolbar"
       aria-label={ariaLabel}
       className={[
+        "vui-workbench-toolbar",
         wrap
           ? "flex min-w-0 flex-wrap items-center gap-1.5"
           : "flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden",

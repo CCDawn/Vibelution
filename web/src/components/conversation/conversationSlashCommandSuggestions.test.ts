@@ -9,6 +9,7 @@ import chatCatalogQueriesSource from "../../routes/chat/useChatWorkbenchCatalogQ
 import chatConversationComposerBridgeSource from "../../routes/chat/ChatConversationComposerBridge.tsx?raw";
 import chatSessionWorkspacePanelSource from "../../routes/chat/ChatSessionWorkspacePanel.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import {
   composerSlashCommandQuery,
   filterSlashCommandSuggestions,
@@ -224,13 +225,14 @@ describe("conversation slash command suggestions", () => {
     expect(chatSessionWorkspacePanelSource).toContain('type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">');
     expect(chatSessionWorkspacePanelSource).toContain("{...conversation}");
     expect(chatConversationComposerBridgeSource).toContain("slashCommandSuggestions={slashCommandSuggestions}");
-    expect(conversationViewSource).toContain("mergeSlashCommandSuggestions(");
-    expect(conversationViewSource).toContain("insertSlashCommandSuggestion(composerValue, suggestion.skill.command)");
-    expect(conversationViewSource).toContain('role="listbox"');
-    expect(conversationViewSource).toContain('role="option"');
-    expect(conversationViewSource).toContain("executeBuiltinSlashCommand(suggestion.builtinId)");
-    expect(conversationViewSource).toContain('data-vui="slash-builtin-badge"');
-    expect(conversationViewSource).toContain("groupSlashCommandSuggestionsBySection(slashSuggestions)");
+    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerSource).toContain("mergeSlashCommandSuggestions(");
+    expect(conversationComposerSource).toContain("insertSlashCommandSuggestion(composerValue, suggestion.skill.command)");
+    expect(conversationComposerSource).toContain('role="listbox"');
+    expect(conversationComposerSource).toContain('role="option"');
+    expect(conversationComposerSource).toContain("executeBuiltinSlashCommand(suggestion.builtinId)");
+    expect(conversationComposerSource).toContain('data-vui="slash-builtin-badge"');
+    expect(conversationComposerSource).toContain("groupSlashCommandSuggestionsBySection(slashSuggestions)");
   });
 });
 

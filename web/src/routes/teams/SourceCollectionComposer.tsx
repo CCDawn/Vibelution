@@ -94,6 +94,7 @@ export function SourceCollectionComposer(props: SourceCollectionComposerProps) {
 
   return (
     <ResearchStageWorkbenchShell
+      chrome="workspace"
       lang={lang}
       current="knowledge_collection"
       title={lang === "zh" ? `${RESEARCH_STAGE_TERMS.knowledge_collection.zh}工作台` : "Knowledge collection workspace"}

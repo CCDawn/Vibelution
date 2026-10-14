@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { buildTeamsWorkbenchResearchSurfacesFromBag } from "./buildTeamsWorkbenchResearchSurfacesFromBag";
 import { renderTeamsWorkbenchCanvasPage } from "./renderTeamsWorkbenchCanvasPage";
 import { renderTeamsWorkbenchBoardPage } from "./renderTeamsWorkbenchBoardPage";
+import { renderTeamsWorkspaceBoardPage } from "./TeamsWorkspaceBoardPage";
 import {
   TEAMS_BOARD_INSPECTOR_PANE,
   TEAMS_LAYOUT_ID,
@@ -27,6 +28,7 @@ import {
   renderTeamsShellGate,
   renderTeamsShellRail,
   renderTeamsShellToolbar,
+  renderTeamsTeamSwitcher,
 } from "./renderTeamsShellFrame";
 import { ResearchStageNav } from "./ResearchStageNav";
 import { ResearchProjectSwitcher } from "./research-projects/ResearchProjectSwitcher";
@@ -653,11 +655,11 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ? researchPrimaryActionDetail(researchPrimaryAction, lang)
     : devTeamSelected
       ? (lang === "zh"
-        ? "在右侧填写任务并启动一轮。规划师用 @角色名 派发，开发实现，评审员给出结论。"
-        : "Enter a task on the right and start a round. The planner assigns with @role, developers implement, and the reviewer concludes.")
+        ? "切到成员发言，填写任务并启动一轮。规划师用 @角色名 派发，开发实现，评审员给出结论。"
+        : "Open Messages, enter a task and start a round. The planner assigns with @role, developers implement, and the reviewer concludes.")
       : (lang === "zh"
-        ? "点节点看执行者。切团队用顶栏，不要在左栏找名单。"
-        : "Select a node to inspect the assignee. Switch teams in the toolbar.");
+        ? "点节点看执行者，在左栏顶部切换团队。"
+        : "Select a node to inspect the assignee. Switch teams at the top of the left rail.");
   const statusCta = researchWorkflowTeamSelected && researchPrimaryAction
     ? researchPrimaryActionLabel(researchPrimaryAction, lang)
     : undefined;
@@ -701,6 +703,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       />
     ),
   });
+  const teamSwitcher = renderTeamsTeamSwitcher({ lang, visibleTeams, effectiveTeamId, onSelectTeam: selectTeamRecord });
 
   const shellGate = renderTeamsShellGate({
     lang,
@@ -810,6 +813,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       selectedTeamContextTitle,
       teamShellRail,
       teamShellToolbar,
+      teamSwitcher,
       researchWorkflowTeamSelected,
       researchCanvasReadOnly,
       researchFlowSlot,
@@ -902,13 +906,15 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     && !isProcessWorkflowView
     && !boardInspectorNarrow;
 
-  return renderTeamsWorkbenchBoardPage({
+  const renderBoardPage = suppressOuterTeamShellChrome ? renderTeamsWorkbenchBoardPage : renderTeamsWorkspaceBoardPage;
+  return renderBoardPage({
     lang,
     styles,
     teamsRailResize,
     selectedTeamContextTitle,
     teamShellRail,
     teamShellToolbar,
+    teamSwitcher,
     boardPrimaryMode,
     workflowPending: teamWorkflowQuery.isPending,
     workflowReady: Boolean(teamWorkflow),

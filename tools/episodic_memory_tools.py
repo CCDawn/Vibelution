@@ -119,6 +119,7 @@ def supersede_personal_memory_tool(
     """
     try:
         from core.web.services import agent_directory_service as ads
+        from core.web.services.agent_directory import episodic_memory
 
         runtime = ads.current_agent_runtime()
         agent_id = str(runtime.get("agentId") or "").strip()
@@ -142,24 +143,29 @@ def supersede_personal_memory_tool(
                     "message": "作废个人记忆需要 episode_id。",
                 }
             )
-        successor_id = ""
-        successor_kind = ""
         replacement = str(successor_text or "").strip()
-        if replacement:
-            refs = [{"type": "session", "id": session_id}] if session_id else []
-            successor = ads.append_episodic_event(
-                agent_id,
-                kind=kind,
-                text=replacement,
-                refs=refs,
+        with episodic_memory.episodic_transaction(agent_id) as transaction:
+            successor_id = ""
+            successor_kind = ""
+            if replacement:
+                original = next((item for item in transaction.events
+                    if str(item.get("episodeId") or item.get("eventId") or "") == normalized_episode_id), None)
+                if original is None:
+                    raise ads.AgentEpisodicEventNotFoundError("Episodic event not found.")
+                if str(original.get("validUntil") or "").strip():
+                    raise ads.AgentDirectoryError("This episode is no longer current; replace its active successor instead.")
+                refs = [{"type": "session", "id": session_id}] if session_id else []
+                successor = transaction.append(
+                    kind=kind,
+                    text=replacement,
+                    refs=refs,
+                )
+                successor_id = str(successor.get("episodeId") or "")
+                successor_kind = str(successor.get("kind") or "")
+            event = transaction.supersede(
+                normalized_episode_id,
+                successor_episode_id=successor_id,
             )
-            successor_id = str(successor.get("episodeId") or "")
-            successor_kind = str(successor.get("kind") or "")
-        event = ads.supersede_episodic_event(
-            agent_id,
-            normalized_episode_id,
-            successor_episode_id=successor_id,
-        )
         return _json_result(
             {
                 "ok": True,

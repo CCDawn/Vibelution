@@ -30,6 +30,7 @@
 | `VCommandPalette` | [product/command-palette.md](./product/command-palette.md#vcommandpalette) |
 | `VSessionSearchDialog` | [product/session-search-dialog.md](./product/session-search-dialog.md#vsessionsearchdialog) |
 | 会话标签关闭两段式确认 | [product/session-tab-close-confirm.md](./product/session-tab-close-confirm.md#会话标签关闭两段式确认) |
+| 会话标签急速连关窗口 | [product/session-tab-close-confirm.md](./product/session-tab-close-confirm.md#急速连关窗口rapid-close-burst) |
 | 会话起点卡 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#会话起点卡) |
 | 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 | ConversationForkSessionDialog | [product/conversation.md](./product/conversation.md#conversationforksessiondialog) |
@@ -59,6 +60,7 @@
 | `VConfirmDialog` | [primitives/feedback.md](./primitives/feedback.md#vconfirmdialog) |
 | `VDropdownMenu` | [primitives/feedback.md](./primitives/feedback.md#vdropdownmenu) |
 | `VPopover` | [primitives/feedback.md](./primitives/feedback.md#vpopover) |
+| `VSelectionToolbar` | [primitives/selection-toolbar.md](./primitives/selection-toolbar.md#vselectiontoolbar) |
 | `VHoverCard` | [primitives/feedback.md](./primitives/feedback.md#vhovercard) |
 
 ## Forms
@@ -83,6 +85,7 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `VPage` | [layout/pages.md](./layout/pages.md#vpage) |
+| `VWorkbenchFrame` | [layout/pages.md](./layout/pages.md#vworkbenchframe) |
 | `VWorkbenchPage` | [layout/pages.md](./layout/pages.md#vworkbenchpage) |
 | `VDenseOpsPage` | [layout/pages.md](./layout/pages.md#vdenseopspage) |
 | `VListDetailPage` | [layout/pages.md](./layout/pages.md#vlistdetailpage) |
@@ -136,6 +139,7 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| `ConversationToolActivity` | [product/conversation-process.md](./product/conversation-process.md#conversationtoolactivity) |
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
 | `ChatGroupArtifactDialog` | [product/conversation.md](./product/conversation.md#chatgroupartifactdialog) |
 | `ChatSessionBrowser` | [product/conversation.md](./product/conversation.md#chatsessionbrowser) |

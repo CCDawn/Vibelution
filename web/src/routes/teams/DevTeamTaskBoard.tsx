@@ -14,7 +14,7 @@ import type { TeamMember } from "../../api/types";
 import {
   VNativeButton,
   VNativeInput,
-  VNativeSelect,
+  VStringSelect,
   VNativeTextarea,
   VSection,
   VStack,
@@ -313,18 +313,18 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
             placeholder={text("依赖任务编号，例如 task-1", "Blocked by, for example task-1")}
             onChange={(event) => setBlockers(event.target.value)}
           />
-          <VNativeSelect
-            aria-label={text("负责人", "Owner")}
+          <VStringSelect
+            ariaLabel={text("负责人", "Owner")}
             value={ownerId}
-            onChange={(event) => setOwnerId(event.target.value)}
-          >
-            <option value="">{text("先不指定负责人", "No owner yet")}</option>
-            {members.filter((member) => member.role !== "规划师").map((member) => (
-              <option key={member.memberId} value={member.memberId}>
-                {member.role}
-              </option>
-            ))}
-          </VNativeSelect>
+            onValueChange={setOwnerId}
+            options={[
+              { value: "", label: text("先不指定负责人", "No owner yet") },
+              ...members.filter((member) => member.role !== "规划师").map((member) => ({
+                value: member.memberId,
+                label: member.role,
+              })),
+            ]}
+          />
           <VNativeButton type="submit" disabled={!subject.trim() || createTask.isPending}>
             {text("新建任务", "Add task")}
           </VNativeButton>
@@ -507,16 +507,18 @@ function TaskCard({
           >
             {text("保存修改", "Save edits")}
           </VNativeButton>
-          <VNativeSelect
-            aria-label={text(`改派 ${task.id}`, `Assign ${task.id}`)}
+          <VStringSelect
+            ariaLabel={text(`改派 ${task.id}`, `Assign ${task.id}`)}
             value={nextOwner}
-            onChange={(event) => setNextOwner(event.target.value)}
-          >
-            <option value="">{text("不指定", "Unassigned")}</option>
-            {members.filter((member) => member.role !== "规划师").map((member) => (
-              <option key={member.memberId} value={member.memberId}>{member.role}</option>
-            ))}
-          </VNativeSelect>
+            onValueChange={setNextOwner}
+            options={[
+              { value: "", label: text("不指定", "Unassigned") },
+              ...members.filter((member) => member.role !== "规划师").map((member) => ({
+                value: member.memberId,
+                label: member.role,
+              })),
+            ]}
+          />
           <VNativeButton
             type="button"
             disabled={pending}

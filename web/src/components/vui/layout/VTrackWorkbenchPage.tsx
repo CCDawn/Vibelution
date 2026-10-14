@@ -2,7 +2,7 @@ import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react
 
 import { cn } from "../lib/cn";
 import { VRouteHeader } from "./VRouteHeader";
-import { VWorkbenchPage } from "./VWorkbenchPage";
+import { VWorkbenchPage, type VWorkbenchPageChrome } from "./VWorkbenchPage";
 import { VUI_PAGE_BODY_FILL_CLASS } from "./pageRecipeClasses";
 
 export type VTrackWorkbenchHeader = {
@@ -21,6 +21,7 @@ export type VTrackWorkbenchHeader = {
 };
 
 export type VTrackWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">, "children" | "title"> & {
+  chrome?: VWorkbenchPageChrome;
   ariaLabel?: string;
   /**
    * Route header config. Pass `null` / omit for full-bleed track body

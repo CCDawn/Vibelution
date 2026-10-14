@@ -21,6 +21,10 @@ from .reasoning_effort import (
     normalize_reasoning_effort,
     resolve_reasoning_effort_request,
 )
+from .agent_model_parameters import (
+    resolve_agent_model_context_window,
+    resolve_agent_model_parameters,
+)
 from .types import LLMCapabilities, ResolvedModelSpec
 
 
@@ -164,11 +168,38 @@ def resolve_agent_llm(
     profile = runtime_config.llm.get_profile(profile_id=runtime_profile_id)
     provider = runtime_config.llm.get_provider(profile.provider_id)
     model_ref = runtime_config.llm.resolve_model_ref(requested_model_ref)
-    _apply_agent_reasoning_effort_override(agent, effective_slot, profile, provider)
+    _apply_agent_reasoning_effort_override(
+        agent,
+        effective_slot,
+        profile,
+        provider,
+        model_ref=model_ref,
+    )
     if reasoning_effort_override is not None:
         profile.reasoning_effort = normalize_reasoning_effort(reasoning_effort_override)
     reasoning_resolution = resolve_reasoning_effort_request(profile)
     spec = discover_model(runtime_config, runtime_profile_id)
+    context_window = resolve_agent_model_context_window(
+        agent,
+        model_ref,
+        spec.context_window,
+        declared_source=str((spec.provider_details or {}).get("context_window_source") or "model_library"),
+    )
+    if context_window["has_override"] and context_window["limit"] > 0:
+        normalized_model_id = runtime_config.llm.resolve_model_ref(model_ref)
+        model_entry = runtime_config.llm.model_library.get(normalized_model_id)
+        if isinstance(model_entry, dict):
+            # ``runtime_config`` is private to this Agent resolution. Applying
+            # the Agent/model value to its model-library entry makes every
+            # downstream consumer of the resolved config observe the same
+            # bounded context window as the session context assembler.
+            model_entry["context_window"] = context_window["limit"]
+            spec = discover_model(runtime_config, runtime_profile_id)
+        spec.provider_details = {
+            **dict(spec.provider_details or {}),
+            "agent_context_window_limit": context_window["limit"],
+            "agent_context_window_source": context_window["source"],
+        }
     return ResolvedAgentLlm(
         agent_id=str((agent or {}).get("agentId") or "").strip() if isinstance(agent, dict) else "",
         slot=effective_slot,
@@ -258,14 +289,22 @@ def _apply_agent_reasoning_effort_override(
     slot: str,
     profile: LLMProfile,
     provider: Any,
+    *,
+    model_ref: str = "",
 ) -> None:
     if not isinstance(agent, dict):
         return
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    effort_by_slot = metadata.get("llmReasoningEffort") if isinstance(metadata, dict) else {}
-    if not isinstance(effort_by_slot, dict):
-        return
-    effort = normalize_reasoning_effort(effort_by_slot.get(slot))
+    model_parameters = resolve_agent_model_parameters(agent, model_ref)
+    if model_parameters["has_reasoning_effort"]:
+        effort = normalize_reasoning_effort(model_parameters["reasoning_effort"])
+        if not effort:
+            return
+    else:
+        effort_by_slot = metadata.get("llmReasoningEffort") if isinstance(metadata, dict) else {}
+        if not isinstance(effort_by_slot, dict):
+            return
+        effort = normalize_reasoning_effort(effort_by_slot.get(slot))
     if not effort:
         return
     # Protocol contract only — do not use model-name heuristics (confirmed D2).

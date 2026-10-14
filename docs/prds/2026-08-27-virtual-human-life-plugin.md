@@ -22,7 +22,7 @@
 5. 第一版交付可信第一方插件包和可扩展插件契约，不开放任意第三方 Python 动态加载、插件市场或不可信代码沙箱。
 6. 旧 `pet_info.json` 不自动绑定给任何 Agent；只能通过带预览和 receipt 的显式导入操作迁移到用户指定 Agent。
 7. 计划与实际经历严格分离。只有实际完成且具有有效 outcome 的活动可以进入日记；长期记忆还需通过重要性晋升。
-8. 应用关闭期间不宣称实时运行。启动后只允许合并漏掉的心跳；纯模拟活动仅在规则能产生有效 outcome 时形成 `simulatedAfterRestart=true` 事件，工具型活动不得推定完成。
+8. 应用前后端统一生命周期：应用关闭后两端停止，生活和唤醒均不推进。重新启动按当前现实时间恢复，过期计划重新判断、取消或改期，不补算停机期间的模拟经历、日记或成长，工具型活动不得推定完成。该决策由用户于 2026-10-13 明确确认，替代旧的重启后模拟活动补算规则。
 9. 主动生活触发使用正式的 `proactive_turn` 内部来源，不通过普通 `submit_session_message()` 伪造用户消息。
 10. 插件启用或后端重启会恢复生活心跳和主动消息能力，但不等于立即发送“启动问候”；任何实际发送仍需通过有效期、额度、间隔、免打扰、会话和权限门。
 11. 拟人化第二阶段以“实际事件 → 情绪/目标/关系/未完事项 → 计划/表达/主动联系 → 新实际事件”为唯一因果闭环，不增加无来源的人设或数值漂移。
@@ -2326,3 +2326,66 @@ Dialogue V2 完成时，用户可观察到人物有时一句说完、有时自�
 - 集成：实际工具→服务→同一日历/open loop→Prompt，禁用/错误会话/管家/伪造或过期 Turn 拒绝；失败/无关活动不成为共同结果，跨日来源仍可验证。
 - 普通链路：受保护文件差异为空，并运行普通 Session 与现有 Companion 工具、Prompt、mailbox、continuity 回归。未改前端，不要求额外 UI 生产构建。
 - 代码验证与真实自然聊天验收分开；本轮不运行外部模型、不重启产品、不 push/发布。后续运行态刷新只经 Launcher 且遵守 active-work guard。
+
+## 34. 自主计划、定时自我唤醒与连续行动（2026-10-13）
+
+用户已确认采用“人物自主制定计划 → 安排下一次行动时间 → 到点唤醒 → 读取已有状态并行动 → 根据结果重新安排”的闭环。人物可调整计划并执行已授权的阅读、创作等行动；应用前后端统一关闭，关闭期间停止生活与调度。重新打开按当前现实时间重排，不补造停机期间的经历。
+
+### 34.1 复用和执行边界
+
+- OpenClaw 的 [dynamic cadence / next_check](https://docs.openclaw.ai/automation/cron-jobs/schedules#dynamic-cadence-pacing) 提供人物决定下一次唤醒间隔、系统限制边界的参考。
+- Hermes Agent 的 [agent-managed scheduling](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron#agent-managed-scheduling-cron-jobs-that-manage-cron-jobs) 提供行动内安排后续任务、持久调度和默认关闭递归扩张的参考。本地固定源码 `NousResearch/hermes-agent@6f31cfad7825a78b69c46eedbd31f2ac2abacfb8` 的 `cron/scheduler.py::_resolve_cron_disabled_toolsets` 与 `tools/cronjob_tools.py::cronjob` 为机器证据入口。只参考机制，不复制外部代码，不引入额外 Agent、Memory 或调度运行时。
+- Generative Agents 的 [plan.py](https://github.com/joonspk-research/generative_agents/blob/fe05a71d3e4ed7d10bf68aa4eda6dd995ec070f4/reverie/backend_server/persona/cognitive_modules/plan.py) 提供记忆、生活规划、行动拆分和事件重排的概念参考；其模拟时间和旧运行依赖不作为产品执行底座。
+- `self_continuity.py` 只拥有一个未来唤醒命令、版本、幂等键、预算和原生 receipt 引用。模型决定意图、原因、时间和所需工具；调度成功绝不能成为生活完成、成长或日记的来源。
+- 自主行动复用生活管家已有的“内部执行 Agent + 隐藏原生 direct Session”配对模式。创建时不传主人物的 `agent_id`，使用 `activate=False, conversation_index_kind=hidden`；否则目录同步会重绑主人物的聊天。适配层校验 owner、内部执行身份、Session、source 和 externalTaskId。内部身份沿用人物角色、模型与授权约束，插件目标、经历、记忆和计划仍归同一个人物；工作 Session Journal 是行动记录唯一权威，不复制陪伴 transcript，不创建另一套 Turn/worker/SSE。
+- 真正联系用户仍走现有 direct Session、主动候选和联系权限链路；自主工作不消耗联系额度，不绕过联系开关或免打扰。用户新消息先取消插件拥有的自主工作，并以精确 Session/Turn 身份调用既有 stop API；普通 Session 核心不作修改。
+
+### 34.2 工具和恢复契约
+
+既有 `virtual_human_schedule_tool` 增加 `view_wakeup / schedule_wakeup / cancel_wakeup`。写入只允许当前人物自身的 direct Session 或三重校验后的内部执行 Session，不能由生活管家代替安排。`start_at` 使用带时区 ISO 时间，`title` 为意图，`reason` 为原因，`required_tool_names` 为工具引用；`expected_version` 使用唤醒计划 revision，每个新决定使用新的 idempotency_key。内部执行身份工具取主人物当前 ToolPolicy、当次计划声明及插件固定工具、内部 ToolPolicy 的交集；保留原有 scope/access/call-budget 约束，不开放 dialogue V2 气泡工具。
+
+每人只保留一个未来唤醒，至少一分钟后、最多七天后，本地日每天最多 24 次。用户消息、正在运行的会话和尚未出队的消息优先。初次启用安排一次未来规划；未来有效计划跨重启保留，过期或中断命令改为未来的重新判断，不重放原命令。取消状态不因重启复活；原生工作完成或失败后若模型未留下下一步，只安排重新规划，不把旧动作直接重发。
+
+真实工具执行还经 Agent-scoped 插件授权闸：人物当前工具策略变化后，当前内部回合停止使用旧授权，待重新规划；普通 Agent 返回无额外限制。内部身份随人物成对归档，归档失败恢复先前状态；删除人物前须等待内部回合收束，成功后删除内部原生 Session 与执行身份。人物数据、目标、记忆和计划只保留一个插件权威。
+
+### 34.3 验收层次
+
+- 连续三轮自主安排、到点执行、原生回执和下一计划更新；重复 tick 不多发，当前行动完成回写不得覆盖模型已生成的下一计划。
+- 关闭 fencing、重开保留未来计划、过期重新判断、主动联系关闭时可自主工作但不能联系、用户消息取消自己的工作、隐藏 Session 跨 Agent 拒绝、revision/幂等/时间/预算边界。
+- 停机后过期模拟活动为 skipped，工具活动为 unknown；无新完成事件、无由离线模拟生成的日记或成长。普通 Session、Journal、worker、SSE 和 composer 差异为零，并运行相关普通 Session 回归。
+- 代码和原生会话适配检查、脚本化行动循环、工具注册检查与真实模型连续生活实测分别记录。产品刷新仍经 Launcher，本地合入不等于运行中的产品已经刷新。
+
+### 34.4 真实模型与桌面实例验收（2026-10-13）
+
+隔离 Launcher 实例 `17fca4ed`、后端端口 `8006` 实际运行本节实现；共享主应用没有停止或刷新。人物 `agent-20261013-230252-840437` 的聊天 Session 为 `session-20261013-230252-542145`，隐藏自主 Session 为 `session-20261013-230437-628031`。默认 `openai/gpt-5.5` 调用返回 `auth_failed`、输入输出 token 均为零，因此不计成功。仅测试人物替换为已配置的 `opencode_go/deepseek-v4-flash`，未改全局模型配置。
+
+测试人物只开放 Companion 工具和文件读写，关闭网络与主动联系。默认逐次审批曾阻止第一笔写入；拒绝该调用、将此测试人物设为 `full_access` 后仍保留受限工具策略。该旧回合下一笔工具调用被真实授权闸拒绝，提示人物授权已变化。便签输出随后明确限制到隔离实例 dataHome 的 `workspace/companion-self-check/`，不写 checkout。
+
+连续三轮都由真实原生 Turn 执行 `write_file_tool`，成功后自行通过 `schedule_wakeup` 预约下一轮；期间没有追加用户消息。以下回执与磁盘文件大小、SHA256 一致：
+
+| 原生自主 Turn 后缀 | 作品 | 大小 | SHA256 |
+| --- | --- | --- | --- |
+| `proactive-92870a39061f498e` | `note-1.txt` | 167 bytes | `2fbe1e8a97d0a3b5de7aeda7242d89a3fd64a93351654943654d5bbf9f6aa788` |
+| `proactive-c8772fcdfd9b4b47` | `note-2.txt` | 164 bytes | `04a8e8414c14acf19f1af8a712d6252f1bd2b6511a476d54e36975cc4b3b297c` |
+| `proactive-bc7e4beab3444fc6` | `note-3.txt` | 173 bytes | `369bbb35a02db5173f41092a8ea3a4ed39f4bd71b755d04677f964629e350cdf` |
+
+第四轮仅检查并调用 `cancel_wakeup`，没有第四份作品。主人物 directSession 一直未变；自主工具记录没有进入人物聊天，普通 Session 列表没有暴露隐藏 Session。桌面人物聊天页首次导航曾超过 20 秒仍显示加载；重新加载后消息正常可见，真实自主工作期间没有新增人物聊天文本。页面显示验证只覆盖此桌面宽屏场景。
+
+关闭与恢复分开核验：
+
+- 页面脚本 `window.close()` 让测试窗口消失，但后端 PID `18188` 和端口继续存在，状态文件变化，原预约第四轮仍被执行。这条程序关闭旁路未通过；未扩大本 Companion 任务修改桌面生命周期。不能据系统关闭结果宣称所有关闭入口都已通过。
+- 另一次模型计划 revision `11` 预约于 `2026-10-13T15:34:10Z`。在系统窗口关闭入口对精确测试窗口发送 `WM_CLOSE` 后，测试后端 PID `40604`、renderer PID `17880` 退出，端口释放，Launcher 确认 `desiredState=closed / observedState=closed`；共享 shell PID `33252` 保持运行。没有用强杀代替关闭。
+- `15:34:19Z` 至 `15:36:12Z`，全部 21 个 Companion/作品文件的 SHA256 不变，已越过原预约时间；没有新增作品、日记或生活经历。
+- Launcher 重开后，过期 revision `11` 被替换为 revision `12 / restart_review`，新唤醒时间 `15:37:30.625512Z`；原预约没有补执行。新的真实回合 `proactive-5d856c2ff60645c2` 根据当前时间和已完成作品安排次日 `07:30 +08:00` 的未来行动，三份作品校验值仍未变。
+
+自主计划、真实工具执行、系统窗口关闭、停机静止和过期重排已实测。共享全应用 shell 退出、整夜长期运行未测试；页面程序关闭旁路与首次页面加载迟延仍须由各自 owning surface 单独处理。默认模型认证失败不因替代模型成功而消除。
+
+### 34.5 剩余问题修复验收（2026-10-14）
+
+默认模型按用户明确选择改为 `relay_openai/gpt-6.1-sol`，通过配置工作区 API 的最新 baseHash 合并保存，活配置和工作区读回一致。原官方通道仍返回 `invalid_api_key`，没有更换或伪称修复官方凭据。配置页的 10 秒连接探测超时；随后对既有中转地址进行真实 Responses 工具往返，模型生成 `acceptance_echo(value=61)`，收到工具结果后返回预期文本，总耗时约 61 秒。隔离实例的人物原生 Session 明确使用同一模型，真实调用 `write_file_tool`，单次批准测试写入后，人物私有工作区 `acceptance-model/note.txt` 内容为 `MODEL_61_OK`。该原生回合停在 `needs_continue`，没有最终可见答复，因此只计原生工具执行成功，不计完整对话终态或三轮自主接续通过。
+
+聊天加载由独立普通 Session 修复任务处理：warm stream 重挂载时，对缺失、错 Session 或 `provisionalTranscript` 的缓存请求 canonical detail，不改变 Companion mailbox、原生 admission、Journal、worker 或 SSE 协议。Launcher 隔离实例 `4436719c` 的健康响应确认 backend HEAD、frontend builtFromCommit 和 workspaceRoot 都属于该任务。首次进入测试人物的无 `companion` Chat URL 后，页面自动补身份，用户历史在 7 秒检查点可见，无持续加载提示、无需 reload、无 pageerror。返回人物大厅再进入、延迟 canonical GET 两秒后也正常显示。普通 Session 无 Companion gate、无持续加载；真实浏览器日志记录 `warm_readback_requested / transcript_unhydrated`，覆盖空缓存 warm 恢复。宽屏桌面验收不代表窄屏或触摸场景。
+
+页面关闭修复归 Electron preload、窄 IPC 和窗口 provider：页面脚本执行前将 `window.close()` 接入现有 `BrowserWindow.close()` 生命周期边界；main 校验主 frame、真实 sender 窗口与 provider 登记 origin，不允许 payload 选择其它实例，不在失败时回退到破坏性 WebContents close。Launcher 与 pet 不获得 workbench 关闭桥。聚焦回归、Electron TypeScript 检查与桌面构建通过，独立审查无确认阻塞项。
+
+真实关闭测试使用一次性隐藏 Electron 42.5.0 窗口和本分支编译后的真实 preload/provider/IPC helper，私有 userData 位于任务缓存；连接的后端仍由正式 Launcher 启动。受控 IPC 拒绝时窗口保持、没有停止请求；重载后桥仍有效。正常 `window.close()` 仅触发一次原有关闭拦截，调用正式 Launcher 停止精确测试 worktree，健康端口停止响应后授权最终关闭窗口。测试人物事先归档，未改共享主窗口或停止共享 shell。此证据证明真实 Electron 关闭桥到 Launcher-owned 后端的停止链路；共享完整 shell 尚未加载本修复，完整主应用退出和整夜运行仍未实测，须在共享实例空闲后经 Launcher 正规刷新。

@@ -113,6 +113,7 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
   return (
     <>
       <VBoardWorkbenchPage
+        chrome={suppressOuterShellChrome ? "embedded" : "workbench"}
         className={p.styles.route}
         hideHeader
         domainRecipe="teams-organization-workbench"
