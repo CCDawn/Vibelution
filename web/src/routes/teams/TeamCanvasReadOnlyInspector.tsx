@@ -2,6 +2,8 @@ import { Eye } from "lucide-react";
 
 import type { TeamCanvasNode } from "../../api/types";
 import { canvasNodeStatusLabel, teamNodeFunctionLabel } from "./teamRouteShellModel";
+import styles from "./TeamCanvasReadOnlyInspector.styles";
+import { canvasNodeTitle } from "./teamCanvasNodePresentation";
 
 export type TeamCanvasReadOnlyInspectorProps = {
   lang: "zh" | "en";
@@ -27,12 +29,12 @@ export function TeamCanvasReadOnlyInspector({
   agentName,
   functionLabel,
   validationIssues,
-  className = "",
-  noticeClassName = "",
-  nodeClassName = "",
+  className = styles.panel,
+  noticeClassName = styles.notice,
+  nodeClassName = styles.fields,
   nodeWideClassName = "",
   emptyClassName = "",
-  issueListClassName = "",
+  issueListClassName = styles.issues,
   issueClassName = "",
 }: TeamCanvasReadOnlyInspectorProps) {
   return (
@@ -47,8 +49,8 @@ export function TeamCanvasReadOnlyInspector({
           <strong>{lang === "zh" ? "只读组织画布" : "Read-only canvas"}</strong>
           <span>
             {lang === "zh"
-              ? "这里仅展示科研团队节点关系，不写回画布配置。"
-              : "This view shows research-team relationships without writing canvas config."}
+              ? "查看团队成员与职责，选择画布节点可切换详情。"
+              : "View team members and roles. Select a canvas node to inspect it."}
           </span>
         </div>
       </div>
@@ -56,7 +58,7 @@ export function TeamCanvasReadOnlyInspector({
         <div className={nodeClassName}>
           <div>
             <span>{lang === "zh" ? "节点" : "Node"}</span>
-            <strong>{node.label}</strong>
+            <strong>{canvasNodeTitle(node, agentName)}</strong>
           </div>
           <div>
             <span>{lang === "zh" ? "职责" : "Role"}</span>

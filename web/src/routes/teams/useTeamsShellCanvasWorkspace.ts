@@ -143,7 +143,10 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
 
-  const canvasFrameRef = useRef<HTMLDivElement | null>(null);
+  const [canvasFrameElement, setCanvasFrameElement] = useState<HTMLDivElement | null>(null);
+  const canvasFrameRef = useCallback((element: HTMLDivElement | null) => {
+    setCanvasFrameElement(element);
+  }, []);
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
 
@@ -226,7 +229,7 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   }, [fallbackVisibleTeamId, requestedVisibleAgentTeamId, requestedVisibleTeamId, selectedTeamId, visibleTeamIds]);
 
   useEffect(() => {
-    const element = canvasFrameRef.current;
+    const element = canvasFrameElement;
     if (!element) {
       return;
     }
@@ -244,7 +247,7 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
     const observer = new ResizeObserver(updateFrameSize);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [canvasFrameElement]);
 
   return {
     selectedTeamId,
@@ -282,6 +285,7 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
 export type TeamsShellCanvasWorkspaceApi = ReturnType<typeof useTeamsShellCanvasWorkspace>;
 
 export type UseTeamsCanvasProjectionInput = {
+  organizationCanvasRequested?: boolean;
   effectiveTeamId: string;
   selectedTeam: Team | null;
   researchWorkflowTeamSelected: boolean;
@@ -327,9 +331,9 @@ export function useTeamsCanvasProjection(input: UseTeamsCanvasProjectionInput) {
   // selection. Structural edits (add/rename/link/archive/room sync) live in
   // team settings, not on the canvas.
   const researchCanvasReadOnly =
-    researchWorkspaceView === "canvas" || teamShellMode === "canvas";
+    Boolean(input.organizationCanvasRequested) || researchWorkspaceView === "canvas" || teamShellMode === "canvas";
 
-  const teamCanvasQueryEnabled = resolveTeamCanvasQueryEnabled({
+  const teamCanvasQueryEnabled = Boolean(input.organizationCanvasRequested && effectiveTeamId && !sourceCollectionStandalone) || resolveTeamCanvasQueryEnabled({
     effectiveTeamId,
     researchWorkflowTeamSelected,
     researchWorkspaceView,

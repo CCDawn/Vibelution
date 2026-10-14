@@ -337,6 +337,8 @@ export function useTeamsWorkbenchFoundation({
     canvasViewportStyle,
     canvasScale,
   } = useTeamsCanvasProjection({
+    organizationCanvasRequested: searchParams.get("teamConversationTeamId") === effectiveTeamId
+      && ["canvas", "group", "member"].includes(searchParams.get("teamConversation") || ""),
     effectiveTeamId,
     selectedTeam,
     researchWorkflowTeamSelected,

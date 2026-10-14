@@ -69,6 +69,16 @@ export function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
   return lang === "zh" ? "就绪" : "Ready";
 }
 
+export function chatRoomRoundStatusLabel(status: string, lang: "zh" | "en") {
+  const labels: Record<string, [string, string]> = {
+    completed: ["已完成", "Completed"], partial: ["部分完成", "Partially complete"],
+    running: ["进行中", "Running"], stopping: ["停止中", "Stopping"], stopped: ["已停止", "Stopped"],
+    failed: ["失败", "Failed"], blocked: ["受阻", "Blocked"], queued: ["等待开始", "Queued"],
+  };
+  const label = labels[status.toLowerCase()];
+  return label ? label[lang === "zh" ? 0 : 1] : status;
+}
+
 export function teamConversationStatusLabel(status: string, lang: "zh" | "en") {
   const normalized = String(status || "").trim();
   const zh: Record<string, string> = {

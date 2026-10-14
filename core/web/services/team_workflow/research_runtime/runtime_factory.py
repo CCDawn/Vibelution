@@ -546,30 +546,7 @@ class WorkflowRuntime:
         self.store.close()
 
 
-def build_workflow_runtime(
-    ledger_path: Path,
-    *,
-    checkpoint_path: Path | str | None = None,
-    read_pool_capacity: int = 4,
-    domain_overrides: dict[str, Any] | None = None,
-    agent_task_factory: Any | None = None,
-    clock: Callable[[], int] | None = None,
-    wake_worker: Callable[[], None] | None = None,
-) -> WorkflowRuntime:
-    """Assemble the production runtime from the Ledger and LangGraph pieces."""
-    checkpoint = Path(checkpoint_path) if checkpoint_path else (
-        ledger_path.parent / "checkpoints.sqlite"
-    )
-    coordinator = ChallengeCupGraphCoordinator(checkpoint)
-
-    store = WorkflowLedgerStore(
-        ledger_path,
-        queue_size=2048,
-        enqueue_timeout_ms=250,
-        read_pool_capacity=read_pool_capacity,
-    )
-    store.open()
-
+def _build_readiness_service(store: WorkflowLedgerStore) -> NodeReadinessService:
     def run_source(run_id: str) -> RunSnapshot | None:
         record = store.get_run(run_id)
         if record is None:
@@ -597,10 +574,38 @@ def build_workflow_runtime(
             return 1
         return 0
 
-    readiness = NodeReadinessService(
+    return NodeReadinessService(
         run_source=run_source,
         attempt_count_source=attempt_count_source,
     )
+
+
+
+def build_workflow_runtime(
+    ledger_path: Path,
+    *,
+    checkpoint_path: Path | str | None = None,
+    read_pool_capacity: int = 4,
+    domain_overrides: dict[str, Any] | None = None,
+    agent_task_factory: Any | None = None,
+    clock: Callable[[], int] | None = None,
+    wake_worker: Callable[[], None] | None = None,
+) -> WorkflowRuntime:
+    """Assemble the production runtime from the Ledger and LangGraph pieces."""
+    checkpoint = Path(checkpoint_path) if checkpoint_path else (
+        ledger_path.parent / "checkpoints.sqlite"
+    )
+    coordinator = ChallengeCupGraphCoordinator(checkpoint)
+
+    store = WorkflowLedgerStore(
+        ledger_path,
+        queue_size=2048,
+        enqueue_timeout_ms=250,
+        read_pool_capacity=read_pool_capacity,
+    )
+    store.open()
+
+    readiness = _build_readiness_service(store)
 
     registry = ActionRegistry()
     ports = RealDomainPorts(
@@ -735,6 +740,7 @@ def build_workflow_runtime(
 
 _PRODUCTION: WorkflowRuntime | None = None
 _PUMP: WorkflowOutboxPump | None = None
+_ARCHIVE_READ_STORE: WorkflowLedgerStore | None = None
 # Serializes the whole start/stop sequence (check → build → assign → close).
 # The singleton check-then-act used to be lock-free, so concurrent starts
 # could build two WorkflowLedgerStores plus two pump threads on the same
@@ -781,23 +787,19 @@ def start_production_workflow_runtime() -> str:
     already-ready runtime stays idempotent and returns ``"ready"``.
 
     Challenge archive mode (封存模式, see ``archive_mode``) skips the start
-    entirely and returns ``"archive_mode"``: an archived batch is read-only,
+    workers and returns ``"archive_mode"``: an archived batch is read-only,
     so no outbox pump workers / maintenance / receipt-persistence /
-    hypothesis-recovery threads may exist. Nothing else is touched, and a
-    later start with the switch off still works (no state was created).
+    hypothesis-recovery threads may exist. Formal reads use existing Ledger
+    reader connections without initializing a writer or creating a database.
     """
     from .archive_mode import challenge_archive_mode_enabled
 
-    if challenge_archive_mode_enabled():
-        logger.info(
-            "challenge archive mode: research workflow runtime not started "
-            "(read-only archive; no resident workflow threads)"
-        )
-        return "archive_mode"
-    global _PRODUCTION, _PUMP
+    archived = challenge_archive_mode_enabled()
+    global _PRODUCTION, _PUMP, _ARCHIVE_READ_STORE
     from core.research.workflow.migration.manifest import is_activated
 
     from .formal_write_runtime import (
+        clear_migration_required,
         mark_migration_required,
         reset_formal_write_runtime_for_tests,
     )
@@ -812,11 +814,47 @@ def start_production_workflow_runtime() -> str:
     try:
         if _PRODUCTION is not None:
             return "ready"
+        if archived and _ARCHIVE_READ_STORE is not None:
+            return "archive_mode"
         data_root = research_workflow_data_root()
-        data_root.mkdir(parents=True, exist_ok=True)
-        if legacy_json_runs_exist(data_root) and not is_activated(data_root):
+        if not archived:
+            data_root.mkdir(parents=True, exist_ok=True)
+        # The manifest loader creates its directory. Archived reads must not
+        # create that directory when the migration has never been initialized.
+        migration_directory_exists = (data_root / "migration").is_dir()
+        if legacy_json_runs_exist(data_root) and not (
+            (not archived or migration_directory_exists) and is_activated(data_root)
+        ):
             mark_migration_required()
             return "migration_required"
+        if archived:
+            # Construct the existing query facade over reader connections only.
+            # open()/initialize() would mutate the schema and start a writer;
+            # checkpoint resolution also opens a writable checkpointer.
+            store = WorkflowLedgerStore(workflow_ledger_path(data_root))
+            try:
+                store.read(lambda repo: repo.execute(
+                    "SELECT run_id FROM workflow_runs LIMIT 1"
+                ).fetchone())
+                registry = ActionRegistry()
+                register_default_adapters(registry, RealDomainPorts(store))
+                context = RealDomainReadinessContext(store, adapter_registry=registry)
+                configure_formal_read_runtime(
+                    store=store,
+                    readiness_service=_build_readiness_service(store),
+                    readiness_context=lambda: context,
+                )
+                clear_migration_required()
+            except Exception:
+                from .formal_read_runtime import release_formal_read_runtime
+
+                release_formal_read_runtime(store)
+                store.close()
+                logger.exception("archive workflow read runtime initialization failed")
+                return "unavailable"
+            _ARCHIVE_READ_STORE = store
+            logger.info("challenge archive mode: formal reads ready; no workflow workers")
+            return "archive_mode"
         pump = WorkflowOutboxPump(workers=workflow_worker_count())
         try:
             _PRODUCTION = build_workflow_runtime(
@@ -834,7 +872,7 @@ def start_production_workflow_runtime() -> str:
 
 
 def stop_production_workflow_runtime() -> None:
-    global _PRODUCTION, _PUMP
+    global _PRODUCTION, _PUMP, _ARCHIVE_READ_STORE
     with _LIFECYCLE_LOCK:
         pump = _PUMP
         _PUMP = None
@@ -845,5 +883,17 @@ def stop_production_workflow_runtime() -> None:
             pump.stop()
         runtime = _PRODUCTION
         _PRODUCTION = None
+        archive_store = _ARCHIVE_READ_STORE
+        _ARCHIVE_READ_STORE = None
         if runtime is not None:
+            from .formal_read_runtime import release_formal_read_runtime
+            from .formal_write_runtime import release_formal_write_runtime
+
+            release_formal_read_runtime(runtime.store)
+            release_formal_write_runtime(runtime.store)
             runtime.close()
+        if archive_store is not None:
+            from .formal_read_runtime import release_formal_read_runtime
+
+            release_formal_read_runtime(archive_store)
+            archive_store.close()

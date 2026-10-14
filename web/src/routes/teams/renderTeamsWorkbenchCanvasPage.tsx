@@ -1,7 +1,7 @@
 /**
  * Canvas-mode shell return for Teams workbench (R2-q extract).
  */
-import { type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { type CSSProperties, type Ref, type ReactNode } from "react";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import { TeamsCanvasComposer } from "./TeamsCanvasComposer";
@@ -64,7 +64,7 @@ export type TeamsWorkbenchCanvasPageProps = {
   teamDetailError: boolean;
   teamCanvasError: boolean;
   canvasViewportStyle: CSSProperties;
-  canvasFrameRef: MutableRefObject<HTMLElement | null>;
+  canvasFrameRef: Ref<HTMLDivElement>;
   nodeToneClass: (node: TeamCanvasNode) => string;
   roleBadgeToneClass: (node: TeamCanvasNode, displayTone?: string) => string;
   completionFlowSlot: ReactNode;
@@ -101,7 +101,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           activeAgents={p.activeAgents}
           agentDisplay={agentDisplayInfo}
           researchCanvasReadOnly={p.researchCanvasReadOnly}
-          hideToolbar={p.hideCanvasToolbar}
+          hideToolbar={Boolean(p.teamHome) || p.hideCanvasToolbar}
           researchCanvasAutoLayoutActive={p.researchCanvasAutoLayoutActive}
           showCommunicationEdges={p.showCommunicationEdges}
           organizationEdgeCount={p.organizationEdgeCount}
@@ -131,7 +131,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           nodeActiveClassName={p.styles.nodeActive}
           nodeReadOnlyClassName={p.styles.nodeReadOnly}
           styles={p.styles}
-          completionFlowSlot={p.completionFlowSlot}
+          completionFlowSlot={p.researchCanvasReadOnly ? null : p.completionFlowSlot}
           teamWorkspaceRoute={teamWorkspaceRoute}
           teamChatRoomRoute={teamChatRoomRoute}
           onSelectNode={p.onSelectNode}
@@ -146,7 +146,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           onNodePointerCancel={p.onNodePointerCancel}
           canvasAuthoring={p.canvasAuthoring}
       />;
-  if (p.teamHome && (!p.researchWorkflowTeamSelected || p.teamHome.conversationRequested)) {
+  if (p.teamHome) {
     return <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => undefined}
       workspace={{ navigation: p.teamShellRail, teamSwitcher: p.teamSwitcher, toolbar: p.teamShellToolbar,
         canvas: organizationCanvas, inspector: p.inspectorBody, resize: p.teamsRailResize }} />;

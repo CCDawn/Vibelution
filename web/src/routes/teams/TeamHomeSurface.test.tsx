@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
@@ -12,6 +12,9 @@ import type { ChatRoomDetail, ChatRoomRound, Team } from "../../api/types";
 import { TeamHomeSurface, type TeamHomeSurfaceProps } from "./TeamHomeSurface";
 
 const timelineProjection = vi.hoisted(() => ({ items: null as never[] | null }));
+vi.mock("./TeamNativeConversation", () => ({ TeamNativeConversation: () => <div data-testid="native-team-chat">原生群聊</div> }));
+
+function LocationProbe() { return <output data-testid="location">{useLocation().search}</output>; }
 
 vi.mock("../chat/useGroupRoomTimeline", () => ({
   useGroupRoomTimeline: ({ detail }: { detail: { rounds?: unknown[] } | null }) => ({
@@ -135,6 +138,36 @@ describe("TeamHomeSurface", () => {
     host = null;
     root = null;
     timelineProjection.items = null;
+  });
+
+  it("opens an explicit team canvas from native chat and returns to the same room", async () => {
+    host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+    await act(async () => {
+      root?.render(<QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/teams?teamId=team-1&teamConversationTeamId=team-1&teamConversation=group&room=room-1"]}>
+          <TeamHomeSurface {...baseProps} conversationRequested workspace={{
+            navigation: <div>成员列表</div>, teamSwitcher: <div>产品团队</div>, toolbar: null,
+            canvas: <div data-testid="organization-canvas">组织画布</div>, inspector: <div>节点详情</div>,
+            resize: { sidebar: { id: "rail", defaultWidth: 220, minWidth: 200, maxWidth: 280 }, aside: { id: "inspector", defaultWidth: 312, minWidth: 280, maxWidth: 380 } },
+          }} />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>);
+    });
+    expect(host.querySelector('[data-testid="native-team-chat"]')).toBeTruthy();
+    const click = async (label: string) => {
+      const button = [...host!.querySelectorAll("button")].find((item) => item.textContent?.trim() === label);
+      expect(button).toBeTruthy();
+      await act(async () => { button?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    };
+    await click("画布");
+    expect(host.querySelector('[data-testid="organization-canvas"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="native-team-chat"]')).toBeNull();
+    expect(host.querySelector("output")?.textContent).toContain("teamConversation=canvas");
+    expect(host.querySelector("output")?.textContent).not.toContain("room=");
+    await click("成员发言");
+    expect(host.querySelector('[data-testid="native-team-chat"]')).toBeTruthy();
+    expect(host.querySelector("output")?.textContent).toContain("room=room-1");
   });
 
   it("shows recent round messages through the shared group renderer and links to the room", () => {

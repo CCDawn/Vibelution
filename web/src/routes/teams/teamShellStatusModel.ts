@@ -10,6 +10,7 @@ import {
 } from "./teamKindModel";
 import type { ResearchBoardColumn } from "./researchBoardModel";
 import { canvasNodeStatusLabel } from "./teamRouteShellModel";
+import { canvasNodeTitle } from "./teamCanvasNodePresentation";
 
 export type TeamShellStageTone = "done" | "active" | "idle" | "blocked";
 export type TeamShellNodeStatusTone = "success" | "warning" | "danger" | "neutral";
@@ -73,11 +74,14 @@ export function teamShellStagesFromBoardColumns(
 export function teamShellNodesFromCanvas(
   nodes: TeamCanvasNode[],
   lang: "zh" | "en",
+  memberNames?: ReadonlyMap<string, string>,
 ): TeamShellStatusNode[] {
   return nodes.map((node) => ({
     id: node.id,
-    label: node.label,
-    agent: node.agentName || node.agentCode || (lang === "zh" ? "未绑定" : "unbound"),
+    label: canvasNodeTitle(node, memberNames?.get(node.agentId)),
+    agent: node.agentName || node.agentCode || (node.agentId
+      ? (lang === "zh" ? "已关联成员" : "Linked member")
+      : (lang === "zh" ? "未绑定" : "unbound")),
     status: canvasNodeStatusLabel(node, lang),
     statusTone: nodeStatusTone(node),
   }));
