@@ -15,7 +15,7 @@ const rowButtonSurfaceClass =
 const detailSurfaceClass =
   `${vuiFlatPanelClass}`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
-const workspaceClass = "grid min-h-0 grid-cols-[clamp(280px,26vw,420px)_minmax(0,1fr)] gap-4 px-4 pb-4 pt-3 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
+const workspaceClass = "grid min-h-0 grid-cols-[clamp(280px,26vw,420px)_minmax(0,1fr)] gap-0 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:!flex-col max-[920px]:overflow-auto max-[920px]:!overflow-y-auto max-[920px]:[&>[data-vui=split-sidebar]]:!h-[44vh] max-[920px]:[&>[data-vui=split-sidebar]]:!w-full max-[920px]:[&>[data-vui=split-sidebar]]:!min-w-0 max-[920px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[920px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[920px]:[&>[data-vui=split-main]]:!min-h-[420px] max-[920px]:[&>[data-vui=split-main]]:!shrink-0 max-[920px]:[&>[role=separator]]:!hidden";
 const loadingBone =
   "block animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none";
 const loadingListClass = "grid min-w-0 content-start gap-1";
@@ -29,7 +29,7 @@ const loadingLineShortClass = `${loadingBone} h-2.5 w-[64%]`;
 const srOnlyClass = "sr-only";
 const panelClass = "grid min-h-0 min-w-0 content-start gap-2";
 const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]`;
-const detailPanelClass = `${panelClass} overflow-auto`;
+const detailPanelClass = `${panelClass} h-full rounded-none border-0 shadow-none overflow-auto`;
 const panelHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const panelEyebrowClass = "m-0 mb-px [font-size:var(--vui-font-xs)] uppercase tracking-[0.07em] text-vui-fg-tertiary";
 const panelTitleClass = "m-0 font-[var(--font-display)] text-vui-md leading-[1.2] text-vui-fg-primary";
