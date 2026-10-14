@@ -44,14 +44,15 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 def settle_session_list_refresh_workers(isolate_runtime_manager_evolution_store):
     """Keep native background reads inside this test's isolated storage lifetime."""
     def settle():
-        for worker in threading.enumerate():
-            if worker.name == "session-list-cache-refresh":
-                worker.join(timeout=10)
-                assert not worker.is_alive(), "Session list refresh outlived isolated test storage"
+        from tests.helpers.session_background_reads import settle_session_background_reads
+
+        settle_session_background_reads()
 
     settle()
     session_service._invalidate_session_list_cache()
     yield
+    if callable(isolate_runtime_manager_evolution_store):
+        isolate_runtime_manager_evolution_store()
     settle()
 
 

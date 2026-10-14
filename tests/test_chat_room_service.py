@@ -54,7 +54,7 @@ _KERNEL_SERVICE_DEFAULT_PROJECT_ROOT = agent_kernel_service.PROJECT_ROOT
 
 
 @pytest.fixture(autouse=True)
-def _restore_service_project_root_globals():
+def _restore_service_project_root_globals(isolate_runtime_manager_evolution_store):
     """Contain the cross-module PROJECT_ROOT writes room ops perform."""
 
     # Inbound cure: agent_kernel_service is not covered by the conftest
@@ -68,12 +68,15 @@ def _restore_service_project_root_globals():
         for module in _SERVICE_GLOBAL_ROOT_MODULES
     }
     yield
-    # Runs before the outer fixtures' monkeypatch teardown, so restoring the
-    # snapshot keeps their recorded unwind values intact while rolling back
-    # every plain assignment this test's service calls performed.
-    for module, value in saved.items():
-        if value is not None:
-            module.PROJECT_ROOT = value
+    try:
+        if callable(isolate_runtime_manager_evolution_store):
+            isolate_runtime_manager_evolution_store()
+    finally:
+        # Restore only after async readers stop, while preserving the outer
+        # monkeypatch fixture's recorded unwind values even on drain failure.
+        for module, value in saved.items():
+            if value is not None:
+                module.PROJECT_ROOT = value
 
 
 def _valid_meeting_output(conclusion):
