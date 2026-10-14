@@ -4,8 +4,8 @@ const styles = {
   surfaceStructured: "content-start",
   srOnly: "sr-only",
   structuredPanel: [
-    "grid min-h-[min(540px,calc(100dvh_-_120px))] w-full gap-3 overflow-auto rounded-[var(--radius-panel)] md:overflow-hidden",
-    "border border-vui-border-subtle bg-vui-surface-panel p-3 text-vui-fg-primary shadow-none",
+    "grid h-full min-h-0 w-full gap-0 overflow-auto md:overflow-hidden",
+    "bg-transparent p-0 text-vui-fg-primary shadow-none",
   ].join(" "),
   skeletonLine: [
     "block h-2.5 w-full max-w-[340px] animate-pulse rounded-full",
@@ -17,15 +17,14 @@ const styles = {
   ].join(" "),
   configGrid: "grid min-h-0 grid-cols-1 gap-3 md:grid-cols-[minmax(168px,0.24fr)_minmax(0,1fr)]",
   navigationPanel: [
-    "grid content-start gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle",
-    "bg-vui-surface-row p-2.5",
+    "vui-workbench-rail grid content-start gap-2 p-2.5",
   ].join(" "),
   navigationRow: "block h-8 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel",
   navigationRowActive: [
     "block h-8 rounded-[var(--radius-control)] border",
     "border-[color-mix(in_srgb,var(--accent-cool)_32%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))]",
   ].join(" "),
-  contentPanel: "grid min-h-0 content-start gap-3 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row p-3",
+  contentPanel: "vui-workbench-pane grid min-h-0 content-start gap-3 p-3",
   sectionHeading: "flex min-w-0 items-start justify-between gap-3 border-b border-vui-border-subtle pb-3",
   headingCopy: "grid min-w-0 flex-1 gap-2",
   headingAction: "block h-8 w-20 shrink-0 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel",

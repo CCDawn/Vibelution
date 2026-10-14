@@ -14,9 +14,9 @@ const mutedControl =
 
 export const gitRouteStyles = {
   route:
-    `grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-auto ${vuiWorkspaceFillClass}`,
+    "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-auto",
   header:
-    "mx-2 mt-1.5 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
+    "min-w-0",
   panelEyebrow: "m-0 mb-0.5 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
   refreshButton:
     "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
@@ -34,11 +34,11 @@ export const gitRouteStyles = {
   // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
   resizeHandle: "max-[860px]:hidden",
   changePanel:
-    `grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2`,
+    "grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 p-2",
   commitPanel:
-    `grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2 max-[1200px]:col-span-full max-[1200px]:row-start-2 max-[1200px]:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] max-[1200px]:grid-rows-[auto_minmax(0,1fr)] max-[1200px]:items-start max-[860px]:col-auto max-[860px]:row-auto max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-[auto_auto_minmax(180px,1fr)]`,
+    "ml-1.5 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 p-2 max-[1200px]:ml-0 max-[1200px]:col-span-full max-[1200px]:row-start-2 max-[1200px]:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] max-[1200px]:grid-rows-[auto_minmax(0,1fr)] max-[1200px]:items-start max-[860px]:col-auto max-[860px]:row-auto max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-[auto_auto_minmax(180px,1fr)]",
   gitOverviewPanel:
-    "grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-1 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
+    "grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 p-2 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-1 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   cleanStateStrip:
     `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(140px,auto)_minmax(0,1fr)] items-center gap-3 ${panelSurface} px-3 py-2.5 text-left text-inherit hover:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] max-[860px]:grid-cols-[minmax(0,1fr)] [&_h2]:m-0 [&_h2]:text-vui-md [&_h2]:text-vui-fg-primary [&>span]:min-w-0 [&>span]:[overflow-wrap:anywhere] [&>span]:[white-space:normal] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-vui-fg-secondary`,
   gitSituationGrid:
@@ -50,7 +50,7 @@ export const gitRouteStyles = {
   worktreeItem:
     `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-2 ${rowSurface} px-2 py-2 text-left text-inherit ${rowSurfaceHover} max-[520px]:grid-cols-[minmax(0,1fr)] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_code]:shrink-0 [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)]`,
   historyPanel:
-    "grid-rows-[auto_minmax(0,1fr)] max-[1200px]:[.workspaceOverview_&]:col-start-2 max-[1200px]:[.workspaceOverview_&]:row-[1/span_2] max-[1200px]:[.workspaceOverview_&]:grid-cols-1 max-[1200px]:[.workspaceOverview_&]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
+    "[.workspaceOverview_&]:ml-0 grid-rows-[auto_minmax(0,1fr)] max-[1200px]:[.workspaceOverview_&]:col-start-2 max-[1200px]:[.workspaceOverview_&]:row-[1/span_2] max-[1200px]:[.workspaceOverview_&]:grid-cols-1 max-[1200px]:[.workspaceOverview_&]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",
   panelHeader: "flex items-center justify-between gap-2 [&_h2]:m-0 [&_h2]:text-vui-sm",
   countPill:

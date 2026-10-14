@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Outlet } from "react-router-dom";
 
 import {
@@ -15,12 +15,13 @@ import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
 import { LauncherNavigation } from "./LauncherNavigation";
-import { VSplitWorkspace, VSurface } from "../components/vui";
+import { VSplitWorkspace, VSurface, VWorkbenchFrame } from "../components/vui";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
 
 export function LauncherShell() {
+  const routeContent = useMemo(() => <Outlet />, []);
   const { lang } = useShellI18n({ configEnabled: false });
   const [theme] = useState(() => readStoredWorkbenchTheme());
   const queryClient = useQueryClient();
@@ -87,7 +88,7 @@ export function LauncherShell() {
         className={styles.workspace}
         columnsClassName={styles.columns}
         sidebar={<LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} />}
-        main={<VSurface as="div" tone="panel" padding="none" className={styles.main}><Outlet /></VSurface>}
+        main={<VSurface as="div" tone="panel" padding="none" className={styles.main}><VWorkbenchFrame>{routeContent}</VWorkbenchFrame></VSurface>}
       />
     </div>
   );

@@ -25,6 +25,8 @@ import {
   VSurface,
   VStringSelect,
   VTabs,
+  VUI_WORKBENCH_RAIL_CLASS,
+  VUI_WORKBENCH_TOOLBAR_CLASS,
 } from "../components/vui";
 import { persistPaneVisibility, readPaneVisibility } from "../components/layout/paneVisibilityPersistence";
 import styles from "./SupervisedConversationWorkspace.styles";
@@ -296,7 +298,7 @@ export function SupervisedConversationWorkspace({
   const showContext = showNavigation;
   const closeNavigation = () => setNavigationOpen(false);
   const contextPanel = (
-    <VSurface as="aside" padding="none" className={styles.contextPanel} aria-label={labels.navigation}>
+    <VSurface as="aside" padding="none" className={`${VUI_WORKBENCH_RAIL_CLASS} ${styles.contextPanel}`} aria-label={labels.navigation}>
       {hasRunGroups ? (
         <nav aria-label={labels.navigation} className={styles.contextRunGroups}>
           {runGroups?.map((group) => {
@@ -482,7 +484,7 @@ export function SupervisedConversationWorkspace({
       data-has-run={hasRun ? "true" : "false"}
       data-vui-region="supervised-conversation-workspace"
     >
-      <header className={`${styles.header} ${showTrackSwitcher || showPhaseNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation} ${narrow ? styles.narrowHeader : ""} ${narrow && (showTrackSwitcher || showPhaseNavigation) ? styles.narrowHeaderWithNavigation : ""}`}>
+      <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header} ${showTrackSwitcher || showPhaseNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation} ${narrow ? styles.narrowHeader : ""} ${narrow && (showTrackSwitcher || showPhaseNavigation) ? styles.narrowHeaderWithNavigation : ""}`}>
         <div className={styles.runIdentity} data-has-source={!setupOpen && sourceLabel ? "true" : "false"}>
           {showContext ? <VIconButton label={labels.navigation} variant="ghost" icon={<PanelLeft size={16} />}
             aria-expanded={narrow ? navigationOpen : showDesktopNavigation}
@@ -587,6 +589,7 @@ export function SupervisedConversationWorkspace({
       {showContext && !narrow && showDesktopNavigation ? contextPanel : null}
       <VSplitWorkspace
         aside={desktopEvidence}
+        chrome="workbench"
         className={styles.splitWorkspace}
         columnsClassName=""
         main={mainContent}

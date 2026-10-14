@@ -4,6 +4,8 @@ import chatApiSource from "./chat.ts?raw";
 import filesApiSource from "./files.ts?raw";
 import agentsApiSource from "./agents.ts?raw";
 import workbenchSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import sessionMutationsSource from "../routes/chat/useChatSessionMutations.ts?raw";
+import railPreviewSource from "../routes/chat/useChatRailPreview.ts?raw";
 
 describe("chat workbench remaining transports", () => {
   it("owns child-session and file-content reads in domain APIs", () => {
@@ -17,12 +19,16 @@ describe("chat workbench remaining transports", () => {
 
   it("keeps ChatCodingRouteWorkbench free of inline JSON paths", () => {
     expect(workbenchSource).toContain("listSessionChildSessions(");
-    expect(workbenchSource).toContain("updateAgent(");
+    expect(workbenchSource).toContain("useChatSessionMutations(");
+    expect(sessionMutationsSource).toContain("updateAgent(");
     expect(workbenchSource).toContain("archiveAgent(");
-    expect(workbenchSource).toContain("fetchFileContent(");
-    expect(workbenchSource).not.toContain('from "../../api/client"');
-    expect(workbenchSource).not.toContain("/api/sessions/");
-    expect(workbenchSource).not.toContain("/api/agents/");
-    expect(workbenchSource).not.toContain("/api/files/");
+    expect(workbenchSource).toContain("useChatRailPreview(");
+    expect(railPreviewSource).toContain("fetchFileContent(");
+    for (const source of [workbenchSource, sessionMutationsSource, railPreviewSource]) {
+      expect(source).not.toContain('from "../../api/client"');
+      expect(source).not.toContain("/api/sessions/");
+      expect(source).not.toContain("/api/agents/");
+      expect(source).not.toContain("/api/files/");
+    }
   });
 });

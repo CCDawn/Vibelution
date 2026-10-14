@@ -77,7 +77,7 @@ export function UsageRoute() {
     [copy("Agent ID", "Agent ID"), summary?.rollupFilters?.agentId || "—"],
   ];
 
-  return <div className={styles.page} data-vui-domain-recipe="usage-workbench">
+  return <div className={styles.page} data-vui-page="surface" data-vui-page-scroll="true" data-vui-domain-recipe="usage-workbench">
     <div className={styles.sheet}>
       <nav className={styles.breadcrumb} aria-label={copy("设置导航", "Settings navigation")}>
         <VRouteLinkButton to="/config" variant="ghost" icon={<ArrowLeft size={15} />}>

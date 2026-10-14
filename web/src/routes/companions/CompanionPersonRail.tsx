@@ -1,7 +1,7 @@
 import { ArrowLeft, Heart, MapPin, Settings, Sparkles } from "lucide-react";
 
 import type { VirtualHumanCompanion } from "../../api/types";
-import { VRouteLinkButton, VStateSurface, VStatusChip } from "../../components/vui";
+import { VRouteLinkButton, VStateSurface, VStatusChip, VUI_WORKBENCH_RAIL_CLASS } from "../../components/vui";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import { CompanionPortrait } from "./CompanionPortrait";
 import {
@@ -44,7 +44,7 @@ export function CompanionPersonRail({
   const localTime = companion ? formatCompanionLocalTime(companion.snapshot, lang) : "--:--";
   return (
     <aside
-      className={`${className} ${styles.personRail}`}
+      className={`${VUI_WORKBENCH_RAIL_CLASS} ${className} ${styles.personRail}`}
       aria-hidden={collapsed}
       role={overlayOpen ? "dialog" : undefined}
       aria-label={companion ? `${companion.displayName} 人物栏` : unavailableTitle}

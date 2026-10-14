@@ -1,5 +1,6 @@
 import { VDialog } from "../components/vui/primitives/VDialog";
 import { VSplitWorkspace } from "../components/vui/layout/VSplitWorkspace";
+import { VWorkbenchFrame } from "../components/vui/layout/VWorkbenchFrame";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { collapseProjectUtilityRail, openProjectUtilityRail, useProjectUtilityRail } from "./projectUtilityRail";
 import { projectTaskCount } from "./projectTaskCount";
@@ -1056,6 +1057,8 @@ export function AppShell() {
   const { lang, t } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
+  // Router context still updates Outlet; shell polling must not recreate its element.
+  const routeContent = useMemo(() => <Outlet />, []);
   const chatRoute = useChatRouteSelection();
   const navigate = useNavigate();
   const navigationType = useNavigationType();
@@ -3144,7 +3147,7 @@ export function AppShell() {
         onRecover={() => { void beginRestart(); }}
         onRetry={() => { void backendHealthQuery.refetch(); }}
       /></div>
-        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><Outlet /></>}
+        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><VWorkbenchFrame flush={location.pathname === "/chat"}>{routeContent}</VWorkbenchFrame></>}
           aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
           resize={{ layoutId: WORKBENCH_LAYOUT_IDS.projectUtilities, aside: { defaultWidth: 420, minWidth: 320, maxWidth: 640 } }} />
       </div>

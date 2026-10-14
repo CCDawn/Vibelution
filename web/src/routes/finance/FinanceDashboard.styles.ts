@@ -11,7 +11,7 @@ export default {
   panelHeading: `flex min-w-0 items-center justify-between gap-2 border-b ${border} pb-2 [&_h2]:m-0 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-[var(--fg-primary)] [&_span]:text-xs ${muted}`,
   tableWrap: "min-w-0 max-w-full overflow-x-auto",
   stockButton: "!h-auto !min-h-0 !max-w-full !justify-start !px-0.5 !py-1 text-left",
-  stockIdentity: "grid min-w-0 gap-0.5 [&_strong]:truncate [&_strong]:text-xs [&_strong]:font-medium [&_strong]:text-[var(--fg-primary)] [&_small]:truncate [&_small]:font-mono [&_small]:text-[var(--vui-type-caption-size)] [&_small]:text-[var(--fg-tertiary)]",
+  stockIdentity: "grid min-w-0 gap-0.5 [&_strong]:truncate [&_strong]:text-xs [&_strong]:font-medium [&_strong]:text-[var(--fg-primary)] [&_small]:truncate [&_small]:font-mono [&_small]:[font-size:var(--vui-type-caption-size)] [&_small]:text-[var(--fg-tertiary)]",
   number: "font-mono text-xs tabular-nums text-[var(--fg-primary)]",
   muted: muted,
   rise: "text-[var(--state-error)]",
@@ -23,5 +23,5 @@ export default {
   shortcuts: "grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2",
   recentList: `grid min-w-0 divide-y ${border}`,
   recentRow: `!h-auto !min-h-0 !w-full !justify-between !gap-3 !rounded-none !px-1 !py-2 text-left [&_span]:min-w-0`,
-  recentTitle: "grid min-w-0 flex-1 gap-1 [&_strong]:truncate [&_strong]:text-xs [&_strong]:font-medium [&_strong]:text-[var(--fg-primary)] [&_small]:truncate [&_small]:text-[var(--vui-type-caption-size)] [&_small]:text-[var(--fg-tertiary)]",
+  recentTitle: "grid min-w-0 flex-1 gap-1 [&_strong]:truncate [&_strong]:text-xs [&_strong]:font-medium [&_strong]:text-[var(--fg-primary)] [&_small]:truncate [&_small]:[font-size:var(--vui-type-caption-size)] [&_small]:text-[var(--fg-tertiary)]",
 } as const;

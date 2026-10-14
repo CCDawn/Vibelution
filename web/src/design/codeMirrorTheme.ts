@@ -2,9 +2,11 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { EditorView } from "@codemirror/view";
 
+const readableCoolAccent = "color-mix(in srgb, var(--accent-cool-2) 80%, var(--fg-primary) 20%)";
+
 export const workbenchCodeMirrorSyntaxHighlightStyle = HighlightStyle.define([
   { tag: [tags.meta, tags.comment], color: "var(--fg-secondary)" },
-  { tag: [tags.keyword, tags.operatorKeyword], color: "var(--accent-cool-2)" },
+  { tag: [tags.keyword, tags.operatorKeyword], color: readableCoolAccent },
   {
     tag: [tags.name, tags.character, tags.propertyName, tags.macroName],
     color: "var(--accent-warm-2)",
@@ -36,7 +38,7 @@ export const workbenchCodeMirrorSyntaxHighlightStyle = HighlightStyle.define([
       tags.link,
       tags.special(tags.string),
     ],
-    color: "var(--accent-cool-2)",
+    color: readableCoolAccent,
   },
   { tag: tags.separator, color: "var(--fg-primary)" },
   { tag: [tags.typeName, tags.className], color: "var(--accent-warm-2)" },
@@ -50,24 +52,24 @@ export const workbenchCodeMirrorSyntaxHighlightStyle = HighlightStyle.define([
   },
   {
     tag: tags.deleted,
-    color: "color-mix(in srgb, var(--state-error) 82%, var(--fg-primary) 18%)",
+    color: "color-mix(in srgb, var(--state-error) 78%, var(--fg-primary) 22%)",
   },
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
   {
     tag: tags.link,
-    color: "var(--accent-cool-2)",
+    color: readableCoolAccent,
     textDecoration: "underline",
   },
   {
     tag: tags.heading,
     fontWeight: "bold",
-    color: "color-mix(in srgb, var(--state-error) 82%, var(--fg-primary) 18%)",
+    color: "color-mix(in srgb, var(--state-error) 78%, var(--fg-primary) 22%)",
   },
   {
     tag: tags.invalid,
-    color: "color-mix(in srgb, var(--state-error) 82%, var(--fg-primary) 18%)",
+    color: "color-mix(in srgb, var(--state-error) 78%, var(--fg-primary) 22%)",
     textDecoration: "underline wavy",
   },
 ]);

@@ -91,6 +91,7 @@ export const VSessionWorkbenchPage = forwardRef<HTMLDivElement, VSessionWorkbenc
         {...(hostAsRoot ? props : {})}
         data-vui={hostAsRoot ? (props as { "data-vui"?: string })["data-vui"] ?? "session-workbench-host" : "session-workbench-host"}
         data-vui-recipe={hostAsRoot ? "session-workbench-page" : undefined}
+        data-vui-page={hostAsRoot ? "session" : undefined}
         data-vui-domain-recipe={hostAsRoot ? domainRecipe : undefined}
         data-vui-layout-id={layoutId}
         aria-label={hostAsRoot ? ariaLabel : undefined}

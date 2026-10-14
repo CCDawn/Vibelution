@@ -28,7 +28,7 @@ export default {
   stockButton: "!h-auto !min-h-0 !max-w-full !justify-start !px-0.5 !py-0.5 text-left",
   stockCell: "grid min-w-0 gap-0.5",
   stockName: "truncate text-xs font-medium text-[var(--fg-primary)]",
-  ticker: `font-mono text-[var(--vui-type-caption-size)] ${muted}`,
+  ticker: `font-mono [font-size:var(--vui-type-caption-size)] ${muted}`,
   positive: "font-mono text-[var(--state-error)]",
   negative: "font-mono text-[var(--state-success)]",
   number: "font-mono text-[var(--fg-primary)]",
@@ -49,5 +49,5 @@ export default {
   metric: `grid min-w-0 gap-1 rounded border ${border} bg-[var(--vui-surface-row)] p-2`,
   metricLabel: `text-xs ${muted}`,
   metricValue: "break-words font-mono text-sm font-semibold text-[var(--fg-primary)]",
-  metricMeta: `text-[var(--vui-type-caption-size)] ${muted}`,
+  metricMeta: `[font-size:var(--vui-type-caption-size)] ${muted}`,
 } as const;

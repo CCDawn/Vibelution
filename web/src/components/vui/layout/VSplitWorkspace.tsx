@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, type ComponentPropsWithoutRef, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { PaneCollapseHandle } from "../../layout/PaneCollapseHandle";
 import { PaneResizeHandle } from "../../layout/PaneResizeHandle";
@@ -12,6 +12,9 @@ const DEFAULT_SIDEBAR: PaneSpec = {
   minWidth: 220,
   maxWidth: 480,
 };
+
+// Primary panes own their boundary; a nested recipe must not draw it again.
+const WorkbenchPaneBoundary = createContext(false);
 
 const DEFAULT_ASIDE: PaneSpec = {
   id: "aside",
@@ -60,6 +63,8 @@ export type VSplitWorkspaceResizeConfig = {
 };
 
 export type VSplitWorkspaceProps = Omit<ComponentPropsWithoutRef<"div">, "children"> & {
+  /** Page panes use shared chrome; nested editors retain their own surfaces. */
+  chrome?: "workbench" | "embedded";
   aside?: ReactNode;
   main: ReactNode;
   sidebar?: ReactNode;
@@ -109,6 +114,7 @@ function stripGridLayoutClasses(className?: string): string {
 
 function ResizableSplitWorkspace({
   aside,
+  chrome = "embedded",
   className,
   main,
   sidebar,
@@ -197,6 +203,7 @@ function ResizableSplitWorkspace({
       {...props}
       ref={setSplitContainerRef}
       data-vui="split-workspace"
+      data-vui-split-chrome={chrome}
       data-vui-resizable="true"
       data-vui-collapsible={resize.collapse ? "true" : undefined}
       data-vui-layout-id={resize.layoutId}
@@ -336,6 +343,7 @@ function ResizableSplitWorkspace({
 
 export function VSplitWorkspace({
   aside,
+  chrome = "embedded",
   className,
   columnsClassName,
   main,
@@ -343,9 +351,13 @@ export function VSplitWorkspace({
   resize,
   ...props
 }: VSplitWorkspaceProps) {
+  const withinWorkbenchPane = useContext(WorkbenchPaneBoundary);
+  const effectiveChrome = withinWorkbenchPane ? "embedded" : chrome;
   if (resize && typeof resize === "object" && resize.layoutId && resize.enabled !== false) {
     return (
+      <WorkbenchPaneBoundary.Provider value={withinWorkbenchPane || effectiveChrome === "workbench"}>
       <ResizableSplitWorkspace
+        chrome={effectiveChrome}
         {...props}
         aside={aside}
         className={className}
@@ -353,6 +365,7 @@ export function VSplitWorkspace({
         sidebar={sidebar}
         resize={resize}
       />
+      </WorkbenchPaneBoundary.Provider>
     );
   }
 
@@ -366,9 +379,11 @@ export function VSplitWorkspace({
           : "grid-cols-[minmax(0,1fr)]";
 
   return (
+    <WorkbenchPaneBoundary.Provider value={withinWorkbenchPane || effectiveChrome === "workbench"}>
     <div
       {...props}
       data-vui="split-workspace"
+      data-vui-split-chrome={effectiveChrome}
       className={["grid min-h-0 min-w-0 gap-2", columns, className].filter(Boolean).join(" ")}
     >
       {sidebar ? (
@@ -385,5 +400,6 @@ export function VSplitWorkspace({
         </aside>
       ) : null}
     </div>
+    </WorkbenchPaneBoundary.Provider>
   );
 }

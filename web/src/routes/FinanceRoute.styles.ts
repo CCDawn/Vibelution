@@ -11,7 +11,7 @@ export default {
   frame: "finance-research-workspace flex h-[calc(100dvh_-_var(--shell-topbar-height))] w-full max-w-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--vui-surface-panel)] text-[var(--fg-primary)]",
   actions: "flex shrink-0 items-center gap-1",
   split: "h-full w-full max-w-full flex-1 !gap-0 overflow-hidden",
-  workspacePane: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--vui-surface-row)]",
+  workspacePane: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-transparent",
   workspacePaneHeader: "h-11 shrink-0 !justify-between px-4 !py-0",
   workspaceAsideHead: "shrink-0 border-b border-vui-border-subtle px-3 pb-2",
   workspaceAsideHeader: "h-11 !justify-between !gap-2 !p-0",

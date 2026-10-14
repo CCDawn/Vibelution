@@ -3,6 +3,11 @@
  * Keep routes on these tokens so shells stay coordinated without per-page reinvention.
  */
 
+/** Chrome shared by recipes and domain workspaces with custom geometry. */
+export const VUI_WORKBENCH_PANE_CLASS = "vui-workbench-pane";
+export const VUI_WORKBENCH_RAIL_CLASS = "vui-workbench-rail";
+export const VUI_WORKBENCH_TOOLBAR_CLASS = "vui-workbench-toolbar";
+
 /** Full-viewport workbench page: header auto + body fills remainder. */
 export const VUI_PAGE_FILL_CLASS =
   "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] content-stretch gap-0 overflow-hidden";
@@ -40,7 +45,7 @@ export const VUI_CANVAS_SURFACE_CLASS =
 
 /** Compact chrome strip under route headers (mode switch, filters). */
 export const VUI_PAGE_TOOLBAR_STRIP_CLASS =
-  "flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2";
+  "vui-workbench-toolbar flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2";
 
 /** Primary scroll/content padding inside board main. */
 export const VUI_BOARD_CONTENT_PAD_CLASS =

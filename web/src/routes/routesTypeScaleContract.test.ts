@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import visualBaseline from "../design/visualTokenEscalation.baseline.json";
 
 /**
  * Route-layer type-scale contract.
@@ -13,8 +14,8 @@ import { describe, expect, it } from "vitest";
 
 const routesRoot = resolve(import.meta.dirname);
 
-const BUILTIN_TEXT_SIZE_BASELINE = 25;
-const ARBITRARY_TEXT_SIZE_BASELINE = 7;
+// The authoritative no-growth budget is per file, shared with the visual-token
+// ratchet. Old aggregate limits predated the Finance/Teams route migration.
 
 const BUILTIN_TEXT_UTILITY = /\btext-(?:sm|xs|base|lg|xl|2xl|3xl)\b/g;
 const ARBITRARY_TEXT_SIZE = /text-\[[0-9.]+(?:px|rem)\]/g;
@@ -32,21 +33,22 @@ function collectSourceFiles(dir: string): string[] {
   });
 }
 
-function countMatches(pattern: RegExp): number {
-  return collectSourceFiles(routesRoot).reduce((total, file) => {
+function grownFiles(pattern: RegExp, baseline: Record<string, number>): string[] {
+  return collectSourceFiles(routesRoot).flatMap((file) => {
     const source = readFileSync(file, "utf8");
-    return total + [...source.matchAll(pattern)].length;
-  }, 0);
+    const count = [...source.matchAll(pattern)].length;
+    const path = relative(resolve(routesRoot, ".."), file).replaceAll("\\", "/");
+    const ceiling = baseline[path] ?? 0;
+    return count > ceiling ? [`${path}: ${count} > ${ceiling}`] : [];
+  });
 }
 
 describe("route type scale contract", () => {
   it("does not grow built-in Tailwind text sizes in routes", () => {
-    expect(countMatches(BUILTIN_TEXT_UTILITY)).toBeLessThanOrEqual(BUILTIN_TEXT_SIZE_BASELINE);
+    expect(grownFiles(BUILTIN_TEXT_UTILITY, visualBaseline.categories.builtinFontSize.files)).toEqual([]);
   });
 
   it("does not add arbitrary font sizes in routes", () => {
-    expect(countMatches(ARBITRARY_TEXT_SIZE)).toBeLessThanOrEqual(
-      ARBITRARY_TEXT_SIZE_BASELINE,
-    );
+    expect(grownFiles(ARBITRARY_TEXT_SIZE, visualBaseline.categories.arbitraryTextSize.files)).toEqual([]);
   });
 });

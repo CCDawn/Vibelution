@@ -45,6 +45,8 @@ export type VBoardWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">,
   boardClassName?: string;
   asideClassName?: string;
   workspaceClassName?: string;
+  /** Embedded hosts let their child recipe own the window panes. */
+  chrome?: "workbench" | "embedded";
   className?: string;
 };
 
@@ -74,6 +76,7 @@ export function VBoardWorkbenchPage({
   boardClassName,
   asideClassName,
   workspaceClassName,
+  chrome = "workbench",
   className,
   ...props
 }: VBoardWorkbenchPageProps) {
@@ -83,6 +86,7 @@ export function VBoardWorkbenchPage({
 
   return (
     <VWorkbenchPage
+      chrome="workspace"
       ariaLabel={ariaLabel}
       data-vui-recipe="board-workbench-page"
       data-vui-domain-recipe={domainRecipe}
@@ -102,6 +106,7 @@ export function VBoardWorkbenchPage({
       )}
       <div data-vui="board-workbench-body" className={cn(VUI_PAGE_BODY_FILL_CLASS, "min-h-0 flex-1")}>
         <VSplitWorkspace
+          chrome={chrome}
           className={cn("h-full min-h-0", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}

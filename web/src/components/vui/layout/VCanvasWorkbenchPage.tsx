@@ -282,6 +282,7 @@ export function VCanvasWorkbenchPage({
 
   return (
     <VWorkbenchPage
+      chrome="workspace"
       ariaLabel={ariaLabel}
       data-vui-recipe="canvas-workbench-page"
       data-vui-domain-recipe={domainRecipe}
@@ -340,6 +341,7 @@ export function VCanvasWorkbenchPage({
           toolbar strip and clips the canvas. flex-1 min-h-0 fills the remainder.
         */}
         <VSplitWorkspace
+          chrome="workbench"
           className={cn("min-h-0 min-w-0 flex-1 overflow-hidden !h-auto", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}

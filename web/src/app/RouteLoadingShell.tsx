@@ -122,6 +122,7 @@ export function RouteLoadingShell({
   meta,
   surface = "workbench",
 }: RouteLoadingShellProps) {
+  const pageChrome = ["default", "companions", "usage", "pet", "reset"].includes(layout) ? "surface" : "workspace";
   if (layout === "finance") return <FinanceResearchLoading />;
   if (layout === "chat") {
     return (
@@ -142,6 +143,7 @@ export function RouteLoadingShell({
         aria-busy="true"
         data-vui-app={surface}
         data-route-loading={layout}
+        data-vui-page={pageChrome}
         className={styles.surfaceQuiet}
       >
         <span className={styles.srOnly}>{frameLabel}</span>
@@ -172,6 +174,7 @@ export function RouteLoadingShell({
       aria-busy="true"
       data-vui-app={surface}
       data-route-loading={layout}
+      data-vui-page={pageChrome}
       className={structured ? `${styles.surface} ${styles.surfaceStructured}` : styles.surfaceQuiet}
     >
       <span className={styles.srOnly}>{resolvedLabel}</span>

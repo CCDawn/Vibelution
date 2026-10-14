@@ -203,7 +203,7 @@ export function RouteErrorBoundary({ surface = "workbench" }: { surface?: RouteE
   const secondaryOnPress = viewModel.secondaryAction === "navigate" ? goHome : reloadPage;
 
   return (
-    <div className={styles.surfaceClass} data-vui-app={surface} role="alert" aria-live="assertive">
+    <div className={styles.surfaceClass} data-vui-page="surface" data-vui-app={surface} role="alert" aria-live="assertive">
       <section className={styles.panelClass} aria-label={viewModel.title}>
         <p className={styles.kickerClass}>{viewModel.kicker}</p>
         <h1 className={styles.titleClass}>{viewModel.title}</h1>

@@ -56,7 +56,8 @@ describe("workbench connection recovery", () => {
   it("observes refetch errors and leaves the route mounted while using the existing restart owner", () => {
     expect(shellSource).toContain("(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen");
     expect(shellSource).toContain("onRecover={() => { void beginRestart(); }}");
-    expect(shellSource).toContain("<CompanionDesktopAttention /><Outlet />");
+    expect(shellSource).toContain("const routeContent = useMemo(() => <Outlet />, []);");
+    expect(shellSource).toContain('<CompanionDesktopAttention /><VWorkbenchFrame flush={location.pathname === "/chat"}>{routeContent}</VWorkbenchFrame>');
     expect(shellSource).not.toContain("unavailable ? null : <Outlet");
     expect(shellSource.indexOf("<div className={styles.mainArea}>" )).toBeLessThan(shellSource.indexOf("<WorkbenchConnectionNotice"));
     expect(shellSource).toContain("className={styles.contentFrame}");
