@@ -9,6 +9,7 @@ import surfaceModelSource from "../routes/chat/useChatConversationSurfaceModel.t
 import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
+import sessionCreateSource from "../routes/chat/useChatSessionCreateMutation.ts?raw";
 import composerActionsSource from "../routes/chat/useChatComposerSubmit.ts?raw";
 import composerSource from "../routes/chat/useChatComposerTurnMutations.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
@@ -49,7 +50,8 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
     expect(apiSource).toContain('method: "PATCH"');
     expect(apiSource).toContain('method: "DELETE"');
-    expect(lifecycleSource).toContain("createChatSession");
+    expect(sessionCreateSource).toContain("createChatSession");
+    expect(lifecycleSource).toContain("useChatSessionCreateMutation(");
     expect(lifecycleSource).toContain("deleteChatSession");
     expect(lifecycleSource).toContain("updateChatSession");
     expect(apiSource).toContain("isSessionNotFoundError(error)");
@@ -58,6 +60,7 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("/api/sessions/bulk-delete");
     expect(lifecycleSource).toContain("bulkDeleteChatSessions");
     expect(lifecycleSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(sessionCreateSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
     expect(lifecycleSource).not.toContain('fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`');
   });
 

@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const lifecycleSource = readFileSync(join(here, "useChatWorkspaceLifecycle.ts"), "utf8");
+const sessionCreateSource = readFileSync(join(here, "useChatSessionCreateMutation.ts"), "utf8");
 const routeSelectionSource = readFileSync(join(here, "useChatRouteSelection.ts"), "utf8");
 const actionsSource = readFileSync(join(here, "useChatWorkspaceActions.ts"), "utf8");
 
 describe("chat workspace user-action telemetry contract", () => {
   it("tracks session lifecycle mutations through startUserAction", () => {
-    expect(lifecycleSource).toContain('startUserAction("session_create"');
+    expect(sessionCreateSource).toContain('startUserAction("session_create"');
+    expect(lifecycleSource).toContain("useChatSessionCreateMutation(");
     expect(lifecycleSource).toContain('startUserAction("session_delete"');
     expect(lifecycleSource).toContain('startUserAction("session_rename"');
     expect(lifecycleSource).toContain('startUserAction("session_clear_history"');

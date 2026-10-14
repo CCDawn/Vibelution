@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const useChatRouteSelectionSourcePath = fileURLToPath(new URL("./useChatRouteSelection.ts", import.meta.url));
 const useChatWorkspaceActionsSourcePath = fileURLToPath(new URL("./useChatWorkspaceActions.ts", import.meta.url));
 const useChatWorkspaceLifecycleSourcePath = fileURLToPath(new URL("./useChatWorkspaceLifecycle.ts", import.meta.url));
+const useChatSessionCreateMutationSourcePath = fileURLToPath(new URL("./useChatSessionCreateMutation.ts", import.meta.url));
 const useChatArchivedAgentRetirementSourcePath = fileURLToPath(new URL("./useChatArchivedAgentRetirement.ts", import.meta.url));
 const chatCodingRouteWorkbenchSourcePath = fileURLToPath(new URL("./ChatCodingRouteWorkbench.tsx", import.meta.url));
 
@@ -35,6 +36,7 @@ describe("Chat route write boundary (single authority)", () => {
     for (const [path, source] of [
       [useChatWorkspaceActionsSourcePath, readSource(useChatWorkspaceActionsSourcePath)],
       [useChatWorkspaceLifecycleSourcePath, readSource(useChatWorkspaceLifecycleSourcePath)],
+      [useChatSessionCreateMutationSourcePath, readSource(useChatSessionCreateMutationSourcePath)],
       [useChatArchivedAgentRetirementSourcePath, readSource(useChatArchivedAgentRetirementSourcePath)],
     ]) {
       expect(navigatesToChatSelection(source), path).toEqual([]);
@@ -58,7 +60,14 @@ describe("Chat route write boundary (single authority)", () => {
     expect(source).not.toContain("setActiveSession");
     expect(source).not.toContain("setSearchParams");
     expect(navigatesToChatSelection(source)).toEqual([]);
-    // Temp create failure must not auto-restore a previous session.
+  });
+
+  it("session create compares-and-swaps the temp route and never auto-restores", () => {
+    const source = readSource(useChatSessionCreateMutationSourcePath);
+    expect(source).toContain("chatRoute.openSession(tempSessionId)");
+    expect(source).toContain("replaceIfStillViewing");
+    expect(source).toContain("routeSelectionRef.current");
+    expect(navigatesToChatSelection(source)).toEqual([]);
     expect(source).toContain("Never auto-restore");
   });
 
