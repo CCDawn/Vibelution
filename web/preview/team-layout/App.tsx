@@ -5,6 +5,7 @@ import { WORKBENCH_LAYOUT_IDS } from "../../src/components/layout/workbenchLayou
 import { usePersistedPaneResize } from "../../src/components/layout/usePersistedPaneResize";
 import { PaneResizeHandle } from "../../src/components/layout/PaneResizeHandle";
 import chatStyles from "../../src/routes/ChatCodingRoute.styles";
+import { vuiRailFillClass } from "../../src/design/vuiSurfaceRecipes";
 import { TeamConversationPreview } from "./TeamConversationPreview";
 import { OrganizationCanvasPreview, WorkflowCanvasPreview, workflowGraph } from "./TeamCanvasPreview";
 
@@ -45,29 +46,29 @@ function Member({ member, subtitle }: { member: typeof defaultMembers[number]; s
   </div>;
 }
 
-function TeamPanel({ title, children, id, actions, titleControl, fill = false }: { title: string; children: ReactNode; id: string; actions?: ReactNode; titleControl?: ReactNode; fill?: boolean }) {
-  return <VPanel ariaLabel={title} className="flex h-full min-h-0 flex-col overflow-hidden" data-testid={id}>
+function TeamPanel({ title, children, id, actions, titleControl, fill = false, rail = false }: { title: string; children: ReactNode; id: string; actions?: ReactNode; titleControl?: ReactNode; fill?: boolean; rail?: boolean }) {
+  return <VPanel ariaLabel={title} className={"flex h-full min-h-0 flex-col overflow-hidden " + (rail ? `${vuiRailFillClass} !rounded-none !border-0` : "")} data-testid={id}>
     <VPanelHeader title={titleControl ?? title} headingLevel={titleControl ? null : 2} actions={actions} data-vui="team-preview-panel-header" className="h-11 shrink-0 items-center! border-b border-[var(--vui-border-subtle)] px-2 py-0 [&>div:first-child]:shrink-0 [&>div:last-child]:overflow-x-auto [&>div:last-child]:justify-start [&_h2]:text-[14px] [&_h2]:font-medium [&_h2]:leading-6" />
     <div className={"flex min-h-0 min-w-0 flex-1 flex-col " + (fill ? "overflow-hidden p-0" : "overflow-auto p-2")} data-vui="team-preview-panel-body">{children}</div>
   </VPanel>;
 }
 
-/** One rounded frame and the same panel/header/body recipe for every view. */
+/** Shared chat rail backdrop with one rounded white content pane for every view. */
 const framePanes = [{ id: "rail", defaultWidth: 220, minWidth: 200, maxWidth: 280 }, { id: "inspector", defaultWidth: 312, minWidth: 280, maxWidth: 380 }];
 function TeamFrame({ title, toolbar, navigation, body, inspector, inspectorTitle, teamName, teamSwitcher, fillBody }: {
   title: string; toolbar: ReactNode; navigation: ReactNode; body: ReactNode; inspector: ReactNode; inspectorTitle: string; teamName: string; teamSwitcher: ReactNode; fillBody: boolean;
 }) {
   const resize = usePersistedPaneResize({ layoutId: WORKBENCH_LAYOUT_IDS.teams, panes: framePanes });
   const attach = useCallback((element: HTMLDivElement | null) => { resize.layoutRef.current = element; resize.registerSplitContainer(element); }, [resize.layoutRef, resize.registerSplitContainer]);
-  return <div className="flex h-full min-h-0 flex-col bg-[var(--vui-surface-base)] p-3">
+  return <div className="flex h-full min-h-0 flex-col bg-vui-surface-rail p-1 [--shell-surface:var(--vui-surface-rail)]">
     <VSessionWorkbenchPage ref={attach} ariaLabel="统一团队工作台" domainRecipe="teams-session-workbench" layoutId={WORKBENCH_LAYOUT_IDS.teams}
-      data-testid="unified-team-frame" className={chatStyles.layout + " !h-full !max-h-full [--shell-surface:var(--vui-surface-chat)]"}
+      data-testid="unified-team-frame" className={chatStyles.layout + " !h-full !max-h-full"}
       hostStyle={{ ...resize.paneVariablesStyle, "--chat-left-pane-width": "var(--pane-w-rail)", "--chat-right-pane-width": "var(--pane-w-inspector)", "--chat-pane-gutter": "6px" } as CSSProperties}
-      indexRail={<aside className="flex min-h-0 min-w-0 flex-col [grid-column:1] [grid-row:1]"><TeamPanel title={teamName} titleControl={teamSwitcher} id="unified-navigation"><nav aria-label="团队工作台导航" className="flex min-h-0 flex-1 flex-col">{navigation}</nav></TeamPanel></aside>}
+      indexRail={<aside className="flex min-h-0 min-w-0 flex-col [grid-column:1] [grid-row:1]"><TeamPanel rail title={teamName} titleControl={teamSwitcher} id="unified-navigation"><nav aria-label="团队工作台导航" className="flex min-h-0 flex-1 flex-col">{navigation}</nav></TeamPanel></aside>}
       leftResizeHandle={<PaneResizeHandle label="调整左侧栏宽度" valueNow={resize.widths.rail} valueMin={200} valueMax={280} className="[grid-column:2] [grid-row:1]" onPointerDown={(event) => resize.startResize("rail", event)} onKeyDown={(event) => resize.onResizeKeyDown("rail", event)} />}
       session={<main className="mx-1 flex min-h-0 min-w-0 flex-col [grid-column:3] [grid-row:1]"><TeamPanel title={title} actions={toolbar} fill={fillBody} id="unified-content">{body}</TeamPanel></main>}
       rightResizeHandle={<PaneResizeHandle label="调整右侧栏宽度" valueNow={resize.widths.inspector} valueMin={280} valueMax={380} className="[grid-column:4] [grid-row:1]" onPointerDown={(event) => resize.startResize("inspector", event, { direction: -1 })} onKeyDown={(event) => resize.onResizeKeyDown("inspector", event, { direction: -1 })} />}
-      statusRail={<aside className="flex min-h-0 min-w-0 flex-col [grid-column:5] [grid-row:1]"><TeamPanel title={inspectorTitle} id="unified-inspector">{inspector}</TeamPanel></aside>} />
+      statusRail={<aside className="flex min-h-0 min-w-0 flex-col [grid-column:5] [grid-row:1]"><TeamPanel rail title={inspectorTitle} id="unified-inspector">{inspector}</TeamPanel></aside>} />
   </div>;
 }
 
