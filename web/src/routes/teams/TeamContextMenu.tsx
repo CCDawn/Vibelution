@@ -33,7 +33,7 @@ export function teamContextMenuItems(props: Props): VDropdownMenuItem[] {
       title: zh ? "仅从当前浏览器的左栏隐藏，保留全部记录；可在已隐藏团队中恢复" : "Hide from this browser's rail; keep all records and restore later.",
       onSelect: () => onHide(team) },
     { id: "archive", label: zh ? "归档团队" : "Archive team", icon: <Archive size={14} />, danger: true, disabled: locked,
-      title: locked ? lockReason : (zh ? "归档后只读，关联群聊房间将被删除；需要再次确认" : "Locks the team and deletes linked chat rooms; confirmation required."),
+      title: locked ? lockReason : (zh ? "归档后只读，当前成员 Agent 一并归档，关联群聊房间将被删除；需要再次确认" : "Locks the team, archives current member Agents, and deletes linked chat rooms; confirmation required."),
       onSelect: () => onArchive(team) },
   ];
 }

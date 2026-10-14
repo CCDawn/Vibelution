@@ -17,6 +17,8 @@ import {
   VToolbar,
 } from "../../../components/vui";
 import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
+import { ConversationToolActivity } from "../../../components/conversation/ConversationToolActivity";
+import { createCodexTranscriptToolActivity } from "../../../components/conversation/conversationToolActivityModel";
 import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
 import { ConversationFileDeliveries } from "../../../components/conversation/ConversationFileDeliveries";
 import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
@@ -198,6 +200,19 @@ export function StructureCatalog() {
             onMove={() => undefined}
           />
         </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationToolActivity" className="col-span-full min-h-0">
+        <ConversationToolActivity
+          language="zh"
+          sessionId="component-preview-tool-activity"
+          activity={createCodexTranscriptToolActivity([
+            { id: "preview-tool-success", messageId: "preview-tools", kind: "tool_call", title: "shell", status: "completed", tone: "neutral", summary: "git status --short" },
+            { id: "preview-tool-failure", messageId: "preview-tools", kind: "tool_call", title: "shell", status: "failed", tone: "error", summary: "npm run build" },
+          ])}
+          renderToolDetails={(cell) => (
+            <p>{cell.status === "failed" ? "构建失败：请检查类型错误。" : "工作区状态已读取。"}</p>
+          )}
+        />
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTranscriptLoadingState" className="col-span-full min-h-0">
         <div className="h-[360px] w-full overflow-hidden rounded-xl border border-vui-border-subtle bg-vui-surface-panel">

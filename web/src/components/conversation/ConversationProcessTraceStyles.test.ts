@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import styles from "./ConversationView.styles";
 
 describe("conversation process trace styles", () => {
+  it("clears button face gradients on both thought headers, including hover", () => {
+    for (const header of [styles.codexTranscriptReasoningHeader, styles.timelineThoughtHeader]) {
+      expect(header).toContain("!bg-none");
+      expect(header).toContain("hover:!bg-none");
+    }
+  });
   it("keeps timeline operation rows scannable instead of generated nested cards", () => {
     expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
     expect(styles.timelineCellHeader).not.toContain("grid-cols-[20px_minmax(0,1fr)_24px]");

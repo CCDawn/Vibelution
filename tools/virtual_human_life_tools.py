@@ -87,13 +87,21 @@ def virtual_human_status_tool() -> str:
     return _invoke(lambda agent_id: {"status": "ready", "snapshot": _service().snapshot(agent_id)})
 
 
-def _invoke_companion_turn(operation) -> str:
+def _invoke_companion_turn(operation, *, allow_self_wake: bool = False) -> str:
     """Bind continuity actions to the actual speaker, never a steward target."""
     runtime = _runtime_context()
 
     def invoke(agent_id: str) -> dict[str, Any]:
         if agent_id != str(runtime.get("agentId") or "").strip():
-            raise RuntimeError("Companion continuity requires the speaking Agent itself.")
+            from core.web.services.virtual_human_life_service import (
+                resolve_virtual_human_runtime_target,
+            )
+
+            resolved = resolve_virtual_human_runtime_target(
+                str(runtime.get("agentId") or ""), session_id=str(runtime.get("sessionId") or ""),
+            )
+            if not (allow_self_wake and resolved.get("selfWake") and resolved.get("targetAgentId") == agent_id):
+                raise RuntimeError("Companion continuity requires the speaking Agent itself.")
         return operation(
             agent_id,
             session_id=str(runtime.get("sessionId") or "").strip(),
@@ -125,14 +133,35 @@ def virtual_human_schedule_tool(
 ) -> str:
     """查询日程、维护长期日历，或提出受 ToolPolicy 约束的工具型活动。
 
-    action: view | propose_tool_activity | upsert_calendar | cancel_calendar |
+    action: view | view_wakeup | schedule_wakeup | cancel_wakeup | propose_tool_activity | upsert_calendar | cancel_calendar |
     set_calendar_exception | propose_commitment | confirm_commitment |
     reject_commitment | cancel_commitment | complete_commitment。
     双方约定需先 propose，用户后续明确同意后才 confirm；改约仍先 propose。
     event_id 是约定 ID，complete 时 source_ref 需为真实成功生活事件 ID。
     日历只负责长期约定和重复安排，活动执行仍由每日
     schedule 与原生 proactive turn 负责，不能因为日历存在就宣称完成。
+    schedule_wakeup 安排自己的下一次行动：start_at 为带时区的 ISO 时间，title 为行动意图，
+    reason 为安排原因，required_tool_names 为届时需要的工具。先 view_wakeup 读取 revision，
+    将它传入 expected_version；使用新的 idempotency_key。唤醒不是完成，也不代表用户发了消息。
     """
+
+    normalized_action = str(action or "view").strip().lower()
+    if normalized_action == "view_wakeup":
+        return _invoke(lambda agent_id: {"status": "ready", "wakePlan": _service().self_continuity.snapshot(agent_id)})
+    if normalized_action in {"schedule_wakeup", "cancel_wakeup"}:
+        def wake_operation(agent_id: str, *, session_id: str, turn_id: str) -> dict[str, Any]:
+            if normalized_action == "cancel_wakeup":
+                result = _service().self_continuity.cancel(
+                    agent_id, session_id=session_id, expected_revision=expected_version,
+                )
+            else:
+                result = _service().self_continuity.schedule(
+                    agent_id, session_id=session_id, source_turn_id=turn_id, wake_at=start_at,
+                    intent=title, reason=reason, expected_revision=expected_version,
+                    idempotency_key=idempotency_key, required_tool_names=required_tool_names,
+                )
+            return {"status": "applied", "wakePlan": result}
+        return _invoke_companion_turn(wake_operation, allow_self_wake=True)
 
     commitment_actions = {
         "propose_commitment": "propose", "confirm_commitment": "confirm",

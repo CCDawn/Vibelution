@@ -37,7 +37,15 @@ import {
   storeAgentBroadcastReadAtMs,
 } from "./agentBroadcastBadge";
 import { loadPrimaryRouteChunk } from "./primaryRouteChunkLoader";
-import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, isLauncherControlPlaneNotReady, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
+import {
+  cancelRuntimeLifecycleCommand,
+  getLocalBranchInstances,
+  getLauncherFreshness,
+  hasLauncherFreshnessBridge,
+  showLauncherWindow,
+  isLauncherControlPlaneNotReady,
+  requestWorkbenchWindowCloseOnPageHide,
+} from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -54,6 +62,9 @@ import {
 } from "./workbenchLifecycleActions";
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import {
+  isLauncherUpdateAvailable,
+  launcherUpdateBannerCopy,
+  frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
   shouldShowUpdateBanner,
   storeUpdateBannerDismissedHead,
@@ -1081,6 +1092,7 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
+  const [launcherWindowError, setLauncherWindowError] = useState("");
   const [updateBannerDismissedHead, setUpdateBannerDismissedHead] = useState(readStoredUpdateBannerDismissedHead);
   const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
@@ -1199,6 +1211,16 @@ export function AppShell() {
     refetchIntervalInBackground: false,
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
+
+  const launcherFreshnessQuery = useQuery({
+    queryKey: queryKeys.launcherFreshness(),
+    queryFn: getLauncherFreshness,
+    enabled: shellDeferredPollReady && hasLauncherFreshnessBridge(),
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+    retry: false,
   });
 
   // Top-bar read-only badges: Git merge pressure and unseen agent broadcasts.
@@ -1465,24 +1487,28 @@ export function AppShell() {
   // Human-readable only (no raw session ids). Used for shutdown copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
-  // Update banner: main moved ahead of the running backend, so a restart is
-  // needed to apply the new code. Rides the existing 120s code-freshness poll
-  // (data is in its notifyOnChangeProps whitelist) — no extra ticker here.
+  // Workbench and Launcher versions share the delayed 120s polling cadence.
+  // Launcher-only updates open its existing management window.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
-  const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head ?? "";
+  const launcherUpdateAvailable = isLauncherUpdateAvailable(launcherFreshnessQuery.data);
+  const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
   const updateBannerVisible = shouldShowUpdateBanner({
     verdict: updateBannerVerdict,
     diskHead: updateBannerDiskHead,
     dismissedHead: updateBannerDismissedHead,
+    launcherFreshness: launcherFreshnessQuery.data,
   });
-  const updateBannerText = updateBannerCopy(
-    lang,
-    updateBannerDiskHead,
-    updateBannerVerdict === "backend_and_frontend_behind",
-    // null/0 with a behind verdict = dirty-digest-only: the banner copy must
-    // speak about uncommitted workspace changes, not a moved-ahead main.
-    codeFreshnessQuery.data?.backend.behindCount ?? null,
-  );
+  const updateBannerText = launcherUpdateAvailable
+    ? launcherUpdateBannerCopy(lang)
+    : updateBannerVerdict === "frontend_behind"
+      ? frontendUpdateBannerCopy(lang)
+      : updateBannerCopy(
+        lang,
+        updateBannerDiskHead,
+        updateBannerVerdict === "backend_and_frontend_behind",
+        // null/0 with a behind verdict means uncommitted workspace changes.
+        codeFreshnessQuery.data?.backend.behindCount ?? null,
+      );
   const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
   const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
   const activeWorkRestartNotice = (activeWorkIndicator?.items.length ?? 0) > 0
@@ -2950,16 +2976,27 @@ export function AppShell() {
                 <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
                 <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
               </div>
-              {updateBannerRestartNotice ? (
+              {!launcherUpdateAvailable && updateBannerRestartNotice ? (
                 <span className={styles.updateBannerNote}>{updateBannerRestartNotice}</span>
               ) : null}
+              {launcherUpdateAvailable && launcherWindowError ? <span className={styles.updateBannerNote}>{launcherWindowError}</span> : null}
               <div className={styles.updateBannerActions}>
-                <VButton type="button" variant="secondary"
+                {launcherUpdateAvailable ? (
+                  <VButton type="button" variant="secondary" className={styles.updateBannerRestartButton}
+                    onPress={() => {
+                      setLauncherWindowError("");
+                      void showLauncherWindow().catch((error: unknown) => {
+                        setLauncherWindowError(error instanceof Error ? error.message : (lang === "en" ? "Could not open Launcher." : "无法打开启动管理。"));
+                      });
+                    }}>
+                    {lang === "en" ? "Open Launcher" : "打开启动管理"}
+                  </VButton>
+                ) : <VButton type="button" variant="secondary"
                   className={styles.updateBannerRestartButton}
                   onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
                   title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
-                </VButton>
+                </VButton>}
                 <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
                   title={updateBannerDismissActionLabel}>
                   {lang === "en" ? "Dismiss" : "暂不提醒"}

@@ -218,6 +218,32 @@ describe("TeamSettingsDialog", () => {
     ]);
   });
 
+  it("keeps an added member editable and submits it after clearing the add selection", () => {
+    const onSubmit = vi.fn();
+    const team = makeTeam();
+    ({ host, root } = renderDialog(
+      <TeamSettingsDialog open lang="zh" team={team} agents={baseAgents} teams={[team]}
+        agentsById={baseAgentsById} pending={false} createRoomPending={false} errorMessage=""
+        onSubmit={onSubmit} onCreateRoom={vi.fn()} onClose={vi.fn()} />,
+    ));
+    const select = document.querySelector('[role="combobox"][aria-label="添加成员"]') as HTMLElement;
+    act(() => select.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const option = Array.from(document.querySelectorAll('[role="option"]'))
+      .find((node) => node.textContent?.includes("Beta")) as HTMLElement;
+    click(option);
+    click(buttonByText("添加") as HTMLElement);
+    expect(document.querySelectorAll('textarea[aria-label^="职责条目"]')).toHaveLength(2);
+    expect(select.textContent).toContain("选择 Agent");
+    setInputValue(inputByLabel("职责条目 · Beta") as HTMLTextAreaElement, "验收新增成员职责");
+    const save = buttonByText("保存修改") as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    click(save);
+    expect(onSubmit).toHaveBeenCalledWith("team-a", { members: [
+      { memberId: "member-1", agentId: "agent-1", role: "lead", purpose: "" },
+      { memberId: "", agentId: "agent-2", role: "", purpose: "", responsibilities: ["验收新增成员职责"] },
+    ] });
+  });
+
   it("caps member responsibilities at 8 lines before submit", () => {
     const onSubmit = vi.fn();
     const team = makeTeam();
@@ -340,6 +366,7 @@ describe("TeamSettingsDialog", () => {
 
     const confirm = buttonByText("确认归档");
     expect(confirm).toBeTruthy();
+    expect(document.body.textContent).toContain("当前成员 Agent 会一并归档");
     click(confirm as HTMLElement);
     expect(onArchive).toHaveBeenCalledWith("team-a");
   });
