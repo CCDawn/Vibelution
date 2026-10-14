@@ -387,11 +387,43 @@ for (const sourceDate of sourceDates) {
 
 const nativeFetch = window.fetch.bind(window);
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const request = input instanceof Request ? input : null;
   const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  const pathname = new URL(requestUrl, window.location.href).pathname;
+  const url = new URL(requestUrl, window.location.href);
+  const pathname = url.pathname;
   if (pathname.startsWith("/api/")) {
+    const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+    const fixtureApiPath = `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life`;
+    const fixtureResponse = (value: unknown) => new Response(JSON.stringify(value), {
+      headers: { "Content-Type": "application/json" },
+    });
+    const limitRows = <T,>(rows: T[]): T[] => {
+      const rawLimit = url.searchParams.get("limit");
+      if (rawLimit === null) return rows;
+      const limit = Number(rawLimit);
+      return Number.isInteger(limit) && limit >= 0 ? rows.slice(0, limit) : rows;
+    };
+
+    if (method === "GET" && pathname === `${fixtureApiPath}/events`) {
+      const requestedDate = url.searchParams.get("localDate");
+      const referencedEventIds = new Set(memories.flatMap((memory) => memory.sourceEventIds ?? []));
+      const matchingEvents = requestedDate && requestedDate !== localDate
+        ? events.filter((event) => referencedEventIds.has(event.eventId))
+        : events;
+      return fixtureResponse(limitRows(matchingEvents));
+    }
+    if (method === "GET" && pathname === `${fixtureApiPath}/diary`) {
+      return fixtureResponse(limitRows(diaryEntries));
+    }
+    if (method === "GET" && pathname === `${fixtureApiPath}/relationships`) {
+      return fixtureResponse(relationships);
+    }
+    if (method === "GET" && pathname === `${fixtureApiPath}/memories`) {
+      return fixtureResponse(limitRows(memories));
+    }
+
     document.documentElement.dataset.fixtureApiRequestBlocked = "true";
-    throw new Error("Fixture API access is disabled; this page uses local QueryClient data.");
+    throw new Error("Fixture API request blocked; only local fixture GET endpoints are available.");
   }
   return nativeFetch(input, init);
 }) as typeof window.fetch;
@@ -414,7 +446,7 @@ function ProductionFixture() {
           className="companion-scene-life-dialog"
         >
           <CompanionLifeRail
-            className=""
+            className="companion-scene-life-content"
             collapsed={false}
             overlayOpen={false}
             companion={companion}
