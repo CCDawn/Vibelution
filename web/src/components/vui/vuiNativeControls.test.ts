@@ -7,6 +7,7 @@ const mainSource = readFileSync(resolve(sourceRoot, "main.tsx"), "utf8");
 const appShellSource = readFileSync(resolve(sourceRoot, "app", "AppShell.tsx"), "utf8");
 const launcherShellSource = readFileSync(resolve(sourceRoot, "app", "LauncherShell.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(sourceRoot, "design", "vui-native-controls.css"), "utf8");
+const tokenSource = readFileSync(resolve(sourceRoot, "design", "tokens.css"), "utf8");
 
 describe("VUI native controls", () => {
   it("loads the native controls baseline after semantic tokens and scopes it to application shells", () => {
@@ -52,8 +53,9 @@ describe("VUI native controls", () => {
     expect(bridgeSource).toContain('[class*="Icon"]');
     expect(bridgeSource).toContain("display: inline-flex");
     expect(bridgeSource).toContain("padding-inline: var(--vui-native-control-padding-x)");
-    expect(bridgeSource).toContain("--vui-native-control-font-size: var(--font-size-caption)");
-    expect(bridgeSource).toContain("--vui-native-field-font-size: var(--font-size-small)");
+    expect(bridgeSource).toContain("--vui-native-control-font-size: var(--vui-type-control-size)");
+    expect(bridgeSource).toContain("--vui-native-field-font-size: var(--vui-type-control-size)");
+    expect(tokenSource).toContain("--vui-type-control-size: var(--vui-font-micro-13)");
     expect(bridgeSource).toContain('input:not([type="checkbox"]):not([type="radio"]):not([type="range"])');
     expect(bridgeSource).toContain('input[type="checkbox"]');
     expect(bridgeSource).toContain("accent-color: var(--accent-cool)");

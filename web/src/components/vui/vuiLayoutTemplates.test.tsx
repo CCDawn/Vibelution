@@ -145,8 +145,8 @@ describe("VUI workbench layout templates", () => {
     );
 
     expect(markup).toContain('data-vui="workbench-page"');
+    expect(markup).toContain('data-vui-page="surface"');
     expect(markup).toContain('data-vui="route-header"');
-    expect(markup).toContain("rounded-[var(--radius-panel)]");
     expect(markup).toContain("text-[var(--font-size-title)]");
     expect(markup).toContain("text-[var(--font-size-caption)]");
     expect(markup).toContain("text-[var(--font-size-micro)]");

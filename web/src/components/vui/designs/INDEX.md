@@ -59,6 +59,7 @@
 | `VConfirmDialog` | [primitives/feedback.md](./primitives/feedback.md#vconfirmdialog) |
 | `VDropdownMenu` | [primitives/feedback.md](./primitives/feedback.md#vdropdownmenu) |
 | `VPopover` | [primitives/feedback.md](./primitives/feedback.md#vpopover) |
+| `VSelectionToolbar` | [primitives/selection-toolbar.md](./primitives/selection-toolbar.md#vselectiontoolbar) |
 | `VHoverCard` | [primitives/feedback.md](./primitives/feedback.md#vhovercard) |
 
 ## Forms

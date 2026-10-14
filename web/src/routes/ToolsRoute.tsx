@@ -2147,14 +2147,13 @@ export function ToolsRoute() {
             ) : null}
             <section className={styles.policyDraftPanel}>
               <div className={styles.policyDraftSummary}>
-                <strong>{lang === "zh" ? `Agent 工具权限 · ${activePolicyAgentLabel}` : `Agent tool permissions · ${activePolicyAgentLabel}`}</strong>
+                <strong>{lang === "zh" ? `Agent 工具权限 · ${activePolicyAgentLabel}` : `Agent tool permissions · ${activePolicyAgentLabel}`}<VContextualHint className="ml-1" label={lang === "zh" ? "工具权限统计说明" : "Tool permission count details"} width="wide" content={lang === "zh"
+                  ? "顶部统计所选 Agent 范围内的可调用工具（不是全局注册总数）；当前 Agent 的明确允许项与工具测试批准分别判断。"
+                  : "The counts above describe callable tools in the selected Agent scope, not the global registry. This Agent's explicit grants and tool-test approval are separate checks."} /></strong>
                 <span>{lang === "zh" ? "明确允许" : "Explicitly allowed"}: {capabilityPreview.effectiveAllowed}</span>
                 <span>{lang === "zh" ? "需显式授权" : "Explicit grants"}: {capabilityPreview.explicitAllowed}</span>
                 <span>{lang === "zh" ? "写入边界" : "Write boundary"}: {capabilityPreview.writeBoundaryLabel}</span>
               </div>
-              <p className={styles.policyHint}>{lang === "zh"
-                ? "顶部统计所选 Agent 范围内的可调用工具（不是全局注册总数）；当前 Agent 的明确允许项与工具测试批准分别判断。"
-                : "The counts above describe callable tools in the selected Agent scope, not the global registry. This Agent's explicit grants and tool-test approval are separate checks."}</p>
               <div className={styles.workspaceScopePanel}>
                 <span>{lang === "zh" ? "工作空间写入" : "Workspace write"}</span>
                 <label>

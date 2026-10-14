@@ -8,7 +8,7 @@ import {
   VContextualHint,
   VFieldRow,
   VInput,
-  VNativeSelect,
+  VStringSelect,
   VSection,
   VSettingsFormPage,
   VSettingsGroupCard,
@@ -283,13 +283,14 @@ function OptionList({
 }
 
 function SourceCard({
-  copy, lang, source, policy, options, updatePolicy,
+  copy, lang, source, policy, options, isDisabled, updatePolicy,
 }: {
   copy: Copy;
   lang: "zh" | "en";
   source: AgentPerceptionSourceId;
   policy: AgentPerceptionPolicy;
   options?: AgentPerceptionScopeOption[];
+  isDisabled: boolean;
   updatePolicy: (updater: (current: AgentPerceptionPolicy) => AgentPerceptionPolicy) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -332,12 +333,14 @@ function SourceCard({
             {mode === "off" ? copy.modeOff : mode === "manual" ? langText(lang, "按需", "On demand") : langText(lang, "自动", "Auto")}
           </VButton>)}
         </div>
-        <VNativeSelect className={panelStyles.modeSelect} aria-label={label + " · " + copy.mode} value={sourcePolicy.mode} onChange={(event) => {
-          const mode = event.currentTarget.value as AgentPerceptionMode;
+        <VStringSelect className={panelStyles.modeSelect} ariaLabel={label + " · " + copy.mode} value={sourcePolicy.mode} isDisabled={isDisabled} onValueChange={(value) => {
+          const mode = value as AgentPerceptionMode;
           updatePolicy((current) => setPerceptionSourceMode(current, source, mode));
-        }}>
-          <option value="off">{copy.modeOff}</option><option value="manual">{copy.modeManual}</option><option value="auto">{copy.modeAuto}</option>
-        </VNativeSelect>
+        }} options={[
+          { value: "off", label: copy.modeOff },
+          { value: "manual", label: copy.modeManual },
+          { value: "auto", label: copy.modeAuto },
+        ]} />
         <div className={panelStyles.scopeSummary}>
           {scoped ? <VButton type="button" density="compact" variant="ghost" className={panelStyles.scopeToggle} aria-expanded={expanded} aria-controls={scopeId}
             aria-label={label + " · " + langText(lang, expanded ? "收起范围" : "编辑范围", expanded ? "Collapse scope" : "Edit scope")}
@@ -360,10 +363,13 @@ function SourceCard({
         <div className={panelStyles.rowHeading}><strong className={panelStyles.smallText}>{label}</strong><span className={panelStyles.mutedText}>{langText(lang, "关闭来源后仍保留选择", "Selections are preserved when the source is off")}</span></div>
         {source === "knowledge" ? <>
           <VFieldRow label={langText(lang, "知识库范围", "Knowledge-base scope")} className={panelStyles.scopeKind}>
-            <VNativeSelect aria-label={langText(lang, "知识库范围", "Knowledge-base scope")} value={policy.sources.knowledge.scope} onChange={(event) => {
-              const scope = event.currentTarget.value as "selected" | "all_authorized";
+            <VStringSelect ariaLabel={langText(lang, "知识库范围", "Knowledge-base scope")} value={policy.sources.knowledge.scope} isDisabled={isDisabled} onValueChange={(value) => {
+              const scope = value as "selected" | "all_authorized";
               updatePolicy((current) => setKnowledgeBaseScope(current, scope));
-            }}><option value="selected">{copy.selected}</option><option value="all_authorized">{copy.allAuthorized}</option></VNativeSelect>
+            }} options={[
+              { value: "selected", label: copy.selected },
+              { value: "all_authorized", label: copy.allAuthorized },
+            ]} />
           </VFieldRow>
           <p className={panelStyles.ruleText}>{policy.sources.knowledge.scope === "selected"
             ? langText(lang, "仅从已勾选的知识库读取。", "Read only from checked knowledge bases.")
@@ -767,7 +773,7 @@ export function AgentPerceptionPanel({
             <p className={panelStyles.ruleText}>{langText(lang, "按需：仅在本轮用户明确要求时读取。自动：按勾选条件触发，每次读取仍复核权限。", "On demand requires the user's explicit request in this turn. Automatic reads use the selected triggers and recheck access each time.")}</p>
             <VSurface padding="none" className={panelStyles.sources}>
               <div className={panelStyles.sourceColumnHead} aria-hidden="true"><span>{langText(lang, "来源", "Source")}</span><span>{copy.mode}</span><span>{langText(lang, "读取范围", "Read scope")}</span></div>
-              {SOURCE_IDS.map(source => <SourceCard key={agentId + source} copy={copy} lang={lang} source={source} policy={draft.policy}
+              {SOURCE_IDS.map(source => <SourceCard key={agentId + source} copy={copy} lang={lang} source={source} policy={draft.policy} isDisabled={savePending}
                 options={source === "team" ? currentConfiguration.availableScopes.teams : source === "knowledge" ? currentConfiguration.availableScopes.knowledgeBases : undefined} updatePolicy={updatePolicy} />)}
             </VSurface><p className={panelStyles.boundary}>{copy.notGranted}</p>
           </VSection>
@@ -797,9 +803,11 @@ export function AgentPerceptionPanel({
             <div className={panelStyles.notificationRow}><div className={panelStyles.minWidthZero}>
               <p className={panelStyles.ruleText}>{langText(lang, "独立于后台调研；静音只停止通知，不停止更新扫描。", "Independent of background research. Quiet mode stops notifications, not update scans.")}</p>
               {draft.policy.notifications.mode === "important" && !draft.policy.background.topics.length ? <p className={panelStyles.warningText}>{langText(lang, "重要更新按调研主题筛选，尚无主题时可选择“全部更新”。", "Important updates are filtered by research topics; without topics, you can choose all updates.")}</p> : null}
-            </div><VNativeSelect aria-label={copy.notificationMode} value={draft.policy.notifications.mode} onChange={event => { const mode = event.currentTarget.value as AgentPerceptionPolicy["notifications"]["mode"]; updatePolicy(current => ({ ...current, notifications: { mode } })); }}>
-              <option value="important">{copy.notificationsImportant}</option><option value="all">{copy.notificationsAll}</option><option value="quiet">{copy.notificationsQuiet}</option>
-            </VNativeSelect></div>
+            </div><VStringSelect ariaLabel={copy.notificationMode} value={draft.policy.notifications.mode} isDisabled={savePending} onValueChange={value => { const mode = value as AgentPerceptionPolicy["notifications"]["mode"]; updatePolicy(current => ({ ...current, notifications: { mode } })); }} options={[
+              { value: "important", label: copy.notificationsImportant },
+              { value: "all", label: copy.notificationsAll },
+              { value: "quiet", label: copy.notificationsQuiet },
+            ]} /></div>
           </VSection>
           {validationError ? <VStateSurface tone="error" density="compact" title={copy.invalidPolicy}>{validationError === "background.topics.required" ? langText(lang, "开启后台调研前请添加主题。", "Add topics before enabling background research.") : langText(lang, "请检查调研频率和高级用量限制。", "Check the research schedule and advanced usage limits.")}</VStateSurface> : null}
         </fieldset>

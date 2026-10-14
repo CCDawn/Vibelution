@@ -8,6 +8,8 @@ import chatLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import gitRouteSource from "./GitRoute.tsx?raw";
 import selfEvolutionTrackSource from "./SelfEvolutionTrack.tsx?raw";
+import agentWorkspaceSource from "./AgentWorkspaceLayoutPanel.tsx?raw";
+import agentWorkspaceStyles from "./AgentWorkspaceLayoutPanel.styles";
 
 type StyleEntry = {
   file: string;
@@ -29,6 +31,7 @@ const composedGridTemplateModifiers = new Set([
   "GitRoute.styles.ts:historyPanel",
   "GitRoute.styles.ts:modelActionRow",
   "DirectSessionIndexItem.styles.ts:sessionItemWithBulkSelect",
+  "AgentWorkspaceLayoutPanel.styles.ts:directoryWithActions",
 ]);
 
 function readRouteStyleEntries(): StyleEntry[] {
@@ -80,7 +83,7 @@ describe("route style display contract", () => {
     expect(chatRouteSource).toContain("className={chatLayoutClassName}");
 
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");
-    expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
+    expect(gitRouteSource).toContain("cn(styles.commitPanel, styles.historyPanel, VUI_WORKBENCH_PANE_CLASS)");
     expect(gitRouteSource).toContain("`${styles.modelDefaultRow} ${styles.modelActionRow}`");
 
     // Settings-align wave 3: ConfigSectionEditor (the only consumer of these
@@ -99,5 +102,7 @@ describe("route style display contract", () => {
     expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled ? styles.sessionItemWithBulkSelect");
 
     expect(selfEvolutionTrackSource).toContain("className={styles.centerColumn}");
+    expect(agentWorkspaceStyles.directory).toMatch(/\bgrid\b/);
+    expect(agentWorkspaceSource).toContain('className={[styles.directory, directoryActions ? styles.directoryWithActions : ""].filter(Boolean).join(" ")}');
   });
 });

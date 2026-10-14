@@ -8,6 +8,10 @@ import {
   VEntityList,
   VErrorSummary,
   VPanelHeader,
+  VPage,
+  VWorkbenchFrame,
+  VSelectionToolbar,
+  type VSelectionToolbarProps,
   VSection,
   VSessionSearchDialog,
   type VSessionSearchDialogItem,
@@ -161,9 +165,22 @@ const sessionSearchPreviewItems: VSessionSearchDialogItem[] = [
 
 export function StructureCatalog() {
   const [sessionSearchDialogOpen, setSessionSearchDialogOpen] = useState(false);
+  const [selectionToolbarAnchor, setSelectionToolbarAnchor] = useState<VSelectionToolbarProps["anchorRect"] | null>(null);
 
   return (
     <VuiPreviewSection title="Structure">
+      <VuiPreviewCard name="VWorkbenchFrame" className="min-h-40">
+        <div className="h-40 min-w-0">
+          <VWorkbenchFrame><VPage className="p-3"><VPanelHeader title="持久页面壳" /><p className="text-vui-sm">共享圆角、背景与面板边界。</p></VPage></VWorkbenchFrame>
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VSelectionToolbar" className="min-h-0">
+        <VButton onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setSelectionToolbarAnchor(selectionToolbarAnchor ? null : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height });
+        }}>{selectionToolbarAnchor ? "收起操作条" : "演示选区操作条"}</VButton>
+        {selectionToolbarAnchor ? <VSelectionToolbar anchorRect={selectionToolbarAnchor} ariaLabel="选区操作示例"><VButton onClick={() => setSelectionToolbarAnchor(null)}>关闭示例</VButton></VSelectionToolbar> : null}
+      </VuiPreviewCard>
       <VuiPreviewCard name="VPanelHeader" className="min-h-0">
         <VPanelHeader title="项目设置" />
       </VuiPreviewCard>

@@ -1,13 +1,6 @@
-import { useLayoutEffect, useRef, type MouseEvent } from "react";
-import { createPortal } from "react-dom";
-
 import { VButton } from "../vui";
-import {
-  resolveSelectionQuoteMenuPosition,
-  SELECTION_QUOTE_MENU_HEIGHT_PX,
-  SELECTION_QUOTE_MENU_WIDTH_PX,
-  type ConversationSelectionRect,
-} from "./conversationTextSelection";
+import { VSelectionToolbar } from "../vui/primitives/VSelectionToolbar";
+import type { ConversationSelectionRect } from "./conversationTextSelection";
 import styles from "./ConversationSelectionQuoteMenu.styles";
 
 export type ConversationSelectionQuoteMenuProps = {
@@ -44,53 +37,11 @@ export function ConversationSelectionQuoteMenu({
   sideLabel,
   onSideChat,
 }: ConversationSelectionQuoteMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const menu = menuRef.current;
-    if (!menu) {
-      return;
-    }
-    const place = () => {
-      const measured = menu.getBoundingClientRect();
-      const position = resolveSelectionQuoteMenuPosition(
-        selectionRect,
-        { width: window.innerWidth, height: window.innerHeight },
-        {
-          width: measured.width || SELECTION_QUOTE_MENU_WIDTH_PX,
-          height: measured.height || SELECTION_QUOTE_MENU_HEIGHT_PX,
-        },
-      );
-      menu.style.left = `${position.left}px`;
-      menu.style.top = `${position.top}px`;
-      menu.style.transform = position.above ? "translateY(-100%)" : "none";
-    };
-    place();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
-    observer?.observe(menu);
-    window.addEventListener("resize", place);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", place);
-    };
-  }, [
-    selectionRect.bottom,
-    selectionRect.height,
-    selectionRect.left,
-    selectionRect.right,
-    selectionRect.top,
-    selectionRect.width,
-  ]);
-  const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-  };
-  const menu = (
-    <div
-      ref={menuRef}
+  return (
+    <VSelectionToolbar
+      anchorRect={selectionRect}
+      ariaLabel={quoteLabel}
       className={styles.selectionQuoteMenu}
-      role="toolbar"
-      aria-label={quoteLabel}
-      data-conversation-selection-menu="1"
-      onMouseDown={handleMouseDown}
     >
       {onSideChat ? (
         <VButton
@@ -128,10 +79,6 @@ export function ConversationSelectionQuoteMenu({
       >
         {copyLabel}
       </VButton>
-    </div>
+    </VSelectionToolbar>
   );
-  if (typeof document === "undefined") {
-    return menu;
-  }
-  return createPortal(menu, document.body);
 }

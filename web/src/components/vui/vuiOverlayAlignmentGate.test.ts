@@ -129,9 +129,9 @@ describe("VUI overlay alignment gate", () => {
     expect(hits).toEqual([]);
   });
 
-  it("locks modal product hosts on VDialog", () => {
+  it("locks modal product hosts on VDialog or VConfirmDialog", () => {
     expect(read("routes/agent-create/AgentCreateWizardDialog.tsx")).toContain("<VDialog");
-    expect(read("routes/AgentModelPicker.tsx")).toContain("<VDialog");
+    expect(read("routes/AgentModelPicker.tsx")).toContain("<VConfirmDialog");
     expect(read("routes/chat/CacheDetailDialog.tsx")).toContain("<VDialog");
     expect(read("components/conversation/ConversationImagePreviewDialog.tsx")).toContain("<VDialog");
     expect(read("routes/ConfigRoute.tsx")).toContain("open={leaveGuardOpen}");
