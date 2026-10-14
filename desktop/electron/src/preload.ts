@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC_CHANNELS } from "./ipc.js";
+import { installRendererWindowClose } from "./windows/rendererWindowClose.js";
 
 const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
 const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=desktop-pet");
@@ -8,6 +9,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
   ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
+    requestWindowClose: () => ipcRenderer.invoke(IPC_CHANNELS.requestWindowClose),
     controlDesktopPet: (open?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open),
     requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger),
     getLauncherFreshness: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherFreshness),
@@ -67,3 +69,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       }
     : {})
 });
+
+if (!isLauncherControlWindow && !isDesktopPetWindow) {
+  contextBridge.executeInMainWorld({ func: installRendererWindowClose });
+}
