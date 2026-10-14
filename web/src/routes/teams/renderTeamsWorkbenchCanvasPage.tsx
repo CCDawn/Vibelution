@@ -146,7 +146,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           onNodePointerCancel={p.onNodePointerCancel}
           canvasAuthoring={p.canvasAuthoring}
       />;
-  if (!p.researchWorkflowTeamSelected && p.teamHome) {
+  if (p.teamHome && (!p.researchWorkflowTeamSelected || p.teamHome.conversationRequested)) {
     return <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => undefined}
       workspace={{ navigation: p.teamShellRail, teamSwitcher: p.teamSwitcher, toolbar: p.teamShellToolbar,
         canvas: organizationCanvas, inspector: p.inspectorBody, resize: p.teamsRailResize }} />;

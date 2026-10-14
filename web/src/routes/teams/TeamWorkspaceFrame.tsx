@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { VCanvasWorkbenchPage, VPanel, VPanelHeader, type VCanvasWorkbenchPageProps } from "../../components/vui";
+import { vuiRailFillClass } from "../../design/vuiSurfaceRecipes";
 
 import styles from "./TeamWorkspaceFrame.styles";
 
@@ -13,7 +14,11 @@ type TeamWorkspacePanelProps = {
 };
 
 function TeamWorkspacePanel({ title, label, children, actions, scroll = true, region }: TeamWorkspacePanelProps) {
-  return <VPanel ariaLabel={label} className={styles.panel} data-team-panel={region}>
+  const surfaceClassName = region === "content"
+    ? styles.contentPanel
+    : `${vuiRailFillClass} ${styles.railPanel}`;
+
+  return <VPanel ariaLabel={label} className={`${styles.panel} ${surfaceClassName}`} data-team-panel={region}>
     <VPanelHeader title={title} headingLevel={region === "navigation" ? null : 2} actions={actions}
       data-vui="team-workspace-panel-header"
       className={styles.header} />
@@ -35,7 +40,7 @@ export type TeamWorkspaceFrameProps = VCanvasWorkbenchPageProps & {
 export function TeamWorkspaceFrame({ title, toolbar, rail, railTitle, railLabel = "团队导航", canvas,
   inspector, inspectorTitle = "详情", inspectorActions, mainScroll = false, className, workspaceClassName, ...props }: TeamWorkspaceFrameProps) {
   return <VCanvasWorkbenchPage {...props} hideHeader chrome="embedded" title={title}
-    className={`${styles.page} ${className ?? ""}`}
+    className={`${styles.page} ${vuiRailFillClass} ${className ?? ""}`}
     workspaceClassName={`${styles.workspace} ${workspaceClassName ?? ""}`}
     railClassName={styles.barePane} canvasClassName={styles.barePane} inspectorClassName={styles.barePane}
     rail={rail || railTitle ? <TeamWorkspacePanel title={railTitle ?? railLabel} label={railLabel} region="navigation">{rail}</TeamWorkspacePanel> : undefined}
