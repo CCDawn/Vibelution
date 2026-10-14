@@ -9,6 +9,7 @@ import type {
 import { VButton, VStateRow } from "../../components/vui";
 import type { ChatMentionTarget } from "../chatMentionTokens";
 import { ConversationStreamingResponseContent } from "../../components/conversation/ConversationStreamingResponseContent";
+import { LazyConversationMarkdownRenderer } from "../../components/conversation/LazyConversationMarkdownRenderer";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import messageStyles from "./ChatGroupMessagePresentation.styles";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
@@ -489,12 +490,16 @@ export function GroupRoundsTimeline({
                   onClick={() => setExpandedResults((current) => ({ ...current, [round.roundId]: !resultOpen }))}>
                   {lang === "zh" ? "轮次结果" : "Round result"}
                 </VButton>
-                {resultOpen ? <p id={`${transcriptId}-result`} className={styles.groupResultCopy}>{round.summary}</p> : null}
+                {resultOpen ? (
+                  <div id={`${transcriptId}-result`} className={styles.groupResultCopy}>
+                    <LazyConversationMarkdownRenderer content={round.summary} language={lang} />
+                  </div>
+                ) : null}
               </div>
             ) : (
               <article className={styles.groupRoundSummary}>
                 <strong>{lang === "zh" ? "本轮结论" : "Round conclusion"}</strong>
-                <p>{round.summary}</p>
+                <LazyConversationMarkdownRenderer content={round.summary} language={lang} />
               </article>
             ) : null}
           </section>

@@ -5,6 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { ChatGroupCenterSurface, type ChatGroupCenterSurfaceProps } from "./ChatGroupCenterSurface";
+vi.mock("../../components/conversation/LazyConversationMarkdownRenderer", async () => {
+  const { ConversationMarkdownRenderer } = await import("../../components/conversation/ConversationMarkdownRenderer");
+  return { LazyConversationMarkdownRenderer: ConversationMarkdownRenderer };
+});
+
 const artifactRenderCalls = vi.hoisted(() => [] as Array<{ teamId: string; taskIds: string[] }>);
 vi.mock("./ChatGroupArtifactDialog", () => ({
   ChatGroupArtifactDialog: (props: { teamId: string; taskIds: string[] }) => {
@@ -479,11 +484,49 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("第 1 轮");
     expect(html).toContain("请讨论拆分风险");
     expect(html).toContain("风险可控");
-    expect(html).toContain("结论：可控");
+    // Round summaries render through the markdown pipeline now, so the
+    // lead-label rule bolds 结论 exactly like every other message body.
+    expect(html).toMatch(/<strong[^>]*>结论<\/strong>：可控/);
     expect(html).toContain("本轮结论");
     expect(html).toContain("group-stream-identity");
     expect(html).toContain("group-stream-topic-identity");
     expect(html).not.toContain("!bg-vui-surface-row");
+  });
+
+  it("renders round summary markdown as a table instead of raw pipe text", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          activeGroupRoom: {
+            roomId: "room-1",
+            title: "研究组",
+            mode: "round_robin",
+            purpose: "discussion",
+            status: "ready",
+            participants: [],
+            rounds: [
+              {
+                roundId: "r1",
+                status: "completed",
+                mode: "round_robin",
+                purpose: "discussion",
+                topic: "请讨论拆分风险",
+                startedAt: "2026-07-20T00:00:00Z",
+                updatedAt: "2026-07-20T00:01:00Z",
+                speakerOrder: [],
+                messages: [],
+                summary: "| 指标 | 数值 |\n| --- | --- |\n| 风险 | 可控 |",
+              },
+            ],
+          } as never,
+        })}
+      />,
+    );
+
+    expect(html).toContain("markdownTableWrap");
+    expect(html).toContain("<table");
+    expect(html).toContain("风险");
+    expect(html).not.toContain("| --- |");
   });
 
   it("shows one identity row for consecutive messages from the same speaker", () => {
