@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { ArrowUpRight, GitBranch, MessageSquare, Play, Square } from "lucide-react";
 
 import { queryKeys } from "../../api/queryKeys";
-import type { ChatRoomDetail, ChatRoomMessage, ChatRoomRound, Team } from "../../api/types";
+import type { AgentInstance, ChatRoomDetail, ChatRoomMessage, ChatRoomRound, Team } from "../../api/types";
 import {
   VButton,
   VConfirmDialog,
@@ -22,6 +23,8 @@ import { teamWorkspaceRoute } from "./researchWorkspaceModel";
 import styles from "./TeamHomeSurface.styles";
 import { TeamWorkspaceFrame, type TeamWorkspaceFrameProps } from "./TeamWorkspaceFrame";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
+import { TeamNativeConversation } from "./TeamNativeConversation";
+import { teamMemberDisplay, teamMemberSessionId } from "./TeamConversationRail";
 
 export type StartTeamRoundPayload = {
   roomId: string;
@@ -53,6 +56,8 @@ export type TeamHomeSurfaceProps = {
   teamSyncPending: boolean;
   onSyncRoom: () => void;
   onOpenOrganization: () => void;
+  conversationRequested?: boolean;
+  agentsById?: ReadonlyMap<string, Partial<AgentInstance>>;
   workspace?: { navigation: ReactNode; teamSwitcher: ReactNode; toolbar: ReactNode; canvas: ReactNode; inspector: ReactNode; resize: TeamWorkspaceFrameProps["resize"] };
 };
 
@@ -200,9 +205,34 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
     onOpenOrganization,
   } = props;
   const teamId = selectedTeam?.teamId || "";
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
   const [homeView, setHomeView] = useState<"canvas" | "conversation">(props.workspace ? "canvas" : "conversation");
+  const nativeConversationOpen = Boolean(props.workspace && props.conversationRequested
+    && searchParams.get("teamConversationTeamId") === teamId);
+  const memberConversation = nativeConversationOpen && searchParams.get("teamConversation") === "member";
+  const selectedMember = memberConversation ? selectedTeam?.members.find((member) => member.memberId === searchParams.get("teamMember")) : undefined;
+  const selectedMemberSessionId = selectedMember ? teamMemberSessionId(selectedMember, linkedRoomDetail) : "";
+  const selectedMemberDisplay = selectedMember ? teamMemberDisplay(selectedMember, props.agentsById, lang) : null;
+  const nativeSelectionReady = memberConversation
+    ? Boolean(selectedMemberSessionId && !searchParams.get("room") && searchParams.get("session") === selectedMemberSessionId && selectedMember?.agentStatus !== "stale")
+    : Boolean(linkedChatRoomId && !searchParams.get("session") && searchParams.get("room") === linkedChatRoomId);
+  function openHomeView(nextView: "canvas" | "conversation") {
+    setHomeView(nextView);
+    const next = new URLSearchParams(searchParams);
+    next.delete("session"); next.delete("room"); next.delete("teamMember");
+    if (nextView === "conversation") {
+      next.set("teamConversationTeamId", teamId); next.set("teamConversation", "group");
+      if (linkedChatRoomId) next.set("room", linkedChatRoomId);
+    } else { next.delete("teamConversationTeamId"); next.delete("teamConversation"); next.delete("returnTo"); next.delete("returnLabel"); }
+    setSearchParams(next);
+  }
+  useEffect(() => {
+    if (!nativeConversationOpen || memberConversation || !linkedChatRoomId || searchParams.get("room") === linkedChatRoomId) return;
+    const next = new URLSearchParams(searchParams); next.set("room", linkedChatRoomId); next.delete("session");
+    setSearchParams(next, { replace: true });
+  }, [linkedChatRoomId, memberConversation, nativeConversationOpen, searchParams, setSearchParams]);
   const stopTriggerRef = useRef<HTMLButtonElement | null>(null);
   const lastRoomRevisionRef = useRef<{ roomId: string; revision: string } | null>(null);
   const groupTimeline = useGroupRoomTimeline({
@@ -400,19 +430,29 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
             {stopRoundError ? <p className={styles.error} role="alert">{stopRoundError.message}</p> : null}
           </section>
         </aside>;
-  const canvasOpen = Boolean(props.workspace && homeView === "canvas");
+  const canvasOpen = Boolean(props.workspace && homeView === "canvas" && !nativeConversationOpen);
+  const nativeInspector = memberConversation && selectedMember ? <section className="space-y-3 text-[13px] leading-6">
+    <h3 className="font-medium">{selectedMemberDisplay?.name}</h3><p>{selectedMemberDisplay?.role}</p><p className="text-[var(--fg-secondary)]">{selectedMember.purpose}</p>
+  </section> : <div className="space-y-5">
+    <section><h3 className="text-[13px] font-medium">{lang === "zh" ? "当前任务" : "Current task"}</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{currentTitle}</p><RoundStatus status={currentStatus} lang={lang} /></section>
+    {currentSummary ? <section><h3 className="text-[13px] font-medium">{lang === "zh" ? "上轮结果" : "Previous result"}</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{currentSummary}</p></section> : null}
+    {selectedTeam?.teamTemplateId === "dev-team" ? <DevTeamTaskBoard lang={lang} teamId={teamId} members={selectedTeam.members} speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members, linkedRoomDetail)} /> : null}
+  </div>;
+  const nativeBody = nativeSelectionReady ? <TeamNativeConversation lang={lang} />
+    : linkedChatRoomPending ? <VStateSurface tone="loading" title={lang === "zh" ? "正在读取关联会话" : "Loading linked conversation"} skeletonLines={3} />
+      : memberConversation ? <VStateSurface tone="error" title={lang === "zh" ? "成员会话尚不可用" : "Member session unavailable"}>{lang === "zh" ? "请刷新团队或同步群聊后再打开。" : "Refresh the team or sync its room."}</VStateSurface> : conversation;
   return <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
-    <TeamWorkspaceFrame title={lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
+    <TeamWorkspaceFrame title={nativeConversationOpen ? selectedMember ? `${selectedMemberDisplay?.name} · ${lang === "zh" ? "对话" : "Conversation"}` : lang === "zh" ? "团队讨论" : "Team discussion" : lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
       layoutId={WORKBENCH_LAYOUT_IDS.teams} resize={props.workspace?.resize}
       responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation" }, inspector: { label: lang === "zh" ? "本轮操作与成员详情" : "Round actions and member details" } }}
       ariaLabel={selectedTeam?.name || (lang === "zh" ? "团队主页" : "Team home")}
       railTitle={props.workspace?.teamSwitcher} rail={props.workspace?.navigation}
-      inspectorTitle={canvasOpen ? (lang === "zh" ? "成员详情" : "Member details") : (lang === "zh" ? "本轮操作" : "Round actions")}
-      mainScroll={!canvasOpen} canvas={canvasOpen ? props.workspace?.canvas : conversation}
-      inspector={canvasOpen ? props.workspace?.inspector : roundActions}
+      inspectorTitle={canvasOpen || memberConversation ? (lang === "zh" ? "成员详情" : "Member details") : (lang === "zh" ? "本轮操作" : "Round actions")}
+      mainScroll={!canvasOpen && !nativeConversationOpen} canvas={canvasOpen ? props.workspace?.canvas : nativeConversationOpen ? nativeBody : conversation}
+      inspector={canvasOpen ? props.workspace?.inspector : nativeConversationOpen && nativeSelectionReady ? nativeInspector : roundActions}
       toolbar={<><VButton density="compact" variant={canvasOpen ? "primary" : "ghost"} aria-pressed={canvasOpen}
-        icon={<GitBranch size={14} aria-hidden="true" />} onClick={() => { setHomeView("canvas"); onOpenOrganization(); }}>{lang === "zh" ? "画布" : "Canvas"}</VButton>
-        <VButton density="compact" variant={!canvasOpen ? "primary" : "ghost"} aria-pressed={!canvasOpen} onClick={() => setHomeView("conversation")}>{lang === "zh" ? "成员发言" : "Messages"}</VButton>
+        icon={<GitBranch size={14} aria-hidden="true" />} onClick={() => { openHomeView("canvas"); onOpenOrganization(); }}>{lang === "zh" ? "画布" : "Canvas"}</VButton>
+        <VButton density="compact" variant={!canvasOpen ? "primary" : "ghost"} aria-pressed={!canvasOpen} onClick={() => props.workspace ? openHomeView("conversation") : setHomeView("conversation")}>{lang === "zh" ? "成员发言" : "Messages"}</VButton>
         {roomLink ? <VRouteLinkButton density="compact" to={roomLink} variant="secondary" icon={<MessageSquare size={14} aria-hidden="true" />}>{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null}
         {props.workspace?.toolbar}</>} />
     <VConfirmDialog

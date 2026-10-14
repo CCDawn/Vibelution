@@ -4,6 +4,29 @@
 > 阶段卡、结果列表等 **不是** 通用 kanban；通用壳用 Board recipe。
 > 设计选型先读 **功能 / 适用范围 / 使用方式**。
 
+## TeamWorkspaceFrame
+
+### 功能
+团队工作台共用的页面外框与导航、内容、检查器三栏组合；内容区保留当前 Teams 页面各自的业务组件。
+
+### 适用范围
+- **适用**：团队主页、组织/流程画布等使用左侧团队导航、中心内容与可选检查器的桌面工作台。
+- **不适用**：普通团队列表/详情 → `VListDetailPage`；总览看板 → `VBoardWorkbenchPage`。
+
+### 使用方式
+沿用 `TeamWorkspaceFrame` 包装业务槽位，保留 `VCanvasWorkbenchPage`、`WORKBENCH_LAYOUT_IDS` 与 shared pane persistence；不增加团队专用页面 recipe 或宽度状态。团队讨论与成员单聊切换后都占用同一个中心内容列，由 `TeamConversationRail` 提供会话选择。
+
+团队讨论和成员单聊在中心列嵌入 `TeamNativeConversation`，复用现有 `ChatCodingRoute`。嵌入层只处理工作台几何并隐藏重复的会话导航栏；Session、transcript、SSE 实时输出、发送和停止仍由原生 Chat 链路负责，不形成第二套会话实现或状态权威。
+团队与成员日常切换留在 `/teams`；原生分叉等创建新独立会话的操作沿用 `/chat`，并提供返回团队入口。成员以 `Team.members` 为名单，按关联房间 `agentId` 映射原生 `sessionId`；缺少会话或已失效成员不能打开其他成员的会话。
+
+### 视觉与布局
+- 外框与左右栏复用 `vuiRailFillClass` / `--vui-surface-rail`；左右面板不覆盖 `--shell-surface`，由外框的 rail surface 提供连续背景。
+- 中心内容面只在内容面板设置 `--shell-surface`、`--vui-surface-panel` 与 `--vui-surface-workspace` 为 `--vui-surface-chat`，保持主题中的对话背景、VUI 软圆角与平面无阴影。
+- 外框留白为 `p-1`，中心列使用 `mx-1`；布局缩放、可选检查器和既有响应行为继续由 `VCanvasWorkbenchPage` 管理。
+
+### 实现落点
+`web/src/routes/teams/TeamWorkspaceFrame.tsx` 与 `TeamWorkspaceFrame.styles.ts`。
+
 ## TeamStageCard
 
 ### 功能
@@ -445,11 +468,11 @@
 | 当前任务 / 状态 / 更新时间 | 以详情中的 `latestTeamRound` 为当前轮元数据，避免 timeline 追赶时显示上一轮状态 |
 | 近期发言与结论 | 使用 `useGroupRoomTimeline` 投影；只展示与 `latestTeamRound.roundId` 相同的轮次。新轮详情先到时暂不挂载上一轮内容；投影处于 legacy fallback 时沿用详情轮次 |
 | timeline 刷新 | 房间首次详情不重复触发请求；后续 `updatedAt` 或当前轮更新时间变化时失效该房间 timeline 缓存 |
-| 发言内容 | 复用群聊 `ChatGroupMessageBody`，不解析协议 JSON、不另造消息过滤规则；最多显示当前轮末尾 4 条，完整历史留在群聊 |
+| 发言内容 | 工作台中复用完整原生 Chat 的时间线与 composer；独立摘要 fallback 继续复用 `ChatGroupMessageBody`、最多显示当前轮末尾 4 条，不另造过滤规则 |
 | 轮次摘要 | 结论直接展示；服务端“参与者成功发言”计数摘要放入折叠的轮次结果，不冒充讨论结论 |
 | 主动作 | 空闲时提交下一轮任务，运行时停止前确认且保留已有产出；群聊未关联时提供同步入口 |
 | 组织结构切换 | 页面局部切换，组织画布提供明确返回动作；切换团队时回到首页 |
-| 布局 | 桌面两栏显示发言与主动作；窄屏正文折为单列。首页不显示重复节点 rail 或 rail 抽屉按钮；顶栏团队选择器负责切换，组织结构视图恢复 rail |
+| 布局 | 桌面复用灰色左右栏与白色圆角中心列，左栏顶部切换团队，团队群聊与成员会话同列；画布与对话共用外框和栏宽记忆 |
 
 ### 非职责
 - 不复制群聊时间线、消息发送/广播能力或团队历史列表。
@@ -463,4 +486,4 @@
 ### 视觉与状态
 - 读取中、读取失败、未关联群聊、空成员、运行与停止中均沿用现有状态和操作；失败原因保持可读。
 - 新轮次的消息投影未追上时显示同步提示；长发言沿用群聊的显式展开，桌面和窄屏均保留独立阅读滚动。
-- 主页主阅读面沿用已批准的 16px 圆角、细边与轻影；内部标题、消息、任务及表单依靠分隔和间距组织，不再增加嵌套表面。窄屏收紧外侧间隙，所有真实操作与内容仍由原组件提供。
+- 主页主阅读面沿用共享 panel 圆角与细边，保持无阴影；内部标题、消息、任务及表单依靠分隔和间距组织，不再增加嵌套表面。所有真实操作与内容仍由原组件提供。
