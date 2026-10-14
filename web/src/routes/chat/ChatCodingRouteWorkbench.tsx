@@ -2234,9 +2234,6 @@ export function ChatCodingRouteWorkbench() {
   const {
     sessionIdsNeedingApproval,
     toolApproval,
-    handleApproveToolApproval,
-    handleApproveToolForSession,
-    handleRejectToolApproval,
   } = useChatToolApprovalBridge({
     detail,
     sessionToolApprovals: sessionToolApprovalsQuery.data,
@@ -3883,37 +3880,42 @@ export function ChatCodingRouteWorkbench() {
             sessionWorkspace={(
             <FollowupQueueTogglePauseContext.Provider value={handleFollowupQueueTogglePause}>
             <ChatSessionWorkspacePanel
-              activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
-              activeCliAgentRunId={activeCliAgentRunId}
-              activeSessionId={activeSessionId}
-              activeTurnStreamState={activeTurnStreamState}
-              blockingErrorMessage={sessionDetailErrorMessage}
-              cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
-              conversation={conversationModel}
-              hideExportControl={headerExportVisible}
-              conversationFocused={statusRailCollapsed}
-              filePreview={{
-                changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
-                errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
-                file: fileContentQuery.data,
-                loadingLabel: t("loadingFilePreview"),
-                sourceLabel: detail?.title ?? t("currentSession"),
-              }}
-              hasBlockingError={sessionDetailErrorState.blockingError}
-              hasTransientError={sessionDetailErrorState.transientError}
-              invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
               lang={lang}
-              loadingSessionLabel={t("loadingSession")}
-              preface={null}
-              noSessionsLabel={t("noSessionsYet")}
-              notices={activeRuntimeNotices}
-              sessionsPending={sessionsQuery.isPending}
+              sessionGate={{
+                activeSessionId,
+                sessionsPending: sessionsQuery.isPending,
+                noSessionsLabel: t("noSessionsYet"),
+                loadingSessionLabel: t("loadingSession"),
+              }}
+              errorGate={{
+                hasBlockingError: sessionDetailErrorState.blockingError,
+                blockingErrorMessage: sessionDetailErrorMessage,
+                hasTransientError: sessionDetailErrorState.transientError,
+                invalidChildSessionLinkMessage,
+                transientErrorMessage: sessionDetailErrorMessage,
+              }}
+              alternateSurface={{
+                workspaceActiveTab: conversationWorkspaceTab,
+                activeCliAgentRunId,
+                activeCliAgentRunAvailable: Boolean(activeCliAgentRun),
+                cliAgentRunEmptyLabel: lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display.",
+                filePreview: {
+                  changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
+                  errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
+                  file: fileContentQuery.data,
+                  loadingLabel: t("loadingFilePreview"),
+                  sourceLabel: detail?.title ?? t("currentSession"),
+                },
+              }}
+              conversationFrame={{
+                conversation: conversationModel,
+                conversationFocused: statusRailCollapsed,
+                preface: null,
+                hideExportControl: headerExportVisible,
+                notices: activeRuntimeNotices,
+                activeTurnStreamState,
+              }}
               toolApproval={toolApproval}
-              transientErrorMessage={sessionDetailErrorMessage}
-              workspaceActiveTab={conversationWorkspaceTab}
-              onApproveToolApproval={handleApproveToolApproval}
-              onApproveToolForSession={handleApproveToolForSession}
-              onRejectToolApproval={handleRejectToolApproval}
             />
             </FollowupQueueTogglePauseContext.Provider>
             )}
