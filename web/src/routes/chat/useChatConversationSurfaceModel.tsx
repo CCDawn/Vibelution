@@ -345,13 +345,13 @@ export function useChatConversationSurfaceModel({
       companionMode: verifiedCompanionMode,
       // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
       showMentalSnapshots: !verifiedCompanionMode,
-      promptSuggestionEnabled: activePromptSuggestionEnabled,
+      promptSuggestionEnabled: !verifiedCompanionMode && activePromptSuggestionEnabled,
       composerFocusSignal:
         composerFocusRequest.sessionId === activeSessionId
           ? composerFocusRequest.signal
           : "",
       onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
-      composer: financeSurface ? { ...companionConversationComposer, placeholder: lang === "zh" ? "追问这只股票…" : "Ask about this stock…" } : companionConversationComposer,
+      composer: financeSurface ? { ...companionConversationComposer, placeholder: lang === "zh" ? "追问这只股票…" : "Ask about this stock…" } : verifiedCompanionMode ? { ...companionConversationComposer, placeholder: lang === "zh" ? "发送消息…" : "Send a message…" } : companionConversationComposer,
       composerLeadingControl: verifiedCompanionMode ? undefined : (
         <ChatComposerPlusMenu
           lang={lang}

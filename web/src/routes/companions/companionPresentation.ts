@@ -73,6 +73,11 @@ const LOCATION_LABELS: Record<string, { zh: string; en: string }> = {
   workplace: { zh: "在工作地点", en: "At work" },
   outdoors: { zh: "在户外", en: "Outdoors" },
   park: { zh: "在公园", en: "At the park" },
+  library: { zh: "在图书馆", en: "At the library" },
+  "reading-room": { zh: "在阅览室", en: "In the reading room" },
+  "school-library": { zh: "在学校图书馆", en: "At the school library" },
+  studio: { zh: "在创作工作室", en: "At the studio" },
+  "music-studio": { zh: "在音乐工作室", en: "At the music studio" },
   cafe: { zh: "在咖啡馆", en: "At a cafe" },
   street: { zh: "在街上", en: "On the street" },
 };

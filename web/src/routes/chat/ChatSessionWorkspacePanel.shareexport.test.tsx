@@ -80,7 +80,7 @@ describe("ChatSessionWorkspacePanel share export wiring", () => {
     expect(centerTabsSource).toContain("sessionId={conversationModel.sessionId}");
     expect(centerTabsSource).toContain("messages={conversationModel.messages}");
     expect(centerTabsSource).toContain("key={conversationModel.sessionId}");
-    expect(workbenchSource).toContain("hideExportControl: headerExportVisible");
+    expect(workbenchSource).toContain("hideExportControl: verifiedCompanionMode || headerExportVisible");
   });
 
   it("keeps the export entry out of ConversationView (W4 decoupling contract)", () => {
