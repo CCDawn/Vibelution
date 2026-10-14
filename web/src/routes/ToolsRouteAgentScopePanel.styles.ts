@@ -1,26 +1,8 @@
-import { vuiOpaqueRowClass } from "../design/vuiSurfaceRecipes";
-
-const coolSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,transparent)] p-2";
-const rowDescendant = vuiOpaqueRowClass
-  .split(/\s+/)
-  .filter(Boolean)
-  .map((token) => `[&>span]:${token}`)
-  .join(" ");
-
 const styles = {
-  agentScopeBar:
-    `grid min-w-0 grid-cols-[minmax(0,1fr)_clamp(160px,16vw,220px)_clamp(130px,14vw,180px)_fit-content(18rem)] items-center gap-2 ${coolSurface} max-[1180px]:grid-cols-[minmax(0,1fr)_clamp(160px,18vw,220px)_clamp(130px,14vw,180px)] max-[880px]:grid-cols-[minmax(0,1fr)_clamp(160px,22vw,220px)] max-[640px]:grid-cols-[1fr]`,
-  scopeCopy:
-    "grid min-w-0 gap-0.5 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-sm)] [&>strong]:font-extrabold [&>strong]:text-vui-fg-primary [&>span]:truncate [&>span]:[font-size:var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary",
-  panelEyebrow:
-    "m-0 truncate [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.06em] text-vui-fg-tertiary",
-  scopeSelect:
-    "grid min-w-0 gap-1 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary [&_[data-vui=native-select]]:w-full",
-  scopeStats:
-    `flex min-w-0 flex-wrap items-center justify-end gap-1 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary max-[1180px]:col-span-full max-[1180px]:justify-start max-[640px]:col-span-auto [&>span]:inline-grid [&>span]:min-h-6 [&>span]:grid-cols-[auto_auto] [&>span]:items-center [&>span]:gap-1 ${rowDescendant} [&>span]:px-2 [&_strong]:text-vui-fg-primary`,
-  deepLinkNotice:
-    "col-span-full m-0 min-w-0 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_32%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_9%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-[var(--vui-line-readable)] text-vui-accent-cool",
+  agentScopeBar: "flex shrink-0 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-vui-border-subtle bg-transparent px-5 py-3 max-[640px]:px-4",
+  scopeSelect: "flex min-w-0 items-center gap-2 text-vui-2xs text-vui-fg-tertiary [&>span:first-child]:shrink-0 [&>span:first-child]:whitespace-nowrap [&_[data-vui=select-shell]]:!w-[250px] [&_[data-vui=select-shell]]:shrink-0 max-[640px]:[&_[data-vui=select-shell]]:!w-[230px] [&:nth-child(2)_[data-vui=select-shell]]:!w-[128px] max-[760px]:[&_[data-vui=select]]:min-h-11",
+  scopeStats: "shrink-0",
+  scopeHintContent: "grid gap-2",
+  deepLinkNotice: "m-0 basis-full min-w-0 break-words text-vui-2xs leading-relaxed text-vui-fg-secondary",
 } as const;
-
 export default styles;
