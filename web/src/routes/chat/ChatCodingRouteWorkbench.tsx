@@ -38,7 +38,8 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listSessionChildSessions, fetchSessionLlmOptions } from "../../api/chat";
+import { useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
+import { useChatSessionWarmup } from "./useChatSessionWarmup";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import { archiveAgent } from "../../api/agents";
 import {
@@ -58,7 +59,6 @@ import { useChatRailPreview } from "./useChatRailPreview";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
-import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { ConversationRerunFileChoiceDialog } from "../../components/conversation/ConversationRerunFileChoiceDialog";
@@ -281,24 +281,17 @@ import {
 import {
   SESSION_DETAIL_INITIAL_MESSAGE_LIMIT,
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
-  fetchSessionDetailWindow,
   isSessionDetailHardLoading,
-  prefetchSessionDetailWindow,
-  cancelUnobservedSessionPrefetches,
   resolveActiveSessionDetailForUi,
-  resolveNeighborSessionIdsForPrefetch,
   sessionDetailSnapshotKey,
   latestMentalSnapshot,
 } from "./chatSessionDetailHelpers";
 import {
   forgetSessionDetailPaint,
   shouldShowStickyTranscriptPending,
-  touchSessionKeepAlive,
 } from "./chatSessionPaintCache";
 import {
-  sessionDetailStructuralSharing,
   useStableSessionDetailPaint,
-  useStableSessionDetailPlaceholder,
   useSessionToolApprovalsQuery,
   type SessionToolApprovalPollingInput,
 } from "./chatSessionQuerySeams";
@@ -1122,163 +1115,36 @@ export function ChatCodingRouteWorkbench() {
       return { ...current, [activeId]: "" };
     });
   }, [activeSessionId]);
-  const sessionDetailPlaceholder = useStableSessionDetailPlaceholder({
+  const {
+    sessionDetailQuery,
+    sessionLlmOptionsQuery,
+    activeRootSessionId,
+    childSessionsQuery,
+  } = useChatSessionDetailQueries({
     activeSessionId,
-    cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
-    summary: activeSessionId
-      ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
-      : undefined,
-  });
-  const sessionDetailQuery = useQuery<SessionDetail>({
-    queryKey: queryKeys.session(activeSessionId ?? "none"),
-    // Temp create shells are local-only; never GET/stream them until rebased.
-    enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
-    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
-      signal,
-      // When SSE owns live transcript, skip expensive secondary lists on poll/refetch.
-      // First paint still hydrates fully until stream ownership is true.
-      includeSecondary: !chatLiveQueryPolicy.directSessionStreamOwnsLiveQueries,
-    }),
-    // Select + GET often race on switch; brief freshness avoids immediate double rebuild
-    // when /select already wrote a windowed detail into the same query key.
-    staleTime: 1_500,
-    structuralSharing: sessionDetailStructuralSharing,
-    placeholderData: sessionDetailPlaceholder,
-    refetchInterval: startupDetailSettledSessionId === activeSessionId
-      ? chatLiveQueryPolicy.sessionDetailRefetchInterval
-      : false,
-    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
-  });
-  useEffect(() => {
-    if (!activeSessionId) {
-      setStartupDetailSettledSessionId("");
-      return;
-    }
-    if (
-      sessionDetailQuery.isFetching
-      || !sessionDetailQuery.data
-      || sessionDetailQuery.data.id !== activeSessionId
-    ) {
-      return;
-    }
-    setStartupDetailSettledSessionId((current) => current === activeSessionId ? current : activeSessionId);
-  }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching]);
-  const sessionLlmOptionsQuery = useQuery({
-    queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
-    enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
-    queryFn: () => fetchSessionLlmOptions(activeSessionId ?? ""),
-    staleTime: 30_000,
-    // Re-read the Agent binding when returning from Agent management.
-    refetchOnMount: "always",
-  });
-  // Explicit missing/archived session keeps its URL and renders the blocking
-  // unavailable surface. Background misses must never fall back to another
-  // session and must never navigate.
-  const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
-  const childSessionLiveQueryPolicy = resolveChatLiveQueryPolicy({
-    ...chatLiveQueryPolicyInput,
-    activeRootSessionId: activeRootSessionId || "",
-  });
-  const childSessionsQuery = useQuery({
-    queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
-    queryFn: () => listSessionChildSessions(activeRootSessionId),
-    enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,
-    refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
-    refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
-  });
-  useEffect(() => {
-    const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
-    const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoomQuery.data);
-    if ((financeSurface || sessionsQuery.data) && directReady && groupReady) {
-      setChatStartupDataReady(true);
-    }
-  }, [
-    activeGroupRoomQuery.data,
-    activeSessionId,
-    financeSurface,
-    standardGroupRoomActive,
-    sessionDetailQuery.data,
-    sessionsQuery.data,
-  ]);
-  useEffect(() => {
-    if (!chatStartupDataReady || chatRouteStartupReadyLoggedRef.current) {
-      return;
-    }
-    chatRouteStartupReadyLoggedRef.current = true;
-    postBrowserTelemetry({
-      phase: "navigation",
-      eventCode: "browser.chat_route.startup_data_ready",
-      message: "Chat route startup data is ready.",
-      fields: {
-        durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
-        activeSession: Boolean(activeSessionId),
-        standardGroupRoomActive,
-        runtimeReady: Boolean(runtimeQuery.data),
-        sessionsReady: Boolean(sessionsQuery.data),
-        conversationsReady: Boolean(conversationsQuery.data),
-        teamsReady: Boolean(teamsQuery.data),
-        sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true),
-        groupRoomReady: Boolean(!standardGroupRoomActive || activeGroupRoomQuery.data),
-      },
-    });
-  }, [
-    activeGroupRoomQuery.data,
-    activeSessionId,
-    chatStartupDataReady,
-    conversationsQuery.data,
-    standardGroupRoomActive,
-    runtimeQuery.data,
-    sessionDetailQuery.data,
-    sessionsQuery.data,
-    teamsQuery.data,
-  ]);
-  useEffect(() => {
-    setDirectSessionBackgroundSyncActive(Boolean(
-      activeSessionId
-      && directSessionPanelActive
-      && isBusyPhase(sessionDetailQuery.data?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status),
-    ));
-  }, [
-    activeSessionId,
-    directSessionActiveSummary?.currentPhase,
-    directSessionActiveSummary?.status,
+    queryClient,
+    sessions: sessionsQuery.data,
+    directSessionActiveSummary,
+    chatLiveQueryPolicy,
+    chatLiveQueryPolicyInput,
+    secondaryChatDataEnabled,
     directSessionPanelActive,
-    sessionDetailQuery.data?.currentPhase,
-  ]);
-  // A hidden window can miss frames or a stream restart; refocusing must not
-  // trust the cached transcript, so force one authoritative resync for the
-  // active session and the indexes that feed badges and notification titles.
-  const previousPageVisibleRef = useRef(pageVisible);
-  const refetchSessionDetailRef = useRef(sessionDetailQuery.refetch);
-  refetchSessionDetailRef.current = sessionDetailQuery.refetch;
-  const focusResyncSessionIdRef = useRef(activeSessionId || "");
-  focusResyncSessionIdRef.current = activeSessionId || "";
-  useEffect(() => {
-    const previousPageVisible = previousPageVisibleRef.current;
-    previousPageVisibleRef.current = pageVisible;
-    const resyncSessionId = focusResyncSessionIdRef.current;
-    if (!pageVisible || previousPageVisible || !resyncSessionId) {
-      return;
-    }
-    // enabled:false does not stop refetch(). A temp shell has no server row;
-    // this GET 404s and the error surface replaces the composer.
-    if (!isTempSessionId(resyncSessionId)) {
-      void refetchSessionDetailRef.current();
-    }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
-    postBrowserTelemetry({
-      phase: "session_stream",
-      eventCode: "browser.session_stream.focus_resync",
-      message: "Focus after a hidden period forced an authoritative session resync.",
-      level: "info",
-      fields: {
-        sessionId: resyncSessionId,
-        streamShouldConnect: sessionStreamDecisionSnapshotRef.current.shouldConnect,
-        visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
-      },
-    });
-  }, [pageVisible, queryClient]);
+    standardGroupRoomActive,
+    activeGroupRoom: activeGroupRoomQuery.data,
+    financeSurface,
+    runtime: runtimeQuery.data,
+    conversations: conversationsQuery.data,
+    teams: teamsQuery.data,
+    pageVisible,
+    chatStartupDataReady,
+    startupDetailSettledSessionId,
+    setStartupDetailSettledSessionId,
+    setChatStartupDataReady,
+    setDirectSessionBackgroundSyncActive,
+    chatRouteMountStartedAtRef,
+    chatRouteStartupReadyLoggedRef,
+    sessionStreamDecisionSnapshotRef,
+  });
 
   const {
     submitTurnMutation,
@@ -1540,96 +1406,17 @@ export function ChatCodingRouteWorkbench() {
     stopGroupRoundPending: stopGroupRoundMutation.isPending,
   });
 
-  useEffect(() => {
-    if (activeSessionId && sessionDetailQuery.data?.id === activeSessionId) {
-      hydrateSession(activeSessionId, [], "agent");
-    }
-  }, [activeSessionId, hydrateSession, sessionDetailQuery.data?.id]);
-
-  // C5: keep recent session ids warm (sticky paint + scroll memory lifetime ring).
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    touchSessionKeepAlive(activeSessionId);
-  }, [activeSessionId]);
-
-  // T1: warm ConversationView after session intent is known (does not mount).
-  useEffect(() => {
-    if (!activeSessionId || groupPanelActive) {
-      return;
-    }
-    let cancelled = false;
-    const run = () => {
-      if (!cancelled) {
-        void prefetchConversationView();
-      }
-    };
-    const idleRequest = (window as Window & {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    }).requestIdleCallback;
-    const handle = typeof idleRequest === "function"
-      ? idleRequest(run, { timeout: 800 })
-      : window.setTimeout(run, 120);
-    return () => {
-      cancelled = true;
-      if (typeof idleRequest === "function") {
-        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
-      } else {
-        window.clearTimeout(handle as number);
-      }
-    };
-  }, [activeSessionId, groupPanelActive]);
-
-  // C: idle-prefetch a few neighbor session detail windows (Cursor list warm pattern).
-  const activePrefetchTargetRef = useRef(activeSessionId);
-  activePrefetchTargetRef.current = activeSessionId;
-  useEffect(() => {
-    if (financeSurface || groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
-      return;
-    }
-    const neighborIds = resolveNeighborSessionIdsForPrefetch({
-      sessions: sessionsQuery.data,
-      activeSessionId,
-    });
-    if (!neighborIds.length) {
-      return;
-    }
-    let cancelled = false;
-    const ownedPendingIds = new Set<string>();
-    const run = async () => {
-      for (const sessionId of neighborIds) {
-        if (cancelled) {
-          return;
-        }
-        try {
-          const alreadyFetching = queryClient.getQueryState(queryKeys.session(sessionId))?.fetchStatus === "fetching";
-          if (!alreadyFetching) ownedPendingIds.add(sessionId);
-          await prefetchSessionDetailWindow(queryClient, sessionId);
-        } catch {
-          return;
-        } finally {
-          ownedPendingIds.delete(sessionId);
-        }
-      }
-    };
-    const idleRequest = (window as Window & {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    }).requestIdleCallback;
-    const handle = typeof idleRequest === "function"
-      ? idleRequest(() => void run(), { timeout: 1_500 })
-      : window.setTimeout(() => void run(), 280);
-    return () => {
-      cancelled = true;
-      void cancelUnobservedSessionPrefetches(queryClient, ownedPendingIds, activePrefetchTargetRef.current || "");
-      if (typeof idleRequest === "function") {
-        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
-      } else {
-        window.clearTimeout(handle as number);
-      }
-    };
-  }, [activeSessionId, financeSurface, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
-
+  useChatSessionWarmup({
+    activeSessionId,
+    sessionDetailId: sessionDetailQuery.data?.id,
+    hydrateSession,
+    financeSurface,
+    groupPanelActive,
+    secondaryChatDataEnabled,
+    pageVisible,
+    sessions: sessionsQuery.data,
+    queryClient,
+  });
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
