@@ -5,16 +5,16 @@ other workbenches. Prefer editing a **pure module or turn panel** over growing
 `ConversationView.tsx` when possible.
 
 `ConversationView.tsx` remains the **shell**: props wiring, expansion state,
-virtual timeline window, stick-bottom scroll, composer submit/edit, and turn
-composition. Pure presentation, timeline projection, and tool rendering should
-live outside the shell.
+virtual timeline window, and turn composition. Stick-bottom scroll lives in
+`useConversationTimelineFollow.ts`. Pure presentation, timeline projection, and
+tool rendering should live outside the shell.
 
 ## 30-second routing (Agent reading map)
 
 | You are changing… | Open first |
 |-------------------|------------|
 | Virtual window / history window policy | `conversationHistoryWindow.ts` |
-| Stick-bottom / follow-tail scroll state | `conversationTimelineFollowState.ts` |
+| Stick-bottom / follow-tail scroll | `useConversationTimelineFollow.ts`, `conversationTimelineFollowState.ts` |
 | Scroll signals / anchor helpers | `conversationTimelineScrollSignals.ts`, `timelineScrollAnchor.ts` |
 | Timeline rows / process projection | `agentMessageTimeline*.ts`, `timelineMessageProcessProjection.ts` |
 | Operation groups / ReAct items | `agentMessageOperations.ts`, `conversationReActOperationItems.ts` |
@@ -52,7 +52,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Imports + lazy chrome | Image preview / Agent context dialogs stay lazy | keep lazy in shell |
 | Row memo equality | `ConversationTurnRow` props compare | keep shell-local unless shared |
 | Virtual range + heights | measured heights, prefix sums, min tail | `conversationHistoryWindow.ts` + shell measure |
-| Stick-bottom follow | rAF follow / user scroll break | `conversationTimelineFollowState.ts` |
+| Stick-bottom follow | rAF follow / user scroll break | `useConversationTimelineFollow.ts` + `conversationTimelineFollowState.ts` |
 | Timeline projection | agent timeline items / codex cells | pure timeline modules |
 | Process / operation expansion | process disclosure state | `ConversationProcessDisclosure.tsx` + pure state |
 | Response streaming render | streaming segments / markdown | streaming + markdown modules |

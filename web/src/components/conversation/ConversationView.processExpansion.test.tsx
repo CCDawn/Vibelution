@@ -7,7 +7,7 @@ import type { ConversationMessage } from "../../api/types";
 import { dictionary } from "../../i18n/dictionary";
 import { ConversationView } from "./ConversationView";
 import styles from "./ConversationView.styles";
-import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationTimelineFollowSource from "./useConversationTimelineFollow.ts?raw";
 import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
 import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
 
@@ -69,12 +69,12 @@ describe("ConversationView process expansion defaults", () => {
   });
 
   it("keeps follow-latest on process toggles near the bottom and anchors only when reading history", () => {
-    const handlerStart = conversationViewSource.indexOf("const handleProcessDisclosureUserToggle");
-    const handlerEnd = conversationViewSource.indexOf(
+    const handlerStart = conversationTimelineFollowSource.indexOf("const handleProcessDisclosureUserToggle");
+    const handlerEnd = conversationTimelineFollowSource.indexOf(
       "// Stick-to-bottom:",
       handlerStart,
     );
-    const handler = conversationViewSource.slice(handlerStart, handlerEnd);
+    const handler = conversationTimelineFollowSource.slice(handlerStart, handlerEnd);
 
     expect(handler).toContain("shouldKeepFollowingLatestOnProcessToggle({");
     expect(handler).toContain("followLatestRef.current = true");
