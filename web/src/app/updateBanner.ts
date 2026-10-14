@@ -19,18 +19,6 @@ export function isLauncherUpdateAvailable(freshness: LauncherFreshness | undefin
   return Boolean(freshness && (freshness.current === false || freshness.shellStale || freshness.updateAvailable));
 }
 
-/**
- * A stale desktop shell opens Launcher only when the workbench itself is current.
- * Frontend or backend staleness keeps the restart action: opening Launcher does
- * not load the new interface build.
- */
-export function launcherUpdateReplacesWorkbenchRestart(input: {
-  verdict: CodeFreshnessVerdict | undefined | null;
-  launcherFreshness?: LauncherFreshness | null;
-}): boolean {
-  return isLauncherUpdateAvailable(input.launcherFreshness) && !isUpdateBannerVerdict(input.verdict);
-}
-
 export function shouldShowUpdateBanner({
   verdict,
   diskHead,
@@ -57,8 +45,8 @@ export function shouldShowUpdateBanner({
 
 export function launcherUpdateBannerCopy(lang: string): { title: string; detail: string } {
   return lang === "en"
-    ? { title: "Launcher update available", detail: "Launcher is running an earlier version. Open Launcher to update and restart." }
-    : { title: "启动器有更新", detail: "启动器仍在运行较早版本，请打开启动管理更新并重启。" };
+    ? { title: "Update ready — restart to apply", detail: "Restart loads the latest interface in this window." }
+    : { title: "有更新，重启后生效", detail: "重启会在当前窗口加载最新界面。" };
 }
 
 export function frontendUpdateBannerCopy(lang: string): { title: string; detail: string } {
@@ -127,7 +115,7 @@ function updateBannerDirtyWorkspaceCopy(
 }
 
 export function updateBannerRestartLabel(lang: string): string {
-  return lang === "en" ? "Restart now" : "立即重启";
+  return lang === "en" ? "Restart to update" : "重启更新";
 }
 
 /**
