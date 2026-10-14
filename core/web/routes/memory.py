@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from core.web.routes.memory_models import MemoryRouteResponse
+from core.web.services.memory.models import PlatformKnowledgeGraphResponse, PlatformKnowledgeGraphDetailResponse
+from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
 from core.web.services.github_project_library_service import (
     GithubProjectLibraryError,
     clone_github_project,
@@ -21,6 +23,8 @@ from core.web.services.memory_graph_service import (
     MemoryKnowledgeGraphAmbiguousNodeError,
     get_memory_knowledge_graph,
     get_memory_knowledge_graph_node_detail,
+    get_platform_knowledge_graph,
+    get_platform_knowledge_graph_node_detail,
     record_memory_knowledge_graph_blocked,
 )
 from core.web.services.memory_service import (
@@ -35,6 +39,31 @@ from core.web.services.memory_service import (
 )
 
 router = APIRouter(tags=["memory"])
+
+
+@router.get("/memory/platform-knowledge-graph", response_model=PlatformKnowledgeGraphResponse)
+def memory_platform_knowledge_graph(request: Request, limit: int = 800, knowledgeBaseId: str = "") -> dict:
+    if request.headers.get("X-OpenCode-Session") is not None:
+        raise HTTPException(status_code=403, detail="Platform knowledge graph requires the local operator session.")
+    try:
+        with server_operator_scope_from_http(request):
+            return get_platform_knowledge_graph(limit=limit, knowledge_base_id=knowledgeBaseId)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Platform knowledge graph requires a privileged operator.") from exc
+
+
+@router.get("/memory/platform-knowledge-graph/node-detail", response_model=PlatformKnowledgeGraphDetailResponse)
+def memory_platform_knowledge_graph_node_detail(request: Request, nodeId: str, limit: int = 40) -> dict:
+    if request.headers.get("X-OpenCode-Session") is not None:
+        raise HTTPException(status_code=403, detail="Platform knowledge graph requires the local operator session.")
+    try:
+        with server_operator_scope_from_http(request):
+            payload = get_platform_knowledge_graph_node_detail(nodeId, limit=limit)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Platform knowledge graph requires a privileged operator.") from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Platform knowledge graph node not found.")
+    return payload
 
 
 class MemoryItemPayload(BaseModel):

@@ -1,6 +1,9 @@
 import { vuiControlQuietClass } from "../design/vuiChromeRecipes";
 
 const styles = {
+  scopeRoot: "flex h-full min-h-0 flex-col",
+  scopeToolbar: "shrink-0",
+  scopeContent: "min-h-0 flex-1",
   railTitle: "mt-2 text-vui-md leading-normal font-medium",
   typeCount: "text-vui-2xs leading-4 text-[var(--fg-tertiary)]",
   searchResults: "grid gap-1",

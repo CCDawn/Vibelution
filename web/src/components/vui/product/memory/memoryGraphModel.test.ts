@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryKnowledgeGraphNode } from "../../../../api/types";
-import { layoutMemoryKnowledgeGraph } from "./memoryGraphModel";
+import { layoutMemoryKnowledgeGraph, memoryGraphClusterSeed } from "./memoryGraphModel";
 
 function node(id: string, type = "concept"): MemoryKnowledgeGraphNode {
   return { id, type, label: id, summary: "", status: "active", createdAt: "", updatedAt: "",
@@ -8,6 +8,33 @@ function node(id: string, type = "concept"): MemoryKnowledgeGraphNode {
 }
 
 describe("memory graph spatial layout", () => {
+  it("groups explicit topics across node types only when the consumer opts in", () => {
+    const nodes = [node("source", "source_artifact"), node("concept"), node("unassigned", "agent")];
+    nodes[0].metadata = { topicId: "science", topicLabel: "科学研究" };
+    nodes[1].metadata = { topicId: "science", topicLabel: "科学研究" };
+    expect(layoutMemoryKnowledgeGraph(nodes, []).clusters.map(cluster => cluster.key)).toEqual(["agents", "knowledge", "sources"]);
+    const layout = layoutMemoryKnowledgeGraph(nodes, [], { groupByTopic: true });
+    expect(layout.clusters.find(cluster => cluster.key === "topic:science")).toMatchObject({ label: "科学研究", nodeIds: ["concept", "source"] });
+    expect(layout.nodes.find(view => view.id === "unassigned")?.clusterKey).toBe("agents");
+    expect(layoutMemoryKnowledgeGraph([...nodes].reverse(), [], { groupByTopic: true })).toEqual(layout);
+  });
+
+  it("keeps a singleton aggregated topic populated and counts finite members without mutating DTOs", () => {
+    const aggregate = node("theme", "topic");
+    aggregate.label = "工程知识 · 42";
+    aggregate.metadata = { topicId: "engineering", topicLabel: "工程知识", memberCount: 42 };
+    const before = JSON.stringify(aggregate);
+    const layout = layoutMemoryKnowledgeGraph([aggregate], [], { groupByTopic: true });
+    expect(layout.clusters).toHaveLength(1);
+    expect(layout.clusters[0]).toMatchObject({ key: "topic:engineering", memberCount: 42, nodeIds: ["theme"] });
+    expect(layout.nodes[0].source).toBe(aggregate);
+    expect(layout.nodes[0].x).toBe(layout.clusters[0].center.x);
+    expect(JSON.stringify(aggregate)).toBe(before);
+    aggregate.metadata.memberCount = Infinity;
+    expect(layoutMemoryKnowledgeGraph([aggregate], [], { groupByTopic: true }).clusters[0].memberCount).toBe(1);
+    expect(memoryGraphClusterSeed("topic:engineering")).toBe(memoryGraphClusterSeed("topic:engineering"));
+    expect(memoryGraphClusterSeed("topic:science")).not.toBe(memoryGraphClusterSeed("topic:engineering"));
+  });
   it("distributes a topic in a volume rather than a plane or a thin depth band", () => {
     const { nodes } = layoutMemoryKnowledgeGraph(Array.from({ length: 22 }, (_, i) => node(String(i))), []);
     const spans = ["x", "y", "z"].map(axis => {

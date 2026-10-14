@@ -68,6 +68,24 @@ function sourceNode(id: string): MemoryKnowledgeGraphNode {
   };
 }
 
+it("keeps aggregated topic captions selectable at the touch target size without duplicate headings", () => {
+  const source = sourceNode("topic-root");
+  source.type = "topic";
+  source.label = "工程知识 · 42";
+  source.metadata = { topicId: "engineering", topicLabel: "工程知识", memberCount: 42 };
+  const layer = document.createElement("div");
+  const onSelectNode = vi.fn();
+  const elements = createMemoryGraphLabelElements(layer, [{ id: source.id, source, clusterKey: "topic:engineering",
+    clusterLabel: "工程知识", x: 0, y: 0, z: 0 }], [], [{ key: "topic:engineering", label: "工程知识", center: { x: 0, y: 0, z: 0 }, nodeIds: [source.id], memberCount: 42 }], onSelectNode, () => {}, () => false);
+  const button = elements.nodeButtons.get(source.id)!;
+  expect(button.textContent).toContain("工程知识 · 42");
+  expect(button.className).toContain("min-h-11");
+  expect(button.className).toContain("min-w-11");
+  expect(elements.clusterHeadings.size).toBe(0);
+  button.click();
+  expect(onSelectNode).toHaveBeenCalledWith(source.id);
+});
+
 function makeNodes(
   ids: readonly string[],
   positions: ReadonlyMap<string, { x: number; y: number; z: number }>,
