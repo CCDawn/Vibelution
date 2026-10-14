@@ -642,7 +642,8 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
 
   it("remount inside the warm window without a watermark advance skips the authoritative refresh", () => {
     vi.useFakeTimers();
-    const { options, invalidateSpy } = baseOptions({});
+    const { options, queryClient, invalidateSpy } = baseOptions({});
+    queryClient.setQueryData(queryKeys.session("s1"), { id: "s1", ledgerSeq: 10, messages: [] });
     const root = mount(options);
     act(() => {
       FakeEventSource.instances[0].open();
@@ -654,6 +655,79 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     expect(FakeEventSource.instances[0].closed).toBe(false);
     expect(invalidateSpy).not.toHaveBeenCalled();
     unmount(remounted);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["foreign", { id: "another-session", ledgerSeq: 10, messages: [] }],
+    ["provisional", { id: "s1", ledgerSeq: 10, messages: [], provisionalTranscript: true }],
+  ] as const)("requests a canonical read on warm remount with %s detail", (_label, cachedDetail) => {
+    vi.useFakeTimers();
+    const { options, queryClient, invalidateSpy } = baseOptions({});
+    const root = mount(options);
+    act(() => FakeEventSource.instances[0].open());
+    unmount(root);
+    if (cachedDetail) queryClient.setQueryData(queryKeys.session("s1"), cachedDetail);
+
+    const remounted = mount(options);
+    try {
+      expect(FakeEventSource.instances).toHaveLength(1);
+      expect(hookResults.at(-1)?.sessionStreamConnected).toBe(true);
+      expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: queryKeys.session("s1"), exact: true });
+    } finally {
+      unmount(remounted);
+      queryClient.clear();
+    }
+  });
+
+  it("hydrates a fresh select shell after its first detail fetch was aborted on unmount", async () => {
+    const { options, queryClient } = baseOptions({});
+    const sessionKey = queryKeys.session("s1");
+    let firstSignal: AbortSignal | undefined;
+    const completed = {
+      id: "s1", ledgerSeq: 10, currentPhase: "completed",
+      messages: [{ id: "answer", role: "assistant", content: "Done" }],
+    } as SessionDetail;
+    const readDetail = vi.fn(({ signal }: { signal: AbortSignal }) => {
+      if (readDetail.mock.calls.length === 1) {
+        firstSignal = signal;
+        return new Promise<SessionDetail>(() => {});
+      }
+      return Promise.resolve(completed);
+    });
+    const queryOptions = { queryKey: sessionKey, queryFn: readDetail, staleTime: 1_500, refetchInterval: false as const };
+    const firstObserver = new QueryObserver(queryClient, queryOptions);
+    const unsubscribeFirst = firstObserver.subscribe(() => {});
+    const root = mount(options);
+    act(() => FakeEventSource.instances[0].open());
+    // The lightweight select writes a fresh cache entry while GET is pending.
+    queryClient.setQueryData(sessionKey, { id: "s1", ledgerSeq: 10, messages: [], provisionalTranscript: true });
+    unmount(root);
+    unsubscribeFirst();
+    expect(firstSignal?.aborted).toBe(true);
+    // An initial frame received without a mounted owner records only its
+    // watermark. Reusing this stream will not replay that initial frame.
+    FakeEventSource.instances[0].emit("session_initial", JSON.stringify({
+      type: "session_initial", sessionId: "s1", ledgerSeq: 10, running: false,
+    }));
+    expect(peekParkedSessionStreamLedgerSeq("s1")).toBe(10);
+    const observer = new QueryObserver(queryClient, queryOptions);
+    const unsubscribe = observer.subscribe(() => {});
+    expect(readDetail).toHaveBeenCalledTimes(1);
+    const remounted = mount(options);
+    try {
+      await vi.waitFor(() => {
+        expect(queryClient.getQueryData<SessionDetail>(sessionKey)?.messages).toEqual(completed.messages);
+      });
+      expect(readDetail).toHaveBeenCalledTimes(2);
+      expect(queryClient.getQueryData<SessionDetail>(sessionKey)?.provisionalTranscript).toBeFalsy();
+      expect(FakeEventSource.instances).toHaveLength(1);
+      expect(hookResults.at(-1)?.sessionStreamConnected).toBe(true);
+    } finally {
+      unmount(remounted);
+      unsubscribe();
+      queryClient.clear();
+    }
   });
 
   it("drops parked delta and detail projections while no owner is mounted", () => {
