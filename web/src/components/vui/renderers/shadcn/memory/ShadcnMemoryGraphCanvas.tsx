@@ -20,9 +20,10 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
     focusToken,
     onSelectNode,
     onSelectEdge,
+    groupByTopic = false,
   } = props;
   const highlightIds = props.highlightIds ?? EMPTY_HIGHLIGHTS;
-  const layout = useMemo(() => layoutMemoryKnowledgeGraph(nodes, edges), [nodes, edges]);
+  const layout = useMemo(() => layoutMemoryKnowledgeGraph(nodes, edges, { groupByTopic }), [nodes, edges, groupByTopic]);
   const rendererLayout = useMemo(() => {
     if (!flat) return layout;
     return {

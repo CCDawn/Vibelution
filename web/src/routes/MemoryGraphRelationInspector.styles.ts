@@ -1,4 +1,7 @@
 const styles = {
+  evidenceItem: "space-y-2",
+  evidenceButton: "!h-auto min-h-11 !whitespace-normal py-2",
+  evidenceLocation: "break-words text-vui-xs text-[var(--fg-tertiary)]",
   panel: "min-h-0 flex-1 space-y-6 overflow-auto p-6",
   title: "break-words text-vui-title leading-[1.4] font-medium",
   endpoints: "grid gap-3",

@@ -17,11 +17,20 @@ export type VMemoryGraphCanvasProps = {
   focusToken?: number;
   highlightIds?: string[];
   onSelectEdge?: (id: string) => void;
+  selectedEdgeId?: string;
+  mode?: "galaxy" | "relations";
+  /** Topic metadata takes priority over type clusters only for opting-in consumers. */
+  groupByTopic?: boolean;
 };
 
 const LazyShadcnMemoryGraphCanvas = lazy(async () => {
   const renderer = await import("../../renderers/shadcn/memory/ShadcnMemoryGraphCanvas");
   return { default: renderer.ShadcnMemoryGraphCanvas };
+});
+
+const LazyShadcnMemoryRelationGraph = lazy(async () => {
+  const renderer = await import("../../renderers/shadcn/memory/ShadcnMemoryRelationGraph");
+  return { default: renderer.ShadcnMemoryRelationGraph };
 });
 
 /**
@@ -40,7 +49,9 @@ export function VMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
       className={styles.root}
     >
       <Suspense fallback={<div className={styles.loading} role="status">正在载入图谱画布…</div>}>
-        <LazyShadcnMemoryGraphCanvas {...props} />
+        {props.mode === "relations"
+          ? <LazyShadcnMemoryRelationGraph {...props} />
+          : <LazyShadcnMemoryGraphCanvas {...props} />}
       </Suspense>
     </VSurface>
   );

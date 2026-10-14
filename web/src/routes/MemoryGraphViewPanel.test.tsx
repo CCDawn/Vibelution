@@ -158,6 +158,7 @@ function Harness({
   return (
     <VuiProvider>
       <MemoryGraphViewPanel
+        initialScope="agent"
         copy={copy}
         graphPayload={payload}
         isGraphLoading={graphLoading}

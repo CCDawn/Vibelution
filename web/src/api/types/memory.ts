@@ -216,6 +216,43 @@ export type MemoryKnowledgeGraphPayload = {
   };
 };
 
+export type PlatformKnowledgeGraphTopic = {
+  id: string;
+  label: string;
+  groupingBasis: "official_target_domain" | "tag" | "knowledge_base";
+  nodeIds: string[];
+};
+
+export type PlatformKnowledgeGraphPayload = Omit<MemoryKnowledgeGraphPayload, "operatingBoundary"> & {
+  topics: PlatformKnowledgeGraphTopic[];
+  summary: MemoryKnowledgeGraphPayload["summary"] & {
+    totalNodeCount: number;
+    totalEdgeCount: number;
+    topicsCount: number;
+  };
+  operatingBoundary: {
+    readOnly: true;
+    fullContentIncluded: false;
+    canEditGraph: false;
+    canApplyKnowledge: false;
+    accessAuthority: "local_operator";
+    excludedPrivateMemory: true;
+    contentAccess: "metadata_only";
+    honorsKnowledgeLifecycle: true;
+  };
+};
+
+export type PlatformKnowledgeGraphDetailPayload = {
+  schemaVersion: number;
+  mode: "read_only_platform_knowledge_graph_node_detail";
+  nodeId: string;
+  node: MemoryKnowledgeGraphNode;
+  relatedNodes: MemoryKnowledgeGraphNode[];
+  edges: MemoryKnowledgeGraphEdge[];
+  operatingBoundary: PlatformKnowledgeGraphPayload["operatingBoundary"];
+  summaryCounts?: { truncated: boolean; relatedNodeCount: number; totalRelatedNodeCount: number };
+};
+
 export type MemoryKnowledgeGraphNodeDetailPayload = {
   schemaVersion: number;
   mode: "read_only_project_memory_graph_node_detail" | string;
