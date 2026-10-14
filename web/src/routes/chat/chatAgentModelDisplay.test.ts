@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import workbenchSource from "./ChatCodingRouteWorkbench.tsx?raw";
+import sessionDetailQueriesSource from "./useChatSessionDetailQueries.ts?raw";
+import surfaceModelSource from "./useChatConversationSurfaceModel.tsx?raw";
 
 // The boundary matters: legacy draft model pins remain readable for the
 // independent financial bridge, but ordinary Agent sends must ignore them.
@@ -19,8 +21,9 @@ describe("ordinary Agent model authority", () => {
     expect(modelControls).not.toContain("choices");
     expect(modelControls).not.toContain("onSelectionChange");
     expect(modelControls).not.toContain("setTurnModelSelections");
-    expect(workbenchSource).toContain("handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? \"\") ?? null)");
-    expect(workbenchSource).toContain('refetchOnMount: "always"');
+    expect(surfaceModelSource).toContain("handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? \"\") ?? null)");
+    expect(workbenchSource).toContain("useChatSessionDetailQueries({");
+    expect(sessionDetailQueriesSource).toContain('refetchOnMount: "always"');
   });
 
   it("sizes the context ring from saved scoped parameters instead of only the last call", () => {

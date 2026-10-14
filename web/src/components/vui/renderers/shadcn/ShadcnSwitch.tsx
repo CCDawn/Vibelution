@@ -105,7 +105,7 @@ export const ShadcnSwitch = forwardRef<HTMLInputElement, ShadcnSwitchProps>(
             aria-hidden="true"
             className={[
               "pointer-events-none relative inline-block h-[18px] w-[30px] shrink-0 rounded-full border",
-              "border-[var(--vui-control-border)] bg-[color-mix(in_srgb,var(--fg-primary)_12%,transparent)] shadow-[inset_0_1px_1px_rgb(0_0_0_/_6%)]",
+              "border-[var(--vui-control-border)] bg-[color-mix(in_srgb,var(--fg-primary)_12%,transparent)] shadow-none",
               "transition-[background-color,border-color] duration-150 motion-reduce:transition-none",
               "peer-checked:border-[var(--accent-cool)] peer-checked:bg-[var(--accent-cool)]",
               // peer variants only reach siblings of the input, so the thumb move
@@ -119,7 +119,7 @@ export const ShadcnSwitch = forwardRef<HTMLInputElement, ShadcnSwitchProps>(
               data-slot="switch-thumb"
               className={[
                 "absolute top-1/2 left-0 block size-3.5 -translate-y-1/2 rounded-full",
-                "bg-[var(--vui-switch-thumb)] shadow-[0_1px_2px_rgb(0_0_0_/_16%)]",
+                "bg-[var(--vui-switch-thumb)] shadow-none",
                 "transition-[translate] duration-150 motion-reduce:transition-none",
               ].join(" ")}
             />

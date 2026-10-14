@@ -4,6 +4,8 @@ import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import { personalAssistantReturnTarget, personalAssistantSessionMatches, validPersonalAssistant } from "./personalAssistantModel";
 import hostSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
+import tabSource from "../chat/ChatCodingCenterTabs.tsx?raw";
+import conversationSurfaceSource from "../chat/useChatConversationSurfaceModel.tsx?raw";
 import desktopSource from "../desktopPet/DesktopAssistantRoute.tsx?raw";
 import routeSource from "../PersonalAssistantRoute.tsx?raw";
 import shellSource from "../../app/AppShell.tsx?raw";
@@ -33,11 +35,12 @@ describe("personal assistant native identity and presentation", () => {
     expect(hostSource).toContain('const personalAssistantSurface = location.pathname === "/personal-assistant" || location.pathname === "/desktop-assistant"');
     expect(hostSource).toContain("const embeddedSurface = financeSurface || personalAssistantSurface");
     expect(hostSource).toContain("indexRailEnabled: !embeddedSurface");
-    expect(hostSource).toContain("showSessionTabs={!embeddedSurface");
+    expect(hostSource).toContain("financeSurface={embeddedSurface}");
+    expect(tabSource).toContain("showSessionTabs={!financeSurface");
     expect(hostSource).toContain("{financeSurface ? <FinancialResearchLiveProjection");
-    expect(hostSource).toContain('composer: financeSurface ?');
+    expect(conversationSurfaceSource).toContain('composer: financeSurface ?');
     expect(hostSource).toContain("turnModelSelection: financeSurface &&");
-    expect(hostSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode");
+    expect(conversationSurfaceSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode");
     expect(WORKBENCH_LAYOUT_IDS.personalAssistant).toBe("personal-assistant");
     expect(WORKBENCH_LAYOUT_IDS.desktopAssistant).toBe("desktop-assistant");
     expect(styleSource).toContain('@source "../PersonalAssistantRoute.tsx"');

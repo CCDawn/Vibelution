@@ -47,9 +47,9 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto mb-[18px] grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-sheen),0_2px_5px_color-mix(in_srgb,var(--fg-primary)_4%,transparent),0_8px_24px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_10%,transparent),var(--vui-sheen),0_3px_14px_color-mix(in_srgb,var(--fg-primary)_5%,transparent)]",
-  "[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)] [[data-theme=dark]_&]:border-[color-mix(in_srgb,var(--fg-primary)_16%,transparent)] [[data-theme=dark]_&]:shadow-[var(--vui-sheen),0_4px_18px_rgb(0_0_0_/_16%)]",
-  "[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] [[data-theme=dark]_&]:focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_10%,transparent),var(--vui-sheen),0_3px_14px_color-mix(in_srgb,var(--fg-primary)_5%,transparent)]",
+  "mx-auto mb-[18px] grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)] bg-[var(--vui-surface-panel)] shadow-none focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] focus-within:ring-2 focus-within:ring-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
+  "[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)] [[data-theme=dark]_&]:border-[color-mix(in_srgb,var(--fg-primary)_16%,transparent)] [[data-theme=dark]_&]:shadow-none",
+  "[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] [[data-theme=dark]_&]:focus-within:ring-2 [[data-theme=dark]_&]:focus-within:ring-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
   "max-[719px]:mb-[10px] max-[719px]:rounded-[14px]",
 );
 const composerNativeFieldTargets =
@@ -103,9 +103,8 @@ const composerSendActionButton = cv(
 // Do not inherit composerFieldBase: its `grid` utility can outrank `hidden` in
 // production chunk order and expose the browser's native file input.
 const composerHiddenAttachmentField = cv("hiddenAttachmentInput", "hidden");
-// VNativeTextarea paints --vui-control-face (a top-to-bottom gray gradient) and
-// --vui-field-shadow. background-color:transparent does not clear that shorthand,
-// so the composer field resets the whole background and the inset shadow.
+// A composer embeds its textarea in one shared field surface. Keep the inner
+// textarea transparent and flat across interaction states.
 const composerFlatTextarea =
   "![background:transparent] !shadow-none hover:![background:transparent] hover:!shadow-none focus-visible:![background:transparent] focus-visible:!shadow-none";
 const composerGenericInputField = cv("input", composerFieldBase, composerFlatTextarea);

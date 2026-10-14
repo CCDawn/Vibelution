@@ -40,15 +40,15 @@ export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
 };
 
 const CARD_BASE =
-  "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center content-center gap-3 overflow-hidden rounded-vui-soft border p-2.5 text-left text-vui-2xs font-[740] cursor-pointer " +
+  "relative grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center content-center gap-3 overflow-hidden rounded-vui-soft border p-2.5 text-left text-vui-2xs font-[740] cursor-pointer " +
   "border-[color:var(--source-step-border,var(--border-soft))] text-[color:var(--source-step-fg,var(--fg-muted))] " +
   "bg-[color:var(--source-workbench-card)] shadow-[var(--vui-elevation-1)] " +
   "transition-[border-color,box-shadow,background-color] duration-150 ease-vui " +
-  "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:shadow-[var(--vui-elevation-2)] " +
-  "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus),var(--vui-elevation-2)] focus-visible:border-[var(--border-strong)]";
+  "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] " +
+  "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)] focus-visible:border-[var(--border-strong)]";
 
 const CARD_SELECTED =
-  "border-[color:color-mix(in_srgb,var(--fg-primary)_34%,var(--border-strong))] bg-[color:color-mix(in_srgb,var(--fg-primary)_3%,var(--source-workbench-card))] shadow-[inset_2px_0_0_color-mix(in_srgb,var(--fg-primary)_72%,transparent),var(--vui-elevation-2)]";
+  "border-[color:color-mix(in_srgb,var(--fg-primary)_34%,var(--border-strong))] bg-[color:color-mix(in_srgb,var(--fg-primary)_3%,var(--source-workbench-card))] before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-[color-mix(in_srgb,var(--fg-primary)_72%,transparent)] before:content-['']";
 
 const HEADER = "flex min-w-0 items-center gap-2";
 const STEP_INDEX =

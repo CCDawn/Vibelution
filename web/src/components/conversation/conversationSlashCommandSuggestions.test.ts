@@ -8,6 +8,7 @@ import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw"
 import chatCatalogQueriesSource from "../../routes/chat/useChatWorkbenchCatalogQueries.ts?raw";
 import chatConversationComposerBridgeSource from "../../routes/chat/ChatConversationComposerBridge.tsx?raw";
 import chatSessionWorkspacePanelSource from "../../routes/chat/ChatSessionWorkspacePanel.tsx?raw";
+import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import {
@@ -221,9 +222,13 @@ describe("conversation slash command suggestions", () => {
     expect(chatCatalogQueriesSource).toContain("const slashCommandSuggestions = skillsQuery.data?.skills ?? []");
     expect(chatRouteSource).toContain("useChatWorkbenchCatalogQueries");
     expect(chatRouteSource).toContain("slashCommandSuggestions,");
-    expect(chatRouteSource).toContain("onCreateSession: !verifiedCompanionMode && selectedChatAgent");
-    expect(chatSessionWorkspacePanelSource).toContain('type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">');
-    expect(chatSessionWorkspacePanelSource).toContain("{...conversation}");
+    expect(chatConversationSurfaceModelSource).toContain("onCreateSession: !verifiedCompanionMode && selectedChatAgent");
+    expect(chatSessionWorkspacePanelSource).toContain("ChatConversationSurfaceModel");
+    expect(chatSessionWorkspacePanelSource).toContain("{...conversation.transcript}");
+    expect(chatSessionWorkspacePanelSource).toContain("{...conversation.participants}");
+    expect(chatSessionWorkspacePanelSource).toContain("{...conversation.composerChrome}");
+    expect(chatSessionWorkspacePanelSource).toContain("{...conversation.turnActions}");
+    expect(chatSessionWorkspacePanelSource).toContain("<ChatConversationComposerBridge");
     expect(chatConversationComposerBridgeSource).toContain("slashCommandSuggestions={slashCommandSuggestions}");
     expect(conversationViewSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("mergeSlashCommandSuggestions(");

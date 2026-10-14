@@ -4,13 +4,13 @@ import {
 } from "../renderers/shared/buttonVariants";
 
 /**
- * Shared form control chrome — compact native-feeling face, fine edge, and inset field shadow.
+ * Shared form control chrome — solid flat face, fine edge, and visible keyboard focus.
  */
 export function vuiFormControlClass(density: VuiDensity | undefined): string {
   return [
     vuiControlDensityClass(density),
     "w-full min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-control-border)]",
-    "[background:var(--vui-control-face)] px-2 [font-size:var(--vui-type-control-size)] text-vui-fg-primary shadow-[var(--vui-field-shadow)]",
+    "bg-[var(--vui-control-face)] px-2 [font-size:var(--vui-type-control-size)] text-vui-fg-primary shadow-[var(--vui-field-shadow)]",
     // Inherit document theme so native pickers/options follow light/dark tokens.
     "[color-scheme:inherit]",
     "transition-[color,background-color,border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none",

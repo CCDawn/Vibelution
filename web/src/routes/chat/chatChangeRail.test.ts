@@ -201,6 +201,8 @@ const emptyDiff: GitFileDiff = {
 
 describe("chat change rail wiring", () => {
   const workbench = readFileSync(resolve(here, "ChatCodingRouteWorkbench.tsx"), "utf8");
+  const statusRail = readFileSync(resolve(here, "ChatCodingStatusRail.tsx"), "utf8");
+  const centerTabs = readFileSync(resolve(here, "ChatCodingCenterTabs.tsx"), "utf8");
   const railPreview = readFileSync(resolve(here, "useChatRailPreview.ts"), "utf8");
 
   it("keeps the center conversation open while the right column shows the file", () => {
@@ -210,12 +212,14 @@ describe("chat change rail wiring", () => {
     expect(workbench).toContain("ordinaryChangeRail");
     expect(workbench).toContain("conversationWorkspaceTab");
     expect(workbench).toContain('activeCliAgentRunId || !changeRail.show');
-    expect(workbench).toContain("workspaceActiveTab={conversationWorkspaceTab}");
-    expect(workbench).toContain("activeTab={workspace.activeTab}");
-    expect(workbench).toContain("openPreviewTab(activeSessionId, path)");
+    expect(workbench).toContain("<ChatCodingCenterTabs");
+    expect(centerTabs).toContain("workspaceActiveTab={conversationWorkspaceTab}");
+    expect(centerTabs).toContain("activeTab={workspace.activeTab}");
+    expect(statusRail).toContain("openPreviewTab(activeSessionId, path)");
     // Browsing fills the main content plane; the original conversation restores its side rail on return.
-    expect(workbench).toContain('rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}');
-    expect(workbench).toContain("ChatRightRail");
+    expect(centerTabs).toContain('rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}');
+    expect(workbench).toContain("ChatCodingStatusRail");
+    expect(statusRail).toContain("ChatRightRail");
     expect(railPreview).toContain('activeRailTab?.kind === "review"');
     expect(railPreview).toContain("useChatGitRail");
     expect(workbench).not.toContain("ChatSidePane");

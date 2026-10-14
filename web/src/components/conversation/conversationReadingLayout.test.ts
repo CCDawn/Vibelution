@@ -49,11 +49,12 @@ describe("approved conversation reading hierarchy", () => {
     // bound cannot widen the transcript rail.
     expect(todoStyles.card).toContain("max-w-[830px]");
     expect(styles.composerCodex).toContain("rounded-[16px]");
-    expect(styles.composerCodex).toContain("shadow-[var(--vui-sheen),0_2px_5px_color-mix(in_srgb,var(--fg-primary)_4%,transparent),0_8px_24px_color-mix(in_srgb,var(--fg-primary)_3%,transparent)]");
+    expect(styles.composerCodex).toContain("shadow-none");
+    expect(styles.composerCodex).not.toContain("0_8px_24px");
     expect(styles.composerCodex).toContain("border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)]");
     expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)]");
     expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))]");
-    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_10%,transparent),var(--vui-sheen),0_3px_14px_color-mix(in_srgb,var(--fg-primary)_5%,transparent)]");
+    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:ring-2");
     for (const bubble of [styles.userMessageBody, userStyles.userMessageBody]) {
       expect(bubble).toContain("rounded-[12px]");
       expect(bubble).toContain("shadow-[var(--vui-sheen)]");

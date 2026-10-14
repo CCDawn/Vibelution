@@ -27,6 +27,7 @@ import {
 import { resolveSessionStreamShouldConnect } from "./chatSessionStreamConnect";
 
 const routeSource = readFileSync(resolve(import.meta.dirname, "./ChatCodingRouteWorkbench.tsx"), "utf8");
+const groupSurfaceSource = readFileSync(resolve(import.meta.dirname, "./ChatCodingGroupSurface.tsx"), "utf8");
 const sessionStreamSource = readFileSync(resolve(import.meta.dirname, "useSessionDetailStream.ts"), "utf8");
 const groupStreamSource = readFileSync(resolve(import.meta.dirname, "useGroupRoomStream.ts"), "utf8");
 const groupRoomEventStreamSource = readFileSync(resolve(import.meta.dirname, "chatRoomEventStream.ts"), "utf8");
@@ -348,7 +349,8 @@ describe("chat hand-test substitute: stream ownership + apply", () => {
 
 describe("chat hand-test substitute: group/project-bus wiring", () => {
   it("keeps center surface extraction and action handler wiring", () => {
-    expect(routeSource).toContain("<ChatGroupCenterSurface");
+    expect(routeSource).toContain("<ChatCodingGroupSurface");
+    expect(groupSurfaceSource).toContain("<ChatGroupCenterSurface");
     expect(routeSource).toContain("onSendProjectBusMessage={handleSendProjectBusMessage}");
     expect(routeSource).toContain("onStartGroupRound={handleStartGroupRound}");
     expect(routeSource).toContain("onStopGroupRound={handleStopGroupRound}");
