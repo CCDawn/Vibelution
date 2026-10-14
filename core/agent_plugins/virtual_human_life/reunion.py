@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .life_provenance import is_verified_experience
+
 _UNKNOWN = "unknown"
 _MAX_EVENT_ID_LENGTH = 200
 _MAX_TITLE_LENGTH = 160
@@ -187,13 +189,9 @@ def _completed_event_candidate(
     event_id = _text(raw_event.get("eventId"), limit=_MAX_EVENT_ID_LENGTH)
     if not event_id or event_id not in links:
         return None
-    if str(raw_event.get("kind") or "").strip().lower() != "activity_completed":
+    if not is_verified_experience(raw_event):
         return None
     outcome = raw_event.get("outcome")
-    if not isinstance(outcome, Mapping):
-        return None
-    if str(outcome.get("status") or "").strip().lower() != "succeeded":
-        return None
     # An inconsistent terminal event is not a trustworthy shared completion.
     top_level_status = str(raw_event.get("status") or "").strip().lower()
     if top_level_status in {"cancelled", "canceled", "failed", "skipped"}:
@@ -240,8 +238,9 @@ def project_shared_experiences(
 
     An event is shared only when an eligible open/resolved loop from the same
     ``session_id`` references its exact ``sourceEventIds`` value.  The
-    projection is bounded and read-only; it never turns a private life event,
-    an expired loop, a plan, or an unsuccessful outcome into a shared fact.
+    projection also requires native execution evidence. It never turns a
+    private event, expired loop, plan, simulation, or character report into a
+    shared fact, even when an upstream caller did not filter its event rows.
     """
 
     links = _shared_loop_links(open_loops, session_id=session_id, now=now)

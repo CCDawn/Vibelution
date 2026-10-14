@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
 from .causal_contracts import CAUSAL_SCHEMA_VERSION
+from .life_provenance import is_verified_experience
+
+
+_ONGOING_DRIVES = {
+    "goals": "goal-independent-life",
+    "projects": "project-personal-craft",
+}
+
+
+def _is_ongoing_drive(bucket: str, item: Mapping[str, Any]) -> bool:
+    return (
+        bucket in _ONGOING_DRIVES
+        and item.get("driveId") == _ONGOING_DRIVES[bucket]
+        and item.get("origin") == "independent_person_contract"
+    )
 
 
 def _iso(value: datetime) -> str:
@@ -39,6 +54,8 @@ def default_drive_projection(*, now: datetime) -> dict[str, Any]:
                 "title": "经营稳定而充实的独立生活",
                 "status": "active",
                 "progress": 0,
+                "progressBasis": "ongoing",
+                "verifiedActivityCount": 0,
                 "origin": "independent_person_contract",
                 "updatedAt": stamp,
             }
@@ -49,6 +66,8 @@ def default_drive_projection(*, now: datetime) -> dict[str, Any]:
                 "title": "推进自己的长期创作项目",
                 "status": "active",
                 "progress": 0,
+                "progressBasis": "ongoing",
+                "verifiedActivityCount": 0,
                 "origin": "independent_person_contract",
                 "updatedAt": stamp,
             }
@@ -116,23 +135,52 @@ def _selected_drive_ids(projection: Mapping[str, Any], kind: str, title: str) ->
     return list(dict.fromkeys(item for item in selected if item in available))
 
 
+def project_drive_progress(
+    projection: Mapping[str, Any], events: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Repair default ongoing-drive display from verified sources without writes."""
+
+    current = deepcopy(dict(projection))
+    counts = {drive_id: 0 for drive_id in _ONGOING_DRIVES.values()}
+    seen: set[str] = set()
+    for event in events:
+        event_id = str(event.get("eventId") or "").strip()
+        if not event_id or event_id in seen or not is_verified_experience(event):
+            continue
+        seen.add(event_id)
+        for drive_id in _selected_drive_ids(
+            current, _event_kind(event), str(event.get("title") or "")
+        ):
+            if drive_id in counts:
+                counts[drive_id] += 1
+    for bucket in _ONGOING_DRIVES:
+        rows = current.get(bucket) if isinstance(current.get(bucket), list) else []
+        for item in rows:
+            if not isinstance(item, dict) or not _is_ongoing_drive(bucket, item):
+                continue
+            item["progressBasis"] = "ongoing"
+            item["progress"] = 0
+            item["verifiedActivityCount"] = counts[str(item["driveId"])]
+            if item.get("status") == "completed":
+                item["status"] = "active"
+    return current
+
+
 def apply_completed_event_to_drives(
     projection: Mapping[str, Any],
     event: Mapping[str, Any],
     *,
     now: datetime,
 ) -> dict[str, Any]:
-    """Advance drives only from a unique, successful completed-life event."""
+    """Advance drives only from a unique completed event with execution proof."""
 
     current = deepcopy(dict(projection))
     event_id = str(event.get("eventId") or "").strip()
-    outcome = event.get("outcome") if isinstance(event.get("outcome"), Mapping) else {}
     processed = [str(item) for item in list(current.get("processedEventIds") or []) if str(item)]
     if (
         not event_id
         or event_id in processed
-        or str(event.get("kind") or "") != "activity_completed"
-        or str(outcome.get("status") or "") != "succeeded"
+        or not is_verified_experience(event)
     ):
         return {"projection": current, "change": None}
 
@@ -147,14 +195,15 @@ def apply_completed_event_to_drives(
             if not isinstance(item, dict) or str(item.get("driveId") or "") not in drive_ids:
                 continue
             drive_id = str(item["driveId"])
-            if bucket == "goals":
-                before = _clamp(item.get("progress"), 0, 100)
-                item["progress"] = min(100, before + 2)
-                deltas.append({"driveId": drive_id, "field": "progress", "delta": item["progress"] - before})
-            elif bucket == "projects":
-                before = _clamp(item.get("progress"), 0, 100)
-                item["progress"] = min(100, before + 5)
-                deltas.append({"driveId": drive_id, "field": "progress", "delta": item["progress"] - before})
+            if bucket in _ONGOING_DRIVES:
+                if not _is_ongoing_drive(bucket, item):
+                    continue
+                item["progressBasis"] = "ongoing"
+                item["progress"] = 0
+                item["verifiedActivityCount"] = max(0, int(item.get("verifiedActivityCount") or 0)) + 1
+                if item.get("status") == "completed":
+                    item["status"] = "active"
+                deltas.append({"driveId": drive_id, "field": "verifiedActivityCount", "delta": 1})
             elif bucket == "habits":
                 if local_date and str(item.get("lastCompletedLocalDate") or "") != local_date:
                     item["completionCount"] = max(0, int(item.get("completionCount") or 0)) + 1
@@ -216,7 +265,19 @@ def prompt_drive_summary(projection: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "driveId": str(item.get("driveId") or ""),
                 "title": str(item.get("title") or "")[:80],
-                **({"progress": _clamp(item.get("progress"), 0, 100)} if bucket in {"goals", "projects"} else {}),
+                **(
+                    {
+                        "progressBasis": "ongoing",
+                        "verifiedActivityCount": max(0, int(item.get("verifiedActivityCount") or 0)),
+                    }
+                    if _is_ongoing_drive(bucket, item)
+                    else {}
+                ),
+                **(
+                    {"progress": _clamp(item.get("progress"), 0, 100)}
+                    if bucket in _ONGOING_DRIVES and not _is_ongoing_drive(bucket, item)
+                    else {}
+                ),
                 **({"streak": max(0, int(item.get("streak") or 0))} if bucket == "habits" else {}),
                 **({"level": _clamp(item.get("level"), 1, 10, 1)} if bucket == "skills" else {}),
             }
@@ -232,4 +293,5 @@ __all__ = [
     "default_drive_projection",
     "link_schedule_to_drives",
     "prompt_drive_summary",
+    "project_drive_progress",
 ]
