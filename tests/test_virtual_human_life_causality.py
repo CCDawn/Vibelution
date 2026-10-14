@@ -391,6 +391,8 @@ def test_service_persists_causal_ledgers_and_exposes_bounded_prompt_context(tmp_
         assert request == {
             **execution_context,
             "requiredToolNames": ["write_file"],
+            "excludedToolCallIds": [],
+            "excludedReceiptEventIds": [],
             "executionTurnId": "turn-causal-tools",
             "startedAt": now[0].isoformat(),
         }

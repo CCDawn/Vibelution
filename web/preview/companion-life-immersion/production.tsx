@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { queryKeys } from "../../src/api/queryKeys";
+import { seedControlTokenForTests } from "../../src/api/client";
 import type {
   AgentPluginBinding,
   VirtualHumanCausalProjection,
@@ -386,6 +387,7 @@ for (const sourceDate of sourceDates) {
 }
 
 const nativeFetch = window.fetch.bind(window);
+seedControlTokenForTests("companion-preview-local-token");
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const request = input instanceof Request ? input : null;
   const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
