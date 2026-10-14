@@ -41,6 +41,21 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 
 
 @pytest.fixture(autouse=True)
+def settle_session_list_refresh_workers(isolate_runtime_manager_evolution_store):
+    """Keep native background reads inside this test's isolated storage lifetime."""
+    def settle():
+        for worker in threading.enumerate():
+            if worker.name == "session-list-cache-refresh":
+                worker.join(timeout=10)
+                assert not worker.is_alive(), "Session list refresh outlived isolated test storage"
+
+    settle()
+    session_service._invalidate_session_list_cache()
+    yield
+    settle()
+
+
+@pytest.fixture(autouse=True)
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
