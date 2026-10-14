@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import workbenchSource from "./ChatCodingRouteWorkbench.tsx?raw";
+import sessionDetailQueriesSource from "./useChatSessionDetailQueries.ts?raw";
 
 // The boundary matters: legacy draft model pins remain readable for the
 // independent financial bridge, but ordinary Agent sends must ignore them.
@@ -20,6 +21,7 @@ describe("ordinary Agent model authority", () => {
     expect(modelControls).not.toContain("onSelectionChange");
     expect(modelControls).not.toContain("setTurnModelSelections");
     expect(workbenchSource).toContain("handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? \"\") ?? null)");
-    expect(workbenchSource).toContain('refetchOnMount: "always"');
+    expect(workbenchSource).toContain("useChatSessionDetailQueries({");
+    expect(sessionDetailQueriesSource).toContain('refetchOnMount: "always"');
   });
 });
