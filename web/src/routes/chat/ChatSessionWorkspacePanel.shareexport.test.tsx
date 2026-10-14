@@ -6,6 +6,7 @@ import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import panelSource from "./ChatSessionWorkspacePanel.tsx?raw";
 import panelStyles from "./ChatSessionWorkspacePanel.styles";
 import workbenchSource from "./ChatCodingRouteWorkbench.tsx?raw";
+import centerTabsSource from "./ChatCodingCenterTabs.tsx?raw";
 
 vi.mock("./ChatConversationComposerBridge", () => ({ ChatConversationComposerBridge: () => <div>原会话与草稿</div> }));
 vi.mock("./ChatRuntimeNoticeStack", () => ({ ChatRuntimeNoticeStack: () => null }));
@@ -43,9 +44,11 @@ describe("ChatSessionWorkspacePanel share export wiring", () => {
     expect(workbenchSource).toContain("const headerExportVisible = !verifiedCompanionMode && !groupPanelActive && !financeSurface");
     expect(workbenchSource).toContain('conversationWorkspaceTab === "agent" && Boolean(conversationModel)');
     expect(workbenchSource).toContain("&& !activeCliAgentRunId && !sessionDetailErrorState.blockingError && !invalidChildSessionLinkMessage");
-    expect(workbenchSource).toContain("sessionId={conversationModel.sessionId}");
-    expect(workbenchSource).toContain("messages={conversationModel.messages}");
-    expect(workbenchSource).toContain("key={conversationModel.sessionId}");
+    expect(workbenchSource).toContain("<ChatCodingCenterTabs");
+    expect(workbenchSource).toContain("headerExportVisible={headerExportVisible}");
+    expect(centerTabsSource).toContain("sessionId={conversationModel.sessionId}");
+    expect(centerTabsSource).toContain("messages={conversationModel.messages}");
+    expect(centerTabsSource).toContain("key={conversationModel.sessionId}");
     expect(workbenchSource).toContain("hideExportControl={headerExportVisible}");
   });
 

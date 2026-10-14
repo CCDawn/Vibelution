@@ -235,6 +235,7 @@ const legacyStyleMapFiles = new Set<string>([
   "routes/AgentListStatePanel.tsx",
   "routes/AgentRenameDialog.tsx",
   "routes/chat/ChatCenterTabStrip.tsx",
+  "routes/chat/ChatCodingCenterTabs.tsx",
   "routes/chat/ChatCodingRouteWorkbench.tsx",
   "routes/chat/ChatConversationIndexPanelContent.tsx",
   "routes/chat/ChatMessageChromeHeader.tsx",
