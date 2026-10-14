@@ -45,7 +45,8 @@
    attachment/error rows scroll locally instead of clipping Send or history. */
 .companion-scene-conversation:focus-within,.companion-scene-conversation:has([data-chat-tool-approval-host]) { height:min(72cqh,calc(100cqh - 96px)); }
 .companion-scene-conversation .vui-components-conversationview.composerCodex { max-height:min(48cqh,calc(100% - 64px)); overflow-y:auto; }
-.companion-scene-conversation .composerFieldCodex textarea { min-height:44px!important; max-height:min(22cqh,180px)!important; overflow-y:auto!important; }
+.companion-scene-conversation .composerFieldCodex textarea { min-height:44px!important; max-height:min(22cqh,180px)!important; overflow-y:auto!important; color:var(--fg-primary)!important; }
+.companion-scene-conversation .composerFieldCodex textarea::placeholder { color:var(--fg-tertiary)!important; }
 .companion-scene-life-dialog { width:min(420px,calc(100vw - 24px))!important; max-height:85dvh!important; }
 .companion-scene-life-content { height:min(70dvh,680px); min-height:0; background:var(--vui-surface-panel)!important; }
 .companion-scene-life-content>header>div>div>p { display:none; }
