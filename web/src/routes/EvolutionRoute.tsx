@@ -97,6 +97,7 @@ import {
   supervisedRoleConversationSession,
   supervisedRunBucketLabel,
   supervisedWorkflowStepLabel,
+  supervisedWorkflowFallbackStatus,
   supervisedWorkflowStepOptionLabel,
   toLimitInput,
   type ProposalEditDraft,
@@ -733,7 +734,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const fallbackSessionId = member?.conversationSession?.conversationSessionId || "";
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
     const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
-    const fallbackStatus = definition.id === supervisedRuntimeWorkflowStepId ? "running" : "pending";
+    const fallbackStatus = supervisedWorkflowFallbackStatus(supervisedMembersRun?.status, definition.id === supervisedRuntimeWorkflowStepId);
     const backendStatus = backendStep?.status || fallbackStatus;
     return {
       id: definition.id,
@@ -743,7 +744,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       status: definition.id === "approval"
         ? supervisedApprovalWorkflowStatus(reviewCandidateWorktree, backendStatus)
         : backendStatus,
-      current: backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId,
+      current: !["failed", "cancelled", "canceled", "stopped"].includes(String(supervisedMembersRun?.status || "").toLowerCase()) && (backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId),
       summary: backendStep?.summary || (
         definition.id === "approval"
           ? (lang === "zh" ? "Judge 复评结论与用户审批合入动作集中在这里。" : "The final Judge decision and user-approved merge are gathered here.")
@@ -2355,6 +2356,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             title={selectedSupervisedWorkspaceRun?.title || (lang === "zh" ? "监督进化" : "Supervised evolution")}
             sourceLabel={frozenSourceLabel}
             sourceSummary={`${lang === "zh" ? "本轮样本" : "Run cases"} ${reviewCandidateWorktree?.costEstimate?.caseCount ?? monitoredRun?.caseTotal ?? "—"} · ${reviewCandidateWorktree?.approvalMode === "agent" ? "Agent" : (lang === "zh" ? "人工审批" : "Human approval")}`}
+            resultSummary={<section className={styles.supervisedResultSummary} aria-label={lang === "zh" ? "候选改动摘要" : "Candidate change summary"}>
+              <h3>{lang === "zh" ? "候选改动" : "Candidate changes"}</h3>
+              {reviewCandidateWorktree?.mergeAnalysis?.changedFiles?.length ? <>
+                <p>{lang === "zh" ? `修改 ${reviewCandidateWorktree.mergeAnalysis.changedFiles.length} 个文件` : `${reviewCandidateWorktree.mergeAnalysis.changedFiles.length} changed files`}</p>
+                {reviewCandidateWorktree.mergeAnalysis.changedFiles.slice(0, 3).map((file) => <code key={file.path}>{file.path}</code>)}
+              </> : <p>{lang === "zh" ? "本轮暂无可供审查的候选改动。" : "No candidate changes are available for review."}</p>}
+            </section>}
             phases={supervisedWorkflowCards.map((step) => ({
               id: step.id, label: step.label, statusLabel: statusLabel(step.status), current: step.current,
               disabled: !step.current && step.status === "pending" && !step.conversationSessionId,
@@ -2464,6 +2472,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       fallbackMessages={supervisedSelectedAgentFallbackMessages}
                       taskSummary={supervisedSelectedAgentTaskSummary}
                       isLive={supervisedRunIsLive}
+                      runStatus={supervisedMembersRun?.status}
                       lang={lang}
                       roleLabel={runRoleLabel}
                       roleDescription={supervisedAgentRoleDescription}
@@ -2474,11 +2483,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             </div>}
             footer={supervisedRunIsLive ? (
               <div className={styles.supervisedLiveFooter}>
-                <span className={styles.supervisedSecondaryText}>{supervisedMembersRunStatusLabel} · {supervisedWorkflowCards.find((step) => step.current)?.label}</span>
-                <VButton variant="ghost" isDisabled={!canTerminateSupervisedRun || terminateSupervisedPending} disabledReason={terminateSupervisedDisabledReason} onPress={() => supervisedWorktreeLiveRun && setSupervisedConfirmation({runId:supervisedWorktreeLiveRun.runId,action:"terminate"})}>{lang === "zh" ? "停止运行" : "Stop run"}</VButton>
+                <strong>{supervisedMembersRunStatusLabel} · {supervisedWorkflowCards.find((step) => step.current)?.label}</strong>
+                <p className={styles.supervisedSecondaryText}>{lang === "zh" ? "当前阶段完成后，结果与可执行操作会在这里更新。" : "Results and available actions update here after this phase."}</p>
+                <VButton variant="danger" isDisabled={!canTerminateSupervisedRun || terminateSupervisedPending} disabledReason={terminateSupervisedDisabledReason} onPress={() => supervisedWorktreeLiveRun && setSupervisedConfirmation({runId:supervisedWorktreeLiveRun.runId,action:"terminate"})}>{lang === "zh" ? "停止运行" : "Stop run"}</VButton>
                 {supervisedControlError ? <p role="alert" className={styles.errorTextCompact}>{supervisedControlError}</p> : null}
               </div>
-            ) : <SupervisedApprovalDecisionPanel compact
+            ) : !reviewCandidateWorktree && monitoredRun && ["cancelled", "canceled", "failed", "stopped"].includes(monitoredRun.status) ? (
+              <div className={styles.supervisedLiveFooter}>
+                <strong>{statusLabel(monitoredRun.status)}</strong>
+                <p className={styles.supervisedSecondaryText}>{lang === "zh" ? "本轮已结束，未生成可供审批的候选。已有会话与运行记录仍可查看。" : "This run ended without a reviewable candidate. Its conversation and run records remain available."}</p>
+                <VButton variant="primary" onPress={openSupervisedSetup}>{lang === "zh" ? "准备新一轮" : "Prepare a new run"}</VButton>
+              </div>
+            ) : <SupervisedApprovalDecisionPanel compact sidebar
                       run={reviewCandidateWorktree}
                       lang={lang}
                       pending={approvalWorktreeActionMutation.isPending}

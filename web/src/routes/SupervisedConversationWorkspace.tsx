@@ -9,7 +9,6 @@ import {
   History,
   MessageSquareText,
   PanelLeft,
-  PanelRightClose,
   PanelRightOpen,
   Plus,
   Settings2,
@@ -24,6 +23,7 @@ import {
   VSplitWorkspace,
   VSurface,
   VStringSelect,
+  VStateSurface,
   VTabs,
   VUI_WORKBENCH_RAIL_CLASS,
   VUI_WORKBENCH_TOOLBAR_CLASS,
@@ -68,6 +68,7 @@ export type SupervisedConversationWorkspaceProps = {
   sourceTitle?: string;
   sourceIcon?: ReactNode;
   sourceSummary?: ReactNode;
+  resultSummary?: ReactNode;
   trackContext?: ReactNode;
   activeTrack?: EvolutionTrack;
   onTrackChange?: (track: EvolutionTrack) => void;
@@ -96,9 +97,9 @@ export type SupervisedConversationWorkspaceProps = {
 
 const LIVE_RUN_PANE = {
   id: "live-run",
-  defaultWidth: 400,
-  minWidth: 320,
-  maxWidth: 560,
+  defaultWidth: 340,
+  minWidth: 300,
+  maxWidth: 440,
 } as const;
 
 const LIVE_RUN_RESIZE = {
@@ -116,7 +117,7 @@ function labelsFor(lang: "zh" | "en") {
       selfTrack: "Self",
       newRun: "New run",
       dataset: "Dataset",
-      evidence: "Evidence",
+      evidence: "Results and actions",
       more: "More",
       setupTitle: "New supervised run",
       history: "Run history",
@@ -127,7 +128,11 @@ function labelsFor(lang: "zh" | "en") {
       followLiveContext: "Viewing an earlier phase",
       followLive: "Return to current",
       closeEvidence: "Close evidence",
-      evidenceTitle: "Run evidence",
+      evidenceTitle: "Results and actions",
+      overview: "Overview",
+      conversation: "Agent conversation",
+      prepare: "Confirm the goal before starting",
+      prepareHint: "Use the results and actions panel to configure this run. The Agent conversation will appear here after it starts.",
       navigation: "Run context",
       progress: "Phase progress",
       noRuns: "No runs yet",
@@ -139,11 +144,11 @@ function labelsFor(lang: "zh" | "en") {
     product: "监督进化",
     selfProduct: "自进化",
     trackNavigation: "进化类型",
-    supervisedTrack: "监督",
+    supervisedTrack: "监督进化",
     selfTrack: "自进化",
     newRun: "新建",
     dataset: "评估集",
-    evidence: "证据",
+    evidence: "结果与操作",
     more: "更多",
     setupTitle: "新建监督运行",
     history: "运行历史",
@@ -154,7 +159,11 @@ function labelsFor(lang: "zh" | "en") {
     followLiveContext: "正在查看历史阶段",
     followLive: "返回当前运行",
     closeEvidence: "关闭证据",
-    evidenceTitle: "运行证据",
+    evidenceTitle: "结果与操作",
+    overview: "概览",
+    conversation: "Agent 对话",
+    prepare: "先确认目标，再看进化过程",
+    prepareHint: "在结果与操作面板中配置这轮运行。启动后，这里显示 Agent 的真实对话和工具记录。",
     navigation: "运行导航",
     progress: "阶段进度",
     noRuns: "暂无运行",
@@ -186,6 +195,7 @@ export function SupervisedConversationWorkspace({
   sourceTitle,
   sourceIcon,
   sourceSummary,
+  resultSummary,
   trackContext,
   activeTrack,
   onTrackChange,
@@ -214,7 +224,7 @@ export function SupervisedConversationWorkspace({
   const labels = labelsFor(lang);
   const workspaceLabel = activeTrack === "self" ? labels.selfProduct : labels.product;
   const { rootRef, width: workspaceWidth } = useWorkspaceWidth();
-  const narrow = workspaceWidth < 880;
+  const narrow = workspaceWidth < 900;
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [desktopNavigationOpen, setDesktopNavigationOpen] = useState(() =>
@@ -222,12 +232,9 @@ export function SupervisedConversationWorkspace({
   );
   const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<Record<string, boolean>>({});
   const [selectedEvidenceTabId, setSelectedEvidenceTabId] = useState("");
-  const evidenceTab = evidenceTabs.find((tab) => tab.id === selectedEvidenceTabId)
-    ?? evidenceTabs[0];
-  const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;
-  const showDesktopEvidence = showEvidence && workspaceWidth >= 960;
-  const showMobileEvidence = showEvidence && !showDesktopEvidence;
-  const showDesktopNavigation = desktopNavigationOpen && (!showDesktopEvidence || workspaceWidth >= 1200);
+  const showDesktopEvidence = !narrow;
+  const showMobileEvidence = narrow && evidenceOpen;
+  const showDesktopNavigation = desktopNavigationOpen && workspaceWidth >= 1180;
   const showTrackSwitcher = activeTrack !== undefined && onTrackChange !== undefined;
 
   useEffect(() => {
@@ -248,10 +255,10 @@ export function SupervisedConversationWorkspace({
 
   useEffect(() => {
     if (setupOpen) {
-      setEvidenceOpen(false);
+      setEvidenceOpen(narrow);
       setNavigationOpen(false);
     }
-  }, [setupOpen]);
+  }, [setupOpen, narrow]);
 
   const moreItems = [
     ...(onOpenConversation
@@ -282,11 +289,6 @@ export function SupervisedConversationWorkspace({
     },
   ];
 
-  const tabItems = evidenceTabs.map((tab) => ({
-    id: tab.id,
-    label: tab.label,
-    content: <div className={styles.evidenceTabBody}>{tab.content}</div>,
-  }));
   const navigationOptions = steps.map((step) => ({
     value: step.id,
     label: step.label,
@@ -294,14 +296,18 @@ export function SupervisedConversationWorkspace({
   }));
   const showPhaseNavigation = !setupOpen && hasRun && navigationOptions.length > 0;
   const hasRunGroups = Boolean(runGroups?.length);
-  const showNavigation = hasRunGroups || trackContext != null || (!setupOpen && hasRun);
+  const showNavigation = hasRunGroups || (!setupOpen && hasRun);
   const showContext = showNavigation;
   const closeNavigation = () => setNavigationOpen(false);
   const contextPanel = (
     <VSurface as="aside" padding="none" className={`${VUI_WORKBENCH_RAIL_CLASS} ${styles.contextPanel}`} aria-label={labels.navigation}>
+      <div className={styles.navigationHeading}>
+        <h2 className={styles.contextHeading}>{labels.navigation}</h2>
+        <VIconButton label={labels.newRun} variant="ghost" icon={<Plus size={16} />} onPress={() => { closeNavigation(); onNew(); }} />
+      </div>
       {hasRunGroups ? (
         <nav aria-label={labels.navigation} className={styles.contextRunGroups}>
-          {runGroups?.map((group) => {
+          {runGroups?.filter((group) => !activeTrack || group.id === activeTrack).map((group) => {
             const currentRuns = group.runs.filter((run) => !run.history || run.selected);
             const historyRuns = group.runs.filter((run) => run.history && !run.selected);
             const historyExpanded = expandedHistoryGroups[group.id] === true;
@@ -384,9 +390,16 @@ export function SupervisedConversationWorkspace({
           })}
         </nav>
       ) : null}
+      <div className={styles.contextLinks}>
+        <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<History size={15} />} onPress={() => { closeNavigation(); onHistory(); }}>{labels.history}</VButton>
+      </div>
+    </VSurface>
+  );
+
+  const overview = (
+    <div className={styles.resultOverview}>
       {trackContext != null ? <section className={styles.trackContext}>{trackContext}</section> : null}
-      {!setupOpen && hasRun ? (
-        <>
+      {hasRun ? <>
           <section className={styles.sourceSection}>
             <h2 className={styles.contextHeading}>{sourceTitle || labels.dataset}</h2>
             <VButton aria-label={sourceTitle || labels.dataset} title={sourceLabel} contentLayout="plain" variant="ghost" className={styles.contextSourceButton}
@@ -395,6 +408,7 @@ export function SupervisedConversationWorkspace({
             </VButton>
             {sourceSummary ? <div className={styles.sourceSummary}>{sourceSummary}</div> : null}
           </section>
+          {resultSummary}
           <nav aria-label={labels.progress} className={styles.contextPhases}>
             <h2 className={styles.contextHeading}>{labels.progress}</h2>
             {phases.map((phase, index) => (
@@ -407,50 +421,51 @@ export function SupervisedConversationWorkspace({
               </VButton>
             ))}
           </nav>
-          <div className={styles.contextLinks}>
-            <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<History size={15} />} onPress={() => { closeNavigation(); onHistory(); }}>{labels.history}</VButton>
-            <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<Settings2 size={15} />} onPress={() => { closeNavigation(); onSettings(); }}>{labels.settings}</VButton>
-          </div>
-        </>
-      ) : null}
-    </VSurface>
+      </> : null}
+      <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<Settings2 size={15} />} onPress={onSettings}>{labels.settings}</VButton>
+    </div>
   );
 
-  const evidenceTabsView = evidenceTabs.length ? (
+  const tabItems = [{ id: "overview", label: labels.overview, content: overview }, ...evidenceTabs.map((tab) => ({
+    id: tab.id, label: tab.label, content: <div className={styles.evidenceTabBody}>{tab.content}</div>,
+  }))];
+  const evidenceTab = tabItems.find((tab) => tab.id === selectedEvidenceTabId) ?? tabItems[0];
+  const evidenceTabsView = (
     <VTabs
       aria-label={labels.evidenceTitle}
       className={styles.evidenceTabs}
+      contentClassName={styles.evidenceTabContent}
       listClassName={styles.evidenceTabList}
       triggerClassName={styles.evidenceTabTrigger}
       value={evidenceTab?.id}
       onValueChange={setSelectedEvidenceTabId}
       items={tabItems}
     />
-  ) : null;
+  );
 
-  const desktopEvidence = showDesktopEvidence ? (
+  const resultPanel = (
     <VSurface
       as="aside"
       aria-label={labels.evidenceTitle}
       className={styles.evidencePanel}
       padding="none"
     >
-      <div className={styles.evidenceHeading}>
+      <div className={`${styles.evidenceHeading} ${narrow ? "!hidden" : ""}`}>
         <strong className={styles.evidenceHeadingTitle}>{labels.evidenceTitle}</strong>
-        <VIconButton
-          label={labels.closeEvidence}
-          variant="ghost"
-          className={styles.evidenceClose}
-          icon={<PanelRightClose size={16} />}
-          onPress={() => setEvidenceOpen(false)}
-        />
       </div>
-      {evidenceTabsView}
+      {setupOpen ? <div className={styles.setupFrame}>{setup}</div> : <>
+        {footer ? <div className={styles.resultActions} data-vui-region="evolution-current-actions">{footer}</div> : null}
+        <div className={styles.resultBody}>{evidenceTabsView}</div>
+      </>}
     </VSurface>
-  ) : undefined;
+  );
 
   const mainContent = (
     <main className={styles.mainPane}>
+      <div className={styles.conversationHeading}>
+        <h2>{labels.conversation}</h2>
+        {showPhaseNavigation ? <VStringSelect ariaLabel={labels.phaseNavigation} className={styles.phaseSelect} value={selectedStepId} onValueChange={onSelectStep} options={navigationOptions} /> : null}
+      </div>
       {!setupOpen ? (
         <>
           {showFollowLive ? (
@@ -468,11 +483,11 @@ export function SupervisedConversationWorkspace({
             </div>
           ) : null}
           <div className={styles.conversationFrame}>{conversation}</div>
-          {footer ? <div className={styles.footer}>{footer}</div> : null}
         </>
       ) : (
-        <div className={styles.setupFrame}>{setup}</div>
+        <VStateSurface title={labels.prepare} tone="empty" fill skeletonLines={false}><p>{labels.prepareHint}</p></VStateSurface>
       )}
+      {narrow ? <div className={styles.mobileActionEntry}><VButton variant="primary" icon={<PanelRightOpen size={16} />} onPress={() => setEvidenceOpen(true)}>{labels.evidence}</VButton></div> : null}
     </main>
   );
 
@@ -487,14 +502,13 @@ export function SupervisedConversationWorkspace({
       <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header} ${showTrackSwitcher || showPhaseNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation} ${narrow ? styles.narrowHeader : ""} ${narrow && (showTrackSwitcher || showPhaseNavigation) ? styles.narrowHeaderWithNavigation : ""}`}>
         <div className={styles.runIdentity} data-has-source={!setupOpen && sourceLabel ? "true" : "false"}>
           {showContext ? <VIconButton label={labels.navigation} variant="ghost" icon={<PanelLeft size={16} />}
-            aria-expanded={narrow ? navigationOpen : showDesktopNavigation}
+            aria-expanded={workspaceWidth < 1180 ? navigationOpen : showDesktopNavigation}
             onPress={() => {
-              if (narrow) setNavigationOpen((open) => !open);
-              else if (desktopNavigationOpen && !showDesktopNavigation) setEvidenceOpen(false);
+              if (workspaceWidth < 1180) setNavigationOpen((open) => !open);
               else setDesktopNavigationOpen((open) => !open);
             }} /> : null}
           <h1 className={styles.title} title={setupOpen ? setupTitle || labels.setupTitle : title}>
-            {setupOpen ? setupTitle || labels.setupTitle : title}
+            {lang === "zh" ? "进化工作台" : "Evolution workspace"}
           </h1>
           {!setupOpen && !hasRun ? (
             <VButton
@@ -527,15 +541,6 @@ export function SupervisedConversationWorkspace({
                 items={trackItems}
               />
             ) : null}
-            {showPhaseNavigation ? (
-              <VStringSelect
-                ariaLabel={labels.phaseNavigation}
-                className={styles.phaseSelect}
-                value={selectedStepId}
-                onValueChange={onSelectStep}
-                options={navigationOptions}
-              />
-            ) : null}
           </div>
         ) : null}
 
@@ -552,18 +557,17 @@ export function SupervisedConversationWorkspace({
               >
                 {labels.newRun}
               </VButton>
-              <VButton
-                aria-expanded={showEvidence}
+              {narrow ? <VButton
+                aria-expanded={showMobileEvidence}
                 aria-label={labels.evidence}
                 contentLayout="plain"
-                variant={showEvidence ? "secondary" : "ghost"}
+                variant="ghost"
                 className={styles.toolbarButton}
-                isDisabled={!hasRun || evidenceTabs.length === 0}
                 onPress={() => setEvidenceOpen((open) => !open)}
                 icon={<PanelRightOpen size={15} />}
               >
                 {labels.evidence}
-              </VButton>
+              </VButton> : null}
             </>
           ) : null}
           <VDropdownMenu
@@ -586,9 +590,9 @@ export function SupervisedConversationWorkspace({
       </header>
 
       <div className={styles.workspaceBody}>
-      {showContext && !narrow && showDesktopNavigation ? contextPanel : null}
+      {showContext && showDesktopNavigation ? contextPanel : null}
       <VSplitWorkspace
-        aside={desktopEvidence}
+        aside={showDesktopEvidence ? resultPanel : undefined}
         chrome="workbench"
         className={styles.splitWorkspace}
         columnsClassName=""
@@ -597,7 +601,7 @@ export function SupervisedConversationWorkspace({
       />
       </div>
 
-      <VDialog className={styles.mobileNavigationDialog} open={showContext && narrow && navigationOpen}
+      <VDialog className={styles.mobileNavigationDialog} open={showContext && workspaceWidth < 1180 && navigationOpen}
         onOpenChange={setNavigationOpen} size="md" title={labels.navigation}>
         {contextPanel}
       </VDialog>
@@ -609,7 +613,7 @@ export function SupervisedConversationWorkspace({
         size="md"
         title={labels.evidenceTitle}
       >
-        <div className={styles.mobileEvidenceBody}>{evidenceTabsView}</div>
+        <div className={styles.mobileEvidenceBody}>{resultPanel}</div>
       </VDialog>
     </section>
   );

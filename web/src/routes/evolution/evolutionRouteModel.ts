@@ -200,6 +200,13 @@ export function supervisedWorkflowStepOptionLabel(
   return labels.filter(Boolean).join(" · ");
 }
 
+export function supervisedWorkflowFallbackStatus(runStatus: string | undefined, current: boolean): string {
+  if (!current) return "pending";
+  const status = String(runStatus || "").trim().toLowerCase();
+  // Missing stage evidence must not manufacture activity for an ended or queued run.
+  return status || "pending";
+}
+
 export function activeSupervisedWorkflowStep(
   run: EvolutionActiveRun | null | undefined,
 ): SupervisedWorkflowStepId | null {
