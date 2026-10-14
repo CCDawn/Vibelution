@@ -91,21 +91,26 @@ export function ChatCenterTabStrip({
         </Link>
       ) : null}
       <div className={styles.tabStripSessions}>
-        {companionHeader ?? (groupPanelActive ? (
-          <span className={`${styles.tab} ${styles.tabActive}`}>
-            {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
-          </span>
-        ) : showSessionTabs ? (
-          sessionTabs
-        ) : showAgentFallbackTab ? (
-          <VButton
-            type="button"
-            className={workspaceActiveTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab}
-            onClick={onActivateAgentFallbackTab}
-          >
-            {agentSessionLabel}
-          </VButton>
-        ) : null)}
+        {companionHeader ?? (
+          <>
+            {groupPanelActive ? (
+              <span className={`${styles.tab} ${styles.tabActive}`}>
+                {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
+              </span>
+            ) : null}
+            {showSessionTabs ? (
+              sessionTabs
+            ) : showAgentFallbackTab && !groupPanelActive ? (
+              <VButton
+                type="button"
+                className={workspaceActiveTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+                onClick={onActivateAgentFallbackTab}
+              >
+                {agentSessionLabel}
+              </VButton>
+            ) : null}
+          </>
+        )}
         {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
       {sessionBrowserControl || sessionActionsControl || !leftOverlayVisible || showRightToggle ? (

@@ -36,6 +36,10 @@ export function createMemoryGraphBatches(options: {
   disposeMaterial: <T extends import("three").Material>(material: T) => T;
 }) {
   const { THREE, scene, nodes, edgePaths, theme, createNodeGeometry, getNodeScale, disposeGeometry, disposeMaterial } = options;
+  let lightSurface = theme.lightSurface;
+  let selectedId = "";
+  let selectedNeighbors: ReadonlySet<string> = new Set();
+  let highlightedIds: ReadonlySet<string> = new Set();
   const hits = new Map<string, import("three").Mesh>();
   const hitGeometry = disposeGeometry(new THREE.SphereGeometry(0.44, 8, 8));
   const hitMaterial = disposeMaterial(new THREE.MeshBasicMaterial());
@@ -118,6 +122,9 @@ export function createMemoryGraphBatches(options: {
   scene.add(arrows);
 
   function updateSelection(id: string, neighbors: ReadonlySet<string>, highlights: ReadonlySet<string>) {
+    selectedId = id;
+    selectedNeighbors = neighbors;
+    highlightedIds = highlights;
     const hasContext = Boolean(id) || highlights.size > 0;
     transform.quaternion.identity();
     for (const batch of batches) {
@@ -143,7 +150,7 @@ export function createMemoryGraphBatches(options: {
     for (const { edge, start, count, arrowMatrix } of ranges) {
       const connected = Boolean(id && (edge.source === id || edge.target === id));
       const highlighted = highlights.has(edge.source) || highlights.has(edge.target);
-      const opacity = connected ? 0.56 : highlighted ? 0.36 : hasContext ? 0.035 : 0.15;
+      const opacity = connected ? 0.88 : highlighted ? 0.7 : hasContext ? 0.08 : lightSurface ? 0.58 : 0.42;
       (lineOpacity.array as Float32Array).fill(opacity, start, start + count);
       if (connected) arrows.setMatrixAt(arrowCount++, arrowMatrix);
     }
@@ -153,6 +160,7 @@ export function createMemoryGraphBatches(options: {
   }
 
   function refreshTheme(next: GraphTheme) {
+    lightSurface = next.lightSurface;
     for (const batch of batches) {
       const color = next.clusterColors.get(batch.clusterKey) ?? next.selectedColor;
       batch.bodyMaterial.color.setHex(color);
@@ -162,6 +170,7 @@ export function createMemoryGraphBatches(options: {
     }
     lineMaterial.color.setHex(next.edgeColor);
     arrowMaterial.color.setHex(next.selectedColor);
+    updateSelection(selectedId, selectedNeighbors, highlightedIds);
   }
 
   return {

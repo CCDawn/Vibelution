@@ -10,6 +10,10 @@ it("preserves spatial picking, opacity and directed relations in a batched graph
     createdAt: "", updatedAt: "", metadata: {}, responsibilityQuestion: "", visual: {}, childNodeIds: [], contentItems: [],
   }));
   const edges = nodes.slice(1).map((node, i) => ({ id: `e${i}`, source: "n0", target: node.id, type: "references", label: "引用", weight: 1, metadata: {} }));
+  edges.push(
+    { id: "highlighted", source: "n1", target: "n2", type: "references", label: "搜索关联", weight: 1, metadata: {} },
+    { id: "unrelated", source: "n3", target: "n4", type: "references", label: "无关关系", weight: 1, metadata: {} },
+  );
   const positioned = layoutMemoryKnowledgeGraph(nodes, edges).nodes;
   const positions = new Map(positioned.map(node => [node.id, new THREE.Vector3(node.x, node.y, node.z)]));
   const scene = new THREE.Scene();
@@ -25,13 +29,25 @@ it("preserves spatial picking, opacity and directed relations in a batched graph
     const body = scene.children.find(o => o.userData.memoryGraphBatch === "nodes") as THREE.InstancedMesh;
     const lines = scene.children.find(o => o.userData.memoryGraphBatch === "edges") as THREE.LineSegments;
     const arrows = scene.children.find(o => o.userData.memoryGraphBatch === "arrows") as THREE.InstancedMesh;
+    const opacity = lines.geometry.getAttribute("graphOpacity");
+    const verticesPerEdge = opacity.count / edges.length;
+    const highlightedOffset = verticesPerEdge * (edges.length - 2);
+    const unrelatedOffset = verticesPerEdge * (edges.length - 1);
     expect(scene.children).toHaveLength(4);
     expect(body.count).toBe(246);
     expect(batch.hits.size).toBe(246);
     expect([...batch.hits.values()].every(hit => hit.parent === null)).toBe(true);
     batch.updateSelection("n0", new Set(["n1"]), new Set(["n2"]));
     expect(arrows.count).toBe(245);
-    expect(lines.geometry.getAttribute("graphOpacity").getX(0)).toBeCloseTo(0.56);
+    expect(lines.geometry.getAttribute("graphOpacity").getX(0)).toBeCloseTo(0.88);
+    expect(opacity.getX(highlightedOffset)).toBeCloseTo(0.7);
+    expect(opacity.getX(unrelatedOffset)).toBeCloseTo(0.08);
+    batch.refreshTheme({ ...theme, lightSurface: true });
+    expect(arrows.count).toBe(245);
+    expect(opacity.getX(0)).toBeCloseTo(0.88);
+    expect(opacity.getX(highlightedOffset)).toBeCloseTo(0.7);
+    expect(opacity.getX(unrelatedOffset)).toBeCloseTo(0.08);
+    batch.refreshTheme(theme);
     for (const [i, node] of positioned.entries()) {
       const matrix = new THREE.Matrix4();
       body.getMatrixAt(i, matrix);
@@ -43,10 +59,15 @@ it("preserves spatial picking, opacity and directed relations in a batched graph
     expect(ray.intersectObject(target, false)[0].object.userData.nodeId).toBe("n0");
     batch.updateSelection("", new Set(), new Set());
     expect(arrows.count).toBe(0);
-    expect(lines.geometry.getAttribute("graphOpacity").getX(0)).toBeCloseTo(0.15);
+    expect(lines.geometry.getAttribute("graphOpacity").getX(0)).toBeCloseTo(0.42);
     batch.refreshTheme({ ...theme, lightSurface: true, edgeColor: 0x112233 });
     expect((lines.material as THREE.LineBasicMaterial).color.getHex()).toBe(0x112233);
     expect((body.material as THREE.MeshStandardMaterial).emissiveIntensity).toBe(0.02);
+    expect(lines.geometry.getAttribute("graphOpacity").getX(0)).toBeCloseTo(0.58);
+    batch.refreshTheme(theme);
+    expect(opacity.getX(0)).toBeCloseTo(0.42);
+    expect(opacity.getX(unrelatedOffset)).toBeCloseTo(0.42);
+    expect(arrows.count).toBe(0);
   } finally {
     batch.dispose();
     geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose());

@@ -88,6 +88,7 @@ export type ResearchProcessWorkspaceProps = {
   /** Team switcher rendered in the process toolbar so chrome stays a single row. */
   toolbarLeading?: ReactNode;
   railActions?: ReactNode;
+  conversationRail?: ReactNode;
 };
 
 // Stable identity so the memoized canvas pane does not re-render when no run
@@ -134,6 +135,7 @@ export function ResearchProcessWorkspace({
   linkedChatRoomId = "",
   toolbarLeading,
   railActions,
+  conversationRail,
 }: ResearchProcessWorkspaceProps) {
   const isZh = lang === "zh";
   const navigate = useNavigate();
@@ -879,6 +881,7 @@ export function ResearchProcessWorkspace({
           },
         }}
         rail={<div className="flex min-h-0 flex-1 flex-col gap-3">
+          {conversationRail ? <div className="min-h-0 shrink-0">{conversationRail}</div> : null}
           {archiveOpen || !hasSelectedExperiment ? null : <div className={styles.stageNavigator}>
             <ResearchWorkflowStageNavigator
               lang={lang}
