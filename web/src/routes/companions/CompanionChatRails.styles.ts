@@ -1,10 +1,10 @@
 const railBase = "!rounded-none !border-0 !shadow-none min-h-0 min-w-0 overflow-hidden bg-vui-surface-rail";
 const personRail = `${railBase} relative isolate !flex flex-col border-r border-r-vui-border-subtle`;
 const lifeRail = `${railBase} !flex flex-col border-l border-l-vui-border-subtle`;
-const railActions = "pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 p-3 [&>*]:pointer-events-auto";
+const railActions = "pointer-events-none absolute inset-x-0 top-0 z-20 flex h-[44px] items-center justify-between gap-2 px-3 [&>*]:pointer-events-auto";
 const railIconButton = "!size-8 !min-h-8 !rounded-full !border !border-vui-border-subtle !bg-vui-surface-panel !p-0 text-vui-fg-secondary shadow-sm hover:!bg-vui-surface-row-hover hover:text-vui-fg-primary";
 const profile = "relative flex min-h-0 flex-1 flex-col overflow-hidden";
-const railPortrait = "!min-h-0 flex-1 !rounded-none !border-0 before:!inset-[10%_4%_0]";
+const railPortrait = "!min-h-0 flex-1 !rounded-none !border-0";
 const personSummary = "relative z-10 grid gap-3 border-t border-vui-border-subtle bg-vui-surface-panel p-4 max-[1100px]:gap-2.5 max-[1100px]:p-3";
 const personPresence = "flex min-w-0 items-center justify-between gap-2 [&>time]:font-mono [&>time]:text-vui-micro-10 [&>time]:text-vui-fg-tertiary";
 const personNameCopy = "flex min-w-0 items-center justify-between gap-2 [&>h1]:m-0 [&>h1]:truncate [&>h1]:text-[clamp(1.65rem,2.2vw,2.15rem)] [&>h1]:font-[820] [&>h1]:tracking-[-0.05em] [&>span]:grid [&>span]:size-8 [&>span]:shrink-0 [&>span]:place-items-center [&>span]:rounded-full [&>span]:bg-[color-mix(in_srgb,var(--state-success)_12%,var(--vui-surface-row))] [&>span]:text-vui-lg [&>span]:text-[var(--state-success)]";
