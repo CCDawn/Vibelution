@@ -60,13 +60,14 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VCanvasWorkbenchPage, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip, VTabs } from "../components/vui";
+import { VButton, VCanvasWorkbenchPage, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip, VStringSelect, VTabs } from "../components/vui";
 import { memoryProposalStatusTone, memoryVisibilityTone } from "./memoryStatusTone";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { canExecuteMemoryCleanup } from "./memory/memoryCleanupSafety";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
 import { useMemoryCoreQueries, useMemoryKnowledgeQueries, isLibraryMemoryView, isPersonalMemoryView, isTeamMemoryView } from "./memory/useMemoryWorkbenchQueries";
+import catalogStyles from "./memory/teamKnowledgeCatalog.styles";
 import {
   toAgentMemoryAgentView,
   toAgentMemoryItemView,
@@ -466,7 +467,13 @@ type Copy = {
   revisionSubmitPending: string;
   reloadLatestKnowledge: string;
   noKnowledgeBases: string;
+  noTeamKnowledgeBases: string;
   teamKnowledgeEmptyHint: string;
+  readIdentity: string;
+  chooseReadIdentity: string;
+  teamKnowledgeUnreadMeta: string;
+  teamKnowledgeChooseReader: string;
+  teamKnowledgeNotMember: string;
   knowledgeHint: string;
   platformPipeline: string;
   pipelineSource: string;
@@ -1068,7 +1075,13 @@ const COPY: Record<"zh" | "en", Copy> = {
     revisionSubmitPending: "正在提交修订…",
     reloadLatestKnowledge: "重新读取最新版本",
     noKnowledgeBases: "当前身份没有可见的知识库",
-    teamKnowledgeEmptyHint: "可在「团队」页面打开团队，通过「知识库」入口进入；也可在 Agent 管理 →「记忆设置」中为该身份配置知识库权限。",
+    noTeamKnowledgeBases: "还没有团队知识库",
+    teamKnowledgeEmptyHint: "可在「团队」页面打开团队，从「知识库」入口创建或进入。",
+    readIdentity: "读取身份",
+    chooseReadIdentity: "选择读取身份",
+    teamKnowledgeUnreadMeta: "条 · 当前身份不可读",
+    teamKnowledgeChooseReader: "还没有选择读取身份。选一个团队成员后，才能打开里面的条目。",
+    teamKnowledgeNotMember: "不是这个团队的成员，不能阅读这些条目。",
     knowledgeHint: "来源、提案、审核、正式知识分层治理。",
     platformPipeline: "记忆平台流水线",
     pipelineSource: "来源登记",
@@ -1566,7 +1579,13 @@ const COPY: Record<"zh" | "en", Copy> = {
     revisionSubmitPending: "Submitting revision…",
     reloadLatestKnowledge: "Reload latest revision",
     noKnowledgeBases: "No knowledge bases visible to the current identity",
-    teamKnowledgeEmptyHint: "Open a team from the Teams page and use its Knowledge entry; or grant this identity knowledge-base access in Agent management → Memory policy.",
+    noTeamKnowledgeBases: "No team knowledge bases yet",
+    teamKnowledgeEmptyHint: "Open a team from the Teams page and use its Knowledge entry to create or open a library.",
+    readIdentity: "Reading identity",
+    chooseReadIdentity: "Choose a reading identity",
+    teamKnowledgeUnreadMeta: "items · not readable by this identity",
+    teamKnowledgeChooseReader: "No reading identity is selected yet. Choose a team member to open the entries.",
+    teamKnowledgeNotMember: " is not a member of this team and cannot read these entries.",
     knowledgeHint: "Sources, proposals, review, and formal knowledge stay separated.",
     platformPipeline: "Memory platform pipeline",
     pipelineSource: "Source registration",
@@ -2549,6 +2568,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     agentMemoryInventoryQuery,
     agentMemoryDetailQuery,
     knowledgeDashboardSnapshotQuery,
+    teamKnowledgeCatalogQuery,
     memoryKnowledgeGraphQuery,
     memoryKnowledgeGraphNodeDetailQuery,
     githubProjectLibraryQuery,
@@ -2643,8 +2663,11 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const knowledgeOperationsHealth = knowledgeDashboardSnapshot?.operationsHealth;
   const knowledgeGovernancePlan = knowledgeDashboardSnapshot?.governancePlan;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
+  const teamCatalogBases = teamKnowledgeCatalogQuery.data?.knowledgeBases ?? [];
+  const teamCatalogSettled = (teamKnowledgeCatalogQuery.data?.agentId ?? "") === requestedKnowledgeActorAgentId;
+  const knowledgeSelectionBases = forcedView === "team" ? teamCatalogBases : knowledgeBases;
   const requestedTeamKnowledgeBase =
-    knowledgeBases.find((base) => {
+    knowledgeSelectionBases.find((base) => {
       const requestId = knowledgeBaseRequestId(base);
       if (requestedKnowledgeBaseId && (
         requestId === requestedKnowledgeBaseId
@@ -2660,10 +2683,15 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       return String(base.ownerType || "team") === "team" && (ownerId === requestedTeamId || base.teamId === requestedTeamId);
     }) ?? null;
   const activeKnowledgeBase: TeamKnowledgeBase | null =
-    knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)
-    ?? (isTeamMemoryView(forcedView) ? null : knowledgeBases[0] ?? null);
-  const activeKnowledgeBaseForItems = knowledgeBaseRequestId(activeKnowledgeBase);
-  const activeKnowledgeActorAgentId = actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId);
+    knowledgeSelectionBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)
+    ?? (isTeamMemoryView(forcedView) ? null : knowledgeSelectionBases[0] ?? null);
+  const teamBaseReadable = forcedView === "team" && teamCatalogSettled && Boolean(activeKnowledgeBase?.permissions.canRead);
+  const activeKnowledgeBaseForItems = forcedView === "team"
+    ? (teamBaseReadable ? knowledgeBaseRequestId(activeKnowledgeBase) : "")
+    : knowledgeBaseRequestId(activeKnowledgeBase);
+  const activeKnowledgeActorAgentId = forcedView === "team"
+    ? requestedKnowledgeActorAgentId
+    : actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId);
   const {
     knowledgeItemsQuery,
     knowledgeSearchQuery,
@@ -2869,6 +2897,19 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     setGraphSearchText("");
     setActiveGraphNodeType("");
     setSelectedGraphNodeId(nodeId);
+  };
+  const changeTeamReader = (agentId: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (agentId.trim()) {
+      next.set("agentId", agentId.trim());
+    } else {
+      next.delete("agentId");
+    }
+    setSearchParams(next);
+  };
+  const teamReaderLabel = (agentId: string) => {
+    const match = knowledgeActorAgents.find((agent) => agent.agentId === agentId);
+    return match?.displayName || match?.agentCode || agentId;
   };
   const changeGraphScope = (agentId: string, teamId = "") => {
     setGraphSearchText("");
@@ -3218,7 +3259,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   }, [selectedAgentMemoryItemId, selectedAgentMemoryItems]);
 
   useEffect(() => {
-    if (!knowledgeBases.length) {
+    if (forcedView === "team" && teamKnowledgeCatalogQuery.isPending && !knowledgeSelectionBases.length) {
+      return;
+    }
+    if (!knowledgeSelectionBases.length) {
       if (activeKnowledgeBaseId) {
         setActiveKnowledgeBaseId("");
       }
@@ -3229,15 +3273,15 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       return;
     }
     if (isTeamMemoryView(forcedView)) {
-      if (activeKnowledgeBaseId && !knowledgeBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
+      if (activeKnowledgeBaseId && !knowledgeSelectionBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
         setActiveKnowledgeBaseId("");
       }
       return;
     }
-    if (!activeKnowledgeBaseId || !knowledgeBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
-      setActiveKnowledgeBaseId(knowledgeBaseRequestId(knowledgeBases[0]));
+    if (!activeKnowledgeBaseId || !knowledgeSelectionBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
+      setActiveKnowledgeBaseId(knowledgeBaseRequestId(knowledgeSelectionBases[0]));
     }
-  }, [activeKnowledgeBaseId, forcedView, knowledgeBases, requestedTeamKnowledgeBase]);
+  }, [activeKnowledgeBaseId, forcedView, knowledgeSelectionBases, requestedTeamKnowledgeBase, teamKnowledgeCatalogQuery.isPending]);
 
   useEffect(() => {
     const ownerId = knowledgeBaseOwnerId(activeKnowledgeBase);
@@ -3960,11 +4004,23 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
 
   const createTeamBrowsePanel = () => {
     const teamSearch = searchText.trim().toLowerCase();
-    const visibleBases = knowledgeBases.filter((base) =>
+    const visibleBases = teamCatalogBases.filter((base) =>
       !teamSearch
       || [base.name, base.teamName, base.agentName, knowledgeBaseRequestId(base)]
         .some((value) => String(value || "").toLowerCase().includes(teamSearch)),
     );
+    const identityOptions = knowledgeActorAgents.filter((agent) => agent.status !== "archived");
+    const selectedReaderMissing = Boolean(
+      requestedKnowledgeActorAgentId
+      && !identityOptions.some((agent) => agent.agentId === requestedKnowledgeActorAgentId),
+    );
+    const selectedTeamDenied = Boolean(activeKnowledgeBase && teamCatalogSettled && !activeKnowledgeBase.permissions.canRead);
+    const teamReaderChanging = Boolean(activeKnowledgeBase) && !teamCatalogSettled;
+    const catalogError = teamKnowledgeCatalogQuery.isError && !teamKnowledgeCatalogQuery.data
+      ? teamKnowledgeCatalogQuery.error instanceof Error
+        ? teamKnowledgeCatalogQuery.error.message
+        : String(teamKnowledgeCatalogQuery.error)
+      : "";
     return (
     <MemoryContentBrowsePanel
       copy={{
@@ -3972,7 +4028,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         loadFailed: copy.knowledgeLoadFailed,
         browseBack: copy.browseBack,
         browseSelectCard: copy.browseSelectTeam,
-        browseEmptyCards: copy.noKnowledgeBases,
+        browseEmptyCards: copy.noTeamKnowledgeBases,
         browseEmptyCardsHint: copy.teamKnowledgeEmptyHint,
         browseEmptyEntries: copy.noMatches,
         noContent: copy.noContent,
@@ -3981,36 +4037,78 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         expandGroup: copy.expandGroup,
         collapseGroup: copy.collapseGroup,
       }}
+      header={(
+        <label className={catalogStyles.identityField}>
+          {copy.readIdentity}
+          <VStringSelect
+            ariaLabel={copy.readIdentity}
+            className={catalogStyles.identitySelect}
+            value={requestedKnowledgeActorAgentId}
+            placeholder={copy.chooseReadIdentity}
+            options={[
+              { value: "", label: copy.chooseReadIdentity },
+              ...(selectedReaderMissing
+                ? [{ value: requestedKnowledgeActorAgentId, label: teamReaderLabel(requestedKnowledgeActorAgentId) }]
+                : []),
+              ...identityOptions.map((agent) => ({
+                value: agent.agentId,
+                label: agent.displayName || agent.agentCode || agent.agentId,
+              })),
+            ]}
+            onValueChange={changeTeamReader}
+          />
+        </label>
+      )}
       searchText={searchText}
       onSearchTextChange={setSearchText}
       cards={visibleBases.map((base) => ({
         id: knowledgeBaseRequestId(base),
         title: base.name || knowledgeBaseRequestId(base),
         group: base.teamName || copy.groupTeamFallback,
-        meta: `${base.stats.itemCount} ${copy.memoryCount}`,
+        meta: teamCatalogSettled && !base.permissions.canRead
+          ? `${base.stats.itemCount} ${copy.teamKnowledgeUnreadMeta}`
+          : `${base.stats.itemCount} ${copy.memoryCount}`,
       }))}
       selectedCardId={activeKnowledgeBaseId}
       onSelectCard={setActiveKnowledgeBaseId}
       onClearCard={() => setActiveKnowledgeBaseId("")}
-      entries={knowledgeItems
+      selectedNotice={selectedTeamDenied && activeKnowledgeBase ? (
+        <div className={catalogStyles.notice}>
+          <p className={catalogStyles.noticeText}>
+            {requestedKnowledgeActorAgentId
+              ? `${teamReaderLabel(requestedKnowledgeActorAgentId)}${copy.teamKnowledgeNotMember}`
+              : copy.teamKnowledgeChooseReader}
+          </p>
+          {activeKnowledgeBase.access?.readers.length ? (
+            <div className={catalogStyles.readerList}>
+              {activeKnowledgeBase.access.readers.map((reader) => (
+                <VButton
+                  key={reader.agentId}
+                  type="button"
+                  variant="secondary"
+                  density="compact"
+                  onClick={() => changeTeamReader(reader.agentId)}
+                >
+                  {reader.displayName || reader.agentId}
+                </VButton>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : undefined}
+      entries={teamBaseReadable ? knowledgeItems
         .filter((item) => String(item.stability || "") !== "deprecated")
         .map((item) => ({
           id: item.knowledgeItemId,
           title: item.title,
           group: item.tags?.[0] || "",
           body: item.content || item.summary || "",
-        }))}
+        })) : []}
       selectedEntryId={activeItemId}
       onSelectEntry={setActiveItemId}
-      loading={knowledgeDashboardSnapshotQuery.isPending && !knowledgeBases.length}
-      errorText={
-        knowledgeDashboardSnapshotQuery.isError && !knowledgeDashboardSnapshot
-          ? knowledgeDashboardSnapshotQuery.error instanceof Error
-            ? knowledgeDashboardSnapshotQuery.error.message
-            : String(knowledgeDashboardSnapshotQuery.error)
-          : ""
-      }
-      entriesLoading={Boolean(activeKnowledgeBaseId) && knowledgeItemsQuery.isPending && !knowledgeItems.length}
+      loading={teamKnowledgeCatalogQuery.isPending && !teamCatalogBases.length}
+      errorText={catalogError}
+      entriesLoading={teamReaderChanging || (Boolean(activeKnowledgeBaseForItems) && knowledgeItemsQuery.isPending && !knowledgeItems.length)}
     />
     );
   };

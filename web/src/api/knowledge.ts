@@ -46,6 +46,15 @@ export function fetchKnowledgeOverview<T>(options?: {
   });
 }
 
+export function fetchTeamKnowledgeCatalog<T>(options?: {
+  agentId?: string;
+  signal?: AbortSignal;
+}): Promise<T> {
+  return fetchJson<T>(`/api/knowledge/team-catalog${agentQuery(options?.agentId)}`, {
+    signal: options?.signal,
+  });
+}
+
 export function fetchKnowledgeDashboardSnapshot<T>(options: {
   agentId: string;
   recommendationLimit?: number;

@@ -45,6 +45,7 @@ describe("knowledge catalog API", () => {
   it("owns the knowledge platform transports", () => {
     const owners = [
       "fetchKnowledgeOverview",
+      "fetchTeamKnowledgeCatalog",
       "fetchKnowledgeDashboardSnapshot",
       "fetchKnowledgeStewardOverview",
       "fetchKnowledgeStewardRecommendations",
@@ -80,6 +81,7 @@ describe("knowledge catalog API", () => {
     owners.forEach((owner) => {
       expect(apiSource).toContain(`export function ${owner}`);
     });
+    expect(apiSource).toContain("/api/knowledge/team-catalog");
     expect(apiSource).toContain("/api/knowledge/dashboard-snapshot?");
     expect(apiSource).toContain("/api/knowledge/search?");
     expect(apiSource).toContain("/api/knowledge/rag/retrieve?");
@@ -98,6 +100,7 @@ describe("knowledge catalog API", () => {
   });
 
   it("keeps Memory workbench queries free of knowledge transport paths", () => {
+    expect(workbenchQueriesSource).toContain("fetchTeamKnowledgeCatalog<");
     expect(workbenchQueriesSource).toContain("fetchKnowledgeDashboardSnapshot<");
     expect(workbenchQueriesSource).toContain("listKnowledgeItems<");
     expect(workbenchQueriesSource).toContain("searchKnowledgeItems<");
