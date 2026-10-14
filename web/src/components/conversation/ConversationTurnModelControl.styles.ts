@@ -7,7 +7,7 @@ const styles = {
   settingsIcon: "shrink-0 opacity-55",
   label: "max-w-32 min-w-0 truncate whitespace-nowrap",
   fullName: "m-0 whitespace-normal break-words text-center text-vui-sm font-medium leading-snug text-[var(--fg-primary)]",
-  popover: `grid w-[min(272px,calc(100vw-16px))] gap-2.5 rounded-[18px] border border-[color-mix(in_srgb,var(--fg-primary)_22%,transparent)] ${vuiFlatPanelClass} p-3 shadow-[0_12px_32px_color-mix(in_srgb,var(--fg-primary)_12%,transparent),var(--vui-shadow-soft)]`,
+  popover: `grid w-[min(272px,calc(100vw-16px))] gap-2.5 rounded-[var(--vui-radius-overlay)] border border-[color-mix(in_srgb,var(--fg-primary)_22%,transparent)] ${vuiFlatPanelClass} p-3 shadow-[0_12px_32px_color-mix(in_srgb,var(--fg-primary)_12%,transparent),var(--vui-shadow-soft)]`,
   fields: "grid min-w-0 gap-3",
   field: "grid min-w-0 gap-0 text-vui-xs text-[var(--fg-secondary)] [&+&]:border-t [&+&]:border-[var(--vui-border-subtle)] [&+&]:pt-3",
   fieldHeader: "relative grid h-7 grid-cols-[28px_minmax(0,1fr)_28px] items-center justify-items-center text-[var(--fg-primary)]",
