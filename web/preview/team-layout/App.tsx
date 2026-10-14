@@ -40,10 +40,10 @@ const sectionTitle = "text-[13px] font-medium text-[var(--fg-primary)]";
 const quiet = "text-[12px] leading-5 text-[var(--fg-tertiary)]";
 
 function Member({ member, subtitle }: { member: typeof defaultMembers[number]; subtitle?: string }) {
-  return <div className="flex min-w-0 items-center gap-2.5">
+  return <span className="flex min-w-0 items-center gap-2.5 text-left">
     <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-base)] text-[12px] text-[var(--fg-secondary)]">{member.initials}</span>
-    <div className="min-w-0"><p className="text-[13px] font-medium">{member.name}</p><p className={quiet}>{subtitle || member.role}</p></div>
-  </div>;
+    <span className="min-w-0"><span className="block text-[13px] font-medium">{member.name}</span><span className={quiet + " block"}>{subtitle || member.role}</span></span>
+  </span>;
 }
 
 function TeamPanel({ title, children, id, actions, titleControl, fill = false, rail = false }: { title: string; children: ReactNode; id: string; actions?: ReactNode; titleControl?: ReactNode; fill?: boolean; rail?: boolean }) {
@@ -99,6 +99,14 @@ export function TeamLayoutPreview() {
     history.replaceState(null, "", `${location.pathname}?view=${view}&state=${scene}&mode=${homeMode}`);
   }, [view, scene, theme, homeMode]);
   function switchPage(next: View) { setView(next); setNotice(""); }
+  function openConversation(member: typeof defaultMembers[number] | null) {
+    setDirectMember(member);
+    if (member) setSelectedMember(members.indexOf(member));
+    setHomeMode("conversation");
+    setView("home");
+    setScene("normal");
+    setNotice("");
+  }
   function switchTeam(nextId: string) {
     const next = teams.find((item) => item.id === nextId);
     if (!next || nextId === teamId) return;
@@ -123,7 +131,12 @@ export function TeamLayoutPreview() {
     <div className="flex items-center justify-between gap-2 pb-4"><p className={quiet}>3 位成员 · 本地协作</p><VStatusChip tone="success">正常</VStatusChip></div>
     <div className="grid gap-1 pb-4">{pages.filter((page) => page.id !== "workflow" || teamId === "research").map((page) => <VButton key={page.id} variant="ghost" density="compact" icon={<page.icon size={15} />} aria-current={view === page.id ? "page" : undefined}
       className={`w-full justify-start aria-[current=page]:bg-[var(--vui-selection-bg)] aria-[current=page]:text-[var(--fg-primary)] ${view === page.id ? "font-medium" : "text-[var(--fg-secondary)]"}`} onClick={() => switchPage(page.id)}>{page.label}</VButton>)}</div>
-    <div className="border-t border-[var(--vui-border-subtle)] pt-4"><p className="mb-3 text-[12px] font-medium text-[var(--fg-tertiary)]">团队成员</p><div className="grid gap-4">{members.map((member) => <div key={member.name}><Member member={member} /></div>)}</div></div>
+    <div className="border-t border-[var(--vui-border-subtle)] pt-4"><p className="mb-2 text-[12px] font-medium text-[var(--fg-tertiary)]">团队与成员</p><div className="grid gap-1" aria-label="团队与成员对话">
+      <VButton variant="ghost" aria-label={`${team.name} · 团队讨论`} aria-pressed={view === "home" && homeMode === "conversation" && !directMember} className="h-auto! w-full justify-start px-2 py-2 aria-pressed:bg-[var(--vui-selection-bg)]" onClick={() => openConversation(null)}>
+        <Member member={{ name: team.name, role: `团队讨论 · ${members.length} 位成员`, initials: "团", note: team.topic }} />
+      </VButton>
+      {members.map((member) => <VButton key={member.name} variant="ghost" aria-label={`${member.name} · 成员对话`} aria-pressed={view === "home" && homeMode === "conversation" && directMember?.name === member.name} className="h-auto! w-full justify-start px-2 py-2 aria-pressed:bg-[var(--vui-selection-bg)]" onClick={() => openConversation(member)}><Member member={member} /></VButton>)}
+    </div></div>
     <div className="mt-auto pt-4"><VButton variant="ghost" density="compact" icon={<Settings2 size={15} />} className="w-full justify-start text-[var(--fg-secondary)]" onClick={() => setDialog("members")}>团队设置</VButton></div>
   </>;
 
