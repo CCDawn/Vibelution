@@ -30,6 +30,7 @@ import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
 import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
 import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
+import conversationTimelineFollowSource from "./useConversationTimelineFollow.ts?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
@@ -1074,7 +1075,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.streamingMessages");
     expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.rowIdentities");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor");
-    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor");
+    expect(conversationTimelineFollowSource).toContain("restoreTimelineRowKeyAnchor");
     expect(conversationViewSource).not.toContain("projectConversationTimelineMessages");
     expect(conversationViewSource).not.toContain("const activeTimelineProjection = useMemo");
     expect(conversationViewSource).not.toContain("buildConversationTimelineRowIdentities(activeTimelineMessages)");
@@ -1109,17 +1110,20 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   it("coalesces streaming auto-scroll frames without dispatching bottom state on every token", () => {
     expect(conversationViewSource).toContain("streamingScrollFrameRef");
     expect(conversationViewSource).toContain("function scrollTimelineToBottom");
-    expect(conversationViewSource).toContain("if (!wasAtBottom) {");
+    expect(conversationViewSource).toContain("timelineFollowApiRef.current?.scrollTimelineToBottom");
+    expect(conversationTimelineFollowSource).toContain("function scrollTimelineToBottom");
+    expect(conversationTimelineFollowSource).toContain("if (!wasAtBottom) {");
     expect(conversationViewSource).toContain("onStreamingFramePaint({");
     expect(conversationViewSource).toContain("paintedAtMs: conversationPerformanceNowMs()");
     expect(conversationViewSource).not.toContain("const frameId = window.requestAnimationFrame");
   });
 
   it("restores per-session timeline scroll memory on thread revisit (C6)", () => {
-    expect(conversationViewSource).toContain("peekSessionTimelineScroll");
-    expect(conversationViewSource).toContain("restoreSessionTimelineScroll");
-    expect(conversationViewSource).toContain("rememberSessionTimelineScroll");
-    expect(conversationViewSource).toContain("initializedSessionRef.current !== sessionId");
+    expect(conversationViewSource).toContain("useConversationTimelineFollow({");
+    expect(conversationTimelineFollowSource).toContain("peekSessionTimelineScroll");
+    expect(conversationTimelineFollowSource).toContain("restoreSessionTimelineScroll");
+    expect(conversationTimelineFollowSource).toContain("rememberSessionTimelineScroll");
+    expect(conversationTimelineFollowSource).toContain("initializedSessionRef.current !== sessionId");
   });
 
   it("keeps react-virtual measurement and streaming paint free of per-render thrash", () => {
@@ -1141,7 +1145,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("scrollMargin: narrowTimelineViewport ? TIMELINE_NARROW_SCROLL_MARGIN_PX : TIMELINE_VIRTUAL_SCROLL_MARGIN_PX");
     expect(conversationViewSource).toContain("virtualStartPx: virtualItem.start - timelineVirtualizer.options.scrollMargin");
     expect(conversationViewSource).toContain("geometryReflow: true");
-    expect(conversationViewSource).toContain("!pending.geometryReflow && activeTimelineMessages.length === pending.startLength");
+    expect(conversationTimelineFollowSource).toContain("!pending.geometryReflow && activeTimelineMessages.length === pending.startLength");
     expect(styles.timelineContent).toContain("gap-7 max-[719px]:gap-5");
     expect(styles.timeline).toContain("pt-7");
     expect(styles.timeline).toContain("max-[719px]:py-[22px]");
@@ -1158,18 +1162,18 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("timelineContentRef");
     expect(conversationViewSource).toContain("styles.timelineContent");
     // Content-host ResizeObserver still re-pins only while following latest.
-    const contentRoBlock = conversationViewSource.slice(
-      conversationViewSource.indexOf("// Stick-to-bottom: re-pin when timeline viewport or content height changes"),
-      conversationViewSource.indexOf("}, [sessionId, activeTimelineMessages.length > 0]);"),
+    const contentRoBlock = conversationTimelineFollowSource.slice(
+      conversationTimelineFollowSource.indexOf("// Stick-to-bottom: re-pin when timeline viewport or content height changes"),
+      conversationTimelineFollowSource.indexOf("}, [sessionId, activeTimelineMessages.length > 0]);"),
     );
     expect(contentRoBlock).toContain("shouldStickTimelineToBottomOnContentResize");
     expect(contentRoBlock).toContain("scheduleTimelineScrollToBottom()");
     expect(conversationViewSource).toContain("pinnedLatestUserMessageIdRef");
-    expect(conversationViewSource).toContain("latestUserChanged");
+    expect(conversationTimelineFollowSource).toContain("latestUserChanged");
     // Paint effect must not depend on Map/array identities that change every render.
     const paintBlock = conversationViewSource.slice(
       conversationViewSource.indexOf("if (!streamingTimelineScrollSignal || !onStreamingFramePaint)"),
-      conversationViewSource.indexOf("useEffect(() => {\n    const timeline = timelineRef.current;\n    if (!timeline) {\n      return;\n    }\n    const handleScroll"),
+      conversationViewSource.indexOf("if (!previewImage)"),
     );
     expect(paintBlock).toContain("streamingTimelineScrollSignal");
     expect(paintBlock).not.toContain("agentRenderStatesByMessageId");
@@ -1187,9 +1191,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("timelineLiveTailMessages.length");
     expect(conversationViewSource).toContain('data-conversation-virtual-host="1"');
     // Follow/anchor semantics keep the production contracts.
-    expect(conversationViewSource).toContain("resolveTimelineFollowState({");
+    expect(conversationTimelineFollowSource).toContain("resolveTimelineFollowState({");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
-    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
+    expect(conversationTimelineFollowSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
   });it("colors operation rows from each operation status instead of the operation kind", () => {
     expect(conversationOperationRowsSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
     expect(conversationOperationRowsSource).toContain("operationStatusTone(operation)");
@@ -1225,8 +1229,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.operationStatus_success).not.toContain("state-success");
   });
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
-    expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
-    expect(conversationViewSource).toContain("preserveCurrentExpansionDefaults();");
+    expect(conversationTimelineFollowSource).toContain("function revealEarlierTimelineMessages()");
+    expect(conversationTimelineFollowSource).toContain("preserveCurrentExpansionDefaults();");
     expect(conversationViewSource).toContain("function preserveCurrentExpansionDefaults()");
     expect(conversationTimelineRowsSource).toContain("const responseExpanded = getExpansionState(message.id, \"response\", defaultResponseExpanded)");
     expect(conversationViewSource).not.toContain("defaultExpansionRef.current = {};\n    responseSegmentCacheRef.current.clear();\n    markdownBlockCacheRef.current.clear();\n    setSectionExpansion({});\n  }, [sessionId, visibleMessageLimit]");
@@ -1265,25 +1269,25 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("auto-loads earlier messages from top-edge or pinned timeline state instead of a manual gate", () => {
-    expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
-    expect(conversationViewSource).toContain("shouldLoadEarlierConversationMessages({");
+    expect(conversationTimelineFollowSource).toContain("function revealEarlierTimelineMessages()");
+    expect(conversationTimelineFollowSource).toContain("shouldLoadEarlierConversationMessages({");
     expect(conversationViewSource).toContain("const hiddenHistorySignalCount = hiddenRenderedMessageCount + (hasEarlierMessages ? 1 : 0)");
-    expect(conversationViewSource).toContain("hiddenMessageCount: hiddenHistorySignalCount");
-    expect(conversationViewSource).toContain("onLoadEarlierMessages()");
-    expect(conversationViewSource).toContain("scrollHeight: timeline.scrollHeight");
-    expect(conversationViewSource).toContain("clientHeight: timeline.clientHeight");
-    expect(conversationViewSource).toContain("handleScroll");
-    expect(conversationViewSource).toContain("revealEarlierTimelineMessages()");
+    expect(conversationTimelineFollowSource).toContain("hiddenMessageCount: hiddenHistorySignalCount");
+    expect(conversationTimelineFollowSource).toContain("onLoadEarlierMessages()");
+    expect(conversationTimelineFollowSource).toContain("scrollHeight: timeline.scrollHeight");
+    expect(conversationTimelineFollowSource).toContain("clientHeight: timeline.clientHeight");
+    expect(conversationTimelineFollowSource).toContain("handleScroll");
+    expect(conversationTimelineFollowSource).toContain("revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
-    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
+    expect(conversationTimelineFollowSource).toContain("restoreTimelineRowKeyAnchor(timeline, pending.anchor)");
     expect(conversationViewSource).not.toContain("function showEarlierMessages()");
     expect(conversationViewSource).not.toContain("onClick={showEarlierMessages}");
     expect(conversationViewSource).not.toContain("setAllMessagesVisible(true)");
   });
 
   it("coalesces canonical and streaming timeline scroll requests into one frame", () => {
-    expect(conversationViewSource).toContain("function scheduleTimelineScrollToBottom()");
-    expect(conversationViewSource).toContain("scheduleTimelineScrollToBottom();");
+    expect(conversationTimelineFollowSource).toContain("function scheduleTimelineScrollToBottom()");
+    expect(conversationTimelineFollowSource).toContain("scheduleTimelineScrollToBottom();");
     expect(conversationViewSource).not.toContain(
       "if (autoScrollToLatest && followLatestRef.current) {\n      scrollTimelineToBottom(timeline);",
     );
@@ -2669,7 +2673,8 @@ describe("conversation turn navigator contract", () => {
     expect(conversationViewSource).toContain("buildConversationTurnNavDirectory");
     expect(conversationViewSource).toContain("resolveConversationTurnNavCurrentIndex");
     expect(conversationViewSource).toContain("<ConversationTurnNavigator");
-    expect(conversationViewSource).toContain("scrollToIndex(entry.anchorRowIndex");
+    expect(conversationTimelineFollowSource).toContain("scrollToIndex(entry.anchorRowIndex");
+    expect(conversationViewSource).toContain("handleTurnNavigate");
     expect(navigatorSource).toContain("CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain("entries.length < CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain('data-conversation-turn-navigator="1"');
