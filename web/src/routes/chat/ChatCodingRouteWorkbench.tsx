@@ -32,7 +32,6 @@ import {
   useCallback,
   useEffect,
   lazy,
-  Suspense,
   useMemo,
   useRef,
   useState,
@@ -64,6 +63,7 @@ import { prefetchConversationView } from "../../components/conversation/prefetch
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { ConversationRerunFileChoiceDialog } from "../../components/conversation/ConversationRerunFileChoiceDialog";
+import { ChatCodingWorkbenchDialogs } from "./ChatCodingWorkbenchDialogs";
 import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
 import {
@@ -179,7 +179,6 @@ import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu";
-import { ChatGroupManagementDialog } from "./ChatGroupManagementDialog";
 import {
   chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
@@ -241,7 +240,6 @@ import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
-import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
 import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
@@ -281,7 +279,6 @@ import {
   contextCompositionSegmentClass,
   contextCompositionSegmentLabel,
   promptSegmentDisplayLabel,
-  cacheCompositionSegmentLabel,
   agentRoleClass,
   avatarInitials,
   avatarImageUrlFrom,
@@ -342,20 +339,6 @@ export { canInputTerminal } from "./cliAgentRunModel";
 const CliAgentRunTerminalPanel = lazy(() =>
   import("./CliAgentRunTerminalPanel").then((module) => ({
     default: module.CliAgentRunTerminalPanel,
-  })),
-);
-
-/** Secondary-lazy: open only when creating an Agent (keeps wizard graph out of Chat shell). */
-const AgentCreateWizardDialog = lazy(() =>
-  import("../agent-create/AgentCreateWizardDialog").then((module) => ({
-    default: module.AgentCreateWizardDialog,
-  })),
-);
-
-/** Secondary-lazy: cache donut dialog opens from status rail action. */
-const CacheDetailDialog = lazy(() =>
-  import("./CacheDetailDialog").then((module) => ({
-    default: module.CacheDetailDialog,
   })),
 );
 
@@ -2155,30 +2138,8 @@ export function ChatCodingRouteWorkbench() {
     }),
     [detail, lang, lastCacheComposition, numberFormatter, t],
   );
-  const {
-    providerCacheInputTokens,
-    providerCachedInputTokens,
-    cacheCalibrationReason,
-    cacheComputedOverestimatedInputTokens,
-    cacheProviderExtraCachedInputTokens,
-    cacheCalibrationSummaryText,
-    trueCacheDonutSegments,
-    upperBoundCacheInputTokens,
-    upperBoundCachedInputTokens,
-    upperBoundCacheCompositionPercent,
-    cachePromptCompositionTotalTokens,
-    cachePromptDonutSegments,
-    cacheCompositionPercent,
-    averageCacheObservedTurnCount,
-    cacheCompositionAverageValue,
-    cacheDetailAvailable,
-    cacheDetailDialogTitle,
-    cacheDetailOpenLabel,
-    cacheCompositionSummary,
-    cacheCompositionTitle,
-    cacheCompositionUpperBoundLabel,
-    cacheCompositionAverageLabel,
-  } = cacheDetailViewModel;
+  const cacheCompositionPercent = cacheDetailViewModel.cacheCompositionPercent;
+  const cacheDetailAvailable = cacheDetailViewModel.cacheDetailAvailable;
   const {
     cacheDetailOpen,
     openCacheDetail,
@@ -4041,7 +4002,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
     >
-      <ChatGroupManagementDialog
+      <ChatCodingWorkbenchDialogs
         open={groupManageDialogOpen}
         onOpenChange={setGroupManageDialogOpen}
         lang={lang}
@@ -4083,77 +4044,26 @@ export function ChatCodingRouteWorkbench() {
         onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
         onResetActiveGroupRoom={handleResetActiveGroupRoom}
         onToggleGroupManageSession={handleToggleGroupManageSession}
-      />
-      {cacheDetailOpen && cacheDetailAvailable ? (
-        <Suspense fallback={null}>
-          <CacheDetailDialog
-            averageCacheObservedTurnCount={averageCacheObservedTurnCount}
-            cacheCompositionAverageLabel={cacheCompositionAverageLabel}
-            cacheCompositionAverageValue={cacheCompositionAverageValue}
-            cacheCompositionPercent={cacheCompositionPercent}
-            cacheCompositionTitle={cacheCompositionTitle}
-            cacheCompositionUpperBoundLabel={cacheCompositionUpperBoundLabel}
-            cacheComputedOverestimatedInputTokens={cacheComputedOverestimatedInputTokens}
-            cacheDetailDialogTitle={cacheDetailDialogTitle}
-            cachePromptCompositionTotalTokens={cachePromptCompositionTotalTokens}
-            cachePromptDonutSegments={cachePromptDonutSegments}
-            cacheProviderExtraCachedInputTokens={cacheProviderExtraCachedInputTokens}
-            cacheCalibrationReason={cacheCalibrationReason}
-            cacheCalibrationSummaryText={cacheCalibrationSummaryText}
-            closeLabel={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
-            lang={lang}
-            missingSegmentLabel={cacheCompositionSegmentLabel("missing", "missing", t)}
-            numberFormatter={numberFormatter}
-            onClose={closeCacheDetail}
-            previousCacheHitLabel={t("previousCacheHit")}
-            providerCachedInputTokens={providerCachedInputTokens}
-            providerCacheInputTokens={providerCacheInputTokens}
-            trueCacheDonutSegments={trueCacheDonutSegments}
-            upperBoundCachedInputTokens={upperBoundCachedInputTokens}
-            upperBoundCacheCompositionPercent={upperBoundCacheCompositionPercent}
-            upperBoundCacheInputTokens={upperBoundCacheInputTokens}
-            promptSnapshot={detail?.agentPromptSnapshot}
-            promptAssembly={detail?.lastPromptAssembly}
-            lastLlmPayloadTrace={lastLlmPayloadTrace}
-          />
-        </Suspense>
-      ) : null}
-      {agentCreateWizardOpen ? (
-        <Suspense fallback={null}>
-          <AgentCreateWizardDialog
-            open={agentCreateWizardOpen}
-            triggerRef={agentCreateTriggerRef}
-            triggerId="chat-agent-create-trigger"
-            onClose={() => setAgentCreateWizardOpen(false)}
-            onCreated={(agent) => {
-              setSelectedAgentId(agent.agentId);
-              setRightIndexPanel("conversations");
-            }}
-            onStartConversation={async (agent) => {
-              if (!agent.directSessionId) return false;
-              handleOpenAgent(agent);
-              return true;
-            }}
-            onOpenAdvancedConfig={(agent) => {
-              setAgentCreateWizardOpen(false);
-              navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
-            }}
-          />
-        </Suspense>
-      ) : null}
-      <ChatDangerConfirmDialog
-        open={Boolean(pendingConfirm)}
-        title={pendingConfirmPresentation?.title ?? ""}
-        confirmLabel={pendingConfirmPresentation?.confirmLabel ?? ""}
-        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
-        confirmPending={pendingConfirmPresentation?.confirmPending ?? false}
-        onOpenChange={(open) => {
-          if (!open) {
-            dismissPendingConfirm();
-          }
-        }}
-        onCancel={dismissPendingConfirm}
-        onConfirm={confirmPendingWorkbenchAction}
+        cacheDetailOpen={cacheDetailOpen}
+        cacheDetailAvailable={cacheDetailAvailable}
+        cacheDetailViewModel={cacheDetailViewModel}
+        t={t}
+        numberFormatter={numberFormatter}
+        closeCacheDetail={closeCacheDetail}
+        promptSnapshot={detail?.agentPromptSnapshot}
+        promptAssembly={detail?.lastPromptAssembly}
+        lastLlmPayloadTrace={lastLlmPayloadTrace}
+        agentCreateWizardOpen={agentCreateWizardOpen}
+        agentCreateTriggerRef={agentCreateTriggerRef}
+        setAgentCreateWizardOpen={setAgentCreateWizardOpen}
+        setSelectedAgentId={setSelectedAgentId}
+        setRightIndexPanel={setRightIndexPanel}
+        handleOpenAgent={handleOpenAgent}
+        navigate={navigate}
+        pendingConfirm={pendingConfirm}
+        pendingConfirmPresentation={pendingConfirmPresentation}
+        dismissPendingConfirm={dismissPendingConfirm}
+        confirmPendingWorkbenchAction={confirmPendingWorkbenchAction}
       />
     </ChatSessionWorkbenchShell>
       <ConversationRerunFileChoiceDialog
