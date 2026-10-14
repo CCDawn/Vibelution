@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import lobbySource from "../CompanionsRoute.tsx?raw";
 import chatSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatConversationSurfaceModelSource from "../chat/useChatConversationSurfaceModel.tsx?raw";
 import centerTabsSource from "../chat/ChatCenterTabStrip.tsx?raw";
 import streamSource from "../chat/useSessionDetailStream.ts?raw";
 import sessionEventStreamSource from "../chat/sessionEventStream.ts?raw";
@@ -77,13 +78,13 @@ describe("virtual-human native Chat reuse", () => {
   });
 
   it("removes technical composer chrome only from the verified companion presentation", () => {
-    expect(chatSource).toContain("companionMode: verifiedCompanionMode");
-    expect(chatSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
-    expect(chatSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined");
-    expect(chatSource).toContain("permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent");
-    expect(chatSource).toContain("llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl");
-    expect(chatSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
-    expect(chatSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
+    expect(chatConversationSurfaceModelSource).toContain("companionMode: verifiedCompanionMode");
+    expect(chatConversationSurfaceModelSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
+    expect(chatConversationSurfaceModelSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined");
+    expect(chatConversationSurfaceModelSource).toContain("permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent");
+    expect(chatConversationSurfaceModelSource).toContain("llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl");
+    expect(chatConversationSurfaceModelSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
+    expect(chatConversationSurfaceModelSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
     expect(chatSource).toContain("statusRail={verifiedCompanionMode ? (");
     expect(chatSource).toContain("conversationIndex={financeSurface ? null : verifiedCompanionMode ? (");
   });
@@ -136,7 +137,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(portraitMotionSource).toContain("@keyframes companion-portrait-breathe");
     expect(portraitMotionSource).toContain("@keyframes companion-portrait-blink");
     expect(portraitMotionSource).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(chatSource).toContain("companionMode: verifiedCompanionMode");
+    expect(chatConversationSurfaceModelSource).toContain("companionMode: verifiedCompanionMode");
     expect(chatSource).not.toContain("EmbodimentState");
   });
 });

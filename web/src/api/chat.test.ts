@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import apiSource from "./chat.ts?raw";
 import evolutionApiSource from "./evolution.ts?raw";
 import routeSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import surfaceModelSource from "../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
@@ -86,7 +87,7 @@ describe("Chat session tool approval API", () => {
     expect(composerSource).toContain("switchSessionHead");
     expect(composerSource).toContain("baseMessageId");
     expect(routeSource).toContain("switchHeadMutation");
-    expect(routeSource).toContain("onSwitchMessageVersion");
+    expect(surfaceModelSource).toContain("onSwitchMessageVersion");
   });
 
   it("owns review-candidate transport outside the chat lifecycle hook", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ChatCodingRouteWorkbench.tsx?raw";
+import surfaceModelSource from "./useChatConversationSurfaceModel.tsx?raw";
 import apiSource from "../../api/agents.ts?raw";
 import mutationSource from "./useAgentPermissionPresetMutation.ts?raw";
 
@@ -23,8 +24,8 @@ describe("chat Agent permission preset mutation contract", () => {
 
   it("projects the active session Agent into the composer control", () => {
     expect(routeSource).toContain("useAgentPermissionPresetMutation");
-    expect(routeSource).toContain("permissionControl:");
-    expect(routeSource).toContain("activeSessionAgent.permissionPreset");
-    expect(routeSource).toContain("activeSessionAgent.configRevision");
+    expect(surfaceModelSource).toContain("permissionControl:");
+    expect(surfaceModelSource).toContain("activeSessionAgent.permissionPreset");
+    expect(surfaceModelSource).toContain("activeSessionAgent.configRevision");
   });
 });

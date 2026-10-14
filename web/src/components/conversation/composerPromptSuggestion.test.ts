@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import chatComposerPlusMenuSource from "../../routes/chat/ChatComposerPlusMenu.tsx?raw";
 import chatComposerSubmitModelSource from "../../routes/chat/chatComposerSubmitModel.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
@@ -155,7 +156,7 @@ describe("composer prompt suggestion wiring", () => {
     expect(chatRouteSource).toContain("readStoredPromptSuggestionToggle");
     expect(chatRouteSource).toContain("writeStoredPromptSuggestionToggle");
     expect(chatRouteSource).toContain("promptSuggestionEnabled={activePromptSuggestionEnabled}");
-    expect(chatRouteSource).toContain("promptSuggestionEnabled: activePromptSuggestionEnabled,");
+    expect(chatConversationSurfaceModelSource).toContain("promptSuggestionEnabled: activePromptSuggestionEnabled,");
     expect(conversationViewSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("useComposerPromptSuggestion(");
     expect(conversationComposerSource).toContain("shouldAcceptComposerGhost(");

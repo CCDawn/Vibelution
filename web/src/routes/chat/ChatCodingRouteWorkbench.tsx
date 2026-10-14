@@ -86,7 +86,6 @@ import {
   ConversationMessage,
   ToolCall,
   VirtualHumanCompanion,
-  AgentPermissionPreset,
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
@@ -124,9 +123,6 @@ import {
   resolveChatLiveQueryPolicy,
 } from "../chatLiveQueryPolicy";
 import { resolveChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
-import {
-  resolveChatUserDisplayName,
-} from "../chatCompactPanel";
 import {
   browserDesktopNotificationBridge,
   createDesktopConversationNotifier,
@@ -175,6 +171,7 @@ import { EMPTY_FINANCIAL_MESSAGES } from "../finance/stockResearchModel";
 import { useFinancialAssistants } from "../finance/useFinancialAssistants";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
+import { useChatConversationSurfaceModel } from "./useChatConversationSurfaceModel";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
@@ -3195,264 +3192,88 @@ export function ChatCodingRouteWorkbench() {
     });
   }, [activeGroupRoomId, activeSessionId, detail?.sessionKind, groupPanelActive, ordinaryChangeRail]);
 
-  // Conversation surface model, memoized so unrelated workbench renders (rails,
-  // dialogs, composer state) do not re-render ConversationView: the memo gate
-  // lives on ConversationView and needs stable prop references. The streaming
-  // activeTurnMessage is intentionally NOT part of this model — it is
-  // projected from the active-turn layer store inside
-  // ChatConversationComposerBridge, the single per-frame subscriber.
-  const conversationModel = useMemo(
-    () => (detail ? {
-      sessionId: activeSessionId ?? detail.id,
-      title: detail.title,
-      phase: detail.currentPhase,
-      // Session summary carries an absolute workspace root (backend resolves
-      // relative paths against PROJECT_ROOT); markdown workspace-file links
-      // resolve against it. Undefined keeps links inert (legacy behavior).
-      sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,
-      messages: detail.messages,
-      transcriptPending: sessionTranscriptPending,
-      hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
-      earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending,
-      onStreamingFramePaint: handleConversationStreamingFramePaint,
-      assistantDisplayName: activeAgentDisplayName,
-      assistantAvatarImageUrl: activeAgentAvatarImageUrl,
-      assistantAvatarFallback: activeAgentAvatarFallback,
-      resolveTurnAvatar: resolveConversationTurnAvatar,
-      userDisplayName: resolveChatUserDisplayName(runtime?.userName),
-      userAvatarPreset: runtime?.userProfile?.avatarPreset,
-      userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
-      taskSummary: currentTaskSummary,
-      changedFiles: detail.changedFiles ?? EMPTY_SESSION_CHANGED_FILES,
-      defaultFileContext: detail.defaultFileContext,
-      showHeader: false,
-      showSessionOverview: false,
-      companionMode: verifiedCompanionMode,
-      // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
-      showMentalSnapshots: !verifiedCompanionMode,
-      promptSuggestionEnabled: activePromptSuggestionEnabled,
-      composerFocusSignal:
-        composerFocusRequest.sessionId === activeSessionId
-          ? composerFocusRequest.signal
-          : "",
-      onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
-      composer: financeSurface ? { ...companionConversationComposer, placeholder: lang === "zh" ? "追问这只股票…" : "Ask about this stock…" } : companionConversationComposer,
-      composerLeadingControl: verifiedCompanionMode ? undefined : (
-        <ChatComposerPlusMenu
-          lang={lang}
-          attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
-          onAddAttachments={handleAddComposerAttachments}
-          sessionReferences={composerSessionReferenceOptions}
-          onAddSessionReference={handleAddComposerReference}
-          knowledgeReferenceOptions={composerKnowledgeReferenceOptions}
-          onAddKnowledgeReference={handleAddComposerReference}
-          labels={{
-            composerAttachFiles: t("composerAttachFiles"),
-            composerReferenceKnowledgeFiles: t("composerReferenceKnowledgeFiles"),
-            composerReferenceKnowledgeUnavailable: t("composerReferenceKnowledgeUnavailable"),
-            composerReferenceKnowledgeTitle: t("composerReferenceKnowledgeTitle"),
-            composerReferenceKnowledgeDescription: t("composerReferenceKnowledgeDescription"),
-            composerReferenceKnowledgeSearch: t("composerReferenceKnowledgeSearch"),
-            composerReferenceKnowledgeEmpty: t("composerReferenceKnowledgeEmpty"),
-          }}
-          mentalModelEnabled={mentalModelEnabledForNextTurn}
-          runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
-          promptSuggestionEnabled={activePromptSuggestionEnabled}
-          capabilityDisabled={!activeSessionId}
-          onMentalModelEnabledChange={handleMentalModelEnabledChange}
-          onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
-          onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
-          directSession={!financeSurface && agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
-            id: agentPrimaryDirectSessionId,
-            label: sessionBindingMismatchLine,
-            onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
-            onPrefetch: () => handlePrefetchDirectSession(agentPrimaryDirectSessionId),
-          } : null}
-          group={standardGroupRoomActive && activeGroupRoom ? {
-            title: activeGroupRoom.title,
-            onManage: () => setGroupManageDialogOpen(true),
-            teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
-            onOpenTeam: activeGroupTeamOwned && activeGroupTeam
-              ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
-              : undefined,
-          } : null}
-        />
-      ),
-      permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent ? {
-        value: activeSessionAgent.permissionPreset || "request_approval",
-        disabled: (
-          agentPermissionPresetMutation.isPending
-          || activeSessionAgent.configSchemaVersion < 2
-          || activeSessionAgent.configRevision < 1
-          || !activeSessionAgent.configHash
-        ),
-        pending: (
-          agentPermissionPresetMutation.isPending
-          && agentPermissionPresetMutation.variables?.agentId === activeSessionAgent.agentId
-        ),
-        agentName: activeAgentDisplayName,
-        onChange: (permissionPreset: AgentPermissionPreset) => {
-          if (
-            !activeSessionId
-            || agentPermissionPresetMutation.isPending
-            || activeSessionAgent.configSchemaVersion < 2
-            || activeSessionAgent.configRevision < 1
-            || !activeSessionAgent.configHash
-          ) {
-            return;
-          }
-          agentPermissionPresetMutation.mutate({
-            agentId: activeSessionAgent.agentId,
-            sessionId: activeSessionId,
-            permissionPreset,
-            expectedConfigRevision: activeSessionAgent.configRevision,
-          });
-        },
-      } : undefined,
-      llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl,
-      turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl,
-      onOpenAgentModelConfig: !financeSurface && !verifiedCompanionMode && activeSessionAgent
-        ? () => handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? "") ?? null)
-        : undefined,
-      composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing,
-      onOpenComposerContextDetail: !financeSurface && !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
-      onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
-      onOpenSideChat: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinarySideChat : undefined,
-      onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinaryRailFile : undefined,
-      slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
-      slashSkillsCatalogState: verifiedCompanionMode ? "ready" : slashSkillsCatalogState,
-      composerReferenceOptions: verifiedCompanionMode ? [] : composerKnowledgeReferenceOptions,
-      cancelComposerModeLabel: t("cancelEditMessage"),
-      turnError: detail.lastTurnError,
-      stopLabel: t("stop"),
-      stopPendingLabel: t("stopPending"),
-      safeGuidanceLabel: t("safeGuidance"),
-      safeGuidancePendingLabel: t("safeGuidancePending"),
-      interruptGuidanceLabel: t("interruptGuidance"),
-      interruptGuidancePendingLabel: t("interruptGuidancePending"),
-      editUserMessageLabel: t("editAndResendMessage"),
-      onComposerChange: handleComposerChange,
-      onAddComposerAttachments: handleAddComposerAttachments,
-      onRemoveComposerAttachment: handleRemoveComposerAttachment,
-      onRetryComposerAttachment: handleRetryComposerAttachmentUpload,
-      onRetryComposerAttachmentUploads: handleRetryComposerAttachmentUploads,
-      onAddComposerReference: handleAddComposerReference,
-      onRemoveComposerReference: handleRemoveComposerReference,
-      onEditUserMessage: handleEditUserMessage,
-      onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
-      onSwitchMessageVersion: handleSwitchMessageVersion,
-      onForkSessionFromNode: verifiedCompanionMode ? undefined : handleForkSessionFromNode,
-      branchVersionSwitchDisabled: (
-        sessionBusy
-        || (switchHeadMutation.isPending
-          && switchHeadMutation.variables?.sessionId === activeSessionId)
-      ),
-      regenerableAssistantMessageId,
-      regenerateDisabled: sessionBusy || regenerateMutation.isPending,
-      regeneratePending: (
-        regenerateMutation.isPending
-        && regenerateMutation.variables?.sessionId === activeSessionId
-      ),
-      onRetryTurn: handleRetryFailedTurn,
-      retryTurnDisabled: sessionBusy || regenerateMutation.isPending,
-      retryTurnPending: (
-        regenerateMutation.isPending
-        && regenerateMutation.variables?.sessionId === activeSessionId
-      ),
-      onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
-      onLoadEarlierMessages: handleLoadEarlierSessionMessages,
-      onSubmit: handleSubmitTurn,
-      onStop: handleStopTurn,
-      onSafeGuidance: () => handleSubmitGuidance("safe"),
-      onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
-      onFollowupQueueUpdate: handleFollowupQueueUpdate,
-      onFollowupQueueRemove: handleFollowupQueueRemove,
-      onFollowupQueueMove: handleFollowupQueueMove,
-      onFollowupQueueSteer: handleFollowupQueueSteer,
-      onFollowupQueueSendNow: handleFollowupQueueSendNow,
-      followupQueueSteerLabel: t("immediateSteer"),
-    } : null),
-    [
-      activeAgentAvatarFallback,
-      activeAgentAvatarImageUrl,
-      activeAgentDisplayName,
-      activeGroupRoom,
-      activeGroupTeam,
-      activeGroupTeamOwned,
-      activePromptSuggestionEnabled,
-      activeSessionAgent,
-      activeSessionId,
-      agentDirectSessionMismatch,
-      agentPermissionPresetMutation,
-      agentPrimaryDirectSessionId,
-      cacheDetailAvailable,
-      composerContextRing,
-      composerFocusRequest,
-      composerKnowledgeReferenceOptions,
-      composerSessionReferenceOptions,
-      currentTaskSummary,
-      detail,
-      financeSurface,
-      handleAddComposerAttachments,
-      handleAddComposerReference,
-      handleCancelEditMessage,
-      handleComposerChange,
-      handleConversationStreamingFramePaint,
-      handleCreateAgentSession,
-      handleEditUserMessage,
-      handleFollowupQueueMove,
-      handleFollowupQueueRemove,
-      handleFollowupQueueSendNow,
-      handleFollowupQueueSteer,
-      handleFollowupQueueUpdate,
-      handleForkSessionFromNode,
-      handleLoadEarlierSessionMessages,
-      handleMentalModelEnabledChange,
-      handleOpenDirectSession,
-      handlePrefetchDirectSession,
-      handlePromptSuggestionEnabledChange,
-      handleRegenerateAssistantMessage,
-      handleRemoveComposerAttachment,
-      handleRemoveComposerReference,
-      handleRetryComposerAttachmentUpload,
-      handleRetryComposerAttachmentUploads,
-      handleRetryFailedTurn,
-      handleRuntimeStatusEnabledChange,
-      handleStopTurn,
-      handleSubmitGuidance,
-      handleSubmitTurn,
-      handleSwitchMessageVersion,
-      lang,
-      loadEarlierSessionMessagesMutation,
-      mentalModelEnabledForNextTurn,
-      navigate,
-      openCacheDetail,
-      openOrdinaryRailFile,
-      openOrdinarySideChat,
-      ordinaryChangeRail,
-      regenerateMutation,
-      regenerableAssistantMessageId,
-      resolvedEditTarget,
-      resolveConversationTurnAvatar,
-      runtime,
-      selectedChatAgent,
-      sessionBusy,
-      sessionLlmControl,
-      activeSessionAgent,
-      handleOpenAgentConfig,
-      sessionBindingMismatchLine,
-      sessionTranscriptPending,
-      setGroupManageDialogOpen,
-      settleSessionComposerFocusRequest,
-      slashCommandSuggestions,
-      slashSkillsCatalogState,
-      standardGroupRoomActive,
-      switchHeadMutation,
-      t,
-      verifiedCompanionMode,
-      companionConversationComposer,
-    ],
-  );
+  const conversationModel = useChatConversationSurfaceModel({
+    activeAgentAvatarFallback,
+    activeAgentAvatarImageUrl,
+    activeAgentDisplayName,
+    activeGroupRoom,
+    activeGroupTeam,
+    activeGroupTeamOwned,
+    activePromptSuggestionEnabled,
+    activeSessionAgent,
+    activeSessionId,
+    agentDirectSessionMismatch,
+    agentPermissionPresetMutation,
+    agentPrimaryDirectSessionId,
+    cacheDetailAvailable,
+    companionConversationComposer,
+    composerContextRing,
+    composerFocusRequest,
+    composerKnowledgeReferenceOptions,
+    composerSessionReferenceOptions,
+    currentTaskSummary,
+    detail,
+    financeSurface,
+    handleAddComposerAttachments,
+    handleAddComposerReference,
+    handleCancelEditMessage,
+    handleComposerChange,
+    handleConversationStreamingFramePaint,
+    handleCreateAgentSession,
+    handleEditUserMessage,
+    handleFollowupQueueMove,
+    handleFollowupQueueRemove,
+    handleFollowupQueueSendNow,
+    handleFollowupQueueSteer,
+    handleFollowupQueueUpdate,
+    handleForkSessionFromNode,
+    handleLoadEarlierSessionMessages,
+    handleMentalModelEnabledChange,
+    handleOpenAgentConfig,
+    handleOpenDirectSession,
+    handlePrefetchDirectSession,
+    handlePromptSuggestionEnabledChange,
+    handleRegenerateAssistantMessage,
+    handleRemoveComposerAttachment,
+    handleRemoveComposerReference,
+    handleRetryComposerAttachmentUpload,
+    handleRetryComposerAttachmentUploads,
+    handleRetryFailedTurn,
+    handleRuntimeStatusEnabledChange,
+    handleStopTurn,
+    handleSubmitGuidance,
+    handleSubmitTurn,
+    handleSwitchMessageVersion,
+    lang,
+    loadEarlierSessionMessagesMutation,
+    mentalModelEnabledForNextTurn,
+    navigate,
+    openCacheDetail,
+    openOrdinaryRailFile,
+    openOrdinarySideChat,
+    ordinaryChangeRail,
+    regenerateMutation,
+    regenerableAssistantMessageId,
+    resolveConversationTurnAvatar,
+    resolvedEditTarget,
+    runtime,
+    runtimeStatusEnabledForNextTurn,
+    selectedChatAgent,
+    sessionBindingMismatchLine,
+    sessionBusy,
+    sessionLlmControl,
+    sessionTranscriptPending,
+    sessionsById,
+    setGroupManageDialogOpen,
+    settleSessionComposerFocusRequest,
+    slashCommandSuggestions,
+    slashSkillsCatalogState,
+    standardGroupRoomActive,
+    switchHeadMutation,
+    t,
+    turnModelControl,
+    verifiedCompanionMode,
+  });
 
   const financialResearchBridge = useFinancialResearchSessionBridge({
     sessionId: activeSessionId ?? "",
