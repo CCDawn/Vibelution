@@ -91,7 +91,7 @@ export function ConversationTurnModelControl({
   const effectiveEffort = normalizedEffort;
   const effortOptions = supportedEfforts.map((value) => ({
     id: value,
-    label: model?.reasoningEffortOptions?.find((option) => option.value === value)?.label || value,
+    label: value,
   }));
   const contextValidation = validateModelContextWindow(contextWindowDraft, maxContextWindow, lang);
   const parsedContextWindow = contextValidation.value;

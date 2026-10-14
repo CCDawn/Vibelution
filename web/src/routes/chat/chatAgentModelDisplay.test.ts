@@ -22,4 +22,13 @@ describe("ordinary Agent model authority", () => {
     expect(workbenchSource).toContain("handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? \"\") ?? null)");
     expect(workbenchSource).toContain('refetchOnMount: "always"');
   });
+
+  it("sizes the context ring from saved scoped parameters instead of only the last call", () => {
+    const start = workbenchSource.indexOf("const composerContextRing = useMemo");
+    const ring = workbenchSource.slice(start, workbenchSource.indexOf("\n  const {", start));
+    expect(ring).toContain("resolveComposerContextLimit({");
+    expect(ring).toContain("modelParameters: !financeSurface && !verifiedCompanionMode ? sessionLlmOptionsQuery.data : undefined");
+    expect(ring).toContain("agentId: detail?.agentId");
+    expect(ring).toContain("sessionLlmOptionsQuery.data,");
+  });
 });

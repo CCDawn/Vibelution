@@ -1090,6 +1090,114 @@ def test_continuation_loop_binds_turn_guidance_provider_before_agent_turn(tmp_pa
     assert observed["boundIsProvider"] is True
 
 
+@pytest.mark.parametrize("guidance_texts", [["focus on tests"], ["focus on tests", "keep the history"]])
+@pytest.mark.parametrize("with_history", [False, True])
+def test_first_send_guidance_preserves_ledger_seed_and_is_injected_once(
+    tmp_path, monkeypatch, guidance_texts, with_history
+) -> None:
+    """Exercise the worker -> runner -> real Agent send gate before any reply."""
+    import agent as agent_module
+    from core.chat import conversation_ledger
+    from core.chat.turn_journal import TurnJournalEvent
+    from core.infrastructure.runtime_input import build_chat_guidance_message, build_chat_user_message
+    from core.orchestration.agent_modes import AgentMode
+
+    session_id, turn_id = "session-first-guide", "turn-first-guide"
+    history = (
+        [{"role": "user", "content": "prior request"}, {"role": "assistant", "content": "prior answer"}]
+        if with_history
+        else []
+    )
+    rows = [
+        {"turnId": "turn-prior", "eventType": f"{item['role']}_message", "payload": item}
+        for item in history
+    ] + [
+        {"turnId": turn_id, "eventType": "user_message", "payload": {"content": "initial request"}},
+        *[
+            {"turnId": turn_id, "eventType": "user_message", "payload": {"content": text, "metadata": {"kind": "user_guidance"}}}
+            for text in guidance_texts
+        ],
+    ]
+    events = [TurnJournalEvent.from_dict({**row, "sequence": index}) for index, row in enumerate(rows, 1)]
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda _session_id: events)
+    monkeypatch.setattr(conversation_ledger, "load_conversation_events", lambda *_args: events)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *_args, **_kwargs: None)
+
+    runtime = agent_module.AgentRuntime.__new__(agent_module.AgentRuntime)
+    runtime._active_turn_messages = None
+    runtime._seeded_history_ledger_fingerprint = ""
+    runtime._get_mode_policy = lambda: SimpleNamespace(mode=AgentMode.CHAT)
+    runtime.is_mental_model_enabled_for_turn = lambda: False
+    runtime._chat_ledger_identity = lambda: (tmp_path, session_id, turn_id)
+    errors = []
+    runtime._handle_turn_journal_replay_failure = lambda exc: errors.append(exc.error_type)
+    payloads = []
+    pending_guidance = list(guidance_texts)
+
+    def guidance_provider():
+        drained = list(pending_guidance)
+        pending_guidance.clear()
+        return drained
+
+    def run_single_turn(initial_prompt=None, **_kwargs):
+        messages = [*list(runtime._active_turn_messages or []), build_chat_user_message(initial_prompt)]
+        messages = runtime._apply_turn_guidance_messages(messages)
+        # The next boundary cannot inject the already-consumed guidance again.
+        assert runtime._apply_turn_guidance_messages(messages) is messages
+        messages, ok = runtime._reconcile_chat_conversation_before_llm(messages)
+        if not ok:
+            return {"status": "failed", "error": "journal reconciliation blocked"}
+        payloads.append(messages)
+        return {"status": "completed", "summary": "结论：已完成。", "outcome": "done"}
+
+    runtime.run_single_turn = run_single_turn
+    result = worker._run_session_continuation_loop(
+        runtime,
+        context={},
+        session_id=session_id,
+        turn_control=SimpleNamespace(turn_id=turn_id, snapshot=lambda: {}),
+        initial_prompt="initial request",
+        history_messages=history,
+        guidance_provider=guidance_provider,
+    )
+
+    assert result["status"] == "completed", errors
+    assert errors == []
+    assert len(payloads) == 1
+    from core.chat.conversation_invariant import conversation_layer_fingerprint, conversation_layer_messages
+
+    dialogue = conversation_layer_messages(payloads[0])
+    expected_history = [build_chat_user_message("prior request"), {"role": "assistant", "content": "prior answer"}] if with_history else []
+    expected = [*expected_history, build_chat_user_message("initial request"), *[build_chat_guidance_message(text) for text in guidance_texts]]
+    assert len(dialogue) == len(expected)
+    assert conversation_layer_fingerprint(dialogue) == conversation_layer_fingerprint(expected)
+
+
+def test_empty_history_cannot_receive_provenance_for_nonempty_ledger(tmp_path, monkeypatch) -> None:
+    from core.chat.conversation_invariant import ConversationSeedInvariantError
+    from core.chat.turn_journal import TurnJournalEvent
+
+    events = [TurnJournalEvent.from_dict({"eventType": "user_message", "turnId": "turn-prior", "payload": {"content": "must survive"}})]
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda _session_id: events)
+    calls = []
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", lambda *_args, **kwargs: calls.append(kwargs) or {"status": "completed", "summary": "结论：已完成。", "outcome": "done"})
+
+    with pytest.raises(ConversationSeedInvariantError) as exc_info:
+        worker._run_session_continuation_loop(
+            object(),
+            context={},
+            session_id="session-empty-seed",
+            turn_control=SimpleNamespace(turn_id="turn-current", snapshot=lambda: {}),
+            initial_prompt="initial request",
+            history_messages=[],
+        )
+    assert exc_info.value.error_type == "ledger_history_projection_mismatch"
+    assert calls == []
+
+
 def test_source_stage_required_tools_narrow_each_model_turn(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)

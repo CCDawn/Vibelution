@@ -4,6 +4,7 @@ import {
   buildComposerContextRingModel,
   formatTokensPerSecondValue,
   resolveComposerCacheState,
+  resolveComposerContextLimit,
 } from "./composerContextModel";
 const base = {
   usageUsed: 85865,
@@ -21,6 +22,26 @@ const base = {
   ],
 };
 describe("composerContextModel", () => {
+  it("immediately resizes usage from saved Agent parameters without rewriting the observed call", () => {
+    const observed = { usageUsed: 4232, usageLimit: 32768 };
+    const modelParameters = { sessionId: "session-a", agentId: "agent-a", contextWindow: 64000 };
+    const limit = resolveComposerContextLimit({ sessionId: "session-a", agentId: "agent-a", modelParameters, observedLimit: observed.usageLimit });
+    const model = buildComposerContextRingModel({ ...base, ...observed, usageLimit: limit });
+    expect(model.usedLabel).toBe("4.2K / 64K");
+    expect(model.usageLabel).toBe("7%");
+    expect(observed.usageLimit).toBe(32768);
+    expect(resolveComposerContextLimit({ sessionId: "session-a", agentId: "agent-a", modelParameters: { ...modelParameters, contextWindow: 16000 }, observedLimit: observed.usageLimit })).toBe(16000);
+  });
+
+  it.each([
+    { sessionId: "session-b", agentId: "agent-a", contextWindow: 64000 },
+    { sessionId: "session-a", agentId: "agent-b", contextWindow: 64000 },
+    { sessionId: "session-a", agentId: "agent-a", contextWindow: 0 },
+    { sessionId: "session-a", agentId: "agent-a", contextWindow: Number.NaN },
+  ])("does not borrow another scope or invalid capacity: %j", (modelParameters) => {
+    expect(resolveComposerContextLimit({ sessionId: "session-a", agentId: "agent-a", modelParameters, observedLimit: 32768 })).toBe(32768);
+  });
+
   it("does not present computed candidates as observed hits and groups by source", () => {
     const model = buildComposerContextRingModel(base);
     expect(model.cacheState).toBe("missing");

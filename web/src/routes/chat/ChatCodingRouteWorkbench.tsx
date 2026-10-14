@@ -257,7 +257,7 @@ import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
-import { buildComposerContextRingModel } from "./composerContextModel";
+import { buildComposerContextRingModel, resolveComposerContextLimit } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
@@ -2195,7 +2195,12 @@ export function ChatCodingRouteWorkbench() {
   });
   const composerContextRing = useMemo(() => {
     const usageUsed = lastContextComposition?.totalTokens ?? detail?.contextUsage?.used ?? 0;
-    const usageLimit = lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0;
+    const usageLimit = resolveComposerContextLimit({
+      sessionId: activeSessionId,
+      agentId: detail?.agentId,
+      modelParameters: !financeSurface && !verifiedCompanionMode ? sessionLlmOptionsQuery.data : undefined,
+      observedLimit: lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0,
+    });
     const runtimeCompression = runtime?.contextCompression;
     const compressionLevels = runtimeCompression?.strategy?.levels ?? [];
     return buildComposerContextRingModel({
@@ -2221,6 +2226,11 @@ export function ChatCodingRouteWorkbench() {
       tokensPerSecond: detail?.llmUsage?.tokensPerSecond ?? null,
     });
   }, [
+    activeSessionId,
+    detail?.agentId,
+    financeSurface,
+    verifiedCompanionMode,
+    sessionLlmOptionsQuery.data,
     cacheCompositionPercent,
     cacheDetailAvailable,
     detail?.contextUsage?.limit,

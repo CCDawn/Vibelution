@@ -2807,16 +2807,34 @@ def _run_session_continuation_loop(
                     static_block=static_runtime_context_block,
                     volatile_block=volatile_runtime_context_block,
                 )
-            if iteration_chat_history:
+            if iteration_chat_history is not None:
                 from core.orchestration.turn_message_assembly import (
                     ledger_seeded_history_fingerprint,
                 )
 
+                seed_events = s._load_session_conversation_events_cached(session_id)
+                if not iteration_chat_history:
+                    from core.chat.conversation_invariant import (
+                        ConversationSeedInvariantError,
+                        canonical_conversation_messages_from_events,
+                    )
+
+                    # Do not attest a missing history as an empty ledger seed.
+                    # First-turn guidance adds more than one current user item,
+                    # so a genuine empty seed still needs its provenance stamp.
+                    if canonical_conversation_messages_from_events(
+                        seed_events, current_turn_id=canonical_turn_id
+                    ):
+                        raise ConversationSeedInvariantError(
+                            error_type="ledger_history_projection_mismatch",
+                            message="Empty chat history seed does not match ConversationLedger reconstruction.",
+                            details={"turnId": canonical_turn_id},
+                        )
                 # Provenance stamp for the send-time ledger gate: the seed
                 # below is assembled from this ledger state, and windowing or
                 # compaction may legally rewrite its contents.
                 chat_history_ledger_fingerprint = ledger_seeded_history_fingerprint(
-                    s._load_session_conversation_events_cached(session_id),
+                    seed_events,
                     turn_id=canonical_turn_id,
                 )
             guidance_configurer = getattr(agent, "set_turn_guidance_provider", None)

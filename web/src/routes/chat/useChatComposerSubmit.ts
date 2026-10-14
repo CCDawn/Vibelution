@@ -48,6 +48,7 @@ import {
 } from "../chatActiveTurnLayer";
 import type { ActiveTurnLayersStore } from "./activeTurnLayersStore";
 import { isTempSessionId } from "../sessionOptimisticIds";
+import { isSteerGuidanceMessage } from "../../components/conversation/conversationMessagePredicates";
 import { sessionCreateAttemptState, tempSessionSendBlockedMessage } from "./sessionCreateAttempt";
 import { useRerunFileChoice } from "./useRerunFileChoice";
 import {
@@ -3607,7 +3608,7 @@ export function useChatComposerSubmitActions({
     }
     let userMessage: ConversationMessage | undefined;
     for (let index = assistantIndex - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "user") {
+      if (messages[index].role === "user" && !isSteerGuidanceMessage(messages[index])) {
         userMessage = messages[index];
         break;
       }
@@ -3654,7 +3655,7 @@ export function useChatComposerSubmitActions({
     let userMessage: ConversationMessage | undefined;
     let userIndex = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "user") {
+      if (messages[index].role === "user" && !isSteerGuidanceMessage(messages[index])) {
         userMessage = messages[index];
         userIndex = index;
         break;

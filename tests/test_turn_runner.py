@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from core.llm.payload_builder import current_prompt_cache_partition
 from core.orchestration.turn_runner import (
     AgentSingleTurnRequest,
@@ -862,3 +864,87 @@ def test_run_existing_agent_single_turn_skips_fingerprint_without_history():
     )
 
     assert "fingerprint" not in captured
+
+
+def test_explicit_empty_history_clears_old_seed_and_carries_provenance():
+    captured = {}
+
+    class FakeAgent:
+        history = [{"role": "user", "content": "stale context"}]
+
+        def seed_chat_history(self, messages):
+            self.history = list(messages)
+
+        def seed_chat_history_ledger_fingerprint(self, fingerprint):
+            captured["fingerprint"] = fingerprint
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["history"] = self.history
+            return {"status": "completed"}
+
+    for stamp in ("empty-ledger-stamp", ""):
+        run_existing_agent_single_turn(
+            FakeAgent(),
+            initial_prompt="first request",
+            chat_history=[],
+            chat_history_ledger_fingerprint=stamp,
+        )
+        assert captured == {"history": [], "fingerprint": stamp}
+
+
+def test_none_history_leaves_same_turn_messages_and_provenance_untouched():
+    class FakeAgent:
+        history = [{"role": "user", "content": "in flight"}]
+        fingerprint = "existing-stamp"
+
+        def seed_chat_history(self, _messages):
+            raise AssertionError("None must not clear in-flight context")
+
+        def seed_chat_history_ledger_fingerprint(self, _fingerprint):
+            raise AssertionError("None must not replace provenance")
+
+    runtime = FakeAgent()
+    prepare_agent_turn(runtime, chat_history=None, chat_history_ledger_fingerprint="unused")
+    assert runtime.history == [{"role": "user", "content": "in flight"}]
+    assert runtime.fingerprint == "existing-stamp"
+
+
+def test_empty_seed_does_not_override_matching_same_turn_carryover():
+    captured = {}
+
+    class FakeAgent:
+        def seed_turn_carryover(self, carryover):
+            captured["carryover"] = carryover
+
+        def seed_chat_history(self, _messages):
+            raise AssertionError("accepted carryover owns the context")
+
+    carryover = {"turnIdentity": "turn-current", "terminal": False, "goal": "continue", "messages": [{"kind": "dict", "role": "user", "content": "in flight"}]}
+    prepare_agent_turn(FakeAgent(), turn_identity="turn-current", carryover=carryover, chat_history=[])
+    assert captured == {"carryover": carryover}
+
+
+def test_empty_history_with_forged_or_expired_provenance_still_blocks_guidance(tmp_path, monkeypatch):
+    import agent as agent_module
+    from core.chat import conversation_ledger
+    from core.chat.turn_journal import TurnJournalEvent
+    from core.infrastructure.runtime_input import build_chat_guidance_message, build_chat_user_message
+    from core.orchestration.agent_modes import AgentMode
+    from core.orchestration.turn_message_assembly import ledger_seeded_history_fingerprint
+
+    current = TurnJournalEvent.from_dict({"eventType": "user_message", "turnId": "turn-current", "payload": {"content": "initial request"}})
+    expired = ledger_seeded_history_fingerprint([current], turn_id="turn-current")
+    prior = TurnJournalEvent.from_dict({"eventType": "user_message", "turnId": "turn-prior", "payload": {"content": "real history"}})
+    monkeypatch.setattr(conversation_ledger, "load_conversation_events", lambda *_args: [prior, current])
+
+    for stamp in ("forged", expired):
+        runtime = agent_module.AgentRuntime.__new__(agent_module.AgentRuntime)
+        runtime._get_mode_policy = lambda: SimpleNamespace(mode=AgentMode.CHAT)
+        runtime.is_mental_model_enabled_for_turn = lambda: False
+        runtime._chat_ledger_identity = lambda: (tmp_path, "session-seed", "turn-current")
+        errors = []
+        runtime._handle_turn_journal_replay_failure = lambda exc: errors.append(exc.error_type)
+        prepare_agent_turn(runtime, chat_history=[], chat_history_ledger_fingerprint=stamp)
+        messages = [build_chat_user_message("initial request"), build_chat_guidance_message("guidance")]
+        assert runtime._reconcile_chat_conversation_before_llm(messages) == (messages, False)
+        assert errors == ["ledger_history_mismatch"]
