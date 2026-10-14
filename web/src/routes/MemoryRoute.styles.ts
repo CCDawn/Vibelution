@@ -26,7 +26,7 @@ const styles = {
   knowledgeGovernanceDeck:
     "knowledgeGovernanceDeck min-w-0 grid hidden max-[900px]:grid-cols-[minmax(0,1fr)]",
   knowledgeMain:
-    "knowledgeMain min-w-0 grid h-full min-h-0 content-start gap-4 overflow-auto overscroll-contain px-5 py-3 [&_.managementPanel]:content-start max-[640px]:px-4",
+    "knowledgeMain min-w-0 grid h-full min-h-0 auto-rows-max content-start gap-4 overflow-auto overscroll-contain px-5 py-3 [&_.managementPanel]:content-start max-[640px]:px-4 max-[640px]:[&_button]:!min-h-11 max-[640px]:[&_input]:!min-h-11 max-[640px]:[&_[data-vui=select]]:!min-h-11",
   knowledgeWorkbenchPage:
     "min-w-0 h-full min-h-0 flex-1 overflow-hidden",
   knowledgeViewStack:

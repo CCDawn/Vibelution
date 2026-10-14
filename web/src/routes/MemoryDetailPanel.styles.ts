@@ -14,7 +14,7 @@ const styles = {
     `countPill min-w-0 ${vuiControlPillClass}`,
   detailActionButton:
     `detailActionButton min-w-0 ${vuiControlQuietClass}`,
-  detailActions: "detailActions flex min-w-0 w-fit max-w-full flex-wrap items-center gap-2 py-2",
+  detailActions: "detailActions flex min-w-0 w-fit max-w-full flex-wrap items-center gap-2 bg-transparent py-2",
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2 px-1 py-0.5 [&>div]:min-w-0 [&_h2]:min-w-0 [&_h2]:break-words [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:break-words",
   detailPanel: `detailPanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,

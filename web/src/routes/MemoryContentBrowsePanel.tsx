@@ -207,28 +207,19 @@ export function MemoryContentBrowsePanel({
                   {bodyVisible ? (
                     <div className={styles.cardGrid}>
                       {group.items.map((card) => (
-                        <VSurface
+                        <VButton
                           key={card.id}
-                          as="article"
-                          tone="card"
-                          elevation="panel"
-                          padding="normal"
+                          type="button"
+                          variant="ghost"
+                          contentLayout="plain"
                           className={card.id === selectedCardId ? `${styles.card} ${styles.cardActive}` : styles.card}
-                          tabIndex={0}
-                          role="button"
                           aria-label={card.title}
                           aria-pressed={card.id === selectedCardId}
-                          onClick={() => onSelectCard(card.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              onSelectCard(card.id);
-                            }
-                          }}
+                          onPress={() => onSelectCard(card.id)}
                         >
                           <strong className={styles.cardTitle}>{card.title}</strong>
                           {card.meta ? <span className={styles.cardMeta}>{card.meta}</span> : null}
-                        </VSurface>
+                        </VButton>
                       ))}
                     </div>
                   ) : null}

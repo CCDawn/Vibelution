@@ -5,7 +5,7 @@ import {
 
 const styles = {
   collapsedFormButton:
-    `collapsedFormButton min-w-0 ${vuiControlQuietClass} grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 min-h-[42px] max-h-[92px]`,
+    `collapsedFormButton min-w-0 ${vuiControlQuietClass} !flex !h-auto !min-h-9 flex-wrap items-center !justify-start !gap-2 !whitespace-normal [&_small]:break-all max-[640px]:!w-full max-[640px]:!min-h-11`,
   countPill:
     `countPill min-w-0 ${vuiControlPillClass}`,
   detailActionButton:
@@ -39,7 +39,7 @@ const styles = {
   sourceGovernanceControls:
     "sourceGovernanceControls min-w-0 flex flex-wrap items-center gap-1.5",
   sourceGovernanceGrid:
-    "sourceGovernanceGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "sourceGovernanceGrid min-w-0 grid gap-4 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] max-[640px]:!grid-cols-1",
   sourceRecord:
     "sourceRecord grid min-w-0 gap-2 border-b border-vui-border-subtle py-3 text-vui-micro-13 last:border-b-0 [&_p]:break-words [&_p]:text-vui-fg-secondary",
   sourceRecordActions:

@@ -482,8 +482,6 @@ describe("MemoryRoute layout contract", () => {
 
     for (const className of [
       detailPanelStyles.copyNotice,
-      detailPanelStyles.detailActions,
-      detailPanelStyles.emptyDetail,
       sourceAndItemPanelStyles.panelNotice,
       graphNodeInspectorPanelStyles.emptyDetail,
       graphNodeInspectorPanelStyles.selectedConfigSummary,
@@ -492,6 +490,13 @@ describe("MemoryRoute layout contract", () => {
       expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     }
+
+    // These regions live inside the shared white pane and must not add another card wall.
+    expect(detailPanelStyles.detailActions).toContain("bg-transparent");
+    expect(detailPanelStyles.emptyDetail).toContain("!bg-transparent");
+    expect(detailPanelStyles.emptyDetail).toContain("!border-0");
+    expect(itemListPanelStyles.itemList).toContain("auto-rows-max");
+    expect(itemListPanelStyles.itemButtonDense).toContain("!grid-cols-[20px_minmax(0,1fr)]");
 
     expect(detailPanelStyles.detailActions).toContain("w-fit");
     expect(detailPanelStyles.detailActions).toContain("max-w-full");
@@ -606,7 +611,6 @@ describe("MemoryRoute layout contract", () => {
       [managePanelStyles.manageSourceFilters, "grid-cols-[repeat(auto-fit,minmax(82px,1fr))]"],
       [sourceAndItemPanelStyles.sourceButton, "grid-cols-[24px_minmax(0,1fr)_auto]"],
       [knowledgeUsageContractPanelStyles.contractDomainRow, "grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto]"],
-      [knowledgeSourceGovernancePanelStyles.collapsedFormButton, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [knowledgeSourceGovernancePanelStyles.sourceRecordHeader, "grid-cols-[minmax(0,1fr)_auto]"],
       [knowledgeReviewPanelStyles.queueToolbar, "grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),max-content))]"],
       [knowledgeRagPanelStyles.ragHealthStrip, "grid-cols-[repeat(auto-fit,minmax(108px,1fr))]"],
@@ -1439,14 +1443,15 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.knowledgeViewStack).toContain("[&>.knowledgeWorkspace]:flex-1");
     expect(styles.knowledgeViewStack).toContain("[&>.knowledgeGovernanceDeck]:hidden");
     expect(styles.knowledgeMain).toContain("[&_.managementPanel]:content-start");
-    expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("flex flex-wrap");
+    expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("!flex !flex-nowrap");
     expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("max-w-full");
-    expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("overflow-x-hidden");
-    expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("max-[640px]:grid");
+    expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("!overflow-x-auto");
+    expect(knowledgeModeTabsStyles.knowledgeModeTabs).toContain("!overflow-y-hidden");
     expect(knowledgeModeTabsStyles.knowledgeModeTabs).not.toContain("grid-cols-[repeat(5,minmax(0,1fr))]");
     expect(knowledgeModeTabsStyles.knowledgeModeTab).toContain("shrink-0");
     expect(knowledgeModeTabsStyles.knowledgeModeTab).toContain("max-w-full");
-    expect(knowledgeModeTabsStyles.knowledgeModeTab).not.toContain("inline-flex");
+    expect(knowledgeModeTabsStyles.knowledgeModeTab).toContain("!inline-flex");
+    expect(knowledgeModeTabsStyles.knowledgeModeTab).toContain("max-[640px]:!min-h-11");
     expect(knowledgeModeTabsStyles.knowledgeModeTab).not.toContain("w-fit");
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).toBeTypeOf("string");
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).not.toContain("inline-flex");
@@ -1458,7 +1463,10 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.knowledgeWorkspace).not.toContain("--memory-right-width");
     expect(routeSource).toContain('data-vui-region="memory-knowledge-workspace"');
     expect(knowledgeSourceGovernancePanelStyles.sourceGovernanceColumn).toContain("[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]");
-    expect(knowledgeSourceGovernancePanelStyles.collapsedFormButton).toContain("max-h-[92px]");
+    expect(knowledgeSourceGovernancePanelStyles.collapsedFormButton).toContain("!flex !h-auto");
+    expect(knowledgeSourceGovernancePanelStyles.collapsedFormButton).toContain("!whitespace-normal");
+    expect(knowledgeSourceGovernancePanelStyles.sourceGovernanceGrid).toContain("max-[640px]:!grid-cols-1");
+    expect(styles.knowledgeMain).toContain("auto-rows-max");
     expect(knowledgeUsageContractPanelStyles.contractStateGrid).toContain("hidden");
     expect(knowledgeUsageContractPanelStyles.contractForbiddenList).toContain("hidden");
     expect(knowledgeStewardPanelStyles.stewardRecommendations).toContain("hidden");

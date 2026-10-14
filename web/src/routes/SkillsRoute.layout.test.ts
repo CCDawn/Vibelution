@@ -155,7 +155,8 @@ describe("SkillsRoute layout contract", () => {
     expect(styles.skillButtonBaseClass).toContain("!bg-transparent");
     expect(styles.skillButtonBaseClass).toContain("!border-0");
     expect(styles.skillButtonBaseClass).toContain("!shadow-none");
-    expect(styles.skillButtonActiveClass).toBe("!bg-[var(--vui-selection-bg)]");
+    expect(styles.skillButtonActiveClass).toBe("aria-pressed:!bg-[var(--vui-selection-bg)]");
+    expect(routeSource).toContain("aria-pressed={activeCommand === skill.command}");
     expect(routeSource).toContain("<small className={styles.sourceCaptionClass}>");
     expect(routeSource).not.toContain("sourcePillClass");
     expect(styles.contentPreClass).toContain("border-0 bg-transparent");
