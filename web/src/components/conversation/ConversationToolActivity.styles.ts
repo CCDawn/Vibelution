@@ -42,10 +42,6 @@ const styles = {
     "itemStatic",
     "flex w-full max-w-full min-w-0 items-center gap-x-2 py-1",
   ),
-  itemChevron: cx(
-    "itemChevron",
-    "ml-auto shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_70%,transparent)] transition-transform duration-150 group-open:rotate-90",
-  ),
   itemDetailsEmpty: cx(
     "itemDetailsEmpty",
     "m-0 py-0.5 text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)]",
@@ -88,7 +84,7 @@ const styles = {
   // Plain action label (no chip chrome). data-codex-tool-action-pill kept for tests/selectors.
   actionLabel: cx(
     "actionLabel",
-    "shrink-0 font-medium text-[var(--fg-secondary)]",
+    "shrink-0 font-normal text-[var(--fg-tertiary)]",
   ),
   // Running rows keep the leading icon static; the action word carries the
   // live state via a text shimmer (gradient sweep, see ConversationToolActivity.css).
@@ -100,7 +96,7 @@ const styles = {
   // Legacy alias used by tests / external selectors that still reference actionPill.
   actionPill: cx(
     "actionPill",
-    "shrink-0 font-medium text-[var(--fg-secondary)]",
+    "shrink-0 font-normal text-[var(--fg-tertiary)]",
   ),
   // Explicit status text only for failure / attention — never dual status chips.
   // ZCode-aligned failure language: the colored word + a dashed underline carries
