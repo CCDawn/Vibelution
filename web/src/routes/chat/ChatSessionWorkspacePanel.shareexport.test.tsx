@@ -33,7 +33,14 @@ const props = {
     filePreview: {},
   },
   conversationFrame: {
-    conversation: { sessionId: "sess-9", messages: [], composer: {} },
+    conversation: {
+      sessionId: "sess-9",
+      messages: [],
+      transcript: {},
+      participants: {},
+      composerChrome: { composer: {} },
+      turnActions: {},
+    },
     conversationFocused: false,
     notices: [],
   },
