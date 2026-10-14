@@ -1,6 +1,12 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Scope-panel copy belongs to this component. Tooltip visibility is covered by VUI tests.
+vi.mock("../components/vui", async () => {
+  const actual = await vi.importActual<typeof import("../components/vui")>("../components/vui");
+  return { ...actual, VContextualHint: ({ label, content }: { label: string; content: React.ReactNode }) => <aside aria-label={label}>{content}</aside> };
+});
 
 import type { AgentInstance } from "../api/types";
 import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
@@ -25,7 +31,7 @@ const copy = {
 };
 
 describe("ToolsRouteAgentScopePanel copy", () => {
-  it("keeps the Agent identity and selected-scope counts together", () => {
+  it("keeps the Agent identity and all selected-scope counts in its contextual hint", () => {
     const html = renderToStaticMarkup(
       <ToolsRouteAgentScopePanel
         copy={copy}
@@ -45,6 +51,10 @@ describe("ToolsRouteAgentScopePanel copy", () => {
     expect(html).toContain("AG-UX Scope Preview Agent");
     expect(html).toContain("所选范围可调用");
     expect(html).toContain("125");
+    expect(html).toContain("当前范围可见");
+    expect(html).toContain("128");
+    expect(html).toContain("当前范围受阻");
+    expect(html).toContain(">3<");
   });
 
   it("distinguishes scope counts from this Agent's allow-list and test approval in zh/en copy", () => {
