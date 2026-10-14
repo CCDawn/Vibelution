@@ -47,7 +47,6 @@ import {
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
 import { fetchKnowledgeOverview, listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
-import { ChatRightRail } from "./ChatRightRail";
 import {
   EMPTY_CHAT_RIGHT_RAIL,
   openChatRightRailTab,
@@ -150,13 +149,9 @@ import {
 } from "../conversationIndexModel";
 import {
   activeTurnTerminalRefreshKey,
-  activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
   isActiveTurnSettledByMessages,
-  selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
-  toolStartToFirstPaintMs,
-  runningToolPaintKeys,
 } from "../chatActiveTurnLayer";
 import {
   ActiveTurnLayersStoreProvider,
@@ -168,7 +163,6 @@ import {
   isChildSession,
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
-import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
 import { useFinancialResearchSessionBridge } from "../finance/FinancialResearchBridge";
 import { FinancialResearchLiveProjection } from "../finance/FinancialResearchLiveProjection";
 import { EMPTY_FINANCIAL_MESSAGES } from "../finance/stockResearchModel";
@@ -177,11 +171,12 @@ import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
+import { ChatCodingStatusRail } from "./ChatCodingStatusRail";
+import { recordConversationStreamingFramePaint } from "./recordConversationStreamingFramePaint";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu";
 import { ChatGroupManagementDialog } from "./ChatGroupManagementDialog";
 import {
-  chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
   isBusyPhase,
   MAX_LEFT_PANEL_WIDTH,
@@ -197,7 +192,6 @@ import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanel } from "./ChatConversationIndexPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
-import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
 import {
   companionAgentIdForDirectSession,
@@ -1982,89 +1976,14 @@ export function ChatCodingRouteWorkbench() {
     });
   }, [activeSessionId, activeTurnSettledByDetail, detail, queryClient, setActiveTurnLayersBySession, activeTurnLayersBySessionRef]);
   const handleConversationStreamingFramePaint = useCallback((metrics: ConversationStreamingFramePaintMetrics) => {
-    const sessionId = String(metrics.sessionId || "").trim();
-    if (!sessionId || sessionId !== activeSessionId) {
-      return;
-    }
-    const now = Date.now();
-    const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId];
-    const paintedToolSelection = selectFirstUnpaintedRunningTool(
-      paintedActiveTurn,
-      paintedRunningToolIdsBySessionRef.current[sessionId] ?? [],
-    );
-    const newlyPaintedRunningTool = paintedToolSelection.tool;
-    const newlyPaintedRunningTools = paintedToolSelection.tools;
-    const firstPaintedToolAtById = {
-      ...(firstPaintedRunningToolAtBySessionRef.current[sessionId] ?? {}),
-    };
-    const runningPaintKeys = runningToolPaintKeys(paintedActiveTurn);
-    runningPaintKeys.forEach(({ toolId, fallbackKey, ordinalKey }) => {
-      [toolId, fallbackKey, ordinalKey].filter(Boolean).forEach((key) => {
-        if (!Number.isFinite(firstPaintedToolAtById[key])) {
-          firstPaintedToolAtById[key] = now;
-        }
-      });
-    });
-    firstPaintedRunningToolAtBySessionRef.current = {
-      ...firstPaintedRunningToolAtBySessionRef.current,
-      [sessionId]: firstPaintedToolAtById,
-    };
-    const lastLoggedAt = lastConversationStreamingFrameTelemetryAtRef.current[sessionId] ?? 0;
-    if (now - lastLoggedAt < 1_000 && !newlyPaintedRunningTool) {
-      return;
-    }
-    if (newlyPaintedRunningTools.length > 0) {
-      const newlyPaintedFallbackKeys = paintedToolSelection.toolIds.flatMap((toolId) => {
-        const keys = runningPaintKeys.find((key) => key.toolId === toolId);
-        return keys ? [keys.fallbackKey, keys.ordinalKey] : [];
-      }).filter(Boolean);
-      paintedRunningToolIdsBySessionRef.current = {
-        ...paintedRunningToolIdsBySessionRef.current,
-        [sessionId]: Array.from(new Set([
-          ...(paintedRunningToolIdsBySessionRef.current[sessionId] ?? []),
-          ...paintedToolSelection.toolIds,
-          ...newlyPaintedFallbackKeys,
-        ])).slice(-64),
-      };
-    }
-    const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
-    const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
-    const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool, index) => {
-      const toolId = paintedToolSelection.toolIds[index];
-      const paintKeys = runningPaintKeys.find((key) => key.toolId === toolId);
-      const firstPaintCandidates = [
-        firstPaintedToolAtById[toolId],
-        firstPaintedToolAtById[paintKeys?.fallbackKey ?? ""],
-        firstPaintedToolAtById[paintKeys?.ordinalKey ?? ""],
-      ]
-        .filter(Number.isFinite);
-      const firstPaintedAt = firstPaintCandidates.length > 0 ? Math.min(...firstPaintCandidates) : undefined;
-      return Math.max(maximum, toolStartToFirstPaintMs(tool, firstPaintedAt, now));
-    }, 0);
-    lastConversationStreamingFrameTelemetryAtRef.current = {
-      ...lastConversationStreamingFrameTelemetryAtRef.current,
-      [sessionId]: now,
-    };
-    postBrowserTelemetry({
-      phase: "conversation_stream",
-      eventCode: "browser.conversation_stream.frame_painted",
-      message: "Conversation streaming frame was committed by the conversation view.",
-      level: "info",
-      fields: {
-        sessionId,
-        turnId: paintedActiveTurn?.turnId ?? "",
-        streamingMessageCount: metrics.streamingMessageCount,
-        renderedTextLength: metrics.renderedTextLength,
-        scrollSignalLength: metrics.scrollSignal.length,
-        activeTurnTextLength: activeTurnLayerTextLength(paintedActiveTurn),
-        paintedAtMs: Math.round(paintedAtMs),
-        lastAssistantDeltaAppliedAtMs: Math.round(lastAssistantDeltaAppliedAtMs),
-        applyToPaintMs: lastAssistantDeltaAppliedAtMs
-          ? Math.max(0, Math.round(paintedAtMs - lastAssistantDeltaAppliedAtMs))
-          : 0,
-        toolStartToBrowserPaintMs: Math.max(0, toolStartToBrowserPaintMs),
-        activeStatusSource: paintedActiveTurn?.ledgerSeq ? "assistant_delta" : "optimistic_submit",
-      },
+    recordConversationStreamingFramePaint({
+      metrics,
+      activeSessionId,
+      activeTurnLayersBySessionRef,
+      paintedRunningToolIdsBySessionRef,
+      firstPaintedRunningToolAtBySessionRef,
+      lastConversationStreamingFrameTelemetryAtRef,
+      lastAssistantDeltaAppliedAtRef,
     });
   }, [activeSessionId]);
   const {
@@ -3509,89 +3428,42 @@ export function ChatCodingRouteWorkbench() {
         </VButton>
       ) : null
       }
-      statusRail={verifiedCompanionMode ? (
-      <CompanionLifeRail
-        className={statusRailClassName}
-        collapsed={statusRailCollapsed}
-        overlayOpen={statusRailOverlayOpen}
-        companion={activeCompanion}
-        state={companionRailState}
-        errorMessage={companionRailError}
+      statusRail={(
+      <ChatCodingStatusRail
+        activeCliAgentRun={activeCliAgentRun}
+        activeCompanion={activeCompanion}
+        activeGroupRoomId={activeGroupRoomId}
+        activeSessionId={activeSessionId}
+        changePreview={changePreview}
+        changeRail={changeRail}
+        changeRailOpened={changeRailOpened}
+        changedPathSet={changedPathSet}
+        cliAgentRunTabs={cliAgentRunTabs}
+        companionRailError={companionRailError}
+        companionRailState={companionRailState}
+        describeError={describeError}
+        detail={detail}
+        gitRail={gitRail}
+        gitReviewPath={gitReviewPath}
+        groupPanelActive={groupPanelActive}
+        handleCliAgentTerminalSessionChange={handleCliAgentTerminalSessionChange}
         lang={lang}
-        onOpenLifeSteward={(stewardSessionId) => {
-          openSession(stewardSessionId, {
-            replace: false,
-            telemetrySource: "virtual_human_life_steward",
-          });
-        }}
+        openPreviewTab={openPreviewTab}
+        openSession={openSession}
+        ordinaryChangeRail={ordinaryChangeRail}
+        railModel={railModel}
+        reviewSource={reviewSource}
+        sessionReviewPath={sessionReviewPath}
+        setReviewPick={setReviewPick}
+        statusRailClassName={statusRailClassName}
+        statusRailCollapsed={statusRailCollapsed}
+        statusRailOverlayOpen={statusRailOverlayOpen}
+        t={t}
+        toggleChangeRail={toggleChangeRail}
+        updateRailModel={updateRailModel}
+        verifiedCompanionMode={verifiedCompanionMode}
       />
-      ) : ordinaryChangeRail && (changeRail.show || changeRailOpened) ? (
-      <ChatRightRail
-        className={statusRailClassName}
-        lang={lang}
-        sessionId={groupPanelActive ? "" : (activeSessionId ?? "")}
-        sessionKind={groupPanelActive ? "group" : detail?.sessionKind}
-        model={railModel}
-        onModelChange={updateRailModel}
-        onOpenSession={(id) => openSession(id, { telemetrySource: "right_rail_project" })}
-        onCollapse={toggleChangeRail}
-        devtools={detail ? {
-          phase: detail.currentPhase,
-          status: detail.status,
-          messages: detail.messages,
-        } : null}
-        terminalRun={activeCliAgentRun ?? cliAgentRunTabs[0] ?? null}
-        terminalMountedInCenter={Boolean(activeCliAgentRun)}
-        onTerminalSessionChange={handleCliAgentTerminalSessionChange}
-        onOpenFile={(path) => {
-          if (activeSessionId) {
-            openPreviewTab(activeSessionId, path);
-          }
-        }}
-        preface={groupPanelActive ? null : <FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
-        review={{
-          sessionTitle: lang === "zh" ? "这次对话" : "This chat",
-          sessionEmptyLabel: lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet",
-          sessionPaths: changeRail.paths,
-          sessionSelectedPath: reviewSource === "git" ? null : sessionReviewPath,
-          sessionChangedPaths: changedPathSet,
-          gitTitle: gitRail.branch
-            ? (lang === "zh" ? `仓库 · ${gitRail.branch}` : `Repository · ${gitRail.branch}`)
-            : (lang === "zh" ? "仓库" : "Repository"),
-          gitEmptyLabel: lang === "zh" ? "工作区是干净的" : "The worktree is clean",
-          gitPending: gitRail.pending,
-          gitPendingLabel: lang === "zh" ? "正在读取仓库" : "Reading the repository",
-          gitUnavailableLabel: gitRail.unavailable
-            ? (gitRail.errorText || describeError(gitRail.error, t("loadFailed")))
-            : "",
-          gitPaths: gitRail.paths,
-          gitSelectedPath: gitReviewPath,
-          gitDetailByPath: gitRail.detailByPath,
-          diff: changePreview.diff,
-          diffLoading: changePreview.diffLoading,
-          hasDiff: changePreview.hasDiff,
-          file: changePreview.file,
-          fileLoading: changePreview.fileLoading,
-          fileError: changePreview.fileError ? describeError(changePreview.fileError, t("loadFailed")) : "",
-          sourceLabel: detail?.title ?? t("currentSession"),
-          onSelectSessionFile: (path) => {
-            if (!activeSessionId) {
-              return;
-            }
-            setReviewPick({ sessionId: activeSessionId, source: "session", path });
-            openPreviewTab(activeSessionId, path);
-          },
-          onSelectGitFile: (path) => {
-            const reviewKey = groupPanelActive ? `group:${activeGroupRoomId}` : activeSessionId;
-            if (!reviewKey) {
-              return;
-            }
-            gitRail.selectPath(path);
-            setReviewPick({ sessionId: reviewKey, source: "git", path });
-          },
-        }}
-      />
-      ) : null}
+      )}
       leftResizeHandle={
       financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"

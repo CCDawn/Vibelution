@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import lobbySource from "../CompanionsRoute.tsx?raw";
 import chatSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
+import statusRailSource from "../chat/ChatCodingStatusRail.tsx?raw";
 import centerTabsSource from "../chat/ChatCenterTabStrip.tsx?raw";
 import streamSource from "../chat/useSessionDetailStream.ts?raw";
 import sessionEventStreamSource from "../chat/sessionEventStream.ts?raw";
@@ -45,7 +46,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("companionMode,");
     expect(chatSource).toContain("<ChatCenterSessionSurface");
     expect(chatSource).toContain("<CompanionPersonRail");
-    expect(chatSource).toContain("<CompanionLifeRail");
+    expect(chatSource).toContain("<ChatCodingStatusRail");
+    expect(statusRailSource).toContain("<CompanionLifeRail");
     expect(chatSource).toContain("<CompanionConversationHeader");
     expect(centerTabsSource).toContain("companionHeader ?? (");
     expect(conversationHeaderSource).toContain("<CompanionPortrait");
@@ -68,8 +70,8 @@ describe("virtual-human native Chat reuse", () => {
   });
 
   it("opens life management as an exact hidden native Session", () => {
-    const lifeStart = chatSource.indexOf("onOpenLifeSteward={(stewardSessionId) => {");
-    const lifeSteward = chatSource.slice(lifeStart, chatSource.indexOf("/>", lifeStart));
+    const lifeStart = statusRailSource.indexOf("onOpenLifeSteward={(stewardSessionId) => {");
+    const lifeSteward = statusRailSource.slice(lifeStart, statusRailSource.indexOf("/>", lifeStart));
     expect(lifeStart).toBeGreaterThanOrEqual(0);
     expect(lifeSteward).toContain("openSession(stewardSessionId,");
     expect(lifeSteward).toContain('telemetrySource: "virtual_human_life_steward"');
@@ -84,7 +86,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl");
     expect(chatSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
     expect(chatSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
-    expect(chatSource).toContain("statusRail={verifiedCompanionMode ? (");
+    expect(statusRailSource).toContain("if (verifiedCompanionMode)");
+    expect(chatSource).toContain("statusRail={(");
     expect(chatSource).toContain("conversationIndex={financeSurface ? null : verifiedCompanionMode ? (");
   });
 
