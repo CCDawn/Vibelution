@@ -734,7 +734,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const fallbackSessionId = member?.conversationSession?.conversationSessionId || "";
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
     const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
-    const fallbackStatus = supervisedWorkflowFallbackStatus(supervisedMembersRun?.status, definition.id === supervisedRuntimeWorkflowStepId);
+    const fallbackStatus = supervisedWorkflowFallbackStatus(supervisedWorkflowRun?.status, definition.id === supervisedRuntimeWorkflowStepId);
     const backendStatus = backendStep?.status || fallbackStatus;
     return {
       id: definition.id,
@@ -744,7 +744,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       status: definition.id === "approval"
         ? supervisedApprovalWorkflowStatus(reviewCandidateWorktree, backendStatus)
         : backendStatus,
-      current: !["failed", "cancelled", "canceled", "stopped"].includes(String(supervisedMembersRun?.status || "").toLowerCase()) && (backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId),
+      current: !["failed", "cancelled", "canceled", "stopped"].includes(String(supervisedWorkflowRun?.status || "").toLowerCase()) && !["failed", "cancelled", "canceled", "stopped"].includes(String(backendStatus).toLowerCase()) && (backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId),
       summary: backendStep?.summary || (
         definition.id === "approval"
           ? (lang === "zh" ? "Judge 复评结论与用户审批合入动作集中在这里。" : "The final Judge decision and user-approved merge are gathered here.")
@@ -2472,7 +2472,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       fallbackMessages={supervisedSelectedAgentFallbackMessages}
                       taskSummary={supervisedSelectedAgentTaskSummary}
                       isLive={supervisedRunIsLive}
-                      runStatus={supervisedMembersRun?.status}
+                      runStatus={supervisedWorkflowRun?.status}
                       lang={lang}
                       roleLabel={runRoleLabel}
                       roleDescription={supervisedAgentRoleDescription}
