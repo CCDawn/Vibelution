@@ -1,7 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowRight, Beaker, Check, ChevronRight, FileText, GitBranch, Home, MessageSquare, Play, RefreshCw, Search, Settings2, Users } from "lucide-react";
-import { VButton, VDialog, VNativeSelect, VPanel, VPanelHeader, VSplitWorkspace, VStateSurface, VStatusChip, VTextarea, VuiProvider, VWorkbenchPage } from "../../src/components/vui";
+import { VButton, VDialog, VNativeSelect, VPanel, VPanelHeader, VSessionWorkbenchPage, VStateSurface, VStatusChip, VTextarea, VuiProvider, VWorkbenchPage } from "../../src/components/vui";
 import { WORKBENCH_LAYOUT_IDS } from "../../src/components/layout/workbenchLayoutIds";
+import { usePersistedPaneResize } from "../../src/components/layout/usePersistedPaneResize";
+import { PaneResizeHandle } from "../../src/components/layout/PaneResizeHandle";
+import chatStyles from "../../src/routes/ChatCodingRoute.styles";
+import { TeamConversationPreview } from "./TeamConversationPreview";
 import { OrganizationCanvasPreview, WorkflowCanvasPreview, workflowGraph } from "./TeamCanvasPreview";
 
 type View = "home" | "sources" | "experiment" | "organization" | "workflow";
@@ -41,26 +45,30 @@ function Member({ member, subtitle }: { member: typeof defaultMembers[number]; s
   </div>;
 }
 
-function TeamPanel({ title, children, id, actions, titleControl }: { title: string; children: ReactNode; id: string; actions?: ReactNode; titleControl?: ReactNode }) {
+function TeamPanel({ title, children, id, actions, titleControl, fill = false }: { title: string; children: ReactNode; id: string; actions?: ReactNode; titleControl?: ReactNode; fill?: boolean }) {
   return <VPanel ariaLabel={title} className="flex h-full min-h-0 flex-col overflow-hidden" data-testid={id}>
-    <VPanelHeader title={titleControl ?? title} headingLevel={titleControl ? null : 2} actions={actions} data-vui="team-preview-panel-header" className="h-11 shrink-0 items-center! border-b border-[var(--vui-border-subtle)] px-2 py-0 [&_h2]:text-[14px] [&_h2]:font-medium [&_h2]:leading-6" />
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto p-2" data-vui="team-preview-panel-body">{children}</div>
+    <VPanelHeader title={titleControl ?? title} headingLevel={titleControl ? null : 2} actions={actions} data-vui="team-preview-panel-header" className="h-11 shrink-0 items-center! border-b border-[var(--vui-border-subtle)] px-2 py-0 [&>div:first-child]:shrink-0 [&>div:last-child]:overflow-x-auto [&>div:last-child]:justify-start [&_h2]:text-[14px] [&_h2]:font-medium [&_h2]:leading-6" />
+    <div className={"flex min-h-0 min-w-0 flex-1 flex-col " + (fill ? "overflow-hidden p-0" : "overflow-auto p-2")} data-vui="team-preview-panel-body">{children}</div>
   </VPanel>;
 }
 
 /** One rounded frame and the same panel/header/body recipe for every view. */
-function TeamFrame({ title, toolbar, navigation, body, inspector, inspectorTitle, teamName, teamSwitcher }: {
-  title: string; toolbar: ReactNode; navigation: ReactNode; body: ReactNode; inspector: ReactNode; inspectorTitle: string; teamName: string; teamSwitcher: ReactNode;
+const framePanes = [{ id: "rail", defaultWidth: 220, minWidth: 200, maxWidth: 280 }, { id: "inspector", defaultWidth: 312, minWidth: 280, maxWidth: 380 }];
+function TeamFrame({ title, toolbar, navigation, body, inspector, inspectorTitle, teamName, teamSwitcher, fillBody }: {
+  title: string; toolbar: ReactNode; navigation: ReactNode; body: ReactNode; inspector: ReactNode; inspectorTitle: string; teamName: string; teamSwitcher: ReactNode; fillBody: boolean;
 }) {
-  return <VWorkbenchPage fill fillLayout="stack" ariaLabel="统一团队工作台" data-testid="unified-team-frame">
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-3 bg-[var(--vui-surface-base)] p-3">
-    <VSplitWorkspace className="min-h-0 flex-1 [&>[data-vui=split-main]]:mx-2" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.teams,
-      sidebar: { defaultWidth: 220, minWidth: 200, maxWidth: 280 }, aside: { defaultWidth: 312, minWidth: 280, maxWidth: 380 } }}
-      sidebar={<TeamPanel title={teamName} titleControl={teamSwitcher} id="unified-navigation"><nav aria-label="团队工作台导航" className="flex min-h-0 flex-1 flex-col">{navigation}</nav></TeamPanel>}
-      main={<TeamPanel title={title} actions={toolbar} id="unified-content">{body}</TeamPanel>}
-      aside={<TeamPanel title={inspectorTitle} id="unified-inspector">{inspector}</TeamPanel>} />
-    </div>
-  </VWorkbenchPage>;
+  const resize = usePersistedPaneResize({ layoutId: WORKBENCH_LAYOUT_IDS.teams, panes: framePanes });
+  const attach = useCallback((element: HTMLDivElement | null) => { resize.layoutRef.current = element; resize.registerSplitContainer(element); }, [resize.layoutRef, resize.registerSplitContainer]);
+  return <div className="flex h-full min-h-0 flex-col bg-[var(--vui-surface-base)] p-3">
+    <VSessionWorkbenchPage ref={attach} ariaLabel="统一团队工作台" domainRecipe="teams-session-workbench" layoutId={WORKBENCH_LAYOUT_IDS.teams}
+      data-testid="unified-team-frame" className={chatStyles.layout + " !h-full !max-h-full [--shell-surface:var(--vui-surface-chat)]"}
+      hostStyle={{ ...resize.paneVariablesStyle, "--chat-left-pane-width": "var(--pane-w-rail)", "--chat-right-pane-width": "var(--pane-w-inspector)", "--chat-pane-gutter": "6px" } as CSSProperties}
+      indexRail={<aside className="flex min-h-0 min-w-0 flex-col [grid-column:1] [grid-row:1]"><TeamPanel title={teamName} titleControl={teamSwitcher} id="unified-navigation"><nav aria-label="团队工作台导航" className="flex min-h-0 flex-1 flex-col">{navigation}</nav></TeamPanel></aside>}
+      leftResizeHandle={<PaneResizeHandle label="调整左侧栏宽度" valueNow={resize.widths.rail} valueMin={200} valueMax={280} className="[grid-column:2] [grid-row:1]" onPointerDown={(event) => resize.startResize("rail", event)} onKeyDown={(event) => resize.onResizeKeyDown("rail", event)} />}
+      session={<main className="mx-1 flex min-h-0 min-w-0 flex-col [grid-column:3] [grid-row:1]"><TeamPanel title={title} actions={toolbar} fill={fillBody} id="unified-content">{body}</TeamPanel></main>}
+      rightResizeHandle={<PaneResizeHandle label="调整右侧栏宽度" valueNow={resize.widths.inspector} valueMin={280} valueMax={380} className="[grid-column:4] [grid-row:1]" onPointerDown={(event) => resize.startResize("inspector", event, { direction: -1 })} onKeyDown={(event) => resize.onResizeKeyDown("inspector", event, { direction: -1 })} />}
+      statusRail={<aside className="flex min-h-0 min-w-0 flex-col [grid-column:5] [grid-row:1]"><TeamPanel title={inspectorTitle} id="unified-inspector">{inspector}</TeamPanel></aside>} />
+  </div>;
 }
 
 export function TeamLayoutPreview() {
@@ -78,7 +86,8 @@ export function TeamLayoutPreview() {
   const [selectedSource, setSelectedSource] = useState(0);
   const [experimentDone, setExperimentDone] = useState(false);
   const [notice, setNotice] = useState("");
-  const [homeMode, setHomeMode] = useState<"canvas" | "conversation">("canvas");
+  const [homeMode, setHomeMode] = useState<"canvas" | "conversation">(params.get("mode") === "conversation" ? "conversation" : "canvas");
+  const [directMember, setDirectMember] = useState<typeof defaultMembers[number] | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>("execute");
   const selectedNode = workflowGraph.nodes.find((node) => node.nodeId === selectedNodeId);
   const workflowVisible = view === "workflow" || (view === "home" && homeMode === "canvas" && teamId === "research");
@@ -86,8 +95,8 @@ export function TeamLayoutPreview() {
   const current = pages.find((page) => page.id === view)!;
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    history.replaceState(null, "", `${location.pathname}?view=${view}&state=${scene}`);
-  }, [view, scene, theme]);
+    history.replaceState(null, "", `${location.pathname}?view=${view}&state=${scene}&mode=${homeMode}`);
+  }, [view, scene, theme, homeMode]);
   function switchPage(next: View) { setView(next); setNotice(""); }
   function switchTeam(nextId: string) {
     const next = teams.find((item) => item.id === nextId);
@@ -101,7 +110,7 @@ export function TeamLayoutPreview() {
     setSelectedMember(0);
     setSelectedSource(0);
     setExperimentDone(false);
-    setHomeMode("canvas");
+    setDirectMember(null);
     setSelectedNodeId("execute");
     setNotice(`已切换到${next.name}（示例数据）。`);
   }
@@ -117,16 +126,9 @@ export function TeamLayoutPreview() {
     <div className="mt-auto pt-4"><VButton variant="ghost" density="compact" icon={<Settings2 size={15} />} className="w-full justify-start text-[var(--fg-secondary)]" onClick={() => setDialog("members")}>团队设置</VButton></div>
   </>;
 
-  const home = <div className="w-full">
-    <div className="flex items-center justify-between"><p className="text-[12px] text-[var(--fg-tertiary)]">当前任务</p><VStatusChip tone={running ? "accent" : "success"}>{running ? "进行中" : "待开始下一轮"}</VStatusChip></div>
-    <h2 className="mt-2 text-[20px] font-medium leading-8">{topic}</h2>
-    <p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">让主页、研究阶段和组织结构共用稳定的页面骨架。切换内容时，标题栏、侧栏和操作区保持位置。</p>
-    <div className="mt-5 flex items-center gap-2 border-b border-[var(--vui-border-subtle)] pb-5 text-[12px] text-[var(--fg-tertiary)]"><Check size={14} className="text-[var(--state-success)]" /><span>上一轮已完成：布局问题清单与修复范围</span><span className="ml-auto">今天 14:32</span></div>
-    <div className="mt-6"><h3 className={sectionTitle}>成员发言</h3></div>
-    <div className="mt-2 divide-y divide-[var(--vui-border-subtle)]">
-      {["先保留现有业务流程，只把标题栏、侧栏和正文容器统一。成员对话仍然是主页的主要内容。", "三栏沿用同一套圆角面板、标题栏和内容留白。切到资料收集与实验页时，面板边界和标题基线保持对齐。", "我会检查切换页面后的栏位位置，以及加载、空白和错误状态是否留在同一个内容区域。"].map((text, index) => <article key={text} className="py-5"><div className="flex items-center justify-between"><Member member={members[index]} /><time className={quiet}>14:{30 + index}</time></div><p className="ml-[38px] mt-3 text-[14px] leading-7 text-[var(--fg-secondary)]">{text}</p></article>)}
-      {running && <article className="py-5"><Member member={members[0]} /><p className="ml-[38px] mt-3 text-[14px] leading-7 text-[var(--fg-secondary)]">新一轮已开始，正在核对页面结构与验收结果。</p><p className={`${quiet} ml-[38px] mt-2`}>示例运行状态</p></article>}
-    </div>
+  const home = <div data-preview="native-conversation-flow" className="flex h-full min-h-0 min-w-0 flex-col [&_.groupConversationFrame]:grid-rows-[minmax(0,1fr)_auto] [&_.groupConversationHeader]:hidden">
+    <TeamConversationPreview key={teamId} teamId={teamId} teamName={team.name} members={members} topic={topic} running={running} directMember={directMember}
+      onStart={(nextTopic) => { setTopic(nextTopic); setRunning(true); setNotice("本轮运行仅为本地演示，未调用模型。"); }} onStop={() => { setRunning(false); setNotice("示例轮次已停止，发言保留。"); }} onNotice={setNotice} />
   </div>;
 
   const sources = [
@@ -150,19 +152,19 @@ export function TeamLayoutPreview() {
   const inspector = <div className="space-y-6">
     <section><p className={quiet}>{scene !== "normal" ? "内容恢复后继续操作，当前布局保持不变。" : workflowVisible ? "选择节点查看任务、负责人和运行状态" : organizationVisible ? "选择成员查看角色与职责" : view === "home" ? "围绕当前任务继续协作" : view === "sources" ? sources[selectedSource].type : view === "experiment" ? "检查步骤与结果记录" : "团队成员的角色与职责"}</p></section>
     {workflowVisible ? <section><h3 className={sectionTitle}>{selectedNode?.label || "选择流程节点"}</h3><p className="mt-3 text-[13px] leading-6 text-[var(--fg-secondary)]">{selectedNode?.description || "点击画布节点查看任务与状态。"}</p>{selectedNode && <><div className="mt-4"><VStatusChip tone={selectedNode.status === "running" ? "accent" : selectedNode.status === "succeeded" ? "success" : "neutral"}>{selectedNode.status === "running" ? "示例运行中" : selectedNode.status === "succeeded" ? "示例已完成" : "示例待执行"}</VStatusChip></div><p className={`${quiet} mt-4`}>负责人：{selectedNode.actorKind === "human" ? "人工" : selectedNode.actorKind === "system" ? "系统" : members[1].name}</p><VButton variant="secondary" className="mt-4 w-full" onClick={() => setNotice(`${selectedNode.label}：已打开示例任务记录。`)}>查看任务记录</VButton></>}</section>
-      : organizationVisible ? <section><Member member={members[selectedMember]} /><h3 className={`${sectionTitle} mt-5`}>职责</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{members[selectedMember].note}</p><VButton variant="secondary" className="mt-4 w-full" onClick={() => setNotice(`与${members[selectedMember].name}的对话入口已模拟。`)}>打开成员对话</VButton></section>
+      : organizationVisible ? <section><Member member={members[selectedMember]} /><h3 className={`${sectionTitle} mt-5`}>职责</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{members[selectedMember].note}</p><VButton variant="secondary" className="mt-4 w-full" onClick={() => { setDirectMember(members[selectedMember]); setHomeMode("conversation"); setView("home"); }}>打开成员对话</VButton></section>
       : view === "home" ? <><section><h3 className={sectionTitle}>下一轮任务</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{topic}</p><VButton variant="primary" className="mt-4 w-full" icon={<Play size={14} />} isDisabled={scene !== "normal" || running} onClick={() => setDialog("start")}>{running ? "本轮正在运行" : "开始下一轮"}</VButton>{running && <VButton variant="secondary" className="mt-2 w-full" onClick={() => setRunning(false)}>停止示例运行</VButton>}</section><section className="border-t border-[var(--vui-border-subtle)] pt-5"><h3 className={sectionTitle}>上轮结果</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">已确认 5 类布局差异，优先统一页面外框和标题栏。</p><p className={`${quiet} mt-2`}>结果已记录 · 今天 14:32</p></section></>
       : view === "sources" ? <><section><h3 className={sectionTitle}>{sources[selectedSource].title}</h3><p className="mt-3 text-[13px] leading-6 text-[var(--fg-secondary)]">{sources[selectedSource].description}</p><div className="mt-4"><VStatusChip tone="success">来源可追溯</VStatusChip></div></section><section className="border-t border-[var(--vui-border-subtle)] pt-5"><h3 className={sectionTitle}>核验要点</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">对应到实际页面和组件，避免只凭样式名称判断统一程度。</p><VButton variant="secondary" className="mt-4 w-full" icon={<ArrowRight size={14} />} onClick={() => setNotice("资料查看操作已模拟。")}>查看资料</VButton></section></>
       : view === "experiment" ? <><section><h3 className={sectionTitle}>验证状态</h3><div className="mt-3"><VStatusChip tone={experimentDone ? "success" : "warning"}>{experimentDone ? "示例已完成" : "待执行"}</VStatusChip></div><VButton variant="primary" className="mt-4 w-full" icon={<Play size={14} />} isDisabled={scene !== "normal"} onClick={() => setExperimentDone(true)}>运行示例检查</VButton></section><section className="border-t border-[var(--vui-border-subtle)] pt-5"><h3 className={sectionTitle}>记录范围</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">本预览只比较桌面布局，保留研究业务的阶段内容。</p></section></>
-      : <><section><Member member={members[selectedMember]} /><h3 className={`${sectionTitle} mt-5`}>职责</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{members[selectedMember].note}</p><VButton variant="secondary" className="mt-4 w-full" icon={<MessageSquare size={14} />} onClick={() => setNotice(`与${members[selectedMember].name}的对话入口已模拟。`)}>打开成员对话</VButton></section><section className="border-t border-[var(--vui-border-subtle)] pt-5"><h3 className={sectionTitle}>会话配置</h3><p className={`${quiet} mt-2`}>沿用成员独立配置</p></section></>}
+      : <><section><Member member={members[selectedMember]} /><h3 className={`${sectionTitle} mt-5`}>职责</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{members[selectedMember].note}</p><VButton variant="secondary" className="mt-4 w-full" icon={<MessageSquare size={14} />} onClick={() => { setDirectMember(members[selectedMember]); setHomeMode("conversation"); setView("home"); }}>打开成员对话</VButton></section><section className="border-t border-[var(--vui-border-subtle)] pt-5"><h3 className={sectionTitle}>会话配置</h3><p className={`${quiet} mt-2`}>沿用成员独立配置</p></section></>}
     <section className="border-t border-[var(--vui-border-subtle)] pt-5"><h3 className={sectionTitle}>团队信息</h3><div className="mt-3 flex items-center justify-between text-[12px] text-[var(--fg-secondary)]"><span>成员</span><span>3 位</span></div><div className="mt-3 flex items-center justify-between text-[12px] text-[var(--fg-secondary)]"><span>关联群聊</span><span>{team.name}群聊</span></div><VButton variant="ghost" density="compact" className="mt-4 w-full justify-start" icon={<Users size={14} />} onClick={() => setDialog("members")}>查看成员与设置</VButton></section>
   </div>;
 
   return <VuiProvider><div className="flex h-full min-h-0 flex-col bg-[var(--vui-surface-panel)] text-[var(--fg-primary)]">
     <div className="flex h-[38px] shrink-0 items-center gap-3 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-base)] px-4 text-[12px]" aria-label="预览控制栏"><strong className="font-medium">团队统一布局预览</strong><span className="text-[var(--fg-tertiary)]">桌面 · 示例数据</span><div className="ml-auto flex items-center gap-2"><label htmlFor="scene" className="shrink-0 whitespace-nowrap text-[var(--fg-tertiary)]">页面状态</label><VNativeSelect id="scene" aria-label="页面状态" value={scene} onChange={(event) => setScene(event.target.value as Scene)} className="w-[110px]" ><option value="normal">正常内容</option><option value="loading">加载中</option><option value="empty">暂无内容</option><option value="error">读取失败</option></VNativeSelect><VNativeSelect aria-label="主题" value={theme} onChange={(event) => setTheme(event.target.value)} className="w-[90px]" ><option value="light">浅色</option><option value="dark">深色</option></VNativeSelect></div></div>
     <div className="flex h-[48px] shrink-0 items-center gap-5 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] px-4"><strong className="text-[15px] font-medium tracking-tight">Vibelution</strong><span className="h-4 border-l border-[var(--vui-border-subtle)]" /><div className="flex items-center gap-1">{["会话", "Agent", "知识", "团队", "进化", "工具"].map((label) => <VButton key={label} variant="ghost" density="compact" aria-current={label === "团队" ? "page" : undefined} className={label === "团队" ? "aria-[current=page]:bg-[var(--vui-selection-bg)] font-medium" : "text-[var(--fg-tertiary)]"} onClick={() => label !== "团队" && setNotice("此预览仅展示团队页面。")}>{label}</VButton>)}</div><span className={`${quiet} ml-auto`}>本地项目 <ChevronRight size={12} className="mx-1 inline" /> Vibelution</span></div>
-    <div className="min-h-0 flex-1"><TeamFrame teamName={team.name} teamSwitcher={teamSwitcher} title={current.label} navigation={navigation} inspectorTitle={workflowVisible ? "节点详情" : organizationVisible ? "成员详情" : view === "home" ? "本轮操作" : view === "sources" ? "资料详情" : view === "experiment" ? "实验操作" : "成员详情"} body={scene === "normal" ? ({ home: homeBody, sources: sourceView, experiment, organization, workflow }[view]) : stateView} inspector={inspector}
-      toolbar={<>{view === "home" && <><VButton variant={homeMode === "canvas" ? "primary" : "ghost"} density="compact" aria-pressed={homeMode === "canvas"} onClick={() => setHomeMode("canvas")}>画布</VButton><VButton variant={homeMode === "conversation" ? "primary" : "ghost"} density="compact" aria-pressed={homeMode === "conversation"} onClick={() => setHomeMode("conversation")}>成员发言</VButton></>}<VButton variant="ghost" density="compact" icon={<RefreshCw size={14} />} onClick={() => { setScene("normal"); setNotice("示例内容已刷新。 "); }}>刷新</VButton><VButton variant="secondary" density="compact" icon={<MessageSquare size={14} />} onClick={() => setNotice("群聊入口已模拟；此预览不会发送消息。")}>团队讨论</VButton></>} /></div>
+    <div className="min-h-0 flex-1"><TeamFrame fillBody={view === "home" || workflowVisible || organizationVisible} teamName={team.name} teamSwitcher={teamSwitcher} title={view === "home" && homeMode === "conversation" ? (directMember ? directMember.name + " · 对话" : "团队讨论") : current.label} navigation={navigation} inspectorTitle={workflowVisible ? "节点详情" : organizationVisible ? "成员详情" : view === "home" ? "本轮操作" : view === "sources" ? "资料详情" : view === "experiment" ? "实验操作" : "成员详情"} body={scene === "normal" ? ({ home: homeBody, sources: sourceView, experiment, organization, workflow }[view]) : stateView} inspector={inspector}
+      toolbar={<>{view === "home" && <><VButton variant={homeMode === "canvas" ? "primary" : "ghost"} density="compact" aria-pressed={homeMode === "canvas"} onClick={() => setHomeMode("canvas")}>画布</VButton><VButton variant={homeMode === "conversation" ? "primary" : "ghost"} density="compact" aria-pressed={homeMode === "conversation"} onClick={() => { setDirectMember(null); setHomeMode("conversation"); }}>成员发言</VButton></>}<VButton variant="ghost" density="compact" icon={<RefreshCw size={14} />} onClick={() => { setScene("normal"); setNotice("示例内容已刷新。 "); }}>刷新</VButton><VButton variant="secondary" density="compact" icon={<MessageSquare size={14} />} onClick={() => { setDirectMember(null); setHomeMode("conversation"); setView("home"); }}>团队讨论</VButton></>} /></div>
     <footer className="flex h-7 shrink-0 items-center border-t border-[var(--vui-border-subtle)] px-4 text-[11px] text-[var(--fg-tertiary)]" role="status">{notice || "预览中的任务、发言与按钮反馈均为示例；不连接真实团队数据。"}<span className="ml-auto">布局一致，业务内容各自保留</span></footer>
     <VDialog open={dialog === "members"} onOpenChange={(open) => !open && setDialog(null)} title={`${team.name}成员`} description="示例成员配置，供布局预览" size="md"><div className="divide-y divide-[var(--vui-border-subtle)]">{members.map((member) => <div key={member.name} className="py-4"><Member member={member} /><p className="ml-[38px] mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{member.note}</p></div>)}</div><div className="flex justify-end pt-4"><VButton variant="secondary" onClick={() => setDialog(null)}>关闭</VButton></div></VDialog>
     <VDialog open={dialog === "start"} onOpenChange={(open) => !open && setDialog(null)} title="开始下一轮" description="此操作只改变预览中的示例状态" size="md"><VTextarea aria-label="本轮任务" value={topic} rows={4} onChange={(event) => setTopic(event.target.value)} /><div className="flex justify-end gap-2 pt-4"><VButton variant="secondary" onClick={() => setDialog(null)}>取消</VButton><VButton variant="primary" isDisabled={!topic.trim()} onClick={() => { setRunning(true); setDialog(null); }}>开始示例运行</VButton></div></VDialog>
