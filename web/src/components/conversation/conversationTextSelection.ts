@@ -6,6 +6,15 @@
  * coordinates, the same anchor SelectionActionMenu uses.
  */
 
+import { resolveSelectionToolbarPosition } from "../layout/selectionToolbarPosition";
+
+export {
+  SELECTION_TOOLBAR_WIDTH_PX as SELECTION_QUOTE_MENU_WIDTH_PX,
+  SELECTION_TOOLBAR_HEIGHT_PX as SELECTION_QUOTE_MENU_HEIGHT_PX,
+  SELECTION_TOOLBAR_GAP_PX as SELECTION_QUOTE_MENU_GAP_PX,
+  SELECTION_TOOLBAR_VIEWPORT_MARGIN_PX as SELECTION_QUOTE_MENU_VIEWPORT_MARGIN_PX,
+} from "../layout/selectionToolbarPosition";
+
 export type ConversationSelectionRect = {
   top: number;
   left: number;
@@ -51,11 +60,6 @@ export type ConversationSelectionMenuPosition = {
   left: number;
   above: boolean;
 };
-
-export const SELECTION_QUOTE_MENU_WIDTH_PX = 208;
-export const SELECTION_QUOTE_MENU_HEIGHT_PX = 40;
-export const SELECTION_QUOTE_MENU_GAP_PX = 8;
-export const SELECTION_QUOTE_MENU_VIEWPORT_MARGIN_PX = 12;
 
 /** DOMRect stores coordinates on the prototype. Object spread drops them. */
 export function readSelectionRect(rect: ConversationSelectionRect): ConversationSelectionRect {
@@ -160,31 +164,9 @@ export function extractConversationSelectionSnapshot(
 export function resolveSelectionQuoteMenuPosition(
   selectionRect: ConversationSelectionRect,
   viewport: { width: number; height: number },
-  menuSize: { width: number; height: number } = {
-    width: SELECTION_QUOTE_MENU_WIDTH_PX,
-    height: SELECTION_QUOTE_MENU_HEIGHT_PX,
-  },
+  menuSize?: { width: number; height: number },
 ): ConversationSelectionMenuPosition {
-  const menuWidth = Math.max(0, menuSize.width);
-  const menuHeight = Math.max(0, menuSize.height);
-  const margin = SELECTION_QUOTE_MENU_VIEWPORT_MARGIN_PX;
-  const viewportWidth = Math.max(viewport.width, menuWidth + margin * 2);
-  const viewportHeight = Math.max(viewport.height, menuHeight + margin * 2);
-  const center = selectionRect.left + selectionRect.width / 2;
-  const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
-  const left = Math.min(Math.max(margin, center - menuWidth / 2), maxLeft);
-  const above = selectionRect.top >= menuHeight + margin + SELECTION_QUOTE_MENU_GAP_PX;
-  const rawTop = above
-    ? selectionRect.top - SELECTION_QUOTE_MENU_GAP_PX
-    : selectionRect.bottom + SELECTION_QUOTE_MENU_GAP_PX;
-  const visualTop = above ? rawTop - menuHeight : rawTop;
-  const maxVisualTop = Math.max(margin, viewportHeight - menuHeight - margin);
-  const clampedVisualTop = Math.min(Math.max(margin, visualTop), maxVisualTop);
-  return {
-    above,
-    left,
-    top: above ? clampedVisualTop + menuHeight : clampedVisualTop,
-  };
+  return resolveSelectionToolbarPosition(selectionRect, viewport, menuSize);
 }
 
 /**

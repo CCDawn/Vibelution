@@ -76,6 +76,7 @@ export function VListDetailPage({
 
   return (
     <VWorkbenchPage
+      chrome="workspace"
       ariaLabel={ariaLabel}
       className={className}
       data-vui-recipe="list-detail-page"
@@ -103,6 +104,7 @@ export function VListDetailPage({
       ) : null}
       <div data-vui="list-detail-body" className={fill ? VUI_PAGE_BODY_FILL_CLASS : "min-h-0 min-w-0"}>
         <VSplitWorkspace
+          chrome="workbench"
           className={cn(fill ? "h-full min-h-0" : undefined, workspaceClassName)}
           columnsClassName={columnsClassName}
           sidebar={list}

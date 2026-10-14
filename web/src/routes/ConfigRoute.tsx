@@ -1537,7 +1537,7 @@ export function ConfigRoute() {
 
   if (!draftConfig && workspaceQuery.isLoading) {
     return (
-      <div className={styles.page} data-vui-recipe="config-settings-workbench">
+      <div className={styles.page} data-vui-page="workspace" data-vui-page-scroll="true" data-vui-recipe="config-settings-workbench">
         <ConfigWorkspacePlaceholderPanel title={copy.loading} />
       </div>
     );
@@ -1545,7 +1545,7 @@ export function ConfigRoute() {
 
   if (!draftConfig || !workspace) {
     return (
-      <div className={styles.page} data-vui-recipe="config-settings-workbench">
+      <div className={styles.page} data-vui-page="workspace" data-vui-page-scroll="true" data-vui-recipe="config-settings-workbench">
         <ConfigWorkspacePlaceholderPanel
           title={copy.loadFailed}
           subtitle={workspaceQuery.error instanceof Error ? workspaceQuery.error.message : ""}
@@ -1561,6 +1561,8 @@ export function ConfigRoute() {
       data-vui-recipe="config-settings-workbench"
       data-vui-layout-id={CONFIG_SETTINGS_LAYOUT_ID}
       data-vui-domain-recipe="config-settings"
+      data-vui-page="workspace"
+      data-vui-page-scroll="true"
     >
       <VDialog
         open={leaveGuardOpen}
@@ -1633,6 +1635,7 @@ export function ConfigRoute() {
         }}
       />
       <VSplitWorkspace
+        chrome="workbench"
         className={styles.settingsSplit}
         data-vui-region="config-settings-split"
         resize={{

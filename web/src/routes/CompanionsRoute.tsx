@@ -5,7 +5,7 @@ import { ArrowRight, Clock3, Sparkles } from "lucide-react";
 
 import { listVirtualHumanCompanions } from "../api/agentPlugins";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VPage, VRouteLinkButton, VStateSurface, VStatusChip } from "../components/vui";
+import { VButton, VPage, VRouteLinkButton, VStateSurface, VStatusChip, VUI_WORKBENCH_PANE_CLASS } from "../components/vui";
 import { CompanionCardSkeleton } from "../app/PageFrameLoadingShell";
 import { usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -183,10 +183,9 @@ export function CompanionsRoute() {
             return (
               <article
                 key={companion.agentId}
-                className={styles.card}
+                className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.card}`}
                 data-companion-id={companion.agentId}
               >
-                <span className={styles.cardGridLines} aria-hidden="true" />
                 <div className={styles.cardCopy}>
                   <div className={styles.presenceRow}>
                     <span className={styles.presenceStatus}>

@@ -1,7 +1,7 @@
 import { Search } from "lucide-react";
 import { useState } from "react";
 
-import { VButton, VNativeInput, VSection, VSkeleton, VStateSurface, VSurface } from "../components/vui";
+import { VButton, VNativeInput, VSection, VSkeleton, VStateSurface, VSurface, VUI_WORKBENCH_PANE_CLASS } from "../components/vui";
 import { toReadableMemoryBlocks, type ReadableMemoryBlock } from "./memory/memoryReadableContent";
 import styles from "./MemoryContentBrowsePanel.styles";
 
@@ -152,7 +152,7 @@ export function MemoryContentBrowsePanel({
   const searchActive = Boolean((searchText ?? "").trim());
 
   return (
-    <div className={styles.root} data-vui-region="memory-content-browse">
+    <div className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.root}`} data-vui-region="memory-content-browse">
       {onSearchTextChange && !selectedCard ? (
         <label className={styles.searchBox}>
           <Search size={15} />

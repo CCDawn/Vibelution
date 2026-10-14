@@ -77,6 +77,11 @@
   --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
   --vui-radius-panel-soft: 8px;
+  /* Window panes and inner cards have distinct semantic roles. */
+  --vui-workbench-radius: 12px;
+  --vui-workbench-inset: 4px;
+  --vui-workbench-border: color-mix(in srgb, var(--fg-primary) 5%, transparent);
+  --vui-workbench-shadow: 0 1px 3px color-mix(in srgb, var(--fg-primary) 3%, transparent);
   --vui-radius-overlay: 8px;
   /* Small pill/chip radius (inline code pills); ≈ the legacy 0.3rem wash. */
   --vui-radius-chip: 5px;

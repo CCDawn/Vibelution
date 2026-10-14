@@ -10,7 +10,6 @@ const logSurfaceKeys = [
   "packageFilesPanel",
   "panelSearch",
   "previewActions",
-  "previewPane",
   "previewStateFlow",
   "sceneCardMeta",
   "sceneCardStatus",
@@ -42,6 +41,18 @@ describe("LogsRoute layout contract", () => {
     expect(styles.packageButtonPath).toContain("truncate");
     expect(styles.rootButtonPath).toContain("truncate");
     expect(styles.deleteButton).toContain("w-fit");
+  });
+
+  it("uses the shared workbench frame for the Logs header and three panes", () => {
+    expect(routeSource).toContain('chrome="workspace"');
+    expect(routeSource).toContain("VUI_WORKBENCH_TOOLBAR_CLASS");
+    expect(routeSource).toContain("VUI_WORKBENCH_RAIL_CLASS");
+    expect(routeSource).toContain("VUI_WORKBENCH_PANE_CLASS");
+    expect(styles.route).not.toMatch(/bg-|shadow-|rounded-|border/);
+    expect(styles.header).not.toMatch(/flex|border|bg-|rounded-|shadow-/);
+    expect(styles.sidebar).not.toMatch(/bg-|rounded-|border/);
+    expect(styles.previewPane).not.toMatch(/bg-|rounded-|border/);
+    expect(styles.rightRail).not.toMatch(/bg-|rounded-|border/);
   });
 
   it("keeps the raw file preview before the diagnostic summary in the main column", () => {
@@ -119,8 +130,9 @@ describe("LogsRoute layout contract", () => {
     }
   });
 
-  it("avoids adding another card shell around the actual log preview stack", () => {
+  it("keeps the log preview stack inside the shared workbench pane", () => {
     expect(styles.previewPane).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.previewPane).not.toMatch(/rounded-|border|bg-/);
     expect(styles.logPreviewStack).toContain("--pane-h-package-files");
     expect(styles.logPreviewStack).toContain("minmax(0,1fr)");
     expect(styles.logPreviewStack).not.toContain("rounded-[var(--radius-panel)]");

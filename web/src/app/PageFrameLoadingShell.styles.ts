@@ -11,10 +11,10 @@ const styles = {
   check:
     "block size-4 animate-pulse rounded-[4px] bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none",
   header:
-    "grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass px-3 py-2",
+    "vui-workbench-toolbar grid min-h-11 min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2",
   headerCopy: "grid min-w-0 gap-1.5",
   headerAction: `${bone} h-8 w-16 rounded-[var(--radius-control)]`,
-  page: "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden p-2",
+  page: "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden",
   pageStack: "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden",
   body: "grid min-h-0 min-w-0",
   pane: "grid min-h-0 min-w-0 content-start gap-1.5 overflow-hidden p-1.5",

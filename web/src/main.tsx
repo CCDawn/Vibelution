@@ -10,6 +10,7 @@ import "./design/tailwind.css";
 import "./design/vui-provider-theme.css";
 import "./design/vui-native-controls.css";
 import "./design/workbench-shell.css";
+import "./design/workbench-frame.css";
 
 if (!redirectToCanonicalWorkbenchHost()) {
   ReactDOM.createRoot(document.getElementById("root")!).render(

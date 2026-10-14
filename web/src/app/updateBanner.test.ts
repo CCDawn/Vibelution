@@ -30,6 +30,14 @@ describe("updateBanner verdict gate", () => {
 });
 
 describe("shouldShowUpdateBanner", () => {
+  it("keeps a dismissal when backend and Launcher return different lengths of the same commit", () => {
+    const fullHead = "a1b2c3d4e5f67890123456789012345678901234ab";
+    const shortHead = fullHead.slice(0, 12);
+    const launcherFreshness = { current: false, label: "stale" };
+    expect(shouldShowUpdateBanner({ verdict: "current", diskHead: fullHead, dismissedHead: shortHead, launcherFreshness })).toBe(false);
+    expect(shouldShowUpdateBanner({ verdict: "current", diskHead: shortHead, dismissedHead: fullHead, launcherFreshness })).toBe(false);
+    expect(shouldShowUpdateBanner({ verdict: "current", diskHead: "b1b2c3d4e5f6", dismissedHead: fullHead, launcherFreshness })).toBe(true);
+  });
   it("keeps a stale Launcher visible even when the workbench is current", () => {
     const launcherFreshness = { current: false, label: "stale", shellStale: true };
     expect(shouldShowUpdateBanner({ verdict: "current", diskHead: "new-head", dismissedHead: "", launcherFreshness })).toBe(true);

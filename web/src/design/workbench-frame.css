@@ -1,0 +1,109 @@
+/* Explicit chrome roles shared by persistent hosts, recipes and domain panes. */
+@layer utilities {
+  [data-vui="workbench-frame"] {
+    --pane-resize-rule-color: color-mix(in srgb, var(--fg-primary) 80%, transparent);
+    --pane-resize-rule-top: var(--vui-workbench-radius);
+    --pane-resize-rule-bottom: var(--vui-workbench-radius);
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    padding: 0 var(--vui-workbench-inset) var(--vui-workbench-inset);
+    background: var(--shell-surface, var(--vui-surface-rail));
+  }
+  [data-vui="workbench-frame"][data-flush="true"] { padding: 0; }
+
+  [data-vui="workbench-frame"] > [data-vui-page] {
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    overflow: hidden;
+    background-image: none !important;
+  }
+  [data-vui="workbench-frame"] > [data-vui-page="surface"],
+  .vui-workbench-pane,
+  [data-vui="workbench-frame"] .vui-workbench-pane,
+  [data-vui="split-workspace"][data-vui-split-chrome="workbench"] > :is([data-vui="split-main"], [data-vui="split-aside"]) {
+    --vui-surface-workspace: var(--vui-surface-chat);
+    --vui-surface-panel: var(--vui-surface-chat);
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--vui-workbench-border);
+    border-radius: var(--vui-workbench-radius) !important;
+    background: var(--vui-surface-chat) !important;
+    box-shadow: var(--vui-workbench-shadow);
+    overflow: hidden !important;
+  }
+  [data-vui="workbench-frame"] > [data-vui-page="workspace"] {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--shell-surface, var(--vui-surface-rail)) !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+  [data-vui="workbench-frame"] > [data-vui-page-scroll="true"] {
+    overflow-y: auto !important;
+  }
+  [data-vui="workbench-frame"] > [data-vui-page="workspace"] > :is([data-vui="dense-ops-chrome"], [data-vui="list-detail-chrome"], [data-vui="track-workbench-top"]) {
+    --vui-surface-panel: var(--shell-surface, var(--vui-surface-rail));
+    --vui-surface-toolbar: var(--shell-surface, var(--vui-surface-rail));
+    border: 0;
+    background: var(--shell-surface, var(--vui-surface-rail));
+    box-shadow: none;
+  }
+  .vui-workbench-toolbar {
+    min-width: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  [data-vui="workbench-frame"] .vui-workbench-toolbar {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+  .vui-workbench-rail,
+  [data-vui="workbench-frame"] .vui-workbench-rail,
+  [data-vui="split-workspace"][data-vui-split-chrome="workbench"] > [data-vui="split-sidebar"] {
+    --vui-surface-panel: var(--shell-surface, var(--vui-surface-rail));
+    --vui-surface-workspace: var(--shell-surface, var(--vui-surface-rail));
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--shell-surface, var(--vui-surface-rail)) !important;
+    box-shadow: none;
+  }
+  [data-vui="split-workspace"][data-vui-split-chrome="workbench"] {
+    border: 0 !important;
+    background: var(--shell-surface, var(--vui-surface-rail)) !important;
+    > [data-vui="split-sidebar"] > * {
+      border: 0 !important;
+      border-radius: 0;
+      background: var(--shell-surface, var(--vui-surface-rail)) !important;
+      box-shadow: none;
+    }
+    > :is([data-vui="split-main"], [data-vui="split-aside"]) > :is([data-vui="board-workbench-main"], [data-vui="board-workbench-aside"], [data-vui="canvas-workbench-canvas"], [data-vui="canvas-workbench-inspector"], [data-agent-pane="main"], [data-agent-pane="inspector"]) {
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none;
+      background: var(--vui-surface-chat) !important;
+    }
+    > [role="separator"] { --pane-resize-rule-offset: 2px; }
+    > [data-vui="split-main"] + [role="separator"] { --pane-resize-rule-offset: -2px; }
+  }
+  @media (max-width: 700px) {
+    [data-vui="workbench-frame"] { --vui-workbench-inset: 2px; }
+  }
+}

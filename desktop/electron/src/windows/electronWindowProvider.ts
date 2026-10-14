@@ -592,6 +592,23 @@ export class ElectronWindowProvider {
     return this.workbenchCloseInFlight;
   }
 
+  requestRendererWorkbenchClose(windowId: number, senderUrl: string): void {
+    let window = this.workbenchWindow?.id === windowId ? this.workbenchWindow : null;
+    let expectedUrl = this.workbenchUrl;
+    if (!window) {
+      const entry = [...this.instanceWindows.values()].find(item => item.window.id === windowId);
+      window = entry?.window ?? null;
+      expectedUrl = entry?.url ?? "";
+    }
+    if (!window || window.isDestroyed() || !expectedUrl
+      || new URL(senderUrl).origin !== new URL(expectedUrl).origin) {
+      throw new Error("Renderer window close does not match a managed workbench.");
+    }
+    // BrowserWindow.close emits our cancellable native close event. WebContents.close
+    // and renderer window.close destroy the page without that lifecycle boundary.
+    window.close();
+  }
+
   instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number; url: string }> {
     const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number; url: string }> = [];
     for (const [instanceId, entry] of this.instanceWindows) {

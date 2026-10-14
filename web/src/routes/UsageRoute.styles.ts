@@ -1,7 +1,7 @@
 const styles = {
   outputSegment: "flex-1",
   page: "h-full min-h-0 min-w-0 max-w-full overflow-y-auto overflow-x-hidden bg-vui-surface-canvas px-4 py-5 max-[700px]:px-2 max-[700px]:py-2",
-  sheet: "mx-auto w-full max-w-[1120px] min-w-0 rounded-vui-panel border border-vui-border-subtle bg-vui-surface-panel px-10 py-7 max-[700px]:px-4 max-[700px]:py-4",
+  sheet: "mx-auto w-full max-w-[1120px] min-w-0 px-10 py-7 max-[700px]:px-4 max-[700px]:py-4",
   breadcrumb: "mb-6 flex min-w-0 items-center gap-2 text-vui-xs text-vui-fg-tertiary [&_a]:!p-0 [&_a]:!bg-transparent [&_a]:!border-0",
   recipe: "!h-auto !overflow-visible !bg-transparent",
   header: "[&_[data-vui=route-header]]:!border-0 [&_[data-vui=route-header]]:!bg-transparent [&_[data-vui=route-header]]:!p-0 [&_[data-vui=route-header]]:!shadow-none [&_[data-vui=route-header]]:!backdrop-blur-none [&_h1]:!text-[24px] [&_h1]:!font-semibold [&_h1+span]:!font-normal [&_h1+span]:!whitespace-normal [&_[data-vui=route-header]>div:first-child>div]:!flex-col [&_[data-vui=route-header]>div:first-child>div]:!items-start",
