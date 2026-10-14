@@ -29,6 +29,7 @@ import conversationResponseBlocksSource from "./conversationResponseBlocks.tsx?r
 import conversationCodexSurfaceSource from "./conversationCodexSurface.tsx?raw";
 import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw";
 import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
+import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
@@ -43,8 +44,9 @@ describe("composer leading control contract", () => {
     expect(html).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
   });
   it("lets Chat replace the legacy image button without changing other routes", () => {
-    expect(conversationViewSource).toContain("composerLeadingControl ?? (");
-    expect(conversationViewSource).toContain("attachmentInputRef.current?.click()");
+    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerSource).toContain("composerLeadingControl ?? (");
+    expect(conversationComposerSource).toContain("attachmentInputRef.current?.click()");
   });
 
   it("keeps the native attachment input hidden independently of field layout", () => {
@@ -241,14 +243,19 @@ describe("ConversationView VUI control contract", () => {
   it("routes conversation controls through VUI primitives", () => {
     expect(conversationViewSource).toContain('from "../vui"');
     expect(conversationViewSource).toContain("<VButton");
-    expect(conversationViewSource).toContain("<VNativeInput");
-    expect(conversationViewSource).toContain("<VNativeTextarea");
+    expect(conversationComposerSource).toContain('from "../vui"');
+    expect(conversationComposerSource).toContain("<VNativeInput");
+    expect(conversationComposerSource).toContain("<VNativeTextarea");
     expect(conversationViewSource).not.toMatch(/<button\b/);
     expect(conversationViewSource).not.toMatch(/<input\b/);
     expect(conversationViewSource).not.toMatch(/<select\b/);
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
-    expect(conversationViewSource).toContain("primaryActionIsQueueSubmit");
-    expect(conversationViewSource).toContain("ConversationFollowupQueueBar");
+    expect(conversationComposerSource).not.toMatch(/<button\b/);
+    expect(conversationComposerSource).not.toMatch(/<input\b/);
+    expect(conversationComposerSource).not.toMatch(/<select\b/);
+    expect(conversationComposerSource).not.toMatch(/<textarea\b/);
+    expect(conversationComposerSource).toContain("primaryActionIsQueueSubmit");
+    expect(conversationComposerSource).toContain("ConversationFollowupQueueBar");
   });
 });
 
@@ -871,17 +878,17 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.input).toContain("![background:transparent]");
     expect(styles.input).toContain("!shadow-none");
 
-    const composerActionStackSource = conversationViewSource.slice(
-      conversationViewSource.indexOf("const composerActions = ("),
-      conversationViewSource.indexOf("\n\n  return (", conversationViewSource.indexOf("const composerActions = (")),
+    const composerActionStackSource = conversationComposerSource.slice(
+      conversationComposerSource.indexOf("const composerActions = ("),
+      conversationComposerSource.indexOf("\n\n  const composerSurface", conversationComposerSource.indexOf("const composerActions = (")),
     );
     expect(composerActionStackSource).not.toContain("className={styles.attachButton}");
     expect(composerActionStackSource).toContain("className={primaryActionClassName}");
-    expect(conversationViewSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
-    expect(conversationViewSource).toContain("className={styles.attachButton}");
-    expect(conversationViewSource).toContain("<ConversationTurnModelControl {...turnModelControl} />");
-    expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
-    expect(conversationViewSource).toContain("<ComposerContextRing");
+    expect(conversationComposerSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
+    expect(conversationComposerSource).toContain("className={styles.attachButton}");
+    expect(conversationComposerSource).toContain("<ConversationTurnModelControl {...turnModelControl} />");
+    expect(conversationComposerSource).toContain("<ConversationInferenceControl {...llmControl} />");
+    expect(conversationComposerSource).toContain("<ComposerContextRing");
     // Ring internals are owned by ComposerContextRing.test.tsx; keep only the
     // regressions that would silently slip back in at this call site.
     expect(ringSource).toContain('role="progressbar"');
@@ -895,18 +902,18 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(ringStyles.ring).not.toContain("overflow-hidden");
     expect(ringStyles.ring.split(/\s+/)).not.toContain("ring");
     expect(conversationViewSource).toContain("composerContextRing");
-    expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
-    expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
+    expect(conversationComposerSource).toContain('composerVariant === "codex" ? composerActions : null');
+    expect(conversationComposerSource).toContain('composerVariant === "compact" ? composerActions : null');
     expect(styles.composerToolbar).toContain("items-center");
     expect(styles.composerToolbarEnd).toContain("max-w-full");
     expect(styles.composerToolbarEnd).not.toContain("max-w-[min(200px");
-    expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
-    expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
+    expect(conversationComposerSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
+    expect(conversationComposerSource).toContain("styles.composerEditSubmitButton");
     // Labeled edit/rerun must not inherit square icon-only geometry.
-    expect(conversationViewSource).not.toContain("composerEditSubmitButton} ${styles.composerRoundButtonPrimary}");
-    expect(conversationViewSource).toContain("styles.composerRoundButtonPrimary");
-    expect(conversationViewSource).toContain("icon={");
-    expect(conversationViewSource).toContain("<RefreshCw");
+    expect(conversationComposerSource).not.toContain("composerEditSubmitButton} ${styles.composerRoundButtonPrimary}");
+    expect(conversationComposerSource).toContain("styles.composerRoundButtonPrimary");
+    expect(conversationComposerSource).toContain("icon={");
+    expect(conversationComposerSource).toContain("<RefreshCw");
   });
   it("keeps inline edit chrome compact after the composer edit bar removal", () => {
     // The composer bottom edit bar is gone: no orphaned keys may linger.
@@ -1142,9 +1149,11 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("scheduleTimelineHeightVersionBump");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
     // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
-    expect(conversationViewSource).toContain("function pinFollowLatestForSubmit");
-    expect(conversationViewSource).toContain("function handleSendAndFollowLatest");
-    expect(conversationViewSource).toContain("handleSendAndFollowLatest()");
+    expect(conversationViewSource).toContain("scrollTimelineToBottom,");
+    expect(conversationComposerSource).toContain("function pinFollowLatestForSubmit");
+    expect(conversationComposerSource).toContain("function handleSendAndFollowLatest");
+    expect(conversationComposerSource).toContain("handleSendAndFollowLatest()");
+    expect(conversationViewSource).toContain("handleSendAndFollowLatest,");
     expect(conversationTimelineRowsSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");
     expect(conversationViewSource).toContain("timelineContentRef");
     expect(conversationViewSource).toContain("styles.timelineContent");
@@ -2035,7 +2044,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain('aria-label="待发送附件"');
     expect(html).toContain('role="list"');
     expect(html).toContain('role="listitem"');
-    expect(conversationViewSource).toContain("<X size={13} aria-hidden=\"true\" />");
+    expect(conversationComposerSource).toContain("<X size={13} aria-hidden=\"true\" />");
   });
 
   it("renders pending document attachments as file badges without image previews", () => {
@@ -2784,7 +2793,7 @@ describe("composer attachment upload status contract", () => {
 
   it("wires the retry entry points through the route surface", () => {
     expect(conversationViewSource).toContain("onRetryComposerAttachmentUploads");
-    expect(conversationViewSource).toContain("onRetryComposerAttachment(attachment.id)");
+    expect(conversationComposerSource).toContain("onRetryComposerAttachment(attachment.id)");
   });
 });
 
