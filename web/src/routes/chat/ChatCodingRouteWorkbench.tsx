@@ -185,6 +185,7 @@ import { ChatCodingGroupSurface } from "./ChatCodingGroupSurface";
 import { ChatConversationIndexPanel } from "./ChatConversationIndexPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
+import { CompanionSceneWorkspace } from "../companions/CompanionSceneWorkspace";
 import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
 import {
@@ -2985,9 +2986,64 @@ export function ChatCodingRouteWorkbench() {
     && !sessionBrowserVisible && conversationWorkspaceTab === "agent" && Boolean(conversationModel)
     && !activeCliAgentRunId && !sessionDetailErrorState.blockingError && !invalidChildSessionLinkMessage;
 
+  const nativeSessionWorkspace = (
+            <FollowupQueueTogglePauseContext.Provider value={handleFollowupQueueTogglePause}>
+            <ChatSessionWorkspacePanel
+              lang={lang}
+              sessionGate={{
+                activeSessionId,
+                sessionsPending: sessionsQuery.isPending,
+                noSessionsLabel: t("noSessionsYet"),
+                loadingSessionLabel: t("loadingSession"),
+              }}
+              errorGate={{
+                hasBlockingError: sessionDetailErrorState.blockingError,
+                blockingErrorMessage: sessionDetailErrorMessage,
+                hasTransientError: sessionDetailErrorState.transientError,
+                invalidChildSessionLinkMessage,
+                transientErrorMessage: sessionDetailErrorMessage,
+              }}
+              alternateSurface={{
+                workspaceActiveTab: conversationWorkspaceTab,
+                activeCliAgentRunId,
+                activeCliAgentRunAvailable: Boolean(activeCliAgentRun),
+                cliAgentRunEmptyLabel: lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display.",
+                filePreview: {
+                  changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
+                  errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
+                  file: fileContentQuery.data,
+                  loadingLabel: t("loadingFilePreview"),
+                  sourceLabel: detail?.title ?? t("currentSession"),
+                },
+              }}
+              conversationFrame={{
+                conversation: conversationModel,
+                conversationFocused: statusRailCollapsed,
+                preface: null,
+                hideExportControl: verifiedCompanionMode || headerExportVisible,
+                notices: activeRuntimeNotices,
+                activeTurnStreamState,
+              }}
+              toolApproval={toolApproval}
+            />
+            </FollowupQueueTogglePauseContext.Provider>
+  );
+
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
     {financeSurface ? <FinancialResearchLiveProjection sessionId={activeSessionId ?? ""} agentId={detail?.agentId} messages={detail?.messages ?? EMPTY_FINANCIAL_MESSAGES} /> : null}
+    {verifiedCompanionMode && activeCompanion ? (
+      <CompanionSceneWorkspace
+        key={activeCompanion.agentId}
+        companion={activeCompanion}
+        lang={lang}
+        sessionId={conversationModel?.sessionId}
+        messages={conversationModel?.messages ?? []}
+        conversation={nativeSessionWorkspace}
+        onReturnToConversation={conversationWorkspaceTab !== "agent" ? () => { if (activeSessionId) setActiveTab(activeSessionId, "agent"); } : undefined}
+        onOpenLifeSteward={(id) => openSession(id, { replace: false, telemetrySource: "virtual_human_life_steward" })}
+      />
+    ) : (
     <ChatSessionWorkbenchShell
       layoutRef={layoutRef}
       className={chatLayoutClassName}
@@ -3243,48 +3299,7 @@ export function ChatCodingRouteWorkbench() {
               onOpenRailFile={openOrdinaryRailFile}
             />
             )}
-            sessionWorkspace={(
-            <FollowupQueueTogglePauseContext.Provider value={handleFollowupQueueTogglePause}>
-            <ChatSessionWorkspacePanel
-              lang={lang}
-              sessionGate={{
-                activeSessionId,
-                sessionsPending: sessionsQuery.isPending,
-                noSessionsLabel: t("noSessionsYet"),
-                loadingSessionLabel: t("loadingSession"),
-              }}
-              errorGate={{
-                hasBlockingError: sessionDetailErrorState.blockingError,
-                blockingErrorMessage: sessionDetailErrorMessage,
-                hasTransientError: sessionDetailErrorState.transientError,
-                invalidChildSessionLinkMessage,
-                transientErrorMessage: sessionDetailErrorMessage,
-              }}
-              alternateSurface={{
-                workspaceActiveTab: conversationWorkspaceTab,
-                activeCliAgentRunId,
-                activeCliAgentRunAvailable: Boolean(activeCliAgentRun),
-                cliAgentRunEmptyLabel: lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display.",
-                filePreview: {
-                  changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
-                  errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
-                  file: fileContentQuery.data,
-                  loadingLabel: t("loadingFilePreview"),
-                  sourceLabel: detail?.title ?? t("currentSession"),
-                },
-              }}
-              conversationFrame={{
-                conversation: conversationModel,
-                conversationFocused: statusRailCollapsed,
-                preface: null,
-                hideExportControl: headerExportVisible,
-                notices: activeRuntimeNotices,
-                activeTurnStreamState,
-              }}
-              toolApproval={toolApproval}
-            />
-            </FollowupQueueTogglePauseContext.Provider>
-            )}
+            sessionWorkspace={nativeSessionWorkspace}
           />
         )}
       />
@@ -3409,6 +3424,9 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
     >
+
+    </ChatSessionWorkbenchShell>
+    )}
       <ChatCodingWorkbenchDialogs
         open={groupManageDialogOpen}
         onOpenChange={setGroupManageDialogOpen}
@@ -3472,7 +3490,6 @@ export function ChatCodingRouteWorkbench() {
         dismissPendingConfirm={dismissPendingConfirm}
         confirmPendingWorkbenchAction={confirmPendingWorkbenchAction}
       />
-    </ChatSessionWorkbenchShell>
       <ConversationRerunFileChoiceDialog
         open={Boolean(rerunFileChoice)}
         language={lang === "en" ? "en" : "zh"}

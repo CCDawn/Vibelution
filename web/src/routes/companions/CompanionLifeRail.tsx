@@ -16,7 +16,6 @@ import type {
   VirtualHumanDiaryEntry,
   VirtualHumanDriveItem,
   VirtualHumanEnvironmentFact,
-  VirtualHumanEpisodicMemory,
   VirtualHumanCalendarProjection,
   VirtualHumanInterest,
   VirtualHumanLifeFeedItem,
@@ -43,6 +42,7 @@ import {
 import type { CompanionRailState } from "./CompanionPersonRail";
 import { CompanionLifeWorldCard } from "./CompanionLifeWorldCard";
 import { CompanionPreferenceCard } from "./CompanionPreferenceCard";
+import { CompanionMemoryRecords } from "./CompanionMemoryRecords";
 import styles from "./CompanionChatRails.styles";
 
 function ScheduleRows({ activities, lang }: { activities: VirtualHumanActivity[]; lang: "zh" | "en" }) {
@@ -67,7 +67,7 @@ function ScheduleRows({ activities, lang }: { activities: VirtualHumanActivity[]
 
 function EventRows({ events, lang }: { events: VirtualHumanLifeEvent[]; lang: "zh" | "en" }) {
   if (!events.length) {
-    return <p className={styles.cardCopy}>{lang === "zh" ? "今天还没有已记录的实际经历。" : "No lived events have been recorded today."}</p>;
+    return <p className={styles.cardCopy}>{lang === "zh" ? "今天还没有生活事件记录。" : "No life events have been recorded today."}</p>;
   }
   return (
     <div className={styles.eventList}>
@@ -86,7 +86,7 @@ function EventRows({ events, lang }: { events: VirtualHumanLifeEvent[]; lang: "z
 
 function DiaryRows({ entries, lang }: { entries: VirtualHumanDiaryEntry[]; lang: "zh" | "en" }) {
   if (!entries.length) {
-    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有从实际经历写下日记。" : "No diary entries have been derived from lived events yet."}</p>;
+    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有日记记录。" : "No diary entries have been recorded yet."}</p>;
   }
   return (
     <div className={styles.memoryList}>
@@ -98,7 +98,7 @@ function DiaryRows({ entries, lang }: { entries: VirtualHumanDiaryEntry[]; lang:
           </div>
           <p className={styles.cardCopy}>{entry.content || (lang === "zh" ? "这条记录暂时没有正文。" : "This note has no body yet.")}</p>
           <span className={styles.memoryMeta}>
-            {entry.sourceEventIds.length} {lang === "zh" ? "条实际经历" : "lived event(s)"}
+            {entry.sourceEventIds.length} {lang === "zh" ? "条来源事件" : "source event(s)"}
           </span>
         </article>
       ))}
@@ -144,7 +144,7 @@ function sourceKindLabel(sourceKind: string, lang: "zh" | "en"): string {
     operator: ["由你确认", "Confirmed by you"],
     sensor: ["设备感知", "Device observation"],
     tool: ["工具观察", "Tool observation"],
-    schedule_outcome: ["实际活动结果", "Lived activity outcome"],
+    schedule_outcome: ["活动结果记录", "Activity outcome record"],
     initial_state: ["初始状态", "Initial state"],
   };
   const pair = labels[sourceKind] ?? ["有来源记录", "Source recorded"];
@@ -222,7 +222,7 @@ function ReflectionRows({ reflections, lang }: { reflections: VirtualHumanReflec
           <div>
             <time>{reflection.localDate || formatMemoryTimestamp(reflection.createdAt, lang)}</time>
             <p>{reflection.text}</p>
-            <small>{lang === "zh" ? `来自 ${reflection.sourceEventIds?.length ?? 0} 段真实经历` : `From ${reflection.sourceEventIds?.length ?? 0} lived event(s)`}</small>
+            <small>{lang === "zh" ? `来自 ${reflection.sourceEventIds?.length ?? 0} 条来源事件` : `From ${reflection.sourceEventIds?.length ?? 0} source event(s)`}</small>
           </div>
         </article>
       ))}
@@ -499,80 +499,6 @@ function relationshipInteractionLabel(kind: string | undefined, lang: "zh" | "en
   return lang === "zh" ? "有过一次日常交流" : "had an everyday conversation";
 }
 
-function memoryTimestamp(memory: VirtualHumanEpisodicMemory): number {
-  const value = memory.promotedAt || memory.occurredAt;
-  if (!value) return 0;
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
-}
-
-function MemoryRows({ memories, lang }: { memories: VirtualHumanEpisodicMemory[]; lang: "zh" | "en" }) {
-  if (!memories.length) {
-    return (
-      <p className={styles.cardCopy}>
-        {lang === "zh"
-          ? "还没有达到长期记忆重要性门槛的生活片段。"
-          : "No lived moments have crossed the long-term memory threshold yet."}
-      </p>
-    );
-  }
-  return (
-    <div className={styles.memoryList}>
-      {[...memories].sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left)).slice(0, 6).map((memory) => {
-        const salience = typeof memory.salienceScore === "number"
-          ? Math.round(memory.salienceScore)
-          : null;
-        const strength = boundedPercent(memory.memoryStrengthScore ?? memory.salienceScore);
-        const breakdown = memory.scoreBreakdown;
-        const sourceCount = Array.isArray(memory.sourceEventIds) ? memory.sourceEventIds.length : 0;
-        return (
-          <article key={memory.episodeId} className={styles.memoryItem}>
-            <div className={styles.memoryVisualRow}>
-              <span className={styles.memoryVisual} aria-hidden="true"><Sparkles size={19} /></span>
-              <div className={styles.memoryBody}>
-                <div className={styles.memoryItemHeader}>
-                  <strong>{lang === "zh" ? "生活片段" : "Lived moment"}</strong>
-                  <time>{formatMemoryTimestamp(memory.occurredAt, lang)}</time>
-                </div>
-                <p className={styles.memoryText}>
-                  {memory.text || (lang === "zh" ? "这条记忆暂时没有正文。" : "This memory has no text yet.")}
-                </p>
-              </div>
-            </div>
-            <div className={styles.progressHeader}>
-              <span>{lang === "zh" ? "记忆强度" : "Memory strength"}</span>
-              <strong>{strength}%</strong>
-            </div>
-            <div className={styles.progressTrack} aria-label={`${lang === "zh" ? "记忆强度" : "Memory strength"} ${strength}%`}>
-              <span className={styles.progressFill} style={{ width: `${strength}%` }} />
-            </div>
-            <div className={styles.memoryMetaRow}>
-              {salience !== null ? (
-                <span>{lang === "zh" ? `重要性 ${salience}%` : `Salience ${salience}%`}</span>
-              ) : null}
-              {sourceCount > 0 ? (
-                <span>{lang === "zh" ? `来自 ${sourceCount} 条经历` : `From ${sourceCount} event(s)`}</span>
-              ) : null}
-              {memory.promotedAt ? (
-                <span>{lang === "zh" ? `晋升于 ${formatMemoryTimestamp(memory.promotedAt, lang)}` : `Promoted ${formatMemoryTimestamp(memory.promotedAt, lang)}`}</span>
-              ) : null}
-              {breakdown && (breakdown.emotion || 0) > 0 ? (
-                <span>{lang === "zh" ? `情绪余波 ${breakdown.emotion}` : `Emotion ${breakdown.emotion}`}</span>
-              ) : null}
-              {breakdown && (breakdown.unresolved || 0) > 0 ? (
-                <span>{lang === "zh" ? "关联未完话题" : "Linked to an open topic"}</span>
-              ) : null}
-              {memory.reinforcedAt ? (
-                <span>{lang === "zh" ? `回想于 ${formatMemoryTimestamp(memory.reinforcedAt, lang)}` : `Recalled ${formatMemoryTimestamp(memory.reinforcedAt, lang)}`}</span>
-              ) : null}
-            </div>
-          </article>
-        );
-      })}
-    </div>
-  );
-}
-
 function RelationshipRows({ relationships, lang }: { relationships: VirtualHumanRelationship[]; lang: "zh" | "en" }) {
   if (!relationships.length) {
     return <p className={styles.cardCopy}>{lang === "zh" ? "关系投影仍在自然形成中。" : "Relationship projections are still taking shape."}</p>;
@@ -753,12 +679,8 @@ export function CompanionLifeRail({
             <p>Life context</p>
             <h2>{companion ? `${companion.displayName} ${lang === "zh" ? "的生活" : "life"}` : stateCopy}</h2>
           </div>
-          {companion ? (
-            <VStatusChip tone={companion.snapshot.state?.lifePaused ? "warning" : "success"}>
-              {companion.snapshot.state?.lifePaused
-                ? (lang === "zh" ? "已暂停" : "Paused")
-                : (lang === "zh" ? "心跳在线" : "Live")}
-            </VStatusChip>
+          {companion?.snapshot.state?.lifePaused ? (
+            <VStatusChip tone="warning">{lang === "zh" ? "已暂停" : "Paused"}</VStatusChip>
           ) : null}
         </div>
         <VTabs
@@ -920,10 +842,10 @@ export function CompanionLifeRail({
           {activeTab === "memory" ? (
             <>
               <section className={styles.lifeCardAccent}>
-                <p className={styles.cardLabel}><Heart size={13} aria-hidden="true" /> {lang === "zh" ? "共同回忆" : "Shared memories"}</p>
+                <p className={styles.cardLabel}><Heart size={13} aria-hidden="true" /> {lang === "zh" ? "记忆记录" : "Memory records"}</p>
                 <div className={styles.memoryOverview}>
                   <strong>{memoryCountLabel}</strong>
-                  <span className={styles.cardMeta}>{lang === "zh" ? "段重要生活片段" : "important lived moments"}</span>
+                  <span className={styles.cardMeta}>{lang === "zh" ? "条长期记忆" : "long-term memories"}</span>
                 </div>
               </section>
               <section className={styles.lifeCard}>
@@ -935,7 +857,7 @@ export function CompanionLifeRail({
                     {lang === "zh" ? "记忆服务暂未提供，下面的日记和关系仍可查看。" : "The memory service is not available yet; diary and relationship projections remain available."}
                   </VStateSurface>
                 ) : (
-                  <MemoryRows memories={memoriesQuery.data ?? []} lang={lang} />
+                  <CompanionMemoryRecords key={companion.agentId} agentId={companion.agentId} memories={memoriesQuery.data ?? []} lang={lang} />
                 )}
               </section>
               <CompanionPreferenceCard
