@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const composerSource = readFileSync(join(here, "useChatComposerSubmit.ts"), "utf8");
+const composerSource = [
+  readFileSync(join(here, "useChatComposerTurnMutations.ts"), "utf8"),
+  readFileSync(join(here, "useChatComposerSubmit.ts"), "utf8"),
+].join("\n");
 
 describe("chat composer user-action telemetry contract", () => {
   it("tracks composer turn mutations through startUserAction", () => {
