@@ -13,6 +13,13 @@ export type ConversationMarkdownClassNames = {
   markdownHeading4: string;
   markdownTable: string;
   markdownTableWrap: string;
+  /**
+   * Optional extras for wide tables (≥ CONVERSATION_MARKDOWN_DENSE_TABLE_MIN_COLUMNS
+   * columns): tighter cell padding/smaller type, plus a scroll-hint caption.
+   * Optional because host style maps and test fakes predate them.
+   */
+  markdownTableDense?: string;
+  markdownTableScrollHint?: string;
   messageBody: string;
   responseSegmentList: string;
   responseSegmentPre: string;

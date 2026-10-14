@@ -41,6 +41,13 @@ describe("chatRoutePresentation", () => {
     expect(shouldCollapseGroupMessage("a\n".repeat(9))).toBe(true);
   });
 
+  it("never collapses messages that contain a markdown table", () => {
+    // -webkit-line-clamp cuts tables mid-row; even an over-budget table body
+    // must stay expandable instead of clamped.
+    const table = ["| 指标 | 数值 | 备注 |", "| --- | --- | --- |", ...Array.from({ length: 12 }, (_, i) => `| 项${i} | ${"x".repeat(40)} | 说明 |`)].join("\n");
+    expect(shouldCollapseGroupMessage(table)).toBe(false);
+  });
+
   it("groups consecutive items that share a speaker key", () => {
     const groups = groupConsecutiveBy(
       [{ id: "a", speaker: "p1" }, { id: "b", speaker: "p1" }, { id: "c", speaker: "p2" }],
