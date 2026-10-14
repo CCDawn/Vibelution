@@ -7,6 +7,12 @@ export type CompanionSceneSelection = {
   backgroundUrl: string | null;
 };
 
+export function isCompanionSceneAssetAligned(key: CompanionSceneKey, projectedSceneKey: string): boolean {
+  if (key === "neutral") return false;
+  const family = projectedSceneKey.toLowerCase().split("-")[0];
+  return family === key || (key === "park" && family === "outdoors");
+}
+
 const BACKGROUND_URLS: Record<Exclude<CompanionSceneKey, "neutral">, string> = {
   home: new URL("./assets/scenes/room-background-v1.png", import.meta.url).href,
   library: new URL("./assets/scenes/library-background-v1.png", import.meta.url).href,

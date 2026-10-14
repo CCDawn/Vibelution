@@ -17,7 +17,7 @@ let container: HTMLDivElement;
 const steward = vi.fn();
 const back = vi.fn();
 function companion(location = "home", background = ""): VirtualHumanCompanion {
-  return { agentId: "companion-a", displayName: "测试人物", snapshot: { state: { currentLocation: location, timezone: "Asia/Shanghai", locationStatus: "moving", movingTo: "park" }, causal: { embodiment: { assetRefs: { background } } } } } as VirtualHumanCompanion;
+  return { agentId: "companion-a", displayName: "测试人物", snapshot: { state: { currentLocation: location, timezone: "Asia/Shanghai", locationStatus: "moving", movingTo: "park" }, causal: { embodiment: { sceneKey: "home-day", assetRefs: { background } } } } } as VirtualHumanCompanion;
 }
 function NativeDraft() {
   const [draft, setDraft] = useState("");
@@ -30,6 +30,12 @@ beforeEach(() => { container = document.createElement("div"); document.body.appe
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.clearAllMocks(); });
 
 describe("CompanionSceneWorkspace", () => {
+  it("does not let an authorized but mismatched legacy home projection override actual location", async () => {
+    await render(companion("library", "/home-background.png"));
+    expect(container.querySelector(".companion-scene-background")?.getAttribute("src")).toContain("library-background-v1.png");
+    await render(companion("unknown-place", "/home-background.png"));
+    expect(container.querySelector(".companion-scene-background")).toBeNull();
+  });
   it("falls back from an authorized failed asset to the current-place image, then a neutral surface", async () => {
     await render(companion("home", "/authorized-background.png"));
     const image = () => container.querySelector<HTMLImageElement>(".companion-scene-background");

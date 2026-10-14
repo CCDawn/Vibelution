@@ -9,7 +9,7 @@ import { CompanionConversationHeader } from "./CompanionConversationHeader";
 import { CompanionLifeRail } from "./CompanionLifeRail";
 import { CompanionPortrait } from "./CompanionPortrait";
 import { companionLocationLabel, companionReturnTarget, formatCompanionLocalTime } from "./companionPresentation";
-import { selectCompanionScene } from "./companionScene";
+import { isCompanionSceneAssetAligned, selectCompanionScene } from "./companionScene";
 import styles from "./CompanionSceneWorkspace.styles";
 
 /** Companion-only presentation. Native Session remains the transcript/composer owner. */
@@ -47,7 +47,11 @@ export function CompanionSceneWorkspace({ companion, conversation, sessionId, me
   }, [lang]);
   const [failedImages, setFailedImages] = useState<string[]>([]);
   const scene = selectCompanionScene(companion.snapshot);
-  const authorizedBackground = companion.snapshot.causal?.embodiment?.assetRefs?.background || "";
+  const embodiment = companion.snapshot.causal?.embodiment;
+  // Authorization alone does not establish the asset's location. Legacy
+  // projections can classify library/studio/unknown places as home.
+  const authorizedBackground = isCompanionSceneAssetAligned(scene.key, embodiment?.sceneKey || "")
+    ? embodiment?.assetRefs?.background || "" : "";
   const candidates = [...new Set([authorizedBackground, scene.backgroundUrl].filter((value): value is string => Boolean(value)))];
   const background = candidates.find(value => !failedImages.includes(value));
   useEffect(() => { setFailedImages([]); }, [companion.agentId, authorizedBackground, scene.backgroundUrl]);
