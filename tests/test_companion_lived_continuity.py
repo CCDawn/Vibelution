@@ -11,6 +11,21 @@ from core.agent_plugins.virtual_human_life.dialogue_context import (
 from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
 
 
+def _verified_outcome(summary):
+    return {
+        "status": "succeeded",
+        "summary": summary,
+        "kind": "verified_tool_outcome",
+        "evidence": {
+            "kind": "native_tool_execution",
+            "sessionId": "session-a",
+            "turnId": "turn-life-action",
+            "toolCallIds": ["life-tool-call"],
+            "receiptEventIds": ["life-tool-succeeded"],
+        },
+    }
+
+
 @pytest.fixture
 def lived(tmp_path):
     clock = [datetime(2026, 9, 8, 8, tzinfo=UTC)]
@@ -153,7 +168,7 @@ def test_shared_experience_requires_completed_owned_event_and_user_turn(lived):
         "kind": "activity_completed",
         "title": "练习新歌",
         "occurredAt": clock[0].isoformat(),
-        "outcome": {"status": "succeeded", "summary": "完成第一段"},
+        "outcome": _verified_outcome("完成第一段"),
     }
     service.store.write_jsonl(
         "agent-a",
@@ -279,7 +294,7 @@ def test_commitment_completion_requires_its_own_activity_outcome(lived):
         "activityId": activity["activityId"],
         "kind": "activity_completed",
         "occurredAt": clock[0].isoformat(),
-        "outcome": {"status": "succeeded", "summary": "聊过了电影"},
+        "outcome": _verified_outcome("聊过了电影"),
     }
     service.store.write_jsonl(
         "agent-a",
@@ -364,7 +379,7 @@ def test_existing_tool_binds_new_actions_to_speaking_user_turn(lived, monkeypatc
         "eventId": "song",
         "kind": "activity_completed",
         "occurredAt": clock[0].isoformat(),
-        "outcome": {"status": "succeeded", "summary": "完成第一段"},
+        "outcome": _verified_outcome("完成第一段"),
     }
     service.store.write_jsonl("agent-a", "events/2026-09-08.jsonl", [good])
     result = json.loads(

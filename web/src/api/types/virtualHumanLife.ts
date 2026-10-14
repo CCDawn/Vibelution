@@ -328,6 +328,7 @@ export type VirtualHumanLifeEvent = {
   kind: string;
   title?: string;
   occurredAt?: string;
+  sourceKind?: string;
   outcome?: VirtualHumanLifeEventOutcome;
   simulatedAfterRestart?: boolean;
   failureReason?: string;
@@ -341,6 +342,7 @@ export type VirtualHumanDiaryEntry = {
   title?: string;
   content?: string;
   sourceEventIds: string[];
+  sourceKind?: string;
   writtenAt?: string;
   projectionKind?: string;
   [key: string]: unknown;
@@ -364,6 +366,8 @@ export type VirtualHumanDriveItem = {
   title: string;
   status?: string;
   progress?: number;
+  progressBasis?: string;
+  verifiedActivityCount?: number;
   streak?: number;
   level?: number;
   experience?: number;
@@ -486,6 +490,7 @@ export type VirtualHumanLifeFeedItem = {
   summary?: string;
   occurredAt?: string;
   sourceEventIds?: string[];
+  sourceKind?: string;
   artifactKind?: string;
   localRef?: string;
 };
@@ -639,6 +644,9 @@ export type VirtualHumanEpisodicMemory = {
   episodeId: string;
   text: string;
   occurredAt?: string | null;
+  sourceKind?: "simulation" | "verified_action" | "character_report" | "unknown";
+  excludedFromRecall?: boolean;
+  sourceRefs?: Array<{ type: string; id: string }>;
   salienceScore?: number | null;
   baseSalienceScore?: number | null;
   memoryStrengthScore?: number | null;

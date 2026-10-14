@@ -465,6 +465,55 @@ def test_virtual_human_activity_tool_can_record_a_failed_activity(
         set_virtual_human_life_service_for_tests(None)
 
 
+def test_activity_start_and_complete_forward_current_runtime_without_execution_proof(
+    monkeypatch,
+) -> None:
+    from tools import virtual_human_life_tools as tool
+
+    runtime = {"agentId": "agent-runtime", "sessionId": "session-runtime", "turnId": "start-turn"}
+    commands = []
+
+    class CaptureService:
+        def execute_command(self, agent_id, **kwargs):
+            commands.append({"agentId": agent_id, **kwargs})
+            return {"status": "recorded"}
+
+    monkeypatch.setattr(tool, "_runtime_context", lambda: runtime)
+    monkeypatch.setattr(tool, "_service", lambda: CaptureService())
+    monkeypatch.setattr(
+        virtual_human_facade,
+        "resolve_virtual_human_runtime_target",
+        lambda agent_id, **kwargs: {"targetAgentId": "agent-companion"},
+    )
+    for action, turn_id in [("start", "start-turn"), ("complete", "complete-turn")]:
+        runtime["turnId"] = turn_id
+        result = json.loads(tool.virtual_human_activity_tool(
+            action=action,
+            expected_version=3,
+            activity_id="activity-a",
+            local_date="2026-10-14",
+            outcome_summary="人物报告已完成",
+            idempotency_key=f"wrapper-{action}",
+        ))
+
+        assert result["ok"] is True
+        assert commands[-1]["agentId"] == "agent-companion"
+        assert commands[-1]["arguments"]["executionContext"] == {
+            "runtimeAgentId": "agent-runtime",
+            "sessionId": "session-runtime",
+            "turnId": turn_id,
+        }
+    assert [row["command"] for row in commands] == ["startActivity", "completeActivity"]
+    assert "outcome" not in commands[0]["arguments"]
+    assert commands[1]["arguments"]["outcome"] == {
+        "status": "succeeded",
+        "kind": "character_report",
+        "summary": "人物报告已完成",
+        "salienceScore": 0,
+    }
+    assert "evidence" not in commands[1]["arguments"]["outcome"]
+
+
 def test_virtual_human_schedule_tool_can_propose_a_permission_gated_activity(
     tmp_path,
     monkeypatch,
@@ -770,6 +819,13 @@ def test_full_life_tools_record_only_source_backed_world_npc_and_artifact(
                 "outcome": {
                     "status": "succeeded",
                     "kind": "verified_tool_outcome",
+                    "evidence": {
+                        "kind": "native_tool_execution",
+                        "sessionId": "session-a",
+                        "turnId": "turn-reading-1",
+                        "toolCallIds": ["save-reading-notes-call"],
+                        "receiptEventIds": ["save-reading-notes-succeeded"],
+                    },
                     "summary": "读完并留下三条笔记。",
                 },
             },
@@ -875,7 +931,18 @@ def test_reflection_tool_can_propose_but_cannot_self_approve(
                 "kind": "activity_completed",
                 "localDate": "2026-08-29",
                 "occurredAt": now.isoformat(),
-                "outcome": {"status": "succeeded", "summary": "完成了第一次独立创作。"},
+                "outcome": {
+                    "status": "succeeded",
+                    "summary": "完成了第一次独立创作。",
+                    "kind": "verified_tool_outcome",
+                    "evidence": {
+                        "kind": "native_tool_execution",
+                        "sessionId": "session-a",
+                        "turnId": "turn-creation-1",
+                        "toolCallIds": ["save-creation-call"],
+                        "receiptEventIds": ["save-creation-succeeded"],
+                    },
+                },
             },
         )
         version = service.snapshot("agent-a")["state"]["stateVersion"]

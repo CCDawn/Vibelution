@@ -392,6 +392,10 @@ def _default_proactive_submitter(**payload: Any) -> dict[str, Any]:
         raise RuntimeError("Virtual human life runtime is not accepting proactive turns.")
     from .session_service import submit_session_proactive_turn
 
+    # Reconcile legacy simulation sources before native admission prefetches
+    # episodic memory into the model context, including hidden self-wake turns.
+    owner_id = str(payload.get("agent_id") or "").strip()
+    get_virtual_human_life_service().reconcile_life_memory_sources(owner_id)
     if (payload.get("trigger") or {}).get("deliveryKind") == "self_wake":
         from core.agent_plugins.virtual_human_life.native_wakeup import resolve_worker
         from core.agent_plugins.virtual_human_life.self_continuity import SESSION_PATH
@@ -565,6 +569,77 @@ def _default_episodic_lister(
     from .agent_directory_service import list_current_episodic_events
 
     return list_current_episodic_events(agent_id, limit=limit)
+
+
+def _default_activity_evidence_resolver(
+    agent_id: str,
+    request: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve only this execution's verified Companion/native identity."""
+    from core.agent_plugins.virtual_human_life.native_activity_evidence import (
+        native_activity_evidence,
+    )
+
+    from .agent_directory_service import current_agent_runtime
+    from .session.journal_bridge import load_session_conversation_events_snapshot
+
+    runtime = current_agent_runtime()
+    if not isinstance(runtime, dict) or not isinstance(request, dict):
+        return None
+    runtime_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or "").strip()
+    turn_id = str(runtime.get("turnId") or "").strip()
+    if (
+        not runtime_id
+        or not session_id
+        or not turn_id
+        or any(
+            str(request.get(key) or "").strip() != expected
+            for key, expected in (
+                ("runtimeAgentId", runtime_id),
+                ("sessionId", session_id),
+                ("turnId", turn_id),
+            )
+        )
+    ):
+        return None
+    try:
+        resolved = resolve_virtual_human_runtime_target(runtime_id, session_id=session_id)
+        if str(resolved.get("targetAgentId") or "").strip() != str(agent_id or "").strip():
+            return None
+        service = get_virtual_human_life_service()
+        agent = service.require_agent(runtime_id, include_archived=True)
+        if (
+            str(agent.get("status") or "active").strip().lower() != "active"
+            or str(agent.get("directSessionId") or "").strip() != session_id
+            or not bool((resolved.get("binding") or {}).get("enabled"))
+        ):
+            return None
+        return native_activity_evidence(
+            request, load_session_conversation_events_snapshot(session_id)
+        )
+    except Exception:  # noqa: BLE001 - unavailable native proof stays unverified
+        return None
+
+
+def _default_episodic_history_lister(
+    agent_id: str,
+    *,
+    limit: int = 500,
+    include_superseded: bool = False,
+    episode_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    from core.agent_plugins.virtual_human_life.native_activity_evidence import (
+        select_episode_history,
+    )
+
+    from .agent_directory.episodic_memory import list_episodic_events
+
+    return select_episode_history(
+        list_episodic_events(agent_id, include_superseded=include_superseded),
+        limit=limit,
+        episode_ids=episode_ids,
+    )
 
 
 def _default_episodic_superseder(
@@ -877,7 +952,9 @@ def get_virtual_human_life_service() -> VirtualHumanLifeService:
                 delivery_receipt_resolver=_default_delivery_receipt_resolver,
                 episodic_writer=_default_episodic_writer,
                 episodic_lister=_default_episodic_lister,
+                episodic_history_lister=_default_episodic_history_lister,
                 episodic_superseder=_default_episodic_superseder,
+                activity_evidence_resolver=_default_activity_evidence_resolver,
                 schedule_planner=_default_schedule_planner,
                 schedule_planner_timeout_seconds=25.0,
                 runtime_acceptance_provider=_runtime_acceptance_allowed,

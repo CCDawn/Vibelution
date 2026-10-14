@@ -51,6 +51,14 @@ def _completed_event(
             "status": "succeeded",
             "summary": "完成了一个可以复核的小阶段",
             "moodDelta": mood_delta,
+            "kind": "verified_tool_outcome",
+            "evidence": {
+                "kind": "native_tool_execution",
+                "sessionId": "session-a",
+                "turnId": f"turn:{event_id}",
+                "toolCallIds": [f"tool:{event_id}"],
+                "receiptEventIds": [f"receipt:{event_id}"],
+            },
         },
     }
 
@@ -116,7 +124,9 @@ def test_completed_event_advances_life_drives_once_and_links_future_plan() -> No
 
     assert first["change"] is not None
     assert first["change"]["sourceEventId"] == "life-1"
-    assert first["projection"]["projects"][0]["progress"] > 0
+    assert first["projection"]["projects"][0]["progress"] == 0
+    assert first["projection"]["projects"][0]["progressBasis"] == "ongoing"
+    assert first["projection"]["projects"][0]["verifiedActivityCount"] == 1
     assert first["projection"]["skills"][0]["experience"] > 0
     assert duplicate["change"] is None
     assert duplicate["projection"] == first["projection"]
@@ -368,6 +378,30 @@ def test_service_persists_causal_ledgers_and_exposes_bounded_prompt_context(tmp_
         "status": "active",
         "directSessionId": "session-a",
     }
+    execution_context = {
+        "runtimeAgentId": "agent-a",
+        "sessionId": "session-a",
+        "turnId": "turn-causal-tools",
+    }
+    evidence_requests = []
+
+    def resolve_activity_evidence(agent_id, request):
+        evidence_requests.append(request)
+        assert agent_id == "agent-a"
+        assert request == {
+            **execution_context,
+            "requiredToolNames": ["write_file"],
+            "executionTurnId": "turn-causal-tools",
+            "startedAt": now[0].isoformat(),
+        }
+        return {
+            "kind": "native_tool_execution",
+            "sessionId": "session-a",
+            "turnId": "turn-causal-tools",
+            "toolCallIds": ["write-file-call"],
+            "receiptEventIds": ["write-file-succeeded"],
+        }
+
     service = VirtualHumanLifeService(
         project_root=tmp_path,
         agent_loader=lambda agent_id, include_archived=False: (
@@ -376,6 +410,7 @@ def test_service_persists_causal_ledgers_and_exposes_bounded_prompt_context(tmp_
         agent_lister=lambda: [agent],
         plugin_root_resolver=lambda agent_id: tmp_path / "agents" / agent_id,
         now_provider=lambda: now[0],
+        activity_evidence_resolver=resolve_activity_evidence,
     )
     service.set_binding("agent-a", enabled=True, expected_version=0)
 
@@ -383,17 +418,43 @@ def test_service_persists_causal_ledgers_and_exposes_bounded_prompt_context(tmp_
     assert initial["causal"]["schemaVersion"] == 1
     assert initial["causal"]["reuseReceipt"]["sourceCommit"].startswith("85cc366")
     assert initial["causal"]["drives"]["goals"]
-    activity = initial["todaySchedule"]["activities"][1]
+    activity = {
+        "activityId": "causal-tool-activity",
+        "title": "推进自己的创作项目",
+        "kind": "tool",
+        "activityKind": "creative",
+        "status": "planned",
+        "requiredToolNames": ["write_file"],
+        "startAt": now[0].isoformat(),
+        "endAt": (now[0] + timedelta(minutes=30)).isoformat(),
+    }
+    saved_schedule = service.save_schedule(
+        "agent-a",
+        {"localDate": initial["state"]["localDate"], "activities": [activity]},
+    )
+    activity = saved_schedule["activities"][0]
     assert activity["driveLinks"]
 
+    started = service.execute_command(
+        "agent-a",
+        command="startActivity",
+        expected_version=initial["state"]["stateVersion"],
+        idempotency_key="start-causal-1",
+        arguments={
+            "localDate": initial["state"]["localDate"],
+            "activityId": activity["activityId"],
+            "executionContext": execution_context,
+        },
+    )
     completed = service.execute_command(
         "agent-a",
         command="completeActivity",
-        expected_version=initial["state"]["stateVersion"],
+        expected_version=started["stateVersion"],
         idempotency_key="complete-causal-1",
         arguments={
             "localDate": initial["state"]["localDate"],
             "activityId": activity["activityId"],
+            "executionContext": execution_context,
             "outcome": {
                 "status": "succeeded",
                 "summary": "完成了一个可复核的小阶段",
@@ -402,6 +463,14 @@ def test_service_persists_causal_ledgers_and_exposes_bounded_prompt_context(tmp_
         },
     )
     source_event_id = completed["result"]["eventId"]
+    assert len(evidence_requests) == 1
+    event = next(
+        row for row in service.store.read_jsonl(
+            "agent-a", f"events/{initial['state']['localDate']}.jsonl"
+        )
+        if row["eventId"] == source_event_id
+    )
+    assert event["outcome"]["kind"] == "verified_tool_outcome"
     after = service.snapshot("agent-a")
 
     assert after["causal"]["drives"]["processedEventIds"] == [source_event_id]
@@ -417,11 +486,12 @@ def test_service_persists_causal_ledgers_and_exposes_bounded_prompt_context(tmp_
     replay = service.execute_command(
         "agent-a",
         command="completeActivity",
-        expected_version=initial["state"]["stateVersion"],
+        expected_version=started["stateVersion"],
         idempotency_key="complete-causal-1",
         arguments={
             "localDate": initial["state"]["localDate"],
             "activityId": activity["activityId"],
+            "executionContext": execution_context,
             "outcome": {
                 "status": "succeeded",
                 "summary": "完成了一个可复核的小阶段",
@@ -625,6 +695,8 @@ def test_non_coalesced_heartbeat_rechecks_suppressed_proactive_candidates(tmp_pa
         now=now[0],
     )
     candidate["validUntil"] = (now[0] + timedelta(hours=12)).isoformat()
+    service.store.append_jsonl("agent-a", "events/2026-08-29.jsonl",
+                              _completed_event("candidate-heartbeat", occurred_at=now[0]))
     service.store.write_jsonl("agent-a", "proactive/candidates.jsonl", [candidate])
 
     quiet_result = service.heartbeat_agent("agent-a", now=now[0], allow_planner=False)

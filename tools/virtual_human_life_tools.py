@@ -422,10 +422,17 @@ def virtual_human_activity_tool(
         "localDate": str(local_date or "").strip(),
         "reason": str(reason or "").strip(),
     }
+    if command in {"startActivity", "completeActivity"}:
+        runtime = _runtime_context()
+        arguments["executionContext"] = {
+            "runtimeAgentId": str(runtime.get("agentId") or ""),
+            "sessionId": str(runtime.get("sessionId") or ""),
+            "turnId": str(runtime.get("turnId") or ""),
+        }
     if command == "completeActivity":
         arguments["outcome"] = {
             "status": "succeeded",
-            "kind": "verified_tool_outcome",
+            "kind": "character_report",
             "summary": str(outcome_summary or "").strip(),
             "salienceScore": int(salience_score or 0),
         }

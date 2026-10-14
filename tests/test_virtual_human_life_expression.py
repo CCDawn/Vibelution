@@ -219,7 +219,18 @@ def test_prompt_injects_expression_time_and_fact_status_without_a_second_turn(
             "kind": "activity_completed",
             "title": "吃过早餐",
             "occurredAt": "2026-09-01T00:15:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "喝了豆浆。"},
+            "outcome": {
+                "status": "succeeded",
+                "summary": "喝了豆浆。",
+                "kind": "verified_tool_outcome",
+                "evidence": {
+                    "kind": "native_tool_execution",
+                    "sessionId": "session-a",
+                    "turnId": "turn-breakfast",
+                    "toolCallIds": ["breakfast-tool-call"],
+                    "receiptEventIds": ["breakfast-tool-succeeded"],
+                },
+            },
         },
     )
     service.store.append_jsonl(

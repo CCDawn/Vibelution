@@ -70,6 +70,7 @@ from .drives import (
     apply_completed_event_to_drives,
     default_drive_projection,
     link_schedule_to_drives,
+    project_drive_progress,
     prompt_drive_summary,
 )
 from .embodiment import resolve_embodiment
@@ -83,6 +84,7 @@ from .expression_policy import project_expression_rules
 from .geography import derive_environment_context, resolve_city_location
 from .interests import project_interests
 from .life_feed import build_life_feed
+from .life_provenance import event_provenance, is_verified_experience
 from .life_world_store import LIFE_WORLD_SCHEMA_VERSION, LifeWorldStore
 from .mailbox import (
     await_mailbox_entry_native_admission,
@@ -103,6 +105,7 @@ from .manifest import (
     TOOL_BUNDLE_ID,
     VIRTUAL_HUMAN_TOOL_NAMES,
 )
+from .memory_sources import LifeMemorySourceReconciler
 from .planning import (
     PLANNER_ACTIVITY_KINDS,
     build_deterministic_schedule,
@@ -238,7 +241,10 @@ class VirtualHumanLifeService:
         | None = None,
         episodic_writer: Callable[..., dict[str, Any]] | None = None,
         episodic_lister: Callable[..., list[dict[str, Any]]] | None = None,
+        episodic_history_lister: Callable[..., list[dict[str, Any]]] | None = None,
         episodic_superseder: Callable[..., dict[str, Any]] | None = None,
+        activity_evidence_resolver: Callable[[str, dict[str, Any]], dict[str, Any] | None]
+        | None = None,
         embodiment_health_provider: Callable[[str], dict[str, Any]] | None = None,
         schedule_planner: Callable[[dict[str, Any]], Any] | None = None,
         schedule_planner_timeout_seconds: float = 2.0,
@@ -270,7 +276,9 @@ class VirtualHumanLifeService:
         self.delivery_receipt_resolver = delivery_receipt_resolver
         self.episodic_writer = episodic_writer
         self.episodic_lister = episodic_lister
+        self.episodic_history_lister = episodic_history_lister
         self.episodic_superseder = episodic_superseder
+        self.activity_evidence_resolver = activity_evidence_resolver
         self.embodiment_health_provider = embodiment_health_provider
         self.schedule_planner = schedule_planner
         self.schedule_planner_timeout_seconds = max(
@@ -287,6 +295,19 @@ class VirtualHumanLifeService:
         self._mailbox_dispatch_threads_guard = threading.Lock()
         self._mailbox_dispatch_threads: dict[str, threading.Thread] = {}
         self.self_continuity = SelfContinuity(self)
+        self.memory_source_reconciler = LifeMemorySourceReconciler(
+            self.store,
+            history_lister=episodic_history_lister,
+            superseder=episodic_superseder,
+            event_lister=self._all_recorded_events,
+            now_iso=lambda: _iso(self._now()),
+        )
+
+    def reconcile_life_memory_sources(self, agent_id: str) -> list[dict[str, Any]]:
+        """Invalidate confirmed simulation promotions before native admission."""
+        with self._lock_for(agent_id):
+            self.require_agent(agent_id)
+            return self.memory_source_reconciler.reconcile(agent_id)
 
     def plugin_root(self, agent_id: str) -> Path:
         return self.store.plugin_root(agent_id)
@@ -325,6 +346,7 @@ class VirtualHumanLifeService:
                 raise VirtualHumanLifeError(
                     "Companion mailbox can only target the bound Agent direct Session."
                 )
+            self.reconcile_life_memory_sources(normalized_agent_id)
             now = self._now()
             mailbox = normalize_mailbox(
                 self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
@@ -550,6 +572,7 @@ class VirtualHumanLifeService:
         )
         with self._lock_for(normalized_agent_id):
             self._require_enabled_binding(normalized_agent_id)
+            self.reconcile_life_memory_sources(normalized_agent_id)
             mailbox = normalize_mailbox(
                 self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
             )
@@ -1698,6 +1721,8 @@ class VirtualHumanLifeService:
     def snapshot(self, agent_id: str) -> dict[str, Any]:
         self.require_agent(agent_id)
         binding = self.binding_for(agent_id)
+        if binding and binding.get("enabled"):
+            self.reconcile_life_memory_sources(agent_id)
         if binding is None:
             return {
                 "pluginId": PLUGIN_ID,
@@ -2772,8 +2797,7 @@ class VirtualHumanLifeService:
                 if str(event.get("eventId") or "") != event_id:
                     continue
                 occurred = _parse_datetime(event.get("occurredAt"))
-                if (event.get("kind") != "activity_completed"
-                    or (event.get("outcome") or {}).get("status") != "succeeded"
+                if (not is_verified_experience(event)
                     or occurred is None or occurred > self._now()):
                     raise ValueError("Shared continuity requires an already successful life event.")
                 return event, path.stem
@@ -2873,7 +2897,8 @@ class VirtualHumanLifeService:
             return []
         local_date = _local_date_text(date or self._local_now(binding).date().isoformat())
         bounded = max(1, min(500, int(limit or 100)))
-        return self.store.read_jsonl(agent_id, f"events/{local_date}.jsonl")[-bounded:]
+        return [{**item, "sourceKind": event_provenance(item)} for item in
+                self.store.read_jsonl(agent_id, f"events/{local_date}.jsonl")[-bounded:]]
 
     def list_diary(
         self,
@@ -2896,7 +2921,15 @@ class VirtualHumanLifeService:
                 for path in sorted(diary_root.glob("*.jsonl")):
                     rows.extend(self.store.read_jsonl(agent_id, f"diary/{path.name}"))
         rows.sort(key=lambda item: str(item.get("writtenAt") or item.get("localDate") or ""))
-        return deepcopy(rows[-bounded:])
+        events_by_id = {str(item.get("eventId") or ""): item
+                        for item in self._all_recorded_events(agent_id)}
+        projected = []
+        for row in rows[-bounded:]:
+            kinds = {event_provenance(events_by_id[source_id])
+                     if source_id in events_by_id else "unknown"
+                     for source_id in _string_list(row.get("sourceEventIds"))}
+            projected.append({**row, "sourceKind": next(iter(kinds)) if len(kinds) == 1 else "unknown"})
+        return deepcopy(projected)
 
     def list_relationships(self, agent_id: str) -> list[dict[str, Any]]:
         self.require_agent(agent_id)
@@ -2932,11 +2965,20 @@ class VirtualHumanLifeService:
     ) -> list[dict[str, Any]]:
         self.require_agent(agent_id)
         bounded = max(1, min(500, int(limit or 100)))
-        return deepcopy(
-            _normalize_reflection_rows(
-                self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
-            )[-bounded:]
-        )
+        rows = _normalize_reflection_rows(
+            self.store.read_jsonl(agent_id, "reflections/proposals.jsonl")
+        )[-bounded:]
+        valid_ids = self._all_lived_event_ids(agent_id)
+        fact_ids = {str(item.get("factId") or "") for item in
+                    self.store.read_jsonl(agent_id, "environment/facts.jsonl")}
+        for row in rows:
+            validated = validate_reflection_proposal(
+                row, valid_event_ids=valid_ids, valid_fact_ids=fact_ids, now=self._now(),
+            )
+            if validated.get("status") == "rejected":
+                row["status"] = "rejected"
+                row["validationReason"] = validated["validationReason"]
+        return deepcopy(rows)
 
     def list_environment_facts(
         self,
@@ -2972,6 +3014,10 @@ class VirtualHumanLifeService:
         }
 
     def _all_lived_events(self, agent_id: str) -> list[dict[str, Any]]:
+        return [item for item in self._all_recorded_events(agent_id)
+                if is_verified_experience(item)]
+
+    def _all_recorded_events(self, agent_id: str) -> list[dict[str, Any]]:
         events_root = self.plugin_root(agent_id) / "events"
         events: list[dict[str, Any]] = []
         if not events_root.is_dir():
@@ -3079,6 +3125,15 @@ class VirtualHumanLifeService:
             if index < 0:
                 raise VirtualHumanLifeError("Reflection proposal was not found.")
             existing = rows[index]
+            if str(decision or "").strip().lower() == "approve":
+                validated = validate_reflection_proposal(
+                    existing, valid_event_ids=self._all_lived_event_ids(agent_id),
+                    valid_fact_ids={str(item.get("factId") or "") for item in
+                                    self.store.read_jsonl(agent_id, "environment/facts.jsonl")},
+                    now=current,
+                )
+                if validated.get("status") == "rejected":
+                    raise VirtualHumanLifeError("Reflection source is not a verified life action.")
             if str(existing.get("status") or "") in {
                 "approved",
                 "rejected",
@@ -3421,6 +3476,7 @@ class VirtualHumanLifeService:
         environment = self.list_environment_facts(agent_id, limit=64)
         movements = self.list_location_movements(agent_id, limit=24)
         lived_events = self._all_lived_events(agent_id)
+        drives = project_drive_progress(drives, lived_events)
         interests = project_interests(lived_events)
         world = self.store.read_json(agent_id, "world/catalog.json") or {
             "schemaVersion": CAUSAL_SCHEMA_VERSION,
@@ -3433,7 +3489,7 @@ class VirtualHumanLifeService:
             "npcs": [],
         }
         life_feed = build_life_feed(
-            events=lived_events,
+            events=self._all_recorded_events(agent_id),
             diary_entries=self.list_diary(agent_id, limit=100),
             artifact_receipts=self.store.read_jsonl(agent_id, "artifacts/receipts.jsonl"),
         )
@@ -3607,9 +3663,23 @@ class VirtualHumanLifeService:
         """
 
         self.require_agent(agent_id)
+        self.reconcile_life_memory_sources(agent_id)
         bounded = max(1, min(500, int(limit or 100)))
         receipts = self.store.read_jsonl(agent_id, "memory/promotion_receipts.jsonl")
         episodes = self._list_current_episodic_events(agent_id)
+        episode_ids = list(dict.fromkeys(
+            str(item.get("episodeId") or "").strip() for item in receipts
+            if str(item.get("episodeId") or "").strip()
+        ))
+        if self.episodic_history_lister is not None:
+            episodes = []
+            for offset in range(0, len(episode_ids), 500):
+                episodes.extend(self.episodic_history_lister(
+                    agent_id, limit=500, include_superseded=True,
+                    episode_ids=episode_ids[offset:offset + 500],
+                ))
+        events_by_id = {str(item.get("eventId") or ""): item
+                        for item in self._all_recorded_events(agent_id)}
         reinforcements = self.store.read_jsonl(
             agent_id, "memory/reinforcement_receipts.jsonl"
         )
@@ -3649,6 +3719,10 @@ class VirtualHumanLifeService:
                 for item in list(receipt.get("sourceEventIds") or [])
                 if str(item).strip()
             ]
+            source_kinds = {event_provenance(events_by_id[source_id])
+                            if source_id in events_by_id else "unknown"
+                            for source_id in source_event_ids}
+            source_kind = next(iter(source_kinds)) if len(source_kinds) == 1 else "unknown"
             strength = project_memory_strength(
                 receipt,
                 reinforcements=reinforcements,
@@ -3668,6 +3742,14 @@ class VirtualHumanLifeService:
                         receipt.get("salienceScore"), 0, 100, 0
                     ),
                     "sourceEventIds": source_event_ids,
+                    "sourceKind": source_kind,
+                    "excludedFromRecall": bool(episode.get("validUntil")),
+                    "sourceRefs": [
+                        {"type": str(ref.get("type") or "")[:80],
+                         "id": str(ref.get("id") or "")[:200]}
+                        for ref in list(episode.get("refs") or [])[:16]
+                        if isinstance(ref, Mapping) and ref.get("id")
+                    ],
                     "promotedAt": str(
                         receipt.get("promotedAt")
                         or receipt.get("writtenAt")
@@ -3761,6 +3843,11 @@ class VirtualHumanLifeService:
                 prompt_ready = False
                 prompt_segment_count = 0
         receipts = self.store.read_jsonl(agent_id, "memory/promotion_receipts.jsonl")
+        excluded_episode_ids = {
+            str(row.get("episodeId") or "")
+            for row in self.store.read_jsonl(agent_id, "memory/source_corrections.jsonl")
+            if row.get("status") == "applied"
+        }
         promotion_times = [
             str(
                 item.get("promotedAt")
@@ -3769,7 +3856,7 @@ class VirtualHumanLifeService:
                 or ""
             ).strip()
             for item in receipts
-            if isinstance(item, dict)
+            if isinstance(item, dict) and str(item.get("episodeId") or "") not in excluded_episode_ids
         ]
         promotion_times = [item for item in promotion_times if item]
         attempts = self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
@@ -3795,9 +3882,9 @@ class VirtualHumanLifeService:
             "promptSegmentCount": int(prompt_segment_count),
             "promptPackFileCount": len(PROMPT_PACK_FILES) if prompt_ready else 0,
             "memoryPromotionCount": len({
-                str(item.get("receiptId") or "")
-                for item in receipts
-                if isinstance(item, dict) and str(item.get("receiptId") or "").strip()
+                str(item.get("episodeId") or "")
+                for item in self.list_memories(agent_id, limit=500)
+                if not item.get("excludedFromRecall")
             }),
             "latestPromotionAt": max(promotion_times) if promotion_times else None,
             "heartbeatEnabled": heartbeat_enabled,
@@ -3930,8 +4017,7 @@ class VirtualHumanLifeService:
             outcome = event.get("outcome") if isinstance(event.get("outcome"), dict) else {}
             if (
                 not event_id
-                or str(event.get("kind") or "") != "activity_completed"
-                or str(outcome.get("status") or "") != "succeeded"
+                or not is_verified_experience(event)
                 or not str(outcome.get("summary") or "").strip()
             ):
                 continue
@@ -4170,6 +4256,7 @@ class VirtualHumanLifeService:
         dispatch: bool,
     ) -> dict[str, Any]:
         rows = self.store.read_jsonl(agent_id, "proactive/candidates.jsonl")
+        valid_event_ids = self._all_lived_event_ids(agent_id)
         recent_cutoff = now.astimezone(timezone.utc) - timedelta(hours=24)
         recent_topic_keys = {
             str(item.get("topicKey") or "")
@@ -4196,6 +4283,10 @@ class VirtualHumanLifeService:
             }:
                 continue
             evaluated += 1
+            if str(item.get("sourceEventId") or "") not in valid_event_ids:
+                rows[index] = {**item, "status": "suppressed", "decision": "suppress",
+                               "suppressionReason": "source_not_verified"}
+                continue
             decision = evaluate_proactive_candidate(
                 item,
                 now=now,
@@ -5831,8 +5922,18 @@ class VirtualHumanLifeService:
             raise BindingConflictError(f"Life activity is already terminal: {status}")
         now = self._now()
         if command == "startActivity":
+            if status != "planned":
+                execution = arguments.get("executionContext")
+                if (status == "active" and isinstance(execution, Mapping)
+                    and activity.get("executionTurnId")
+                    and activity["executionTurnId"] == str(execution.get("turnId") or "")):
+                    return {"activity": deepcopy(activity)}
+                raise BindingConflictError("Only a planned activity can be started by a new execution.")
             activity["status"] = "active"
             activity["startedAt"] = _iso(now)
+            execution = arguments.get("executionContext")
+            if isinstance(execution, Mapping) and str(execution.get("turnId") or ""):
+                activity["executionTurnId"] = str(execution["turnId"])[:200]
             state["currentActivityId"] = activity_id
             result: dict[str, Any] = {"activity": deepcopy(activity)}
         elif command in {"cancelActivity", "skipActivity", "failActivity"}:
@@ -5859,6 +5960,52 @@ class VirtualHumanLifeService:
                 "summary": summary[:1200],
                 "recordedAt": _iso(now),
             }
+            # A model-authored kind or evidence object is never proof of execution.
+            normalized_outcome.pop("evidence", None)
+            normalized_outcome["kind"] = "character_report"
+            execution = arguments.get("executionContext")
+            required_tools = _string_list(activity.get("requiredToolNames"))
+            execution = execution if isinstance(execution, Mapping) else {}
+            used_calls: set[str] = set()
+            used_receipts: set[str] = set()
+            for recorded in self._all_lived_events(agent_id):
+                prior = (recorded.get("outcome") or {}).get("evidence") or {}
+                if (prior.get("sessionId") == execution.get("sessionId")
+                    and prior.get("turnId") == execution.get("turnId")):
+                    used_calls.update(_string_list(prior.get("toolCallIds")))
+                    used_receipts.update(_string_list(prior.get("receiptEventIds")))
+            if (
+                status == "active"
+                and activity.get("startedAt")
+                and required_tools
+                and execution
+                and len(used_calls) <= 512 and len(used_receipts) <= 512
+                and self.activity_evidence_resolver is not None
+            ):
+                evidence = self.activity_evidence_resolver(
+                    agent_id,
+                    {
+                        "runtimeAgentId": str(execution.get("runtimeAgentId") or ""),
+                        "sessionId": str(execution.get("sessionId") or ""),
+                        "turnId": str(execution.get("turnId") or ""),
+                        "requiredToolNames": required_tools,
+                        "executionTurnId": str(activity.get("executionTurnId") or ""),
+                        "startedAt": str(activity.get("startedAt") or ""),
+                        "excludedToolCallIds": sorted(used_calls),
+                        "excludedReceiptEventIds": sorted(used_receipts),
+                    },
+                )
+                if isinstance(evidence, Mapping):
+                    candidate = {"outcome": {
+                        "kind": "verified_tool_outcome", "evidence": evidence,
+                    }}
+                    if (event_provenance(candidate) == "verified_action"
+                        and evidence.get("sessionId") == execution.get("sessionId")
+                        and evidence.get("turnId") == execution.get("turnId")
+                        and not used_calls.intersection(_string_list(evidence.get("toolCallIds")))
+                        and not used_receipts.intersection(_string_list(evidence.get("receiptEventIds")))):
+                        normalized_outcome["kind"] = "verified_tool_outcome"
+                        normalized_outcome["evidence"] = deepcopy(dict(evidence))
             event = {
                 "eventId": f"life-event-{uuid.uuid4().hex[:16]}",
                 "agentId": str(agent_id).strip(),
@@ -6491,7 +6638,7 @@ class VirtualHumanLifeService:
             outcome = {
                 "status": "succeeded",
                 "kind": "deterministic_simulation",
-                "summary": f"完成了{activity.get('title') or '计划活动'!s}。",
+                "summary": f"{activity.get('title') or '计划活动'!s}的计划时间已结束，尚未记录实际结果。",
                 "salienceScore": self._simulated_activity_salience(
                     str(activity.get("title") or "")
                 ),
@@ -6607,7 +6754,7 @@ class VirtualHumanLifeService:
                 "outcome": {
                     "status": "succeeded",
                     "kind": "deterministic_simulation",
-                    "summary": f"完成了{title or '计划活动'}。",
+                    "summary": f"{title or '计划活动'}的计划时间已结束，尚未记录实际结果。",
                 },
             }
         )
@@ -6656,7 +6803,7 @@ class VirtualHumanLifeService:
         affect = self._record_affect_episode(agent_id, episode, now=now)
         state["mood"] = deepcopy(affect["mood"])
 
-        if not bool(event.get("simulatedAfterRestart")):
+        if is_verified_experience(event):
             relationships = self.list_relationships(agent_id)
             relationship = next(
                 (

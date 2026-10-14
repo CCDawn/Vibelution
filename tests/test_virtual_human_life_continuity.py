@@ -14,6 +14,11 @@ from core.agent_plugins.virtual_human_life.world_model import (
 )
 
 
+def _native_evidence():
+    return {"kind": "native_tool_execution", "sessionId": "session-a", "turnId": "turn-a",
+            "toolCallIds": ["call-a"], "receiptEventIds": ["receipt-a"]}
+
+
 def test_interests_only_grow_from_successful_outcome_backed_activities() -> None:
     events = [
         {
@@ -38,6 +43,7 @@ def test_interests_only_grow_from_successful_outcome_backed_activities() -> None
             "outcome": {
                 "status": "succeeded",
                 "kind": "verified_tool_outcome",
+                "evidence": _native_evidence(),
                 "summary": "读完并留下三条读书笔记。",
                 "salienceScore": 72,
             },
@@ -51,6 +57,7 @@ def test_interests_only_grow_from_successful_outcome_backed_activities() -> None
                 "status": "succeeded",
                 "kind": "verified_tool_outcome",
                 "summary": "重复事件不应再次成长。",
+                "evidence": _native_evidence(),
             },
         },
     ]
@@ -309,6 +316,7 @@ def test_service_projects_full_life_continuity_without_creating_npc_agents(tmp_p
             "status": "succeeded",
             "kind": "verified_tool_outcome",
             "summary": "读完并留下三条笔记。",
+            "evidence": _native_evidence(),
             "salienceScore": 72,
         },
     }

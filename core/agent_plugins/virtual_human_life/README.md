@@ -16,6 +16,7 @@
 | 主动候选、未回复降速、未完话题和承诺 | `conversation_continuity.py` |
 | 用户消息、已选主动消息与第二气泡的插件私有到达 FIFO | `mailbox.py` + `delivery_plan.py` + `delivery_runtime.py` + `service.py` |
 | 夜间反思、记忆强化和来源校验 | `reflection.py` |
+| 生活来源分类、原生工具回执核对与旧模拟记忆纠正 | `life_provenance.py` + `native_activity_evidence.py` + `memory_sources.py` |
 | 长期日历、周期事件、例外和冲突 | `calendar.py` |
 | 双方约定提议、确认、改约和结果闭环（同一日历账本） | `commitments.py` |
 | 真实到达时间的重逢、成功事件与共同话题只读投影 | `reunion.py` |
@@ -39,7 +40,9 @@
 
 ## 不变量
 
-- 计划不等于经历；只有带有效 outcome 的活动才能成为 Life Event、日记或长期记忆来源。
+- 计划不等于经历。计时器完成记录标为日程模拟，人物自行描述标为自述；只有已开始活动的必需工具在同一原生 Session/Turn 留下明确成功回执，才能成为可信行动、日记晋升或长期记忆来源。一份回执只能支持一次活动，插件仅保存有界回执 ID，不保存第二份工具正文。
+- 旧模拟记忆仅在插件晋升回执、原生 private_note 的完整引用和模拟事件精确一致时，通过原生 supersession 退出召回；原正文与来源历史保留。纠正发生在 Companion 原生接收前，不能清除已经组装的旧 Turn。来源不明或混合引用的记忆不自动失效，界面不得称其已隔离。
+- 默认独立生活与创作项目是持续目标，展示可信行动次数，不按日程条数累计百分比；用户自定义目标保留。
 - 自我唤醒只保存一个有界未来命令及原生 receipt 引用，不保存第二份 transcript；执行复用同一人物的隐藏原生工作 Session 和 assistant-only proactive admission，工作记录只有该 Session Journal 持有，不复制陪伴聊天。人物可用既有 schedule tool 读取、替换和取消未来唤醒；初次启用会安排一次规划唤醒，后续时间由人物决定。自我唤醒独立于主动联系开关、次数和免打扰，不创建聊天 continuation burst；联系用户必须另走既有聊天门，每次原生工具仍受 ToolPolicy 限制。
 - 关闭应用即停止生活与调度。重启时过期活动标记 skipped/unknown，不补造生活事件、日记或成长；过期/中断的唤醒改为一次未来的重新规划，未来有效计划保留。自我唤醒至少间隔一分钟、最多预约七天后、每天至多 24 次，忙碌或已到达的用户消息优先。
 - 主动 Turn 不写 `user_message`；只有 assistant item 持久化并取得 receipt 后才计额度。

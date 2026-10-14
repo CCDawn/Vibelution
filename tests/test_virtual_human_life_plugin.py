@@ -23,6 +23,14 @@ def _active_agent(agent_id: str) -> dict[str, str]:
     }
 
 
+def _execution_evidence() -> dict:
+    return {
+        "kind": "native_tool_execution", "sessionId": "session-agent-a",
+        "turnId": "turn-action", "toolCallIds": ["call-action"],
+        "receiptEventIds": ["receipt-action"],
+    }
+
+
 @pytest.fixture
 def service(tmp_path: Path) -> VirtualHumanLifeService:
     agents = {
@@ -1401,19 +1409,32 @@ def test_verified_activity_outcome_drives_diary_and_memory_receipt(tmp_path: Pat
             {"agentId": agent_id, "episodeId": "episode-1", **payload}
         )
         or {"episodeId": "episode-1", **payload},
+        activity_evidence_resolver=lambda _agent_id, _request: _execution_evidence(),
         now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
     )
     service.set_binding("agent-a", enabled=True, expected_version=0)
     snapshot = service.snapshot("agent-a")
     activity_id = snapshot["todaySchedule"]["activities"][0]["activityId"]
 
+    schedule = snapshot["todaySchedule"]
+    schedule["activities"][0]["requiredToolNames"] = ["recipe_tool"]
+    service.save_schedule("agent-a", schedule)
+    execution = {"runtimeAgentId": "agent-a", "sessionId": "session-agent-a", "turnId": "turn-action"}
+    started = service.execute_command(
+        "agent-a", command="startActivity",
+        expected_version=snapshot["state"]["stateVersion"],
+        idempotency_key="start-breakfast",
+        arguments={"activityId": activity_id, "executionContext": execution},
+    )
+
     completed = service.execute_command(
         "agent-a",
         command="completeActivity",
-        expected_version=snapshot["state"]["stateVersion"],
+        expected_version=started["stateVersion"],
         idempotency_key="complete-breakfast",
         arguments={
             "activityId": activity_id,
+            "executionContext": execution,
             "outcome": {
                 "status": "succeeded",
                 "summary": "做了一份很满意的早餐",
@@ -1440,7 +1461,7 @@ def test_verified_activity_outcome_drives_diary_and_memory_receipt(tmp_path: Pat
     assert receipts[0]["sourceEventIds"] == [completed["result"]["eventId"]]
 
 
-def test_heartbeat_automatically_writes_diary_and_promotes_salient_simulated_event(
+def test_heartbeat_simulation_does_not_write_diary_or_promote_memory(
     tmp_path: Path,
 ) -> None:
     agent = _active_agent("agent-a")
@@ -1481,12 +1502,11 @@ def test_heartbeat_automatically_writes_diary_and_promotes_salient_simulated_eve
 
     event = service.list_events("agent-a", date="2026-08-27")[-1]
     assert event["outcome"]["salienceScore"] >= 70
-    assert result["createdDiaryCount"] == 1
-    assert result["promotedMemoryCount"] == 1
-    assert service.list_diary("agent-a", local_date="2026-08-27")[0][
-        "sourceEventIds"
-    ] == [event["eventId"]]
-    assert episodes[0]["refs"] == [{"type": "item", "id": event["eventId"]}]
+    assert result["createdDiaryCount"] == 0
+    assert result["promotedMemoryCount"] == 0
+    assert service.list_diary("agent-a", local_date="2026-08-27") == []
+    assert episodes == []
+    assert service.snapshot("agent-a")["causal"]["interests"]["items"] == []
 
 
 def test_diary_review_retries_memory_promotion_without_duplicating_the_diary(
@@ -1529,6 +1549,8 @@ def test_diary_review_retries_memory_promotion_without_duplicating_the_diary(
                 "status": "succeeded",
                 "summary": "完成了一段新的旋律草稿。",
                 "salienceScore": 84,
+                "kind": "verified_tool_outcome",
+                "evidence": _execution_evidence(),
             },
         },
     )
@@ -1578,6 +1600,8 @@ def test_legacy_event_salience_is_derived_without_rewriting_event_ledger(
             "outcome": {
                 "status": "succeeded",
                 "summary": "完成了一段新的旋律草稿。",
+                "kind": "verified_tool_outcome",
+                "evidence": _execution_evidence(),
             },
         },
     )
@@ -1636,6 +1660,8 @@ def test_memory_projection_reuses_existing_episode_without_duplicate_write(
                 "status": "succeeded",
                 "summary": "完成一段重要的新作品。",
                 "salienceScore": 88,
+                "kind": "verified_tool_outcome",
+                "evidence": _execution_evidence(),
             },
         },
     )
@@ -1653,6 +1679,9 @@ def test_memory_projection_reuses_existing_episode_without_duplicate_write(
             "occurredAt": "2026-08-27T12:00:00Z",
             "salienceScore": 88,
             "sourceEventIds": ["event-existing"],
+            "sourceKind": "verified_action",
+            "excludedFromRecall": False,
+            "sourceRefs": [{"type": "item", "id": "event-existing"}],
             "promotedAt": memories[0]["promotedAt"],
             "baseSalienceScore": 88,
             "memoryStrengthScore": 93,
@@ -1666,6 +1695,141 @@ def test_memory_projection_reuses_existing_episode_without_duplicate_write(
             "reinforcedAt": "",
         }
     ]
+
+
+@pytest.mark.parametrize("started,required,proof", [
+    (False, True, True), (True, False, True), (True, True, False),
+])
+def test_model_completion_cannot_supply_its_own_execution_proof(
+    service: VirtualHumanLifeService, started: bool, required: bool, proof: bool,
+) -> None:
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    schedule = service.schedule_for("agent-a", "2026-08-27")
+    activity = schedule["activities"][0]
+    activity["requiredToolNames"] = ["read_file_tool"] if required else []
+    service.save_schedule("agent-a", schedule)
+    requests = []
+    service.activity_evidence_resolver = lambda _agent, request: (
+        requests.append(request) or (_execution_evidence() if proof else None)
+    )
+    execution = {"runtimeAgentId": "agent-a", "sessionId": "session-agent-a", "turnId": "turn-action"}
+    if started:
+        service.execute_command(
+            "agent-a", command="startActivity", expected_version=1,
+            idempotency_key="start-negative", arguments={
+                "activityId": activity["activityId"], "executionContext": execution,
+            },
+        )
+    result = service.execute_command(
+        "agent-a", command="completeActivity",
+        expected_version=service.snapshot("agent-a")["state"]["stateVersion"],
+        idempotency_key="complete-negative", arguments={
+            "activityId": activity["activityId"], "executionContext": execution,
+            "outcome": {"status": "succeeded", "summary": "我完成了创作。",
+                        "kind": "verified_tool_outcome", "evidence": _execution_evidence(),
+                        "salienceScore": 100},
+        },
+    )
+    event = service.list_events("agent-a", date="2026-08-27")[-1]
+    assert event["outcome"]["kind"] == "character_report"
+    assert "evidence" not in event["outcome"]
+    assert service.review_diary("agent-a", local_date="2026-08-27")["promotedMemoryCount"] == 0
+    assert not service._all_lived_events("agent-a")
+    assert result["result"]["eventId"] == event["eventId"]
+    assert bool(requests) == (started and required)
+
+
+def test_active_start_is_idempotent_for_its_turn_and_receipt_is_consumed_once(service):
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    schedule = service.schedule_for("agent-a", "2026-08-27")
+    activities = schedule["activities"][:2]
+    for activity in activities:
+        activity["requiredToolNames"] = ["read_file_tool"]
+    service.save_schedule("agent-a", schedule)
+    execution = {"runtimeAgentId": "agent-a", "sessionId": "session-agent-a", "turnId": "turn-action"}
+    evidence_requests = []
+    service.activity_evidence_resolver = lambda _agent, request: (
+        evidence_requests.append(request) or _execution_evidence()
+    )
+
+    def execute(command, key, activity, **args):
+        return service.execute_command(
+            "agent-a", command=command,
+            expected_version=service.snapshot("agent-a")["state"]["stateVersion"],
+            idempotency_key=key,
+            arguments={"activityId": activity["activityId"], "executionContext": execution, **args},
+        )
+
+    first = execute("startActivity", "start-first", activities[0])["result"]["activity"]
+    again = execute("startActivity", "start-first-again", activities[0])["result"]["activity"]
+    assert again["startedAt"] == first["startedAt"]
+    assert again["executionTurnId"] == first["executionTurnId"]
+    with pytest.raises(BindingConflictError, match="new execution"):
+        execute("startActivity", "start-wrong-turn", activities[0], executionContext={**execution, "turnId": "other-turn"})
+    execute("startActivity", "start-second", activities[1])
+    for index, activity in enumerate(activities):
+        execute("completeActivity", f"complete-{index}", activity,
+                outcome={"status": "succeeded", "summary": "读取了文件。", "salienceScore": 90})
+    events = service.list_events("agent-a", date="2026-08-27")
+    assert [event["outcome"]["kind"] for event in events] == ["verified_tool_outcome", "character_report"]
+    assert evidence_requests[1]["excludedToolCallIds"] == ["call-action"]
+    assert evidence_requests[1]["excludedReceiptEventIds"] == ["receipt-action"]
+
+
+def test_queued_companion_corrects_memory_before_native_admission(service, monkeypatch):
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.auto_mailbox_dispatch = False
+    calls = []
+    busy = [True]
+    service.conversation_busy_provider = lambda _session: busy[0]
+    monkeypatch.setattr(service, "reconcile_life_memory_sources", lambda agent: calls.append("correct"))
+    service.conversation_submitter = lambda **payload: (
+        calls.append("native") or {"accepted": True, "turnId": "native-turn"}
+    )
+    service.queue_conversation_message(
+        "agent-a", session_id="session-agent-a", client_submission_id="old-queued",
+        content="继续聊聊",)
+    calls.clear()
+    busy[0] = False
+    service.dispatch_conversation_mailbox_once("agent-a", session_id="session-agent-a")
+    assert "native" in calls
+    assert calls.index("correct") < calls.index("native")
+
+
+def test_old_simulated_reflection_is_rejected_at_read_and_approval(service):
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl("agent-a", "events/2026-08-27.jsonl", {
+        "eventId": "old-simulation", "kind": "activity_completed",
+        "outcome": {"status": "succeeded", "kind": "deterministic_simulation"},
+    })
+    service.store.append_jsonl("agent-a", "reflections/proposals.jsonl", {
+        "proposalId": "old-proposal", "sourceKind": "lived_event", "targetKind": "self_narrative",
+        "sourceEventIds": ["old-simulation"], "text": "这段真实经历让我更自信。", "status": "approved",
+    })
+    assert service.list_reflection_proposals("agent-a")[0]["status"] == "rejected"
+    with pytest.raises(VirtualHumanLifeError, match="not a verified"):
+        service.review_reflection_proposal("agent-a", proposal_id="old-proposal", decision="approve")
+    assert "这段真实经历让我更自信" not in str(service.build_prompt_segments("agent-a"))
+
+
+def test_old_simulated_proactive_candidate_cannot_trigger_a_turn(service):
+    binding = service.set_binding("agent-a", enabled=True, expected_version=0)
+    service.store.append_jsonl("agent-a", "events/2026-08-27.jsonl", {
+        "eventId": "old-simulation", "kind": "activity_completed",
+        "outcome": {"status": "succeeded", "kind": "deterministic_simulation"},
+    })
+    service.store.append_jsonl("agent-a", "proactive/candidates.jsonl", {
+        "candidateId": "old-candidate", "sourceEventId": "old-simulation",
+        "status": "pending", "score": 100, "topicKey": "creative",
+        "validUntil": "2026-08-28T00:00:00+00:00", "reason": "我完成了创作。",
+    })
+    dispatched = []
+    service.proactive_submitter = lambda **kwargs: dispatched.append(kwargs)
+    service._evaluate_proactive_candidates(
+        "agent-a", now=service._now(), binding=binding, state={}, dispatch=True,
+    )
+    assert service.list_proactive_candidates("agent-a")[0]["suppressionReason"] == "source_not_verified"
+    assert dispatched == []
 
 
 def test_schedule_planner_accepts_valid_proposal_and_falls_back_on_invalid(

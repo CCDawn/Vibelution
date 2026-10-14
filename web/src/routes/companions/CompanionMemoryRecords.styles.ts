@@ -4,7 +4,7 @@ export default {
   header: "flex min-w-0 items-baseline justify-between gap-2 text-vui-xs [&>strong]:font-medium [&>time]:shrink-0 [&>time]:text-vui-fg-tertiary",
   preview: "m-0 line-clamp-3 whitespace-pre-wrap break-words text-vui-xs leading-relaxed text-vui-fg-secondary [overflow-wrap:anywhere]",
   footer: "flex min-w-0 flex-wrap items-center justify-between gap-1.5",
-  source: "min-w-0 break-words text-vui-micro-11 leading-relaxed text-vui-fg-tertiary [overflow-wrap:anywhere]",
+  source: "m-0 min-w-0 break-words text-vui-micro-11 leading-relaxed text-vui-fg-tertiary [overflow-wrap:anywhere]",
   content: "grid min-w-0 gap-4",
   body: "m-0 whitespace-pre-wrap break-words text-vui-sm leading-relaxed text-vui-fg-primary [overflow-wrap:anywhere]",
   note: "m-0 text-vui-xs leading-relaxed text-vui-fg-tertiary",
