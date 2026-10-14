@@ -1,5 +1,6 @@
 // Placement and typography owned by the team task homepage.
 const styles = {
+  conversation: "flex min-h-0 min-w-0 flex-col gap-4",
   status: "shrink-0",
   emptyMessages: "py-4 text-sm text-[var(--fg-tertiary)]",
   messageList: "divide-y divide-[var(--vui-border-subtle)]",
@@ -9,7 +10,7 @@ const styles = {
   messageTime: "shrink-0 text-xs text-[var(--fg-tertiary)]",
   messageBody: "mt-1 min-w-0 break-words text-[15px] leading-6 text-[var(--fg-secondary)]",
   earlierLink: "mt-2 !min-h-11 !px-0 text-sm",
-  // The containing VCanvasWorkbenchPage owns the white 12px pane boundary.
+  // TeamWorkspaceFrame owns the shared panel boundary.
   frame: "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
   header: "shrink-0 border-b border-[var(--vui-border-subtle)] p-2",
   headerCopy: "min-w-0 flex-1",

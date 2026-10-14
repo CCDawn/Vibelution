@@ -272,7 +272,7 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
     onStopTeamRound({ roomId: linkedChatRoomId, teamId: selectedTeam.teamId });
   };
 
-  const conversation = <div className="flex min-h-0 min-w-0 flex-col gap-4">
+  const conversation = <div className={styles.conversation}>
     <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header}`}><div className={styles.headerCopy}>
           <p className={styles.eyebrow}>{lang === "zh" ? "当前任务" : "Current task"}</p>
           <h2 className={styles.title}>{currentTitle}</h2>

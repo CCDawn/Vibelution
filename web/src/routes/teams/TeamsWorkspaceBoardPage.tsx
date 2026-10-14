@@ -3,6 +3,7 @@ import { TeamsOverviewComposer } from "./TeamsOverviewComposer";
 import { TeamsWorkbenchInspectorOverlay, type TeamsWorkbenchBoardPageProps } from "./renderTeamsWorkbenchBoardPage";
 import type { ReactNode } from "react";
 import { VButton } from "../../components/vui";
+import styles from "./TeamsWorkspaceBoardPage.styles";
 import { TEAMS_LAYOUT_ID } from "./teamsWorkbenchChrome";
 
 export function renderTeamsWorkspaceBoardPage(p: TeamsWorkbenchBoardPageProps & { teamSwitcher?: ReactNode }) {
@@ -16,7 +17,7 @@ export function renderTeamsWorkspaceBoardPage(p: TeamsWorkbenchBoardPageProps & 
       inspector={p.showBoardInspectorAside && !p.narrowInspector ? p.inspectorBody : undefined}
       canvas={<TeamsOverviewComposer lang={p.lang} boardPrimaryMode={p.boardPrimaryMode as any}
         workflowPending={p.workflowPending} workflowReady={p.workflowReady}
-        className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-auto"
+        className={styles.overview}
         challengeWorkspaceClassName={p.styles.challengeWorkspaceBody}
         challengeCupResearchTeamSelected={p.challengeCupResearchTeamSelected}
         overviewSlot={p.overviewSlot} stageSlot={p.stageSlot} launcherSlot={p.launcherSlot} />}
