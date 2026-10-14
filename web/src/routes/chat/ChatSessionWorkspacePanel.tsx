@@ -13,7 +13,8 @@ import { ConversationShareExportButton } from "../../components/conversation/Con
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
-import { ChatToolApprovalDialog, type ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
+import { ChatToolApprovalDialog } from "./ChatToolApprovalDialog";
+import type { ChatToolApprovalSurface } from "./useChatToolApprovalBridge";
 import styles from "./ChatSessionWorkspacePanel.styles";
 
 /** T2: file preview only when that surface is active. Tool approval is eager (blocking path). */
@@ -56,22 +57,9 @@ type ChatSessionWorkspacePanelProps = {
   hideExportControl?: boolean;
   noSessionsLabel: string;
   notices: SessionRuntimeNotice[];
-  onApproveToolApproval: () => void;
-  onApproveToolForSession?: () => void;
-  onRejectToolApproval: () => void;
   sessionsPending: boolean;
-  toolApproval: {
-    /** Stable identity for the pending request — keeps the dialog from remount-flashing. */
-    requestId?: string;
-    pending: boolean;
-    rawTitle: string;
-    riskLabel: string;
-    scopeLabel: string;
-    toolLabels: ChatToolApprovalLabel[];
-    actionPreview?: string;
-    sessionGrantScope?: Record<string, unknown>;
-    toolName?: string;
-  } | null;
+  /** Pending request plus its approve/reject actions. Null when nothing is waiting. */
+  toolApproval: ChatToolApprovalSurface | null;
   transientErrorMessage: string;
   workspaceActiveTab: string;
 };
@@ -95,9 +83,6 @@ export function ChatSessionWorkspacePanel({
   hideExportControl = false,
   noSessionsLabel,
   notices,
-  onApproveToolApproval,
-  onApproveToolForSession,
-  onRejectToolApproval,
   sessionsPending,
   toolApproval,
   transientErrorMessage,
@@ -129,18 +114,15 @@ export function ChatSessionWorkspacePanel({
             sessionGrantScope={toolApproval.sessionGrantScope}
             toolName={toolApproval.toolName}
             variant="banner"
-            onApprove={onApproveToolApproval}
-            onApproveForSession={onApproveToolForSession}
-            onReject={onRejectToolApproval}
+            onApprove={toolApproval.onApprove}
+            onApproveForSession={toolApproval.onApproveForSession}
+            onReject={toolApproval.onReject}
           />
         </div>
       ),
     }
     : null), [
     lang,
-    onApproveToolApproval,
-    onApproveToolForSession,
-    onRejectToolApproval,
     toolApproval,
   ]);
 

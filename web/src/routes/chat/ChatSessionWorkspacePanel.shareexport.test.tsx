@@ -15,7 +15,7 @@ const props = {
   conversation: { sessionId: "sess-9", messages: [], composer: {} }, conversationFocused: false,
   lang: "zh", workspaceActiveTab: "agent", notices: [], sessionsPending: false,
   toolApproval: null, filePreview: {}, hasBlockingError: false, hasTransientError: false,
-  invalidChildSessionLinkMessage: "", onApproveToolApproval: () => {}, onRejectToolApproval: () => {},
+  invalidChildSessionLinkMessage: "",
 } as unknown as ComponentProps<typeof ChatSessionWorkspacePanel>;
 
 describe("ChatSessionWorkspacePanel share export wiring", () => {

@@ -105,8 +105,6 @@ export function ChatReadOnlySessionWorkspace({
       loadingSessionLabel={loadingLabel}
       noSessionsLabel={emptyLabel}
       notices={sessionDetail?.runtimeNotices ?? []}
-      onApproveToolApproval={ignoreReadOnlyAction}
-      onRejectToolApproval={ignoreReadOnlyAction}
       sessionsPending={loading || (live && !normalizedSessionId)}
       toolApproval={null}
       transientErrorMessage={errorMessage}

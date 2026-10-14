@@ -2234,9 +2234,6 @@ export function ChatCodingRouteWorkbench() {
   const {
     sessionIdsNeedingApproval,
     toolApproval,
-    handleApproveToolApproval,
-    handleApproveToolForSession,
-    handleRejectToolApproval,
   } = useChatToolApprovalBridge({
     detail,
     sessionToolApprovals: sessionToolApprovalsQuery.data,
@@ -3911,9 +3908,6 @@ export function ChatCodingRouteWorkbench() {
               toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}
               workspaceActiveTab={conversationWorkspaceTab}
-              onApproveToolApproval={handleApproveToolApproval}
-              onApproveToolForSession={handleApproveToolForSession}
-              onRejectToolApproval={handleRejectToolApproval}
             />
             </FollowupQueueTogglePauseContext.Provider>
             )}

@@ -33,30 +33,24 @@ export interface UseChatToolApprovalBridgeParams {
   };
 }
 
+export interface ChatToolApprovalSurface {
+  requestId?: string;
+  pending: boolean;
+  rawTitle: string;
+  riskLabel: string;
+  scopeLabel: string;
+  toolLabels: Array<{ id: string; label: string }>;
+  actionPreview?: string;
+  sessionGrantScope?: Record<string, unknown>;
+  toolName?: string;
+  onApprove: () => void;
+  onApproveForSession?: () => void;
+  onReject: () => void;
+}
+
 export interface ChatToolApprovalBridgeState {
-  pendingToolGovernanceApproval: AgentToolGovernanceRequest | null;
-  pendingSessionToolApproval: SessionToolApprovalRequest | null;
   sessionIdsNeedingApproval: string[];
-  pendingToolApprovalLabels: Array<{ id: string; label: string }>;
-  pendingToolApprovalRawTitle: string;
-  pendingToolApprovalActionPreview: string;
-  pendingToolApprovalScope: string;
-  pendingToolApprovalRisk: string;
-  pendingToolApprovalPending: boolean;
-  toolApproval: {
-    requestId?: string;
-    pending: boolean;
-    rawTitle: string;
-    riskLabel: string;
-    scopeLabel: string;
-    toolLabels: Array<{ id: string; label: string }>;
-    actionPreview?: string;
-    sessionGrantScope?: Record<string, unknown>;
-    toolName?: string;
-  } | null;
-  handleApproveToolApproval: () => void;
-  handleApproveToolForSession: (() => void) | undefined;
-  handleRejectToolApproval: () => void;
+  toolApproval: ChatToolApprovalSurface | null;
 }
 
 export function useChatToolApprovalBridge({
@@ -191,8 +185,14 @@ export function useChatToolApprovalBridge({
       actionPreview: pendingToolApprovalActionPreview,
       sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
       toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
+      onApprove: handleApproveToolApproval,
+      onApproveForSession: handleApproveToolForSession,
+      onReject: handleRejectToolApproval,
     };
   }, [
+    handleApproveToolApproval,
+    handleApproveToolForSession,
+    handleRejectToolApproval,
     pendingSessionToolApproval,
     pendingToolGovernanceApproval,
     pendingToolApprovalPending,
@@ -204,18 +204,7 @@ export function useChatToolApprovalBridge({
   ]);
 
   return {
-    pendingToolGovernanceApproval,
-    pendingSessionToolApproval,
     sessionIdsNeedingApproval,
-    pendingToolApprovalLabels,
-    pendingToolApprovalRawTitle,
-    pendingToolApprovalActionPreview,
-    pendingToolApprovalScope,
-    pendingToolApprovalRisk,
-    pendingToolApprovalPending,
     toolApproval,
-    handleApproveToolApproval,
-    handleApproveToolForSession,
-    handleRejectToolApproval,
   };
 }
