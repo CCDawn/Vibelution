@@ -10,7 +10,7 @@ import { FINANCE_WORKSPACE_GROUPS, financeWorkspaceGroup } from "./financeWorksp
 
 export type FinanceSessionCollection = "recent" | "archived";
 type Props = {
-  records: SessionSummary[]; selectedId: string; zh: boolean; area: string;
+  records: SessionSummary[]; selectedId: string; zh: boolean; area: string; sessionsOnly?: boolean;
   collection: FinanceSessionCollection; onCollectionChange: (value: FinanceSessionCollection) => void;
   search: string; onSearchChange: (value: string) => void;
   loading: boolean; error: boolean; hasMore: boolean; morePending: boolean;
@@ -46,10 +46,10 @@ export function FinanceWorkspaceSidebar(props: Props) {
   const activeGroup = financeWorkspaceGroup(props.area);
   const batchDisabled = !selected.length || props.actionPending || props.loading || props.error;
   return <div className={styles.root}>
-    <nav aria-label={zh ? "工作台功能分组" : "Workspace groups"} className={styles.rail}>
+    {!props.sessionsOnly ? <nav aria-label={zh ? "工作台功能分组" : "Workspace groups"} className={styles.rail}>
       {FINANCE_WORKSPACE_GROUPS.map(group => { const Icon = groupIcons[group.id]; return <VButton key={group.id} variant="ghost" className={[styles.groupButton, activeGroup.id === group.id ? styles.groupSelected : styles.quiet].join(" ")} icon={<Icon size={17} />} aria-label={zh ? group.zh : group.en} title={zh ? group.zh : group.en} aria-pressed={activeGroup.id === group.id} onPress={() => props.onNavigate(group.areas[0].id)} />; })}
       <VRouteLinkButton className={[styles.quiet, styles.configLink].join(" ")} to={props.configHref} aria-label={zh ? "模型与助手配置" : "Assistant settings"} title={zh ? "模型与助手配置" : "Assistant settings"}><Settings2 size={16} /></VRouteLinkButton>
-    </nav>
+    </nav> : null}
     <div className={styles.sessions}>
       <div className={styles.heading}><strong className={styles.title}>{zh ? "会话" : "Sessions"}</strong><VButton variant="ghost" className={styles.newResearch} icon={<Plus size={14} />} isPending={props.creating} onPress={props.onNewResearch}>{zh ? "新研究" : "New"}</VButton>{props.onCollapse ? <VIconButton variant="ghost" className={styles.iconButton} label={zh ? "收起会话栏" : "Collapse sessions"} icon={<PanelLeftClose size={16} />} onPress={props.onCollapse} /> : null}</div>
       <div className={styles.controls}><div className={styles.search}><Search className={styles.searchIcon} size={14} aria-hidden="true" /><VInput className={styles.searchInput} value={search} onChange={event => props.onSearchChange(event.target.value)} maxLength={200} aria-label={collection === "archived" ? (zh ? "搜索已加载归档会话" : "Search loaded archived sessions") : (zh ? "搜索研究会话" : "Search research sessions")} placeholder={zh ? "搜索会话" : "Search sessions"} /></div>{props.onBatchAction ? <VButton variant="ghost" className={styles.manage} aria-pressed={managing} isDisabled={props.actionPending} onPress={() => { setManaging(!managing); setSelectedIds([]); }}>{managing ? (zh ? "完成" : "Done") : (zh ? "管理" : "Manage")}</VButton> : null}</div>

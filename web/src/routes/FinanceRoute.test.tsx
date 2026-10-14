@@ -114,15 +114,17 @@ async function render(path = "/finance") {
   await settle();
 }
 async function settle() { await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); }
-function button(label: string) { return [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label)); }
+function button(label: string) { return [...document.querySelectorAll("button")].find((item) => item.textContent?.includes(label) || item.getAttribute("aria-label") === (label === "新研究" ? "新建会话" : label)); }
 async function chooseTab(label: string) {
-  const tab = [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === label)!;
-  await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+  const tab = [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === label);
+  if (tab) await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+  else await act(async () => button(label)!.click());
 }
 async function chooseGroup(label: string) {
-  const group = [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="工作台功能分组"] button')].find(item => item.getAttribute("aria-label") === label)!;
-  await act(async () => group.click());
+  const first = { 研究: "股票研究", 行情: "自选行情", 资产: "模拟账户", 资料: "报告中心" }[label];
+  await act(async () => button(first || label)!.click());
 }
+async function openSessionManager() { await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="全部会话"]')!.click()); await settle(); }
 async function openResearchSettings() {
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="股票资料与研究设置"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
   await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes("股票概览与研究设置"))!.click());
@@ -139,7 +141,7 @@ function stageResearchMessages(): SessionDetail["messages"] {
   ];
 }
 async function input(label: string, value: string) {
-  const field = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const field = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value);
     field.dispatchEvent(new Event("input", { bubbles: true }));
@@ -252,7 +254,7 @@ describe("financial assistant page", () => {
     await render("/finance?session=native-session&finance_tab=report");
     await settle();
     expect(container.querySelector("[data-finance-report-body]")?.textContent).toContain("11.57元/股");
-    expect(container.querySelector('[aria-label="当前主题"]')?.textContent).toContain(nativeTitle);
+    expect(container.querySelector('[aria-label="当前研究主题"]')?.textContent).toContain(nativeTitle);
     expect(container.querySelector('[aria-label="当前股票"]')).toBeNull();
     expect(createChatSession).not.toHaveBeenCalled();
     expect(nativeSubmit).not.toHaveBeenCalled();
@@ -275,18 +277,21 @@ describe("financial assistant page", () => {
   it("opens the native conversation first and retains all grouped workspace views", async () => {
     await render("/finance?session=native-session");
     const draft = container.querySelector('textarea[aria-label="native draft"]');
-    expect(draft?.closest('[aria-hidden]')?.getAttribute("aria-hidden")).toBe("false");
+    expect(draft?.closest('[data-finance-native-conversation]')).not.toBeNull();
+    expect(draft?.closest('[data-vui="split-aside"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="公司或股票代码"]')).toBeNull();
-    expect(container.querySelector('[data-finance-session-scroll]')).not.toBeNull();
-    const views = (label: string) => [...container.querySelectorAll(`[role="tablist"][aria-label="${label}功能"] [role="tab"]`)].map(tab => tab.textContent);
-    expect(views("研究")).toEqual(["股票研究", "主题研究", "分析员协作", "研究任务", "总览"]);
+    expect(container.querySelector('[data-finance-session-scroll]')).toBeNull();
+    expect(container.querySelector('[data-finance-desktop-sessions]')).not.toBeNull();
+    const views = (label: string) => [...container.querySelectorAll('nav[aria-label="股票智能体功能"] section')].find(group => group.querySelector('div')?.textContent === label)?.querySelectorAll('button');
+    const labels = (label: string) => [...(views(label) ?? [])].map(button => button.textContent);
+    expect(labels("研究")).toEqual(["股票研究", "主题研究", "分析员协作", "研究任务", "总览"]);
     await chooseGroup("行情");
-    expect(views("行情")).toEqual(["自选行情", "股票筛选"]);
+    expect(labels("行情")).toEqual(["自选行情", "股票筛选"]);
     expect(container.querySelector('[aria-label="公司或股票代码"]')).not.toBeNull();
     await chooseGroup("资产");
-    expect(views("资产")).toEqual(["模拟账户", "组合研究", "历史回测", "交易复盘"]);
+    expect(labels("资产")).toEqual(["模拟账户", "组合研究", "历史回测", "交易复盘"]);
     await chooseGroup("资料");
-    expect(views("资料")).toEqual(["报告中心", "研究记忆", "技能中心", "学习中心"]);
+    expect(labels("资料")).toEqual(["报告中心", "研究记忆", "技能中心", "学习中心"]);
     await chooseGroup("研究");
     expect(container.querySelector('textarea[aria-label="native draft"]')).toBe(draft);
     expect(createChatSession).not.toHaveBeenCalled();
@@ -298,10 +303,11 @@ describe("financial assistant page", () => {
       items: [{ ...nativeSession(params.cursor ? "next-match" : "body-match"), title: params.cursor ? "后续记录" : "经营质量", updatedAt: "2026-10-05T13:49:11" }], nextCursor: params.cursor ? "" : "next-page",
     } as SessionQueryResponse : { items: [nativeSession("native-session")], nextCursor: "" } as SessionQueryResponse);
     await render("/finance?session=native-session");
+    await openSessionManager();
     await input("搜索研究会话", "正文关键词");
     await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
     await settle();
-    const list = container.querySelector('[data-finance-session-scroll]')!;
+    const list = document.querySelector('[data-finance-session-scroll]')!;
     expect(list.textContent).toContain("经营质量");
     await act(async () => button("更多会话")!.click());
     await settle();
@@ -668,6 +674,7 @@ describe("financial assistant page", () => {
     await render("/finance?session=native-session");
     expect(container.textContent).not.toContain("外部会话");
     expect(container.textContent).not.toContain("已归档记录");
+    await openSessionManager();
     await act(async () => button("年度研究")!.click());
     await settle();
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=history-session");
@@ -719,7 +726,8 @@ describe("financial assistant page", () => {
     expect(querySessions).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance-a", q: "只在正文出现的关键词" }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(input.closest('[data-finance-report-history]')?.textContent).toContain("经营质量");
     expect(input.closest('[data-finance-report-history]')?.textContent).not.toContain("原生研究");
-    expect(container.textContent).toContain("年度研究");
+    await openSessionManager();
+    expect(document.querySelector('[data-finance-session-scroll]')?.textContent).toContain("年度研究");
   });
 
   it("creates once on a double click and does not steal selection after opening history", async () => {
@@ -732,6 +740,7 @@ describe("financial assistant page", () => {
     await act(async () => { create.click(); create.click(); });
     expect(createChatSession).toHaveBeenCalledTimes(1);
     expect(createChatSession).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance-a" }), expect.any(String));
+    await openSessionManager();
     await act(async () => button("年度研究")!.click());
     await settle();
     await act(async () => resolve(nativeSession("late-session")));
@@ -775,7 +784,7 @@ it("keeps a newly selected stock separate from the previous native research unti
   await render("/finance?session=native-session&finance_tab=overview&finance_asideTab=process");
   expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe("贵州茅台 (600519)");
   expect(container.textContent).not.toContain("old_stock_tool");
-  expect(container.querySelector('[aria-label="研究辅助面板"] [aria-selected="true"]')?.textContent).toBe("过程");
+  expect(document.querySelector('[role="dialog"] [aria-label="研究辅助面板"] [aria-selected="true"]')?.textContent).toBe("过程");
   await chooseTab("研究报告");
   expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe("贵州茅台 (600519)");
   expect(container.textContent).toContain("这只股票还没有研究报告");
@@ -789,7 +798,7 @@ it("keeps a newly selected stock separate from the previous native research unti
 
 it("opens backtests directly under assets with a stock picker and no irrelevant inspector", async () => {
   await render("/finance?session=native-session&finance_area=backtest");
-  expect(container.querySelector('[aria-label="资产功能"] [aria-selected="true"]')?.textContent).toBe("历史回测");
+  expect(container.querySelector('nav[aria-label="股票智能体功能"] button[aria-pressed="true"]')?.textContent).toBe("历史回测");
   expect(container.querySelector('[aria-label="公司或股票代码"]')).not.toBeNull();
   expect(container.textContent).toContain("检查数据与预算");
   expect(container.querySelector('[aria-label="辅助栏操作"]')).toBeNull();

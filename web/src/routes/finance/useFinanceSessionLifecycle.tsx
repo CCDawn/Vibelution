@@ -51,12 +51,14 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
   const [notice, setNotice] = useState("");
   const [canUndoBatchArchive, setCanUndoBatchArchive] = useState(false);
   const [deleting, setDeleting] = useState<DeleteConfirmation | null>(null);
+  const [removedSessionIds, setRemovedSessionIds] = useState<string[]>([]);
   useEffect(() => {
     gate.current = false;
     verifiedDeletes.current.clear();
     undoableArchives.current = [];
     returnFocusTarget.current = null;
     setPending(false); setError(""); setNotice(""); setDeleting(null); setCanUndoBatchArchive(false);
+    setRemovedSessionIds([]);
   }, [agentId]);
 
   function operation(): LifecycleOperation { return { agentId, generation: generation.current }; }
@@ -96,6 +98,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         if (result.sessionId !== record.id) throw new Error(zh ? "会话操作返回了其他研究" : "Session operation identity mismatch");
       }
       changed = true;
+      if (isCurrent(request)) setRemovedSessionIds(ids => action === "restore" ? ids.filter(id => id !== record.id) : ids.includes(record.id) ? ids : [...ids, record.id]);
       if (isCurrent(request)) setDeleting(null);
       await Promise.all([
         client.cancelQueries({ queryKey: ["sessions", "finance", agentId] }),
@@ -297,6 +300,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
     : (zh ? `「${deleting?.records[0]?.title || "研究会话"}」的会话记录将被删除。需要保留时可改用归档。` : `The conversation for “${deleting?.records[0]?.title || "Research"}” will be deleted. Archive it to keep the record.`);
 
   return {
+    removedSessionIds,
     requestAction,
     requestBatchAction,
     undoBatchArchive,
