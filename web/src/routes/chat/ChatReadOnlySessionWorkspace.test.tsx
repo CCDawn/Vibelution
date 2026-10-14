@@ -5,7 +5,7 @@ import source from "./ChatReadOnlySessionWorkspace.tsx?raw";
 describe("ChatReadOnlySessionWorkspace", () => {
   it("reuses the formal Chat workspace and canonical conversation bridge", () => {
     expect(source).toContain("ChatSessionWorkspacePanel");
-    expect(source).toContain("conversation={sessionDetail ? {");
+    expect(source).toContain("conversation: sessionDetail ? {");
     expect(source).toContain("messages: sessionDetail.messages");
     expect(source).toContain("showHeader: false");
     expect(source).toContain("showSessionOverview: false");
@@ -25,7 +25,7 @@ describe("ChatReadOnlySessionWorkspace", () => {
   it("keeps the embedded session read-only without manufacturing fallback messages", () => {
     expect(source).toContain("disabled: true");
     expect(source).toContain("actionDisabled: true");
-    expect(source).toContain("hasBlockingError={hasSessionError && !sessionDetail}");
+    expect(source).toContain("hasBlockingError: hasSessionError && !sessionDetail");
     expect(source).not.toContain("role: \"assistant\"");
     expect(source).not.toContain("snapshot");
   });
