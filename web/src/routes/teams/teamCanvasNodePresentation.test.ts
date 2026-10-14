@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { TeamCanvasNode } from "../../api/types";
 import {
   canvasNodeAgentLine,
+  canvasNodeSecondaryLines,
+  canvasNodeTitle,
   canvasNodeRoleBadgeKind,
   canvasNodeToneKind,
   nodeToneClass,
@@ -10,6 +12,17 @@ import {
 } from "./teamCanvasNodePresentation";
 
 describe("teamCanvasNodePresentation", () => {
+  it("presents a resolved member name for machine-generated labels, preserving custom node titles", () => {
+    const node = { id: "search", label: "challenge_cup_search", agentName: "搜索 Agent" } as TeamCanvasNode;
+    expect(canvasNodeTitle(node)).toBe("搜索 Agent");
+    expect(canvasNodeTitle({ ...node, label: "资料负责人" }, "搜索 Agent")).toBe("资料负责人");
+  });
+  it("removes repeated member names and roles but keeps a distinct assignee and purpose", () => {
+    const node = { label: "开发工程师 A", purpose: "编码实现" } as TeamCanvasNode;
+    expect(canvasNodeSecondaryLines(node, "开发工程师 A Agent", "编码实现")).toEqual({ agent: "", purpose: "" });
+    expect(canvasNodeSecondaryLines({ ...node, purpose: "补齐登录测试" }, "顾言初", "编码实现"))
+      .toEqual({ agent: "顾言初", purpose: "补齐登录测试" });
+  });
   it("classifies role badge and node tone kinds", () => {
     const lead = { role: "research_ceo", purpose: "lead", agentId: "a1", status: "bound" } as TeamCanvasNode;
     expect(canvasNodeRoleBadgeKind(lead)).toBe("lead");

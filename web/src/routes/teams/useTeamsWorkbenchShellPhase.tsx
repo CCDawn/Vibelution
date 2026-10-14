@@ -262,7 +262,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
 
   useEffect(() => {
     if (searchParams.get("teamConversationTeamId") === effectiveTeamId
-      && ["group", "member"].includes(searchParams.get("teamConversation") || "")) return;
+      && ["group", "member", "canvas"].includes(searchParams.get("teamConversation") || "")) return;
     if (!challengeCupResearchTeamSelected || !effectiveTeamId) {
       return;
     }
@@ -289,7 +289,9 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
   const teamConversationRequested = searchParams.get("teamConversationTeamId") === effectiveTeamId
     && ["group", "member"].includes(searchParams.get("teamConversation") || "");
-  const researchCanvasVisible = teamConversationRequested || (teamShellMode === "canvas" && !researchWorkflowTeamSelected);
+  const teamCanvasRequested = searchParams.get("teamConversationTeamId") === effectiveTeamId
+    && searchParams.get("teamConversation") === "canvas";
+  const researchCanvasVisible = teamConversationRequested || teamCanvasRequested || (teamShellMode === "canvas" && !researchWorkflowTeamSelected);
   // The Challenge Cup workflow owns its process rail and split geometry inside
   // ResearchProcessWorkspace; the generic team shell must not mount a second rail.
   const suppressOuterTeamShellChrome =
@@ -648,7 +650,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ? teamShellStagesFromBoardColumns(researchBoardColumns, lang)
     : [];
   const statusNodes = researchCanvasVisible
-    ? teamShellNodesFromCanvas(displayCanvasNodes ?? [], lang)
+    ? teamShellNodesFromCanvas(displayCanvasNodes ?? [], lang,
+      new Map((selectedTeam?.members ?? []).map((member: { agentId: string; agentName: string; role: string }) => [member.agentId, member.agentName || member.role])))
     : [];
   const devTeamSelected = selectedTeam?.teamTemplateId === "dev-team";
   const statusNextTitle = researchWorkflowTeamSelected && researchPrimaryAction
@@ -902,7 +905,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       onNodePointerUp: finishNodeDrag,
       onNodePointerCancel: finishNodeDrag,
       canvasAuthoring,
-      teamHome: !researchWorkflowTeamSelected || teamConversationRequested ? {
+      teamHome: !researchWorkflowTeamSelected || teamConversationRequested || teamCanvasRequested ? {
         lang,
         selectedTeam,
         conversationRequested: teamConversationRequested,

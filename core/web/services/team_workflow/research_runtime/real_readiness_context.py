@@ -236,12 +236,9 @@ class RealDomainReadinessContext:
         filters, so this returns the raw invocation facts.
         """
         try:
-            records = self._store.submit(
-                lambda uow: uow.repository.list_knowledge_invocations_for_parent(
-                    run_id
-                ),
-                force_flush=True,
-            ).result(timeout=10)
+            records = self._store.read(
+                lambda repo: repo.list_knowledge_invocations_for_parent(run_id)
+            )
         except Exception:  # noqa: BLE001 - unreadable ledger fails closed
             return []
         try:
@@ -507,14 +504,13 @@ class RealDomainReadinessContext:
         return readiness_providers.is_agent_resolvable(agent_id)
 
     def recovery_blocker_codes(self, run_id: str) -> Sequence[str]:
-        rows = self._store.submit(
-            lambda uow: uow.repository.execute(
+        rows = self._store.read(
+            lambda repo: repo.execute(
                 "SELECT problem_code FROM recovery_records "
                 "WHERE run_id = ? AND status = 'open'",
                 (run_id,),
             ).fetchall(),
-            force_flush=True,
-        ).result(timeout=10)
+        )
         return [str(row[0]) for row in rows]
 
     def adapter_registered(self, node_id: str) -> bool:
@@ -552,10 +548,9 @@ class RealDomainReadinessContext:
         return self._registry.get(kind) is not None
 
     def incoming_handoffs(self, run_id: str, node_id: str) -> Sequence[HandoffSnapshot]:
-        rows = self._store.submit(
-            lambda uow: uow.repository.list_handoffs_for_node(run_id, node_id),
-            force_flush=True,
-        ).result(timeout=10)
+        rows = self._store.read(
+            lambda repo: repo.list_handoffs_for_node(run_id, node_id)
+        )
         return [
             HandoffSnapshot(
                 handoff_id=str(row[0]),
@@ -602,14 +597,13 @@ def _budget_consumed_from_ledger(
     store: WorkflowLedgerStore, run_id: str, *, stage_id: str
 ) -> dict[str, int]:
     try:
-        rows = store.submit(
-            lambda uow: uow.repository.execute(
+        rows = store.read(
+            lambda repo: repo.execute(
                 "SELECT reserved_json, settled_json, status FROM budget_receipts "
                 "WHERE run_id = ? AND stage_id = ?",
                 (run_id, stage_id),
             ).fetchall(),
-            force_flush=True,
-        ).result(timeout=10)
+        )
     except Exception:
         return {}
     tokens = 0
@@ -658,12 +652,12 @@ def _budget_consumed_from_ledger(
 
 def _run_ids_for(store: WorkflowLedgerStore, team_id: str) -> list[str]:
     """Team history lookup for callers that did not request an execution run."""
-    rows = store.submit(
-        lambda uow: uow.repository.execute(
+    rows = store.read(
+        lambda repo: repo.execute(
             "SELECT run_id FROM workflow_runs WHERE team_id = ? "
             "ORDER BY created_at_ms DESC LIMIT 50", (team_id,),
-        ).fetchall(), force_flush=True,
-    ).result(timeout=10)
+        ).fetchall(),
+    )
     return [str(row[0]) for row in rows]
 
 

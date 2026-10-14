@@ -63,9 +63,9 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
         ) : (
           <VStateSurface
             tone={props.error ? "error" : "loading"}
-            title={props.unavailableMessage ?? (props.error
-              ? (lang === "zh" ? "流程定义无法读取" : "Workflow definition unavailable")
-              : (lang === "zh" ? "加载流程定义" : "Loading workflow definition"))}
+            title={props.error
+              ? (lang === "zh" ? "研究状态读取失败" : "Research state unavailable")
+              : props.unavailableMessage ?? (lang === "zh" ? "加载流程定义" : "Loading workflow definition")}
             fill
             className={styles.loading}
           />

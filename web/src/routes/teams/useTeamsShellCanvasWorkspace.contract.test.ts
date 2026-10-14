@@ -113,6 +113,20 @@ function rerenderHook(input: UseTeamsShellCanvasWorkspaceInput): TeamsShellCanva
   return capturedApi;
 }
 
+it("measures the canvas when it mounts after loading and when its element changes", () => {
+  const api = mountHook(baseInput());
+  const makeFrame = (width: number, height: number) => {
+    const frame = document.createElement("div");
+    Object.defineProperties(frame, { clientWidth: { value: width }, clientHeight: { value: height } });
+    return frame;
+  };
+  act(() => api.canvasFrameRef(makeFrame(640, 480)));
+  expect(capturedApi?.canvasFrameSize).toEqual({ width: 640, height: 480 });
+  act(() => api.canvasFrameRef(null));
+  act(() => api.canvasFrameRef(makeFrame(800, 600)));
+  expect(capturedApi?.canvasFrameSize).toEqual({ width: 800, height: 600 });
+});
+
 describe("useTeamsShellCanvasWorkspace non-research shell ownership", () => {
   afterEach(() => {
     if (root) {
