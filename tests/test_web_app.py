@@ -2604,6 +2604,8 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
         "_resolve_session_agent_llm",
         lambda *_args, **_kwargs: SimpleNamespace(
             model_id="test-dialogue-model",
+            model_ref=session_agent["llmBindings"]["dialogue"]["modelId"],
+            reasoning_effort_requested="",
             config=SimpleNamespace(),
             log_fields=lambda: {"llmModelId": "test-dialogue-model"},
         ),
@@ -2740,6 +2742,8 @@ def test_session_worker_seeds_active_skill_contract_on_later_turn(tmp_path, monk
         "_resolve_session_agent_llm",
         lambda *_args, **_kwargs: SimpleNamespace(
             model_id="test-dialogue-model",
+            model_ref=session_agent["llmBindings"]["dialogue"]["modelId"],
+            reasoning_effort_requested="",
             config=SimpleNamespace(),
             log_fields=lambda: {"llmModelId": "test-dialogue-model"},
         ),
