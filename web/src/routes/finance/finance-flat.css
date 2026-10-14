@@ -1,0 +1,48 @@
+/* Finance keeps VUI semantics and theme colors, with flat control chrome.
+   Shared by the product workspace and its isolated desktop preview. */
+:is([data-vui-domain-recipe="financial-assistant-workspace"], .finance-desktop-preview) {
+  --vui-control-face: var(--vui-surface-panel);
+  --vui-primary-face: var(--accent-cool);
+  --vui-control-shadow: none;
+  --vui-field-shadow: none;
+  --vui-control-hover-shadow: none;
+  --vui-component-control-hover-shadow: none;
+  --vui-native-control-shadow-hover: none;
+  --vui-sheen: none;
+  --vui-elevation-1: none;
+  --vui-elevation-2: none;
+  --vui-elevation-1-sheen: none;
+  --vui-elevation-2-sheen: none;
+  --vui-elevation-panel: none;
+  --vui-workbench-shadow: none;
+}
+
+:is([data-vui-domain-recipe="financial-assistant-workspace"], .finance-desktop-preview)
+  :is(button, input, textarea, select, [role="tab"], [data-vui="surface"]) {
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+:is([data-vui-domain-recipe="financial-assistant-workspace"], .finance-desktop-preview)
+  button[data-variant="secondary"] {
+  background: var(--vui-surface-panel);
+}
+
+:is([data-vui-domain-recipe="financial-assistant-workspace"], .finance-desktop-preview)
+  button[data-variant="secondary"]:hover:not(:disabled) {
+  background: var(--vui-control-hover-bg);
+}
+
+:is([data-vui-domain-recipe="financial-assistant-workspace"], .finance-desktop-preview)
+  [role="tab"][data-state="active"] {
+  background-color: color-mix(in srgb, var(--accent-cool) 9%, var(--vui-surface-panel));
+  border-color: color-mix(in srgb, var(--accent-cool) 25%, var(--vui-border-subtle));
+  color: var(--accent-cool);
+}
+
+/* An outline remains visible when shadow-based Tailwind rings are removed. */
+:is([data-vui-domain-recipe="financial-assistant-workspace"], .finance-desktop-preview)
+  :is(button, input, textarea, select, [role="tab"]):is(:focus-visible, [data-focus-visible="true"]) {
+  outline: 2px solid var(--accent-cool) !important;
+  outline-offset: 2px;
+}

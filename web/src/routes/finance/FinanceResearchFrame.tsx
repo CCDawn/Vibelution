@@ -11,6 +11,7 @@ import {
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { persistPaneVisibility, readPaneVisibility } from "../../components/layout/paneVisibilityPersistence";
 import styles from "../FinanceRoute.styles";
+import "./finance-flat.css";
 
 export function FinanceResearchFrame({
   zh, sidebar, aside, children, loading = true, title, meta, actions, asideHeader, asideMeta, asideFooter, hideAside = false,

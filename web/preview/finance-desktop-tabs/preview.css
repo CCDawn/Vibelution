@@ -3,6 +3,7 @@
 @import "../../src/design/tailwind.css";
 @import "../../src/design/vui-provider-theme.css";
 @import "../../src/design/vui-native-controls.css";
+@import "../../src/routes/finance/finance-flat.css";
 @source "./main.tsx";
 @source "./tools.tsx";
 @source "./research-detail.tsx";
