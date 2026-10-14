@@ -174,7 +174,9 @@ describe("MemoryRoute layout contract", () => {
     expect(contentBrowsePanelSource).toContain("VSection");
     expect(contentBrowsePanelSource).toContain("VSkeleton");
     expect(contentBrowsePanelSource).toContain("toReadableMemoryBlocks");
-    expect(contentBrowsePanelSource).not.toContain("VSplitWorkspace");
+    expect(contentBrowsePanelSource).toContain('VSplitWorkspace chrome="workbench"');
+    expect(contentBrowsePanelSource).toContain('id: "browse-categories"');
+    expect(contentBrowsePanelSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
     expect(agentMemoryPanelSource).toContain("VSplitWorkspace");
     expect(agentMemoryPanelSource).not.toContain("<MemoryContentBrowsePanel");
     expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
@@ -560,14 +562,15 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("preserves a compact narrow Memory layout without turning every detail pane full width", () => {
-    expect(managePanelStyles.manageWorkspace).toContain("grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)]");
-    expect(managePanelStyles.manageWorkspace).toContain("grid-rows-[minmax(0,0.58fr)_minmax(0,1fr)]");
+    expect(managePanelSource).toContain('VSplitWorkspace chrome="workbench"');
+    expect(managePanelSource).toContain('id: "manage-list"');
+    expect(managePanelSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
     expect(managePanelStyles.manageWorkspace).toContain("h-full");
     expect(managePanelStyles.manageWorkspace).toContain("overflow-hidden");
-    expect(managePanelStyles.manageWorkspace).toContain("[&_.manageListPanel]:row-span-2");
-    expect(managePanelStyles.manageWorkspace).toContain("[&_.detailPanel]:col-start-2");
-    expect(managePanelStyles.manageWorkspace).toContain("[&_.detailPanel]:row-start-2");
-    expect(managePanelStyles.manageWorkspace).toContain("[&_.detailPanel]:max-h-none");
+    expect(managePanelStyles.manageWorkspace).toContain("max-[980px]:!flex-col");
+    expect(managePanelStyles.manageDetailStack).toContain("overflow-auto");
+    expect(managePanelStyles.manageDetailStack).toContain("min-h-0");
+    expect(managePanelStyles.manageDetailStack).toContain("[&>.detailPanel]:!h-auto");
     expect(reviewQueuePanelStyles.reviewReasonList).toContain("flex");
   });
 

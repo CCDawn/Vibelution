@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchSkillLibrary, fetchSkillLibraryDetail } from "../api/skills";
 import { queryKeys } from "../api/queryKeys";
-import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
+import type { SkillLibraryItem } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
@@ -99,6 +99,8 @@ function copyFor(lang: string) {
         copyFailed: "复制失败，请手动复制指令",
         copyCommand: "复制指令",
         bulkSelected: "已选",
+        bulkSelect: "批量选择",
+        bulkExit: "退出选择",
         bulkSelectVisible: "选择可见",
         bulkClear: "清除选择",
         bulkCopyCommands: "批量复制指令",
@@ -133,6 +135,8 @@ function copyFor(lang: string) {
         copyFailed: "Copy failed; copy the command manually",
         copyCommand: "Copy command",
         bulkSelected: "Selected",
+        bulkSelect: "Bulk select",
+        bulkExit: "Exit selection",
         bulkSelectVisible: "Select visible",
         bulkClear: "Clear selection",
         bulkCopyCommands: "Copy commands",
@@ -152,6 +156,7 @@ export function SkillsRoute() {
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
   const [activeCommand, setActiveCommand] = useState("");
   const [copyState, setCopyState] = useState("");
+  const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
   const [selectedSkillCommands, setSelectedSkillCommands] = useState<Set<string>>(() => new Set());
 
   const libraryQuery = useQuery({
@@ -250,11 +255,11 @@ export function SkillsRoute() {
   return (
     <VListDetailPage
       className={styles.routeClass}
-      headerClassName={styles.headerClass}
+      hideHeader
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
       layoutId={WORKBENCH_LAYOUT_IDS.skills}
-      resize={{ sidebar: { defaultWidth: 400, minWidth: 300, maxWidth: 520 } }}
+      resize={{ sidebar: { defaultWidth: 304, minWidth: 300, maxWidth: 520 } }}
       data-vui-domain-recipe="skills-workbench"
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
@@ -276,12 +281,24 @@ export function SkillsRoute() {
         />
       )}
       list={(
-        <VSurface as="section" className={styles.listPanelClass} ariaLabel={copy.listTitle} tone="panel" padding="compact">
+        <VSurface as="section" className={styles.listPanelClass} ariaLabel={copy.listTitle} tone="rail" padding="none">
           <VPanelHeader
             className={styles.panelHeaderClass}
-            eyebrow={copy.listTitle}
-            title={`${filteredSkills.length} / ${skills.length}`}
-            actions={<Sparkles size={17} />}
+            title={`${copy.listTitle} · ${filteredSkills.length} / ${skills.length}`}
+            actions={(
+              <VButton
+                type="button"
+                variant="ghost"
+                className={styles.filterButtonClass}
+                aria-pressed={bulkSelectionMode}
+                onPress={() => {
+                  setBulkSelectionMode((current) => !current);
+                  clearSelectedSkills();
+                }}
+              >
+                {bulkSelectionMode ? copy.bulkExit : copy.bulkSelect}
+              </VButton>
+            )}
           />
 
           <label className={styles.searchBoxClass}>
@@ -309,22 +326,20 @@ export function SkillsRoute() {
             />
           </div>
 
-          <VDenseToolbar ariaLabel={copy.bulkSelected}>
+          {bulkSelectionMode ? <VDenseToolbar className={styles.bulkToolbarClass} ariaLabel={copy.bulkSelected}>
             <div className={styles.bulkSummaryClass}>
               <CheckSquare size={15} />
               <strong className={styles.bulkSummaryTitleClass}>{copy.bulkSelected}</strong>
               <span>{selectedSkills.length} / {filteredSkills.length}</span>
             </div>
-            <VButton
+            {selectedSkills.length ? <VButton
               type="button"
               className={styles.primaryButtonClass}
               icon={<Copy size={14} />}
-              isDisabled={!selectedSkills.length}
-              disabledReason={copy.bulkSelectVisible}
               onPress={copySelectedSkillCommands}
             >
               {copy.bulkCopyCommands}
-            </VButton>
+            </VButton> : null}
             <VButton
               type="button"
               className={styles.filterButtonClass}
@@ -335,8 +350,7 @@ export function SkillsRoute() {
             >
               {allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}
             </VButton>
-            <span className={styles.bulkReadOnlyNoteClass}>{copy.bulkReadOnlyReason}</span>
-          </VDenseToolbar>
+          </VDenseToolbar> : null}
 
           <div className={styles.skillListClass}>
             {libraryQuery.isError ? (
@@ -357,8 +371,8 @@ export function SkillsRoute() {
               filteredSkills.map((skill) => {
                 const selected = selectedSkillCommands.has(skill.command);
                 return (
-                  <div key={`${skill.path}-${skill.hash}`} className={styles.selectableRowClass}>
-                    <VTooltip content={`${copy.bulkSelected}: ${skill.name}`} width="compact">
+                  <div key={`${skill.path}-${skill.hash}`} className={bulkSelectionMode ? `${styles.selectableRowClass} ${styles.selectableRowSelectingClass}` : styles.selectableRowClass}>
+                    {bulkSelectionMode ? <VTooltip content={`${copy.bulkSelected}: ${skill.name}`} width="compact">
                       <label className={styles.rowSelectClass}>
                         <VNativeInput
                           className={styles.hiddenCheckboxClass}
@@ -367,30 +381,32 @@ export function SkillsRoute() {
                           aria-label={`${copy.bulkSelected}: ${skill.name}`}
                           onChange={(event) => toggleSkillSelection(skill.command, event.target.checked)}
                         />
-                        {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+                        {selected ? <CheckSquare size={15} aria-hidden="true" /> : <Square size={15} aria-hidden="true" />}
                       </label>
-                    </VTooltip>
+                    </VTooltip> : null}
                     <VButton
                       type="button"
                       contentLayout="plain"
                       className={activeCommand === skill.command ? `${styles.skillButtonBaseClass} ${styles.skillButtonActiveClass}` : styles.skillButtonBaseClass}
+                      aria-pressed={activeCommand === skill.command}
                       onPress={() => setActiveCommand(skill.command)}
                     >
-                      <span className={styles.sourceDotClass} data-source={skill.source} />
+                      <BookOpen size={16} className={styles.skillIconClass} aria-hidden="true" />
                       <span className={styles.skillCopyClass}>
                         <strong className={styles.skillNameClass}>{skill.name}</strong>
+                        <small className={styles.sourceCaptionClass}>{sourceLabel(skill.source, lang)}</small>
                       </span>
-                      <span className={styles.sourcePillClass}>{sourceLabel(skill.source, lang)}</span>
                     </VButton>
                   </div>
                 );
               })
             )}
           </div>
+          <p className={styles.bulkReadOnlyNoteClass}>{copy.bulkReadOnlyReason}</p>
         </VSurface>
       )}
       detail={(
-        <VSurface as="section" className={styles.detailPanelClass} ariaLabel={copy.detailTitle} tone="panel" padding="compact">
+        <VSurface as="section" className={styles.detailPanelClass} ariaLabel={copy.detailTitle} tone="panel" padding="none">
           {activeSkill ? (
             <>
               <div className={styles.detailHeaderClass}>

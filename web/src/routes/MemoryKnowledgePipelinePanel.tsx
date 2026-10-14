@@ -59,6 +59,8 @@ export function MemoryKnowledgePipelinePanel({
           ]}
         />
       </div>
+      <details className={styles.pipelineDisclosure}>
+      <summary>{copy.platformPipeline}</summary>
       <VTooltip content={copy.knowledgeSubtitle} width="wide">
         <section
           className={styles.pipelinePanel}
@@ -87,6 +89,7 @@ export function MemoryKnowledgePipelinePanel({
           </div>
         </section>
       </VTooltip>
+      </details>
     </>
   );
 }

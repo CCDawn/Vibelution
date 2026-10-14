@@ -16,8 +16,8 @@ const styles = {
   selectedTitle: "max-w-48 truncate",
   refreshError: "px-6 text-vui-2xs leading-4 text-[var(--fg-secondary)]",
 
-  atlasRail: "!border-r !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-rail)]",
-  atlasRailInner: "flex h-full min-h-0 flex-col gap-6 overflow-auto px-4 py-6",
+  atlasRail: "!border-0 !bg-[var(--vui-surface-rail)]",
+  atlasRailInner: "flex h-full min-h-0 flex-col gap-4 overflow-auto px-3 py-4",
   atlasEyebrow: "text-vui-2xs leading-4 tracking-wide text-[var(--fg-tertiary)]",
   atlasSearch: "flex min-w-0 items-center gap-2 rounded-md border border-[var(--vui-border-subtle)] px-2 py-1 text-[var(--fg-secondary)] [&_input]:min-w-0 [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:text-vui-xs [&_input]:leading-5",
   atlasFilters: "mt-3 grid gap-1 [&_button]:w-full [&_button]:justify-between [&_button]:gap-3 [&_button]:!border-transparent [&_[data-active=true]]:bg-[var(--vui-control-hover-bg)]",
@@ -33,7 +33,7 @@ const styles = {
   atlasNodeList: "grid h-[var(--pane-h-graph-node-list,168px)] shrink-0 grid-cols-1 gap-1 overflow-auto border-t border-[var(--vui-border-subtle)] px-4 py-2 sm:grid-cols-2 [&_button]:justify-start",
   // Wave 6B: PaneHeightResizeHandle owns row-resize visual; placement only.
   graphNodeListResizeHandle: "graphNodeListResizeHandle",
-  atlasInspectorHost: "!border-l !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)]",
+  atlasInspectorHost: "!border-0 !bg-[var(--vui-surface-panel)]",
   atlasInspector: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
   atlasDetailHeader: "flex shrink-0 items-center justify-between border-b border-[var(--vui-border-subtle)] px-5 py-3 text-vui-2xs leading-4 text-[var(--fg-secondary)]",
   graphWorkspace: "min-w-0 h-full min-h-0 overflow-hidden",

@@ -2,11 +2,6 @@ import {
   vuiControlPillClass,
 } from "../design/vuiChromeRecipes";
 
-import {
-  vuiOpaqueRowClass,
-  vuiStateSelectedRowClass,
-} from "../design/vuiSurfaceRecipes";
-
 const listButton =
   "min-w-0 w-full max-w-full !h-auto text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:gap-1";
 
@@ -21,7 +16,7 @@ const styles = {
     "compactItemSummary line-clamp-1 min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   // Wave 6F: height from PersistedHeightListShell / pane-heights.v1, not fixed max-h.
   compactMemoryList:
-    "compactMemoryList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
+    "compactMemoryList min-w-0 grid min-h-0 auto-rows-max content-start gap-1 overflow-auto",
   compactMemoryListFill:
     "compactMemoryListFill h-full min-h-0",
   compactMemoryListResizeHandle:
@@ -30,17 +25,17 @@ const styles = {
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   itemBadges:
     "itemBadges min-w-0 flex flex-wrap items-center gap-1",
-  itemButton: `itemButton ${listButton} ${vuiOpaqueRowClass} px-2 py-1.5`,
-  itemButtonActive: `itemButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
+  itemButton: `itemButton ${listButton} !grid content-start gap-1.5 !rounded-[var(--radius-control)] !border-0 bg-transparent !px-3 !py-2.5 !shadow-none hover:!bg-vui-surface-row-hover`,
+  itemButtonActive: "itemButtonActive min-w-0 !bg-[var(--vui-selection-bg)] !text-vui-fg-primary",
   itemButtonCompact: "itemButtonCompact min-w-0",
-  itemButtonDense: "itemButtonDense min-w-0 min-h-[62px]",
+  itemButtonDense: "itemButtonDense min-w-0 min-h-[62px] !grid-cols-[20px_minmax(0,1fr)] items-start",
   itemContentButton: `itemContentButton ${listButton} px-0 py-0 shadow-none border-0 bg-transparent`,
   itemContentButtonDense:
-    "itemContentButtonDense min-w-0 grid w-full content-start gap-1 [font-size:var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
+    "itemContentButtonDense !grid !h-auto !min-h-0 w-full min-w-0 content-start !items-stretch !justify-stretch gap-1 !border-0 !bg-transparent !shadow-none !whitespace-normal !text-left text-vui-micro-13 leading-relaxed text-vui-fg-secondary [&>span]:w-full",
   itemHeader:
     "itemHeader flex min-w-0 items-baseline justify-between gap-2 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--fg-primary)] [&>span]:shrink-0 [&>span]:text-[var(--fg-tertiary)]",
   itemList:
-    "itemList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "itemList min-w-0 grid min-h-0 auto-rows-max content-start gap-1.5 overflow-auto",
   itemOrigin:
     "itemOrigin min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   itemPath:
