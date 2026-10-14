@@ -210,7 +210,8 @@ describe("Launcher branch workspace interactions", () => {
       return button(label, row);
     };
 
-    expect(action("codex/switch", "切换到工作台")).toBeTruthy();
+    expect(action("codex/switch", "切换到工作台").title).toContain("已经打开的工作台");
+    expect(action("codex/switch", "切换到工作台").title).toContain("不会更新代码");
     expect(action("codex/recover", "恢复工作台")).toBeTruthy();
     expect(action("codex/recover", "恢复工作台").title).toContain("保存当前任务记录");
     expect(action("codex/recover", "恢复工作台").title).toContain("重启工作台");

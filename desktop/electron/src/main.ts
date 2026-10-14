@@ -3538,8 +3538,24 @@ async function orchestrateLauncherLifecycle(
     ? AbortSignal.any([signal, intentLease.signal])
     : intentLease.signal;
   if (supervisedOperation === "start" && windowProvider !== null) {
-    const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
-    const servingVersion = frontendCheckedForReuse && !frontendReleaseChanged && !packagedShellStale
+    // Advisory packaged staleness (the sealed frontend hash differs, but the
+    // shell is still usable) must not turn "open the workbench" into a restart.
+    // That restart is not an explicit user restart, so active work only queues
+    // it and the click looks dead. A launch-blocking shell still skips reuse
+    // and falls through to the existing refresh gate.
+    let packagedShellBlocksReuse = false;
+    let packagedShellAdvisoryStale = false;
+    if (app.isPackaged) {
+      try {
+        const status = await inspectCurrentDesktopShell();
+        packagedShellBlocksReuse = Boolean(status.launchBlocking);
+        packagedShellAdvisoryStale = Boolean(status.stale) && !packagedShellBlocksReuse;
+      } catch (error: unknown) {
+        console.warn(error instanceof Error ? error.message : String(error));
+        packagedShellBlocksReuse = await packagedDesktopShellIsStale();
+      }
+    }
+    const servingVersion = frontendCheckedForReuse && !frontendReleaseChanged && !packagedShellBlocksReuse
       ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot })
       : { ok: false, reason: "release_or_shell_changed" };
     if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
@@ -3548,7 +3564,7 @@ async function orchestrateLauncherLifecycle(
     if (
       frontendCheckedForReuse
       && !frontendReleaseChanged
-      && !packagedShellStale
+      && !packagedShellBlocksReuse
       && servingVersion.ok
       && await mainLineBackendIsReusable(paths.workspaceRoot)
     ) {
@@ -3564,6 +3580,7 @@ async function orchestrateLauncherLifecycle(
         return supersededLifecycleResult(operation);
       }
       scheduleLauncherStatusCliRefresh();
+      const reportShellStale = shellStale || packagedShellAdvisoryStale;
       return {
         schemaVersion: 1,
         accepted: true,
@@ -3573,8 +3590,8 @@ async function orchestrateLauncherLifecycle(
         // same shape for every accepted main-line result.
         commandId: randomUUID(),
         ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {}),
-        ...(shellStale ? { shellStale: true } : {}),
-        message: workbenchOpenedMessage(shellStale)
+        ...(reportShellStale ? { shellStale: true } : {}),
+        message: workbenchOpenedMessage(reportShellStale)
       };
     }
     // A reachable but non-reusable backend may be serving an older immutable
