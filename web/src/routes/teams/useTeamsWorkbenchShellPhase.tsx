@@ -655,8 +655,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ? researchPrimaryActionDetail(researchPrimaryAction, lang)
     : devTeamSelected
       ? (lang === "zh"
-        ? "在右侧填写任务并启动一轮。规划师用 @角色名 派发，开发实现，评审员给出结论。"
-        : "Enter a task on the right and start a round. The planner assigns with @role, developers implement, and the reviewer concludes.")
+        ? "切到成员发言，填写任务并启动一轮。规划师用 @角色名 派发，开发实现，评审员给出结论。"
+        : "Open Messages, enter a task and start a round. The planner assigns with @role, developers implement, and the reviewer concludes.")
       : (lang === "zh"
         ? "点节点看执行者，在左栏顶部切换团队。"
         : "Select a node to inspect the assignee. Switch teams at the top of the left rail.");

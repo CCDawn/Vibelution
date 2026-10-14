@@ -115,7 +115,7 @@ export function renderTeamsShellToolbar(args: Pick<
   | "onSelectTeam"
 > & { settingsAction?: ReactNode }): ReactNode {
   return (
-    <div className="flex w-full min-w-0 items-center justify-between gap-3">
+    <div className="inline-flex w-max shrink-0 items-center justify-between gap-2">
       <TeamShellToolbar
         showIdentity={false}
         lang={args.lang}
@@ -125,9 +125,9 @@ export function renderTeamsShellToolbar(args: Pick<
         mode={args.teamShellMode}
         onModeChange={args.onModeChange}
         onRefresh={args.onRefreshTeams}
-        identityClassName={args.styles.teamShellToolbarIdentity}
+        identityClassName={`${args.styles.teamShellToolbarIdentity} !flex-none !flex-nowrap`}
         switchClassName={args.styles.teamShellToolbarSwitch}
-        actionsClassName={args.styles.teamShellToolbarActions}
+        actionsClassName={`${args.styles.teamShellToolbarActions} !flex-nowrap`}
         refreshButtonClassName={args.styles.teamRefreshButton}
         actions={
           <>

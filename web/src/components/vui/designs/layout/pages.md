@@ -293,6 +293,8 @@ import { VBoardWorkbenchPage } from "@/components/vui";
 
 ## VCanvasWorkbenchPage
 
+- `chrome` defaults to `workbench`; use `embedded` when a domain composition owns the rail, canvas and inspector panel surfaces. It forwards to VSplitWorkspace, matching VBoardWorkbenchPage, without changing drawer behavior or layout persistence.
+
 侧栏抽屉锚定视口边缘，覆盖居中 Dialog 的位移动画；抽屉内容填满可用高度，长详情在面板内滚动，不得因居中 transform 移出视口。
 
 记忆图谱可设置 `responsive.inspector.narrowPlacement="bottom"`：窄屏阅读栏从底部展开，最高占 64dvh；复用 VDialog 的 Escape、焦点约束与返回焦点。默认仍是侧栏，不改变其他画布页。

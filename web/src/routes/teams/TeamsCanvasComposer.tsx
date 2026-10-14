@@ -3,6 +3,7 @@
  * Shell rail stays owned by the route; this owns canvas + inspector layout only.
  */
 import type { ReactNode } from "react";
+import { AlertTriangle, Eye } from "lucide-react";
 import { TeamWorkspaceFrame } from "./TeamWorkspaceFrame";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 
@@ -47,10 +48,8 @@ export function TeamsCanvasComposer({
   researchFlowSlot = null,
   inspectorTitle,
   inspectorBody,
-  researchWorkflowTeamSelected = false,
   researchCanvasReadOnly = false,
   hideInspector = false,
-  styles,
   validationValid = true,
 }: TeamsCanvasComposerProps) {
   const canvasBody = researchFlowSlot ? (
@@ -90,6 +89,7 @@ export function TeamsCanvasComposer({
       toolbar={toolbar}
       canvas={canvasBody}
       inspectorTitle={inspectorTitle}
+      inspectorActions={!validationValid ? <AlertTriangle size={16} aria-label="画布校验异常" /> : researchCanvasReadOnly ? <Eye size={16} aria-label="只读画布" /> : undefined}
       inspector={hideInspector ? undefined : <div data-vui-region="teams-inspector" data-composer="teams-canvas">{inspectorBody}</div>}
     />
   );

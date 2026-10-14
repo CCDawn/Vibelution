@@ -1,11 +1,9 @@
 /**
  * Canvas-mode shell return for Teams workbench (R2-q extract).
  */
-import { useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
-import { ArrowLeft } from "lucide-react";
-import { VNativeButton } from "../../components/vui";
 import { TeamsCanvasComposer } from "./TeamsCanvasComposer";
 import { TeamOrganizationCanvasSurface, type TeamCanvasAuthoringProps } from "./TeamOrganizationCanvasSurface";
 import { TeamHomeSurface, type TeamHomeSurfaceProps } from "./TeamHomeSurface";
@@ -89,36 +87,7 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
 }
 
 function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
-  const [organizationOpen, setOrganizationOpen] = useState(false);
-  const showTeamHome = Boolean(!p.researchWorkflowTeamSelected && p.teamHome && !organizationOpen);
-
-  return (
-    <TeamsCanvasComposer
-      className={p.styles.route}
-      layoutId={TEAMS_LAYOUT_ID}
-      resize={p.teamsRailResize}
-      ariaLabel={p.selectedTeamContextTitle}
-      title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
-      responsiveRailLabel={p.lang === "zh" ? "团队列表" : "Team list"}
-      rail={showTeamHome ? undefined : p.teamShellRail}
-      toolbar={p.teamShellToolbar}
-      teamSwitcher={p.teamSwitcher}
-      styles={p.styles}
-      researchWorkflowTeamSelected={p.researchWorkflowTeamSelected}
-      researchCanvasReadOnly={p.researchCanvasReadOnly}
-      researchFlowSlot={p.researchFlowSlot}
-      hideInspector={showTeamHome || p.hideInspector}
-      validationValid={p.validationValid}
-      inspectorTitle={
-        p.researchCanvasReadOnly
-          ? (p.lang === "zh" ? "组织画布" : "Organization canvas")
-          : (p.lang === "zh" ? "节点绑定" : "Node binding")
-      }
-      inspectorBody={p.inspectorBody}
-      canvas={showTeamHome && p.teamHome ? (
-        <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => setOrganizationOpen(true)} />
-      ) : (
-        <TeamOrganizationCanvasSurface
+  const organizationCanvas = <TeamOrganizationCanvasSurface
           lang={p.lang}
           selectedTeam={p.selectedTeam}
           selectedTeamReferenceName={p.selectedTeamReferenceName}
@@ -163,12 +132,6 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           nodeReadOnlyClassName={p.styles.nodeReadOnly}
           styles={p.styles}
           completionFlowSlot={p.completionFlowSlot}
-          toolbarLeadingAction={!p.researchWorkflowTeamSelected && p.teamHome && organizationOpen ? (
-            <VNativeButton type="button" onClick={() => setOrganizationOpen(false)}>
-              <ArrowLeft size={14} aria-hidden="true" />
-              {p.lang === "zh" ? "返回任务首页" : "Back to team home"}
-            </VNativeButton>
-          ) : null}
           teamWorkspaceRoute={teamWorkspaceRoute}
           teamChatRoomRoute={teamChatRoomRoute}
           onSelectNode={p.onSelectNode}
@@ -182,8 +145,17 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           onNodePointerUp={p.onNodePointerUp}
           onNodePointerCancel={p.onNodePointerCancel}
           canvasAuthoring={p.canvasAuthoring}
-      />
-      )}
-    />
-  );
+      />;
+  if (!p.researchWorkflowTeamSelected && p.teamHome) {
+    return <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => undefined}
+      workspace={{ navigation: p.teamShellRail, teamSwitcher: p.teamSwitcher, toolbar: p.teamShellToolbar,
+        canvas: organizationCanvas, inspector: p.inspectorBody, resize: p.teamsRailResize }} />;
+  }
+  return <TeamsCanvasComposer className={p.styles.route} layoutId={TEAMS_LAYOUT_ID} resize={p.teamsRailResize}
+    ariaLabel={p.selectedTeamContextTitle} title={p.lang === "zh" ? "组织画布" : "Organization canvas"}
+    responsiveRailLabel={p.lang === "zh" ? "团队导航" : "Team navigation"}
+    rail={p.teamShellRail} toolbar={p.teamShellToolbar} teamSwitcher={p.teamSwitcher} styles={p.styles}
+    researchWorkflowTeamSelected={p.researchWorkflowTeamSelected} researchCanvasReadOnly={p.researchCanvasReadOnly}
+    researchFlowSlot={p.researchFlowSlot} hideInspector={p.hideInspector} validationValid={p.validationValid}
+    inspectorTitle={p.lang === "zh" ? "节点绑定" : "Node binding"} inspectorBody={p.inspectorBody} canvas={organizationCanvas} />;
 }
