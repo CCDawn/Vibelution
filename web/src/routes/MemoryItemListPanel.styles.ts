@@ -28,7 +28,7 @@ const styles = {
   itemButton: `itemButton ${listButton} !grid content-start gap-1.5 !rounded-[var(--radius-control)] !border-0 bg-transparent !px-3 !py-2.5 !shadow-none hover:!bg-vui-surface-row-hover`,
   itemButtonActive: "itemButtonActive min-w-0 !bg-[var(--vui-selection-bg)] !text-vui-fg-primary",
   itemButtonCompact: "itemButtonCompact min-w-0",
-  itemButtonDense: "itemButtonDense min-w-0 min-h-[62px] !grid-cols-[20px_minmax(0,1fr)] items-start",
+  itemButtonDense: "itemButtonDense min-w-0 min-h-[62px] !grid !grid-cols-[20px_minmax(0,1fr)] items-start",
   itemContentButton: `itemContentButton ${listButton} px-0 py-0 shadow-none border-0 bg-transparent`,
   itemContentButtonDense:
     "itemContentButtonDense !grid !h-auto !min-h-0 w-full min-w-0 content-start !items-stretch !justify-stretch gap-1 !border-0 !bg-transparent !shadow-none !whitespace-normal !text-left text-vui-micro-13 leading-relaxed text-vui-fg-secondary [&>span]:w-full",
