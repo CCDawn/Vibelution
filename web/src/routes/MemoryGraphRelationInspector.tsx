@@ -3,6 +3,8 @@ import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode } from "../api/
 import { VButton } from "../components/vui";
 import styles from "./MemoryGraphRelationInspector.styles";
 
+const sourceTypeLabels: Record<string, string> = { candidate: "已审核入库记录", review_record: "入库审核记录", source: "研究来源", source_artifact: "来源资料", paper_note: "论文笔记", mechanism: "机制记录", neuro_mechanism: "神经机制记录", mechanism_mapping: "机制映射记录", web: "网页来源", file: "文件来源" };
+
 export function MemoryGraphRelationInspector({ edge, nodes, onNavigate, onBack }: {
   edge: MemoryKnowledgeGraphEdge; nodes: MemoryKnowledgeGraphNode[];
   onNavigate: (id: string) => void; onBack: () => void;
@@ -23,7 +25,7 @@ export function MemoryGraphRelationInspector({ edge, nodes, onNavigate, onBack }
     </div>
     <div className={styles.sources}><h3 className={styles.sourceTitle}>为什么相连</h3><p className={styles.sourceEmpty}>{reason}</p></div>
     <div className={styles.sources}><h3 className={styles.sourceTitle}>关联来源</h3>
-      {evidence.length ? evidence.map(node => <div key={node.id} className={styles.evidenceItem}><VButton variant="ghost" className={styles.evidenceButton} onClick={() => onNavigate(node.id)}>{node.label}</VButton><p className={styles.sourceEmpty}>{String(node.metadata.sourceType ?? "来源记录")} · {String(node.metadata.reviewedAt ?? node.metadata.capturedAt ?? "")}</p>{Boolean(node.metadata.sourceRef) && <p className={styles.evidenceLocation}>{JSON.stringify(node.metadata.sourceRef)}</p>}</div>) : <p className={styles.sourceEmpty}>当前关系未提供直接来源节点。归属和主题分组不代表事实支持。</p>}
+      {evidence.length ? evidence.map(node => <div key={node.id} className={styles.evidenceItem}><VButton variant="ghost" className={styles.evidenceButton} onClick={() => onNavigate(node.id)}>{node.label}</VButton><p className={styles.sourceEmpty}>{sourceTypeLabels[String(node.metadata.sourceType)] ?? "来源记录"} · {String(node.metadata.reviewedAt ?? node.metadata.capturedAt ?? "")}</p>{Boolean(node.metadata.sourceRef) && <p className={styles.evidenceLocation}>{JSON.stringify(node.metadata.sourceRef)}</p>}</div>) : <p className={styles.sourceEmpty}>当前关系未提供直接来源节点。归属和主题分组不代表事实支持。</p>}
     </div>
     <details className={styles.metadata}><summary>关系记录</summary><pre className={styles.metadataBody}>{JSON.stringify(edge.metadata ?? {}, null, 2)}</pre></details>
   </section>;

@@ -85,7 +85,8 @@ it("uses safe Chinese fallbacks and preserves empty and long-content states", as
   try {
     await act(async () => resize(900));
     expect(view.host.querySelector('[data-relation-layout="list"]')).not.toBeNull();
-    expect(view.host.querySelector('[data-node-id="long"]')?.textContent).toBe(long.label);
+    expect(view.host.querySelector('[data-node-id="long"] strong')?.textContent).toBe(long.label);
+    expect(view.host.querySelector('[data-node-id="long"] small')?.textContent).toBe("知识条目");
   } finally { await view.close(); }
   const empty = await setup({ nodes: [], edges: [] });
   try { expect(empty.host.textContent).toContain("当前范围没有可见节点"); }

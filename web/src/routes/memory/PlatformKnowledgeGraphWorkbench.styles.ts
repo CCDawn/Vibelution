@@ -8,6 +8,8 @@ const styles = {
   muted: "text-[var(--fg-tertiary)]",
   breakWords: "break-words",
   sourceHash: "mt-3 break-all text-vui-xs text-[var(--fg-tertiary)]",
+  technical: "mt-4 text-vui-xs text-[var(--fg-tertiary)]",
+  relationStatus: "shrink-0 border-b border-[var(--vui-border-subtle)] px-4 py-3 text-vui-xs leading-relaxed text-[var(--fg-secondary)]",
   metadataBoundary: "mt-5 text-vui-xs leading-relaxed text-[var(--fg-tertiary)]",
   loadingDetail: "mt-4 text-vui-xs",
   truncatedDetail: "mt-3 text-vui-xs",

@@ -32,7 +32,7 @@ class PlatformGraphEdge(BaseModel):
 class PlatformGraphTopic(BaseModel):
     id: str
     label: str
-    groupingBasis: Literal["official_target_domain", "tag", "knowledge_base"]
+    groupingBasis: Literal["official_target_domain", "tag", "knowledge_base", "title_keywords"]
     nodeIds: list[str]
 
 

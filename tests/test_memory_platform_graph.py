@@ -120,7 +120,7 @@ def test_platform_lifecycle_and_topic_fallback(graph_store):
     assert not any(edge["type"].startswith("official_") for edge in payload["edges"])
     assert "SECRET HISTORY" not in json.dumps(payload)
     tag_item = next(node for node in payload["nodes"] if node["type"] == "knowledge_item" and node["metadata"]["groupingBasis"] == "tag")
-    assert "排序首项" in tag_item["metadata"]["groupingReason"]
+    assert "语义标签" in tag_item["metadata"]["groupingReason"]
 
 
 def test_platform_detail_bounded_and_official_target_checked(graph_store):
