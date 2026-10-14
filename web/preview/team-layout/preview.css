@@ -1,4 +1,3 @@
-@layer preview-flat;
 @import "tailwindcss" source(none);
 @import "../../src/design/theme.tailwind.css";
 @source "./*.tsx";
@@ -16,34 +15,3 @@ p, h1, h2, h3 { margin: 0; }
 @source "../../src/routes/ChatCodingRoute.styles.ts";
 @source "../../src/design/vuiSurfaceRecipes.ts";
 @source "../../src/design/vuiChromeRecipes.ts";
-
-@layer preview-flat {
-/* Flat conversation composer preview; production control tokens stay unchanged. */
-[data-preview="native-conversation-flow"] {
-  --vui-control-face: var(--vui-surface-panel);
-  --vui-control-shadow: none;
-  --vui-field-shadow: none;
-}
-[data-preview="native-conversation-flow"] textarea {
-  background: transparent !important;
-  box-shadow: none !important;
-}
-[data-preview="native-conversation-flow"] :is(.groupConversationFrame textarea + div, .composerCodex) button {
-  background-image: none !important;
-  box-shadow: none !important;
-}
-[data-preview="native-conversation-flow"] .groupConversationFrame textarea + div button {
-  background: var(--vui-surface-panel) !important;
-}
-[data-preview="native-conversation-flow"] .groupConversationFrame textarea + div button:hover {
-  background: var(--vui-control-muted-hover) !important;
-}
-[data-preview="native-conversation-flow"] :is(.groupConversationFrame textarea + div, .composerCodex) button:focus-visible {
-  outline: 2px solid var(--accent-cool);
-  outline-offset: 2px;
-}
-[data-preview="native-conversation-flow"] .composerCodex {
-  box-shadow: none !important;
-}
-
-}
