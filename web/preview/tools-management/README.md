@@ -13,4 +13,4 @@
 - ToolsRoute 继续持有已有查询/权限草稿/Mutation；不新建权限事实源。
 - view 将深链 policy/bundle 对应到 Agent 配置，detail/test 对应工具库；保留 returnTo。
 - 同一个常驻 Frame 和现有 WORKBENCH_LAYOUT_IDS.tools 尺寸记忆；每个视图仅替换正文。
-- 收到用户明确批准后才能修改正式 ToolsRoute owning surface。
+- 正式布局已经用户批准并接入 ToolsRoute。production.html 直接渲染正式路由；只读注册表快照保存在系统临时目录，真实写请求全部拒绝。它不证明正式运行窗口已刷新或真实授权操作已验收。

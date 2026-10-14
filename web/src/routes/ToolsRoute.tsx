@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, Box, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, ListChecks, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -42,6 +42,7 @@ import {
   VDenseOpsPage,
   VIconButton,
   VNativeInput,
+  VNativeButton,
   VPanelHeader,
   VRouteLinkButton,
   VStateSurface,
@@ -56,6 +57,7 @@ import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
+import { resolveToolsWorkspaceView, toolsWorkspaceParams, type ToolsWorkspaceView } from "./toolsRouteWorkspace";
 import {
   migrateLegacyNumericPane,
   type PaneSpec,
@@ -299,7 +301,7 @@ const TOOLS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.tools;
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
 const TOOLS_LEFT_PANE: PaneSpec = {
   id: "left",
-  defaultWidth: 350,
+  defaultWidth: 304,
   minWidth: 260,
   maxWidth: 520,
 };
@@ -1044,7 +1046,9 @@ function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRe
 
 export function ToolsRoute() {
   const { lang, t } = useAppI18n({ domains: ["tools"] });
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const workspaceView = resolveToolsWorkspaceView(searchParams);
+  const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
   const bulkCopy = useMemo(() => toolsBulkCopy(lang), [lang]);
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<ToolFilter>("all");
@@ -1211,7 +1215,7 @@ export function ToolsRoute() {
     [toolBundles],
   );
   const selectedBundle = useMemo(
-    () => toolBundles.find((bundle) => bundle.bundleId === selectedBundleId) ?? deepLinkTargetBundle ?? defaultSelectedBundle,
+    () => selectedBundleId === "unbundled" ? null : toolBundles.find((bundle) => bundle.bundleId === selectedBundleId) ?? deepLinkTargetBundle ?? defaultSelectedBundle,
     [deepLinkTargetBundle, defaultSelectedBundle, selectedBundleId, toolBundles],
   );
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? deepLinkTargetTool ?? visibleTools[0] ?? null;
@@ -1241,12 +1245,10 @@ export function ToolsRoute() {
   activePolicyAgentRef.current = activePolicyAgent;
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
   const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(activePolicy, activeTool) : "inherited";
+  const allEditablePolicyTools = useMemo(() => tools.filter((tool) => tool.llmVisible || tool.runtimeActive), [tools]);
   const editablePolicyTools = useMemo(() => {
     const query = toolPolicySearchText.trim().toLowerCase();
-    return tools.filter((tool) => {
-      if (!tool.llmVisible && !tool.runtimeActive) {
-        return false;
-      }
+    return allEditablePolicyTools.filter((tool) => {
       if (!query) {
         return true;
       }
@@ -1263,15 +1265,15 @@ export function ToolsRoute() {
         ...(tool.riskTags ?? []),
       ].join(" ").toLowerCase().includes(query);
     });
-  }, [toolPolicySearchText, tools]);
+  }, [allEditablePolicyTools, toolPolicySearchText]);
   const editablePolicyGroups = useMemo(
     () => groupPolicyToolsByBundle(editablePolicyTools, toolBundles, toolPolicyDraft, lang),
     [editablePolicyTools, lang, toolBundles, toolPolicyDraft],
   );
   const toolPolicyDirty = !toolPolicyDraftEqualsAgent(toolPolicyDraft, activePolicyAgent);
   const capabilityPreview = useMemo(
-    () => buildAgentCapabilityPreview(toolPolicyDraft, editablePolicyTools, lang),
-    [editablePolicyTools, lang, toolPolicyDraft],
+    () => buildAgentCapabilityPreview(toolPolicyDraft, allEditablePolicyTools, lang),
+    [allEditablePolicyTools, lang, toolPolicyDraft],
   );
   const scopedTools = useMemo(
     () => tools.filter((tool) => scopeStateForTool(tool, activeAgentScopeId).visible),
@@ -1333,13 +1335,13 @@ export function ToolsRoute() {
       setSelectedBundleId(deepLinkTargetBundle.bundleId);
       return;
     }
-    if (!selectedBundleId || !toolBundles.some((bundle) => bundle.bundleId === selectedBundleId)) {
+    if (selectedBundleId !== "unbundled" && (!selectedBundleId || !toolBundles.some((bundle) => bundle.bundleId === selectedBundleId))) {
       setSelectedBundleId(defaultSelectedBundle?.bundleId ?? "");
     }
   }, [deepLinkTargetBundle, defaultSelectedBundle, selectedBundleId, toolBundles]);
 
   useEffect(() => {
-    if (!requestedToolKey && !requestedBundleId && requestedFocus === "policy") {
+    if (!searchParams.get("focus") && !requestedToolKey && !requestedBundleId) {
       return;
     }
     const targetId = requestedFocus === "detail" || requestedFocus === "test"
@@ -1350,7 +1352,7 @@ export function ToolsRoute() {
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     });
-  }, [requestedBundleId, requestedFocus, requestedToolKey]);
+  }, [requestedBundleId, requestedFocus, requestedToolKey, searchParams, workspaceView]);
 
   useEffect(() => {
     setSelectedToolIds((current) => {
@@ -1587,7 +1589,7 @@ export function ToolsRoute() {
         ? `未找到深链指定的工具：${requestedToolKey}，已显示当前可见工具。`
         : `Deep-linked tool was not found: ${requestedToolKey}. Showing the current visible tool.`;
     }
-    if (requestedBundleId && !toolsQuery.isPending && !deepLinkTargetBundle) {
+    if (requestedBundleId && requestedBundleId !== "unbundled" && !toolsQuery.isPending && !deepLinkTargetBundle) {
       return lang === "zh"
         ? `未找到深链指定的工具包：${requestedBundleId}，已使用默认工具包。`
         : `Deep-linked tool package was not found: ${requestedBundleId}. Using the default package.`;
@@ -1626,6 +1628,38 @@ export function ToolsRoute() {
       }) as CSSProperties,
     [leftPanelCollapsed, toolsPaneVariablesStyle],
   );
+  const policyBundleEntries = useMemo(() => {
+    const assignableNames = new Set(allEditablePolicyTools.map((tool) => tool.name));
+    const entries = toolBundles.map((bundle) => ({
+      id: bundle.bundleId, label: bundle.label, description: bundle.description,
+      count: bundle.toolNames.filter((name) => assignableNames.has(name)).length,
+    }));
+    const unbundled = groupPolicyToolsByBundle(allEditablePolicyTools, toolBundles, toolPolicyDraft, lang).find((group) => group.bundleId === "unbundled");
+    if (unbundled) entries.push({ id: unbundled.bundleId, label: unbundled.label, description: unbundled.description, count: unbundled.tools.length });
+    return entries;
+  }, [allEditablePolicyTools, lang, toolBundles, toolPolicyDraft]);
+  const activePolicyBundleId = selectedBundleId || selectedBundle?.bundleId || policyBundleEntries[0]?.id || "";
+  const activePolicyBundle = policyBundleEntries.find((entry) => entry.id === activePolicyBundleId);
+  const visiblePolicyGroups = useMemo(() => {
+    if (toolPolicySearchText.trim()) return editablePolicyGroups;
+    // Package browsing includes all members of this package, including tools shared with another package.
+    const groups = groupPolicyToolsByBundle(allEditablePolicyTools, selectedBundle ? [selectedBundle] : toolBundles, toolPolicyDraft, lang);
+    return groups.filter((group) => group.bundleId === activePolicyBundleId);
+  }, [activePolicyBundleId, allEditablePolicyTools, editablePolicyGroups, lang, selectedBundle, toolBundles, toolPolicyDraft, toolPolicySearchText]);
+
+  function navigateWorkspace(view: ToolsWorkspaceView) {
+    setSearchParams((current) => toolsWorkspaceParams(current, { view }), { replace: true });
+  }
+  function selectPolicyBundle(bundleId: string) {
+    setSelectedBundleId(bundleId);
+    setToolPolicySearchText("");
+    setSearchParams((current) => toolsWorkspaceParams(current, { view: "policy", bundle: bundleId }), { replace: true });
+  }
+  function selectActiveTool(tool: ToolRegistryItem) {
+    setActiveToolId(tool.id);
+    setSearchParams((current) => toolsWorkspaceParams(current, { view: "library", tool: tool.id }), { replace: true });
+  }
+
   const resizeLeftPanelLabel = lang === "zh" ? "调整工具列表宽度" : "Resize tool list";
 
   function handleLeftPanelResizeStart(event: PointerEvent<any>) {
@@ -1771,7 +1805,7 @@ export function ToolsRoute() {
       toggleBulkTool(tool.id, event.shiftKey ? true : !selectedToolIds.has(tool.id), event.shiftKey);
       return;
     }
-    setActiveToolId(tool.id);
+    selectActiveTool(tool);
   }
 
   function selectVisibleBulkTools() {
@@ -1908,34 +1942,7 @@ export function ToolsRoute() {
         />
       )}
     >
-      <ToolsRouteAgentScopePanel
-        copy={{
-          blocked: t("toolsScopeBlocked"),
-          callable: lang === "zh" ? "所选范围可调用" : "Callable in selected scope",
-          configure: lang === "zh" ? "配置" : "Configure",
-          configureAgent: lang === "zh" ? "配置 Agent" : "Configure Agent",
-          loading: t("loading"),
-          scope: t("toolsAgentScope"),
-          synced: lang === "zh" ? "已同步" : "Synced",
-          unsaved: lang === "zh" ? "未保存" : "Unsaved",
-          visible: t("toolsScopeVisible"),
-        }}
-        activeAgents={activeAgents}
-        activeAgent={activePolicyAgent}
-        agentsLoading={agentsQuery.isPending}
-        agentsErrorText={agentsQuery.isError
-          ? agentsQuery.error instanceof Error
-            ? agentsQuery.error.message
-            : String(agentsQuery.error)
-          : ""}
-        activeAgentScopeId={activeAgentScopeId}
-        scopeOptions={toolScopeOptions}
-        scopeCounts={activeAgentScope.counts}
-        dirty={toolPolicyDirty}
-        deepLinkNotice={deepLinkNotice}
-        onAgentChange={setActivePolicyAgentId}
-        onScopeChange={setActiveAgentScopeId}
-      />
+
 
       <div
         ref={(element) => {
@@ -1948,12 +1955,15 @@ export function ToolsRoute() {
         data-vui-layout-id={TOOLS_LAYOUT_ID}
       >
         <aside className={leftPanelCollapsed ? `${styles.listPanel} ${styles.paneCollapsed}` : styles.listPanel} aria-hidden={leftPanelCollapsed}>
+          {workspaceView === "library" ? <>
           <div className={styles.panelHeader}>
             <div>
-              <p className={styles.panelEyebrow}>{t("toolsRegistry")}</p>
-              <h2>{t("toolsCurrentAgentTools")}</h2>
+                                              <h2>{lang === "zh" ? "工具库" : "Tool library"}</h2>
             </div>
-            <span className={styles.countPill}>{visibleTools.length}</span>
+            <div className={styles.libraryHeaderActions}><span className={styles.countPill}>{visibleTools.length}</span>
+              <VIconButton variant="ghost" label={lang === "zh" ? (bulkSelectionMode ? "退出批量选择" : "批量选择") : (bulkSelectionMode ? "Exit bulk selection" : "Bulk select")}
+                icon={<ListChecks size={16}/>} onPress={() => { setBulkSelectionMode((current) => !current); clearBulkTools(); }} />
+            </div>
           </div>
           <label className={styles.searchBox}>
             <Search size={15} />
@@ -1965,25 +1975,12 @@ export function ToolsRoute() {
             />
           </label>
           <div className={styles.filterRow}>
-            {FILTERS.map((filter) => (
-              <VButton
-                key={filter}
-                type="button"
-                variant="secondary"
-                className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
-                onPress={() => setActiveFilter(filter)}
-              >
-                <span>{filterLabel(filter, lang)}</span>
-                <strong>{filterCounts[filter]}</strong>
-              </VButton>
-            ))}
+            <VStringSelect ariaLabel={lang === "zh" ? "工具筛选" : "Tool filter"} value={activeFilter}
+              onValueChange={(value) => setActiveFilter(value as ToolFilter)}
+              options={FILTERS.map((filter) => ({ value: filter, label: `${filterLabel(filter, lang)} ${filterCounts[filter]}` }))} />
           </div>
-          <section className={styles.bulkActionBar} aria-label={bulkCopy.selected}>
-            <div className={styles.bulkSummary}>
-              <CheckSquare size={15} />
-              <strong>{bulkCopy.selected}</strong>
-              <span>{selectedTools.length} / {visibleTools.length}</span>
-            </div>
+          {bulkSelectionMode || selectedTools.length ? <div className={styles.bulkSelectionHeader}>
+            <span>{bulkCopy.selected} {selectedTools.length}</span>
             <VButton
               type="button"
               variant="secondary"
@@ -1996,21 +1993,12 @@ export function ToolsRoute() {
             >
               <span>{allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}</span>
             </VButton>
-            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(true)} icon={<Power size={14} />}>
-              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.enable}</span>
-            </VButton>
-            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(false)} icon={<CircleSlash size={14} />}>
-              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.disable}</span>
-            </VButton>
-            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => setToolConfirm({ kind: "bulk-delete" })} icon={<Trash2 size={14} />}>
-              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
-            </VButton>
-          </section>
+          </div> : null}
           <ToolRegistryVirtualList
             rows={toolRegistryRows}
             className={styles.toolList}
             ariaLabel={lang === "zh" ? "工具注册表" : "Tool registry"}
-            onActivateTool={(tool) => setActiveToolId(tool.id)}
+            onActivateTool={selectActiveTool}
             renderRow={(row) => {
               if (row.kind === "group") {
                 const group = row.group;
@@ -2038,8 +2026,8 @@ export function ToolsRoute() {
               const isActive = tool.id === activeTool?.id;
               const bulkSelected = selectedToolIds.has(tool.id);
               return (
-                <div className={styles.selectableToolRow}>
-                  <VTooltip content={`${bulkCopy.selected}: ${tool.name}`} width="compact">
+                <div className={`${styles.selectableToolRow} ${bulkSelectionMode || selectedTools.length ? styles.toolRowSelecting : ""}`}>
+                  {bulkSelectionMode || selectedTools.length ? <VTooltip content={`${bulkCopy.selected}: ${tool.name}`} width="compact">
                     <label className={styles.rowSelect}>
                       <VNativeInput
                         type="checkbox"
@@ -2053,7 +2041,7 @@ export function ToolsRoute() {
                       />
                       {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                     </label>
-                  </VTooltip>
+                  </VTooltip> : null}
                   <VButton
                     type="button"
                     variant="ghost"
@@ -2064,13 +2052,11 @@ export function ToolsRoute() {
                     aria-setsize={row.total}
                     onClick={(event) => handleToolRowClick(tool, event)}
                   >
-                    <VStatusChip tone={statusToneToVui(statusTone(tool))} className={styles.toolStatusChip}>
-                      {toolStatusLabel(tool, lang)}
-                    </VStatusChip>
+                    <Wrench size={15} strokeWidth={1.5} className="mt-1 shrink-0 text-vui-fg-tertiary"/>
                     <span className={styles.toolCopy}>
                       <strong>{tool.name}</strong>
                       <span>
-                        {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
+                        {toolStatusLabel(tool, lang)} · {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
                       </span>
                     </span>
                   </VButton>
@@ -2096,6 +2082,35 @@ export function ToolsRoute() {
               </>
             )}
           />
+
+          {selectedTools.length ? (
+          <section className={styles.bulkActionBar} aria-label={bulkCopy.selected}>
+            <div className={styles.bulkSummary}>
+              <CheckSquare size={15} />
+              <strong>{bulkCopy.selected}</strong>
+              <span>{selectedTools.length} / {visibleTools.length}</span>
+            </div>
+            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(true)} icon={<Power size={14} />}>
+              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.enable}</span>
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(false)} icon={<CircleSlash size={14} />}>
+              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.disable}</span>
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => setToolConfirm({ kind: "bulk-delete" })} icon={<Trash2 size={14} />}>
+              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
+            </VButton>
+          </section>
+          ) : null}
+          </> : <>
+          <div className={styles.panelHeader}><h2>{lang === "zh" ? "工具包" : "Tool packages"}</h2></div>
+          <div className={styles.policyBundleList} aria-label={lang === "zh" ? "工具包列表" : "Tool packages"}>
+            {policyBundleEntries.map((entry) => <VNativeButton key={entry.id} className={`${styles.policyBundleButton} ${entry.id === activePolicyBundleId ? styles.policyBundleButtonActive : ""}`}
+              aria-pressed={entry.id === activePolicyBundleId} title={entry.description} onClick={() => selectPolicyBundle(entry.id)}>
+              <Box size={16} strokeWidth={1.5}/><span>{entry.label}</span><small>{entry.count}</small>
+            </VNativeButton>)}
+          </div>
+          <p className={styles.policyRailHint}>{lang === "zh" ? "选择工具包，调整当前 Agent 的权限。" : "Choose a package to edit this Agent's permissions."}</p>
+          </>}
         </aside>
 
         <PaneCollapseHandle
@@ -2115,29 +2130,77 @@ export function ToolsRoute() {
         />
 
         <VSurface as="main" className={styles.detailPane} padding="none">
+        <div className={styles.detailPaneBody}>
+          <div className={styles.workspaceToolbar}>
+            <VTabs aria-label={lang === "zh" ? "工具管理视图" : "Tool management views"} value={workspaceView} onValueChange={(value) => navigateWorkspace(value as ToolsWorkspaceView)}
+              items={[{ id: "library", label: lang === "zh" ? "工具库" : "Tool library" }, { id: "policy", label: lang === "zh" ? "Agent 工具配置" : "Agent tool configuration" }]}
+              listClassName={styles.workspaceTabsList} triggerClassName={styles.workspaceTabsTrigger}/>
+            <span className={styles.workspaceState}>{workspaceView === "policy" ? (toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")) : (lang === "zh" ? "注册表" : "Registry")}</span>
+          </div>
+          <div className={styles.mobileSelection}><VStringSelect ariaLabel={workspaceView === "library" ? (lang === "zh" ? "当前工具" : "Current tool") : (lang === "zh" ? "当前工具包" : "Current package")}
+            value={workspaceView === "library" ? activeTool?.id || "" : activePolicyBundleId}
+            options={workspaceView === "library" ? visibleTools.map((tool) => ({ value: tool.id, label: tool.name })) : policyBundleEntries.map((entry) => ({ value: entry.id, label: entry.label }))}
+            onValueChange={(value) => { if (workspaceView === "policy") selectPolicyBundle(value); else { const tool = tools.find((item) => item.id === value); if (tool) selectActiveTool(tool); } }}/></div>
+          {workspaceView === "library" ? <details className={styles.mobileLibraryControls}>
+            <summary>{lang === "zh" ? "搜索与批量操作" : "Search and bulk actions"}</summary>
+            <label className={styles.searchBox}><Search size={15}/><VNativeInput aria-label={t("toolsSearchPlaceholder")} placeholder={t("toolsSearchPlaceholder")} value={searchText} onChange={(event) => setSearchText(event.target.value)}/></label>
+            <VStringSelect ariaLabel={lang === "zh" ? "工具筛选" : "Tool filter"} value={activeFilter} onValueChange={(value) => setActiveFilter(value as ToolFilter)} options={FILTERS.map((filter) => ({ value: filter, label: `${filterLabel(filter, lang)} ${filterCounts[filter]}` }))}/>
+            <label className="flex items-center gap-2 text-vui-micro-13"><VNativeInput type="checkbox" aria-label={lang === "zh" ? "选择当前工具" : "Select current tool"} checked={Boolean(activeTool && selectedToolIds.has(activeTool.id))} disabled={!activeTool || bulkToolPending} onChange={(event) => activeTool && toggleBulkTool(activeTool.id, event.target.checked)}/>{lang === "zh" ? "选择当前工具" : "Select current tool"}</label>
+            <div className={styles.detailActions}><span>{bulkCopy.selected} {selectedTools.length}</span><VButton variant="ghost" onPress={allVisibleToolsSelected ? clearBulkTools : selectVisibleBulkTools}>{allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}</VButton></div>
+            {selectedTools.length ? <div className={styles.detailActions}><VButton isDisabled={bulkToolPending} onPress={() => bulkSetToolsEnabled(true)}>{bulkCopy.enable}</VButton><VButton isDisabled={bulkToolPending} onPress={() => bulkSetToolsEnabled(false)}>{bulkCopy.disable}</VButton><VButton isDisabled={bulkToolPending} onPress={() => setToolConfirm({ kind: "bulk-delete" })}>{bulkCopy.delete}</VButton></div> : null}
+          </details> : null}
+      <ToolsRouteAgentScopePanel
+        copy={{
+          blocked: t("toolsScopeBlocked"),
+          callable: lang === "zh" ? "所选范围可调用" : "Callable in selected scope",
+          configure: lang === "zh" ? "配置" : "Configure",
+          configureAgent: lang === "zh" ? "配置 Agent" : "Configure Agent",
+          loading: t("loading"),
+          scope: t("toolsAgentScope"),
+          synced: lang === "zh" ? "已同步" : "Synced",
+          unsaved: lang === "zh" ? "未保存" : "Unsaved",
+          visible: t("toolsScopeVisible"),
+        }}
+        activeAgents={activeAgents}
+        activeAgent={activePolicyAgent}
+        agentsLoading={agentsQuery.isPending}
+        agentsErrorText={agentsQuery.isError
+          ? agentsQuery.error instanceof Error
+            ? agentsQuery.error.message
+            : String(agentsQuery.error)
+          : ""}
+        activeAgentScopeId={activeAgentScopeId}
+        scopeOptions={toolScopeOptions}
+        scopeCounts={activeAgentScope.counts}
+        dirty={toolPolicyDirty}
+        deepLinkNotice={deepLinkNotice}
+        onAgentChange={(agentId) => { setActivePolicyAgentId(agentId); setSearchParams((current) => toolsWorkspaceParams(current, { agent: agentId }), { replace: true }); }}
+        onScopeChange={(scopeId) => { setActiveAgentScopeId(scopeId); setSearchParams((current) => toolsWorkspaceParams(current, { scope: scopeId }), { replace: true }); }}
+      />
+              {notice.text ? (
+                <p
+                  className={
+                    notice.tone === "error"
+                      ? styles.noticeError
+                      : notice.tone === "success"
+                        ? styles.noticeSuccess
+                        : styles.notice
+                  }
+                >
+                  {notice.text}
+                </p>
+              ) : null}
         <div className={styles.detailPanel}>
-          <section
-            id="agent-tools-policy"
-            className={`${styles.agentPermissionSummaryPanel} ${requestedFocus === "policy" ? styles.deepLinkFocus : ""}`}
-          >
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 工具配置" : "Agent tool configuration"}</p>
-                <h2>{lang === "zh" ? "工具权限" : "Tool permissions"}</h2>
-              </div>
-              <span className={toolPolicyDirty ? styles.stateBadge : styles.countPill}>
-                {toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-              </span>
-            </div>
-            <div className={styles.permissionSummaryGrid}>
-              <div className={styles.permissionSummaryCards}>
+          {workspaceView === "policy" ? (
+          <section id="agent-tools-policy" className={styles.agentPermissionSummaryPanel} data-tools-view="policy">
+            <div className={styles.policyScroll} data-tools-role="policy-scroll">
+              <div className={styles.policyOverview} data-tools-role="policy-summary">
                 <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
-                <span>{lang === "zh" ? "优先" : "Preferred"} <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
-                <span>{lang === "zh" ? "禁用" : "Blocked"} <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
-                <span>{lang === "zh" ? "未允许" : "Not allowed"} <strong>{capabilityPreview.inherited}</strong></span>
-                <span>{lang === "zh" ? "高风险允许" : "High-risk allowed"} <strong>{capabilityPreview.highRiskAllowed}</strong></span>
+                <span>{lang === "zh" ? "优先" : "Preferred"} {toolPolicyDraft.preferredTools.length}</span>
+                <span>{lang === "zh" ? "禁用" : "Blocked"} {toolPolicyDraft.blockedTools.length}</span>
+                <small>{lang === "zh" ? "配置作用于后续回合" : "Applies to subsequent turns"}</small>
               </div>
-            </div>
+              <div className={styles.panelHeader}><h2>{toolPolicySearchText.trim() ? (lang === "zh" ? "搜索结果" : "Search results") : activePolicyBundle?.label || (lang === "zh" ? "工具权限" : "Tool permissions")}</h2></div>
             {toolPolicyPreview ? (
               <VStateSurface
                 tone="info"
@@ -2148,47 +2211,13 @@ export function ToolsRoute() {
                   : `${toolPolicyPreview.preview.visibleTools.length} visible, ${toolPolicyPreview.preview.executableTools.length} executable, ${toolPolicyPreview.preview.unavailableTools.length} unavailable, ${toolPolicyPreview.preview.approvalRequiredTools.length} approval-required; affects ${toolPolicyPreview.impact.affectedAgentCount} Agents.`}
               </VStateSurface>
             ) : null}
-            <section className={styles.policyDraftPanel}>
-              <div className={styles.policyDraftSummary}>
-                <strong>{lang === "zh" ? `Agent 工具权限 · ${activePolicyAgentLabel}` : `Agent tool permissions · ${activePolicyAgentLabel}`}<VContextualHint className="ml-1" label={lang === "zh" ? "工具权限统计说明" : "Tool permission count details"} width="wide" content={lang === "zh"
-                  ? "顶部统计所选 Agent 范围内的可调用工具（不是全局注册总数）；当前 Agent 的明确允许项与工具测试批准分别判断。"
-                  : "The counts above describe callable tools in the selected Agent scope, not the global registry. This Agent's explicit grants and tool-test approval are separate checks."} /></strong>
-                <span>{lang === "zh" ? "明确允许" : "Explicitly allowed"}: {capabilityPreview.effectiveAllowed}</span>
-                <span>{lang === "zh" ? "需显式授权" : "Explicit grants"}: {capabilityPreview.explicitAllowed}</span>
-                <span>{lang === "zh" ? "写入边界" : "Write boundary"}: {capabilityPreview.writeBoundaryLabel}</span>
-              </div>
-              <div className={styles.workspaceScopePanel}>
-                <span>{lang === "zh" ? "工作空间写入" : "Workspace write"}</span>
-                <label>
-                  <VNativeInput type="checkbox" checked disabled />
-                  {lang === "zh" ? "私人工作区" : "Private workspace"}
-                </label>
-                <label>
-                  <VNativeInput
-                    type="checkbox"
-                    checked={toolPolicyDraft.writeScopes.includes("shared")}
-                    onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
-                  />
-                  {lang === "zh" ? "共享资料区" : "Shared workspace"}
-                </label>
-              </div>
+              <section className={styles.policyDraftPanel}>
               {toolBundles.length ? (
                 <div
                   id="agent-tools-bundles"
                   className={`${styles.toolBundleApplyBar} ${requestedFocus === "bundle" ? styles.deepLinkFocus : ""}`}
                 >
-                  <label className={styles.toolBundleSelect}>
-                    <span>{lang === "zh" ? "工具包" : "Package"}</span>
-                    <VStringSelect
-                      ariaLabel={lang === "zh" ? "工具包" : "Tool bundle"}
-                      value={selectedBundle?.bundleId ?? ""}
-                      onValueChange={setSelectedBundleId}
-                      options={toolBundles.map((bundle) => ({
-                        value: bundle.bundleId,
-                        label: bundle.label,
-                      }))}
-                    />
-                  </label>
+
                   <VTooltip content={selectedBundle?.description || (lang === "zh" ? "先选择工具包。" : "Choose a package first.")} width="wide">
                     <span className={styles.toolBundleSummary} tabIndex={0}>
                       {selectedBundle ? toolBundleMeta(selectedBundle, lang) : "-"}
@@ -2224,15 +2253,15 @@ export function ToolsRoute() {
                   onChange={(event) => setToolPolicySearchText(event.target.value)}
                 />
               </label>
-              {editablePolicyTools.length ? (
+              {visiblePolicyGroups.length ? (
                 <div className={styles.toolPermissionList}>
-                  {editablePolicyGroups.map((group) => (
+                  {visiblePolicyGroups.map((group) => (
                     <ToolPermissionGroupDisclosure
                       key={group.bundleId}
                       className={styles.toolPermissionGroup}
-                      summaryClassName={styles.permissionSummary}
+                      summaryClassName={toolPolicySearchText.trim() ? styles.permissionSummary : styles.singlePermissionSummary}
                       listClassName={styles.toolPermissionGroupList}
-                      forceOpen={Boolean(toolPolicySearchText.trim())}
+                      forceOpen={true}
                       summary={(
                         <>
                           <span>{group.label}</span>
@@ -2246,13 +2275,15 @@ export function ToolsRoute() {
                             <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
                               <span>
                                 <strong>{tool.name}</strong>
-                                <VTooltip content={tool.description || tool.source} width="wide">
-                                  <small tabIndex={0}>{displaySource(tool.source, lang)}</small>
-                                </VTooltip>
                                 <span className={styles.toolPermissionMeta}>
+                                  <VTooltip content={tool.description || tool.source} width="wide">
+                                    <small tabIndex={0}>{displaySource(tool.source, lang)}</small>
+                                  </VTooltip>
+                                  <span aria-hidden="true">·</span>
                                   <em>{toolTierLabel(tool.permissionTier, lang)}</em>
+                                  <span aria-hidden="true">·</span>
                                   <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
-                                  {tags.length ? <small title={tags.join(" / ")}>{tags.slice(0, 2).join(" / ")}</small> : null}
+                                  {tags.length ? <VContextualHint label={`${tool.name} ${lang === "zh" ? "工具标签" : "Tool tags"}`} content={tags.join(" / ")} width="wide" /> : null}
                                 </span>
                               </span>
                               {(() => {
@@ -2304,6 +2335,43 @@ export function ToolsRoute() {
                   title={lang === "zh" ? "当前没有可分配工具" : "No assignable tools"}
                 />
               )}
+                <details className={styles.schemaDisclosure}><summary>{lang === "zh" ? "权限摘要与工作空间写入" : "Permission summary and workspace write"}</summary>
+            <div className={styles.permissionSummaryGrid}>
+              <div className={styles.permissionSummaryCards}>
+                <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
+                <span>{lang === "zh" ? "优先" : "Preferred"} <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
+                <span>{lang === "zh" ? "禁用" : "Blocked"} <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
+                <span>{lang === "zh" ? "未允许" : "Not allowed"} <strong>{capabilityPreview.inherited}</strong></span>
+                <span>{lang === "zh" ? "高风险允许" : "High-risk allowed"} <strong>{capabilityPreview.highRiskAllowed}</strong></span>
+              </div>
+            </div>
+              <div className={styles.policyDraftSummary}>
+                <strong>{lang === "zh" ? `Agent 工具权限 · ${activePolicyAgentLabel}` : `Agent tool permissions · ${activePolicyAgentLabel}`}<VContextualHint className="ml-1" label={lang === "zh" ? "工具权限统计说明" : "Tool permission count details"} width="wide" content={lang === "zh"
+                  ? "顶部统计所选 Agent 范围内的可调用工具（不是全局注册总数）；当前 Agent 的明确允许项与工具测试批准分别判断。"
+                  : "The counts above describe callable tools in the selected Agent scope, not the global registry. This Agent's explicit grants and tool-test approval are separate checks."} /></strong>
+                <span>{lang === "zh" ? "明确允许" : "Explicitly allowed"}: {capabilityPreview.effectiveAllowed}</span>
+                <span>{lang === "zh" ? "需显式授权" : "Explicit grants"}: {capabilityPreview.explicitAllowed}</span>
+                <span>{lang === "zh" ? "写入边界" : "Write boundary"}: {capabilityPreview.writeBoundaryLabel}</span>
+              </div>
+              <div className={styles.workspaceScopePanel}>
+                <span>{lang === "zh" ? "工作空间写入" : "Workspace write"}</span>
+                <label>
+                  <VNativeInput type="checkbox" checked disabled />
+                  {lang === "zh" ? "私人工作区" : "Private workspace"}
+                </label>
+                <label>
+                  <VNativeInput
+                    type="checkbox"
+                    checked={toolPolicyDraft.writeScopes.includes("shared")}
+                    onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
+                  />
+                  {lang === "zh" ? "共享资料区" : "Shared workspace"}
+                </label>
+              </div>
+                </details>
+              </section>
+            </div>
+            <footer className={styles.policyFooter}><span>{toolPolicyDirty ? (lang === "zh" ? "草稿有变更" : "Unsaved draft") : (lang === "zh" ? "配置已同步" : "Synced")}</span>
               <div className={styles.detailActions}>
                 <VButton
                   type="button"
@@ -2333,9 +2401,9 @@ export function ToolsRoute() {
                   {activePolicyAgentPending ? (lang === "zh" ? "保存中..." : "Saving...") : (lang === "zh" ? "保存工具配置" : "Save tool config")}
                 </VButton>
               </div>
-            </section>
+            </footer>
           </section>
-          {activeTool ? (
+          ) : activeTool ? (
             <aside
               id="agent-tools-detail"
               className={`${styles.toolDetailPanel} ${requestedFocus === "detail" || requestedFocus === "test" ? styles.deepLinkFocus : ""}`}
@@ -2379,6 +2447,7 @@ export function ToolsRoute() {
                   {activeScopeState?.blockReason || activeTool.blockReason || activeTool.validationError}
                 </p>
               ) : null}
+              <details className={styles.schemaDisclosure}><summary>{lang === "zh" ? "运行状态与测试边界" : "Runtime readiness and test boundary"}</summary>
               <section className={styles.readinessPanel}>
                 {toolReadinessCards(activeTool, activeScopeState ?? scopeStateForTool(activeTool, activeAgentScope.id), activeAgentScope, t).map((card) => (
                   <div
@@ -2407,6 +2476,7 @@ export function ToolsRoute() {
                   {toolPolicyModeLabel(activePolicyMode, lang)}
                 </strong>
               </section>
+              </details>
               {activeIsImage2Tool ? (
                 <section className={styles.image2ModelPanel}>
                   <div className={styles.panelHeader}>
@@ -2554,6 +2624,25 @@ export function ToolsRoute() {
                   ) : null}
                 </section>
               ) : null}
+              <div className={styles.testToolbar}><h3>{lang === "zh" ? "工具测试" : "Tool test"}</h3>
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  className={styles.secondaryButton}
+                  isDisabled={!activeTool || !activePolicyAgent || activeToolTestPending}
+                  onPress={() => {
+                    if (activeTool && activePolicyAgent) {
+                      testMutation.mutate({
+                        toolId: activeTool.id,
+                        agentScopeId: activeAgentScope.id,
+                        agentId: activePolicyAgent.agentId,
+                      });
+                    }
+                  }}
+                  icon={<FlaskConical size={15} />}
+                >
+                  {activeToolTestPending ? t("toolsTesting") : t("toolsTest")}
+                </VButton>              </div>
               <section className={styles.policyPanel}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -2578,6 +2667,7 @@ export function ToolsRoute() {
                   <pre>{jsonPreview(activeTool.testPolicy.argsPreview)}</pre>
                 </details>
               </section>
+              <details className={styles.schemaDisclosure}><summary>{lang === "zh" ? "管理操作" : "Manage tool"}</summary>
               <div className={styles.detailActions}>
                 <VButton
                   type="button"
@@ -2616,38 +2706,9 @@ export function ToolsRoute() {
                 >
                   {activeToolDeletePending ? t("deletingSelectedLogs") : t("deleteSelected")}
                 </VButton>
-                <VButton
-                  type="button"
-                  variant="secondary"
-                  className={styles.secondaryButton}
-                  isDisabled={!activeTool || !activePolicyAgent || activeToolTestPending}
-                  onPress={() => {
-                    if (activeTool && activePolicyAgent) {
-                      testMutation.mutate({
-                        toolId: activeTool.id,
-                        agentScopeId: activeAgentScope.id,
-                        agentId: activePolicyAgent.agentId,
-                      });
-                    }
-                  }}
-                  icon={<FlaskConical size={15} />}
-                >
-                  {activeToolTestPending ? t("toolsTesting") : t("toolsTest")}
-                </VButton>
+
               </div>
-              {notice.text ? (
-                <p
-                  className={
-                    notice.tone === "error"
-                      ? styles.noticeError
-                      : notice.tone === "success"
-                        ? styles.noticeSuccess
-                        : styles.notice
-                  }
-                >
-                  {notice.text}
-                </p>
-              ) : null}
+              </details>
               {visibleTestResult ? (
                 <section className={styles.testPanel}>
                   <div className={styles.panelHeader}>
@@ -2725,6 +2786,7 @@ export function ToolsRoute() {
               )}
             </section>
           )}
+        </div>
         </div>
         </VSurface>
       </div>

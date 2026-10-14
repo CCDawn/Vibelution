@@ -1,5 +1,5 @@
 import type { AgentInstance } from "../api/types";
-import { VStringSelect } from "../components/vui";
+import { VContextualHint, VStringSelect } from "../components/vui";
 import styles from "./ToolsRouteAgentScopePanel.styles";
 
 export type ToolsRouteScopeOption = {
@@ -61,13 +61,8 @@ export function ToolsRouteAgentScopePanel({
 }: ToolsRouteAgentScopePanelProps) {
   return (
     <section className={styles.agentScopeBar}>
-        <div className={styles.scopeCopy}>
-          <p className={styles.panelEyebrow}>{copy.configureAgent}</p>
-          <strong>{agentDisplayName(activeAgent)}</strong>
-          <span>{dirty ? copy.unsaved : copy.synced}</span>
-        </div>
         <label className={styles.scopeSelect}>
-          <span>{copy.configure}</span>
+          <span>{copy.configureAgent}</span>
           <VStringSelect
             ariaLabel={copy.configureAgent}
             value={activeAgent?.agentId ?? ""}
@@ -95,17 +90,13 @@ export function ToolsRouteAgentScopePanel({
             }))}
           />
         </label>
-        <div className={styles.scopeStats}>
-          <span>
-            {copy.visible}: <strong>{scopeCounts.visible}</strong>
-          </span>
-          <span>
-            {copy.callable}: <strong>{scopeCounts.callable}</strong>
-          </span>
-          <span>
-            {copy.blocked}: <strong>{scopeCounts.blocked}</strong>
-          </span>
-        </div>
+        <VContextualHint className={styles.scopeStats} label={`${copy.scope} · ${agentDisplayName(activeAgent)}`}
+          content={<div className="grid gap-2"><strong>{agentDisplayName(activeAgent)}</strong>
+            <span>{dirty ? copy.unsaved : copy.synced}</span>
+            <span>{copy.visible}: <strong>{scopeCounts.visible}</strong></span>
+            <span>{copy.callable}: <strong>{scopeCounts.callable}</strong></span>
+            <span>{copy.blocked}: <strong>{scopeCounts.blocked}</strong></span>
+          </div>} />
         {deepLinkNotice ? <p className={styles.deepLinkNotice}>{deepLinkNotice}</p> : null}
     </section>
   );

@@ -20,41 +20,6 @@ const agentScopeStylesSource = [
 
 const routeOverflowGuardStyles = ["route", "workspace"] as const;
 
-const backgroundAwarePanelStyles = [
-  "agentPermissionSummaryPanel",
-  "bulkSummary",
-  "dependencyHealthPanel",
-  "emptyDetail",
-  "image2ModelPanel",
-  "image2ModelSummary",
-  "listPanel",
-  "notice",
-  "noticeError",
-  "noticeSuccess",
-  "policyDraftSummary",
-  "policyPanel",
-  "readinessCard",
-  "readinessPanel",
-  "resultCard",
-  "resultSummaryGrid",
-  "searchBox",
-  "testPanel",
-  "toolAgentFitPanel",
-  "toolBundleSummary",
-  "toolDetailPanel",
-] as const;
-
-const backgroundAwareRepeatedStyles = [
-  "bulkActionBar",
-  "policyDraftSummary",
-  "selectableToolRow",
-  "summaryCard",
-  "toolBundleApplyBar",
-  "toolBundleSummary",
-  "toolPermissionRow",
-  "workspaceScopePanel",
-] as const;
-
 const surfaceFreeRepeatedLayoutStyles = [
   "toolBadges",
   "toolBundleApplyActions",
@@ -68,11 +33,6 @@ const surfaceFreeRepeatedLayoutStyles = [
   "toolPermissionMeta",
 ] as const;
 
-const backgroundAwareAgentScopeStyles = [
-  "agentScopeBar",
-  "scopeStats",
-] as const;
-
 const contentSizedActionStyles = [
   "dangerButton",
   "filterButton",
@@ -84,19 +44,6 @@ const contentSizedActionStyles = [
 
 function classTokens(className: string): string[] {
   return className.split(/\s+/).filter(Boolean);
-}
-
-function expectBackgroundAwareHairlineSurface(className: string) {
-  expect(className).toContain("border");
-  expect(className).toMatch(/border-\[(?:color:)?color-mix\(in_srgb|border-\[var\(--vui-border|border-vui-border/);
-  // Opaque surface recipes, color: mix form, or state-tint bg-[color-mix(...)] recipes.
-  expect(className).toMatch(
-    /!bg-vui-surface-|bg-vui-surface-|!bg-\[var\(--vui-surface-|bg-\[var\(--vui-surface-|bg-\[(?:color:)?color-mix\(in_srgb/,
-  );
-  expect(className).not.toContain("bg-vui-surface-glass");
-  expect(className).not.toContain("bg-[var(--surface-card)]");
-  expect(className).not.toContain("bg-[var(--surface-panel)]");
-  expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
 }
 
 function expectNoRepeatedSurfaceTokens(className: string) {
@@ -169,7 +116,7 @@ describe("ToolsRoute layout contract", () => {
 
   it("surfaces tool readiness before raw schema details", () => {
     const readinessIndex = routeSource.indexOf("styles.readinessPanel");
-    const schemaIndex = routeSource.indexOf("styles.schemaDisclosure");
+    const schemaIndex = routeSource.indexOf("schemaPreview(activeTool)");
 
     expect(readinessIndex).toBeGreaterThan(0);
     expect(schemaIndex).toBeGreaterThan(readinessIndex);
@@ -232,8 +179,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolScopeOptions");
     expect(agentScopePanelSource).toContain("styles.agentScopeBar");
     expect(agentScopeStylesSource).toContain(".agentScopeBar");
-    expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(0,1fr)_clamp(160px,16vw,220px)");
-    expect(agentScopeStyles.agentScopeBar).toContain("max-[880px]:grid-cols-[minmax(0,1fr)_clamp(160px,22vw,220px)]");
+    expect(agentScopeStyles.agentScopeBar).toContain("flex-wrap");
+    expect(agentScopeStyles.scopeSelect).toContain("whitespace-nowrap");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
     expect(routeSource).toContain("testTool(");
     expect(toolsApiSource).toContain("agentScope: payload.agentScopeId");
@@ -428,7 +375,7 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.toolButton).toContain("!grid");
     expect(styles.toolButton).toContain("w-full");
     expect(styles.toolButton).toContain("grid-cols-[auto_minmax(0,1fr)]");
-    expect(styles.toolCopy).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.toolCopy).toContain("text-vui-micro-13");
     expect(styles.toolCopy).toContain("[&>span]:truncate");
     expect(styles.toolList).toContain("overflow-auto");
   });
@@ -451,14 +398,14 @@ describe("ToolsRoute layout contract", () => {
     expect(stylesModuleSource).toContain("const buttonBase");
     expect(stylesModuleSource).toContain("const activeTone");
     expect(stylesModuleSource).toContain("const compactField");
-    expect(agentScopeStylesModuleSource).toContain("const coolSurface");
+    expect(agentScopeStyles.agentScopeBar).toContain("bg-transparent");
   });
 
   it("keeps bulk controls in compact document flow instead of covering tool rows", () => {
     expect(routeSource).toContain("styles.listPanel");
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.toolList");
-    expect(styles.listPanel).toContain("panel");
+    expect(styles.listPanel).toContain("vui-workbench-rail");
     expect(styles.bulkActionBar).toContain("flex");
     expect(styles.bulkActionBar).toContain("flex-wrap");
     expect(styles.bulkActionBar).not.toContain("!grid");
@@ -474,8 +421,9 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.toolDetailPanel");
     expect(routeSource).toContain("styles.detailPanel");
     expect(styles.permissionSummaryGrid).toContain("grid");
-    expect(styles.detailPanel).toContain("overflow-auto");
-    expect(styles.toolDetailPanel).toContain("panel");
+    expect(styles.detailPanel).toContain("overflow-hidden");
+    expect(styles.policyScroll).toContain("overflow-auto");
+    expect(styles.toolDetailPanel).toContain("overflow-auto");
   });
 
   it("guards route and workspace against horizontal overflow", () => {
@@ -489,16 +437,16 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.workspace).toContain("max-[760px]:!grid-cols-[minmax(0,1fr)]");
   });
 
-  it("keeps major panels background-aware without route-owned shadow shells", () => {
-    for (const key of backgroundAwarePanelStyles) {
-      expectBackgroundAwareHairlineSurface(styles[key]);
+  it("uses the shared white pane without nesting window surfaces", () => {
+    expect(stylesModuleSource).toContain("VUI_WORKBENCH_PANE_CLASS");
+    expect(styles.detailPane).toContain("vui-workbench-pane");
+    for (const key of ["agentPermissionSummaryPanel", "toolDetailPanel", "policyPanel", "toolPermissionRow"] as const) {
+      expect(styles[key]).not.toContain("radius-panel");
+      expect(styles[key]).not.toContain("shadow-");
+      expect(styles[key]).not.toContain("bg-vui-surface-glass");
     }
-  });
-
-  it("keeps repeated tool cards, bundles, and policy rows light instead of stacked opaque cards", () => {
-    for (const key of backgroundAwareRepeatedStyles) {
-      expectBackgroundAwareHairlineSurface(styles[key]);
-    }
+    expect(styles.toolPermissionRow).toContain("border-t");
+    expect(styles.policyFooter).toContain("border-t");
   });
 
   it("keeps nested tool bundle and policy wrappers as layout instead of extra surfaces", () => {
@@ -507,10 +455,13 @@ describe("ToolsRoute layout contract", () => {
     }
   });
 
-  it("keeps Agent scope repeated surfaces light without glass or route-owned shadows", () => {
-    for (const key of backgroundAwareAgentScopeStyles) {
-      expectBackgroundAwareHairlineSurface(agentScopeStyles[key]);
-    }
+  it("keeps Agent scope inline and leaves its counts available as contextual help", () => {
+    expect(agentScopeStyles.agentScopeBar).toContain("bg-transparent");
+    expect(agentScopePanelSource).toContain("<VContextualHint");
+    expect(agentScopePanelSource).toContain("scopeCounts.visible");
+    expect(agentScopePanelSource).toContain("scopeCounts.callable");
+    expect(agentScopePanelSource).toContain("scopeCounts.blocked");
+    expect(agentScopePanelSource).not.toContain("styles.scopeCopy");
   });
 
   it("keeps short action buttons sized to their content", () => {
@@ -526,58 +477,54 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.policyTabsHost).toContain("justify-end");
   });
 
-  it("keeps the Agent policy draft summary in a four-column grid", () => {
+  it("folds the full policy summary without removing write boundaries", () => {
+    expect(routeSource).toContain("权限摘要与工作空间写入");
     expect(routeSource).toContain("styles.policyDraftSummary");
-    expect(styles.policyDraftSummary).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
-    expect(styles.policyDraftSummary).toContain("gap-1");
-    expect(styles.policyDraftSummary).toContain("py-1");
-    expectBackgroundAwareHairlineSurface(styles.policyDraftSummary);
-    expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
-    expect(styles.policyDraftSummary).toContain("max-[520px]:grid-cols-[1fr]");
+    expect(routeSource).toContain('toggleToolPolicyScope("writeScopes", "shared"');
+    expect(styles.policyDraftSummary).toContain("grid-cols-2");
+    expect(styles.policyDraftSummary).toContain("max-[640px]:!grid-cols-1");
   });
 
   it("allocates the remaining route height to the tools workspace", () => {
     expect(styles.route).toContain("h-full");
-    expect(styles.route).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.route).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(styles.route).toContain("overflow-hidden");
     expect(styles.workspace).toContain("h-full");
     expect(styles.workspace).toContain("min-h-0");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
-    expect(styles.listPanel).toContain("overflow-auto");
+    expect(styles.listPanel).toContain("overflow-hidden");
+    expect(styles.toolList).toContain("overflow-auto");
     expect(styles.toolDetailPanel).toContain("overflow-auto");
   });
 
-  it("stacks the Tools workspace on narrow screens instead of clipping the detail panel", () => {
+  it("uses a narrow-screen selector instead of stacking a tall registry above the detail", () => {
     expect(styles.workspace).toContain("max-[760px]:!grid-cols-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("max-[760px]:!grid-rows-[minmax(420px,42vh)_minmax(420px,1fr)]");
-    expect(styles.workspace).toContain("max-[760px]:!overflow-y-auto");
-    expect(styles.workspace).toContain("max-[760px]:!overflow-x-hidden");
-    expect(styles.listPanel).toContain("max-[760px]:!max-h-none");
-    expect(styles.detailPanel).toContain("overflow-auto");
+    expect(styles.workspace).toContain("max-[760px]:!grid-rows-[minmax(0,1fr)]");
+    expect(styles.listPanel).toContain("max-[760px]:!hidden");
+    expect(styles.mobileSelection).toContain("max-[760px]:!block");
+    expect(routeSource).toContain("styles.mobileSelection");
     expect(styles.resizeHandle).toContain("max-[760px]:!hidden");
   });
 
   it("keeps dense workbench rows compact and mobile-safe", () => {
-    expect(styles.filterRow).toContain("flex");
-    expect(styles.filterRow).toContain("gap-1");
+    expect(routeSource).toContain('ariaLabel={lang === "zh" ? "工具筛选"');
     expect(styles.searchBox).toContain("grid-cols-[auto_minmax(0,1fr)]");
     expect(styles.bulkActionBar).toContain("flex-wrap");
-    expect(styles.selectableToolRow).toContain("grid-cols-[28px_minmax(0,1fr)]");
-    expect(styles.toolCopy).toContain("[&>strong]:line-clamp-2");
-    expect(styles.toolPermissionRow).toContain("max-[640px]:grid-cols-[1fr]");
+    expect(styles.toolRowSelecting).toContain("grid-cols-[28px_minmax(0,1fr)]");
+    expect(styles.toolCopy).toContain("[&>strong]:break-all");
+    expect(styles.toolPermissionRow).toContain("max-[640px]:!grid-cols-[1fr]");
     expect(styles.policyTabsHost).toContain("max-[640px]:justify-start");
     expect(styles.policyTabsHost).toContain("data-policy-mode=blocked");
   });
 
-  it("uses compact scan grids for detail and Agent scope panels", () => {
-    expect(styles.readinessPanel).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
-    expect(styles.readinessPanel).toContain("max-[520px]:grid-cols-[1fr]");
-    expect(styles.metaGrid).toContain("minmax(7.5rem,1fr)");
+  it("keeps detail grids compact and scope controls inline", () => {
+    expect(styles.readinessPanel).toContain("grid-cols-2");
+    expect(styles.readinessPanel).toContain("max-[640px]:!grid-cols-1");
+    expect(styles.metaGrid).toContain("grid-cols-2");
     expect(styles.toolAgentFitPanel).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(styles.toolAgentFitPanel).toContain("max-[640px]:grid-cols-[1fr]");
-    expect(agentScopeStyles.agentScopeBar).toContain("fit-content(18rem)");
-    expect(agentScopeStyles.agentScopeBar).toContain("max-[640px]:grid-cols-[1fr]");
-    expect(agentScopeStyles.scopeStats).toContain("max-[1180px]:col-span-full");
+    expect(styles.toolAgentFitPanel).toContain("max-[640px]:!grid-cols-[1fr]");
+    expect(agentScopeStyles.agentScopeBar).toContain("flex-wrap");
+    expect(agentScopeStyles.scopeSelect).toContain("whitespace-nowrap");
   });
 });

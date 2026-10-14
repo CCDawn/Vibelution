@@ -25,9 +25,9 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
-  `${vuiOpaquePanelClass} p-2`;
+  "min-w-0 border-0 bg-transparent";
 const quietPanelSurface =
-  `${vuiOpaquePanelClass} p-1.5`;
+  "min-w-0 border-0 bg-transparent";
 const rowSurface =
   `${vuiOpaqueRowClass}`;
 const warmRowSurface =
@@ -55,7 +55,7 @@ const styles = {
   agentCompatibility:
     `agentCompatibility min-w-0 ${vuiStateCoolInfoClass}`,
   agentPermissionSummaryPanel:
-    `agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiOpaquePanelClass} p-2 text-vui-fg-primary`,
+    "agentPermissionSummaryPanel flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent",
   agentPolicyPanel:
     `agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiOpaquePanelClass} p-2 text-[var(--fg-primary)]`,
   agentPolicySelect:
@@ -63,12 +63,12 @@ const styles = {
   agentScopeBar:
     `agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   bulkActionBar:
-    `bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-1 ${vuiOpaqueRowClass} p-1`,
+    "bulkActionBar flex min-w-0 shrink-0 flex-wrap items-center gap-1 border-t border-vui-border-subtle bg-transparent pt-2",
   bulkPolicyActions:
     "bulkPolicyActions min-w-0 flex flex-wrap items-center gap-1.5",
   bulkPolicyToolRow: `bulkPolicyToolRow min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateWarmSoftClass}`,
   bulkSummary:
-    `bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap ${vuiOpaqueRowClass} px-2 py-1 [font-size:var(--vui-font-xs)]`,
+    "bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap text-vui-2xs text-vui-fg-secondary",
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   contextualHint:
@@ -76,22 +76,22 @@ const styles = {
   countPill:
     `countPill min-w-0 ${pillBase}`,
   dangerButton:
-    `dangerButton min-w-0 ${buttonBase} ${errorTone}`,
+    "dangerButton inline-flex w-fit min-w-0 max-w-full",
   deepLinkFocus:
     "deepLinkFocus min-w-0",
   deepLinkNotice:
     `deepLinkNotice min-w-0 rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2`,
   dependencyHealthPanel:
-    `dependencyHealthPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
+    "dependencyHealthPanel min-w-0 border-t border-vui-border-subtle py-4 text-vui-micro-13 leading-relaxed",
   detailActions:
-    "detailActions min-w-0 flex flex-wrap items-center gap-1 border-t border-[color:color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] pt-2",
+    "detailActions flex min-w-0 flex-wrap items-center gap-2",
   detailHeader:
-    "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
+    "detailHeader flex min-w-0 items-start justify-between gap-4 [&_h2]:break-all [&_h2]:text-vui-title [&_h2]:font-medium [&_p]:text-vui-micro-13 [&_p]:leading-relaxed [&_p]:text-vui-fg-secondary",
   detailPanel:
-    "detailPanel h-full min-h-0 min-w-0 max-w-full grid content-start gap-4 overflow-auto",
+    "detailPanel flex min-h-0 min-w-0 flex-1 overflow-hidden",
   detailPane: VUI_WORKBENCH_PANE_CLASS,
   emptyDetail:
-    `emptyDetail min-w-0 max-w-full ${panelSurface} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
+    "emptyDetail grid h-full min-h-0 min-w-0 flex-1 place-content-center justify-items-center gap-3 p-6 text-vui-micro-13 text-vui-fg-tertiary",
   emptyState:
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   filterButton:
@@ -99,49 +99,49 @@ const styles = {
   filterButtonActive:
     `filterButtonActive min-w-0 ${activeTone}`,
   filterRow:
-    `filterRow min-w-0 flex flex-wrap items-center gap-1 ${vuiOpaqueRowClass} p-1`,
+    "filterRow min-w-0 px-1 pb-2",
   header:
     "hidden",
   image2ModelControls:
     "image2ModelControls min-w-0 grid grid-cols-[minmax(12rem,0.9fr)_minmax(0,1.1fr)] items-end gap-2 max-[820px]:grid-cols-[1fr]",
   image2ModelPanel:
-    `image2ModelPanel min-w-0 max-w-full ${panelSurface}`,
+    "image2ModelPanel min-w-0 border-t border-vui-border-subtle py-4 text-vui-micro-13 leading-relaxed",
   image2ModelSelect:
     `image2ModelSelect min-w-0 ${compactField}`,
   image2ModelSummary:
-    `image2ModelSummary min-w-0 max-w-full ${quietPanelSurface}`,
+    "image2ModelSummary min-w-0 text-vui-micro-13 leading-relaxed",
   listPanel:
-    `listPanel ${VUI_WORKBENCH_RAIL_CLASS} min-w-0 max-w-full ${panelSurface} ${scrollStack} max-[760px]:!max-h-none`,
+    "listPanel vui-workbench-rail flex h-full min-h-0 min-w-0 max-w-full flex-col overflow-hidden px-2 pb-2 pt-3 max-[760px]:!hidden",
   metaGrid:
-    "metaGrid min-w-0 grid gap-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]",
+    "metaGrid grid min-w-0 grid-cols-2 gap-x-8 gap-y-4 border-y border-vui-border-subtle py-5 text-vui-micro-13 [&_section]:flex [&_section]:items-center [&_section]:justify-between [&_section]:gap-2 [&_span]:text-vui-fg-secondary [&_strong]:font-medium max-[640px]:!grid-cols-1",
   metaGridWide:
-    "metaGridWide min-w-0 sm:col-span-2",
+    "metaGridWide min-w-0 col-span-full",
   notice:
-    `notice min-w-0 max-w-full ${panelSurface}`,
+    "notice m-0 min-w-0 shrink-0 break-words bg-vui-surface-row px-5 py-2 text-vui-2xs leading-relaxed",
   noticeError:
-    `noticeError min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateDangerSoftClass} p-2 text-[var(--state-error)]`,
+    "noticeError m-0 min-w-0 shrink-0 break-words bg-[var(--vui-status-error-bg)] px-5 py-2 text-vui-2xs leading-relaxed text-[var(--state-error)]",
   noticeSuccess:
-    `noticeSuccess min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateSuccessSoftClass} p-2 text-[var(--state-success)]`,
+    "noticeSuccess m-0 min-w-0 shrink-0 break-words bg-[var(--vui-status-success-bg)] px-5 py-2 text-vui-2xs leading-relaxed text-[var(--state-success)]",
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
   panelEyebrow:
-    "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+    "panelEyebrow text-vui-2xs font-normal leading-relaxed text-vui-fg-tertiary",
   panelHeader:
-    "panelHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
+    "panelHeader flex min-w-0 items-center justify-between gap-3 px-2 pb-3 [&_h2]:text-vui-xs [&_h2]:font-medium",
   permissionSummaryCards:
-    "permissionSummaryCards min-w-0 grid gap-1 grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]",
+    "permissionSummaryCards flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-vui-micro-13 [&_strong]:font-medium",
   permissionSummaryGrid:
-    "permissionSummaryGrid min-w-0 grid gap-1 grid-cols-[minmax(0,1fr)]",
+    "permissionSummaryGrid grid min-w-0 gap-3 py-3",
   policyDraftPanel:
-    "policyDraftPanel min-w-0 max-w-full grid gap-4 border-t border-vui-border-subtle pt-4",
+    "policyDraftPanel grid min-w-0 max-w-full content-start gap-4",
   policyDraftSummary:
-    `policyDraftSummary min-w-0 max-w-full ${rowSurface} px-2 py-1 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-1 [font-size:var(--vui-font-xs)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
+    "policyDraftSummary grid min-w-0 max-w-full grid-cols-2 gap-3 py-3 text-vui-micro-13 max-[640px]:!grid-cols-1",
   policyHint:
     "policyHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   policyMeta:
     "policyMeta min-w-0 flex flex-wrap items-center gap-1",
   policyPanel:
-    `policyPanel min-w-0 max-w-full ${panelSurface}`,
+    "policyPanel min-w-0 text-vui-micro-13 leading-relaxed [&_h3]:text-vui-micro-13 [&_h3]:font-medium [&_p]:text-vui-fg-secondary",
   policyStatePill:
     `policyStatePill min-w-0 ${pillBase}`,
   policy_active:
@@ -199,11 +199,11 @@ const styles = {
   policy_warning:
     `policy_warning min-w-0 ${warningTone}`,
   primaryButton:
-    `primaryButton min-w-0 ${buttonBase} ${activeTone}`,
+    "primaryButton inline-flex w-fit min-w-0 max-w-full",
   readinessCard:
-    `readinessCard min-w-0 max-w-full ${quietPanelSurface} px-2 py-1`,
+    "readinessCard flex min-w-0 items-center justify-between gap-3 bg-transparent [&_span]:text-vui-fg-secondary",
   readinessPanel:
-    `readinessPanel min-w-0 max-w-full ${panelSurface} !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-1 max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
+    "readinessPanel grid min-w-0 grid-cols-2 gap-4 py-3 text-vui-micro-13 max-[640px]:!grid-cols-1",
   readiness_active:
     `readiness_active min-w-0 ${vuiStateSelectedRowClass}`,
   readiness_allowed:
@@ -273,11 +273,11 @@ const styles = {
   returnButton:
     `returnButton min-w-0 ${buttonBase}`,
   route:
-    `route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
+    "route grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden overflow-x-hidden text-vui-fg-primary",
   rowSelect:
-    `rowSelect inline-grid h-7 w-7 min-w-7 place-items-center ${vuiOpaqueRowClass} [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:sr-only`,
+    "rowSelect inline-grid size-7 min-w-7 place-items-center text-vui-fg-secondary [&_input]:sr-only",
   schemaDisclosure:
-    "schemaDisclosure min-w-0 font-mono [font-size:var(--vui-font-xs)]",
+    "schemaDisclosure min-w-0 border-t border-vui-border-subtle py-3 text-vui-micro-13 [&>summary]:flex [&>summary]:min-h-8 [&>summary]:cursor-pointer [&>summary]:items-center [&>summary]:justify-between [&>summary]:gap-2 [&>summary]:font-medium [&>pre]:mt-3 [&>pre]:overflow-auto [&>pre]:rounded-[var(--radius-control)] [&>pre]:bg-vui-surface-row [&>pre]:p-3 [&>pre]:text-vui-2xs [&>pre]:leading-relaxed",
   scopeCopy:
     "scopeCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   scopeSelect:
@@ -285,10 +285,9 @@ const styles = {
   scopeStats:
     "scopeStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   searchBox:
-    `searchBox min-w-0 max-w-full ${quietPanelSurface} grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 px-2 py-1`,
+    "searchBox grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-chat px-2 py-1 text-vui-fg-tertiary [&_input]:!w-full [&_input]:!border-0 [&_input]:!bg-transparent [&_input]:!px-0 [&_input]:!shadow-none max-[760px]:[&_input]:!min-h-11",
   secondaryButton:
-    `secondaryButton min-w-0 ${buttonBase}`,
-  // Host carries blocked-active danger tint so allowed/inherited keep cool selection.
+    "secondaryButton inline-flex w-fit min-w-0 max-w-full",
   policyTabsHost:
     "policyTabsHost min-w-0 flex flex-wrap items-center justify-end max-[640px]:justify-start " +
     "[&[data-policy-mode=blocked]_[data-slot=tabs-trigger][data-state=active]]:border-[color-mix(in_srgb,var(--state-error)_42%,transparent)] " +
@@ -299,12 +298,9 @@ const styles = {
   policyTabsList:
     "policyTabsList inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0.5",
   policyTabsTrigger:
-    "policyTabsTrigger min-w-0 border-0 bg-transparent shadow-none " +
-    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] " +
-    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
-    "data-[state=active]:text-[var(--accent-cool)]",
+    "policyTabsTrigger min-w-0 !min-h-8 !px-3 max-[760px]:!min-h-11",
   selectableToolRow:
-    `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-1 !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1`,
+    "selectableToolRow grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] items-center gap-1",
   sourcePill:
     `sourcePill min-w-0 ${pillBase}`,
   stateBadge:
@@ -430,13 +426,13 @@ const styles = {
   testPanel:
     `testPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   toolAgentFitPanel:
-    `toolAgentFitPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 max-[640px]:grid-cols-[1fr]`,
+    "toolAgentFitPanel grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 text-vui-micro-13 max-[640px]:!grid-cols-[1fr] [&_span]:break-all",
   toolBadges:
     "toolBadges min-w-0 flex flex-wrap items-center gap-1",
   toolBundleApplyActions:
     "toolBundleApplyActions min-w-0 flex flex-wrap items-center justify-end gap-1 max-[640px]:justify-start",
   toolBundleApplyBar:
-    "toolBundleApplyBar min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] p-2 !grid grid-cols-[minmax(12rem,0.85fr)_minmax(0,1fr)_auto] max-[860px]:grid-cols-[1fr]",
+    "toolBundleApplyBar flex min-w-0 flex-wrap items-center justify-between gap-3",
   toolBundleApplyCard:
     "toolBundleApplyCard min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-2 text-[var(--accent-warm)]",
   toolBundleApplyGrid:
@@ -444,7 +440,7 @@ const styles = {
   toolBundleGroup:
     "toolBundleGroup min-w-0 max-w-full border-b border-vui-border-subtle bg-transparent py-3",
   toolBundleHeader:
-    "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-1 [font-size:var(--vui-font-xs)]",
+    "toolBundleHeader flex min-w-0 flex-wrap items-center justify-between gap-1 px-3 pb-1 pt-4 text-vui-2xs [&_strong]:font-normal [&_strong]:text-vui-fg-tertiary",
   toolBundleTitle:
     "inline-flex items-center gap-1.5",
   toolBundleItems:
@@ -457,33 +453,52 @@ const styles = {
   toolBundleSelect:
     "toolBundleSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
   toolBundleSummary:
-    "toolBundleSummary min-w-0 max-w-full truncate rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] px-2 py-1 text-[var(--fg-secondary)]",
+    "toolBundleSummary min-w-0 max-w-full text-vui-2xs leading-relaxed text-vui-fg-tertiary",
   toolButton:
-    `toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-3 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateWarmSoftClass}`,
+    "toolButton !grid !h-auto !min-h-[58px] w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-3 !py-2.5 !shadow-none !text-left hover:!bg-vui-surface-row-hover",
   toolButtonActive:
-    `toolButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
+    "toolButtonActive !bg-[var(--vui-selection-bg)]",
   toolCopy:
-    "toolCopy grid min-w-0 gap-0 text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:line-clamp-2 [&>strong]:break-words [&>span]:truncate",
+    "toolCopy grid min-w-0 gap-1 text-vui-micro-13 text-vui-fg-secondary [&>strong]:break-all [&>strong]:font-medium [&>strong]:leading-5 [&>strong]:text-vui-fg-primary [&>span]:truncate [&>span]:text-vui-2xs",
   toolDetailPanel:
-    "toolDetailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-2 text-[var(--accent-warm)] grid min-h-0 content-start gap-2 overflow-auto",
+    "toolDetailPanel h-full min-h-0 min-w-0 max-w-full flex-1 overflow-auto overscroll-contain px-6 py-6 max-[640px]:px-4 [&>section]:my-4 [&>div]:my-4 [&>details]:my-0",
   toolList:
     "toolList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   toolPermissionGroup:
-    "toolPermissionGroup min-w-0 max-w-full border-b border-vui-border-subtle bg-transparent py-3",
+    "toolPermissionGroup min-w-0",
   toolPermissionGroupList:
-    "toolPermissionGroupList min-w-0 grid max-h-[24rem] min-h-0 content-start gap-1 overflow-auto",
+    "toolPermissionGroupList grid min-w-0 content-start gap-0",
   toolPermissionList:
     "toolPermissionList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   toolPermissionMeta:
-    "toolPermissionMeta text-vui-fg-secondary [&_em]:not-italic min-w-0 flex flex-wrap items-center gap-1.5",
+    "toolPermissionMeta text-vui-2xs leading-5 text-vui-fg-secondary [&_em]:not-italic min-w-0 flex flex-wrap items-center gap-1.5",
   toolPermissionRow:
-    "toolPermissionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-1 min-[1600px]:grid-cols-[minmax(0,1fr)_12rem] items-center gap-3 px-3 py-3 max-[640px]:grid-cols-[1fr]",
+    "toolPermissionRow grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-vui-border-subtle bg-transparent py-3 [&>span]:grid [&>span]:gap-1 [&_strong]:break-all [&_strong]:text-vui-micro-13 [&_strong]:font-medium [&_small]:text-vui-2xs [&_small]:text-vui-fg-tertiary max-[640px]:!grid-cols-[1fr]",
   ts:
     "ts min-w-0",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-0 !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:!grid-cols-[minmax(0,1fr)] max-[760px]:!grid-rows-[minmax(420px,42vh)_minmax(420px,1fr)] max-[760px]:!overflow-y-auto max-[760px]:!overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    "workspace grid h-full min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden overflow-x-hidden max-[760px]:!grid-cols-[minmax(0,1fr)] max-[760px]:!grid-rows-[minmax(0,1fr)]",
   workspaceScopePanel:
-    `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 px-2 py-1 [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
+    "workspaceScopePanel flex min-w-0 flex-wrap items-center gap-4 py-3 text-vui-micro-13 [&_label]:inline-flex [&_label]:items-center [&_label]:gap-2",
+  detailPaneBody: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
+  workspaceToolbar: "flex min-h-12 shrink-0 min-w-0 flex-wrap items-center justify-between gap-2 px-4 py-2",
+  workspaceTabsList: "!w-fit !border-0 !bg-transparent !p-0 !gap-1",
+  workspaceTabsTrigger: "!min-h-8 !rounded-[var(--radius-control)] !border-transparent !bg-none !px-3 !shadow-none data-[state=active]:!bg-[var(--vui-selection-bg)] max-[760px]:!min-h-11",
+  workspaceState: "text-vui-2xs text-vui-fg-tertiary",
+  mobileSelection: "hidden shrink-0 px-4 pb-3 max-[760px]:!block max-[760px]:[&_[data-vui=select]]:min-h-11",
+  mobileLibraryControls: "hidden shrink-0 min-w-0 max-h-[42vh] overflow-auto px-4 pb-3 text-vui-micro-13 max-[760px]:!block [&>summary]:min-h-8 [&>summary]:cursor-pointer [&>summary]:text-vui-fg-secondary [&>label]:my-2 [&>div]:my-2 [&_[data-vui=select]]:min-h-11 [&_button]:min-h-11",
+  libraryHeaderActions: "flex items-center gap-2",
+  bulkSelectionHeader: "flex min-w-0 items-center justify-between gap-2 px-2 py-2 text-vui-2xs text-vui-fg-secondary",
+  toolRowSelecting: "!grid-cols-[28px_minmax(0,1fr)]",
+  policyBundleList: "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain",
+  policyBundleButton: "flex min-h-10 w-full min-w-0 items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left text-vui-micro-13 hover:bg-vui-surface-row-hover [&>svg]:shrink-0 [&>svg]:text-vui-fg-tertiary [&>span]:min-w-0 [&>span]:flex-1 [&>span]:break-words [&>small]:text-vui-2xs [&>small]:text-vui-fg-tertiary",
+  policyBundleButtonActive: "bg-[var(--vui-selection-bg)]",
+  policyRailHint: "shrink-0 border-t border-vui-border-subtle px-3 py-3 text-vui-2xs leading-relaxed text-vui-fg-tertiary",
+  policyScroll: "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain px-6 py-5 max-[640px]:px-4 [&>.panelHeader]:px-0 [&>.panelHeader_h2]:text-vui-lg",
+  policyOverview: "mb-5 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-vui-micro-13 [&_strong]:font-medium [&_small]:text-vui-2xs [&_small]:text-vui-fg-tertiary",
+  singlePermissionSummary: "hidden",
+  policyFooter: "flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-subtle px-5 py-3 text-vui-2xs text-vui-fg-tertiary max-[640px]:px-4 max-[760px]:[&_button]:min-h-11",
+  testToolbar: "flex min-w-0 items-center justify-between gap-3 border-t border-vui-border-subtle pt-5 [&_h3]:text-vui-xs [&_h3]:font-medium",
 } as const;
 
 export default styles;
