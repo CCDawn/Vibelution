@@ -464,13 +464,15 @@ describe("VUI batch migration", () => {
     },
   );
 
+  // Full source-tree I/O can exceed Vitest's 5s default on Windows worktrees.
+  // Keep the same architecture assertion, with a bounded scan deadline.
   it("keeps business TSX sources raw-control free outside VUI primitives and tests", () => {
     const violations = listSourceTsxFiles(sourceRoot)
       .filter((path) => !isRawControlGuardExempt(path))
       .filter((path) => sourceHasRawControlOutsideAllowedExceptions(path, readTargetSource(path)));
 
     expect(violations).toEqual([]);
-  });
+  }, 60_000);
 
   it("permits only the styled image-upload inputs in Config via VInput", () => {
     const configSource = readTargetSource("routes/config/ConfigSectionEditor.tsx");
