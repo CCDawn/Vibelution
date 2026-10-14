@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import type { Team } from "../../api/types";
+import { VSelect } from "../../components/vui";
 import { TeamBundleToolbarActions } from "./TeamBundleToolbarActions";
 import { TeamCreateToolbarActions } from "./TeamCreateToolbarActions";
 import { TeamShellStatusRail } from "./TeamShellStatusRail";
@@ -14,6 +15,13 @@ import type { TeamShellMode } from "./teamShellModel";
 import type { TeamShellStatusNode, TeamShellStatusStage } from "./teamShellStatusModel";
 
 type Lang = "zh" | "en";
+
+export function renderTeamsTeamSwitcher(args: { lang: Lang; visibleTeams: Team[]; effectiveTeamId: string; onSelectTeam: (team: Team) => void }) {
+  return <VSelect aria-label={args.lang === "zh" ? "切换团队" : "Switch team"} density="compact"
+    className="w-full min-w-0" selectedKey={args.effectiveTeamId || null}
+    options={args.visibleTeams.map((team) => ({ id: team.teamId, label: team.name, description: team.purpose }))}
+    onSelectionChange={(id) => { const team = args.visibleTeams.find((item) => item.teamId === String(id)); if (team) args.onSelectTeam(team); }} />;
+}
 
 export type TeamsShellFrameArgs = {
   lang: Lang;
@@ -109,6 +117,7 @@ export function renderTeamsShellToolbar(args: Pick<
   return (
     <div className="flex w-full min-w-0 items-center justify-between gap-3">
       <TeamShellToolbar
+        showIdentity={false}
         lang={args.lang}
         teamName={args.teamName}
         purpose={args.purpose}

@@ -23,6 +23,7 @@ export type TeamsWorkbenchCanvasPageProps = {
   selectedTeamContextTitle: string;
   teamShellRail: ReactNode;
   teamShellToolbar: ReactNode;
+  teamSwitcher?: ReactNode;
   researchWorkflowTeamSelected: boolean;
   researchCanvasReadOnly: boolean;
   validationValid: boolean;
@@ -101,6 +102,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
       responsiveRailLabel={p.lang === "zh" ? "团队列表" : "Team list"}
       rail={showTeamHome ? undefined : p.teamShellRail}
       toolbar={p.teamShellToolbar}
+      teamSwitcher={p.teamSwitcher}
       styles={p.styles}
       researchWorkflowTeamSelected={p.researchWorkflowTeamSelected}
       researchCanvasReadOnly={p.researchCanvasReadOnly}

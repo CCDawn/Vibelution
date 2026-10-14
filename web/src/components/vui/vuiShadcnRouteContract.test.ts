@@ -75,12 +75,14 @@ describe("VUI shadcn route contract", () => {
     const workbenchEntry = readFileSync(resolve(routesDir, "teams/useTeamsWorkbenchModel.tsx"), "utf-8");
     const boardPage = readFileSync(resolve(routesDir, "teams/renderTeamsWorkbenchBoardPage.tsx"), "utf-8");
     const canvasComposer = readFileSync(resolve(routesDir, "teams/TeamsCanvasComposer.tsx"), "utf-8");
+    const teamFrame = readFileSync(resolve(routesDir, "teams/TeamWorkspaceFrame.tsx"), "utf-8");
     const shellFrame = readFileSync(resolve(routesDir, "teams/renderTeamsShellFrame.tsx"), "utf-8");
     const chrome = readFileSync(resolve(routesDir, "teams/teamsWorkbenchChrome.ts"), "utf-8");
 
     expect(workbenchEntry).toContain("useTeamsWorkbenchFoundation");
     expect(boardPage).toContain("VBoardWorkbenchPage");
-    expect(canvasComposer).toContain("VCanvasWorkbenchPage");
+    expect(canvasComposer).toContain("TeamWorkspaceFrame");
+    expect(teamFrame).toContain("VCanvasWorkbenchPage");
     expect(chrome).toContain("WORKBENCH_LAYOUT_IDS.teams");
     expect(canvasComposer).toContain('domainRecipe="teams-organization-workbench"');
     expect(shellFrame).toContain("TeamShellStatusRail");

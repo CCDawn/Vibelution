@@ -631,7 +631,7 @@ describe("ResearchProcessWorkspace", () => {
     const rail = rendered.container.querySelector('[data-vui="canvas-workbench-rail"]');
     const canvas = rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]');
     const inspector = rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]');
-    expect(rail?.childElementCount).toBe(0);
+    expect(rail?.querySelector('[data-testid="research-workflow-stage-navigator"]')).toBeNull();
     expect(canvas?.querySelector('[data-vui="research-question-archive-canvas"]')).not.toBeNull();
     expect(canvas?.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-panel")).toBe("question");
     expect(canvas?.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-has-archive-summary")).toBe("true");

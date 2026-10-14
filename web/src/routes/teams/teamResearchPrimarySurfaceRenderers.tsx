@@ -14,7 +14,7 @@ import { createExperimentController } from "./createExperimentController";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
 import { TeamCreateToolbarActions } from "./TeamCreateToolbarActions";
-import { TeamShellToolbar } from "./TeamShellToolbar";
+import { renderTeamsTeamSwitcher } from "./renderTeamsShellFrame";
 
 /**
  * The research process workspace owns its own canvas/inspector/model pack. Keeping it
@@ -248,27 +248,13 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
           lang={lang}
           teamName={String(selectedTeam?.name || "")}
           linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
-          toolbarLeading={(
-            <TeamShellToolbar
-              lang={lang}
-              teamName={String(selectedTeam?.name || "")}
-              purpose={String(selectedTeam?.purpose || "")}
-              teamOptions={(visibleTeams ?? []).map((team: { teamId: string; name: string; purpose?: string }) => ({
-                id: team.teamId,
-                label: team.name,
-                description: team.purpose || team.teamId,
-              }))}
-              selectedTeamId={String(effectiveTeamId || "")}
-              onSelectTeamId={(teamId) => {
-                const team = (visibleTeams ?? []).find((item: { teamId: string }) => item.teamId === teamId);
-                if (team) {
-                  selectTeamRecord(team);
-                }
-              }}
-              switchClassName="min-w-0 w-full"
-              actions={<TeamCreateToolbarActions lang={lang} onTeamCreated={selectTeamRecord} />}
-            />
-          )}
+          toolbarLeading={renderTeamsTeamSwitcher({
+              lang,
+              visibleTeams: visibleTeams ?? [],
+              effectiveTeamId: String(effectiveTeamId || ""),
+              onSelectTeam: selectTeamRecord,
+          })}
+          railActions={<TeamCreateToolbarActions lang={lang} onTeamCreated={selectTeamRecord} />}
         />
       </Suspense>
     );
