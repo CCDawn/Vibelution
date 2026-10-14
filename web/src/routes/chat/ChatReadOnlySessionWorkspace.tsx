@@ -45,72 +45,78 @@ export function ChatReadOnlySessionWorkspace({
 
   return (
     <ChatSessionWorkspacePanel
-      activeCliAgentRunAvailable={false}
-      activeCliAgentRunId=""
-      activeSessionId={normalizedSessionId || null}
-      blockingErrorMessage={errorMessage}
-      cliAgentRunEmptyLabel={emptyLabel}
-      conversation={sessionDetail ? {
-        sessionId: sessionDetail.id,
-        title: sessionDetail.title || assistant.displayName,
-        phase: sessionDetail.currentPhase || sessionDetail.status || "idle",
-        messages: sessionDetail.messages,
-        assistantDisplayName: assistant.displayName,
-        assistantAvatarImageUrl: assistant.avatarImageUrl,
-        assistantAvatarFallback: assistant.avatarFallback,
-        userDisplayName: user.displayName,
-        userAvatarPreset: user.avatarPreset,
-        userAvatarImageUrl: user.avatarImageUrl,
-        taskSummary: sessionDetail.taskSummary || taskSummary,
-        defaultFileContext: sessionDetail.defaultFileContext || defaultFileContext,
-        showHeader: false,
-        showSessionOverview: false,
-        showComposer: false,
-        autoScrollToLatest: live,
-        composer: {
-          actionDisabled: true,
-          actionMode: "send",
-          attachmentInputDisabled: true,
-          attachments: [],
-          disabled: true,
-          editUserMessageDisabled: true,
-          error: "",
-          followupQueue: [],
-          guidance: "",
-          interruptGuidancePending: false,
-          modeNotice: "",
-          modeTargetPreview: "",
-          pending: false,
-          placeholder: lang === "zh" ? "会话只读" : "Session is read-only",
-          references: [],
-          safeGuidancePending: false,
-          submitLabel: "",
-          value: "",
-        },
-        onComposerChange: ignoreReadOnlyAction,
-        onSubmit: ignoreReadOnlyAction,
-      } : null}
-      conversationFocused={true}
-      filePreview={{
-        changed: false,
-        errorMessage: "",
-        file: null,
-        loadingLabel,
-        sourceLabel: "",
-      }}
-      hasBlockingError={hasSessionError && !sessionDetail}
-      hasTransientError={hasSessionError && Boolean(sessionDetail)}
-      invalidChildSessionLinkMessage=""
       lang={lang}
-      loadingSessionLabel={loadingLabel}
-      noSessionsLabel={emptyLabel}
-      notices={sessionDetail?.runtimeNotices ?? []}
-      onApproveToolApproval={ignoreReadOnlyAction}
-      onRejectToolApproval={ignoreReadOnlyAction}
-      sessionsPending={loading || (live && !normalizedSessionId)}
+      sessionGate={{
+        activeSessionId: normalizedSessionId || null,
+        sessionsPending: loading || (live && !normalizedSessionId),
+        noSessionsLabel: emptyLabel,
+        loadingSessionLabel: loadingLabel,
+      }}
+      errorGate={{
+        hasBlockingError: hasSessionError && !sessionDetail,
+        blockingErrorMessage: errorMessage,
+        hasTransientError: hasSessionError && Boolean(sessionDetail),
+        invalidChildSessionLinkMessage: "",
+        transientErrorMessage: errorMessage,
+      }}
+      alternateSurface={{
+        workspaceActiveTab: "agent",
+        activeCliAgentRunId: "",
+        activeCliAgentRunAvailable: false,
+        cliAgentRunEmptyLabel: emptyLabel,
+        filePreview: {
+          changed: false,
+          errorMessage: "",
+          file: null,
+          loadingLabel,
+          sourceLabel: "",
+        },
+      }}
+      conversationFrame={{
+        conversation: sessionDetail ? {
+          sessionId: sessionDetail.id,
+          title: sessionDetail.title || assistant.displayName,
+          phase: sessionDetail.currentPhase || sessionDetail.status || "idle",
+          messages: sessionDetail.messages,
+          assistantDisplayName: assistant.displayName,
+          assistantAvatarImageUrl: assistant.avatarImageUrl,
+          assistantAvatarFallback: assistant.avatarFallback,
+          userDisplayName: user.displayName,
+          userAvatarPreset: user.avatarPreset,
+          userAvatarImageUrl: user.avatarImageUrl,
+          taskSummary: sessionDetail.taskSummary || taskSummary,
+          defaultFileContext: sessionDetail.defaultFileContext || defaultFileContext,
+          showHeader: false,
+          showSessionOverview: false,
+          showComposer: false,
+          autoScrollToLatest: live,
+          composer: {
+            actionDisabled: true,
+            actionMode: "send",
+            attachmentInputDisabled: true,
+            attachments: [],
+            disabled: true,
+            editUserMessageDisabled: true,
+            error: "",
+            followupQueue: [],
+            guidance: "",
+            interruptGuidancePending: false,
+            modeNotice: "",
+            modeTargetPreview: "",
+            pending: false,
+            placeholder: lang === "zh" ? "会话只读" : "Session is read-only",
+            references: [],
+            safeGuidancePending: false,
+            submitLabel: "",
+            value: "",
+          },
+          onComposerChange: ignoreReadOnlyAction,
+          onSubmit: ignoreReadOnlyAction,
+        } : null,
+        conversationFocused: true,
+        notices: sessionDetail?.runtimeNotices ?? [],
+      }}
       toolApproval={null}
-      transientErrorMessage={errorMessage}
-      workspaceActiveTab="agent"
     />
   );
 }
