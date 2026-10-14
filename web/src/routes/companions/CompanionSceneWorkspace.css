@@ -41,9 +41,9 @@
 .companion-scene-conversation .vui-components-conversationview.surface { background:transparent; border:0; }
 .companion-scene-conversation .emptyStateStarters { display:none; }
 .companion-scene-conversation .vui-components-conversationview.composerCodex { width:calc(100% - 32px)!important; margin-bottom:12px!important; box-shadow:none!important; background:color-mix(in srgb,var(--vui-surface-glass) 66%,transparent)!important; }
-/* Expand within the scene while composing or approving; long drafts and
-   attachment/error rows scroll locally instead of clipping Send or history. */
-.companion-scene-conversation:focus-within,.companion-scene-conversation:has([data-chat-tool-approval-host]) { height:min(72cqh,calc(100cqh - 96px)); }
+/* Approval may expand the scene. Input focus keeps the portrait visible;
+   long drafts and attachment/error rows scroll locally above the history. */
+.companion-scene-conversation:has([data-chat-tool-approval-host]) { height:min(72cqh,calc(100cqh - 96px)); }
 .companion-scene-conversation .vui-components-conversationview.composerCodex { max-height:min(48cqh,calc(100% - 64px)); overflow-y:auto; }
 .companion-scene-conversation .composerFieldCodex textarea { min-height:44px!important; max-height:min(22cqh,180px)!important; overflow-y:auto!important; color:var(--fg-primary)!important; }
 .companion-scene-conversation .composerFieldCodex textarea::placeholder { color:var(--fg-tertiary)!important; }
