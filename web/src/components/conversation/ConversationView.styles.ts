@@ -666,6 +666,14 @@ backToBottomButton:
     "vui-components-conversationview markdownTable w-max min-w-full table-auto border-separate border-spacing-0 text-left [&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-b-[var(--vui-border-strong)] [&_th]:bg-[var(--vui-surface-row)] [&_th]:px-3 [&_th]:py-2 [&_th]:align-top [&_th]:text-[var(--fg-primary)] [&_th]:font-semibold [&_td]:min-w-[10ch] [&_td]:max-w-[52ch] [&_td]:border-b [&_td]:border-b-[var(--vui-border-subtle)] [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--fg-secondary)] [&_td]:whitespace-normal [&_td]:break-words [&_td]:[overflow-wrap:anywhere]",
   markdownTableWrap:
     "vui-components-conversationview markdownTableWrap my-3 max-w-full overflow-x-auto overflow-y-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] [scrollbar-gutter:stable]",
+  // Wide tables (>=6 columns): the default cell padding/type makes the
+  // horizontal overflow several screens wide. `!` overrides because Tailwind
+  // orders same-property utilities deterministically — plain px-2 would lose
+  // to the base map's px-3 regardless of class order.
+  markdownTableDense:
+    "vui-components-conversationview markdownTableDense !text-vui-2xs [&_th]:!px-2 [&_th]:!py-1.5 [&_td]:!px-2 [&_td]:!py-1.5 [&_td]:!min-w-0 [&_td]:!max-w-[28ch]",
+  markdownTableScrollHint:
+    "vui-components-conversationview markdownTableScrollHint mt-1 flex items-center justify-end gap-1 text-vui-2xs text-[var(--fg-tertiary)]",
   mentalBodyList:
     "vui-components-conversationview mentalBodyList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   mentalBodyRow: `vui-components-conversationview mentalBodyRow min-w-0 ${vuiOpaqueRowClass} p-2 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,

@@ -251,6 +251,10 @@ import {
 import { startOrFocusWorkbenchFromProductEntry } from "./windows/productEntryWorkbench.js";
 import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { ensureWorkbenchBackendReady } from "./windows/workbenchOpenBackendGate.js";
+import {
+  startWorkbenchBackendWatchdog,
+  type WorkbenchBackendWatchdogHandle
+} from "./windows/workbenchBackendWatchdog.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 import {
   MainWorkbenchCloseTransactionStore,
@@ -399,6 +403,7 @@ let trayRestartLauncherInFlight = false;
 let shellRefreshInFlight = false;
 let lastKnownDesktopShell: DesktopShellStatus | undefined;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
+let workbenchBackendWatchdog: WorkbenchBackendWatchdogHandle | null = null;
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
@@ -3098,6 +3103,53 @@ async function runTrayQuitAll(): Promise<void> {
   }
 }
 
+/**
+ * Observe already-open workbench windows for backend liveness. The window-open
+ * gate only protects the moment a window is created; once a backend dies under
+ * an open window nothing else reloads it onto a recovered backend, which is
+ * exactly the frozen-window incident this loop closes. Pure observation plus
+ * window reload — it never touches backend processes or the lifecycle
+ * coordinator, and only loopback HTTP(S) workbench origins are ever probed.
+ */
+function startWorkbenchBackendWatchdogLoop(): void {
+  if (workbenchBackendWatchdog !== null) {
+    return;
+  }
+  workbenchBackendWatchdog = startWorkbenchBackendWatchdog({
+    listWindows: () =>
+      BrowserWindow.getAllWindows().map((window) => ({
+        id: window.id,
+        getUrl: () => window.webContents.getURL(),
+        isDestroyed: () => window.isDestroyed(),
+        reload: () => window.webContents.reload(),
+        getTitle: () => window.getTitle(),
+        setTitle: (title: string) => window.setTitle(title)
+      })),
+    log: (event) => {
+      if (event.kind === "tick-error") {
+        console.warn(event.message);
+        return;
+      }
+      void recordElectronSupervisorEvent(launcherBootstrap, {
+        eventCode:
+          event.kind === "origin-degraded"
+            ? "electron.workbench_backend_watchdog.degraded"
+            : "electron.workbench_backend_watchdog.recovered",
+        message:
+          event.kind === "origin-degraded"
+            ? "Workbench backend origin stopped answering; windows marked offline."
+            : "Workbench backend origin answered again; matching windows reloaded.",
+        fields: { origin: event.origin }
+      });
+    }
+  });
+}
+
+function stopWorkbenchBackendWatchdogLoop(): void {
+  workbenchBackendWatchdog?.dispose();
+  workbenchBackendWatchdog = null;
+}
+
 function startPeriodicShellFreshnessWatch(): void {
   if (periodicShellFreshnessTimer !== null) {
     return;
@@ -5155,6 +5207,7 @@ app.whenReady()
       }
     });
     startPeriodicShellFreshnessWatch();
+    startWorkbenchBackendWatchdogLoop();
     void maybeRestoreTrayRestartAllPending();
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.tray.created",
@@ -5362,6 +5415,7 @@ app.on("before-quit", (event) => {
     desktopTray?.destroy();
     desktopTray = null;
     stopDesktopActionLoop();
+    stopWorkbenchBackendWatchdogLoop();
     return;
   }
   event.preventDefault();
@@ -5377,4 +5431,5 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   stopLauncherStateFileHints();
   stopDeferredRestartFulfillment();
+  stopWorkbenchBackendWatchdogLoop();
 });

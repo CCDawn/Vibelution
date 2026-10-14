@@ -37,7 +37,7 @@ const styles = {
     "!flex !min-h-0 !min-w-0 !flex-1 !items-stretch !gap-0 !overflow-hidden",
   workspaceBody: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
   contextPanel:
-    "flex h-full min-h-0 w-[224px] shrink-0 flex-col overflow-y-auto !rounded-none !border-0 border-r border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-rail)] !p-3 max-[1179px]:!w-full",
+    "flex h-full min-h-0 w-[224px] shrink-0 flex-col overflow-y-auto !rounded-none !border-0 border-r border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-rail)] !p-3 max-[899px]:!w-full",
   navigationHeading: "mb-3 flex shrink-0 items-center justify-between gap-2 [&_h2]:mb-0",
   sourceSection: "shrink-0 border-b border-[var(--vui-border-subtle)] px-5 py-4",
   contextHeading: "m-0 mb-2 text-[length:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
@@ -49,11 +49,7 @@ const styles = {
     "flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--vui-control-muted)] text-vui-micro-10 font-medium text-[var(--fg-tertiary)]",
   runGroupItems: "flex min-w-0 flex-col gap-0.5",
   runHistory: "mt-1 border-t border-[var(--vui-border-subtle)] pt-1",
-  runHistoryToggle:
-    "!flex !h-auto !min-h-9 !w-full !justify-between !px-2 !text-[length:var(--vui-font-xs)] !text-[var(--fg-secondary)]",
-  runHistoryLabel: "flex min-w-0 items-center gap-1.5",
-  runHistoryAll:
-    "!flex !h-auto !min-h-9 !w-full !justify-start !px-2 !text-left !text-[length:var(--vui-font-xs)] !text-[var(--fg-secondary)]",
+  runHistoryHeading: "m-0 mb-1.5 flex items-center justify-between gap-2 px-2 text-vui-xs font-semibold text-vui-fg-secondary",
   runItem:
     "!flex !h-auto !min-h-10 !w-full !min-w-0 !justify-start !px-2 !py-1.5 text-left aria-pressed:!bg-[var(--vui-surface-panel)] max-[879px]:!min-h-11",
   runItemText: "flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left",

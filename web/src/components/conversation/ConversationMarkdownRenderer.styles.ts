@@ -54,6 +54,8 @@ export const conversationMarkdownRendererStyles: ConversationMarkdownClassNames 
   markdownHeading4: conversationViewStyles.markdownHeading4,
   markdownTable: conversationViewStyles.markdownTable,
   markdownTableWrap: conversationViewStyles.markdownTableWrap,
+  markdownTableDense: conversationViewStyles.markdownTableDense,
+  markdownTableScrollHint: conversationViewStyles.markdownTableScrollHint,
   messageBody: conversationViewStyles.messageBody,
   responseSegmentList: conversationViewStyles.responseSegmentList,
   responseSegmentPre: conversationViewStyles.responseSegmentPre,

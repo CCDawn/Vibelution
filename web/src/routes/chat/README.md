@@ -48,7 +48,6 @@ Chat surface. Rules:
 | CLI terminal tabs / lifecycle | `cliAgentRunModel.ts`, `useChatCliAgentTerminal.ts`, `CliAgentRunTerminalPanel.tsx` | composer submit |
 | Cache / token donut pure math | `sessionCacheComposition.ts`, `chatCacheDetailModel.ts`, `useChatCacheDetailDialog.ts`, `CacheDetailDialog.tsx`, `TokenCoreStatusPanel.tsx` | stream apply |
 | Token status metrics (cache/input/compression/speed) | `chatTokenStatusModel.ts`, `TokenCoreStatusPanel.tsx` | stream apply |
-| Feature presets labels | `chatFeaturePresets.ts` | detail stream |
 | Tool approval copy | `toolApprovalLabels.ts`, `ChatToolApprovalDialog.tsx` | left rail JSX |
 | Submit telemetry fields | `chatSubmitTelemetry.ts` | layout resize |
 | Composer draft/attachments/submit pure helpers | `chatComposerSubmitModel.ts` | stream apply, dual EventSource |
@@ -89,7 +88,6 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 
 - `cliAgentRunModel.ts` — CLI run views, lifecycle, terminal input rules
 - `sessionCacheComposition.ts` — cache donut segment geometry
-- `chatFeaturePresets.ts` — run-mode preset keys/labels
 - `toolApprovalLabels.ts` — governance tool display labels
 - `chatSubmitTelemetry.ts` — submit browser telemetry fields
 

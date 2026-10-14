@@ -1,0 +1,96 @@
+@import "tailwindcss" source(none);
+@import "../../src/design/theme.tailwind.css";
+@source "./*.tsx";
+@source "../../src/components/vui/**/*.{ts,tsx}";
+
+html, body, #root { height: 100%; margin: 0; min-width: 320px; color-scheme: dark; }
+.immersion-app { height: 100dvh; overflow: hidden; isolation: isolate; position: relative; background: var(--vui-surface-workspace); color: var(--vui-fg-primary); }
+.scene-background { position: absolute; inset: 0; z-index: -2; }
+.scene-background img { width: 100%; height: 100%; object-fit: cover; }
+.scene-background::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgb(12 18 28 / .32), transparent 35%, rgb(12 18 28 / .28)); }
+.scene-person { position: absolute; z-index: -1; bottom: -6dvh; left: 35%; transform: translateX(-50%); height: 89dvh; max-width: 65%; object-fit: contain; pointer-events: none; filter: drop-shadow(0 8px 16px rgb(10 18 30 / .2)); }
+.immersion-app[data-life-open=false] .scene-person { left: 50%; }
+.person-header { display: flex; position: relative; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; height: 84px; box-sizing: border-box; background: rgb(12 18 28 / .64); backdrop-filter: blur(8px); color: #f4f7fb; }
+.person-heading h1 { font-size: 20px; letter-spacing: .02em; font-weight: 600; margin: 0; }
+.person-heading p { display: flex; align-items: center; gap: 5px; color: #dce3ec; font-size: 12px; margin: 5px 0 0; }
+.header-controls { display: flex; align-items: center; gap: 4px; }
+.person-header button { color: #f4f7fb; min-height: 44px; min-width: 44px; }
+.person-header button:hover { background: rgb(255 255 255 / .1); }
+.preview-banner { position: absolute; top: 96px; left: 24px; z-index: 2; padding: 5px 10px; background: rgb(12 18 28 / .72); border-radius: 5px; color: #edf2f8; font-size: 12px; line-height: 1.7; pointer-events: none; }
+.immersion-workspace { height: calc(100% - 84px); min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 392px; gap: 24px; padding: 20px 24px 24px; box-sizing: border-box; }
+.immersion-app[data-life-open=false] .immersion-workspace { grid-template-columns: minmax(0, 1fr); }
+.life-panel { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: color-mix(in srgb, var(--vui-surface-panel) 96%, transparent); border-radius: 8px; box-shadow: var(--vui-elevation-overlay); }
+.panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 20px 0; }
+.panel-header h2 { margin: 5px 0 0; font-size: 18px; font-weight: 500; letter-spacing: .02em; }
+.eyebrow { color: var(--vui-fg-tertiary); font-size: 12px; line-height: 1.7; }
+.panel-header button { min-width: 44px; min-height: 44px; }
+.sample-boundary { margin: 12px 20px 16px; color: var(--vui-fg-secondary); font-size: 12px; line-height: 1.7; }
+.life-panel [role=tablist] { margin: 0 16px; flex-shrink: 0; }
+.life-panel [data-vui=tabs] { flex-shrink: 0; }
+.life-panel [role=tab] { flex: 1; min-height: 44px; }
+.panel-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; flex: 1; padding: 0 20px; }
+.narrative-section { padding: 24px 0; border-bottom: 1px solid var(--vui-border-subtle); }
+.narrative-section:last-child { border: 0; }
+.section-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--vui-fg-secondary); font-size: 12px; line-height: 1.7; }
+.section-meta>span:first-child { color: var(--vui-fg-primary); font-weight: 500; }
+.narrative-section h3, .memory-section h3 { font-size: 16px; line-height: 1.7; font-weight: 500; margin: 12px 0 8px; }
+.narrative-section p, .record-body p { font-size: 15px; line-height: 1.85; color: var(--vui-fg-secondary); margin: 12px 0 0; overflow-wrap: anywhere; }
+.narrative-section .place-line { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; line-height: 1.7; margin-top: 0; }
+.activity-status { color: var(--vui-fg-primary); margin-left: 5px; border-left: 1px solid var(--vui-border-subtle); padding-left: 9px; }
+.artifact-link { margin: 16px 0 0; padding: 10px 8px; min-height: 44px; height: auto; font-size: 13px; white-space: normal; max-width: 100%; text-align: left; }
+.next-plan { display: flex; align-items: flex-start; gap: 12px; margin-top: 16px; }
+.next-plan>svg { margin-top: 3px; color: var(--vui-fg-secondary); flex-shrink: 0; }
+.next-plan time { font-size: 14px; font-variant-numeric: tabular-nums; }
+.next-plan h3 { margin: 6px 0 4px; font-size: 15px; }
+.next-plan p { margin: 0; font-size: 12px; }
+.narrative-section .ongoing-direction { border-left: 2px solid var(--vui-border-subtle); padding-left: 12px; margin-top: 24px; font-size: 14px; }
+.ongoing-direction span { display: block; font-size: 12px; color: var(--vui-fg-tertiary); margin-top: 3px; }
+.panel-footer { flex-shrink: 0; font-size: 12px; line-height: 1.7; padding: 12px 20px; color: var(--vui-fg-tertiary); border-top: 1px solid var(--vui-border-subtle); }
+.memory-section { padding-top: 12px; }
+.memory-intro { font-size: 13px; line-height: 1.8; color: var(--vui-fg-secondary); margin: 8px 0 12px; }
+.record-row { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 7px; height: auto; white-space: normal; border-radius: 0; border-bottom: 1px solid var(--vui-border-subtle); padding: 20px 4px; text-align: left; }
+.record-row strong { font-weight: 500; font-size: 15px; line-height: 1.7; }
+.record-row p { margin: 0; font-size: 13px; line-height: 1.8; color: var(--vui-fg-secondary); }
+.record-source { color: var(--vui-fg-secondary); font-size: 12px; line-height: 1.7; }
+.record-source.quarantined { color: var(--vui-fg-tertiary); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+.record-row-bottom { display: flex; justify-content: space-between; gap: 8px; color: var(--vui-fg-tertiary); font-size: 12px; line-height: 1.7; }
+.detail-back { align-self: flex-start; margin: 0 12px; min-height: 44px; }
+.record-detail { padding: 20px 0 24px; }
+.record-detail h3 { font-size: 18px; line-height: 1.65; font-weight: 500; margin: 10px 0; outline-offset: 5px; }
+.record-time { font-size: 12px; line-height: 1.7; color: var(--vui-fg-tertiary); margin: 0 0 24px; }
+.origin-note { border-top: 1px solid var(--vui-border-subtle); padding-top: 20px; margin-top: 32px; }
+.origin-note h4 { font-size: 13px; font-weight: 500; margin: 0 0 8px; }
+.origin-note p { font-size: 12px; line-height: 1.8; color: var(--vui-fg-secondary); margin: 8px 0 0; }
+.conversation-example { grid-column: 1; grid-row: 1; align-self: end; justify-self: center; width: min(720px, 100%); padding: 20px; border-color: rgb(255 255 255 / .18); background: rgb(14 21 32 / .78); color: #edf2f8; backdrop-filter: blur(12px); }
+.sample-conversation .eyebrow { color: #ccd7e4; }
+.sample-conversation p { font-size: 16px; line-height: 1.85; margin: 10px 0 20px; }
+.preview-composer { display: flex; align-items: end; gap: 8px; }
+.preview-composer textarea { flex: 1; min-width: 0; font-size: 16px; line-height: 1.7; resize: none; min-height: 44px; color: #edf2f8; background: rgb(255 255 255 / .06); }
+.preview-composer button { min-width: 44px; min-height: 44px; }
+.composer-notice { margin: 8px 0 0; font-size: 12px; line-height: 1.7; color: #ccd7e4; }
+.scene-options { min-width: 248px; max-width: calc(100vw - 40px); }
+.scene-options h3 { margin: 0 0 10px; font-size: 15px; font-weight: 500; }
+.scene-options button { width: 100%; display: flex; justify-content: space-between; gap: 12px; min-height: 44px; text-align: left; }
+.scene-options button[aria-pressed=true] { background: var(--vui-selection-bg); }
+.scene-options time { font-size: 12px; color: var(--vui-fg-tertiary); }
+.scene-options p { font-size: 12px; line-height: 1.7; color: var(--vui-fg-secondary); margin: 12px 0 0; }
+.immersion-app .person-header button, .immersion-app .panel-header button,
+.immersion-app .preview-composer button, .immersion-app .detail-back {
+  min-height: 44px !important; height: 44px !important; min-width: 44px !important;
+}
+.immersion-app .artifact-link, .scene-options button { min-height: 44px !important; height: auto !important; }
+@media (max-width: 760px) {
+  .person-header { height: 80px; padding: 12px 16px; }
+  .person-heading h1 { font-size: 18px; }
+  .preview-banner { top: 88px; left: 16px; padding: 4px 8px; }
+  .immersion-workspace { height: calc(100% - 80px); grid-template-columns: minmax(0, 1fr); padding: 48px 16px 16px; gap: 0; }
+  .life-panel { grid-column: 1; grid-row: 1; width: min(392px, 100%); justify-self: end; z-index: 3; background: color-mix(in srgb, var(--vui-surface-panel) 97%, transparent); }
+  .immersion-app[data-life-open=true] .conversation-example { visibility: hidden; }
+  .scene-person { left: 47%; max-width: 90%; height: 86dvh; bottom: -4dvh; }
+  .conversation-example { padding: 16px; }
+  .panel-header { padding: 16px 16px 0; }
+  .sample-boundary { margin: 8px 16px 12px; }
+  .panel-scroll { padding: 0 16px; }
+  .panel-footer { padding: 10px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }

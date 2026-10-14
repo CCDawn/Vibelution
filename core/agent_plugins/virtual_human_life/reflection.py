@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .causal_contracts import CAUSAL_SCHEMA_VERSION
+from .life_provenance import is_verified_experience
 
 REFLECTION_TARGET_KINDS = {
     "memory_reinforcement",
@@ -195,7 +196,7 @@ def build_nightly_reflection_proposals(
     local_date: str,
     now: datetime,
 ) -> list[dict[str, Any]]:
-    """Build deterministic proposals only from promoted lived events."""
+    """Build proposals only from promoted events with native execution evidence."""
 
     proposals: list[dict[str, Any]] = []
     for event in events:
@@ -204,8 +205,7 @@ def build_nightly_reflection_proposals(
         if (
             not event_id
             or event_id not in promoted_source_ids
-            or str(event.get("kind") or "") != "activity_completed"
-            or str(outcome.get("status") or "") != "succeeded"
+            or not is_verified_experience(event)
         ):
             continue
         digest = hashlib.sha256(f"{local_date}:{event_id}".encode()).hexdigest()[:20]

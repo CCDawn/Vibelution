@@ -10,7 +10,7 @@ import { HomeRedirect } from "../routes/HomeRedirect";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
-import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
+import { createReloadGracePromise, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 
 const AgentsRoute = lazyRoute(loadAgentsRouteChunk);
 // The folder must not be named `aux` — AUX is a reserved device name on
@@ -102,15 +102,39 @@ export function loadTeamsRouteChunk() {
   return import("../routes/TeamsRoute").then((module) => ({ default: module.TeamsRoute }));
 }
 
+/**
+ * Wraps a navigation chunk loader with stale-asset recovery. When a recovery
+ * reload is requested, the returned promise stays pending through a short
+ * grace window (the reload may still tear down this document) and then
+ * rejects with the original error, so the route errorElement — not an
+ * eternal suspension — owns the failure when the reload was vetoed.
+ */
+export function loadRouteChunkWithRecovery<T extends ComponentType<any>>(
+  loader: () => Promise<{ default: T }>,
+): Promise<{ default: T }> {
+  return loader().catch((error) => {
+    if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
+      return createReloadGracePromise<{ default: T }>(error, {
+        onDegrade: (degradedError) => {
+          postBrowserTelemetry({
+            phase: "recovery",
+            eventCode: "browser.route_chunk_recovery.reload_vetoed",
+            message: "Route chunk recovery reload did not take effect; surfacing the route error boundary.",
+            level: "error",
+            fields: {
+              pathname: currentPathname(),
+              errorMessage: degradedError instanceof Error ? degradedError.message : String(degradedError ?? ""),
+            },
+          });
+        },
+      });
+    }
+    throw error;
+  });
+}
+
 function lazyRoute<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
-  return lazy(() =>
-    loader().catch((error) => {
-      if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
-        return new Promise<{ default: T }>(() => undefined);
-      }
-      throw error;
-    }),
-  );
+  return lazy(() => loadRouteChunkWithRecovery(loader));
 }
 
 function nowMs(): number {

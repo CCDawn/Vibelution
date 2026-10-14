@@ -7,6 +7,7 @@ import type {
   SessionCacheCompositionSegment,
 } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
+import { CONVERSATION_MARKDOWN_TABLE_PATTERN } from "../../components/conversation/conversationMarkdownTypes";
 import styles from "../ChatCodingRoute.styles";
 
 export function chatRoomModeLabel(mode: ChatRoomMode, lang: "zh" | "en") {
@@ -185,6 +186,10 @@ export function compactAgentRoleLabel(role: string, fallback = "") {
 
 export function shouldCollapseGroupMessage(content: string) {
   const text = String(content || "").trim();
+  if (CONVERSATION_MARKDOWN_TABLE_PATTERN.test(text)) {
+    // Markdown tables must never be clamped: -webkit-line-clamp cuts them mid-row.
+    return false;
+  }
   return text.length > 260 || text.split(/\r?\n/).length > 8;
 }
 

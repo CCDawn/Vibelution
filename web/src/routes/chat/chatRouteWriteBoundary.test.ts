@@ -6,6 +6,8 @@ import { chatSelectionPathname } from "./useChatRouteSelection";
 const useChatRouteSelectionSourcePath = fileURLToPath(new URL("./useChatRouteSelection.ts", import.meta.url));
 const useChatWorkspaceActionsSourcePath = fileURLToPath(new URL("./useChatWorkspaceActions.ts", import.meta.url));
 const useChatWorkspaceLifecycleSourcePath = fileURLToPath(new URL("./useChatWorkspaceLifecycle.ts", import.meta.url));
+const useChatSessionChangeMutationsSourcePath = fileURLToPath(new URL("./useChatSessionChangeMutations.ts", import.meta.url));
+const useChatGroupWorkspaceMutationsSourcePath = fileURLToPath(new URL("./useChatGroupWorkspaceMutations.ts", import.meta.url));
 const useChatArchivedAgentRetirementSourcePath = fileURLToPath(new URL("./useChatArchivedAgentRetirement.ts", import.meta.url));
 const chatCodingRouteWorkbenchSourcePath = fileURLToPath(new URL("./ChatCodingRouteWorkbench.tsx", import.meta.url));
 
@@ -41,6 +43,8 @@ describe("Chat route write boundary (single authority)", () => {
     for (const [path, source] of [
       [useChatWorkspaceActionsSourcePath, readSource(useChatWorkspaceActionsSourcePath)],
       [useChatWorkspaceLifecycleSourcePath, readSource(useChatWorkspaceLifecycleSourcePath)],
+      [useChatSessionChangeMutationsSourcePath, readSource(useChatSessionChangeMutationsSourcePath)],
+      [useChatGroupWorkspaceMutationsSourcePath, readSource(useChatGroupWorkspaceMutationsSourcePath)],
       [useChatArchivedAgentRetirementSourcePath, readSource(useChatArchivedAgentRetirementSourcePath)],
     ]) {
       expect(navigatesToChatSelection(source), path).toEqual([]);
@@ -55,6 +59,23 @@ describe("Chat route write boundary (single authority)", () => {
     expect(source).not.toContain("/chat?session=");
     expect(source).not.toContain("/chat?room=");
     expect(source).not.toContain("encodeURIComponent(normalizedSessionId)}`, { replace: true }");
+  });
+
+  it("session change mutations use compare-and-swap route transitions only", () => {
+    const source = readSource(useChatSessionChangeMutationsSourcePath);
+    expect(source).toContain("replaceIfStillViewing");
+    expect(source).not.toContain("setActiveSession");
+    expect(source).not.toContain("setSearchParams");
+    expect(navigatesToChatSelection(source)).toEqual([]);
+  });
+
+  it("group workspace mutations use compare-and-swap route transitions only", () => {
+    const source = readSource(useChatGroupWorkspaceMutationsSourcePath);
+    expect(source).toContain("replaceIfStillViewing");
+    expect(source).toContain("chatRoute.openRoom(");
+    expect(source).not.toContain("setActiveSession");
+    expect(source).not.toContain("setSearchParams");
+    expect(navigatesToChatSelection(source)).toEqual([]);
   });
 
   it("workspace lifecycle uses compare-and-swap route transitions only", () => {

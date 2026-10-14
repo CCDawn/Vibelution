@@ -1557,7 +1557,12 @@ def test_operator_can_review_reflection_through_agent_scoped_command(tmp_path) -
                 "title": "完成一段独立创作",
                 "localDate": "2026-08-27",
                 "occurredAt": "2026-08-27T09:00:00+00:00",
-                "outcome": {"status": "succeeded", "summary": "完成并保存了作品。"},
+                "outcome": {"status": "succeeded", "summary": "完成并保存了作品。",
+                            "kind": "verified_tool_outcome", "evidence": {
+                                "kind": "native_tool_execution", "sessionId": "session-agent-a",
+                                "turnId": "turn-a", "toolCallIds": ["call-a"],
+                                "receiptEventIds": ["receipt-a"],
+                            }},
             },
         )
         proposal = service.record_reflection_proposal(

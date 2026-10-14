@@ -73,6 +73,9 @@ export function createMemoryGraphLabelElements(
   const summaryElements = new Map<string, HTMLElement>();
 
   for (const cluster of clusters) {
+    // Topic roots already carry the clickable name/count; avoid a competing
+    // non-interactive heading occupying the same caption space.
+    if (cluster.key.startsWith("topic:") && nodes.some(node => node.clusterKey === cluster.key && node.source.type === "topic")) continue;
     const heading = document.createElement("div");
     heading.className = styles.clusterLabel;
     heading.style.display = "none";
@@ -103,7 +106,8 @@ export function createMemoryGraphLabelElements(
     const node = viewNode.source;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = styles.nodeLabel;
+    const topicRoot = viewNode.clusterKey.startsWith("topic:") && node.type === "topic";
+    button.className = styles.nodeLabel + (topicRoot ? " min-h-11 min-w-11 !px-3 !py-2 !text-vui-sm" : "");
     button.style.display = "none";
     button.dataset.nodeId = node.id;
     button.dataset.nodeType = node.type;
@@ -577,10 +581,12 @@ function candidatesForFrame(
     for (const id of selectedNeighbors) priorities.set(id, Math.max(priorities.get(id) ?? 0, 8_000));
   }
   for (const id of highlightIds) priorities.set(id, Math.max(priorities.get(id) ?? 0, 9_500));
+  const topicRoots = nodes.filter(node => node.clusterKey.startsWith("topic:") && node.source.type === "topic");
+  for (const node of topicRoots) priorities.set(node.id, Math.max(priorities.get(node.id) ?? 0, 9_000));
 
   const importantCount = Math.min(24, Number(Boolean(selectedNodeId)) + selectedNeighbors.size + highlightIds.size);
   const baseBudget = Math.max(3, Math.round(LABEL_BUDGETS[zoom] * areaScale));
-  const budget = Math.min(nodes.length, MAX_VISIBLE_NODE_LABELS, Math.max(baseBudget, importantCount));
+  const budget = Math.min(nodes.length, MAX_VISIBLE_NODE_LABELS, Math.max(baseBudget, importantCount, topicRoots.length));
   const comparePriority = (left: string, right: string) => {
     const priorityDelta = (priorities.get(right) ?? 0) - (priorities.get(left) ?? 0);
     return priorityDelta || (left < right ? -1 : left > right ? 1 : 0);

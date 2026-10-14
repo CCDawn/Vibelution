@@ -12,6 +12,7 @@ from vibelution_storage import resolve_project_logs_home
 
 from . import agent_directory_service, memory_service, team_knowledge_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
+from .memory.platform_graph import get_platform_knowledge_graph, get_platform_knowledge_graph_node_detail
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

@@ -3,18 +3,21 @@ import type {
   MemoryKnowledgeGraphNode,
 } from "../../../../api/types";
 
-export type MemoryGraphClusterKey =
+type LegacyClusterKey =
   | "workspace"
   | "agents"
   | "knowledge"
   | "sources"
   | "operations";
 
+export type MemoryGraphClusterKey = LegacyClusterKey | `topic:${string}`;
+
 export type MemoryGraphCluster = {
   key: MemoryGraphClusterKey;
   label: string;
   center: { x: number; y: number; z: number };
   nodeIds: string[];
+  memberCount?: number;
 };
 
 export type PositionedMemoryKnowledgeGraphNode = {
@@ -61,13 +64,51 @@ const TYPE_CLUSTER: Record<string, MemoryGraphClusterKey> = {
 };
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const CLUSTER_PHASE: Record<MemoryGraphClusterKey, number> = {
+const CLUSTER_PHASE: Record<LegacyClusterKey, number> = {
   workspace: 0.3,
   agents: 1.1,
   knowledge: 2.2,
   sources: 3.35,
   operations: 4.5,
 };
+
+/** Stable topic appearance seed; never depends on payload or cluster order. */
+export function memoryGraphClusterSeed(key: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = Math.imul(hash ^ key.charCodeAt(index), 16777619);
+  }
+  return hash >>> 0;
+}
+
+function topicFor(node: MemoryKnowledgeGraphNode): string {
+  return typeof node.metadata.topicId === "string" ? node.metadata.topicId.trim() : "";
+}
+
+function topicDefinitions(nodes: readonly MemoryKnowledgeGraphNode[]): ClusterDefinition[] {
+  const topics = new Map<string, MemoryKnowledgeGraphNode[]>();
+  for (const node of nodes) {
+    const topicId = topicFor(node);
+    if (!topicId) continue;
+    const members = topics.get(topicId);
+    if (members) members.push(node);
+    else topics.set(topicId, [node]);
+  }
+  return [...topics.entries()].sort(([left], [right]) => compareIds(left, right))
+    .map(([topicId, members], index, all) => {
+      const key: MemoryGraphClusterKey = `topic:${topicId}`;
+      const named = [...members].sort((left, right) => compareIds(left.id, right.id))
+        .find(node => typeof node.metadata.topicLabel === "string" && node.metadata.topicLabel.trim());
+      const angle = index * GOLDEN_ANGLE;
+      const vertical = 1 - 2 * (index + 0.5) / all.length;
+      const radial = Math.sqrt(1 - vertical * vertical);
+      return {
+        key,
+        label: named ? String(named.metadata.topicLabel).trim() : topicId,
+        center: { x: Math.cos(angle) * radial * 12, y: vertical * 12, z: Math.sin(angle) * radial * 12 },
+      };
+    });
+}
 
 function compareIds(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -130,9 +171,11 @@ function resolveClusterCenters(
 export function layoutMemoryKnowledgeGraph(
   nodes: readonly MemoryKnowledgeGraphNode[],
   edges: readonly MemoryKnowledgeGraphEdge[],
+  options: { groupByTopic?: boolean } = {},
 ): MemoryGraphLayout {
+  const definitions = options.groupByTopic ? [...topicDefinitions(nodes), ...CLUSTERS] : CLUSTERS;
   const grouped = new Map<MemoryGraphClusterKey, MemoryKnowledgeGraphNode[]>(
-    CLUSTERS.map((cluster) => [cluster.key, []]),
+    definitions.map((cluster) => [cluster.key, []]),
   );
   const nodeIds = new Set(nodes.map((node) => node.id));
   const degree = new Map<string, number>(nodes.map((node) => [node.id, 0]));
@@ -144,14 +187,20 @@ export function layoutMemoryKnowledgeGraph(
   }
 
   for (const node of nodes) {
-    grouped.get(clusterForType(node.type))?.push(node);
+    const topicId = options.groupByTopic ? topicFor(node) : "";
+    grouped.get(topicId ? `topic:${topicId}` : clusterForType(node.type))?.push(node);
   }
-  const counts = new Map([...grouped.entries()].map(([key, members]) => [key, members.length]));
-  const centers = resolveClusterCenters(CLUSTERS, counts);
+  const counts = new Map([...grouped.entries()].map(([key, members]) => [key,
+    key.startsWith("topic:") ? Math.max(members.length, ...members.map(node => {
+      const count = node.metadata.memberCount;
+      return typeof count === "number" && Number.isFinite(count) ? Math.max(0, count) : 0;
+    })) : members.length,
+  ]));
+  const centers = resolveClusterCenters(definitions, counts);
   const positioned: PositionedMemoryKnowledgeGraphNode[] = [];
   const clusters: MemoryGraphCluster[] = [];
 
-  for (const definition of CLUSTERS) {
+  for (const definition of definitions) {
     const members = [...(grouped.get(definition.key) ?? [])].sort((left, right) => {
       const degreeDelta = (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0);
       return degreeDelta || compareIds(left.id, right.id);
@@ -163,12 +212,16 @@ export function layoutMemoryKnowledgeGraph(
       ...definition,
       center: { ...center },
       nodeIds: members.map((node) => node.id),
+      ...(definition.key.startsWith("topic:") ? { memberCount: counts.get(definition.key) } : {}),
     });
 
     members.forEach((source, index) => {
       // A spherical distribution gives every topic genuine depth. Small radial
       // variation avoids a hollow shell without piling nodes at the center.
-      const angle = CLUSTER_PHASE[definition.key] + index * GOLDEN_ANGLE;
+      const phase = definition.key.startsWith("topic:")
+        ? (memoryGraphClusterSeed(definition.key) / 4294967296) * Math.PI * 2
+        : CLUSTER_PHASE[definition.key as LegacyClusterKey];
+      const angle = phase + index * GOLDEN_ANGLE;
       const vertical = 1 - 2 * (index + 0.5) / members.length;
       const radial = Math.sqrt(Math.max(0, 1 - vertical * vertical));
       const radius = radiusForCount(members.length) * (index % 3 === 0 ? 0.82 : 1);

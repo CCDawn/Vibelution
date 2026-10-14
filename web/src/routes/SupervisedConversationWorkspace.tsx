@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   BookOpen,
-  ChevronDown,
-  ChevronRight,
   Database,
   Ellipsis,
   History,
@@ -137,7 +135,6 @@ function labelsFor(lang: "zh" | "en") {
       progress: "Phase progress",
       noRuns: "No runs yet",
       historyRuns: "History",
-      viewAllHistory: (count: number) => `View all history (${count})`,
     };
   }
   return {
@@ -168,7 +165,6 @@ function labelsFor(lang: "zh" | "en") {
     progress: "阶段进度",
     noRuns: "暂无运行",
     historyRuns: "历史记录",
-    viewAllHistory: (count: number) => `查看全部历史（${count}）`,
   };
 }
 
@@ -230,11 +226,10 @@ export function SupervisedConversationWorkspace({
   const [desktopNavigationOpen, setDesktopNavigationOpen] = useState(() =>
     readPaneVisibility(WORKBENCH_LAYOUT_IDS.evolution, "run-navigation", true),
   );
-  const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<Record<string, boolean>>({});
   const [selectedEvidenceTabId, setSelectedEvidenceTabId] = useState("");
   const showDesktopEvidence = !narrow;
   const showMobileEvidence = narrow && evidenceOpen;
-  const showDesktopNavigation = desktopNavigationOpen && workspaceWidth >= 1180;
+  const showDesktopNavigation = desktopNavigationOpen && workspaceWidth >= 900;
   const showTrackSwitcher = activeTrack !== undefined && onTrackChange !== undefined;
 
   useEffect(() => {
@@ -310,7 +305,6 @@ export function SupervisedConversationWorkspace({
           {runGroups?.filter((group) => !activeTrack || group.id === activeTrack).map((group) => {
             const currentRuns = group.runs.filter((run) => !run.history || run.selected);
             const historyRuns = group.runs.filter((run) => run.history && !run.selected);
-            const historyExpanded = expandedHistoryGroups[group.id] === true;
             const selectRun = (run: EvolutionWorkspaceRun) => (
               <VButton
                 key={run.id}
@@ -341,43 +335,12 @@ export function SupervisedConversationWorkspace({
                     ) : null}
                     {historyRuns.length ? (
                       <div className={styles.runHistory}>
-                        <VButton
-                          contentLayout="plain"
-                          variant="ghost"
-                          className={styles.runHistoryToggle}
-                          aria-expanded={historyExpanded}
-                          aria-controls={`evolution-history-${group.id}`}
-                          onPress={() => setExpandedHistoryGroups((current) => ({
-                            ...current,
-                            [group.id]: !historyExpanded,
-                          }))}
-                        >
-                          <span className={styles.runHistoryLabel}>
-                            {historyExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-                            <span>{labels.historyRuns}</span>
-                          </span>
+                        <h3 className={styles.runHistoryHeading}>
+                          <span>{labels.historyRuns}</span>
                           <span className={styles.runGroupCount}>{historyRuns.length}</span>
-                        </VButton>
-                        <div
-                          id={`evolution-history-${group.id}`}
-                          className={`${styles.runGroupItems} ${historyExpanded ? "" : "hidden"}`}
-                          hidden={!historyExpanded}
-                        >
-                          {historyRuns.slice(0, 5).map(selectRun)}
-                          {historyRuns.length > 5 ? (
-                            <VButton
-                              contentLayout="plain"
-                              variant="ghost"
-                              className={styles.runHistoryAll}
-                              onPress={() => {
-                                closeNavigation();
-                                if (group.onHistory) group.onHistory();
-                                else onHistory();
-                              }}
-                            >
-                              {labels.viewAllHistory(historyRuns.length)}
-                            </VButton>
-                          ) : null}
+                        </h3>
+                        <div id={`evolution-history-${group.id}`} className={styles.runGroupItems}>
+                          {historyRuns.map(selectRun)}
                         </div>
                       </div>
                     ) : null}
@@ -502,9 +465,9 @@ export function SupervisedConversationWorkspace({
       <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header} ${showTrackSwitcher || showPhaseNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation} ${narrow ? styles.narrowHeader : ""} ${narrow && (showTrackSwitcher || showPhaseNavigation) ? styles.narrowHeaderWithNavigation : ""}`}>
         <div className={styles.runIdentity} data-has-source={!setupOpen && sourceLabel ? "true" : "false"}>
           {showContext ? <VIconButton label={labels.navigation} variant="ghost" icon={<PanelLeft size={16} />}
-            aria-expanded={workspaceWidth < 1180 ? navigationOpen : showDesktopNavigation}
+            aria-expanded={workspaceWidth < 900 ? navigationOpen : showDesktopNavigation}
             onPress={() => {
-              if (workspaceWidth < 1180) setNavigationOpen((open) => !open);
+              if (workspaceWidth < 900) setNavigationOpen((open) => !open);
               else setDesktopNavigationOpen((open) => !open);
             }} /> : null}
           <h1 className={styles.title} title={setupOpen ? setupTitle || labels.setupTitle : title}>
@@ -601,7 +564,7 @@ export function SupervisedConversationWorkspace({
       />
       </div>
 
-      <VDialog className={styles.mobileNavigationDialog} open={showContext && workspaceWidth < 1180 && navigationOpen}
+      <VDialog className={styles.mobileNavigationDialog} open={showContext && workspaceWidth < 900 && navigationOpen}
         onOpenChange={setNavigationOpen} size="md" title={labels.navigation}>
         {contextPanel}
       </VDialog>

@@ -16,6 +16,7 @@ import {
 } from "./memoryGraphLabels";
 import { nebulaMaterial } from "./NebulaField";
 import { createMemoryGraphBatches } from "./MemoryGraphBatches";
+import { memoryGraphClusterSeed } from "../../../product/memory/memoryGraphModel";
 import { memoryGraphRendererStyles as styles } from "./memoryGraphRenderer.styles";
 
 type ThreeApi = typeof import("three");
@@ -106,7 +107,7 @@ function createMemoryGraphRuntimeScope(onFailure: (reason?: unknown) => void): M
   };
 }
 
-const MUTED_CLUSTER_COLORS: Record<MemoryGraphClusterKey, number> = {
+const MUTED_CLUSTER_COLORS: Partial<Record<MemoryGraphClusterKey, number>> = {
   workspace: 0xa8bda9,
   agents: 0x88b8b0,
   knowledge: 0x94aeca,
@@ -169,7 +170,9 @@ function readTheme(
   // a second application theme or a replacement for semantic UI tokens.
   const clusterColors = new Map<MemoryGraphClusterKey, number>();
   for (const cluster of clusters) {
-    const color = new THREE.Color(MUTED_CLUSTER_COLORS[cluster.key]);
+    const color = cluster.key.startsWith("topic:")
+      ? new THREE.Color().setHSL((memoryGraphClusterSeed(cluster.key) % 360) / 360, 0.32, 0.68)
+      : new THREE.Color(MUTED_CLUSTER_COLORS[cluster.key] ?? MUTED_CLUSTER_COLORS.operations!);
     if (lightSurface) color.multiplyScalar(0.58);
     clusterColors.set(cluster.key, color.getHex());
   }
@@ -449,10 +452,13 @@ function initializeMemoryGraphEngine(
     const center = new THREE.Vector3(cluster.center.x, cluster.center.y, cluster.center.z);
     const radius = Math.max(
       2.6,
+      cluster.memberCount ? 1.35 + Math.cbrt(cluster.memberCount) * 0.7 : 0,
       ...members.map((node) => positions.get(node.id)?.distanceTo(center) ?? 0),
     ) + 1.1;
     const nebula = disposeMaterial(
-      nebulaMaterial(THREE, center, radius, clusterColor, index * 11.71, theme.lightSurface ? 0.9 : 1),
+      nebulaMaterial(THREE, center, radius, clusterColor,
+        cluster.key.startsWith("topic:") ? memoryGraphClusterSeed(cluster.key) % 1000 : index * 11.71,
+        theme.lightSurface ? 0.9 : 1),
     );
     const cloud = new THREE.Mesh(
       disposeGeometry(new THREE.SphereGeometry(radius, 28, 20)),

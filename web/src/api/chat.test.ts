@@ -9,6 +9,8 @@ import surfaceModelSource from "../routes/chat/useChatConversationSurfaceModel.t
 import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
+import sessionChangeSource from "../routes/chat/useChatSessionChangeMutations.ts?raw";
+import groupWorkspaceSource from "../routes/chat/useChatGroupWorkspaceMutations.ts?raw";
 import composerActionsSource from "../routes/chat/useChatComposerSubmit.ts?raw";
 import composerSource from "../routes/chat/useChatComposerTurnMutations.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
@@ -37,9 +39,11 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}`");
     expect(apiSource).toContain("search.set(\"includeSecondary\", \"false\")");
     expect(helperSource).toContain("fetchSessionDetail(normalizedSessionId, {");
-    expect(lifecycleSource).toContain("fetchSessionDetail(optimisticNextActiveSessionId)");
+    expect(sessionChangeSource).toContain("fetchSessionDetail(optimisticNextActiveSessionId)");
+    expect(lifecycleSource).toContain("useChatSessionChangeMutations(");
     expect(helperSource).not.toContain("/api/sessions/");
     expect(lifecycleSource).not.toContain("`/api/sessions/${encodeURIComponent(optimisticNextActiveSessionId)}`");
+    expect(sessionChangeSource).not.toContain("`/api/sessions/${encodeURIComponent(optimisticNextActiveSessionId)}`");
   });
 
   it("owns session catalog transport outside chat route hooks", () => {
@@ -51,14 +55,17 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain('method: "DELETE"');
     expect(lifecycleSource).toContain("createChatSession");
     expect(lifecycleSource).toContain("deleteChatSession");
+    expect(sessionChangeSource).toContain("deleteChatSession");
     expect(lifecycleSource).toContain("updateChatSession");
     expect(apiSource).toContain("isSessionNotFoundError(error)");
     expect(apiSource).toContain("export async function deleteChatSession");
     expect(apiSource).toContain("export function bulkDeleteChatSessions");
     expect(apiSource).toContain("/api/sessions/bulk-delete");
-    expect(lifecycleSource).toContain("bulkDeleteChatSessions");
+    expect(sessionChangeSource).toContain("bulkDeleteChatSessions");
     expect(lifecycleSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(sessionChangeSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
     expect(lifecycleSource).not.toContain('fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`');
+    expect(sessionChangeSource).not.toContain('fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`');
   });
 
   it("owns session turn-command and Agent model-parameter transport outside chat route hooks", () => {
@@ -105,8 +112,9 @@ describe("Chat session tool approval API", () => {
   it("owns review-candidate transport outside the chat lifecycle hook", () => {
     expect(apiSource).toContain("/chat-review-candidate");
     expect(apiSource).toContain('method: "POST"');
-    expect(lifecycleSource).toContain("createSessionChatReviewCandidate");
+    expect(sessionChangeSource).toContain("createSessionChatReviewCandidate");
     expect(lifecycleSource).not.toContain("/chat-review-candidate");
+    expect(sessionChangeSource).not.toContain("/chat-review-candidate");
   });
 
   it("owns session message curation transport outside the view layer", () => {
@@ -126,6 +134,7 @@ describe("Chat session tool approval API", () => {
     expect(routeSource).not.toContain("/curation");
     expect(mutationSource).not.toContain("/curation");
     expect(lifecycleSource).not.toContain("/curation");
+    expect(sessionChangeSource).not.toContain("/curation");
     expect(composerSource).not.toContain("Curation");
     expect(composerActionsSource).not.toContain("Curation");
   });
@@ -146,12 +155,14 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("/reset");
     expect(apiSource).toContain('method: "PATCH"');
     expect(apiSource).toContain('method: "DELETE"');
-    expect(lifecycleSource).toContain("createChatRoom");
-    expect(lifecycleSource).toContain("startChatRoomRound");
-    expect(lifecycleSource).toContain("stopChatRoomRound");
-    expect(lifecycleSource).toContain("updateChatRoom");
-    expect(lifecycleSource).toContain("deleteChatRoom");
-    expect(lifecycleSource).toContain("resetChatRoom");
+    expect(groupWorkspaceSource).toContain("createChatRoom");
+    expect(groupWorkspaceSource).toContain("startChatRoomRound");
+    expect(groupWorkspaceSource).toContain("stopChatRoomRound");
+    expect(groupWorkspaceSource).toContain("updateChatRoom");
+    expect(groupWorkspaceSource).toContain("deleteChatRoom");
+    expect(groupWorkspaceSource).toContain("resetChatRoom");
+    expect(lifecycleSource).toContain("useChatGroupWorkspaceMutations(");
     expect(lifecycleSource).not.toContain("/api/chat-rooms");
+    expect(groupWorkspaceSource).not.toContain("/api/chat-rooms");
   });
 });

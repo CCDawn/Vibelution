@@ -82,6 +82,13 @@ def _record_lived_event(service: VirtualHumanLifeService, when: datetime) -> str
         "outcome": {
             "status": "succeeded",
             "kind": "verified_tool_outcome",
+            "evidence": {
+                "kind": "native_tool_execution",
+                "sessionId": "session-agent-a",
+                "turnId": "turn-reflection-1",
+                "toolCallIds": ["save-melody-call"],
+                "receiptEventIds": ["save-melody-succeeded"],
+            },
             "summary": "完成并保存了一段可以继续发展的原创旋律。",
             "salienceScore": 88,
             "moodDelta": 18,
