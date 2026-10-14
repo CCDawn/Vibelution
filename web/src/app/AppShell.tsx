@@ -103,7 +103,7 @@ import {
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval, useBootStaggeredPollReady, useStartupWarmup } from "./pollingPolicy";
-import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
+import { createReloadGracePromise, recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 import {
   isModifiedPrimaryNavClick,
   resolveUnmodifiedShellNavHref,
@@ -167,7 +167,23 @@ const LazyAppShellSettingsMenu = lazy(() =>
     .then((module) => ({ default: module.AppShellSettingsMenu }))
     .catch((error) => {
       if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
-        return new Promise<{ default: typeof import("./AppShellSettingsMenu").AppShellSettingsMenu }>(() => undefined);
+        // A recovery reload was requested; stay pending through the grace
+        // window (the reload may still tear down this document) and then
+        // surface the original error instead of suspending the menu forever.
+        return createReloadGracePromise<{ default: typeof import("./AppShellSettingsMenu").AppShellSettingsMenu }>(error, {
+          onDegrade: (degradedError) => {
+            postBrowserTelemetry({
+              phase: "recovery",
+              eventCode: "browser.appshell_settings_menu_recovery.reload_vetoed",
+              message: "Settings menu chunk recovery reload did not take effect; surfacing the load error.",
+              level: "error",
+              fields: {
+                pathname: typeof window === "undefined" ? "" : window.location.pathname,
+                errorMessage: degradedError instanceof Error ? degradedError.message : String(degradedError ?? ""),
+              },
+            });
+          },
+        });
       }
       throw error;
     }),
