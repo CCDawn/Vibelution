@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, GitBranch, MessageSquare, Play, Square } from "lucide-react";
 
@@ -11,7 +11,6 @@ import {
   VStateSurface,
   VStatusChip,
   VTextarea,
-  VUI_WORKBENCH_RAIL_CLASS,
   VUI_WORKBENCH_TOOLBAR_CLASS,
 } from "../../components/vui";
 import { ChatGroupMessageBody } from "../chat/ChatGroupMessagePresentation";
@@ -21,6 +20,8 @@ import { formatTime } from "./source-collection/presentationModel";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
 import styles from "./TeamHomeSurface.styles";
+import { TeamWorkspaceFrame, type TeamWorkspaceFrameProps } from "./TeamWorkspaceFrame";
+import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 
 export type StartTeamRoundPayload = {
   roomId: string;
@@ -52,6 +53,7 @@ export type TeamHomeSurfaceProps = {
   teamSyncPending: boolean;
   onSyncRoom: () => void;
   onOpenOrganization: () => void;
+  workspace?: { navigation: ReactNode; teamSwitcher: ReactNode; toolbar: ReactNode; canvas: ReactNode; inspector: ReactNode; resize: TeamWorkspaceFrameProps["resize"] };
 };
 
 const roundStateCopy: Record<string, { zh: string; en: string; tone: "neutral" | "accent" | "success" | "warning" | "danger" }> = {
@@ -200,6 +202,7 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   const teamId = selectedTeam?.teamId || "";
   const queryClient = useQueryClient();
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
+  const [homeView, setHomeView] = useState<"canvas" | "conversation">(props.workspace ? "canvas" : "conversation");
   const stopTriggerRef = useRef<HTMLButtonElement | null>(null);
   const lastRoomRevisionRef = useRef<{ roomId: string; revision: string } | null>(null);
   const groupTimeline = useGroupRoomTimeline({
@@ -269,10 +272,8 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
     onStopTeamRound({ roomId: linkedChatRoomId, teamId: selectedTeam.teamId });
   };
 
-  return (
-    <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
-      <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header}`}>
-        <div className={styles.headerCopy}>
+  const conversation = <div className={styles.conversation}>
+    <header className={`${VUI_WORKBENCH_TOOLBAR_CLASS} ${styles.header}`}><div className={styles.headerCopy}>
           <p className={styles.eyebrow}>{lang === "zh" ? "当前任务" : "Current task"}</p>
           <h2 className={styles.title}>{currentTitle}</h2>
           <div className={styles.statusRow}>
@@ -281,21 +282,8 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
               <time className={styles.updatedTime}>{lang === "zh" ? "更新于" : "Updated"} {formatTime(currentTeamRound.updatedAt || currentTeamRound.startedAt, lang)}</time>
             ) : null}
           </div>
-        </div>
-        <div className={styles.headerActions}>
-          {roomLink ? (
-            <VRouteLinkButton to={roomLink} variant="secondary" className={styles.touchAction} icon={<MessageSquare size={15} aria-hidden="true" />}>
-              {lang === "zh" ? "打开群聊" : "Open room"}
-            </VRouteLinkButton>
-          ) : null}
-          <VButton variant="ghost" className={styles.touchAction} icon={<GitBranch size={15} aria-hidden="true" />} onPress={onOpenOrganization}>
-            {lang === "zh" ? "组织结构" : "Organization"}
-          </VButton>
-        </div>
-      </header>
-
-      <main className={styles.content}>
-        <div className={styles.transcript}>
+        </div></header>
+    <div className={styles.transcript}>
           {selectedTeam?.teamTemplateId === "dev-team" && selectedTeam.teamId ? (
             <section className={styles.taskBoard} aria-label={lang === "zh" ? "共享任务板" : "Shared task board"}>
               <DevTeamTaskBoard
@@ -346,8 +334,8 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
             )}
           </section>
         </div>
-
-        <aside className={`${VUI_WORKBENCH_RAIL_CLASS} ${styles.actionRail}`}>
+  </div>;
+  const roundActions = <aside className={styles.actionRail}>
           <section aria-labelledby="team-home-round-action">
             <h3 id="team-home-round-action" className={styles.sectionTitle}>
               {linkedRoomBusy ? (lang === "zh" ? "本轮正在运行" : "Round in progress") : (lang === "zh" ? "开始下一轮" : "Start next round")}
@@ -411,9 +399,23 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
             {startRoundError ? <p className={styles.error} role="alert">{startRoundError.message}</p> : null}
             {stopRoundError ? <p className={styles.error} role="alert">{stopRoundError.message}</p> : null}
           </section>
-        </aside>
-      </main>
-      <VConfirmDialog
+        </aside>;
+  const canvasOpen = Boolean(props.workspace && homeView === "canvas");
+  return <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
+    <TeamWorkspaceFrame title={lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
+      layoutId={WORKBENCH_LAYOUT_IDS.teams} resize={props.workspace?.resize}
+      responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation" }, inspector: { label: lang === "zh" ? "本轮操作与成员详情" : "Round actions and member details" } }}
+      ariaLabel={selectedTeam?.name || (lang === "zh" ? "团队主页" : "Team home")}
+      railTitle={props.workspace?.teamSwitcher} rail={props.workspace?.navigation}
+      inspectorTitle={canvasOpen ? (lang === "zh" ? "成员详情" : "Member details") : (lang === "zh" ? "本轮操作" : "Round actions")}
+      mainScroll={!canvasOpen} canvas={canvasOpen ? props.workspace?.canvas : conversation}
+      inspector={canvasOpen ? props.workspace?.inspector : roundActions}
+      toolbar={<><VButton density="compact" variant={canvasOpen ? "primary" : "ghost"} aria-pressed={canvasOpen}
+        icon={<GitBranch size={14} aria-hidden="true" />} onClick={() => { setHomeView("canvas"); onOpenOrganization(); }}>{lang === "zh" ? "画布" : "Canvas"}</VButton>
+        <VButton density="compact" variant={!canvasOpen ? "primary" : "ghost"} aria-pressed={!canvasOpen} onClick={() => setHomeView("conversation")}>{lang === "zh" ? "成员发言" : "Messages"}</VButton>
+        {roomLink ? <VRouteLinkButton density="compact" to={roomLink} variant="secondary" icon={<MessageSquare size={14} aria-hidden="true" />}>{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null}
+        {props.workspace?.toolbar}</>} />
+    <VConfirmDialog
         open={confirmStopOpen}
         onOpenChange={setConfirmStopOpen}
         title={lang === "zh" ? "停止本轮讨论？" : "Stop this round?"}
@@ -425,6 +427,5 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
         onCloseAutoFocus={(event) => { event.preventDefault(); stopTriggerRef.current?.focus({ preventScroll: true }); }}
         onConfirm={confirmStopRound}
       />
-    </div>
-  );
+  </div>;
 }

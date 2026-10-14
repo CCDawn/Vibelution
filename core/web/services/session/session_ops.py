@@ -1187,9 +1187,16 @@ def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, An
 
 def _session_fixed_model_choice(session_id: str) -> dict[str, Any]:
     s = _service()
+    from .agent_runtime import _llm_options_chain_slot
+
     normalized_session_id = str(session_id or "").strip()
     agent_id = s._session_agent_id_snapshot(normalized_session_id)
-    agent = s.get_agent(agent_id, include_archived=False) if agent_id else None
+    chain_slot = _llm_options_chain_slot(normalized_session_id)
+    agent = (
+        chain_slot["agent"]
+        if chain_slot is not None and isinstance(chain_slot.get("agent"), dict)
+        else s.get_agent(agent_id, include_archived=False) if agent_id else None
+    )
     fallback_detail: dict[str, Any] | None = None
     if agent is None:
         fallback_detail = s.get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")

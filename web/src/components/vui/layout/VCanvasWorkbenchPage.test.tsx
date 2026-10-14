@@ -84,6 +84,15 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
     expect(container.querySelector('[data-vui="split-aside"]')).not.toBeNull();
   });
 
+  it("preserves default pane chrome and supports an embedded owner surface", () => {
+    const container = renderPage(1440);
+    expect(container.querySelector('[data-vui-split-chrome]')?.getAttribute("data-vui-split-chrome")).toBe("workbench");
+    act(() => root?.render(<VCanvasWorkbenchPage title="Embedded" canvas={<div>Canvas</div>} rail={<div>Navigation</div>} inspector={<div>Details</div>} chrome="embedded" />));
+    expect(container.querySelector('[data-vui-split-chrome]')?.getAttribute("data-vui-split-chrome")).toBe("embedded");
+    expect(container.textContent).toContain("Navigation");
+    expect(container.textContent).toContain("Details");
+  });
+
   it("keeps rail and Inspector columns at the wide breakpoint", () => {
     const container = renderPage(1280, true);
 

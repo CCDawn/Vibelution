@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.web.services.session.timebase import parse_timestamp_utc
+from .turn_model_parameters import capture_model_parameters
 
 QUEUED_TURN_STATE_KEY = "queued_turns"
 BRANCH_GENERATION_KEY = "branchGeneration"
@@ -196,6 +197,7 @@ def enqueue_session_queued_turn(
     client_submission_fingerprint: str = "",
     client_submission_fingerprint_base: str = "",
     model_selection: dict[str, Any] | None = None,
+    model_parameters: dict[str, Any] | None = None,
     lang: str = "",
     steer_id: str = "",
     record_steer_admission: bool = True,
@@ -265,6 +267,7 @@ def enqueue_session_queued_turn(
                 if isinstance(model_selection, dict) and model_selection
                 else None
             ),
+            "modelParameters": dict(model_parameters) if model_parameters else capture_model_parameters(s, conversation),
             "clientSubmissionFingerprint": str(client_submission_fingerprint or "").strip(),
             "clientSubmissionFingerprintBase": str(client_submission_fingerprint_base or "").strip(),
             "status": "queued",
@@ -427,6 +430,7 @@ def update_session_queued_turn(
                 ))
             if retry_state == "failed":
                 row["dispatchClientSubmissionId"] = f"queue-retry-{uuid.uuid4().hex}"
+                row["modelParameters"] = capture_model_parameters(s, conversation)
         if content is not None:
             next_content = str(content or "").strip()
             if not next_content and not row["attachments"]:
@@ -1323,6 +1327,7 @@ def drain_session_queued_turns(session_id: str) -> bool:
                     if isinstance(drained_model_selection, dict) and drained_model_selection
                     else None
                 ),
+                "_model_parameters_snapshot": head.get("modelParameters"),
                 "turn_steer_promotion": {
                     "steerId": str(head.get("id") or "").strip(),
                     "delivery": "queue",

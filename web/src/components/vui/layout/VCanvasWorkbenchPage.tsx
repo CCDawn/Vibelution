@@ -52,6 +52,8 @@ export type VCanvasWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">
   meta?: ReactNode;
   actions?: ReactNode;
   hideHeader?: boolean;
+  /** Embedded domains own their panel surfaces, as in VBoardWorkbenchPage. */
+  chrome?: "workbench" | "embedded";
   headerClassName?: string;
   toolbar?: ReactNode;
   toolbarClassName?: string;
@@ -235,6 +237,7 @@ export function VCanvasWorkbenchPage({
   meta,
   actions,
   hideHeader = false,
+  chrome = "workbench",
   headerClassName,
   toolbar,
   toolbarClassName,
@@ -341,7 +344,7 @@ export function VCanvasWorkbenchPage({
           toolbar strip and clips the canvas. flex-1 min-h-0 fills the remainder.
         */}
         <VSplitWorkspace
-          chrome="workbench"
+          chrome={chrome}
           className={cn("min-h-0 min-w-0 flex-1 overflow-hidden !h-auto", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}

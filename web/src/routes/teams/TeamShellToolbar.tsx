@@ -28,6 +28,7 @@ export type TeamShellToolbarProps = {
   kindLabel?: string;
   /** Optional trailing toolbar actions (e.g. team bundle import/export). */
   actions?: ReactNode;
+  showIdentity?: boolean;
 };
 
 /**
@@ -48,6 +49,7 @@ export function TeamShellToolbar({
   onSelectTeamId,
   kindLabel = "",
   actions,
+  showIdentity = true,
 }: TeamShellToolbarProps) {
   const fallbackName = lang === "zh" ? "暂无团队" : "No team";
   const fallbackPurpose = lang === "zh" ? "团队工作台" : "Team workbench";
@@ -55,7 +57,7 @@ export function TeamShellToolbar({
 
   return (
     <div className={identityClassName} data-testid="team-shell-toolbar-identity">
-      {canSwitch ? (
+      {!showIdentity ? null : canSwitch ? (
         <>
           <div className={switchClassName}>
             <VSelect

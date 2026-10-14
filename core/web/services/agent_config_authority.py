@@ -95,6 +95,11 @@ def canonical_agent_config_payload(agent: dict[str, Any] | None) -> dict[str, An
             if isinstance(metadata.get("llmReasoningEffort"), dict)
             else {}
         ),
+        "modelParametersByRef": copy.deepcopy(
+            metadata.get("llmModelParameters")
+            if isinstance(metadata.get("llmModelParameters"), dict)
+            else {}
+        ),
         "promptTemplateId": str(payload.get("promptTemplateId") or "").strip(),
         "toolPolicyId": str(payload.get("toolPolicyId") or "").strip(),
         "toolPolicy": copy.deepcopy(

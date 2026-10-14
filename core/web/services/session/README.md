@@ -43,6 +43,33 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 
 Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
+## Model parameter acceptance
+
+The composer shows the Agent's bound dialogue model. Parameter edits write only
+that Agent's current model entry; they never change the binding or shared model
+library. `turn_model_parameters.py` freezes model identity, context window,
+reasoning effort and Agent configuration revision when the server accepts a new
+user submission. The worker uses this private snapshot for the entire turn.
+
+| Action | Parameters used |
+| --- | --- |
+| New send after a successful parameter save | Current Agent/model parameters at acceptance |
+| Running turn, tool follow-up, automatic continuation or provider retry | Accepted turn parameters |
+| Queue, pause/resume, reorder or send-now | Original queue admission snapshot |
+| Guidance inserted into the running turn | Running turn parameters |
+| Guidance retargeted to the next-turn queue | Snapshot at queue admission |
+| Manual failed-answer retry, regenerate or edit-resubmit | Current parameters, captured as a new submission |
+| Same `clientSubmissionId` resent after a transport failure | Existing accepted submission; no second turn or new snapshot |
+| Confirmed failed queued submission explicitly retried | Current parameters with a new dispatch identity |
+
+Queue entries persist `modelParameters`; accepted user journal metadata records
+the same bounded scalar snapshot. These are execution evidence, not writers of
+Agent defaults. Configuration revisions prevent a stale parameter editor from
+writing after the Agent or its model binding changes. UI submission actions wait
+for an in-flight parameter save to settle; unsuccessful saves retain the prior
+effective values. A smaller window constrains future prompt assembly and the
+existing compression policy without deleting conversation history.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |

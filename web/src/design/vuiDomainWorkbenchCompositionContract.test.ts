@@ -33,6 +33,8 @@ describe("Wave 6B Teams organization workbench composition", () => {
     const entry = readFileSync(resolve(routesRoot, "TeamsRoute.tsx"), "utf8");
     const board = readFileSync(resolve(routesRoot, "teams/renderTeamsWorkbenchBoardPage.tsx"), "utf8");
     const canvas = readFileSync(resolve(routesRoot, "teams/TeamsCanvasComposer.tsx"), "utf8");
+    const frame = readFileSync(resolve(routesRoot, "teams/TeamWorkspaceFrame.tsx"), "utf8");
+    const unifiedBoard = readFileSync(resolve(routesRoot, "teams/TeamsWorkspaceBoardPage.tsx"), "utf8");
     const chrome = readFileSync(resolve(routesRoot, "teams/teamsWorkbenchChrome.ts"), "utf8");
     const canvasSurface = readFileSync(resolve(routesRoot, "teams/TeamOrganizationCanvasSurface.tsx"), "utf8");
     expect(entry).toContain("TeamsRouteWorkbench");
@@ -41,7 +43,10 @@ describe("Wave 6B Teams organization workbench composition", () => {
     expect(board).toContain("VBoardWorkbenchPage");
     expect(board).toContain('data-vui-region="teams-inspector"');
     expect(canvas).toContain('domainRecipe="teams-organization-workbench"');
-    expect(canvas).toContain("VCanvasWorkbenchPage");
+    expect(canvas).toContain("TeamWorkspaceFrame");
+    expect(unifiedBoard).toContain("TeamWorkspaceFrame");
+    expect(unifiedBoard).toContain("TEAMS_LAYOUT_ID");
+    expect(frame).toContain("VCanvasWorkbenchPage");
     expect(canvas).toContain('data-vui-region="teams-inspector"');
     expect(canvasSurface).toContain('data-vui-region="teams-canvas"');
     expect(chrome).toContain("WORKBENCH_LAYOUT_IDS.teams");
