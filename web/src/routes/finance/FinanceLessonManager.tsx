@@ -5,7 +5,7 @@ import { fetchFinancialClaims, financialEvaluationKeys, revokeFinancialLesson, r
 import type { FinancialClaim, FinancialLessonHistory, FinancialLessonState } from "../../api/types/financialEvaluation";
 import { fetchFinancialPreferences, financialPreferenceKeys } from "../../api/financialPreferences";
 import { VButton, VDialog, VRouteLinkButton, VStateSurface, VSurface, VTextarea } from "../../components/vui";
-import styles from "./FinanceEvaluation.styles";
+import styles from "./FinanceLessonManager.styles";
 
 type LessonVersion = Pick<FinancialLessonHistory, "lessonId" | "text" | "state" | "createdAt" | "supersededBy" | "revokedAt">;
 type LessonEntry = { claim: FinancialClaim; version: LessonVersion };
@@ -146,14 +146,14 @@ export function FinanceLessonManager({ agentId, zh }: { agentId: string; zh: boo
 
   return <div className={styles.page} data-finance-lesson-manager>
     <div className={styles.row}>
-      <div className="grid min-w-0 gap-1">
+      <div className={styles.headingGroup}>
         <h2 className={styles.title}>{zh ? "股票复盘教训" : "Stock review lessons"}</h2>
         <p className={styles.note}>{zh ? `有效 ${activeLessonCount} 条 · 这里只显示已确认的个人记忆；显示出来不代表本轮研究已经读取。${validationListAtLimit ? ` 核验记录已达到 ${claims.data?.limit} 条上限。` : ""}` : `${activeLessonCount} active · These are confirmed personal memories; their presence does not mean the current research has read them.${validationListAtLimit ? ` The validation list reached its ${claims.data?.limit}-item cap.` : ""}`}</p>
       </div>
       <VButton variant="ghost" isPending={claims.isFetching || preferences.isFetching} onPress={() => { void claims.refetch(); void preferences.refetch(); }}>{zh ? "刷新" : "Refresh"}</VButton>
     </div>
     {preferences.isError ? <VStateSurface tone="error" density="compact" title={zh ? "记忆状态不可用；修订已停用，作废仍可使用" : "Memory status unavailable; revision is disabled, revocation remains available"} /> : preferences.data?.memoryEnabled === false ? <VStateSurface tone="error" density="compact" title={zh ? "个人记忆已关闭；可作废现有教训，重新启用后才能修订" : "Personal memory is disabled; existing lessons can be revoked, and revision requires memory to be enabled"} /> : null}
-    {claims.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取股票复盘教训" : "Loading stock review lessons"} /> : claims.isError ? <VStateSurface tone="error" title={zh ? "教训列表不可用" : "Lessons unavailable"} actions={<VButton onPress={() => void claims.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{claims.error.message}</VStateSurface> : lessons.length === 0 ? <VStateSurface tone="empty" title={zh ? "暂无已确认的股票教训" : "No confirmed stock lessons"}>{zh ? "在已核验的报告结论中确认教训后，会在这里显示股票、分析日、版本状态和原报告。" : "Confirm a lesson from a verified report outcome to see its stock, analysis date, version state and source report here."}</VStateSurface> : <div className="grid min-w-0 gap-3">
+    {claims.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取股票复盘教训" : "Loading stock review lessons"} /> : claims.isError ? <VStateSurface tone="error" title={zh ? "教训列表不可用" : "Lessons unavailable"} actions={<VButton onPress={() => void claims.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{claims.error.message}</VStateSurface> : lessons.length === 0 ? <VStateSurface tone="empty" title={zh ? "暂无已确认的股票教训" : "No confirmed stock lessons"}>{zh ? "在已核验的报告结论中确认教训后，会在这里显示股票、分析日、版本状态和原报告。" : "Confirm a lesson from a verified report outcome to see its stock, analysis date, version state and source report here."}</VStateSurface> : <div className={styles.lessonList}>
       {lessons.map(({ claim, version }) => <VSurface key={`${claim.id}:${version.lessonId}`} tone="panel" padding="normal" className={styles.panel}>
         <div className={styles.row}>
           <strong className={styles.status}>{displaySymbol(claim.symbol)}</strong>
