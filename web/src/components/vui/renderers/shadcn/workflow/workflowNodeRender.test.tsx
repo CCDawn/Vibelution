@@ -421,7 +421,8 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
       layoutMode: "serpentine",
     });
     expect(markup).toContain("bg-[var(--vui-surface-panel)]");
-    expect(markup).toContain("shadow-[var(--vui-elevation-2)]");
+    expect(markup).toContain("shadow-none");
+    expect(markup).not.toContain("hover:-translate-y-px");
     expect(markup).not.toContain("rgba(15,23,42,0.05)");
   });
 
