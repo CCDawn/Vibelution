@@ -24,6 +24,7 @@ from core.chat.turn_journal import TERMINAL_EVENTS, TurnJournalPostTerminalWrite
 from . import conversation_references
 from . import document_attachments
 from . import journal_bridge
+from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
     get_development_submission_admission_runtime,
@@ -629,6 +630,7 @@ def _enqueue_busy_session_turn(
     client_submission_fingerprint_base: str,
     lang: str,
     model_selection: dict[str, Any] | None = None,
+    model_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Accept a user turn that arrived while the session still had an active turn."""
 
@@ -707,6 +709,7 @@ def _enqueue_busy_session_turn(
         client_submission_fingerprint=client_submission_fingerprint,
         client_submission_fingerprint_base=client_submission_fingerprint_base,
         model_selection=model_selection,
+        model_parameters=model_parameters,
         lang=lang,
     )
     payload = _accepted_session_turn_payload(
@@ -1316,6 +1319,7 @@ def submit_session_message(
     turn_steer_promotion: dict[str, Any] | None = None,
     _client_submission_fingerprint: str = "",
     _client_submission_fingerprint_base: str = "",
+    _model_parameters_snapshot: dict[str, Any] | None = None,
 ) -> dict:
     """Persist a user message and start a single web chat turn.
 
@@ -1406,6 +1410,7 @@ def submit_session_message(
     prepared_agent: dict[str, Any] | None = None
     prepared_agent_id = ""
     prepared_context_limit_ok = False
+    accepted_model_parameters = dict(_model_parameters_snapshot) if _model_parameters_snapshot else None
     try:
         if normalized_client_submission_id:
             replay = _existing_submission_replay(
@@ -1448,6 +1453,7 @@ def submit_session_message(
                         client_submission_fingerprint=client_submission_fingerprint,
                         client_submission_fingerprint_base=client_submission_fingerprint_base,
                         model_selection=normalized_model_selection,
+                        model_parameters=accepted_model_parameters,
                         lang=lang,
                     )
                 )
@@ -1503,8 +1509,6 @@ def submit_session_message(
                 conversation_id,
                 conversation=conversation,
             )
-            _require_positive_context_limit(s, conversation, lang)
-            prepared_context_limit_ok = True
             prepared_agent_id = str(
                 conversation.get("agent_id") or conversation.get("agentId") or ""
             ).strip()
@@ -1514,6 +1518,11 @@ def submit_session_message(
                     prepared_agent_id,
                     lang=lang,
                 )
+                if accepted_model_parameters is None:
+                    accepted_model_parameters = capture_model_parameters(s, conversation, agent=prepared_agent)
+                prepared_agent = pin_agent_model_parameters(prepared_agent, accepted_model_parameters)
+            _require_positive_context_limit(s, {**conversation, "_agent": prepared_agent}, lang)
+            prepared_context_limit_ok = True
         submit_timing_fields["submitPrepareMs"] = s._elapsed_ms(prepare_started_at)
     except _SessionTurnQueued as queued:
         release_admit_lock()
@@ -1638,6 +1647,7 @@ def submit_session_message(
                     client_submission_fingerprint=client_submission_fingerprint,
                     client_submission_fingerprint_base=client_submission_fingerprint_base,
                     model_selection=normalized_model_selection,
+                    model_parameters=accepted_model_parameters,
                     lang=lang,
                 )
                 release_admit_lock()
@@ -1732,6 +1742,8 @@ def submit_session_message(
             # payload so the turn record shows which model this turn asked for
             # even before (and independent of) the worker executing it.
             persisted_message_metadata["modelSelection"] = dict(normalized_model_selection)
+        if accepted_model_parameters:
+            persisted_message_metadata["modelParameters"] = dict(accepted_model_parameters)
         # Kernel bridge is audit/traceOnly: never hold CHAT_STATE_LOCK or block
         # Prefer: respond-async accept on its latency (measured cold path ~5s).
         deferred_kernel_trace = {
@@ -2126,6 +2138,7 @@ def submit_session_message(
             "active_skill_contract": active_skill_contract,
             "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
             "model_selection": dict(normalized_model_selection) if normalized_model_selection else None,
+            "model_parameters": accepted_model_parameters,
             "trace_context_carrier": dict(normalized_trace_context_carrier),
             "submit_timing_fields": dict(submit_timing_fields),
             "submit_started_at_monotonic": submit_started_at,
@@ -2353,6 +2366,20 @@ def _resubmit_session_user_message(
     normalized_base_message_id = str(base_message_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
     is_regenerate = str(operation or "").strip() == "regenerate"
+    rerun_request_fingerprint = hashlib.sha256(json.dumps({
+        "operation": operation,
+        "messageId": target_message_id,
+        "baseMessageId": normalized_base_message_id,
+        "content": content,
+        "contentUtf8Base64": content_utf8_base64,
+        "attachmentIds": list(attachment_ids or []),
+        "mentalModelEnabled": mental_model_enabled,
+        "runtimeStatusEnabled": runtime_status_enabled,
+        "turnStatusTail": turn_status_tail,
+        "turnMode": turn_mode,
+        "writeIntent": write_intent,
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    rerun_prepared = False
     message = "" if is_regenerate else _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
@@ -2372,6 +2399,16 @@ def _resubmit_session_user_message(
     admit_lock = _session_submit_admit_lock(conversation_id)
     admit_lock.acquire()
     try:
+        if normalized_client_submission_id:
+            accepted_events = journal_bridge.load_session_conversation_events_by_correlation(
+                conversation_id, event_type=s.EVENT_USER_MESSAGE,
+                correlation_id=normalized_client_submission_id, project_root=s.PROJECT_ROOT,
+            )
+            if accepted_events:
+                accepted_metadata = (accepted_events[-1].payload or {}).get("metadata") or {}
+                if accepted_metadata.get("rerunRequestFingerprint") != rerun_request_fingerprint:
+                    _raise_submission_identity_conflict(s, lang)
+                return s.get_session_detail(conversation_id) or {}
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
@@ -2525,7 +2562,9 @@ def _resubmit_session_user_message(
 
         s._ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        rerun_agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        accepted_model_parameters = capture_model_parameters(s, conversation, agent=rerun_agent)
+        rerun_agent = pin_agent_model_parameters(rerun_agent, accepted_model_parameters)
         original_entry = dict(previous_messages[target_index])
         history_before_target = previous_messages[:target_index]
         original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
@@ -2544,6 +2583,9 @@ def _resubmit_session_user_message(
             else s._active_skill_contract_from_conversation(conversation)
         )
         user_metadata = {}
+        user_metadata["rerunRequestFingerprint"] = rerun_request_fingerprint
+        if accepted_model_parameters:
+            user_metadata["modelParameters"] = dict(accepted_model_parameters)
         if normalized_client_submission_id:
             user_metadata["clientSubmissionId"] = normalized_client_submission_id
         if skill_invocation:
@@ -2608,8 +2650,10 @@ def _resubmit_session_user_message(
                 stage=acceptance_stage,
             )
             raise
+        rerun_prepared = True
     finally:
-        admit_lock.release()
+        if not rerun_prepared:
+            admit_lock.release()
     # Acceptance window (resubmit): running is already set, so any failure
     # before the worker is scheduled (journal lock timeout, disk I/O, ...)
     # must settle the turn exactly like the schedule-failure handler below;
@@ -2633,6 +2677,7 @@ def _resubmit_session_user_message(
             status="recorded",
             payload=user_payload,
             source="regenerate_session_message" if is_regenerate else "edit_and_resubmit_session_message",
+            correlation_id=normalized_client_submission_id,
         )
 
         acceptance_stage = "turn_start_projection"
@@ -2742,6 +2787,8 @@ def _resubmit_session_user_message(
             "attachments": attachments,
             "session_references": session_references,
             "history_messages": history_before_target,
+            "model_parameters": accepted_model_parameters,
+            "agent_snapshot": rerun_agent,
             "mental_model_enabled": mental_model_enabled,
             "runtime_status_enabled": runtime_status_enabled,
             "turn_status_tail": dict(turn_status_tail) if isinstance(turn_status_tail, dict) else None,
@@ -2764,6 +2811,10 @@ def _resubmit_session_user_message(
             stage=acceptance_stage,
         )
         raise
+    finally:
+        # Keep the admission lock until the accepted user journal marker exists:
+        # a concurrent transport retry must replay it, never supersede this turn.
+        admit_lock.release()
     try:
         s._schedule_session_turn(context)
     except Exception as exc:

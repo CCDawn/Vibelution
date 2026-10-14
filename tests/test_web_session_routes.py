@@ -478,6 +478,82 @@ def test_session_llm_options_maps_dangling_model_binding_to_422(monkeypatch):
     assert response.json()["detail"] == detail
 
 
+def test_session_model_parameters_patch_uses_agent_model_revision_contract(monkeypatch):
+    request_payload = {
+        "expectedAgentId": "agent-a",
+        "expectedModelRef": "provider/model-a",
+        "expectedConfigRevision": 7,
+        "contextWindow": 32768,
+        "reasoningEffort": "high",
+    }
+    expected = {
+        "sessionId": "session-active",
+        "agentId": "agent-a",
+        "configRevision": 8,
+        "currentModelId": "provider/model-a",
+        "currentReasoningEffort": "high",
+        "contextWindow": 32768,
+        "maxContextWindow": 64000,
+        "model": {"modelRef": "provider/model-a", "label": "Model A"},
+    }
+    captured = {}
+
+    def update(session_id, **kwargs):
+        captured["session_id"] = session_id
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(session_routes, "update_session_model_parameters", update)
+    response = client.patch(
+        "/api/sessions/session-active/model-parameters",
+        json=request_payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == expected
+    assert captured == {
+        "session_id": "session-active",
+        "expected_agent_id": "agent-a",
+        "expected_model_ref": "provider/model-a",
+        "expected_config_revision": 7,
+        "context_window": 32768,
+        "reasoning_effort": "high",
+    }
+
+
+def test_session_model_parameters_patch_rejects_stale_binding_and_extra_fields(monkeypatch):
+    request_payload = {
+        "expectedAgentId": "agent-a",
+        "expectedModelRef": "provider/model-a",
+        "expectedConfigRevision": 7,
+        "contextWindow": 32768,
+        "reasoningEffort": "high",
+    }
+
+    def raise_conflict(*_args, **_kwargs):
+        raise session_service.SessionModelParametersConflictError("Session Agent changed. Refresh and retry.")
+
+    monkeypatch.setattr(session_routes, "update_session_model_parameters", raise_conflict)
+    conflict = client.patch(
+        "/api/sessions/session-active/model-parameters",
+        json=request_payload,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "Session Agent changed. Refresh and retry."
+
+    extra = client.patch(
+        "/api/sessions/session-active/model-parameters",
+        json={**request_payload, "llmBindings": {"dialogue": {"modelId": "other/model"}}},
+    )
+    assert extra.status_code == 422
+
+    non_integer = client.patch(
+        "/api/sessions/session-active/model-parameters",
+        json={**request_payload, "contextWindow": 32768.0},
+    )
+    assert non_integer.status_code == 422
+
+
 def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monkeypatch):
     agents = [{"agentId": "agent-a", "displayName": "Agent A"}]
     captured: dict[str, object] = {}

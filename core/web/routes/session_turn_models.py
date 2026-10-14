@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 class SessionTurnCommandResponse(BaseModel):
@@ -51,7 +51,23 @@ class SessionLlmOptionsResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     sessionId: str
+    agentId: str = ""
+    configRevision: int = 0
     currentModelId: str = ""
     currentReasoningEffort: str = ""
+    contextWindow: int = 0
+    maxContextWindow: int = 0
     model: dict[str, Any] | None = None
     choices: list[dict[str, Any]] = []
+
+
+class SessionModelParametersPayload(BaseModel):
+    """CAS update for the model already bound to the session's Agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expectedAgentId: str = Field(min_length=1, max_length=160)
+    expectedModelRef: str = Field(min_length=1, max_length=300)
+    expectedConfigRevision: StrictInt = Field(ge=0)
+    contextWindow: StrictInt = Field(gt=0)
+    reasoningEffort: str = Field(max_length=40)

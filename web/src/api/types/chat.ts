@@ -122,8 +122,23 @@ export type SessionLlmOptions = {
   currentModelId: string;
   currentReasoningEffort: string;
   model: SessionLlmModelOption | null;
+  /** Agent identity and configuration snapshot for Agent-scoped model settings. */
+  agentId?: string;
+  configRevision?: number;
+  /** Active context window and the model's hard maximum, in tokens. */
+  contextWindow?: number;
+  maxContextWindow?: number;
   /** Full selectable list for per-turn overrides (composer "send once with model" menu). */
   choices?: SessionLlmModelOption[];
+};
+
+/** Agent-scoped settings for the model already bound to this session's Agent. */
+export type SessionModelParametersUpdate = {
+  expectedAgentId: string;
+  expectedModelRef: string;
+  expectedConfigRevision: number;
+  contextWindow: number;
+  reasoningEffort: string;
 };
 
 /**
