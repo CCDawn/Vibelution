@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EvolutionActiveRun, EvolutionLibraryEntry, EvolutionProposalDetail, EvolutionWorkflowStep } from "../../api/types";
 import {
   activeSupervisedWorkflowStep,
+  supervisedWorkflowFallbackStatus,
   buildSupervisedStartPlaceholder,
   canOpenProposalSourceRun,
   clampScore,
@@ -23,6 +24,15 @@ import {
 } from "./evolutionRouteModel";
 
 describe("evolutionRouteModel", () => {
+  it.each(["failed", "cancelled", "canceled", "stopped", "done", "completed"])("never presents an ended %s run as a running fallback phase", (status) => {
+    expect(supervisedWorkflowFallbackStatus(status, true)).toBe(status);
+    expect(supervisedWorkflowFallbackStatus(status, false)).toBe("pending");
+  });
+  it("keeps an active run phase live when stage evidence is missing", () => {
+    expect(supervisedWorkflowFallbackStatus("running", true)).toBe("running");
+    expect(supervisedWorkflowFallbackStatus("queued", true)).toBe("queued");
+    expect(supervisedWorkflowFallbackStatus(undefined, true)).toBe("pending");
+  });
   it("keeps the selected approval mode in the optimistic run projection", () => {
     const run = buildSupervisedStartPlaceholder({
       sourceKind: "dataset",
