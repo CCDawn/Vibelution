@@ -175,7 +175,9 @@ function readTheme(
   }
   return {
     clusterColors,
-    edgeColor: cssColor(THREE, host, "--vui-border-strong", "rgb(135, 151, 170)"),
+    // Relations are graph content, not panel borders. Foreground tokens retain
+    // contrast when the workbench switches to pale, opaque border colors.
+    edgeColor: cssColor(THREE, host, "--fg-secondary", "rgb(98, 110, 128)"),
     selectedColor: cssColor(THREE, host, "--accent-cool", "#0a84ff"),
     lightSurface,
   };
@@ -450,7 +452,7 @@ function initializeMemoryGraphEngine(
       ...members.map((node) => positions.get(node.id)?.distanceTo(center) ?? 0),
     ) + 1.1;
     const nebula = disposeMaterial(
-      nebulaMaterial(THREE, center, radius, clusterColor, index * 11.71, theme.lightSurface ? 0.65 : 1),
+      nebulaMaterial(THREE, center, radius, clusterColor, index * 11.71, theme.lightSurface ? 0.9 : 1),
     );
     const cloud = new THREE.Mesh(
       disposeGeometry(new THREE.SphereGeometry(radius, 28, 20)),
@@ -461,10 +463,11 @@ function initializeMemoryGraphEngine(
     scene.add(cloud);
 
     const dustPositions: number[] = [];
-    for (let star = 0; star < 44; star += 1) {
-      const vertical = 1 - (2 * (star + 0.5)) / 44;
+    const starCount = 96;
+    for (let star = 0; star < starCount; star += 1) {
+      const vertical = 1 - (2 * (star + 0.5)) / starCount;
       const angle = star * 2.39996323;
-      const radial = radius * 0.84 * Math.cbrt((((star * 17) % 43) + 1) / 44);
+      const radial = radius * 0.84 * Math.cbrt((((star * 17) % (starCount - 1)) + 1) / starCount);
       const circle = Math.sqrt(1 - vertical * vertical);
       dustPositions.push(
         center.x + radial * circle * Math.cos(angle),
@@ -477,9 +480,9 @@ function initializeMemoryGraphEngine(
     const dust = disposeMaterial(
       new THREE.PointsMaterial({
         color: clusterColor,
-        size: 0.026,
+        size: 0.055,
         transparent: true,
-        opacity: 0.42,
+        opacity: theme.lightSurface ? 0.82 : 0.72,
         depthWrite: false,
       }),
     );
@@ -541,13 +544,15 @@ function initializeMemoryGraphEngine(
     for (const [key, color] of next.clusterColors) theme.clusterColors.set(key, color);
     theme.edgeColor = next.edgeColor;
     theme.selectedColor = next.selectedColor;
+    theme.lightSurface = next.lightSurface;
 
     batches.refreshTheme(next);
     for (const [key, appearance] of clusterMaterials) {
       const color = theme.clusterColors.get(key) ?? theme.selectedColor;
       appearance.nebula.uniforms.tint.value.setHex(color);
-      appearance.nebula.uniforms.strength.value = next.lightSurface ? 0.65 : 1;
+      appearance.nebula.uniforms.strength.value = next.lightSurface ? 0.9 : 1;
       appearance.dust.color.setHex(color);
+      appearance.dust.opacity = next.lightSurface ? 0.82 : 0.72;
     }
     invalidate();
   }

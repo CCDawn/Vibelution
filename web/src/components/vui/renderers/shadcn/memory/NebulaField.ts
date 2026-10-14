@@ -93,6 +93,7 @@ export function nebulaMaterial(
         }
         if (alpha < 0.008) discard;
         gl_FragColor = vec4(rgb / max(alpha, 0.001), alpha);
+        #include <colorspace_fragment>
       }
     `,
   });
