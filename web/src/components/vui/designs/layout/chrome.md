@@ -114,7 +114,7 @@ import { VTabs } from "@/components/vui";
 | density / listClassName | 密度与域几何 | 选中用 data-state，勿 twin Active class |
 
 ### 视觉与状态
-- 桌面分段切换沿用原生 segmented control 的低对比外框、轻微内高光和清晰选中态；不把每个 tab 画成独立胶囊或强调色按钮。
+- 桌面分段切换沿用原生 segmented control 的低对比外框、纯色表面和清晰选中态；选中与悬停均不叠加渐变或立体阴影；不把每个 tab 画成独立胶囊或强调色按钮。
 - 选中状态按 `data-state=active` 呈现，保留 Radix 键盘与焦点语义；同一组只允许一个当前分段。
 
 ### 非职责

@@ -37,6 +37,22 @@ const agentSummaryStripSource = readFileSync(
 );
 
 describe("VUI dual-theme foundation", () => {
+  it("keeps controls and panels flat in both themes while overlays retain elevation", () => {
+    const lightStart = tokensSource.indexOf('[data-theme="light"]');
+    for (const theme of [tokensSource.slice(0, lightStart), tokensSource.slice(lightStart)]) {
+      const value = (name: string) => theme.match(new RegExp(name + ":\\s*([^;]+);"))?.[1].trim();
+      expect(value("--vui-control-face")).toBe("var(--vui-surface-panel)");
+      expect(value("--vui-primary-face")).not.toContain("gradient");
+      expect(value("--vui-control-shadow")).toBe("none");
+      expect(value("--vui-field-shadow")).toBe("none");
+      expect(value("--vui-sheen")).toBe("0 0 0 transparent");
+      expect(value("--vui-elevation-1")).toBe("0 0 0 transparent");
+      expect(value("--vui-elevation-2")).toMatch(/rgba/);
+      expect(value("--vui-shadow-focus")).toBe("var(--focus-ring)");
+      expect(providerThemeSource).toContain("[data-vui]:focus-visible");
+      expect(providerThemeSource).toContain("outline: 1px solid");
+    }
+  });
   it("defines shared semantic tokens for light and dark theme surfaces", () => {
     for (const token of [
       "--vui-surface-glass",

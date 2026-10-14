@@ -29,11 +29,11 @@
    - 产品面禁止手写 `createPortal` / `fixed inset-0` 对话框壳；模态用 `VDialog`/`VConfirmDialog`，锚定浮层用 `VPopover`/`VDropdownMenu`。
    - 总闸：`../vuiOverlayAlignmentGate.test.ts`（含 intentional keep 清单）。
 
-## 原生质感视觉基线
+## 平面控件视觉基线
 
 这是经隔离预览确认的 VUI 视觉目标，设计值由 [`tokens.css`](../../../design/tokens.css) 持有；组件说明只引用语义 token，不另写页面级色值。浅色主题使用 `#e9e9e9` canvas/rail、白色内容面、`#fafafa` toolbar、`#1d1d1f` 正文、`#d5d5d7` 中性选中底和 `#007aff` accent。深色主题沿用既有浅/深主题选择，表面层级采用 `#202124` canvas、`#292a2d` rail、`#252629` 内容面与现有深色 accent。
 
-控件使用细边线与克制的内高光/阴影：按钮主面、边框和阴影使用 `--vui-primary-face`、`--vui-primary-border`、`--vui-control-face`、`--vui-control-border`、`--vui-control-shadow`；输入使用 `--vui-field-shadow`；列表选择使用 `--vui-selection-bg`；开关滑块使用两主题均为白色的 `--vui-switch-thumb`。主按钮白字对比度至少 4.5:1；次要按钮采用轻微面渐变与内高光，ghost 保持透明。状态色继续表达语义，不能用蓝色替代成功、警告或错误状态。
+按钮、输入、选择器、标签页和开关使用纯色表面与细边线，普通、悬停、按下、禁用和选中态均不使用控件渐变、内高光或浮雕阴影。按钮主面与边框使用 `--vui-primary-face`、`--vui-primary-border`、`--vui-control-face`、`--vui-control-border`；`--vui-control-shadow` 与 `--vui-field-shadow` 为 `none`；列表选择使用 `--vui-selection-bg`。主按钮白字对比度至少 4.5:1，次要按钮悬停使用 `--vui-control-hover-bg`，ghost 保持透明。输入背景使用 background-color utility，让嵌套搜索框的透明背景能够正常覆盖。开关滑块使用两主题均为白色的 `--vui-switch-thumb`。普通工作台面板与对话输入区保持平面；聚焦 ring、状态侧边标记和浮层 `--vui-elevation-overlay` 保留。状态色继续表达语义，不能用蓝色替代成功、警告或错误状态。
 
 控件圆角为 5px，浮层为 8px。控件与标签字号 13px、caption 12px，常规字重 400、标题 500；compact 控件高度为 `26px + (fontBase - 16px)`，normal 为 `30px + (fontBase - 16px)`，随字号偏好一起缩放。Switch 轨道为 30×18px，thumb 两主题均为白色；Checkbox 为 16px，选中使用蓝色勾选，不铺整块蓝色背景。
 

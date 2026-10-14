@@ -3,19 +3,19 @@
 import type { VuiButtonVariant } from "./buttonVariants";
 
 /**
- * Native-feeling secondary control chrome: a fine edge, quiet face, and soft inset shadow.
+ * Flat secondary control chrome: a fine edge and a solid semantic face.
  */
 export const vuiButtonBaseClass =
-  "border border-[var(--vui-control-border)] text-vui-fg-secondary [background:var(--vui-control-face)] shadow-[var(--vui-control-shadow)]";
+  "border border-[var(--vui-control-border)] text-vui-fg-secondary bg-[var(--vui-control-face)] shadow-[var(--vui-control-shadow)]";
 
 export const vuiButtonHoverClass =
-  "transition-[color,background,border-color,box-shadow,opacity] duration-150 ease-out motion-reduce:transition-none hover:border-[color-mix(in_srgb,var(--vui-control-border)_78%,var(--fg-primary))] hover:[background:linear-gradient(180deg,color-mix(in_srgb,var(--vui-surface-panel)_94%,var(--accent-cool))_0%,var(--vui-control-muted)_100%)] hover:text-[var(--fg-primary)]";
+  "transition-[color,background,border-color,box-shadow,opacity] duration-150 ease-out motion-reduce:transition-none hover:border-[color-mix(in_srgb,var(--vui-control-border)_78%,var(--fg-primary))] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--fg-primary)]";
 
 /**
  * Solid blue primary — visually clear default action in both themes.
  */
 export const vuiButtonPrimaryClass =
-  "border border-[var(--vui-primary-border)] text-white [background:var(--vui-primary-face)] shadow-[0_1px_2px_rgb(0_0_0_/_14%)] hover:brightness-[0.97] active:brightness-90";
+  "border border-[var(--vui-primary-border)] text-white bg-[var(--vui-primary-face)] shadow-none hover:brightness-[0.97] active:brightness-90";
 
 /** Quiet danger treatment keeps both the error meaning and label readable. */
 export const vuiButtonDangerClass =

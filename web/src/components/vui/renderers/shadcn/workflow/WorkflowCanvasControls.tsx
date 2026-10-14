@@ -55,7 +55,7 @@ export function WorkflowCanvasControls({
   };
 
   const btn =
-    "inline-flex size-9 items-center justify-center rounded-lg border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_94%,transparent)] text-[var(--fg-secondary)] shadow-sm transition hover:-translate-y-px hover:bg-[var(--vui-control-hover-bg)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]";
+    "inline-flex size-9 items-center justify-center rounded-lg border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_94%,transparent)] text-[var(--fg-secondary)] shadow-none transition-colors hover:bg-[var(--vui-control-hover-bg)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]";
 
   return (
     <div

@@ -40,8 +40,8 @@ import { VButton } from "@/components/vui";
 - 不负责路由导航语义；不做纯图标方钮；不做密集零浮层命中条。
 
 ### 视觉与状态
-- **primary**：蓝色渐变面与边框由 `--vui-primary-face` / `--vui-primary-border` 提供，白字对比度至少 4.5:1；**secondary**：轻微面渐变和内高光；**ghost**：透明；**danger**：错误语义色。
-- 常规文字 400，标题 500；控件与短标签 13px。控件圆角 5px。表面、边线、内高光与阴影使用全局语义 token，不在按钮变体中重写主题色。
+- **primary**：蓝色纯色面与边框由 `--vui-primary-face` / `--vui-primary-border` 提供，白字对比度至少 4.5:1；**secondary**：纯色面与细边框，悬停使用 `--vui-control-hover-bg`；**ghost**：透明；**danger**：错误语义色。
+- 常规文字 400，标题 500；控件与短标签 13px。控件圆角 5px。表面、边线与焦点使用全局语义 token，不在按钮变体中重写主题色；所有变体的普通、悬停和禁用状态保持平面，无渐变、内高光和浮起阴影。
 - focus ring；disabled opacity；长中文允许调用方控制换行。
 
 ### 实现落点

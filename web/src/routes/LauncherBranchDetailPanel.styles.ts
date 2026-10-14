@@ -10,7 +10,7 @@ const styles = {
   titleBody: "min-w-0",
   metadata: "mt-2 flex flex-wrap items-center gap-2.5 text-vui-micro-13 text-vui-fg-tertiary",
   statusChip: "gap-1.5 !font-normal",
-  actions: "flex shrink-0 items-start max-[640px]:w-full max-[640px]:[&>div]:w-full max-[640px]:[&_[data-vui=action-group]]:w-full max-[640px]:[&_[data-variant=primary]]:!flex-1 [&_[data-vui=button]]:!min-h-8 max-[640px]:[&_[data-vui=button]]:!min-h-11 [&_[data-variant=primary]]:!bg-[image:var(--vui-primary-face)] [&_[data-variant=primary]]:!text-white",
+  actions: "flex shrink-0 items-start max-[640px]:w-full max-[640px]:[&>div]:w-full max-[640px]:[&_[data-vui=action-group]]:w-full max-[640px]:[&_[data-variant=primary]]:!flex-1 [&_[data-vui=button]]:!min-h-8 max-[640px]:[&_[data-vui=button]]:!min-h-11 [&_[data-variant=primary]]:!bg-[var(--vui-primary-face)] [&_[data-variant=primary]]:!text-white",
   tabs: "shrink-0",
   tabList: "!justify-start !gap-1 !border-0 !bg-transparent !p-0",
   tabTrigger: "!rounded-[var(--radius-control)] !border-0 !px-3 !py-1.5 !text-vui-micro-13 !shadow-none data-[state=active]:!bg-[var(--vui-control-muted)] max-[640px]:!min-h-11",

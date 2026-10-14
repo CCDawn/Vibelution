@@ -11,6 +11,8 @@
 
 禁止再增加第四套 Input。
 
+输入、文本域和选择器共用纯色 `--vui-control-face` 与细边框，`--vui-field-shadow` 为 `none`；嵌套筛选框可用透明 background-color 覆盖，共享表面不使用背景渐变。键盘焦点、错误边框和禁用提示保留。Checkbox、Switch 与 range 滑块保持平面，填充颜色表达状态；range 的分段进度绘制保留。
+
 ---
 
 ## VInput

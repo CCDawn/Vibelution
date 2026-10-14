@@ -17,7 +17,9 @@
   font-synthesis: none;
 }
 
-[data-vui-provider="shadcn"] [data-focus-visible="true"] {
+[data-vui-provider="shadcn"] [data-focus-visible="true"],
+[data-vui-provider="shadcn"] [data-vui]:focus-visible,
+[data-vui-provider="shadcn"] [role="tab"]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
   outline-offset: 1px;
   box-shadow: var(--vui-focus-ring);
@@ -53,7 +55,8 @@
   overflow: hidden;
 }
 
-[data-vui-provider="shadcn"] button[data-vui][data-focus-visible="true"] {
+[data-vui-provider="shadcn"] button[data-vui][data-focus-visible="true"],
+[data-vui-provider="shadcn"] button[data-vui]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
   outline-offset: 1px;
   box-shadow: var(--vui-focus-ring);

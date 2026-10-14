@@ -275,7 +275,7 @@ export function WorkflowNodeChrome({
       className={cn(
         "relative h-full w-full border outline-none transition duration-150",
         spacious
-          ? "flex items-center overflow-visible rounded-xl bg-[var(--vui-surface-panel)] py-0 pr-4 pl-3 shadow-[var(--vui-elevation-2)] hover:-translate-y-px"
+          ? "flex items-center overflow-visible rounded-xl bg-[var(--vui-surface-panel)] py-0 pr-4 pl-3 shadow-none"
           : "flex flex-col justify-between overflow-hidden rounded-vui-soft bg-[var(--vui-surface-panel)] px-2.5 py-2 shadow-[var(--vui-elevation-1)]",
         visual.borderClass,
         spacious ? "text-[var(--fg-primary)]" : visual.toneClass,
@@ -334,7 +334,7 @@ export function WorkflowNodeChrome({
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <span
             className={cn(
-              "relative grid size-11 shrink-0 place-items-center rounded-xl text-[var(--accent-cool-contrast)] shadow-[inset_0_-1px_0_color-mix(in_srgb,var(--fg-primary)_12%,transparent)]",
+              "relative grid size-11 shrink-0 place-items-center rounded-xl text-[var(--accent-cool-contrast)] shadow-none",
               kindFillClass(visualKind),
             )}
           >

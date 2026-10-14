@@ -313,7 +313,7 @@ const styles = {
   trackTabsTrigger:
     "min-h-[26px] rounded-full border border-transparent px-2 font-bold text-[var(--fg-secondary)] shadow-none " +
     "data-[state=active]:border-[var(--vui-border-subtle)] data-[state=active]:bg-[var(--vui-surface-base)] " +
-    "data-[state=active]:text-[var(--fg-primary)] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.06)]",
+    "data-[state=active]:text-[var(--fg-primary)] data-[state=active]:shadow-none",
   selectInput:
     "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_var(--vui-alpha-tint-strong),_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_var(--vui-alpha-tint-strong),_transparent)]",
   selectionBar:
