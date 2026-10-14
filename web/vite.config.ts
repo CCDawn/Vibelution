@@ -171,6 +171,10 @@ export default defineConfig({
     fileParallelism: true,
     maxWorkers: "50%",
     isolate: true,
+    // Whole-source contracts compete for filesystem I/O in Windows forks.
+    // Keep every assertion and a bounded deadline without treating a slow
+    // repository scan as a failed architecture contract.
+    testTimeout: process.platform === "win32" ? 60_000 : 5_000,
   },
   build: {
     chunkSizeWarningLimit: 760,
