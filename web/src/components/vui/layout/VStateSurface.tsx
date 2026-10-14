@@ -32,11 +32,11 @@ export type VStateSurfaceProps = Omit<ComponentPropsWithoutRef<"section">, "titl
 };
 
 const BASE =
-  "grid min-w-0 w-full content-start gap-2 rounded-[var(--vui-radius-soft)] border p-3 text-left " +
+  "grid min-w-0 w-full content-start gap-2 rounded-vui-soft border p-3 text-left " +
   "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 
 const BASE_COMPACT =
-  "grid min-w-0 w-full content-start gap-1.5 rounded-[var(--vui-radius-soft)] border px-2.5 py-2 text-left " +
+  "grid min-w-0 w-full content-start gap-1.5 rounded-vui-soft border px-2.5 py-2 text-left " +
   "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 
 /** Full-region occupancy for board/canvas/list-detail main slots. */
