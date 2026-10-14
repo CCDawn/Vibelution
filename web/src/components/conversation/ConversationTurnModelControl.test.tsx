@@ -117,7 +117,8 @@ describe("ConversationTurnModelControl", () => {
 
   it("shows the Agent model and opens parameters without a model chooser", () => {
     const html = renderControl();
-    expect(html).toContain("Luna 5.6");
+    expect(html).toContain(">gpt-5.6-luna<");
+    expect(html).toContain('title="Luna 5.6"');
     expect(html).toContain('aria-label="Agent 模型: Luna 5.6"');
     expect(html).toContain('aria-haspopup="dialog"');
     expect(html).not.toContain("listbox");
@@ -127,6 +128,35 @@ describe("ConversationTurnModelControl", () => {
     expect(controlSource).toContain("reasoningEffort");
     expect(controlSource).not.toContain("modelChoices");
     expect(controlSource).not.toContain("onSelectionChange={onModel");
+  });
+
+  it("shows only the model name and reveals the full provider name in the panel", async () => {
+    const qwen: SessionLlmModelOption = {
+      ...luna,
+      modelId: "dashscope_main/qwen3.6-plus",
+      modelRef: "dashscope_main/qwen3.6-plus",
+      label: "阿里云 DashScope Qwen3.6 Plus",
+      model: "qwen3.6-plus",
+      providerId: "dashscope_main",
+      providerLabel: "阿里云 DashScope",
+    };
+    const html = renderControl({ model: qwen });
+    expect(html).toContain(">Qwen3.6 Plus<");
+    expect(html).not.toContain(">阿里云 DashScope");
+    expect(html).toContain('title="阿里云 DashScope Qwen3.6 Plus"');
+    expect(html).toContain('aria-label="Agent 模型: 阿里云 DashScope Qwen3.6 Plus"');
+    expect(renderControl({
+      model: { ...qwen, label: "阿里云 DashScope", model: "qwen3.6-plus" },
+    })).toContain(">qwen3.6-plus<");
+
+    await withInteractiveControl(async (render) => {
+      await render({ model: qwen });
+      await act(async () => document.body.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')?.click());
+      const name = document.body.querySelector('[data-testid="conversation-model-full-name"]');
+      expect(name?.textContent).toBe("阿里云 DashScope Qwen3.6 Plus");
+      expect(name?.className ?? "").toContain("whitespace-normal");
+      expect(name?.className ?? "").not.toContain("truncate");
+    });
   });
 
   it("does not keep the previous Agent model during loading or error", () => {
@@ -227,6 +257,8 @@ describe("ConversationTurnModelControl", () => {
   it("keeps the toolbar trigger compact and the popover within the viewport", () => {
     expect(styles.label).toContain("truncate");
     expect(styles.label).toContain("max-w-32");
+    expect(styles.fullName).toContain("whitespace-normal");
+    expect(styles.fullName).not.toContain("truncate");
     expect(styles.trigger).toContain("h-7");
     expect(styles.popover).toContain("w-[min(272px,calc(100vw-16px))]");
     expect(styles.saveButton).toContain("!h-7");
