@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { AgentInstance, ChatRoomDetail, Team, TeamMember } from "../../api/types";
 import { VButton } from "../../components/vui";
 import { agentDisplayInfo } from "../agentDisplay";
+import styles from "./TeamConversationRail.styles";
 
 export function teamMemberDisplay(member: TeamMember, agentsById: ReadonlyMap<string, Partial<AgentInstance>> | undefined, lang: "zh" | "en") {
   const info = agentDisplayInfo(agentsById?.get(member.agentId), lang, { name: member.agentName || undefined, templateId: member.role });
@@ -23,14 +24,14 @@ export function TeamConversationRail({ team, room, lang, selectedMemberId, group
       avatar: display.name.slice(0, 1), selected: selectedMemberId === member.memberId,
       disabled: !sessionId || member.agentStatus === "stale", onClick: () => onOpenMember(member, sessionId),
     }; })];
-  return <nav aria-label={lang === "zh" ? "团队与成员对话" : "Team and member conversations"} className="flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-auto">
-    <div className="grid shrink-0 gap-1"><p className="px-2 text-[12px] text-[var(--fg-tertiary)]">{lang === "zh" ? "团队与成员" : "Team and members"}</p>
+  return <nav aria-label={lang === "zh" ? "团队与成员对话" : "Team and member conversations"} className={styles.root}>
+    <div className={styles.entries}><p className={styles.heading}>{lang === "zh" ? "团队与成员" : "Team and members"}</p>
       {entries.map((entry) => <VButton key={entry.id} variant="ghost" aria-label={entry.title + (lang === "zh" ? entry.id === "group" ? " · 团队讨论" : " · 成员对话" : entry.id === "group" ? " · Team discussion" : " · Member conversation")} aria-pressed={entry.selected}
         isDisabled={entry.disabled} disabledReason={entry.disabled ? lang === "zh" ? "成员会话尚不可用，请先同步群聊或检查成员配置" : "Sync the room or check the member configuration first" : undefined}
-        className="h-auto! w-full justify-start px-2 py-2 aria-pressed:bg-[var(--vui-selection-bg)]" onClick={entry.onClick}>
-        <span className="flex min-w-0 items-center gap-2.5 text-left"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-base)] text-[12px] text-[var(--fg-secondary)]">{entry.avatar}</span><span className="min-w-0"><span className="block truncate text-[13px] font-medium">{entry.title}</span><span className="block truncate text-[12px] leading-5 text-[var(--fg-tertiary)]">{entry.subtitle}</span></span></span>
+        className={styles.entry} onClick={entry.onClick}>
+        <span className={styles.identity}><span className={styles.avatar}>{entry.avatar}</span><span className={styles.copy}><span className={styles.name}>{entry.title}</span><span className={styles.role}>{entry.subtitle}</span></span></span>
       </VButton>)}
     </div>
-    {navigation ? <div className="min-h-0 flex-1 border-t border-[var(--vui-border-subtle)] pt-2">{navigation}</div> : null}
+    {navigation ? <div className={styles.navigation}>{navigation}</div> : null}
   </nav>;
 }

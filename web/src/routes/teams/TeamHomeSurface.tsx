@@ -431,11 +431,11 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
           </section>
         </aside>;
   const canvasOpen = Boolean(props.workspace && homeView === "canvas" && !nativeConversationOpen);
-  const nativeInspector = memberConversation && selectedMember ? <section className="space-y-3 text-[13px] leading-6">
-    <h3 className="font-medium">{selectedMemberDisplay?.name}</h3><p>{selectedMemberDisplay?.role}</p><p className="text-[var(--fg-secondary)]">{selectedMember.purpose}</p>
-  </section> : <div className="space-y-5">
-    <section><h3 className="text-[13px] font-medium">{lang === "zh" ? "当前任务" : "Current task"}</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{currentTitle}</p><RoundStatus status={currentStatus} lang={lang} /></section>
-    {currentSummary ? <section><h3 className="text-[13px] font-medium">{lang === "zh" ? "上轮结果" : "Previous result"}</h3><p className="mt-2 text-[13px] leading-6 text-[var(--fg-secondary)]">{currentSummary}</p></section> : null}
+  const nativeInspector = memberConversation && selectedMember ? <section className={styles.memberInspector}>
+    <h3 className={styles.inspectorHeading}>{selectedMemberDisplay?.name}</h3><p>{selectedMemberDisplay?.role}</p><p className={styles.inspectorQuiet}>{selectedMember.purpose}</p>
+  </section> : <div className={styles.nativeInspector}>
+    <section><h3 className={styles.inspectorHeading}>{lang === "zh" ? "当前任务" : "Current task"}</h3><p className={styles.inspectorCopy}>{currentTitle}</p><RoundStatus status={currentStatus} lang={lang} /></section>
+    {currentSummary ? <section><h3 className={styles.inspectorHeading}>{lang === "zh" ? "上轮结果" : "Previous result"}</h3><p className={styles.inspectorCopy}>{currentSummary}</p></section> : null}
     {selectedTeam?.teamTemplateId === "dev-team" ? <DevTeamTaskBoard lang={lang} teamId={teamId} members={selectedTeam.members} speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members, linkedRoomDetail)} /> : null}
   </div>;
   const nativeBody = nativeSelectionReady ? <TeamNativeConversation lang={lang} />
