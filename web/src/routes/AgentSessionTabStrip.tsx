@@ -20,6 +20,13 @@ import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
 /** How long the armed (two-stage confirm) close control waits before disarming itself. */
 const CLOSE_CONFIRM_ARM_TIMEOUT_MS = 3000;
 
+/**
+ * After one confirmed close, × clicks execute immediately (no arming) for this
+ * window — rapid multi-tab closing stays single-click per tab, Chrome-style.
+ * Escape ends the window early; the window refreshes on every burst close.
+ */
+const RAPID_CLOSE_BURST_WINDOW_MS = 2000;
+
 /** Options accepted by the delete callback; `confirmed` marks the second click of the inline confirm. */
 export type AgentSessionTabDeleteOptions = {
   confirmed?: boolean;
@@ -219,6 +226,7 @@ export function AgentSessionTabStrip({
   const tabGroupRef = useRef<HTMLDivElement>(null);
   // Two-stage inline confirm for tab close: at most one armed control at a time.
   const [armedCloseSessionId, setArmedCloseSessionId] = useState<string | null>(null);
+  const rapidCloseUntilRef = useRef(0);
   const disarmCloseConfirm = useCallback(() => setArmedCloseSessionId(null), []);
   useEffect(() => {
     if (!armedCloseSessionId) {
@@ -248,6 +256,18 @@ export function AgentSessionTabStrip({
       document.removeEventListener("keydown", handleDocumentKeyDown);
     };
   }, [armedCloseSessionId]);
+  // Escape also ends the rapid-close burst. This listener must live outside the
+  // armed-scoped effect above: after a confirmed close nothing is armed, so the
+  // armed effect (and its keydown handler) is already torn down.
+  useEffect(() => {
+    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        rapidCloseUntilRef.current = 0;
+      }
+    };
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown);
+  }, []);
   useEffect(() => {
     const activeTab = tabGroupRef.current?.querySelector<HTMLElement>('[data-session-tab-active="true"]');
     activeTab?.closest<HTMLElement>("[data-agent-session-tab-container]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -513,12 +533,16 @@ export function AgentSessionTabStrip({
               data-session-tab-close-armed={tabCloseArmed ? "true" : undefined}
               onClick={(event) => {
                 event.stopPropagation();
-                if (!tabCloseArmed) {
-                  setArmedCloseSessionId(session.id);
+                // Rapid-close burst: once one tab close was confirmed, an
+                // immediate × click on any tab is a deliberate close.
+                const inRapidCloseBurst = !tabCloseArmed && Date.now() < rapidCloseUntilRef.current;
+                if (tabCloseArmed || inRapidCloseBurst) {
+                  disarmCloseConfirm();
+                  rapidCloseUntilRef.current = Date.now() + RAPID_CLOSE_BURST_WINDOW_MS;
+                  onDeleteSession(session, { confirmed: true });
                   return;
                 }
-                disarmCloseConfirm();
-                onDeleteSession(session, { confirmed: true });
+                setArmedCloseSessionId(session.id);
               }}
               isDisabled={deleteDisabled}
               title={tabCloseTitle}
