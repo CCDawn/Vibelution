@@ -56,6 +56,8 @@ def test_append_tool_has_no_target_agent_parameter():
     signature = inspect.signature(append_personal_memory_tool)
     assert "agent_id" not in signature.parameters
     assert "target_agent" not in signature.parameters
+    assert "require_enabled" not in signature.parameters
+    assert "require_enabled" not in inspect.signature(supersede_personal_memory_tool).parameters
 
 
 def test_default_session_policy_includes_personal_memory_tools():
@@ -219,6 +221,69 @@ def test_supersede_tool_replaces_current_episode(tmp_path, monkeypatch):
     current = agent_directory_service.list_current_episodic_events(agent["agentId"])
     assert [item["episodeId"] for item in current] == [result["successorEpisodeId"]]
     assert current[0]["text"] == "Prefer focused afternoons."
+
+    repeated = json.loads(supersede_personal_memory_tool(
+        episode_id=first["episodeId"], successor_text="Another replacement.", kind="preference",
+    ))
+    assert repeated["ok"] is False
+    assert agent_directory_service.list_current_episodic_events(agent["agentId"]) == current
+
+
+def test_supersede_tool_does_not_leave_replacement_when_replacement_is_invalid(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Episode Rollback")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": agent["agentId"], "sessionId": "session-edit"},
+    )
+    first = json.loads(
+        append_personal_memory_tool(text="Keep the original preference.", kind="preference")
+    )
+
+    result = json.loads(
+        supersede_personal_memory_tool(
+            episode_id=first["episodeId"],
+            successor_text="This invalid replacement must not be stored.",
+            kind="invalid-kind",
+        )
+    )
+
+    assert result["ok"] is False
+    current = agent_directory_service.list_current_episodic_events(agent["agentId"])
+    assert [item["episodeId"] for item in current] == [first["episodeId"]]
+    assert current[0]["text"] == "Keep the original preference."
+
+
+def test_supersede_tool_cannot_write_replacement_when_memory_is_disabled(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Episode Disabled")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": agent["agentId"], "sessionId": "session-edit"},
+    )
+    first = agent_directory_service.append_episodic_event(
+        agent["agentId"], kind="preference", text="Keep while memory is disabled"
+    )
+    agent_directory_service.update_agent_instance(
+        agent["agentId"], memory_policy={"enabled": False}
+    )
+
+    result = json.loads(
+        supersede_personal_memory_tool(
+            episode_id=first["episodeId"],
+            successor_text="Must not be appended while disabled.",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "AgentDirectoryError"
+    assert agent_directory_service.list_current_episodic_events(agent["agentId"]) == [first]
 
 
 def test_new_session_context_includes_current_personal_episodes(tmp_path, monkeypatch):

@@ -257,6 +257,7 @@ def test_existing_team_upgrades_only_untouched_market_role_on_explicit_setup(fin
         agent = agent_directory_service.get_agent(member["agentId"])
         assert (financial_assistant_service.INDEX_TOOL in agent["toolPolicy"]["allowedTools"]) == (member["role"] == "market")
     policy = agent_directory_service.get_agent(market["agentId"])["toolPolicy"]
+    assert financial_assistant_service.SESSION_REFERENCE_TOOL in agent_directory_service.get_agent(owner)["toolPolicy"]["allowedTools"]
     provisioning.provision_financial_team(owner)
     assert agent_directory_service.get_agent(market["agentId"])["toolPolicy"] == policy
 

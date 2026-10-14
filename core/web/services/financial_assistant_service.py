@@ -27,9 +27,11 @@ _NEWS_READ_TOOLS = (*_PREVIOUS_READ_TOOLS, "news_search_tool")
 MARKET_TOOL = "financial_market_snapshot_tool"
 MARKET_SCREEN_TOOL = "financial_market_screen_tool"
 INDEX_TOOL = "financial_index_context_tool"
+SESSION_REFERENCE_TOOL = "session_reference_query_tool"
 _LEGACY_MARKET_READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL)
 _LEGACY_SCREEN_READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL, MARKET_SCREEN_TOOL)
-READ_TOOLS = (*_LEGACY_SCREEN_READ_TOOLS, INDEX_TOOL)
+_LEGACY_DEFAULT_READ_TOOLS = (*_LEGACY_SCREEN_READ_TOOLS, INDEX_TOOL)
+READ_TOOLS = (*_LEGACY_DEFAULT_READ_TOOLS, SESSION_REFERENCE_TOOL)
 READ_POLICY = {
     "allowedTools": list(READ_TOOLS),
     "preferredTools": list(READ_TOOLS),
@@ -218,6 +220,7 @@ _NEWS_REFERENCE_MARKER = "financialAssistantNewsReferenceGranted"
 _MARKET_REFERENCE_MARKER = "financialAssistantMarketReferenceGranted"
 _MARKET_SCREEN_REFERENCE_MARKER = "financialAssistantMarketScreenReferenceGranted"
 _INDEX_REFERENCE_MARKER = "financialAssistantIndexReferenceGranted"
+_SESSION_REFERENCE_MARKER = "financialAssistantSessionReferenceGranted"
 
 
 def _default_read_policy(policy: dict, tools: tuple[str, ...]) -> bool:
@@ -275,7 +278,14 @@ def _grant_default_references(agent: dict) -> bool:
     market_pending = not metadata.get(_MARKET_REFERENCE_MARKER)
     screen_pending = not metadata.get(_MARKET_SCREEN_REFERENCE_MARKER)
     index_pending = not metadata.get(_INDEX_REFERENCE_MARKER)
-    if not news_pending and not market_pending and not screen_pending and not index_pending:
+    session_reference_pending = not metadata.get(_SESSION_REFERENCE_MARKER)
+    if not (
+        news_pending
+        or market_pending
+        or screen_pending
+        or index_pending
+        or session_reference_pending
+    ):
         return False
     if agent.get("status") != "active":
         return False
@@ -288,29 +298,66 @@ def _grant_default_references(agent: dict) -> bool:
     policy = (
         agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
     )
+    blocked_tools = _names(policy, "blockedTools")
     updates: dict = {}
     grant_news = (
         news_pending
         and _default_read_policy(policy, _PREVIOUS_READ_TOOLS)
-        and "news_search_tool" not in _names(policy, "blockedTools")
+        and "news_search_tool" not in blocked_tools
     )
     grant_market = market_pending and _market_tool_status(agent) == "upgrade_available"
     grant_market_screen = (
         screen_pending
         and _market_tool_status(agent) == "upgrade_available"
         and _default_read_policy(policy, _LEGACY_MARKET_READ_TOOLS)
-        and MARKET_SCREEN_TOOL not in _names(policy, "blockedTools")
+        and MARKET_SCREEN_TOOL not in blocked_tools
     )
     grant_index = (
         index_pending
-        and INDEX_TOOL not in _names(policy, "blockedTools")
+        and INDEX_TOOL not in blocked_tools
         and (_default_read_policy(policy, _LEGACY_SCREEN_READ_TOOLS)
+             or (not session_reference_pending and _default_read_policy(
+                 policy, (*_LEGACY_SCREEN_READ_TOOLS, SESSION_REFERENCE_TOOL)))
              or grant_market or grant_market_screen)
     )
-    if grant_news or grant_market or grant_market_screen or grant_index:
-        tools = _LEGACY_SCREEN_READ_TOOLS if grant_market or grant_market_screen or grant_index else _NEWS_READ_TOOLS
-        if grant_index:
+    legacy_default_tools = next(
+        (
+            tools
+            for tools in (
+                _PREVIOUS_READ_TOOLS,
+                _NEWS_READ_TOOLS,
+                _LEGACY_MARKET_READ_TOOLS,
+                _LEGACY_SCREEN_READ_TOOLS,
+                _LEGACY_DEFAULT_READ_TOOLS,
+            )
+            if _default_read_policy(policy, tools)
+        ),
+        None,
+    )
+    grant_session_reference = (
+        session_reference_pending
+        and SESSION_REFERENCE_TOOL not in blocked_tools
+        and legacy_default_tools is not None
+    )
+    legacy_upgrade = grant_news or grant_market or grant_market_screen or grant_index
+    if legacy_upgrade or grant_session_reference:
+        if legacy_upgrade:
+            if grant_market or grant_market_screen or grant_index:
+                tools = _LEGACY_SCREEN_READ_TOOLS
+            else:
+                tools = _NEWS_READ_TOOLS
+        else:
+            # A reference-only migration preserves the precise legacy default;
+            # granting a read tool must not imply market or index upgrades.
+            assert legacy_default_tools is not None
+            tools = legacy_default_tools
+        if grant_index and INDEX_TOOL not in tools:
             tools = (*tools, INDEX_TOOL)
+        if grant_session_reference or (
+            not session_reference_pending and SESSION_REFERENCE_TOOL in _names(policy, "allowedTools")
+            and _default_read_policy(policy, (*_LEGACY_SCREEN_READ_TOOLS, SESSION_REFERENCE_TOOL))
+        ):
+            tools = (*tools, SESSION_REFERENCE_TOOL)
         updates["tool_policy"] = {
             **policy,
             "allowedTools": list(tools),
@@ -355,6 +402,7 @@ def _grant_default_references(agent: dict) -> bool:
         **({_MARKET_REFERENCE_MARKER: True} if market_pending else {}),
         **({_MARKET_SCREEN_REFERENCE_MARKER: True} if grant_market or grant_market_screen else {}),
         **({_INDEX_REFERENCE_MARKER: True} if index_pending else {}),
+        **({_SESSION_REFERENCE_MARKER: True} if session_reference_pending else {}),
     }
     directory.update_agent_instance(agent["agentId"], **updates)
     return migrated
@@ -449,6 +497,7 @@ def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
                     _MARKET_REFERENCE_MARKER: True,
                     _MARKET_SCREEN_REFERENCE_MARKER: True,
                     _INDEX_REFERENCE_MARKER: True,
+                    _SESSION_REFERENCE_MARKER: True,
                 },
             )
         else:

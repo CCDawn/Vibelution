@@ -7,6 +7,7 @@ import pytest
 
 from core.web.services.agent_perception import service
 from core.web.services.agent_perception.policy import default_agent_perception_policy
+from core.web.services.agent_directory import episodic_memory
 
 
 def policy(*sources: str) -> dict:
@@ -49,6 +50,15 @@ def environment(monkeypatch):
 
         def list_current_episodic_events(self, agent_id, *, limit):
             return list(agent.get("testEpisodes") or [])[:limit]
+
+    monkeypatch.setattr(
+        episodic_memory,
+        "list_episodic_events",
+        lambda _agent_id, *, include_superseded=False: list(
+            agent.get("testEpisodes") or []
+        ),
+        raising=False,
+    )
 
     def base(owner_type, owner_id, raw_id, readable=True):
         return {"ownerType": owner_type, "ownerId": owner_id,
@@ -188,12 +198,12 @@ def test_memory_policy_revoked_inside_episodic_callback_discards_personal_result
     ]
     directory = service._directory()
 
-    def events_then_disable(agent_id, *, limit):
-        events = list(agent["testEpisodes"])[:limit]
+    def events_then_disable(agent_id, *, include_superseded=False):
+        events = list(agent["testEpisodes"])
         memory["enabled"] = False
         return events
 
-    monkeypatch.setattr(directory, "list_current_episodic_events", events_then_disable)
+    monkeypatch.setattr(episodic_memory, "list_episodic_events", events_then_disable)
     monkeypatch.setattr(service, "_directory", lambda: directory)
     from core.web.services.agent_perception import access
 
@@ -280,14 +290,50 @@ def test_manual_requires_trusted_explicit_user_request(environment):
     assert len(calls) == 1
 
 
-def test_personal_source_searches_bounded_current_episodic_memory(environment):
+def test_personal_source_searches_all_current_episodes_and_excludes_financial_lessons(
+    environment,
+):
     agent, _, _, _, _, _ = environment
     agent["metadata"][service.POLICY_METADATA_KEY] = policy("personal")
     agent["testEpisodes"] = [
-        {"episodeId": "episode-match", "kind": "preference", "occurredAt": "2026-10-03", "text": "咖啡偏好：用户喜欢手冲咖啡。", "validUntil": ""},
-        {"episodeId": "episode-stale", "kind": "preference", "occurredAt": "2026-10-02", "text": "旧的咖啡偏好", "validUntil": "2026-10-04"},
-        {"episodeId": "episode-other", "kind": "note", "occurredAt": "2026-10-01", "text": "周末骑行路线", "validUntil": ""},
+        {
+            "episodeId": f"episode-recent-{index}",
+            "kind": "note",
+            "occurredAt": f"2026-10-{(index % 9) + 1:02d}",
+            "text": f"没有匹配词的普通记录 {index}",
+            "validUntil": "",
+            "refs": [],
+        }
+        for index in range(120)
     ]
+    agent["testEpisodes"].extend(
+        [
+            {
+                "episodeId": "episode-financial-match",
+                "kind": "note",
+                "occurredAt": "2026-09-30",
+                "text": "咖啡偏好：600519 截止日复盘教训",
+                "validUntil": "",
+                "refs": [{"type": "item", "id": "financial-validation:validation-1"}],
+            },
+            {
+                "episodeId": "episode-stale",
+                "kind": "preference",
+                "occurredAt": "2026-09-29",
+                "text": "咖啡偏好：已失效的偏好",
+                "validUntil": "2026-10-04",
+                "refs": [],
+            },
+            {
+                "episodeId": "episode-match",
+                "kind": "preference",
+                "occurredAt": "2026-09-28",
+                "text": "咖啡偏好：用户喜欢手冲咖啡。",
+                "validUntil": "",
+                "refs": [],
+            },
+        ]
+    )
     from core.web.services.agent_perception import access
     with access.perception_turn_scope("agent-a", user_text="检索个人记忆", user_message_source="user"):
         result = service.search_perception_sources(

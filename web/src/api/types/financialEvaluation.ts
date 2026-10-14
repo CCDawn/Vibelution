@@ -1,4 +1,16 @@
 export type FinancialLesson = { id: string; text: string; createdAt: string; refs: Array<{ type: string; id: string }> };
+export type FinancialLessonState = "active" | "superseded" | "revoked" | "absent";
+export type FinancialLessonHistory = {
+  lessonId: string;
+  text: string;
+  state: Exclude<FinancialLessonState, "absent">;
+  createdAt: string;
+  supersededBy?: string | null;
+  revokedAt?: string | null;
+  clientRequestId?: string | null;
+};
+export type FinancialLessonRevisionRequest = { text: string; clientRequestId: string; expectedLessonId: string };
+export type FinancialLessonRevocationRequest = { clientRequestId: string; expectedLessonId: string };
 export type FinancialClaimRequest = {
   clientRequestId: string; sessionId: string; turnId: string; symbol: string;
   dueDate: string; direction: "up" | "down"; thresholdPct: number; claimText: string;
@@ -11,6 +23,8 @@ export type FinancialClaim = Omit<FinancialClaimRequest, "clientRequestId"> & {
   evidence: { baseDate: string; baseClose: number; dueDateQuoteDate: string; dueClose: number; returnPct: number; sourceUrl: string; fetchedAt: string; seriesHash: string } | null;
   error: { code: string; unavailableReason: string } | null;
   lesson: FinancialLesson | null;
+  lessonState?: FinancialLessonState;
+  lessonHistory?: FinancialLessonHistory[];
 };
 export type FinancialClaimPage = { agentId: string; items: FinancialClaim[]; limit: number };
 export type FinancialBacktestRequest = { symbol: string; startDate: string; endDate: string; window: number; commissionBps: number; slippageBps: number };

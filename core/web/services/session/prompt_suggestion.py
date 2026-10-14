@@ -60,6 +60,7 @@ PROMPT_SUGGESTION_TEXT = (
     "- 提问（“那……呢？”）\n"
     "- 助手口吻（“让我……”“我会……”“这是……”）\n"
     "- 用户没有提过的新主意\n"
+    "- 未经确认的已完成动作或状态改变（例如“工具已挂载”“权限已经启用”）；不要假定用户已修复上一条回答中的缺口\n"
     "- 多句话\n"
     "\n"
     "如果下一步不明显，保持沉默。\n"
@@ -172,6 +173,17 @@ def suggestion_suppression_reason(suggestion: str) -> str:
         return "empty"
     lower = suggestion.lower()
     word_count = _suggestion_word_count(suggestion)
+
+    # Generated drafts cannot certify an environment change the user has not made.
+    if re.match(
+        r"^(?:(?:工具|权限|模型|服务|环境|配置)\s*(?:已经|已)"
+        r"|i(?:['’]ve\s+|\s+(?:have\s+)?(?:already\s+)?)(?:enabled|installed|configured|fixed|updated|switched|restarted)\b"
+        r"|(?:the\s+)?(?:tools?|permissions?|model|service|environment|configuration)\s+"
+        r"(?:(?:is|are|was|were)\s+|has\s+been\s+|have\s+been\s+)?(?:already\s+)?"
+        r"(?:enabled|installed|configured|fixed|updated|switched|restarted)\b)",
+        lower,
+    ):
+        return "unverified_completion"
 
     if lower == "done":
         return "done"
