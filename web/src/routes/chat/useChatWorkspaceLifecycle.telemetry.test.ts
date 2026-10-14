@@ -5,18 +5,22 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const lifecycleSource = readFileSync(join(here, "useChatWorkspaceLifecycle.ts"), "utf8");
+const sessionChangeSource = readFileSync(join(here, "useChatSessionChangeMutations.ts"), "utf8");
 const routeSelectionSource = readFileSync(join(here, "useChatRouteSelection.ts"), "utf8");
 const actionsSource = readFileSync(join(here, "useChatWorkspaceActions.ts"), "utf8");
 
 describe("chat workspace user-action telemetry contract", () => {
   it("tracks session lifecycle mutations through startUserAction", () => {
     expect(lifecycleSource).toContain('startUserAction("session_create"');
-    expect(lifecycleSource).toContain('startUserAction("session_delete"');
-    expect(lifecycleSource).toContain('startUserAction("session_rename"');
-    expect(lifecycleSource).toContain('startUserAction("session_clear_history"');
-    expect(lifecycleSource).toContain('startUserAction("session_add_to_review"');
+    expect(sessionChangeSource).toContain('startUserAction("session_delete"');
+    expect(sessionChangeSource).toContain('startUserAction("session_rename"');
+    expect(sessionChangeSource).toContain('startUserAction("session_clear_history"');
+    expect(sessionChangeSource).toContain('startUserAction("session_add_to_review"');
+    expect(lifecycleSource).toContain("useChatSessionChangeMutations(");
     expect(lifecycleSource).toContain("telemetry?.succeeded({");
     expect(lifecycleSource).toContain("telemetry?.failed(error");
+    expect(sessionChangeSource).toContain("telemetry?.succeeded({");
+    expect(sessionChangeSource).toContain("telemetry?.failed(error");
   });
 
   it("tracks group room and project bus mutations", () => {
@@ -31,9 +35,9 @@ describe("chat workspace user-action telemetry contract", () => {
   });
 
   it("records delete focus handoff fields for session delete", () => {
-    expect(lifecycleSource).toContain("optimisticNextActiveSessionId");
-    expect(lifecycleSource).toContain("serverNextActiveSessionId");
-    expect(lifecycleSource).toContain("nextActiveSessionId");
+    expect(sessionChangeSource).toContain("optimisticNextActiveSessionId");
+    expect(sessionChangeSource).toContain("serverNextActiveSessionId");
+    expect(sessionChangeSource).toContain("nextActiveSessionId");
   });
 
   it("records route-level session and room open observations", () => {
