@@ -142,7 +142,7 @@ describe("TeamHomeSurface", () => {
 
     expect(html).toContain('data-vui-region="team-home-surface"');
     expect(html).toContain("vui-workbench-toolbar");
-    expect(html).toContain("vui-workbench-rail");
+    expect(html).toContain('data-team-panel="inspector"');
     expect(html).toContain("完整发言");
     expect(html).toContain("顾言初");
     expect(html).toContain("打开群聊");

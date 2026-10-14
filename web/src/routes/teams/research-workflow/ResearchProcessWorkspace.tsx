@@ -8,7 +8,8 @@ import {
 } from "../../../api/hypothesisFirst";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
-import { VButton, VCanvasWorkbenchPage, VStateRow } from "../../../components/vui";
+import { VButton, VStateRow } from "../../../components/vui";
+import { TeamWorkspaceFrame } from "../TeamWorkspaceFrame";
 import {
   buildHypothesisFirstCanvasRegion,
   hypothesisFirstSemanticNodeId,
@@ -86,6 +87,7 @@ export type ResearchProcessWorkspaceProps = {
   linkedChatRoomId?: string;
   /** Team switcher rendered in the process toolbar so chrome stays a single row. */
   toolbarLeading?: ReactNode;
+  railActions?: ReactNode;
 };
 
 // Stable identity so the memoized canvas pane does not re-render when no run
@@ -131,6 +133,7 @@ export function ResearchProcessWorkspace({
   teamName = "",
   linkedChatRoomId = "",
   toolbarLeading,
+  railActions,
 }: ResearchProcessWorkspaceProps) {
   const isZh = lang === "zh";
   const navigate = useNavigate();
@@ -811,16 +814,18 @@ export function ResearchProcessWorkspace({
         discussionModel={scopedDiscussionModel}
         onNavigateDiscussion={navigateToDiscussion}
       />
-      <VCanvasWorkbenchPage
+      <TeamWorkspaceFrame
         data-vui="research-process-workspace"
         domainRecipe="research-process-workflow"
         ariaLabel={isZh ? "科研流程工作区" : "Research workflow workspace"}
         title={isZh ? "科研流程" : "Research workflow"}
         hideHeader
+        railTitle={toolbarLeading ?? teamName}
+        railLabel={isZh ? "团队与研究阶段" : "Team and research stages"}
+        inspectorTitle={isZh ? "当前任务" : "Current task"}
         toolbarClassName={styles.toolbar}
         toolbar={(
           <ResearchWorkflowToolbar
-            leading={toolbarLeading}
             onOpenTeamCommunication={() => {
               if (currentDiscussionDeepLink) {
                 navigateToDiscussion(currentDiscussionDeepLink);
@@ -873,15 +878,16 @@ export function ResearchProcessWorkspace({
             onOpenChange: inspectorOpenChange,
           },
         }}
-        rail={archiveOpen || !hasSelectedExperiment ? null : (
-          <div className={styles.stageNavigator}>
+        rail={<div className="flex min-h-0 flex-1 flex-col gap-3">
+          {archiveOpen || !hasSelectedExperiment ? null : <div className={styles.stageNavigator}>
             <ResearchWorkflowStageNavigator
               lang={lang}
               model={stageNavigatorModel}
               onNavigateNode={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
             />
-          </div>
-        )}
+          </div>}
+          {railActions ? <div className="mt-auto shrink-0 border-t border-[var(--vui-border-subtle)] pt-3">{railActions}</div> : null}
+        </div>}
         canvas={archiveOpen ? (
           <div className={styles.archive} data-vui="research-question-archive-canvas">
             {inspectorPane}
