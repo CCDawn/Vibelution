@@ -1,4 +1,7 @@
+import pytest
+
 from core.chat.conversation_branches import (
+    BranchNode,
     analyze_conversation_branches,
     resolve_active_user_node_id,
     resolve_head_target,
@@ -236,6 +239,69 @@ def test_resolve_active_user_node_maps_assistant_and_rejects_off_path():
     assert resolve_active_user_node_id(view, "event-u2b") == "event-u2"
     assert resolve_active_user_node_id(view, "event-a2") == ""
     assert resolve_active_user_node_id(view, "event-missing") == ""
+
+
+@pytest.mark.parametrize(
+    "guidance_kinds",
+    [("user_guidance",), ("user_interrupt_guidance",), ("user_guidance", "user_interrupt_guidance")],
+)
+def test_resolve_active_user_node_skips_same_turn_guidance(guidance_kinds):
+    events = [
+        _event("event-original", "turn-guided", 1, EVENT_USER_MESSAGE, payload={"content": "original request"}),
+        *[
+            _event(
+                f"event-guide-{index}",
+                "turn-guided",
+                index + 2,
+                EVENT_USER_MESSAGE,
+                payload={"content": "guidance", "metadata": {"kind": kind}},
+            )
+            for index, kind in enumerate(guidance_kinds)
+        ],
+        _event("event-answer", "turn-guided", len(guidance_kinds) + 2, EVENT_ASSISTANT_MESSAGE, payload={"content": "answer"}),
+    ]
+    view = analyze_conversation_branches(events)
+
+    assert resolve_active_user_node_id(view, "event-answer") == "event-original"
+    for index in range(len(guidance_kinds)):
+        guide_id = f"event-guide-{index}"
+        assert resolve_active_user_node_id(view, guide_id) == "event-original"
+        assert view.nodes[guide_id].role == "user"
+    assert view.nodes["event-answer"].parent_node_id == f"event-guide-{len(guidance_kinds) - 1}"
+    assert view.active_node_ids == tuple(event.event_id for event in events)
+    messages, _leaf, _branch = visible_messages_with_branch_info(events)
+    user_messages = [message for message in messages if message["role"] == "user"]
+    assert user_messages[0]["content"] == "original request"
+    assert [message["metadata"]["kind"] for message in user_messages[1:]] == list(guidance_kinds)
+
+
+def test_branch_node_keeps_legacy_positional_constructor():
+    node = BranchNode("user", "user", "", (), "main", "turn-1", "user", 1, True)
+    assert node.message_kind == ""
+
+
+@pytest.mark.parametrize("select_old_branch", [False, True])
+def test_guidance_request_resolution_keeps_active_branch_boundary(select_old_branch):
+    events = [
+        _event("event-u0", "turn-0", 1, EVENT_USER_MESSAGE, payload={"content": "previous request"}),
+        _event("event-a0", "turn-0", 2, EVENT_ASSISTANT_MESSAGE, payload={"content": "previous answer"}),
+        _event("event-u1", "turn-1", 3, EVENT_USER_MESSAGE, payload={"content": "original request"}),
+        _event("event-g1", "turn-1", 4, EVENT_USER_MESSAGE, payload={"content": "safe guide", "metadata": {"kind": "user_guidance"}}),
+        _event("event-a1", "turn-1", 5, EVENT_ASSISTANT_MESSAGE, payload={"content": "old answer"}),
+        _rebase("event-edit", 6, "event-a0", operation="edit", turn_id="turn-2"),
+        _event("event-u2", "turn-2", 7, EVENT_USER_MESSAGE, payload={"content": "edited request"}),
+        _event("event-g2", "turn-2", 8, EVENT_USER_MESSAGE, payload={"content": "interrupt guide", "metadata": {"kind": "user_interrupt_guidance"}}),
+        _event("event-a2", "turn-2", 9, EVENT_ASSISTANT_MESSAGE, payload={"content": "new answer"}),
+    ]
+    if select_old_branch:
+        events.append(_rebase("event-select", 10, "event-a1", operation="head_select", turn_id="turn-1"))
+    view = analyze_conversation_branches(events)
+    active_index, inactive_index = (1, 2) if select_old_branch else (2, 1)
+
+    for kind in ("u", "g", "a"):
+        assert resolve_active_user_node_id(view, f"event-{kind}{active_index}") == f"event-u{active_index}"
+        assert resolve_active_user_node_id(view, f"event-{kind}{inactive_index}") == ""
+    assert resolve_active_user_node_id(view, "event-a0") == "event-u0"
 
 
 def test_visible_messages_carry_branch_metadata():
