@@ -27,6 +27,19 @@ export function validateModelContextWindow(value: string, maximum: number, lang:
   return { value: parsed, valid: true, error: "" };
 }
 
+const MODEL_NAME_SEPARATOR = /^[\s·•\u00b7\-/|:：,，]+/;
+
+function modelNames(model: SessionLlmModelOption) {
+  const fullName = model.label.trim() || model.model.trim() || model.modelRef.trim() || model.modelId.trim();
+  const provider = model.providerLabel.trim();
+  if (provider && fullName.toLocaleLowerCase().startsWith(provider.toLocaleLowerCase())) {
+    const modelName = fullName.slice(provider.length).replace(MODEL_NAME_SEPARATOR, "").trim();
+    if (modelName) return { fullName, shortName: modelName };
+  }
+  const upstream = model.model.trim() || model.modelId.trim() || model.modelRef.trim();
+  return { fullName, shortName: upstream || fullName };
+}
+
 function modelContextStops(maximum: number, custom: number) {
   if (!Number.isSafeInteger(maximum) || maximum <= 0) return [];
   return [...new Set([
@@ -79,11 +92,14 @@ export function ConversationTurnModelControl({
   const [contextStops, setContextStops] = useState(() => modelContextStops(maxContextWindow, contextWindow));
   const cancelledNumberEditRef = useRef(false);
   const previousPendingRef = useRef(pending);
-  const label = error
+  const statusLabel = error
     ? (zh ? "模型读取失败" : "Model unavailable")
     : loading
       ? (zh ? "读取模型…" : "Loading model…")
-      : model?.label || model?.model || model?.modelRef || model?.modelId || (zh ? "未绑定模型" : "No model bound");
+      : "";
+  const names = model ? modelNames(model) : { fullName: "", shortName: "" };
+  const fullName = statusLabel || names.fullName || (zh ? "未绑定模型" : "No model bound");
+  const shortName = statusLabel || names.shortName || fullName;
   const supportedEfforts = model?.reasoningEffortValues ?? [];
   const normalizedEffort = supportedEfforts.includes(currentReasoningEffort)
     ? currentReasoningEffort
@@ -206,18 +222,19 @@ export function ConversationTurnModelControl({
             isDisabled={!canConfigure || loading || error || pending}
             aria-haspopup="dialog"
             aria-expanded={open}
-            aria-label={`${zh ? "Agent 模型" : "Agent model"}: ${label}`}
+            aria-label={`${zh ? "Agent 模型" : "Agent model"}: ${fullName}`}
             aria-busy={loading || pending || undefined}
             data-open={open ? "true" : "false"}
-            title={label}
+            title={fullName}
           >
             <Bot className={styles.icon} size={12} aria-hidden="true" />
-            <span className={styles.label}>{label}</span>
+            <span className={styles.label}>{shortName}</span>
             <SlidersHorizontal className={styles.settingsIcon} size={12} aria-hidden="true" />
           </VButton>
         )}
       >
         <div className={styles.fields} data-testid="conversation-model-parameters-panel">
+          <p className={styles.fullName} data-testid="conversation-model-full-name">{fullName}</p>
           {effortOptions.length ? (
             <div className={styles.field}>
               <div className={styles.fieldHeader}>
@@ -232,7 +249,6 @@ export function ConversationTurnModelControl({
                   onPress={() => { setReasoningEffortDraft(""); setDirty(true); }}
                 />
               </div>
-              <span className={styles.fieldCaption} title={label}>{label}</span>
               <VNativeInput
                 type="range"
                 rangeVariant="capsule"
