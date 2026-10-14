@@ -1,5 +1,6 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
+import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -4840,6 +4841,14 @@ ipcMain.handle(IPC_CHANNELS.requestWorkbenchRestart, async (event, trigger?: str
       ...(normalizedTrigger ? { headers: { "X-Vibelution-Launcher-Trigger": normalizedTrigger } } : {})
     }
   });
+});
+
+ipcMain.handle(IPC_CHANNELS.requestWindowClose, (event) => {
+  const provider = windowProvider;
+  if (provider === null) throw new Error("Managed window provider is unavailable.");
+  return requestRendererWindowClose(event,
+    () => BrowserWindow.fromWebContents(event.sender),
+    (windowId, senderUrl) => provider.requestRendererWorkbenchClose(windowId, senderUrl));
 });
 
 ipcMain.handle(IPC_CHANNELS.getLauncherFreshness, async (event) => {

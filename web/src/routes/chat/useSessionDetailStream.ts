@@ -485,18 +485,29 @@ export function useSessionDetailStream({
     if (reacquiredWarm) {
       // The stream stayed open while this session was parked, so it may have
       // reconnected or advanced without a mounted owner. Re-baseline the
-      // projection gates (the next frame applies like after a fresh open) and
-      // trigger one authoritative refresh when the parked watermark advanced
-      // over the cached detail, so the route re-enters on the latest state.
+      // projection gates (the next frame applies like after a fresh open).
+      // A fresh lightweight select handoff is not a hydrated transcript. A
+      // remount can skip GET on freshness and never receive another initial
+      // frame from this warm stream, so unread bodies also need a readback.
       sessionProjectionGate.noteStreamReopened();
       sessionStreamRecovery.noteStreamReopened();
-      if (parkedLedgerSeq > 0) {
-        const cachedLedgerSeq = Number(
-          queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.ledgerSeq ?? 0,
-        );
-        if (parkedLedgerSeq > cachedLedgerSeq) {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
-        }
+      const cachedLedgerSeq = normalizedLedgerSeq(initialCachedDetail?.ledgerSeq);
+      const transcriptUnhydrated = !initialCachedDetail
+        || initialCachedDetail.id !== streamSessionId
+        || Boolean(initialCachedDetail.provisionalTranscript);
+      if (transcriptUnhydrated || parkedLedgerSeq > cachedLedgerSeq) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId), exact: true });
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.warm_readback_requested",
+          message: "Warm session stream requested a canonical detail readback.",
+          fields: {
+            sessionId: streamSessionId,
+            reason: transcriptUnhydrated ? "transcript_unhydrated" : "ledger_advanced",
+            cachedLedgerSeq,
+            parkedLedgerSeq,
+          },
+        });
       }
       if (stream.readyState === 1) {
         markStreamConnected();
