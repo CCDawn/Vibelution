@@ -9,7 +9,8 @@ import surfaceModelSource from "../routes/chat/useChatConversationSurfaceModel.t
 import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
-import composerSource from "../routes/chat/useChatComposerSubmit.ts?raw";
+import composerActionsSource from "../routes/chat/useChatComposerSubmit.ts?raw";
+import composerSource from "../routes/chat/useChatComposerTurnMutations.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
 import helperSource from "../routes/chat/chatSessionDetailHelpers.ts?raw";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
@@ -86,6 +87,7 @@ describe("Chat session tool approval API", () => {
     expect(routeSource).toContain("expectedAgentId: options.agentId");
     expect(routeSource).not.toContain("updateSessionReasoningEffort");
     expect(composerSource).not.toContain("/api/sessions/");
+    expect(composerActionsSource).not.toContain("/api/sessions/");
     expect(composerModelSource).not.toContain("/api/sessions/");
     expect(mutationSource).not.toContain("/reasoning-effort");
   });
@@ -125,6 +127,7 @@ describe("Chat session tool approval API", () => {
     expect(mutationSource).not.toContain("/curation");
     expect(lifecycleSource).not.toContain("/curation");
     expect(composerSource).not.toContain("Curation");
+    expect(composerActionsSource).not.toContain("Curation");
   });
 
   it("owns conversation and child-session list transport", () => {
