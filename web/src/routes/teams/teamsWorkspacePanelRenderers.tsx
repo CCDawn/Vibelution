@@ -117,12 +117,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           agentName={display?.name}
           functionLabel={node ? teamNodeFunctionLabel(node, display?.functionLabel, lang) : ""}
           validationIssues={validation?.issues ?? []}
-          className={styles.canvasReadOnlyPanel}
-          noticeClassName={styles.canvasReadOnlyNotice}
-          nodeClassName={styles.canvasReadOnlyNode}
-          nodeWideClassName={styles.canvasReadOnlyNodeWide}
           emptyClassName={styles.empty}
-          issueListClassName={styles.issueList}
           issueClassName={styles.issue}
         />
       );

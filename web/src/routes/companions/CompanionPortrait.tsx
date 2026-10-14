@@ -30,6 +30,7 @@ export function CompanionPortrait({
     [companion.avatarImageUrl, expressionAssetRef],
   );
   const [failedAssetRefs, setFailedAssetRefs] = useState<string[]>([]);
+  const [loadedImageRatio, setLoadedImageRatio] = useState<{ assetRef: string; ratio: number } | null>(null);
 
   useEffect(() => {
     setFailedAssetRefs([]);
@@ -44,6 +45,7 @@ export function CompanionPortrait({
     className,
   ].filter(Boolean).join(" ");
   const imageClassName = compact ? styles.avatarImage : styles.portraitImage;
+  const imageRatio = loadedImageRatio?.assetRef === imageUrl ? loadedImageRatio.ratio : 2 / 3;
   return (
     <span
       className={portraitClassName}
@@ -55,7 +57,10 @@ export function CompanionPortrait({
       data-scene-key={sceneKey}
       data-companion-blink={embodiment?.blinkProfile?.enabled ? "true" : "false"}
       data-embodiment-fallback={embodiment?.fallbackReason || undefined}
-      style={{ "--companion-blink-duration": `${blinkDurationMs}ms` } as CSSProperties}
+      style={{
+        "--companion-blink-duration": `${blinkDurationMs}ms`,
+        "--companion-portrait-ratio": imageRatio,
+      } as CSSProperties}
     >
       {backgroundUrl ? (
         <img
@@ -67,23 +72,31 @@ export function CompanionPortrait({
         />
       ) : null}
       {imageUrl ? (
-        <span className={styles.portraitFigure} data-companion-figure="true">
+        <span className={compact ? styles.avatarFigure : styles.portraitFigure} data-companion-figure="true">
+          {!compact ? <span className={styles.portraitGlow} aria-hidden="true" /> : null}
           <img
             src={imageUrl}
             alt=""
             className={imageClassName}
+            onLoad={(event) => {
+              const { naturalWidth, naturalHeight } = event.currentTarget;
+              if (naturalWidth > 0 && naturalHeight > 0) {
+                setLoadedImageRatio({ assetRef: imageUrl, ratio: naturalWidth / naturalHeight });
+              }
+            }}
             onError={() => setFailedAssetRefs((current) => [...new Set([...current, imageUrl])])}
           />
+          {!compact ? (
+            <span className={styles.portraitBlink} data-companion-eyelids="true" aria-hidden="true">
+              <i />
+              <i />
+            </span>
+          ) : null}
         </span>
       ) : (
         <span className={styles.portraitInitials}>{companionInitials(companion)}</span>
       )}
-      <span className={styles.portraitGlow} aria-hidden="true" />
-      <span className={styles.portraitBlink} data-companion-eyelids="true" aria-hidden="true">
-        <i />
-        <i />
-      </span>
-      <span className={styles.onlineDot} aria-hidden="true" />
+      <span className={styles.onlineDot} data-compact={compact} aria-hidden="true" />
     </span>
   );
 }

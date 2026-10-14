@@ -49,6 +49,7 @@ import {
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
 import { TeamSettingsToolbarAction } from "./TeamSettingsToolbarAction";
+import { TeamConversationRail } from "./TeamConversationRail";
 import {
   canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   isChallengeCupCanonicalizationTeamOwned,
@@ -260,6 +261,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   } = d;
 
   useEffect(() => {
+    if (searchParams.get("teamConversationTeamId") === effectiveTeamId
+      && ["group", "member", "canvas"].includes(searchParams.get("teamConversation") || "")) return;
     if (!challengeCupResearchTeamSelected || !effectiveTeamId) {
       return;
     }
@@ -284,7 +287,11 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
 
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
-  const researchCanvasVisible = teamShellMode === "canvas" && !researchWorkflowTeamSelected;
+  const teamConversationRequested = searchParams.get("teamConversationTeamId") === effectiveTeamId
+    && ["group", "member"].includes(searchParams.get("teamConversation") || "");
+  const teamCanvasRequested = searchParams.get("teamConversationTeamId") === effectiveTeamId
+    && searchParams.get("teamConversation") === "canvas";
+  const researchCanvasVisible = teamConversationRequested || teamCanvasRequested || (teamShellMode === "canvas" && !researchWorkflowTeamSelected);
   // The Challenge Cup workflow owns its process rail and split geometry inside
   // ResearchProcessWorkspace; the generic team shell must not mount a second rail.
   const suppressOuterTeamShellChrome =
@@ -643,7 +650,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ? teamShellStagesFromBoardColumns(researchBoardColumns, lang)
     : [];
   const statusNodes = researchCanvasVisible
-    ? teamShellNodesFromCanvas(displayCanvasNodes ?? [], lang)
+    ? teamShellNodesFromCanvas(displayCanvasNodes ?? [], lang,
+      new Map((selectedTeam?.members ?? []).map((member: { agentId: string; agentName: string; role: string }) => [member.agentId, member.agentName || member.role])))
     : [];
   const devTeamSelected = selectedTeam?.teamTemplateId === "dev-team";
   const statusNextTitle = researchWorkflowTeamSelected && researchPrimaryAction
@@ -664,7 +672,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ? researchPrimaryActionLabel(researchPrimaryAction, lang)
     : undefined;
 
-  const teamShellRail = renderTeamsShellRail({
+  const teamStatusRail = renderTeamsShellRail({
     lang,
     statusNextTitle,
     statusNextBody,
@@ -680,6 +688,30 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     selectedNodeId,
     onSelectNode: setSelectedNodeId,
   });
+  const openTeamConversation = (memberId = "", sessionId = "") => {
+    if (!selectedTeam) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("teamId", selectedTeam.teamId);
+    next.set("teamConversationTeamId", selectedTeam.teamId);
+    next.set("teamConversation", memberId ? "member" : "group");
+    next.set("teamMode", "canvas");
+    next.set("returnTo", `/teams?teamId=${encodeURIComponent(selectedTeam.teamId)}&teamMode=canvas`);
+    next.set("returnLabel", lang === "zh" ? "返回团队" : "Back to team");
+    next.delete("session"); next.delete("room"); next.delete("teamMember"); next.delete("companion");
+    if (memberId && sessionId) { next.set("teamMember", memberId); next.set("session", sessionId); }
+    else if (linkedChatRoomId) next.set("room", linkedChatRoomId);
+    navigate(`/teams?${next.toString()}`);
+  };
+  const teamShellRail = selectedTeam ? <TeamConversationRail team={selectedTeam} room={linkedRoomDetail ?? null} lang={lang}
+    agentsById={d.activeAgentsById}
+    selectedMemberId={teamConversationRequested ? searchParams.get("teamMember") || "" : ""}
+    groupSelected={teamConversationRequested && searchParams.get("teamConversation") === "group"}
+    onOpenGroup={() => openTeamConversation()} onOpenMember={(member, sessionId) => openTeamConversation(member.memberId, sessionId)}
+    navigation={researchWorkflowTeamSelected ? teamStatusRail : undefined} /> : teamStatusRail;
+  const teamConversationRail = selectedTeam ? <TeamConversationRail team={selectedTeam} room={linkedRoomDetail ?? null} lang={lang}
+    agentsById={d.activeAgentsById}
+    selectedMemberId="" groupSelected={false} onOpenGroup={() => openTeamConversation()}
+    onOpenMember={(member, sessionId) => openTeamConversation(member.memberId, sessionId)} /> : null;
 
   const teamShellToolbar = renderTeamsShellToolbar({
     lang,
@@ -760,6 +792,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     scComposition,
     styles,
     activeWorkflowItemCount,
+    teamConversationRail,
     researchBoardColumns,
     researchStageStartFeedbackText,
     teamWorkflowCandidatePreviewItems,
@@ -872,9 +905,11 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       onNodePointerUp: finishNodeDrag,
       onNodePointerCancel: finishNodeDrag,
       canvasAuthoring,
-      teamHome: !researchWorkflowTeamSelected ? {
+      teamHome: !researchWorkflowTeamSelected || teamConversationRequested || teamCanvasRequested ? {
         lang,
         selectedTeam,
+        conversationRequested: teamConversationRequested,
+        agentsById: d.activeAgentsById,
         linkedChatRoomId: linkedChatRoomId || "",
         linkedRoomDetail,
         linkedRoomBusy,

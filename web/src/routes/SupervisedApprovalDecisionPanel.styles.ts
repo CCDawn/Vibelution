@@ -7,6 +7,10 @@ const borderedSurface =
   `rounded-lg border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass}`;
 
 const styles = {
+  sidebarPanel: "grid min-w-0 gap-3 bg-vui-surface-panel px-5 py-4",
+  sidebarSummary: "grid min-w-0 gap-2 [&>strong]:text-vui-lg [&>strong]:font-semibold [&>span]:text-vui-sm [&>span]:tabular-nums [&>span]:text-vui-fg-secondary",
+  sidebarReason: "m-0 whitespace-pre-wrap break-words text-vui-xs leading-relaxed text-vui-fg-secondary",
+  sidebarActionButtons: "flex w-full min-w-0 flex-col gap-2 [&_button]:!min-h-10 [&_button]:!w-full max-[899px]:[&_button]:!min-h-11",
   compactPanel: "grid shrink-0 gap-1.5 border-t border-vui-border-subtle bg-vui-surface-panel px-3 py-2",
   compactSummary: "flex min-w-0 flex-wrap items-center justify-between gap-2 text-vui-sm [&>span]:text-vui-fg-secondary",
   compactReason: "m-0 line-clamp-2 text-vui-xs text-vui-fg-secondary",

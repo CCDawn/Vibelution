@@ -1,0 +1,68 @@
+/* Scoped Companion projection: never changes ordinary ConversationView styles. */
+.companion-scene-workspace {
+ /* Approved illustrated scene has a constant dark glass skin. It is scoped
+    here so the surrounding workbench and portalled settings retain its theme. */
+ color-scheme:dark;
+ --fg-primary:#f4f7fb; --fg-secondary:#d6e0e8; --fg-tertiary:#b2bfcc;
+ --vui-surface-panel:#101722; --vui-surface-raised:#18212c;
+ --vui-surface-glass:color-mix(in srgb,var(--vui-surface-panel) 88%,transparent);
+ --vui-surface-chat:transparent; --vui-surface-workspace:var(--vui-surface-panel);
+ --vui-surface-row:var(--vui-surface-raised); --vui-control-face:transparent;
+ --vui-control-muted:var(--vui-surface-raised);
+ --vui-border-subtle:color-mix(in srgb,var(--fg-primary) 16%,transparent);
+ --vui-control-border:var(--vui-border-subtle);
+ color:var(--fg-primary);
+}
+.companion-scene-workspace { position:relative; isolation:isolate; container-type:size; display:block!important; height:100%; min-height:0; min-width:0; overflow:hidden; background:var(--vui-surface-workspace); }
+.companion-scene-background { position:absolute; inset:0; z-index:0; width:100%; height:100%; object-fit:cover; }
+.companion-scene-portrait { position:absolute!important; inset:0; z-index:1; min-height:0!important; background:transparent!important; pointer-events:none; }
+.companion-scene-portrait>img { display:none; }
+.companion-scene-portrait [data-companion-figure] { height:calc(100cqh - 60px); width:calc((100cqh - 60px) * var(--companion-portrait-ratio)); bottom:-5cqh; }
+.companion-scene-portrait [data-companion-figure]::before,.companion-scene-portrait [data-companion-figure]>span,.companion-scene-portrait>[data-compact],.companion-scene-header [data-compact] { display:none; }
+.companion-scene-header { position:absolute; inset:0 0 auto; z-index:10; display:flex; align-items:center; gap:12px; min-height:72px; padding:12px 16px; color:var(--fg-primary); background:color-mix(in srgb,var(--vui-surface-glass) 82%,transparent); backdrop-filter:blur(10px); }
+.companion-scene-header [data-companion-conversation-header] { flex:1; }
+.companion-scene-header [data-companion-conversation-header] strong { font-size:18px; font-weight:600; }
+.companion-scene-header [data-companion-conversation-header] strong+span { font-size:12px; }
+.companion-scene-header [data-companion-conversation-header] { gap:8px; }
+/* Important Tailwind utilities have layered priority. Keep this override in
+   base so the native compact export/send utilities cannot shrink hit targets. */
+@layer base {
+ .companion-scene-workspace .companion-scene-header button,
+ .companion-scene-workspace .composerToolbarCodex button { height:44px!important; min-height:44px!important; min-width:44px!important; }
+}
+.companion-scene-workspace .companion-scene-header button,.companion-scene-workspace .companion-scene-header a { min-height:44px!important; min-width:44px!important; }
+.companion-scene-location { display:flex; align-items:center; gap:8px; font-size:12px; max-width:32%; }
+.companion-scene-location>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.companion-scene-location time { color:var(--fg-secondary); font-variant-numeric:tabular-nums; }
+.companion-scene-conversation { position:absolute!important; z-index:5; left:50%; translate:-50% 0; bottom:16px; width:min(840px,calc(100% - 48px)); height:min(46cqh,440px); min-height:0; display:flex; flex-direction:column; overflow:hidden; border-radius:var(--vui-radius-panel-soft); background:color-mix(in srgb,var(--vui-surface-glass) 86%,transparent)!important; backdrop-filter:blur(12px); }
+.companion-scene-conversation .conversationShell,.companion-scene-conversation .conversationFrame,.companion-scene-conversation .conversationBody,.companion-scene-conversation .conversationKeepAlivePane { min-height:0; }
+.companion-scene-conversation-host { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }
+.companion-scene-conversation .vui-components-conversationview.timeline { background:transparent!important; padding:16px 24px!important; }
+.companion-scene-conversation .vui-components-conversationview.surface { background:transparent; border:0; }
+.companion-scene-conversation .emptyStateStarters { display:none; }
+.companion-scene-conversation .vui-components-conversationview.composerCodex { width:calc(100% - 32px)!important; margin-bottom:12px!important; box-shadow:none!important; background:color-mix(in srgb,var(--vui-surface-glass) 66%,transparent)!important; }
+/* Approval may expand the scene. Input focus keeps the portrait visible;
+   long drafts and attachment/error rows scroll locally above the history. */
+.companion-scene-conversation:has([data-chat-tool-approval-host]) { height:min(72cqh,calc(100cqh - 96px)); }
+.companion-scene-conversation .vui-components-conversationview.composerCodex { max-height:min(48cqh,calc(100% - 64px)); overflow-y:auto; }
+.companion-scene-conversation .composerFieldCodex textarea { min-height:44px!important; max-height:min(22cqh,180px)!important; overflow-y:auto!important; color:var(--fg-primary)!important; }
+.companion-scene-conversation .composerFieldCodex textarea::placeholder { color:var(--fg-tertiary)!important; }
+.companion-scene-life-dialog { width:min(420px,calc(100vw - 24px))!important; max-height:85dvh!important; }
+.companion-scene-life-content { height:min(70dvh,680px); min-height:0; background:var(--vui-surface-panel)!important; }
+.companion-scene-life-content>header>div>div>p { display:none; }
+.companion-scene-life-content>header h2 { font-size:14px; }
+@media(max-width:719px) {
+ .companion-scene-header { gap:4px; padding:8px; }
+ .companion-scene-header [data-companion-proactive-settings] button [data-slot=vui-button-label],.companion-scene-header [data-companion-proactive-settings] button [data-slot=vui-button-trailing-icon] { display:none; }
+ .companion-scene-header [data-companion-proactive-settings] button { width:44px; padding:0; }
+ .companion-scene-header [data-companion-conversation-header]>div:first-child>[data-companion-portrait] { display:none; }
+ .companion-scene-location { position:absolute; top:80px; left:16px; max-width:calc(100% - 32px); padding:8px 12px; background:var(--vui-surface-glass); border-radius:var(--vui-radius-control); }
+ .companion-scene-portrait [data-companion-figure] { height:calc(100cqh - 100px); width:calc((100cqh - 100px) * var(--companion-portrait-ratio)); bottom:0; }
+ .companion-scene-conversation { bottom:12px; width:calc(100% - 24px); height:min(48cqh,420px); }
+ .companion-scene-conversation .vui-components-conversationview.timeline { padding:12px 14px!important; }
+ .companion-scene-background { object-position:35% 50%; }
+ [data-companion-scene=studio] .companion-scene-background { object-position:25% 50%; }
+ [data-companion-scene=park] .companion-scene-background { object-position:50% 50%; }
+}
+@container (max-height:520px) { .companion-scene-conversation { height:calc(100cqh - 132px); } }
+@media(prefers-reduced-motion:reduce) { .companion-scene-workspace [data-companion-figure] { animation:none!important; } }

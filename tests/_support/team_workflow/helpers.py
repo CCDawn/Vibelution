@@ -347,6 +347,8 @@ def _stub_source_collection_search_background(monkeypatch):
     return calls
 
 def _use_fake_local_research_config(monkeypatch):
+    from config.public_config import build_effective_config as build_test_config
+
     model_library = {
         "houmo_qwen35_9b_agent": {
             "model": "qwen3.5-9b",
@@ -367,10 +369,25 @@ def _use_fake_local_research_config(monkeypatch):
         },
     )
     monkeypatch.setattr(team_workflow_orchestration_service, "build_effective_config", lambda public_config: public_config)
+    runtime_config = build_test_config({"llm": {
+        "schema_version": 2,
+        "providers": {"research-test-local": {
+            "label": "Research test provider", "service_class": "local_runtime",
+            "vendor": "custom", "driver": "openai", "base_url": "http://127.0.0.1:9/v1",
+            "auth_kind": "none", "credential_ref": "none", "requires_credential": False,
+            "protocols": {"default": "chat_completions", "allowed": ["chat_completions"]},
+            "models": {"qwen3.5-9b": {"upstream_id": "qwen3.5-9b", "enabled": True, "context_window": 32768}},
+        }},
+        "profiles": {"primary": {"model_ref": "research-test-local/qwen3.5-9b"}},
+    }})
+    runtime_config.llm.model_library = {
+        key: {**value, "provider_id": "research-test-local"}
+        for key, value in model_library.items()
+    }
     monkeypatch.setattr(
         session_service,
         "get_config",
-        lambda: SimpleNamespace(llm=SimpleNamespace(model_library=model_library)),
+        lambda: runtime_config,
     )
 
 def _steward_pack_output(*, candidate_ids=None, confidence=0.61):

@@ -45,6 +45,11 @@ import {
   type AgentMessageOperationGroups,
 } from "./agentMessageOperations";
 import { resolveAssistantDisplayPlan } from "./assistantDisplayPlan";
+import {
+  companionMessageSpokenText,
+  companionUnrepeatedSpeech,
+  previousCompanionSpokenText,
+} from "./companionSpokenDisplay";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
@@ -631,6 +636,12 @@ export function createConversationTimelineRows({
             const agentSections = agentRenderState.sectionState;
             const processSections = agentRenderState.processSections;
             const responseText = agentSections.answerText;
+            const companionVisibleSpeech = companionMode
+              ? companionUnrepeatedSpeech(
+                previousCompanionSpokenText(activeTimelineMessages, index),
+                companionMessageSpokenText(message),
+              )
+              : "";
             const noFinalAnswerStatusText = isNoFinalAnswerStatusContent(responseText)
               ? responseText.trim()
               : "";
@@ -709,7 +720,7 @@ export function createConversationTimelineRows({
             const copyableAnswerText = message.role === "assistant"
               && !turnErrorMessage
               && !assistantTurnIsStreaming(message)
-              ? responseText.trim()
+              ? (companionMode ? companionVisibleSpeech : responseText.trim())
               : "";
             // Codex parity: settled turns carry a quiet measured token-usage
             // label near the turn meta; streaming turns and surfaces without
@@ -790,7 +801,13 @@ export function createConversationTimelineRows({
               && !agentInboxMessage
               && !groupTranscriptMessage
             )
-              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity, companionMode)
+              ? renderCodexTranscriptCells(
+                message,
+                codexTranscriptCells,
+                rowIdentity,
+                companionMode,
+                companionVisibleSpeech,
+              )
               : null;
             // Todo checklist card: client-derived from the latest journaled
             // todo_write call in this turn (no extra SSE event). Companion and

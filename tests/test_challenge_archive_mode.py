@@ -246,6 +246,12 @@ def test_start_production_runtime_skips_under_archive(
     monkeypatch.setenv(CHALLENGE_ARCHIVE_MODE_ENV, "1")
     stop_production_workflow_runtime()
 
+    from core.research.workflow.ledger import WorkflowLedgerStore
+
+    store = WorkflowLedgerStore(tmp_path / "workflow-ledger.sqlite")
+    store.open()
+    store.close()
+
     assert start_production_workflow_runtime() == "archive_mode"
     assert production_workflow_runtime() is None
     # shutdown 侧对未启动 runtime 幂等。
@@ -368,15 +374,15 @@ def test_lifecycle_meeting_recovery_job_starts_when_not_archived(
     assert jobs.started == ["startup-meeting-driver-recovery"]
 
 
-def test_lifecycle_workflow_runtime_job_skips_under_archive(
+def test_lifecycle_workflow_runtime_job_initializes_reads_under_archive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from core.web import lifecycle
 
     monkeypatch.setattr(archive_mode, "challenge_archive_mode_enabled", lambda: True)
     jobs = _FakeStartupJobs()
-    assert lifecycle._start_workflow_runtime_job(jobs) is None
-    assert jobs.started == []
+    assert lifecycle._start_workflow_runtime_job(jobs) == "task:startup-workflow-runtime"
+    assert jobs.started == ["startup-workflow-runtime"]
 
 
 def test_lifecycle_workflow_runtime_job_starts_when_not_archived(

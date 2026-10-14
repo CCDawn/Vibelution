@@ -255,6 +255,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
               onSelectTeam: selectTeamRecord,
           })}
           railActions={<TeamCreateToolbarActions lang={lang} onTeamCreated={selectTeamRecord} />}
+          conversationRail={ctx.teamConversationRail}
         />
       </Suspense>
     );

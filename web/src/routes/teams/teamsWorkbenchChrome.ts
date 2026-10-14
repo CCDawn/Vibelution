@@ -35,17 +35,17 @@ export const TEAMS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.teams;
 /** Left team list — VUI split sidebar with persisted width. */
 export const TEAMS_RAIL_PANE: PaneSpec = {
   id: "rail",
-  defaultWidth: 248,
+  defaultWidth: 220,
   minWidth: 200,
-  maxWidth: 360,
+  maxWidth: 280,
 };
 
 /** Right board inspector (workflow / stage tools) — persisted drag column. */
 export const TEAMS_BOARD_INSPECTOR_PANE: PaneSpec = {
   id: "inspector",
-  defaultWidth: 360,
+  defaultWidth: 312,
   minWidth: 280,
-  maxWidth: 560,
+  maxWidth: 380,
 };
 
 export type TeamsRouteProps = {

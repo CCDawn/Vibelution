@@ -29,7 +29,8 @@ import {
   VTooltip,
 } from "../../components/vui";
 import { edgeLine, isCommunicationEdge, teamCanvasNodeStyle } from "./canvasGeometry";
-import { canvasNodeAgentLine } from "./teamCanvasNodePresentation";
+import { canvasNodeAgentLine, canvasNodeSecondaryLines, canvasNodeTitle } from "./teamCanvasNodePresentation";
+import nodeStyles from "./TeamOrganizationCanvasSurface.styles";
 import { teamNodeFunctionLabel } from "./teamRouteShellModel";
 
 /** Canvas authoring interactions owned by the shell phase (state + save wiring). */
@@ -415,7 +416,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                 const display = agent ? agentDisplay(agent, lang) : null;
                 const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
                 const agentLine = canvasNodeAgentLine(node, display?.name, lang);
-                const purpose = String(node.purpose || "").trim();
+                const title = canvasNodeTitle(node, display?.name);
+                const secondary = canvasNodeSecondaryLines(node, agentLine, functionLabel, title);
                 const nodeSelected = selectedNodeId === node.id;
                 const connectActive = Boolean(authoring?.connectSourceNodeId);
                 const nodeIsConnectSource = authoring?.connectSourceNodeId === node.id;
@@ -431,7 +433,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                       researchCanvasReadOnly ? nodeReadOnlyClassName : "",
                     ].filter(Boolean).join(" ")}
                     style={teamCanvasNodeStyle(node)}
-                    aria-label={`${node.label}, ${functionLabel}, ${agentLine}`}
+                    aria-label={`${title}, ${functionLabel}, ${agentLine}`}
                     aria-pressed={nodeSelected}
                     data-connect-source={nodeIsConnectSource ? "true" : undefined}
                     title={
@@ -462,10 +464,10 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                     }}
                   >
                     <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
-                    <strong>{node.label}</strong>
+                    <strong className={nodeStyles.title}>{title}</strong>
                     <span className={`${styles.nodeRoleBadge} ${roleBadgeToneClass(node, display?.tone)}`}>{functionLabel}</span>
-                    <small>{agentLine}</small>
-                    {purpose ? <small className={styles.nodePurpose}>{purpose}</small> : null}
+                    {secondary.agent ? <small className={nodeStyles.secondary}>{secondary.agent}</small> : null}
+                    {secondary.purpose ? <small className={styles.nodePurpose}>{secondary.purpose}</small> : null}
                   </VNativeButton>
                 );
               })}

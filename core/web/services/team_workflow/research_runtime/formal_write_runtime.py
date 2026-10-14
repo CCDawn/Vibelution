@@ -54,10 +54,26 @@ def reset_formal_write_runtime_for_tests() -> None:
         _MIGRATION_REQUIRED = False
 
 
+def release_formal_write_runtime(store: WorkflowLedgerStore) -> None:
+    """Detach a closing owner's write facade without clearing another runtime."""
+    global _COMMAND, _STORE
+    with _LOCK:
+        if _STORE is store:
+            _COMMAND = None
+            _STORE = None
+
+
 def mark_migration_required() -> None:
     global _MIGRATION_REQUIRED
     with _LOCK:
         _MIGRATION_REQUIRED = True
+
+
+def clear_migration_required() -> None:
+    """Clear a resolved migration barrier without configuring a write facade."""
+    global _MIGRATION_REQUIRED
+    with _LOCK:
+        _MIGRATION_REQUIRED = False
 
 
 def is_migration_required() -> bool:

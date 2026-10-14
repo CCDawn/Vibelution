@@ -1020,25 +1020,12 @@ def _start_research_workflow_runtime() -> str:
 
 
 def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
-    """Schedule the research workflow resident runtime unless archived.
+    """Initialize formal reads even when archive mode disables workflow workers.
 
-    挑战杯封存模式（archive_mode，只读可看）下不启动 runtime：驻留线程
-    （outbox pump workers / maintenance / receipt-persistence /
-    hypothesis-recovery）全部不存在，运行时不轮询、不推进、不改写状态。
-    返回 None 表示任务未创建；shutdown 侧 stop 对未启动 runtime 是幂等
-    no-op。开关读取集中在 research_runtime.archive_mode。
+    The startup job finishes after configuring reader connections in archive
+    mode; no writer, outbox pump or resident workflow threads are started.
     """
 
-    from .services.team_workflow.research_runtime.archive_mode import (
-        challenge_archive_mode_enabled,
-    )
-
-    if challenge_archive_mode_enabled():
-        logger.info(
-            "challenge archive mode: research workflow runtime not scheduled "
-            "(read-only archive)"
-        )
-        return None
     return startup_jobs.start_thread(
         "startup-workflow-runtime", _start_research_workflow_runtime
     )

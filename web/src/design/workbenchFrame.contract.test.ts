@@ -18,7 +18,7 @@ describe("shared workbench chrome ownership", () => {
     }
     expect(source("routes/ConfigRoute.tsx").match(/data-vui-page="workspace"/g)?.length).toBe(3);
     expect(source("routes/MemoryAgentMemoryPanel.tsx")).toContain('<VSplitWorkspace chrome="workbench"');
-    expect(source("routes/MemoryContentBrowsePanel.tsx")).toContain('${VUI_WORKBENCH_PANE_CLASS} ${styles.root}');
+    expect(source("routes/MemoryContentBrowsePanel.tsx")).toContain('<VSplitWorkspace chrome="workbench"');
     expect(source("routes/teams/ResearchStageWorkbenchShell.tsx")).toContain("<VWorkbenchPage");
     expect(source("routes/teams/SourceCollectionComposer.tsx")).toContain('chrome="workspace"');
     expect(source("routes/teams/source-collection/ui/TeamSourceCollectionStandaloneStagePanel.tsx")).toContain('chrome="workbench"');
@@ -36,7 +36,7 @@ describe("shared workbench chrome ownership", () => {
     for (const recipe of ["VListDetailPage", "VBoardWorkbenchPage", "VCanvasWorkbenchPage"]) {
       const code = source(`components/vui/layout/${recipe}.tsx`);
       expect(code).toContain('chrome="workspace"');
-      if (recipe === "VBoardWorkbenchPage") {
+      if (recipe === "VBoardWorkbenchPage" || recipe === "VCanvasWorkbenchPage") {
         expect(code).toContain('chrome = "workbench"');
         expect(code).toContain('chrome={chrome}');
       } else {

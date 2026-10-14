@@ -14,16 +14,16 @@ const styles = {
     `countPill min-w-0 ${vuiControlPillClass}`,
   detailActionButton:
     `detailActionButton min-w-0 ${vuiControlQuietClass}`,
-  detailActions: `detailActions min-w-0 flex w-fit max-w-full flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
+  detailActions: "detailActions flex min-w-0 w-fit max-w-full flex-wrap items-center gap-2 bg-transparent py-2",
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2 px-1 py-0.5 [&>div]:min-w-0 [&_h2]:min-w-0 [&_h2]:break-words [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:break-words",
   detailPanel: `detailPanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   emptyDetail:
-    "emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "emptyDetail grid min-h-[96px] min-w-0 content-center gap-2 !rounded-none !border-0 !bg-transparent !px-0 py-3 text-vui-micro-13 leading-relaxed text-vui-fg-tertiary",
   factGrid:
     "factGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] [&_section]:min-w-0 [&_section]:rounded-[var(--radius-control)] [&_section]:border [&_section]:border-[var(--vui-border-subtle)] [&_section]:bg-[var(--vui-surface-row)] [&_section]:p-2 [&_strong]:min-w-0 [&_strong]:break-all",
   generatedAt:
-    "generatedAt min-w-0",
+    "generatedAt min-w-0 text-vui-2xs leading-relaxed text-vui-fg-tertiary",
   impactPanel: `impactPanel min-w-0 ${vuiFlatPanelClass} p-2 [&>p]:min-w-0 [&>p]:break-words`,
   manageDetailPanel:
     "manageDetailPanel min-w-0 bg-[var(--vui-surface-panel)]",

@@ -354,6 +354,7 @@ export function createConversationCodexSurface({
     cells: CodexTranscriptCell[],
     rowIdentity: AgentMessageTimelineRowIdentity,
     isCompanionMode = false,
+    companionVisibleSpeech = "",
   ) {
     const visibleCells = dedupeCodexTranscriptCellsForDisplay(
       settleCodexTranscriptActiveStatuses(
@@ -361,18 +362,39 @@ export function createConversationCodexSurface({
         { turnStreaming: assistantTurnIsStreaming(message) },
       ),
     );
-    if (visibleCells.length === 0) {
+    const companionSpeech = isCompanionMode ? companionVisibleSpeech.trim() : "";
+    const companionErrors = isCompanionMode
+      ? visibleCells.filter((cell) => cell.kind === "error_notice")
+      : [];
+    if (visibleCells.length === 0 && !companionSpeech) {
       return null;
     }
     const isFinalResponseCell = (cell: CodexTranscriptCell) => (
       cell.kind === "assistant_markdown" && cell.phase !== "commentary"
     );
+    const streaming = assistantTurnIsStreaming(message);
     const processCells = isCompanionMode
       ? []
       : visibleCells.filter((cell) => !isFinalResponseCell(cell));
     const finalCells = isCompanionMode
-      ? visibleCells.filter((cell) => isFinalResponseCell(cell) || cell.kind === "error_notice")
+      ? [
+          ...(companionSpeech
+            ? [{
+                id: `${message.id}:companion-spoken`,
+                kind: "assistant_markdown" as const,
+                messageId: message.id,
+                status: streaming ? "running" as const : "completed" as const,
+                tone: streaming ? "running" as const : "neutral" as const,
+                phase: "final_answer",
+                text: companionSpeech,
+              }]
+            : []),
+          ...companionErrors,
+        ]
       : visibleCells.filter(isFinalResponseCell);
+    if (isCompanionMode && finalCells.length === 0) {
+      return null;
+    }
     const renderTimelineNodes = (
       timelineCells: CodexTranscriptCell[],
       options?: { attachToolApproval?: boolean },

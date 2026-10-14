@@ -93,6 +93,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatConversationSurfaceModelSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl");
     expect(chatConversationSurfaceModelSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
     expect(chatConversationSurfaceModelSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
+    expect(chatConversationSurfaceModelSource).toContain("promptSuggestionEnabled: !verifiedCompanionMode && activePromptSuggestionEnabled");
     expect(statusRailSource).toContain("if (verifiedCompanionMode)");
     expect(chatSource).toContain("statusRail={(");
     expect(chatSource).toContain("conversationIndex={financeSurface ? null : verifiedCompanionMode ? (");
