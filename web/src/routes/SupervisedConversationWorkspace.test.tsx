@@ -171,13 +171,12 @@ describe("SupervisedConversationWorkspace interactions", () => {
     expect(container.querySelector('[data-vui="split-main"]')?.textContent).toContain("Native Agent conversation");
   });
 
-  it("keeps the right column permanent at medium desktop widths and makes navigation a drawer", async () => {
+  it("shows both navigation and results by default at medium desktop widths", () => {
     setViewport(1000);
     const container = renderWorkspace();
-    expect(container.querySelector('aside[aria-label="运行导航"]')).toBeNull();
+    expect(container.querySelector('aside[aria-label="运行导航"]')).not.toBeNull();
     expect(container.querySelector('aside[aria-label="结果与操作"]')).not.toBeNull();
-    await clickAndFlush(container.querySelector('button[aria-label="运行导航"]')!);
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("运行历史");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(container.querySelector('[data-vui="split-main"]')?.textContent).toContain("Native Agent conversation");
   });
 
@@ -246,125 +245,57 @@ describe("SupervisedConversationWorkspace interactions", () => {
     expect(tab.getAttribute("data-disabled")).not.toBeNull();
   });
 
-  it("keeps active and pending-approval runs visible while history starts collapsed", () => {
+  it("shows active, pending-approval and history runs without expanding anything", () => {
     const container = renderWorkspace({
-      runGroups: [{
-        id: "supervised",
-        label: "监督进化",
-        runs: [
-          { id: "running", title: "正在运行的任务", status: "运行中", selected: false, history: false, onSelect: vi.fn() },
-          { id: "approval", title: "等待审批的任务", status: "待审批", selected: false, history: false, onSelect: vi.fn() },
-          { id: "old", title: "较早的失败任务", status: "失败", selected: false, history: true, onSelect: vi.fn() },
-        ],
-      }],
+      runGroups: [{ id: "supervised", label: "监督进化", runs: [
+        { id: "running", title: "正在运行的任务", status: "运行中", selected: false, history: false, onSelect: vi.fn() },
+        { id: "approval", title: "等待审批的任务", status: "待审批", selected: false, history: false, onSelect: vi.fn() },
+        { id: "old", title: "较早的失败任务", status: "失败", selected: false, history: true, onSelect: vi.fn() },
+      ] }],
     });
     const rail = container.querySelector('aside[aria-label="运行导航"]')!;
-    const historyToggle = buttonByText(rail, "历史记录");
-
     expect(buttonByText(rail, "正在运行的任务")).toBeDefined();
     expect(buttonByText(rail, "等待审批的任务")).toBeDefined();
-    expect(historyToggle.getAttribute("aria-expanded")).toBe("false");
-    expect(rail.querySelector("#evolution-history-supervised")?.hasAttribute("hidden")).toBe(true);
-    expect(rail.querySelector('#evolution-history-supervised button[aria-current="page"]')).toBeNull();
+    expect(buttonByText(rail, "较早的失败任务")).toBeDefined();
+    expect(rail.querySelector("#evolution-history-supervised")?.hasAttribute("hidden")).toBe(false);
+    expect(rail.querySelector("button[aria-expanded]")).toBeNull();
   });
 
-  it("keeps a selected terminal run visible outside the collapsed history list", () => {
-    const container = renderWorkspace({
-      runGroups: [{
-        id: "supervised",
-        label: "监督进化",
-        runs: [
-          { id: "selected-old", title: "当前选中的已完成任务", status: "已完成", selected: true, history: true, onSelect: vi.fn() },
-          { id: "other-old", title: "其他历史任务", status: "失败", selected: false, history: true, onSelect: vi.fn() },
-        ],
-      }],
-    });
+  it("keeps a selected terminal run visible exactly once", () => {
+    const container = renderWorkspace({ runGroups: [{ id: "supervised", label: "监督进化", runs: [
+      { id: "selected-old", title: "当前选中的已完成任务", status: "已完成", selected: true, history: true, onSelect: vi.fn() },
+      { id: "other-old", title: "其他历史任务", status: "失败", selected: false, history: true, onSelect: vi.fn() },
+    ] }] });
     const rail = container.querySelector('aside[aria-label="运行导航"]')!;
-
     expect(buttonByText(rail, "当前选中的已完成任务").getAttribute("aria-current")).toBe("page");
+    expect(rail.querySelectorAll('button[aria-current="page"]')).toHaveLength(1);
     expect(rail.querySelector("#evolution-history-supervised")?.textContent).not.toContain("当前选中的已完成任务");
-    expect(rail.querySelector("#evolution-history-supervised")?.hasAttribute("hidden")).toBe(true);
+    expect(buttonByText(rail, "其他历史任务")).toBeDefined();
   });
 
-  it("expands the first five history entries and routes the all-history action to the group", async () => {
-    const onGroupHistory = vi.fn();
-    const onWorkspaceHistory = vi.fn();
-    const runs = Array.from({ length: 7 }, (_, index) => ({
-      id: `history-${index + 1}`,
-      title: `历史任务 ${index + 1}`,
-      status: "失败",
-      selected: false,
-      history: true,
-      onSelect: vi.fn(),
-    }));
-    const container = renderWorkspace({
-      onHistory: onWorkspaceHistory,
-      runGroups: [{ id: "supervised", label: "监督进化", runs, onHistory: onGroupHistory }],
-    });
-    const rail = container.querySelector('aside[aria-label="运行导航"]')!;
-    const historyToggle = buttonByText(rail, "历史记录");
-
-    await clickAndFlush(historyToggle);
-    expect(historyToggle.getAttribute("aria-expanded")).toBe("true");
-    expect(buttonByText(rail, "历史任务 1")).toBeDefined();
-    expect(buttonByText(rail, "历史任务 5")).toBeDefined();
-    expect(rail.querySelector("#evolution-history-supervised")?.textContent).not.toContain("历史任务 6");
-    expect(rail.querySelector("#evolution-history-supervised")?.textContent).not.toContain("历史任务 7");
-
-    await clickAndFlush(buttonByText(rail, "查看全部历史（7）"));
-    expect(onGroupHistory).toHaveBeenCalledOnce();
-    expect(onWorkspaceHistory).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the workspace history action when a group has no history handler", async () => {
+  it("lists every available history run and keeps run selection and the full history entry working", async () => {
     const onHistory = vi.fn();
-    const runs = Array.from({ length: 6 }, (_, index) => ({
-      id: `history-${index + 1}`,
-      title: `历史任务 ${index + 1}`,
-      status: "失败",
-      selected: false,
-      history: true,
-      onSelect: vi.fn(),
+    const runs = Array.from({ length: 7 }, (_, index) => ({
+      id: `history-${index + 1}`, title: `历史任务 ${index + 1}`, status: "失败", selected: false, history: true, onSelect: vi.fn(),
     }));
-    const container = renderWorkspace({
-      onHistory,
-      runGroups: [{ id: "supervised", label: "监督进化", runs }],
-    });
+    const container = renderWorkspace({ onHistory, runGroups: [{ id: "supervised", label: "监督进化", runs }] });
     const rail = container.querySelector('aside[aria-label="运行导航"]')!;
-
-    await clickAndFlush(buttonByText(rail, "历史记录"));
-    await clickAndFlush(buttonByText(rail, "查看全部历史（6）"));
+    expect(rail.querySelectorAll("#evolution-history-supervised button")).toHaveLength(7);
+    await clickAndFlush(buttonByText(rail, "历史任务 7"));
+    expect(runs[6].onSelect).toHaveBeenCalledOnce();
+    await clickAndFlush(buttonByText(rail, "运行历史"));
     expect(onHistory).toHaveBeenCalledOnce();
   });
 
-  it("keeps history expansion isolated per group and allows it to be collapsed again", async () => {
-    const container = renderWorkspace({
-      activeTrack: undefined,
-      onTrackChange: vi.fn(),
-      runGroups: [
-        {
-          id: "supervised",
-          label: "监督进化",
-          runs: [{ id: "s-old", title: "监督历史任务", status: "失败", selected: false, history: true, onSelect: vi.fn() }],
-        },
-        {
-          id: "self",
-          label: "自进化",
-          runs: [{ id: "self-old", title: "自进化历史任务", status: "完成", selected: false, history: true, onSelect: vi.fn() }],
-        },
-      ],
-    });
+  it("shows history for both supplied tracks without per-group collapse state", () => {
+    const container = renderWorkspace({ activeTrack: undefined, onTrackChange: vi.fn(), runGroups: [
+      { id: "supervised", label: "监督进化", runs: [{ id: "s-old", title: "监督历史任务", status: "失败", selected: false, history: true, onSelect: vi.fn() }] },
+      { id: "self", label: "自进化", runs: [{ id: "self-old", title: "自进化历史任务", status: "完成", selected: false, history: true, onSelect: vi.fn() }] },
+    ] });
     const rail = container.querySelector('aside[aria-label="运行导航"]')!;
-    const toggles = Array.from(rail.querySelectorAll<HTMLButtonElement>("button[aria-expanded]"));
-    expect(toggles).toHaveLength(2);
-
-    await clickAndFlush(toggles[0]);
-    expect(toggles[0].getAttribute("aria-expanded")).toBe("true");
-    expect(rail.querySelector("#evolution-history-supervised")?.hasAttribute("hidden")).toBe(false);
-    expect(rail.querySelector("#evolution-history-self")?.hasAttribute("hidden")).toBe(true);
-    await clickAndFlush(toggles[0]);
-    expect(toggles[0].getAttribute("aria-expanded")).toBe("false");
-    expect(rail.querySelector("#evolution-history-supervised")?.hasAttribute("hidden")).toBe(true);
+    expect(buttonByText(rail, "监督历史任务")).toBeDefined();
+    expect(buttonByText(rail, "自进化历史任务")).toBeDefined();
+    expect(rail.querySelectorAll("[hidden]")).toHaveLength(0);
   });
 
   it("remembers the desktop navigation pane visibility after remount", async () => {

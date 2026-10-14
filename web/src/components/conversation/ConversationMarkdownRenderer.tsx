@@ -21,7 +21,11 @@ import { remarkConversationAutolinks } from "./conversationMarkdownAutolinks";
 import { ConversationMarkdownMermaidBlock } from "./conversationMarkdownMermaidBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
-import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
+import {
+  CONVERSATION_MARKDOWN_DENSE_TABLE_MIN_COLUMNS,
+  CONVERSATION_MARKDOWN_TABLE_PATTERN,
+  type ConversationMarkdownClassNames,
+} from "./conversationMarkdownTypes";
 import {
   CODE_BLOCK_MAX_VISIBLE_LINES,
   TABLE_MAX_VISIBLE_ROWS,
@@ -95,7 +99,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
     return null;
   }
   const guarded = guardConversationMarkdownMath(normalized);
-  const hasTable = /^\s*\|.+\|\s*$/m.test(normalized);
+  const hasTable = CONVERSATION_MARKDOWN_TABLE_PATTERN.test(normalized);
   return (
     <div className={[classNames.markdownBody, hasTable ? classNames.markdownBodyWithTable : ""].filter(Boolean).join(" ")}>
       <ReactMarkdown
@@ -318,7 +322,7 @@ function markdownComponents(
           key={markdownBlockBoundaryKey(node)}
           source={markdownBlockSourceText(node)}
         >
-          <ConversationMarkdownTableBlock classNames={classNames}>{children}</ConversationMarkdownTableBlock>
+          <ConversationMarkdownTableBlock classNames={classNames} language={language}>{children}</ConversationMarkdownTableBlock>
         </ConversationMarkdownBlockBoundary>
       );
     },
@@ -368,33 +372,77 @@ function ConversationMarkdownPreBlock({ children, preClassName, language }: Conv
 type ConversationMarkdownTableBlockProps = {
   children: React.ReactNode;
   classNames: ConversationMarkdownClassNames;
+  language: "zh" | "en";
 };
 
+function markdownTableRowCellCount(row: React.ReactNode): number {
+  if (!React.isValidElement<{ children?: React.ReactNode }>(row)) {
+    return 0;
+  }
+  return React.Children.toArray(row.props.children).filter((cell) =>
+    React.isValidElement(cell),
+  ).length;
+}
+
+/**
+ * Column count from the first available row (header row when present, first
+ * body row otherwise) — enough to pick the dense variant without parsing the
+ * markdown source.
+ */
+function markdownTableColumnCount(children: React.ReactNode): number {
+  const rowLists = React.Children.toArray(children).map((section) =>
+    React.isValidElement<{ children?: React.ReactNode }>(section)
+      ? React.Children.toArray(section.props.children)
+      : [],
+  );
+  const firstRow = rowLists.find((rows) => rows.length > 0)?.[0];
+  return firstRow ? markdownTableRowCellCount(firstRow) : 0;
+}
+
 /** Block body of a GFM table — see ConversationMarkdownPreBlock for the split. */
-function ConversationMarkdownTableBlock({ children, classNames }: ConversationMarkdownTableBlockProps) {
+function ConversationMarkdownTableBlock({ children, classNames, language }: ConversationMarkdownTableBlockProps) {
   const truncation = truncateConversationMarkdownTable(children);
+  const dense = isDenseConversationMarkdownTable(children);
+  const tableClassName = [classNames.markdownTable, dense ? classNames.markdownTableDense : ""]
+    .filter(Boolean)
+    .join(" ");
+  const scrollHint = dense
+    ? (language === "zh" ? "表格较宽，可左右滚动查看" : "Wide table — scroll sideways to view more")
+    : null;
   if (!truncation) {
     return (
-      <div className={classNames.markdownTableWrap}>
-        <table className={classNames.markdownTable}>{children}</table>
-      </div>
+      <>
+        <div className={classNames.markdownTableWrap}>
+          <table className={tableClassName}>{children}</table>
+        </div>
+        {scrollHint && classNames.markdownTableScrollHint ? (
+          <div className={classNames.markdownTableScrollHint}>{scrollHint}</div>
+        ) : null}
+      </>
     );
   }
   return (
     <>
       <div className={classNames.markdownTableWrap}>
-        <table className={classNames.markdownTable}>{truncation.visible}</table>
+        <table className={tableClassName}>{truncation.visible}</table>
       </div>
+      {scrollHint && classNames.markdownTableScrollHint ? (
+        <div className={classNames.markdownTableScrollHint}>{scrollHint}</div>
+      ) : null}
       <details className={conversationMarkdownOverflowStyles.overflowDetails}>
         <summary className={conversationMarkdownOverflowStyles.overflowSummary}>
           {`展开其余 ${truncation.overflowCount} 行`}
         </summary>
         <div className={classNames.markdownTableWrap}>
-          <table className={classNames.markdownTable}>{truncation.overflow}</table>
+          <table className={tableClassName}>{truncation.overflow}</table>
         </div>
       </details>
     </>
   );
+}
+
+function isDenseConversationMarkdownTable(children: React.ReactNode) {
+  return markdownTableColumnCount(children) >= CONVERSATION_MARKDOWN_DENSE_TABLE_MIN_COLUMNS;
 }
 
 function languageFromCodeClassName(className: string) {

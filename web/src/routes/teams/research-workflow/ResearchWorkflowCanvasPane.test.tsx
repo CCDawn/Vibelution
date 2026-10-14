@@ -19,6 +19,7 @@ async function renderPane(props: {
   graph?: WorkflowLayoutInput | null;
   error?: string | null;
   language?: "zh" | "en";
+  unavailableMessage?: string;
 }) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
@@ -32,6 +33,7 @@ async function renderPane(props: {
           selectedNodeId={null}
           runtimeCurrentNodeIds={[]}
           error={props.error ?? null}
+          unavailableMessage={props.unavailableMessage}
           onSelectNode={() => undefined}
         />
       </QueryClientProvider>,
@@ -69,8 +71,15 @@ describe("ResearchWorkflowCanvasPane", () => {
     root = rendered.root;
     const alert = rendered.container.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain("快照加载失败，请重试");
-    expect(rendered.container.textContent).toContain("流程定义无法读取");
+    expect(rendered.container.textContent).toContain("研究状态读取失败");
     expect(rendered.container.textContent).not.toContain("加载流程定义");
+  });
+
+  it("does not keep a loading message after the formal state read fails", async () => {
+    const rendered = await renderPane({ graph: null, error: "FormalReadRuntimeUnavailable", unavailableMessage: "正在读取当前题目的研究状态" });
+    root = rendered.root;
+    expect(rendered.container.textContent).toContain("研究状态读取失败");
+    expect(rendered.container.textContent).not.toContain("正在读取当前题目的研究状态");
   });
 
   it("clears the inline error once the workspace recovers", async () => {

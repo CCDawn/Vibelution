@@ -126,6 +126,34 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).toContain("list-disc");
   });
 
+  it("switches wide tables to the dense variant with a scroll hint", async () => {
+    const columns = ["一", "二", "三", "四", "五", "六"];
+    const wideTable = [
+      `| ${columns.join(" | ")} |`,
+      `| ${columns.map(() => "---").join(" | ")} |`,
+      `| ${columns.map((_, index) => `v${index + 1}`).join(" | ")} |`,
+    ].join("\n");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content={wideTable} classNames={styles} language="zh" />,
+    );
+
+    expect(html).toContain("markdownTableDense");
+    expect(html).toContain("表格较宽，可左右滚动查看");
+  });
+
+  it("keeps narrow tables on the standard layout without a scroll hint", async () => {
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={"| 项目 | 状态 |\n| --- | --- |\n| Markdown | ready |"}
+        classNames={styles}
+        language="zh"
+      />,
+    );
+
+    expect(html).not.toContain("markdownTableDense");
+    expect(html).not.toContain("表格较宽");
+  });
+
   it("keeps ordered and unordered lists visually distinct", async () => {
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer

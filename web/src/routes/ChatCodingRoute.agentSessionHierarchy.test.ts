@@ -7,6 +7,7 @@ import visibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?
 import agentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
 import tabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import lifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
+import sessionChangeSource from "./chat/useChatSessionChangeMutations.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 
 describe("ChatCodingRoute Agent-session hierarchy", () => {
@@ -41,8 +42,9 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(lifecycleSource).toContain("setEditingSessionTitle(");
     // Failure recovery opens a retry editor only when none is already active.
     // The callback behavior suite covers preserving newer same-session input.
-    expect(lifecycleSource).toContain("if (!editingSessionIdRef.current) {");
+    expect(sessionChangeSource).toContain("if (!editingSessionIdRef.current) {");
     expect(lifecycleSource).not.toContain("!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId");
+    expect(sessionChangeSource).not.toContain("!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId");
     // Create shows the new session directly: the create flow never opens the
     // rename editor, so no temp-id editor is entered and no draft is trusted.
     expect(lifecycleSource).not.toContain("setEditingSessionId(tempSessionId)");
@@ -64,12 +66,13 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
   });
 
   it("optimistically removes deleted sessions and restores only failed deletion membership", () => {
-    expect(lifecycleSource).toContain("captureAgentSessionCacheSnapshots(queryClient)");
-    expect(lifecycleSource).toContain("removeSessionFromAgentSessionCaches(queryClient, variables.sessionId)");
-    expect(lifecycleSource).toContain(
+    expect(sessionChangeSource).toContain("captureAgentSessionCacheSnapshots(queryClient)");
+    expect(sessionChangeSource).toContain("removeSessionFromAgentSessionCaches(queryClient, variables.sessionId)");
+    expect(sessionChangeSource).toContain(
       "restoreUndeletedSessionCaches(queryClient, [variables.sessionId], context)",
     );
     // Callback and helper behavior suites verify preserving concurrent cache edits.
     expect(lifecycleSource).not.toContain("restoreAgentSessionCacheSnapshots(");
+    expect(sessionChangeSource).not.toContain("restoreAgentSessionCacheSnapshots(");
   });
 });

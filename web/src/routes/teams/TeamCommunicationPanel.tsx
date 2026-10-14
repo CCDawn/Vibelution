@@ -23,15 +23,18 @@ import {
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import shellStyles from "../TeamsRoute.styles";
 import researchRouteStyles from "../TeamsRoute.research.styles";
+import panelStyles from "./TeamCommunicationPanel.styles";
 import { formatTime } from "./source-collection/presentationModel";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
-import { chatRoomStatusLabel } from "./workflowPresentation";
+import { chatRoomStatusLabel, chatRoomRoundStatusLabel } from "./workflowPresentation";
+import { chatRoomModeLabel } from "../chat/chatRoutePresentation";
 import { DevTeamTaskBoard, speakingTeamMemberIdFromRoom } from "./DevTeamTaskBoard";
 
 const styles = {
   ...shellStyles,
   ...researchRouteStyles,
+  ...panelStyles,
 } as Record<string, string>;
 
 export type TeamCommunicationPanelProps = {
@@ -151,7 +154,7 @@ export function TeamCommunicationPanel({
             {selectedTeam?.linkedChatRoomId
               ? linkedRoomBusy
                 ? (lang === "zh" ? "群聊运行中" : "room running")
-                : (lang === "zh" ? "发送到群聊 round" : "starts a room round")
+                : (lang === "zh" ? "发送到群聊" : "starts a room round")
               : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
           </span>
         </div>
@@ -228,12 +231,12 @@ export function TeamCommunicationPanel({
             <article className={styles.teamRoundCard}>
               <div className={styles.teamRoundHeader}>
                 <strong>{latestTeamRound.topic || (lang === "zh" ? "未命名任务" : "Untitled task")}</strong>
-                <span>{latestTeamRound.status}</span>
+                <span>{chatRoomRoundStatusLabel(latestTeamRound.status, lang)}</span>
               </div>
               <p>{latestTeamRound.summary || (lang === "zh" ? "任务仍在等待成员输出。" : "Waiting for participant output.")}</p>
               <div className={styles.teamRoundMeta}>
-                <span>{latestTeamRound.messages.length} messages</span>
-                <span>{latestTeamRound.mode}</span>
+                <span>{latestTeamRound.messages.length} {lang === "zh" ? "条消息" : "messages"}</span>
+                <span>{chatRoomModeLabel({ id: latestTeamRound.mode, label: latestTeamRound.mode, status: "active" }, lang)}</span>
                 <span>{formatTime(latestTeamRound.updatedAt || latestTeamRound.startedAt, lang)}</span>
               </div>
               <Link to={teamChatRoomRoute(latestTeamRound.roomId, workspaceHref, teamBackLabel)}>
@@ -276,12 +279,12 @@ export function TeamCommunicationPanel({
       >
         <div className={styles.sectionTitle}>
           <strong>{lang === "zh" ? "团队广播" : "Team broadcast"}</strong>
-          <span>{activeTeamMemberCount} active agents</span>
+          <span>{activeTeamMemberCount} {lang === "zh" ? "位活跃成员" : "active agents"}</span>
         </div>
         <VNativeTextarea
           value={teamMessage}
           onChange={(event) => onTeamMessageChange(event.target.value)}
-          placeholder={lang === "zh" ? "发送给当前团队 active 成员" : "Send to active members of this team"}
+          placeholder={lang === "zh" ? "发送给当前团队活跃成员" : "Send to active members of this team"}
         />
         <label className={styles.inlineToggle}>
           <VNativeInput
@@ -316,7 +319,7 @@ export function TeamCommunicationPanel({
       <section className={styles.teamHistoryPanel} data-team-member-messages>
         <div className={styles.sectionTitle}>
           <strong>{lang === "zh" ? "成员通信" : "Member messages"}</strong>
-          <span>{memberMessages.length} events</span>
+          <span>{memberMessages.length} {lang === "zh" ? "条记录" : "events"}</span>
         </div>
         {memberMessagesQuery.isPending ? (
           <VStateSurface
@@ -357,7 +360,7 @@ export function TeamCommunicationPanel({
       <section className={styles.teamHistoryPanel}>
         <div className={styles.sectionTitle}>
           <strong>{lang === "zh" ? "最近团队广播" : "Recent team broadcasts"}</strong>
-          <span>{teamBusEvents.length} events</span>
+          <span>{teamBusEvents.length} {lang === "zh" ? "条记录" : "events"}</span>
         </div>
         {projectBusPending ? (
           <VStateSurface

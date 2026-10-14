@@ -74,6 +74,22 @@ export function canvasNodeAgentLine(
   return canvasNodeStatusLabel(node, lang);
 }
 
+/** Only show secondary information when it adds to the node title or role. */
+export function canvasNodeTitle(node: TeamCanvasNode, displayName?: string) {
+  return (node.label === node.id || /^challenge_cup_/.test(node.label))
+    ? displayName || node.agentName || node.label
+    : node.label;
+}
+
+export function canvasNodeSecondaryLines(node: TeamCanvasNode, agentLine: string, functionLabel: string, title = node.label) {
+  const identity = (value: string) => value.trim().replace(/\s+Agent$/i, "").replace(/\s+/g, " ");
+  const purpose = String(node.purpose || "").trim();
+  return {
+    agent: identity(agentLine) === identity(title) ? "" : agentLine,
+    purpose: identity(purpose) === identity(functionLabel) ? "" : purpose,
+  };
+}
+
 export type CanvasNodeRoleBadgeStyles = Record<CanvasNodeRoleBadgeKind, string> & {
   stale: string;
   open: string;
