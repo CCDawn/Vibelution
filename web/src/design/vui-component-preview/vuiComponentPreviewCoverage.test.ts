@@ -53,6 +53,15 @@ const previewExemptDesignSections = new Set([
   // approved single-row preview and the isolated workbench browser acceptance.
   "ChatSessionIndexToolbar",
   "ChatSessionIndexSearch",
+  // Route-owned compositions of existing VUI APIs. Canonical Agent/Session
+  // queries and the native desktop bridge supply their meaningful states;
+  // none is a standalone VUI export. Covered by personal-assistant route,
+  // overview, identity/return interaction tests and native desktop acceptance.
+  "PersonalAssistantRoute",
+  "DesktopAssistantRoute",
+  "PersonalAssistantOverview",
+  "PersonalAssistantState",
+  "DesktopAssistantReturnNotice",
 ]);
 
 function collectPreviewSources(directory: string): string {
