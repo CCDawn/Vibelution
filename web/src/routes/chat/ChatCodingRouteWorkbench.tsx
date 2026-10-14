@@ -763,13 +763,13 @@ export function ChatCodingRouteWorkbench() {
     requestedSessionId,
   });
 
-  // Room / project-bus route commits sync panel chrome only (never navigation).
+  // Room / project-bus route commits clear stale room errors only. The
+  // conversation index stays mounted; members stays an opt-in left-rail tab.
   useEffect(() => {
     if (chatRouteSelection.kind === "room" || chatRouteSelection.kind === "project_bus") {
-      setRightIndexPanel("members");
       setGroupRoomActionError("");
     }
-  }, [chatRouteSelection.kind, setGroupRoomActionError, setRightIndexPanel]);
+  }, [chatRouteSelection.kind, setGroupRoomActionError]);
 
   const sessionStreamRouteSettling = resolveSessionStreamRouteSettling({
     activeSessionId,

@@ -200,7 +200,7 @@ export function ChatCodingCenterTabs({
       onToggleRightOverlay={toggleChangeRail}
       sessionTabs={(
         <AgentSessionTabStrip
-          activeSessionId={activeSessionId ?? null}
+          activeSessionId={groupPanelActive ? null : (activeSessionId ?? null)}
           activeCliAgentRunId={activeCliAgentRunId}
           agentsById={agentsById}
           buildSessionReferencePayload={buildSessionReferencePayload}

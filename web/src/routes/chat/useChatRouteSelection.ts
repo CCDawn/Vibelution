@@ -40,7 +40,7 @@ export type UseChatRouteSelectionResult = {
     companionAgentId: string,
     options?: ChatCompanionNavigateOptions,
   ) => void;
-  /** Navigate to a group room; pushes by default. */
+  /** Navigate to a group room; replaces by default (same in-place semantics as sessions). */
   openRoom: (roomId: string, options?: ChatRouteNavigateOptions) => void;
   /** Navigate to the explicit Project Agent Bus route. */
   openProjectBus: (options?: ChatRouteNavigateOptions) => void;
@@ -172,7 +172,7 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       });
       navigateToSelection(
         { kind: "room", roomId: normalizedRoomId },
-        { replace: options?.replace ?? false },
+        { replace: options?.replace ?? true },
       );
     },
     [location.search, navigateToSelection],

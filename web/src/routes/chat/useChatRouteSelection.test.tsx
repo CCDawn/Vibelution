@@ -204,17 +204,18 @@ describe("useChatRouteSelection committed-location contract", () => {
     expect(committedSearch()).toBe("?session=session-ordinary");
   });
 
-  it("openRoom pushes and openProjectBus commits the explicit project bus route", () => {
+  it("openRoom replaces in place and openProjectBus pushes the explicit project bus route", () => {
     mount(["/chat?session=session-a"]);
     act(() => {
       latest().openRoom("room-team");
     });
     expect(committedSearch()).toBe(`?room=room-team`);
+    expect(observedNavigationTypes[observedNavigationTypes.length - 1]).toBe("REPLACE");
     act(() => {
       latest().openProjectBus();
     });
     expect(committedSearch()).toBe(`?room=${PROJECT_AGENT_BUS_ROOM_ID}`);
-    expect(observedNavigationTypes).toContain("PUSH");
+    expect(observedNavigationTypes[observedNavigationTypes.length - 1]).toBe("PUSH");
   });
 
   it("canonicalizes a bare route exactly once per location key", () => {

@@ -24,6 +24,21 @@ describe("ChatCenterTabStrip return navigation", () => {
     expect(html).toContain("群聊</span>");
     expect(html).not.toContain("<button");
   });
+  it("keeps session tabs mounted alongside the active group label", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <ChatCenterTabStrip
+          {...props}
+          chatReturnTarget={null}
+          groupPanelActive
+          showSessionTabs
+          sessionTabs={<span>原会话标签</span>}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("群聊</span>");
+    expect(html).toContain("原会话标签");
+  });
   it("places the browse entry alongside existing session tabs without replacing their content", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
