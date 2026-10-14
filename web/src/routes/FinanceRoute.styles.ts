@@ -20,7 +20,7 @@ export default {
   workspaceAsideTabs: "mt-2 min-w-0 [&_[role=tablist]]:!border-0 [&_[role=tablist]]:!bg-transparent [&_[role=tablist]]:!shadow-none [&_[role=tab]]:!text-xs",
   workspaceAsideMeta: "mt-1 min-w-0 truncate text-xs text-vui-fg-secondary",
   workspaceAsideFooter: "flex shrink-0 items-center gap-2 border-t border-vui-border-subtle px-3 py-2 [&_button]:!h-8 [&_button]:!min-h-8 [&_button]:!border-transparent [&_button]:!bg-transparent [&_button]:!text-xs [&_button]:!shadow-none",
-  workspaceAsideTitle: "whitespace-nowrap text-sm font-medium",
+  workspaceAsideTitle: "min-w-0 flex-1 truncate whitespace-nowrap text-sm font-medium",
   workspaceHeaderContent: "flex min-w-0 flex-1 items-center gap-3",
   workspaceHeaderTitle: "m-0 min-w-0 truncate text-sm font-semibold",
   workspaceHeaderMeta: "shrink-0 whitespace-nowrap text-xs tabular-nums text-vui-fg-tertiary",
@@ -91,4 +91,7 @@ export default {
   workspaceTopicHeader: "flex min-w-0 shrink-0 items-center justify-between gap-3 border-b border-[var(--vui-border-subtle)] px-6 py-4 text-sm [&>strong]:min-w-0 [&>strong]:truncate",
   workspaceCollection: "min-h-0 min-w-0 w-full flex-1 overflow-auto p-4",
   workspaceCollectionTitle: "text-lg font-semibold mt-0 mb-5",
+  workspaceDetail: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 pt-3 [&>footer]:px-0",
+  workspaceInlineContext: "min-w-0 shrink-0 px-4",
+  sessionManager: "!h-[min(70dvh,42rem)] !min-h-0 !overflow-hidden [&>[data-slot=dialog-body]]:flex [&>[data-slot=dialog-body]]:min-h-0 [&>[data-slot=dialog-body]]:flex-col [&>[data-slot=dialog-body]]:overflow-hidden",
 } as const;

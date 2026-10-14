@@ -66,6 +66,7 @@ describe("native financial research lifecycle", () => {
     expect(indexedIds()).toEqual(["current", "next"]);
     expect(router.state.location.search).toBe("?session=current");
     expect(state.error).toContain("请先停止");
+    expect(state.removedSessionIds).toEqual([]);
   });
   it("uses native delete after confirmation and ignores another Agent's replacement id", async () => {
     await act(async () => state.requestAction(current, "delete"));
@@ -75,6 +76,7 @@ describe("native financial research lifecycle", () => {
     await act(async () => { confirm.click(); confirm.click(); }); await settle();
     expect(deleteChatSession).toHaveBeenCalledTimes(1);
     expect(isSessionDeleteTombstoned("current")).toBe(true);
+    expect(state.removedSessionIds).toContain("current");
     expect(indexedIds()).toEqual(["next"]);
     expect(router.state.location.search).toBe("?session=next");
     expect(client.getQueryData(exactKey)).toBeUndefined();
