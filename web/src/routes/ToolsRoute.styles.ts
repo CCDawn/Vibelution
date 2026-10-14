@@ -491,7 +491,7 @@ const styles = {
   registryToolIcon: "mt-1 shrink-0 text-vui-fg-tertiary",
   mobileToolToggle: "flex items-center gap-2 text-vui-micro-13",
   bulkSelectionHeader: "flex min-w-0 items-center justify-between gap-2 px-2 py-2 text-vui-2xs text-vui-fg-secondary",
-  toolRowSelecting: "!grid-cols-[28px_minmax(0,1fr)]",
+  toolRowSelecting: "!grid !grid-cols-[28px_minmax(0,1fr)]",
   policyBundleList: "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain",
   policyBundleButton: "flex min-h-10 w-full min-w-0 items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left text-vui-micro-13 hover:bg-vui-surface-row-hover [&>svg]:shrink-0 [&>svg]:text-vui-fg-tertiary [&>span]:min-w-0 [&>span]:flex-1 [&>span]:break-words [&>small]:text-vui-2xs [&>small]:text-vui-fg-tertiary",
   policyBundleButtonActive: "bg-[var(--vui-selection-bg)]",

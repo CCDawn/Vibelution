@@ -1,7 +1,8 @@
 import { Search } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
-import { VButton, VNativeInput, VSection, VSkeleton, VStateSurface, VSurface, VUI_WORKBENCH_PANE_CLASS } from "../components/vui";
+import { VButton, VNativeInput, VSection, VSkeleton, VSplitWorkspace, VStateSurface, VSurface } from "../components/vui";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { toReadableMemoryBlocks, type ReadableMemoryBlock } from "./memory/memoryReadableContent";
 import styles from "./MemoryContentBrowsePanel.styles";
 
@@ -51,6 +52,8 @@ type MemoryContentBrowsePanelProps = {
   entriesLoading?: boolean;
   /** Group titles that start collapsed; searching always expands them. */
   collapsibleGroupTitles?: string[];
+  /** Secondary library tools remain accessible inside the reader, without another page shell. */
+  supplementaryContent?: ReactNode;
 };
 
 function groupItems<T extends { id: string; group?: string }>(
@@ -143,6 +146,7 @@ export function MemoryContentBrowsePanel({
   errorText = "",
   entriesLoading = false,
   collapsibleGroupTitles = [],
+  supplementaryContent,
 }: MemoryContentBrowsePanelProps) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const ungrouped = copy.ungrouped || copy.browseSelectCard;
@@ -151,9 +155,9 @@ export function MemoryContentBrowsePanel({
   const entryGroups = groupItems(entries, selectedCard?.title || ungrouped);
   const searchActive = Boolean((searchText ?? "").trim());
 
-  return (
-    <div className={`${VUI_WORKBENCH_PANE_CLASS} ${styles.root}`} data-vui-region="memory-content-browse">
-      {onSearchTextChange && !selectedCard ? (
+  const rail = (
+    <div className={styles.rail}>
+      {onSearchTextChange ? (
         <label className={styles.searchBox}>
           <Search size={15} />
           <VNativeInput
@@ -164,19 +168,10 @@ export function MemoryContentBrowsePanel({
           />
         </label>
       ) : null}
-      {selectedCard ? (
-        <div className={styles.backRow}>
-          <VButton type="button" variant="secondary" density="compact" onClick={onClearCard}>
-            {copy.browseBack}
-          </VButton>
-        </div>
-      ) : null}
       <div className={styles.scroll}>
         {errorText ? (
           <VStateSurface tone="error" title={copy.loadFailed}>{errorText}</VStateSurface>
         ) : null}
-        {!selectedCard ? (
-          <>
             {loading && !cards.length ? (
               <VSection title={copy.loading}>
                 <SkeletonCardGrid count={6} />
@@ -212,35 +207,39 @@ export function MemoryContentBrowsePanel({
                   {bodyVisible ? (
                     <div className={styles.cardGrid}>
                       {group.items.map((card) => (
-                        <VSurface
+                        <VButton
                           key={card.id}
-                          as="article"
-                          tone="card"
-                          elevation="panel"
-                          padding="normal"
-                          className={styles.card}
-                          tabIndex={0}
-                          role="button"
+                          type="button"
+                          variant="ghost"
+                          contentLayout="plain"
+                          className={card.id === selectedCardId ? `${styles.card} ${styles.cardActive}` : styles.card}
                           aria-label={card.title}
-                          onClick={() => onSelectCard(card.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              onSelectCard(card.id);
-                            }
-                          }}
+                          aria-pressed={card.id === selectedCardId}
+                          onPress={() => onSelectCard(card.id)}
                         >
                           <strong className={styles.cardTitle}>{card.title}</strong>
                           {card.meta ? <span className={styles.cardMeta}>{card.meta}</span> : null}
-                        </VSurface>
+                        </VButton>
                       ))}
                     </div>
                   ) : null}
                 </VSection>
               );
             })}
-          </>
-        ) : (
+      </div>
+    </div>
+  );
+
+  const reader = (
+    <div className={styles.reader}>
+      <div className={styles.readerToolbar}>
+        <strong>{selectedCard?.title || copy.browseSelectCard}</strong>
+        {selectedCard ? <VButton type="button" variant="ghost" density="compact" onClick={onClearCard}>{copy.browseBack}</VButton> : null}
+      </div>
+      <div className={styles.readerScroll}>
+        {errorText ? <VStateSurface tone="error" title={copy.loadFailed}>{errorText}</VStateSurface> : null}
+        {supplementaryContent}
+        {selectedCard ? (
           <div className={styles.entryList}>
             {entriesLoading && !entries.length ? (
               <VSection title={copy.loading}>
@@ -292,8 +291,13 @@ export function MemoryContentBrowsePanel({
               </VSection>
             ))}
           </div>
-        )}
+        ) : loading ? <SkeletonCardGrid count={3} /> : !errorText ? <VStateSurface tone="empty" title={cards.length ? copy.browseSelectCard : copy.browseEmptyCards}>{!cards.length ? copy.browseEmptyCardsHint : undefined}</VStateSurface> : null}
       </div>
     </div>
   );
+
+  return <VSplitWorkspace chrome="workbench" data-vui-region="memory-content-browse"
+    className={`${styles.root} ${selectedCard || !cards.length ? styles.mobileReading : styles.mobileListing}`}
+    resize={{ layoutId: WORKBENCH_LAYOUT_IDS.memory, sidebar: { id: "browse-categories", defaultWidth: 304, minWidth: 240, maxWidth: 480 } }}
+    sidebar={rail} main={reader} />;
 }

@@ -4024,8 +4024,11 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       .filter((group) => group.items.length);
     const selectedGroup = libraryGroups.find((group) => group.section.id === activeSectionId) ?? null;
     return (
-      <>
-        <MemoryGithubProjectIndexPanel
+        <div className={styles.libraryBrowseFill}>
+      <MemoryContentBrowsePanel
+        supplementaryContent={<details className={styles.librarySupplement}>
+          <summary>{copy.githubProjectsTitle}</summary>
+          <MemoryGithubProjectIndexPanel
           copy={{
             title: copy.githubProjectsTitle,
             hint: copy.githubProjectsHint,
@@ -4037,9 +4040,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           }}
           library={githubProjectLibraryQuery.data}
           loading={githubProjectLibraryQuery.isPending}
-        />
-        <div className={styles.libraryBrowseFill}>
-      <MemoryContentBrowsePanel
+          />
+        </details>}
         copy={{
           loading: copy.loading,
           loadFailed: copy.loadFailed,
@@ -4092,7 +4094,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         }
       />
         </div>
-      </>
     );
   };
 
@@ -4196,7 +4197,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         batchCount={knowledgeBases.reduce((total, base) => total + base.stats.batchCount, 0)}
         pendingRatingSuggestionCount={ratingSuggestionsQuery.data?.summary.pendingSuggestionCount ?? knowledgeItems.filter((item) => item.markedAt).length}
       />
-      <MemoryUserContentPanel defaultUserId="default" />
       <div className={styles.knowledgeGovernanceDeck}>
         <MemoryKnowledgeUsageContractPanel
           copy={copy}
@@ -4261,6 +4261,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         )}
         canvas={(
         <div className={styles.knowledgeMain}>
+          <MemoryUserContentPanel defaultUserId="default" />
           <MemoryKnowledgeModeTabs
             copy={copy}
             lang={lang}

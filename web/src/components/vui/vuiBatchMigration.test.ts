@@ -545,8 +545,9 @@ describe("VUI batch migration", () => {
 
     expect(source).toContain("skillButtonBaseClass");
     expect(source).toContain("!h-auto");
-    expect(source).toContain("!grid grid-cols-[10px_minmax(0,1fr)]");
-    expect(source).toContain("[&>span:last-child]:col-start-2");
+    expect(source).toContain("!grid grid-cols-[auto_minmax(0,1fr)]");
+    expect(source).toContain("skillCopyClass = \"grid min-w-0 gap-1");
+    expect(source).toContain("sourceCaptionClass");
     expect(source).not.toContain("[&_[data-slot=vui-button-label]]:grid");
   });
 
