@@ -156,7 +156,7 @@ describe("composer prompt suggestion wiring", () => {
     expect(chatRouteSource).toContain("readStoredPromptSuggestionToggle");
     expect(chatRouteSource).toContain("writeStoredPromptSuggestionToggle");
     expect(chatRouteSource).toContain("promptSuggestionEnabled={activePromptSuggestionEnabled}");
-    expect(chatConversationSurfaceModelSource).toContain("promptSuggestionEnabled: activePromptSuggestionEnabled,");
+    expect(chatConversationSurfaceModelSource).toContain("promptSuggestionEnabled: !verifiedCompanionMode && activePromptSuggestionEnabled,");
     expect(conversationViewSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("useComposerPromptSuggestion(");
     expect(conversationComposerSource).toContain("shouldAcceptComposerGhost(");

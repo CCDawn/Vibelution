@@ -1,25 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import railSource from "./CompanionLifeRail.tsx?raw";
+import memorySource from "./CompanionMemoryRecords.tsx?raw";
 import preferenceSource from "./CompanionPreferenceCard.tsx?raw";
 import styles from "./CompanionChatRails.styles";
 
 describe("virtual-human life rail memory projection", () => {
-  it("renders real episodic memories with salience, time, and event provenance", () => {
+  it("opens stored episodic memory text and source records without claiming shared experiences", () => {
     expect(railSource).toContain("fetchVirtualHumanMemories");
     expect(railSource).toContain("CompanionLifeWorldCard");
     expect(railSource).toContain("queryKeys.virtualHumanMemories");
-    expect(railSource).toContain("MemoryRows");
-    expect(railSource).toContain("memory.text");
-    expect(railSource).toContain("memory.salienceScore");
-    expect(railSource).toContain("memory.sourceEventIds");
-    expect(railSource).toContain("memory.promotedAt");
-    expect(railSource).toContain("memory.memoryStrengthScore");
-    expect(railSource).toContain("memory.scoreBreakdown");
-    expect(railSource).toContain("memory.reinforcedAt");
-    expect(railSource).toContain("sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left))");
-    expect(railSource).toContain("styles.memoryVisual");
-    expect(railSource).toContain("段重要生活片段");
+    expect(railSource).toContain("CompanionMemoryRecords");
+    expect(memorySource).toContain("memory.text");
+    expect(memorySource).toContain("selected.salienceScore");
+    expect(memorySource).toContain("memory.sourceEventIds");
+    expect(memorySource).toContain("selected.promotedAt");
+    expect(memorySource).toContain("selected.reinforcedAt");
+    expect(memorySource).toContain("sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left))");
+    expect(memorySource).not.toContain("progressTrack");
+    expect(memorySource).not.toContain("memoryStrengthScore");
+    expect(railSource).toContain("条长期记忆");
+    expect(railSource).not.toContain("共同回忆");
+    expect(railSource).not.toContain("心跳在线");
   });
 
   it("opens the hidden life steward through the Chat route owner", () => {

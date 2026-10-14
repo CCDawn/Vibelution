@@ -61,7 +61,9 @@ class VirtualHumanLifeStore:
     def write_json(self, agent_id: str, relative_path: str, payload: dict[str, Any]) -> Path:
         path = self._path(agent_id, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+        # Receipt names already contain a full digest. Repeating that filename
+        # can exceed Windows MAX_PATH while the final destination still fits.
+        fd, temp_name = tempfile.mkstemp(prefix=".vhl-", dir=str(path.parent))
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
@@ -108,7 +110,7 @@ class VirtualHumanLifeStore:
     ) -> Path:
         path = self._path(agent_id, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+        fd, temp_name = tempfile.mkstemp(prefix=".vhl-", dir=str(path.parent))
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 for row in rows:

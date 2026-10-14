@@ -139,6 +139,7 @@ export function CompanionProactiveSettingsPopover({
             trailingIcon={<ChevronDown size={12} aria-hidden="true" />}
             aria-haspopup="dialog"
             aria-expanded={open}
+            aria-label={lang === "zh" ? `主动联系设置：${enabled ? currentLabel : "关闭"}` : `Proactive contact settings: ${enabled ? currentLabel : "Off"}`}
           >
             <span>{lang === "zh" ? "主动联系" : "Proactive"}</span>
             <span aria-hidden="true">·</span>
