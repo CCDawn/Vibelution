@@ -309,9 +309,10 @@ export function useChatWorkspaceActions({
     if (!roomId) {
       return;
     }
-    // Group room entry pushes history (product semantics).
-    chatRoute.openRoom(roomId);
-    setRightIndexPanel("members");
+    // Same in-place semantics as direct sessions: keep the conversation index,
+    // swap only the center surface, and do not push a history entry.
+    chatRoute.openRoom(roomId, { replace: true });
+    setRightIndexPanel("conversations");
     setRightPaneCollapsed(false);
     setGroupRoomActionError("");
     void chatWorkspaceCache.afterChatRoomChanged(roomId);

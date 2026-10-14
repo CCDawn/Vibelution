@@ -842,7 +842,7 @@ export function useChatWorkspaceLifecycle({
         ...current,
         __sessions__: "",
       }));
-      setRightIndexPanel("members");
+      setRightIndexPanel("conversations");
       setSessionFilter("");
       // Cache first, then switch route — the room surface reads the cache on entry.
       queryClient.setQueryData(queryKeys.chatRoom(tempRoomId), optimisticRoom);
@@ -895,7 +895,6 @@ export function useChatWorkspaceLifecycle({
         ...current,
         __sessions__: "",
       }));
-      setRightIndexPanel("members");
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
     },
     onError: (error, _variables, context) => {
@@ -940,7 +939,6 @@ export function useChatWorkspaceLifecycle({
         roundId: accepted.roundId,
         asyncAccepted: true,
       });
-      setRightIndexPanel("members");
       setGroupTopicDraft("");
       setGroupRoomActionError("");
       void chatWorkspaceCache.afterGroupRoundStarted(accepted.roomId);
@@ -960,7 +958,6 @@ export function useChatWorkspaceLifecycle({
     }),
     onSuccess: (room, _variables, context) => {
       context?.telemetry?.succeeded({ roomId: room.roomId });
-      setRightIndexPanel("members");
       setGroupRoomActionError("");
       syncChatRoomDetail(room);
       void chatWorkspaceCache.afterGroupRoundStopped(room.roomId);
@@ -1051,7 +1048,6 @@ export function useChatWorkspaceLifecycle({
         roomId: room.roomId,
         participantCount: room.participants.length,
       });
-      setRightIndexPanel("members");
       setGroupManageTitleDraft(room.title || "");
       setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
       setGroupManageModeDraft(room.mode || "round_robin");
@@ -1108,7 +1104,6 @@ export function useChatWorkspaceLifecycle({
     }),
     onSuccess: (room, _variables, context) => {
       context?.telemetry?.succeeded({ roomId: room.roomId });
-      setRightIndexPanel("members");
       setGroupRoomActionError("");
       syncChatRoomDetail(room);
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
