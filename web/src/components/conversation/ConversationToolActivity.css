@@ -1,15 +1,6 @@
-.vui-components-conversation-tool-activity.itemChevron {
-  transform: rotate(-90deg);
-  transform-origin: center;
-}
-
 .vui-components-conversation-tool-activity.activityChevron {
   transform: rotate(-90deg);
   transform-origin: center;
-}
-
-details[open] > summary .vui-components-conversation-tool-activity.itemChevron {
-  transform: rotate(0deg);
 }
 
 details[open] > summary .vui-components-conversation-tool-activity.activityChevron {

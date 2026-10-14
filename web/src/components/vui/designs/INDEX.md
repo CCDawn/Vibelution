@@ -137,6 +137,7 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| `ConversationToolActivity` | [product/conversation-process.md](./product/conversation-process.md#conversationtoolactivity) |
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |
 | `ChatGroupArtifactDialog` | [product/conversation.md](./product/conversation.md#chatgroupartifactdialog) |
 | `ChatSessionBrowser` | [product/conversation.md](./product/conversation.md#chatsessionbrowser) |

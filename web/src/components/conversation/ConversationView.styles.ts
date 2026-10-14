@@ -474,7 +474,7 @@ backToBottomButton:
     "vui-components-conversationview codexTranscriptReasoningCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-1 text-vui-sm leading-[var(--vui-line-readable)]",
   // Native thought header: icon + title only (no collapse chevron column).
   codexTranscriptReasoningHeader:
-    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !bg-none !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!bg-none hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptReasoningHeaderBody:
     "vui-components-conversationview codexTranscriptReasoningHeaderBody min-w-0 overflow-hidden text-left",
   codexTranscriptReasoningTitleRow:
@@ -1264,7 +1264,7 @@ timeline:
   timelineHistoryGate:
     "vui-components-conversationview timelineHistoryGate min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineThoughtHeader:
-    "vui-components-conversationview timelineThoughtHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview timelineThoughtHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !bg-none !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!bg-none hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   timelineThoughtInlinePreview:
     "vui-components-conversationview timelineThoughtInlinePreview min-w-0 flex-1 truncate text-vui-sm font-normal leading-[1.42] text-[var(--fg-tertiary)]",
   timelineOperationCell:
