@@ -24,6 +24,7 @@ type SupervisedApprovalDecisionPanelProps = {
   lang: "zh" | "en";
   pending: boolean;
   compact?: boolean;
+  sidebar?: boolean;
   hideActions?: boolean;
   error?: string;
   onAction: (runId: string, action: SupervisedApprovalAction) => void;
@@ -79,6 +80,7 @@ export function SupervisedApprovalDecisionPanel({
   lang,
   pending,
   compact = false,
+  sidebar = false,
   hideActions = false,
   error = "",
   onAction,
@@ -93,23 +95,7 @@ export function SupervisedApprovalDecisionPanel({
     ? lang === "zh" ? "治理动作正在执行，请等待状态刷新。" : "Governance action is running; wait for state refresh."
     : model.primaryActionReason || primaryActionState?.reason || "";
 
-  const actionBar = (
-      <footer className={styles.actionBar}>
-        <span className={styles.runtimeEffect}>
-          {model.runtimeEffect === "applied" || model.runtimeEffect === "rolled_back"
-            ? <CheckCircle2 size={14} aria-hidden="true" />
-            : model.runtimeEffect === "activating" || model.runtimeEffect === "rollback_activating"
-              ? <LoaderCircle size={14} aria-hidden="true" />
-              : <AlertTriangle size={14} aria-hidden="true" />}
-          {model.runtimeEffectLabel}
-        </span>
-        <div className={styles.actionButtons}>
-        {model.phase === "blocked" && run?.candidateAvailability?.status === "unavailable" && onPrepareRerun ? (
-          <VButton variant="primary" isDisabled={pending} onPress={() => onPrepareRerun(run)}>
-            {lang === "zh" ? "按本轮配置重新准备" : "Prepare a new run with these settings"}
-          </VButton>
-        ) : null}
-        {model.secondaryActions.map((item) => {
+  const secondaryActionButtons = model.secondaryActions.map((item) => {
           const state = run?.actionStates?.[actionStateKey(item.action)];
           return (
             <VButton
@@ -123,8 +109,8 @@ export function SupervisedApprovalDecisionPanel({
               {item.label}
             </VButton>
           );
-        })}
-        {model.primaryAction && run ? (
+        });
+  const primaryActionButton = (model.primaryAction && run ? (
           <VButton
             type="button"
             variant={model.primaryAction === "rollback" ? "danger" : "primary"}
@@ -145,18 +131,36 @@ export function SupervisedApprovalDecisionPanel({
                 ? lang === "zh" ? "已生效" : "Applied"
               : lang === "zh" ? "暂无可执行动作" : "No action available"}
           </VChip>
-        )}
+        ));
+
+  const actionBar = (
+      <footer className={styles.actionBar}>
+        <span className={styles.runtimeEffect}>
+          {model.runtimeEffect === "applied" || model.runtimeEffect === "rolled_back"
+            ? <CheckCircle2 size={14} aria-hidden="true" />
+            : model.runtimeEffect === "activating" || model.runtimeEffect === "rollback_activating"
+              ? <LoaderCircle size={14} aria-hidden="true" />
+              : <AlertTriangle size={14} aria-hidden="true" />}
+          {model.runtimeEffectLabel}
+        </span>
+        <div className={sidebar ? styles.sidebarActionButtons : styles.actionButtons}>
+        {model.phase === "blocked" && run?.candidateAvailability?.status === "unavailable" && onPrepareRerun ? (
+          <VButton variant="primary" isDisabled={pending} onPress={() => onPrepareRerun(run)}>
+            {lang === "zh" ? "按本轮配置重新准备" : "Prepare a new run with these settings"}
+          </VButton>
+        ) : null}
+        {sidebar ? <>{primaryActionButton}{secondaryActionButtons}</> : <>{secondaryActionButtons}{primaryActionButton}</>}
         </div>
       </footer>
   );
   if (compact) {
     return (
-      <section className={styles.compactPanel} aria-label={lang === "zh" ? "本轮审批与状态" : "Run approval and status"} aria-busy={pending}>
-        <div className={styles.compactSummary}>
+      <section className={sidebar ? styles.sidebarPanel : styles.compactPanel} aria-label={lang === "zh" ? "本轮审批与状态" : "Run approval and status"} aria-busy={pending}>
+        <div className={sidebar ? styles.sidebarSummary : styles.compactSummary}>
           <strong>{model.headline}</strong>
           <span>{lang === "zh" ? "评分" : "Score"} {formatScore(model.metrics.baselineScore)} → {formatScore(model.metrics.candidateScore)}</span>
         </div>
-        {model.reason ? <p className={styles.compactReason}>{model.reason}</p> : null}
+        {model.reason ? <p className={sidebar ? styles.sidebarReason : styles.compactReason}>{model.reason}</p> : null}
         {error ? <p role="alert" className={styles.error}>{error}</p> : null}
         {!hideActions ? actionBar : null}
       </section>

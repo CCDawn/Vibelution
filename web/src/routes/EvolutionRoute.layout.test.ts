@@ -135,7 +135,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("evidenceTabs={[");
     expect(supervisedConversationWorkspaceSource).toContain('data-vui-region="supervised-conversation-workspace"');
     expect(supervisedConversationWorkspaceSource).toContain("{conversation}");
-    expect(supervisedConversationWorkspaceSource).toContain("const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;");
+    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = !narrow;");
     expect(supervisedConversationWorkspaceSource).toContain("onPress={onNew}");
     expect(supervisedConversationWorkspaceSource).toContain("onPress={onSource}");
     expect(routeSource).not.toContain("liveLaunchCollapsed");
@@ -604,7 +604,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedConversationWorkspaceSource).toContain("<div className={styles.setupFrame}>{setup}</div>");
     expect(supervisedConversationWorkspaceStyles.mainPane).toContain("flex-1");
     expect(supervisedConversationWorkspaceStyles.conversationFrame).toContain("flex-1");
-    expect(supervisedConversationWorkspaceSource).toContain("const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;");
+    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = !narrow;");
   });
 
   it("keeps the setup picker usable at narrow widths with a visible start action", () => {
@@ -613,7 +613,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedLiveSetupPanelStyles.sourceGroups).toContain("overflow-y-auto");
     expect(supervisedLiveSetupPanelStyles.footer).toContain("sticky bottom-0");
     expect(supervisedLiveSetupPanelStyles.footerButton).toContain("!min-h-11");
-    expect(supervisedConversationWorkspaceStyles.phaseSelect).toContain("max-[879px]:[&_button]:!min-h-11");
+    expect(supervisedConversationWorkspaceStyles.phaseSelect).toContain("max-[899px]:[&_button]:!min-h-11");
   });
 
   it("shows a compact supervised workflow rail and center overview fallback", () => {
@@ -954,8 +954,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("opens run evidence beside the main conversation on wide screens", () => {
-    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = showEvidence && workspaceWidth >= 960;");
-    expect(supervisedConversationWorkspaceSource).toContain("aside={desktopEvidence}");
+    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = !narrow;");
+    expect(supervisedConversationWorkspaceSource).toContain("aside={showDesktopEvidence ? resultPanel : undefined}");
     expect(supervisedConversationWorkspaceSource).toContain("resize={LIVE_RUN_RESIZE}");
     expect(supervisedConversationWorkspaceStyles.splitWorkspace).toContain("!overflow-hidden");
     expect(supervisedConversationWorkspaceStyles.mainPane).toContain("flex-1");
@@ -966,9 +966,9 @@ describe("EvolutionRoute library user flow contract", () => {
   it("uses the shared resizable workspace for optional run evidence", () => {
     expect(supervisedConversationWorkspaceSource).toContain("VSplitWorkspace");
     expect(supervisedConversationWorkspaceSource).toContain("const LIVE_RUN_PANE = {");
-    expect(supervisedConversationWorkspaceSource).toContain("defaultWidth: 400");
-    expect(supervisedConversationWorkspaceSource).toContain("minWidth: 320");
-    expect(supervisedConversationWorkspaceSource).toContain("maxWidth: 560");
+    expect(supervisedConversationWorkspaceSource).toContain("defaultWidth: 340");
+    expect(supervisedConversationWorkspaceSource).toContain("minWidth: 300");
+    expect(supervisedConversationWorkspaceSource).toContain("maxWidth: 440");
     expect(supervisedConversationWorkspaceSource).not.toContain("PaneCollapseHandle");
   });
 
@@ -988,8 +988,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("moves evidence into a narrow-screen dialog while keeping the conversation primary", () => {
-    expect(supervisedConversationWorkspaceSource).toContain("const narrow = workspaceWidth < 880;");
-    expect(supervisedConversationWorkspaceSource).toContain("const showMobileEvidence = showEvidence && !showDesktopEvidence;");
+    expect(supervisedConversationWorkspaceSource).toContain("const narrow = workspaceWidth < 900;");
+    expect(supervisedConversationWorkspaceSource).toContain("const showMobileEvidence = narrow && evidenceOpen;");
     expect(supervisedConversationWorkspaceSource).toContain("open={showMobileEvidence}");
     expect(supervisedConversationWorkspaceStyles.mobileEvidenceDialog).toContain("!w-[min(88vw,420px)]");
     expect(supervisedConversationWorkspaceStyles.mobileEvidenceBody).toContain("overflow-hidden");
@@ -1026,8 +1026,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("shows real changed-file evidence only when a run exists", () => {
-    expect(supervisedConversationWorkspaceSource).toContain("isDisabled={!hasRun || evidenceTabs.length === 0}");
-    expect(supervisedConversationWorkspaceSource).toContain("const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;");
+    expect(supervisedConversationWorkspaceSource).toContain('data-vui-region="evolution-current-actions"');
+    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = !narrow;");
     expect(routeSource).toContain("(reviewCandidateWorktree?.mergeAnalysis?.changedFiles ?? []).map((file)");
     expect(routeSource).toContain("file.path");
     expect(routeSource).not.toContain("SupervisedWorktreeReviewPanel");

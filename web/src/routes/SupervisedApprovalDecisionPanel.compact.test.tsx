@@ -110,6 +110,8 @@ async function renderPanel(
   run: SupervisedWorktreeRun,
   options: {
     compact?: boolean;
+    sidebar?: boolean;
+    pending?: boolean;
     hideActions?: boolean;
     onAction: (runId: string, action: SupervisedApprovalAction) => void;
   },
@@ -119,8 +121,9 @@ async function renderPanel(
       <SupervisedApprovalDecisionPanel
         run={run}
         lang="zh"
-        pending={false}
+        pending={options.pending ?? false}
         compact={options.compact}
+        sidebar={options.sidebar}
         hideActions={options.hideActions}
         onAction={options.onAction}
       />,
@@ -171,6 +174,25 @@ describe("SupervisedApprovalDecisionPanel compact mode", () => {
 
     await act(async () => approveButton?.click());
     expect(onAction).toHaveBeenCalledExactlyOnceWith("swte-compact-test", "approve_review");
+  });
+
+  it("places the sidebar primary action first and preserves server permission and pending guards", async () => {
+    const onAction = vi.fn();
+    await renderPanel(worktreeRun(), { compact: true, sidebar: true, onAction });
+    expect(container.querySelector("button")?.textContent).toContain("批准并受控合入");
+    await act(async () => container.querySelector("button")?.click());
+    expect(onAction).toHaveBeenCalledExactlyOnceWith("swte-compact-test", "approve_review");
+
+    onAction.mockClear();
+    await renderPanel(worktreeRun(), { compact: true, sidebar: true, pending: true, onAction });
+    expect(Array.from(container.querySelectorAll("button")).every((button) => button.disabled)).toBe(true);
+    await act(async () => container.querySelector("button")?.click());
+    expect(onAction).not.toHaveBeenCalled();
+
+    await renderPanel(worktreeRun({ actionStates: undefined }), { compact: true, sidebar: true, onAction });
+    expect(container.querySelector("button")?.disabled).toBe(true);
+    await act(async () => container.querySelector("button")?.click());
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it("omits all governance actions in hideActions mode", async () => {

@@ -32,6 +32,7 @@ export type SupervisedAgentConversationPanelProps = {
   taskSummary: string;
   supplementalContent?: ReactNode;
   isLive: boolean;
+  runStatus?: string;
   compact?: boolean;
   lang: "zh" | "en";
   roleLabel: (role: string | undefined) => string;
@@ -142,6 +143,7 @@ export function SupervisedAgentConversationPanel({
   taskSummary,
   supplementalContent,
   isLive,
+  runStatus,
   compact = false,
   lang,
   roleLabel,
@@ -196,10 +198,15 @@ export function SupervisedAgentConversationPanel({
   const selectedActive = isLive && selectedRole === activeRole;
   const selectedTabId = `supervised-agent-tab-${selectedRole}`;
   const selectedPanelId = `supervised-agent-panel-${selectedRole}`;
-  const emptyTitle = sessionId
+  const endedWithoutSession = !sessionId && ["failed", "cancelled", "canceled", "stopped", "done", "completed"].includes(String(runStatus || "").toLowerCase());
+  const emptyTitle = endedWithoutSession
+    ? lang === "zh" ? "本阶段没有会话记录" : "No conversation record for this phase"
+    : sessionId
     ? lang === "zh" ? `${assistantDisplayName} 暂无可展示消息` : `${assistantDisplayName} has no visible messages`
     : lang === "zh" ? `${assistantDisplayName} 尚未启动` : `${assistantDisplayName} has not started`;
-  const emptyCopy = sessionId
+  const emptyCopy = endedWithoutSession
+    ? lang === "zh" ? "本轮已结束，该阶段没有原生会话记录。请在右侧查看运行结果、改动与可执行操作。" : "This run ended without a canonical conversation record for this phase. Review its results, changes and available actions in the results panel."
+    : sessionId
     ? lang === "zh"
       ? "会话已建立，等待该 Agent 产生第一条可展示消息。"
       : "The session exists and is waiting for its first visible message."
