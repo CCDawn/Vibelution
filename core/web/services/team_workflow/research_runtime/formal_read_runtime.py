@@ -86,6 +86,17 @@ def get_query_service() -> WorkflowQueryService:
         return _QUERY
 
 
+def release_formal_read_runtime(store: WorkflowLedgerStore) -> None:
+    """Detach only the facade owned by the store being closed."""
+    global _QUERY, _REPLAY, _STREAM, _STORE
+    with _LOCK:
+        if _STORE is store:
+            _QUERY = None
+            _REPLAY = None
+            _STREAM = None
+            _STORE = None
+
+
 def get_event_replay_service() -> WorkflowEventReplayService:
     with _LOCK:
         if _REPLAY is None:

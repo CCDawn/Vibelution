@@ -210,7 +210,8 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
   const [homeView, setHomeView] = useState<"canvas" | "conversation">(props.workspace ? "canvas" : "conversation");
   const nativeConversationOpen = Boolean(props.workspace && props.conversationRequested
-    && searchParams.get("teamConversationTeamId") === teamId);
+    && searchParams.get("teamConversationTeamId") === teamId
+    && ["group", "member"].includes(searchParams.get("teamConversation") || ""));
   const memberConversation = nativeConversationOpen && searchParams.get("teamConversation") === "member";
   const selectedMember = memberConversation ? selectedTeam?.members.find((member) => member.memberId === searchParams.get("teamMember")) : undefined;
   const selectedMemberSessionId = selectedMember ? teamMemberSessionId(selectedMember, linkedRoomDetail) : "";
@@ -225,7 +226,10 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
     if (nextView === "conversation") {
       next.set("teamConversationTeamId", teamId); next.set("teamConversation", "group");
       if (linkedChatRoomId) next.set("room", linkedChatRoomId);
-    } else { next.delete("teamConversationTeamId"); next.delete("teamConversation"); next.delete("returnTo"); next.delete("returnLabel"); }
+    } else {
+      next.set("teamConversationTeamId", teamId); next.set("teamConversation", "canvas");
+      next.delete("returnTo"); next.delete("returnLabel");
+    }
     setSearchParams(next);
   }
   useEffect(() => {

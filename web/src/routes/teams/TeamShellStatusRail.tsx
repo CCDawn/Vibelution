@@ -95,7 +95,7 @@ export function TeamShellStatusRail({
                 >
                   <strong className={styles.stageTitle}>{item.label}</strong>
                   <VStatusChip tone={item.statusTone}>{item.status}</VStatusChip>
-                  <span className={styles.nodeAgent}>{item.agent}</span>
+                  {item.agent !== item.label ? <span className={styles.nodeAgent}>{item.agent}</span> : null}
                 </VNativeButton>
               );
             })}
