@@ -15,6 +15,17 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: personal-assistant
+    description: "Personal assistant identity, public overview, governed tools and native Session reuse."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/web/services/personal_assistant_service.py"
+      - "core/web/routes/personal_assistant.py"
+      - "tools/personal_assistant_tools.py"
+      - "tests/test_personal_assistant_*.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_personal_assistant_service.py tests/test_personal_assistant_api.py tests/test_personal_assistant_tools.py tests/test_session_agent_runtime.py tests/test_tool_authorization_execution.py -q"
   - id: owned-runtime-shutdown
     description: "Physical worker retirement and bounded backend shutdown/reopen."
     executionLayers:

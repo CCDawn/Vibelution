@@ -4,6 +4,8 @@ export const IPC_CHANNELS = {
   focusWorkbenchWindow: "launcher:focus-workbench-window",
   openConversationFromPet: "pet:open-conversation",
   controlDesktopPet: "pet:settings-control",
+  setDesktopPetExpanded: "pet:window-expanded",
+  getDesktopAssistantContext: "pet:assistant-context",
   beginDesktopPetWindowDrag: "pet:window-drag-begin",
   moveDesktopPetWindowDrag: "pet:window-drag-move",
   endDesktopPetWindowDrag: "pet:window-drag-end",

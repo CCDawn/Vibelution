@@ -1,5 +1,13 @@
 # VUI Component Index
 
+| Component | Design |
+| --- | --- |
+| `PersonalAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantroute) |
+| `DesktopAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantroute) |
+| `PersonalAssistantOverview` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantoverview) |
+| `PersonalAssistantState` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantstate) |
+| `DesktopAssistantReturnNotice` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantreturnnotice) |
+
 选型与反冗余入口。路径均为 `designs/` 相对路径。
 
 > **设计使用约定：** 点开任一组件说明后，先读 **功能 → 适用范围 → 使用方式** 三节，再决定是否采用或扩展。禁止在未读对应说明时新建平行组件。

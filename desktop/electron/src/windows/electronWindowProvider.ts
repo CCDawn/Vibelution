@@ -517,6 +517,36 @@ export class ElectronWindowProvider {
     return true;
   }
 
+  /** Deliver only to the unique live, registered workbench for this origin. */
+  focusAndSendToWorkbenchOrigin(origin: string, channel: string, payload: unknown): boolean {
+    this.reconcileCurrentWorkbenchWindow();
+    const matchesOrigin = (window: ElectronWindowLike | null, readyUrl: string | null): window is ElectronWindowLike => {
+      if (!window || window.isDestroyed() || !readyUrl || typeof window.webContents.send !== "function") return false;
+      try {
+        return new URL(readyUrl).origin === origin && new URL(window.webContents.getURL()).origin === origin;
+      } catch {
+        return false;
+      }
+    };
+    const matches = new Map<ElectronWindowLike, string>();
+    if (matchesOrigin(this.workbenchWindow, this.workbenchReadyUrl)) {
+      matches.set(this.workbenchWindow, this.workbenchReadyUrl!);
+    }
+    for (const entry of this.instanceWindows.values()) {
+      if (matchesOrigin(entry.window, entry.readyUrl)) matches.set(entry.window, entry.readyUrl!);
+    }
+    if (matches.size !== 1) return false;
+    const [[window, readyUrl]] = matches;
+    try {
+      presentElectronWindow(window);
+      if (!matchesOrigin(window, readyUrl)) return false;
+      window.webContents.send!(channel, payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   sendToLauncher(channel: string, payload: unknown): boolean {
     const window = this.launcherWindow;
     if (!window || window.isDestroyed() || typeof window.webContents.send !== "function") {

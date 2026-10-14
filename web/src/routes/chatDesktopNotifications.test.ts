@@ -9,7 +9,28 @@ import {
   sanitizeSessionLabel,
   subscribeCompanionNotificationOpened,
   subscribeConversationNotificationOpened,
+  subscribeDesktopAssistantOpened,
 } from "./chatDesktopNotifications";
+
+describe("desktop assistant notification ownership", () => {
+  it("routes only the native assistant source to its exclusive subscriber", () => {
+    const listeners: Array<(value: unknown) => void> = [];
+    const bridge = { onConversationNotificationOpened: (listener: (value: unknown) => void) => { listeners.push(listener); return () => undefined; } };
+    const ordinary = vi.fn(), assistant = vi.fn(), companion = vi.fn();
+    subscribeConversationNotificationOpened(bridge, ordinary);
+    subscribeDesktopAssistantOpened(bridge, assistant);
+    subscribeCompanionNotificationOpened(bridge, companion);
+    listeners.forEach(listener => listener({ schemaVersion: 1, sessionId: "personal-session", source: "desktop-assistant" }));
+    expect(ordinary).not.toHaveBeenCalled(); expect(assistant).toHaveBeenCalledWith("personal-session");
+    assistant.mockClear();
+    for (const source of [undefined, "desktop-pet", "/arbitrary-path"]) listeners.forEach(listener => listener({ schemaVersion: 1, sessionId: "ordinary-session", source }));
+    expect(ordinary).toHaveBeenCalledTimes(3); expect(assistant).not.toHaveBeenCalled();
+    listeners.forEach(listener => listener({ schemaVersion: 1, sessionId: "../invalid", source: "desktop-assistant" }));
+    expect(assistant).not.toHaveBeenCalled();
+    listeners.forEach(listener => listener({ schemaVersion: 1, sessionId: "personal-session", companionAgentId: "person", source: "desktop-assistant" }));
+    expect(companion).not.toHaveBeenCalled(); expect(assistant).not.toHaveBeenCalled();
+  });
+});
 
 function assistantDelta(
   patch: Partial<Extract<SessionStreamEvent, { type: "assistant_delta" }>> = {},

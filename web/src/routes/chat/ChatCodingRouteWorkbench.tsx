@@ -773,6 +773,9 @@ export function ChatCodingRouteWorkbench() {
   }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
   const verifiedCompanionMode = Boolean(activeCompanion);
   const financeSurface = location.pathname === "/finance";
+  // Presentation only: the outer assistant route has already verified the canonical Agent/Session binding.
+  const personalAssistantSurface = location.pathname === "/personal-assistant" || location.pathname === "/desktop-assistant";
+  const embeddedSurface = financeSurface || personalAssistantSurface;
   const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
@@ -1040,7 +1043,7 @@ export function ChatCodingRouteWorkbench() {
     requestedSessionId,
     requestedRoomId,
     showArchivedSessions,
-    sessionDirectoryEnabled: !financeSurface,
+    sessionDirectoryEnabled: !embeddedSurface,
   });
 
   const archivedSessions = useMemo(
@@ -1212,13 +1215,13 @@ export function ChatCodingRouteWorkbench() {
   useEffect(() => {
     const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
     const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoomQuery.data);
-    if ((financeSurface || sessionsQuery.data) && directReady && groupReady) {
+    if ((embeddedSurface || sessionsQuery.data) && directReady && groupReady) {
       setChatStartupDataReady(true);
     }
   }, [
     activeGroupRoomQuery.data,
     activeSessionId,
-    financeSurface,
+    embeddedSurface,
     standardGroupRoomActive,
     sessionDetailQuery.data,
     sessionsQuery.data,
@@ -1608,7 +1611,7 @@ export function ChatCodingRouteWorkbench() {
   const activePrefetchTargetRef = useRef(activeSessionId);
   activePrefetchTargetRef.current = activeSessionId;
   useEffect(() => {
-    if (financeSurface || groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
+    if (embeddedSurface || groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
       return;
     }
     const neighborIds = resolveNeighborSessionIdsForPrefetch({
@@ -1651,7 +1654,7 @@ export function ChatCodingRouteWorkbench() {
         window.clearTimeout(handle as number);
       }
     };
-  }, [activeSessionId, financeSurface, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
+  }, [activeSessionId, embeddedSurface, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
 
 
   const workspace = activeSessionId
@@ -1667,7 +1670,7 @@ export function ChatCodingRouteWorkbench() {
   // Group rooms share the ordinary right rail (review/git, file preview,
   // devtools); session-scoped kinds (side chats, subagent directory) stay
   // hidden through the launcher filter, and rail state keys off the room id.
-  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface;
+  const ordinaryChangeRail = !verifiedCompanionMode && !embeddedSurface;
   const {
     fileContentQuery,
     changeRail,
@@ -1696,7 +1699,7 @@ export function ChatCodingRouteWorkbench() {
     group: groupPanelActive,
   });
 
-  const sessionBrowserVisible = sessionBrowserOpen && !financeSurface && !verifiedCompanionMode && !groupPanelActive;
+  const sessionBrowserVisible = sessionBrowserOpen && !embeddedSurface && !verifiedCompanionMode && !groupPanelActive;
   const {
     layoutRef,
     dragState,
@@ -1722,7 +1725,7 @@ export function ChatCodingRouteWorkbench() {
   } = useChatWorkbenchLayout({
     standardGroupRoomActive,
     statusRailEnabled: !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))),
-    indexRailEnabled: !financeSurface,
+    indexRailEnabled: !embeddedSurface,
   });
   useEffect(() => {
     if (!ordinaryChangeRail) {
@@ -3689,7 +3692,7 @@ export function ChatCodingRouteWorkbench() {
       />
       ) : null}
       leftResizeHandle={
-      financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
+      embeddedSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
@@ -3723,16 +3726,16 @@ export function ChatCodingRouteWorkbench() {
             styles={styles}
             lang={lang}
             agentSessionLabel={t("agentSession")}
-            chatReturnTarget={chatReturnTarget}
+            chatReturnTarget={personalAssistantSurface ? null : chatReturnTarget}
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            showSessionTabs={!financeSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
-            showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}
+            showSessionTabs={!embeddedSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+            showAgentFallbackTab={!embeddedSurface && !verifiedCompanionMode}
             companionHeader={verifiedCompanionMode && activeCompanion ? (
               <CompanionConversationHeader companion={activeCompanion} lang={lang} />
             ) : null}
-            conversationIndexControl={!financeSurface && !verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
+            conversationIndexControl={!embeddedSurface && !verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
               <VIconButton
                 tooltip=""
                 id="chat-conversation-index-toggle"
@@ -3748,7 +3751,7 @@ export function ChatCodingRouteWorkbench() {
               />
             ) : null}
             workspaceActiveTab={conversationWorkspaceTab}
-            sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
+            sessionBrowserControl={!embeddedSurface && !verifiedCompanionMode && !groupPanelActive ? (
               <VIconButton
                 label={lang === "zh" ? "浏览会话" : "Browse sessions"}
                 icon={<List size={16} strokeWidth={1.5} aria-hidden="true" />}
@@ -3765,7 +3768,7 @@ export function ChatCodingRouteWorkbench() {
               presentation="menu"
               isDisabled={conversationModel.messages.length === 0}
             /> : undefined}
-            leftOverlayVisible={responsiveLayout.leftVisible}
+            leftOverlayVisible={personalAssistantSurface || responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
             statusRailAvailable={verifiedCompanionMode}
@@ -4048,7 +4051,7 @@ export function ChatCodingRouteWorkbench() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       />) : null
       }
-      conversationIndex={financeSurface ? null : verifiedCompanionMode ? (
+      conversationIndex={embeddedSurface ? null : verifiedCompanionMode ? (
       <CompanionPersonRail
         className={conversationIndexPaneClassName}
         collapsed={conversationIndexCollapsed}

@@ -66,6 +66,8 @@ const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) =>
 const MemoryRoute = lazyRoute(loadMemoryRouteChunk);
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
 const DesktopPetRoute = lazyRoute(() => import("../routes/desktopPet/DesktopPetRoute").then((module) => ({ default: module.DesktopPetRoute })));
+const DesktopAssistantRoute = lazyRoute(() => import("../routes/desktopPet/DesktopAssistantRoute").then((module) => ({ default: module.DesktopAssistantRoute })));
+const PersonalAssistantRoute = lazyRoute(() => import("../routes/PersonalAssistantRoute").then((module) => ({ default: module.PersonalAssistantRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
 const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module) => ({ default: module.SkillsRoute })));
@@ -149,6 +151,10 @@ function guardedLazyElement(
 
 export const router = createBrowserRouter([
   {
+    path: "/desktop-assistant",
+    ...guardedLazyElement(<DesktopAssistantRoute />, "workbench"),
+  },
+  {
     path: "/desktop-pet",
     ...guardedLazyElement(<DesktopPetRoute />, "workbench"),
   },
@@ -187,6 +193,10 @@ export const router = createBrowserRouter([
       {
         path: "finance",
         ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><FinanceRoute /></WorkbenchDomainRoute>, "workbench", "finance"),
+      },
+      {
+        path: "personal-assistant",
+        ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><PersonalAssistantRoute /></WorkbenchDomainRoute>, "workbench", "chat"),
       },
       {
         path: "companions",

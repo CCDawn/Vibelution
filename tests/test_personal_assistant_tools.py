@@ -1,0 +1,344 @@
+"""Personal manager tools keep canonical identity, bounded dispatch and approval."""
+
+import json
+from functools import wraps
+
+import pytest
+from langchain_core.tools import tool
+
+from core.authorization.tool_policy_evaluator import (
+    evaluate_tool_policy,
+    normalize_legacy_tool_policy,
+)
+from core.authorization.tool_policy_models import TurnToolGrant
+from core.web.services import agent_directory_service as directory
+from core.web.services import personal_assistant_service as service
+from core.web.services import session_service, team_knowledge_service, tool_catalog
+from tests.test_financial_report_registry import definition
+from tests.test_personal_assistant_service import (
+    _corrupt_agent,
+)
+from tests.test_personal_assistant_service import (
+    finance_env as _finance_env,
+)
+from tests.test_personal_assistant_service import personal_env as _personal_env
+from tools import personal_assistant_tools as tools
+from tools import rebirth_tools
+
+finance_env = _finance_env
+personal_env = _personal_env
+MANAGE = "personal_assistant_manage_tool"
+OVERVIEW = "personal_assistant_overview_tool"
+
+
+@pytest.fixture
+def assistant_runtime(personal_env, monkeypatch):
+    row = service.create_personal_assistant()["assistant"]
+    monkeypatch.setattr(
+        directory,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": row["agentId"],
+            "sessionId": row["directSessionId"],
+        },
+    )
+    return row
+
+
+def _blocked(raw):
+    result = json.loads(raw)
+    assert result["ok"] is False and result["status"] == "blocked"
+
+
+def _forbid(*_args, **_kwargs):
+    pytest.fail("blocked tool reached a platform operation")
+
+
+@pytest.mark.parametrize("runtime", ["missing", "ordinary", "foreign_session"])
+def test_tools_reject_unbound_ordinary_and_foreign_runtime_identity(
+    personal_env, assistant_runtime, monkeypatch, runtime
+):
+    row = assistant_runtime
+    invalid = (
+        {}
+        if runtime == "missing"
+        else {
+            "agentId": personal_env["owner"]
+            if runtime == "ordinary"
+            else row["agentId"],
+            "sessionId": "foreign-session",
+        }
+    )
+    monkeypatch.setattr(directory, "current_agent_runtime", lambda: invalid)
+    monkeypatch.setattr(service, "get_platform_overview", _forbid)
+    monkeypatch.setattr(tools.operations, "agent_archive_tool", _forbid)
+    _blocked(tools.personal_assistant_overview_tool())
+    _blocked(
+        tools.personal_assistant_manage_tool("agent_archive", '{"agent_id":"other"}')
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"roleKey": "ordinary"},
+        {"primaryMode": "chat"},
+        {"status": "archived"},
+        {"metadata": {"personalAssistantProfile": "other"}},
+    ],
+)
+def test_tools_reject_tampered_profile_identity(
+    personal_env, assistant_runtime, monkeypatch, changes
+):
+    _corrupt_agent(assistant_runtime["agentId"], **changes)
+    monkeypatch.setattr(service, "get_platform_overview", _forbid)
+    _blocked(tools.personal_assistant_overview_tool())
+
+
+@pytest.mark.parametrize("corruption", ["foreign_owner", "archived"])
+def test_tools_require_actual_session_ownership_and_unarchived_row(
+    personal_env, assistant_runtime, monkeypatch, corruption
+):
+    row = assistant_runtime
+    session = session_service.load_session_chat_state(
+        personal_env["root"], row["directSessionId"]
+    )
+    if corruption == "foreign_owner":
+        session["agentId"] = session["agent_id"] = personal_env["other"]
+    else:
+        session["archive_state"] = session["archiveState"] = {"status": "archived"}
+    session_service.save_session_chat_state(
+        personal_env["root"], row["directSessionId"], session
+    )
+    monkeypatch.setattr(service, "get_platform_overview", _forbid)
+    _blocked(tools.personal_assistant_overview_tool())
+
+
+def test_tools_fail_closed_when_profile_is_no_longer_unique(
+    personal_env, assistant_runtime, monkeypatch
+):
+    directory.create_agent_instance(
+        display_name="重复个人助理",
+        primary_mode="general",
+        role_key=service.ROLE,
+        metadata={"personalAssistantProfile": service.PROFILE},
+    )
+    monkeypatch.setattr(service, "get_platform_overview", _forbid)
+    _blocked(tools.personal_assistant_overview_tool())
+
+
+def test_overview_tool_delegates_only_after_canonical_identity(
+    assistant_runtime, monkeypatch
+):
+    calls = []
+    payload = {
+        "generatedAt": "test",
+        "counts": {},
+        "agents": [],
+        "sessions": [],
+        "attention": [],
+    }
+    monkeypatch.setattr(
+        service, "get_platform_overview", lambda: calls.append(1) or payload
+    )
+    assert json.loads(tools.personal_assistant_overview_tool()) == {
+        "ok": True,
+        **payload,
+    }
+    assert calls == [1]
+
+
+@pytest.mark.parametrize(
+    "action,target,args",
+    [
+        ("agent_create", "agent_create_tool", {"display_name": "新助手"}),
+        (
+            "agent_update",
+            "agent_update_tool",
+            {"agent_id": "target", "updates_json": '{"displayName":"新名字"}'},
+        ),
+        ("agent_archive", "agent_archive_tool", {"agent_id": "target"}),
+        (
+            "session_create",
+            "session_create_tool",
+            {"title": "新会话", "agent_id": "target"},
+        ),
+        (
+            "session_update",
+            "session_update_tool",
+            {"session_id": "target", "title": "新标题"},
+        ),
+        (
+            "session_stop",
+            "session_stop_tool",
+            {"session_id": "target", "turn_id": "turn-target"},
+        ),
+        ("session_delete", "session_delete_tool", {"session_id": "target"}),
+    ],
+)
+def test_manage_uses_native_operation_signatures_and_preserves_result(
+    assistant_runtime, monkeypatch, action, target, args
+):
+    calls = []
+    original = getattr(tools.operations, target)
+    receipt = {"ok": True, "status": "native", "agentId": "target"}
+    raw_result = json.dumps(
+        {
+            **receipt,
+            "session": {"messages": ["private transcript"]},
+            "agent": {"privateMemory": "private memory"},
+        }
+    )
+
+    @wraps(original)
+    def operation(**kwargs):
+        calls.append(kwargs)
+        return raw_result
+
+    monkeypatch.setattr(tools.operations, target, operation)
+    assert (
+        json.loads(tools.personal_assistant_manage_tool(action, json.dumps(args)))
+        == receipt
+    )
+    assert calls == [args]
+    _blocked(
+        tools.personal_assistant_manage_tool(
+            action, json.dumps({**args, "command": "arbitrary command"})
+        )
+    )
+    assert calls == [args]
+
+
+@pytest.mark.parametrize(
+    "action,arguments",
+    [
+        ("shell", "{}"),
+        ("agent_purge", "{}"),
+        ("session_restore", "{}"),
+        ("agent_archive", "[]"),
+        ("agent_archive", "{invalid"),
+        ("agent_archive", '{"padding":"' + "x" * 16001 + '"}'),
+    ],
+)
+def test_manage_rejects_unbounded_actions_or_bad_arguments_before_dispatch(
+    assistant_runtime, monkeypatch, action, arguments
+):
+    monkeypatch.setattr(tools.operations, "agent_archive_tool", _forbid)
+    _blocked(tools.personal_assistant_manage_tool(action, arguments))
+
+
+def test_knowledge_acl_uses_native_current_actor_without_spoofable_argument(
+    assistant_runtime, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "grant_knowledge_base_access",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or {"granted": True},
+    )
+    arguments = {
+        "knowledge_base_id": "base",
+        "target_agent_id": "target",
+        "permissions_json": '["read"]',
+    }
+    result = json.loads(
+        tools.personal_assistant_manage_tool(
+            "knowledge_acl_grant", json.dumps(arguments)
+        )
+    )
+    assert result["ok"] is True, result
+    assert calls == [
+        (
+            ("base", "target"),
+            {"permissions": ["read"], "actor_agent_id": assistant_runtime["agentId"]},
+        )
+    ]
+    _blocked(
+        tools.personal_assistant_manage_tool(
+            "knowledge_acl_grant",
+            json.dumps({**arguments, "actor_agent_id": "foreign-agent"}),
+        )
+    )
+    assert len(calls) == 1
+
+
+def test_restart_uses_native_rebirth_and_current_session_only(
+    assistant_runtime, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        rebirth_tools,
+        "trigger_self_restart_tool",
+        lambda **kwargs: calls.append(kwargs) or '{"ok":true,"status":"scheduled"}',
+    )
+    result = tools.personal_assistant_manage_tool(
+        "restart", '{"reason":"用户要求重启"}'
+    )
+    assert json.loads(result)["status"] == "scheduled"
+    assert calls == [
+        {"reason": "用户要求重启", "sessionId": assistant_runtime["directSessionId"]}
+    ]
+    for args in (
+        {"reason": ""},
+        {"reason": 1},
+        {"reason": "重启", "sessionId": "foreign"},
+    ):
+        _blocked(tools.personal_assistant_manage_tool("restart", json.dumps(args)))
+    assert len(calls) == 1
+
+
+def test_manage_registered_descriptor_always_requires_native_approval():
+    wrapper = definition(
+        "tools/Key_Tools.py",
+        MANAGE,
+        {
+            "tool": tool,
+            "_personal_assistant_manage_impl": tools.personal_assistant_manage_tool,
+        },
+    )
+    schema = wrapper.args_schema.model_json_schema()
+    assert set(schema["properties"]) == {"action", "arguments_json"}
+    descriptor = tool_catalog.build_tool_descriptor(MANAGE, args_schema=schema)
+    assert descriptor.approval == "always" and descriptor.risk == "destructive"
+    assert descriptor.concurrency == "serialized"
+    policy = normalize_legacy_tool_policy(
+        {
+            "allowedTools": [MANAGE],
+            "mutationAccess": "controlled",
+            "networkAccess": "none",
+        },
+        registered_tool_names=[MANAGE],
+        policy_id="personal-test",
+    )
+    decision = evaluate_tool_policy(
+        agent_id="personal-test",
+        policy=policy,
+        grant=TurnToolGrant(
+            turn_id="turn-test",
+            source="session",
+            allowed_capabilities=descriptor.capabilities,
+            denied_tools=(),
+            approval_mode="on_request",
+        ),
+        descriptors=[descriptor],
+        registry_version=1,
+        registry_fingerprint="test",
+    )
+    assert decision.approval_requirements == ((MANAGE, "always", "destructive"),)
+
+
+def test_overview_registered_descriptor_has_no_mutation_or_approval():
+    wrapper = definition(
+        "tools/Key_Tools.py",
+        OVERVIEW,
+        {
+            "tool": tool,
+            "_personal_assistant_overview_impl": tools.personal_assistant_overview_tool,
+        },
+    )
+    assert wrapper.args_schema.model_json_schema()["properties"] == {}
+    descriptor = tool_catalog.build_tool_descriptor(
+        OVERVIEW, args_schema=wrapper.args_schema.model_json_schema()
+    )
+    assert descriptor.risk == "read" and descriptor.approval == "never"
+    assert "read_only" in descriptor.capabilities

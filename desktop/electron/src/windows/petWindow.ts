@@ -6,6 +6,7 @@ import type { DesktopPaths } from "../paths.js";
 import { resolvePreloadPath } from "../paths.js";
 import {
   clampPetWindowBounds,
+  desktopPetWindowExpandedBounds,
   defaultPetWindowBounds,
   type PetWindowBounds,
 } from "./petWindowBounds.js";
@@ -14,7 +15,7 @@ const PET_BOUNDS_FILE = "desktop-pet-window.json";
 
 export function desktopPetWindowUrl(workbenchUrl: string): string {
   const url = new URL(workbenchUrl);
-  url.pathname = "/desktop-pet";
+  url.pathname = url.pathname === "/desktop-assistant" ? "/desktop-assistant" : "/desktop-pet";
   url.search = "";
   url.hash = "";
   return url.toString();
@@ -22,7 +23,7 @@ export function desktopPetWindowUrl(workbenchUrl: string): string {
 
 export function isDesktopPetWindowUrl(rawUrl: string): boolean {
   try {
-    return new URL(rawUrl).pathname === "/desktop-pet";
+    return ["/desktop-pet", "/desktop-assistant"].includes(new URL(rawUrl).pathname);
   } catch {
     return false;
   }
@@ -61,6 +62,12 @@ export function createPetWindow(_url: string, paths: DesktopPaths): BrowserWindo
     },
   });
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  window.webContents.on("did-navigate", (_event, url) => {
+    // A mode switch always starts collapsed; expanded sizes are never persisted.
+    if (!isDesktopPetWindowUrl(url) || window.isDestroyed()) return;
+    const current = window.getBounds();
+    window.setBounds(desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, false), false);
+  });
   window.on("moved", () => persistBounds(boundsPath, window.getBounds()));
   return window;
 }

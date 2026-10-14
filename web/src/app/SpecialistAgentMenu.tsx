@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { VButton, VDropdownMenu } from "../components/vui";
 
-export function specialistAgentSection(pathname: string): "finance" | "companions" | "" {
+export function specialistAgentSection(pathname: string): "finance" | "companions" | "personal-assistant" | "" {
   if (pathname === "/finance" || pathname.startsWith("/finance/")) return "finance";
   if (pathname === "/companions" || pathname.startsWith("/companions/")) return "companions";
+  if (pathname === "/personal-assistant") return "personal-assistant";
   return "";
 }
 
@@ -33,6 +34,8 @@ export function SpecialistAgentMenu({ lang, enabled, className, activeClassName,
         icon: section === "finance" ? <Check size={14} /> : undefined, onSelect: openFinance },
       { id: "companions", label: lang === "zh" ? "虚拟人智能体" : "Virtual-human companions",
         icon: section === "companions" ? <Check size={14} /> : undefined, onSelect: () => choose("/companions") },
+      { id: "personal-assistant", label: lang === "zh" ? "个人助理" : "Personal assistant",
+        icon: section === "personal-assistant" ? <Check size={14} /> : undefined, onSelect: () => choose("/personal-assistant") },
     ]}
   />;
 }
