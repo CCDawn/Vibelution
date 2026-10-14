@@ -934,7 +934,7 @@ Settled ```mermaid fence 的显式渲染块：平时就是明文 + 语言标签 
 - 不做第二套压缩状态卡；上下文用量详情仍由 composer 上下文入口承载。
 
 ### 视觉与状态
-- 行样式 `turnDividerRow`：flex 居中，两侧 `turnDividerRule` 发线（`--vui-border-subtle` 78% 混合），文字 `--fg-tertiary`、`text-vui-xs`。
+- 行样式 `turnDividerRow`：flex 居中，两侧 `turnDividerRule` 发线（`--vui-border-subtle` 78% 混合），文字 `--fg-tertiary`、`text-vui-xs`；行宽走 `mx-auto w-full max-w-[760px]`（`transcriptMeasure`），与正文列前端对齐、不铺满时间轴。
 - 三态：applied 挂 cool-info；skipped_low_savings 仅 `opacity-60`；failed_preserved 挂 warning 软态并把发线/图标/文字转到 `--state-warning`。
 - 模型/分叉行复用同一行样式，不区分 tone；时间戳不渲染（行语义是「边界」不是「事件」）。
 
