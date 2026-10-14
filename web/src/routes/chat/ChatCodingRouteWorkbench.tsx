@@ -22,8 +22,6 @@ import {
   HeartHandshake,
   MessageCircleHeart,
   RotateCcw,
-  PanelLeftOpen,
-  List,
   Search,
   Sparkles,
   Trash2,
@@ -89,13 +87,12 @@ import {
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { PaneResizeHandle } from "../../components/layout/PaneResizeHandle";
-import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { PaneCollapseHandle } from "../../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
@@ -134,7 +131,6 @@ import {
   agentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "../agentDisplay";
-import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
 import { directoryTeamBlockIds } from "../agentConversationDirectoryModel";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
@@ -184,10 +180,12 @@ import {
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatSessionBrowser } from "./ChatSessionBrowser";
-import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
+import { ChatCodingCenterTabs } from "./ChatCodingCenterTabs";
+import { ChatCodingGroupSurface } from "./ChatCodingGroupSurface";
 import { ChatConversationIndexPanel } from "./ChatConversationIndexPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
+import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
 import {
   companionAgentIdForDirectSession,
@@ -289,7 +287,6 @@ import {
 
 import {
   cliAgentRunIdFromTabId,
-  cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
@@ -318,14 +315,6 @@ const CliAgentRunTerminalPanel = lazy(() =>
   import("./CliAgentRunTerminalPanel").then((module) => ({
     default: module.CliAgentRunTerminalPanel,
   })),
-);
-
-/** S2: not required for first paint of direct chat center. */
-const ChatGroupCenterSurface = lazy(() =>
-  import("./ChatGroupCenterSurface").then((module) => ({ default: module.ChatGroupCenterSurface })),
-);
-const ChatFileWorkspaceTabs = lazy(() =>
-  import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
 );
 
 /**
@@ -3081,135 +3070,64 @@ export function ChatCodingRouteWorkbench() {
         className={centerPaneClassName}
         surfaceClassName={styles.centerSurface}
         tabStrip={(
-          <ChatCenterTabStrip
-            styles={styles}
+          <ChatCodingCenterTabs
             lang={lang}
-            agentSessionLabel={t("agentSession")}
             chatReturnTarget={chatReturnTarget}
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            showSessionTabs={!financeSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
-            showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}
-            companionHeader={verifiedCompanionMode && activeCompanion ? (
-              <CompanionConversationHeader companion={activeCompanion} lang={lang} />
-            ) : null}
-            conversationIndexControl={!financeSurface && !verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
-              <VIconButton
-                tooltip=""
-                id="chat-conversation-index-toggle"
-                className={styles.conversationIndexToggle}
-                label={lang === "zh" ? "展开会话列" : "Expand conversation column"}
-                aria-expanded={false}
-                aria-controls="chat-conversation-index-pane"
-                icon={<PanelLeftOpen size={16} aria-hidden="true" />}
-                onClick={() => {
-                  setLeftRailCollapsed(false);
-                  window.requestAnimationFrame(() => document.getElementById("chat-conversation-index-collapse")?.focus());
-                }}
-              />
-            ) : null}
-            workspaceActiveTab={conversationWorkspaceTab}
-            sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
-              <VIconButton
-                label={lang === "zh" ? "浏览会话" : "Browse sessions"}
-                icon={<List size={16} strokeWidth={1.5} aria-hidden="true" />}
-                className={sessionBrowserVisible ? `${styles.toolbarIconButton} ${styles.tabActive}` : styles.toolbarIconButton}
-                aria-pressed={sessionBrowserVisible}
-                onPress={() => setSessionBrowserOpen(current => !current)}
-              />
-            ) : null}
-            sessionActionsControl={headerExportVisible && conversationModel ? <ConversationShareExportButton
-              key={conversationModel.sessionId}
-              sessionId={conversationModel.sessionId}
-              messages={conversationModel.messages}
-              language={lang}
-              presentation="menu"
-              isDisabled={conversationModel.messages.length === 0}
-            /> : undefined}
+            financeSurface={financeSurface}
+            verifiedCompanionMode={verifiedCompanionMode}
+            selectedChatAgentId={selectedChatAgentId}
+            agentSessionTabs={agentSessionTabs}
+            cliAgentRunTabs={cliAgentRunTabs}
+            activeCompanion={activeCompanion}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
+            conversationIndexCollapsed={conversationIndexCollapsed}
+            setLeftRailCollapsed={setLeftRailCollapsed}
+            conversationWorkspaceTab={conversationWorkspaceTab}
+            sessionBrowserVisible={sessionBrowserVisible}
+            setSessionBrowserOpen={setSessionBrowserOpen}
+            headerExportVisible={headerExportVisible}
+            conversationModel={conversationModel}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
-            statusRailAvailable={verifiedCompanionMode}
-            rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}
-            rightRailOpen={ordinaryChangeRail ? changeRailVisible : statusRailOverlayOpen}
+            ordinaryChangeRail={ordinaryChangeRail}
+            changeRailVisible={changeRailVisible}
             statusRailOverlayOpen={statusRailOverlayOpen}
-            onActivateAgentFallbackTab={() => {
-              setSessionBrowserOpen(false);
-              activeSessionId && setActiveTab(activeSessionId, "agent");
-            }}
-            onToggleLeftOverlay={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
-            onToggleRightOverlay={toggleChangeRail}
-            sessionTabs={(
-              <AgentSessionTabStrip
-                activeSessionId={activeSessionId}
-                activeCliAgentRunId={activeCliAgentRunId}
-                agentsById={agentsById}
-                buildSessionReferencePayload={buildSessionReferencePayload}
-                contextMenuSessionId={contextMenuSessionId}
-                cliAgentRuns={cliAgentRunTabs}
-                createPending={createSessionMutation.isPending}
-                createDisabled={!selectedChatAgentId}
-                deletePendingSessionId={
-                  deleteSessionMutation.isPending
-                    ? String(deleteSessionMutation.variables?.sessionId || "").trim()
-                    : ""
-                }
-                editingSessionId={editingSessionId}
-                editingSessionTitle={editingSessionTitle}
-                lang={lang}
-                renamePending={renameSessionMutation.isPending}
-                renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-                resolveModelLabel={resolveModelLabel}
-                sessions={agentSessionTabs}
-                teams={teams}
-                runtimeRunningSessionIds={runtimeRunningSessionIds}
-                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-                statusLabel={statusLabel}
-                t={t}
-                workspaceActiveTab={conversationWorkspaceTab}
-                onCancelRename={cancelRenameSession}
-                onContextMenu={openSessionContextMenu}
-                onDragReference={startSessionReferenceDrag}
-                onOpenCliAgentRun={(runId) => {
-                  setSessionBrowserOpen(false);
-                  if (activeSessionId) {
-                    setActiveTab(activeSessionId, cliAgentRunTabId(runId));
-                  }
-                }}
-                onCloseCliAgentRun={(runId) => {
-                  const run = cliAgentRunTabs.find((item) => item.id === runId);
-                  if (run) {
-                    void closeCliAgentRun(run);
-                  }
-                }}
-                onCreateSession={handleCreateSession}
-                onDeleteSession={handleDeleteSession}
-                onOpenDirectSession={handleOpenDirectSession}
-                onPrefetchDirectSession={handlePrefetchDirectSession}
-                onRenameTitleChange={setEditingSessionTitle}
-                onSetActiveTab={(sessionId, tab) => {
-                  setSessionBrowserOpen(false);
-                  setActiveTab(sessionId, tab);
-                }}
-                onSubmitRename={submitRenameSession}
-              />
-            )}
-            fileTabs={(
-              <ChatFileWorkspaceTabs
-                activeTab={workspace.activeTab}
-                closePreviewTabLabel={t("closePreviewTab")}
-                hidden={groupPanelActive}
-                openTabs={workspace.openTabs}
-                onCloseTab={(tabPath) => {
-                  activeSessionId && closePreviewTab(activeSessionId, tabPath);
-                }}
-                onOpenTab={(tabPath) => {
-                  setSessionBrowserOpen(false);
-                  activeSessionId && setActiveTab(activeSessionId, tabPath);
-                }}
-              />
-            )}
+            toggleChangeRail={toggleChangeRail}
+            setResponsiveOverlayPane={setResponsiveOverlayPane}
+            activeSessionId={activeSessionId}
+            setActiveTab={setActiveTab}
+            activeCliAgentRunId={activeCliAgentRunId}
+            agentsById={agentsById}
+            buildSessionReferencePayload={buildSessionReferencePayload}
+            contextMenuSessionId={contextMenuSessionId}
+            createSessionPending={createSessionMutation.isPending}
+            deleteSessionPending={deleteSessionMutation.isPending}
+            pendingDeleteSessionId={String(deleteSessionMutation.variables?.sessionId || "").trim()}
+            editingSessionId={editingSessionId}
+            editingSessionTitle={editingSessionTitle}
+            renamePending={renameSessionMutation.isPending}
+            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+            resolveModelLabel={resolveModelLabel}
+            teams={teams}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+            statusLabel={statusLabel}
+            t={t}
+            onCancelRename={cancelRenameSession}
+            onContextMenu={openSessionContextMenu}
+            onDragReference={startSessionReferenceDrag}
+            closeCliAgentRun={closeCliAgentRun}
+            onCreateSession={handleCreateSession}
+            onDeleteSession={handleDeleteSession}
+            onOpenDirectSession={handleOpenDirectSession}
+            onPrefetchDirectSession={handlePrefetchDirectSession}
+            onRenameTitleChange={setEditingSessionTitle}
+            onSubmitRename={submitRenameSession}
+            workspace={workspace}
+            closePreviewTab={closePreviewTab}
           />
         )}
         surface={(
@@ -3251,7 +3169,7 @@ export function ChatCodingRouteWorkbench() {
             )}
             groupPanelActive={groupPanelActive}
             groupSurface={(
-            <ChatGroupCenterSurface
+            <ChatCodingGroupSurface
               lang={lang}
               projectBusActive={projectBusActive}
               standardGroupRoomActive={standardGroupRoomActive}
@@ -3260,9 +3178,7 @@ export function ChatCodingRouteWorkbench() {
               activeGroupRoomId={activeGroupRoomId}
               availableGroupParticipantCount={availableGroupParticipantCount}
               visibleGroupParticipants={availableGroupParticipants}
-              onOpenGroupTeam={!chatReturnTarget && activeGroupTeam ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId)) : undefined}
               onManageGroupRoom={() => setGroupManageDialogOpen(true)}
-              artifactTeamId={activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined}
               activeGroupParticipantById={activeGroupParticipantById}
               projectBusTimeline={projectBusTimeline}
               projectBusEvents={projectBusEvents}
@@ -3275,31 +3191,17 @@ export function ChatCodingRouteWorkbench() {
               groupStopDisabled={groupStopDisabled}
               expandedGroupMessageIds={expandedGroupMessageIds}
               chatMentionTargets={chatMentionTargets}
-              userDisplayName={runtime?.userName || (lang === "zh" ? "我" : "Me")}
-              composerLeadingControl={standardGroupRoomActive && activeGroupRoom ? (
-                <ChatComposerPlusMenu
-                  lang={lang}
-                  showAddReference={false}
-                  showCapabilities={false}
-                  attachmentDisabled
-                  sessionReferences={[]}
-                  mentalModelEnabled={mentalModelEnabledForNextTurn}
-                  runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
-                  promptSuggestionEnabled={activePromptSuggestionEnabled}
-                  capabilityDisabled
-                  onMentalModelEnabledChange={handleMentalModelEnabledChange}
-                  onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
-                  onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
-                  group={{
-                    title: activeGroupRoom.title,
-                    onManage: () => setGroupManageDialogOpen(true),
-                    teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
-                    onOpenTeam: activeGroupTeamOwned && activeGroupTeam
-                      ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
-                      : undefined,
-                  }}
-                />
-              ) : undefined}
+              runtimeUserName={runtime?.userName}
+              mentalModelEnabled={mentalModelEnabledForNextTurn}
+              runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+              promptSuggestionEnabled={activePromptSuggestionEnabled}
+              onMentalModelEnabledChange={handleMentalModelEnabledChange}
+              onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+              onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
+              chatReturnTarget={chatReturnTarget}
+              activeGroupTeam={activeGroupTeam}
+              activeGroupTeamOwned={activeGroupTeamOwned}
+              onNavigateTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
               projectBusRefreshing={projectAgentBusQuery.isFetching}
               projectBusRefreshError={projectAgentBusQuery.isError ? describeError(projectAgentBusQuery.error, t("loadFailed")) : ""}
               projectBusSendPending={sendProjectBusMessageMutation.isPending}

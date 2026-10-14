@@ -7,6 +7,7 @@ import chatSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
 import statusRailSource from "../chat/ChatCodingStatusRail.tsx?raw";
 import chatConversationSurfaceModelSource from "../chat/useChatConversationSurfaceModel.tsx?raw";
 import centerTabsSource from "../chat/ChatCenterTabStrip.tsx?raw";
+import codingCenterTabsSource from "../chat/ChatCodingCenterTabs.tsx?raw";
 import streamSource from "../chat/useSessionDetailStream.ts?raw";
 import sessionEventStreamSource from "../chat/sessionEventStream.ts?raw";
 import conversationHeaderSource from "./CompanionConversationHeader.tsx?raw";
@@ -51,7 +52,8 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("<CompanionPersonRail");
     expect(chatSource).toContain("<ChatCodingStatusRail");
     expect(statusRailSource).toContain("<CompanionLifeRail");
-    expect(chatSource).toContain("<CompanionConversationHeader");
+    expect(codingCenterTabsSource).toContain("<CompanionConversationHeader");
+    expect(chatSource).toContain("<ChatCodingCenterTabs");
     expect(centerTabsSource).toContain("companionHeader ?? (");
     expect(conversationHeaderSource).toContain("<CompanionPortrait");
     expect(conversationHeaderSource).toContain("<CompanionProactiveSettingsPopover");
@@ -68,8 +70,9 @@ describe("virtual-human native Chat reuse", () => {
     expect(lobbySource).not.toContain("EventSource");
     expect(lifeRailSource).not.toContain("EventSource");
     expect(personRailSource).not.toContain("EventSource");
-    expect(chatSource).toContain("showSessionTabs={!financeSurface && !verifiedCompanionMode");
-    expect(chatSource).toContain("showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}");
+    expect(codingCenterTabsSource).toContain("showSessionTabs={!financeSurface && !verifiedCompanionMode");
+    expect(codingCenterTabsSource).toContain("showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}");
+    expect(chatSource).toContain("<ChatCodingCenterTabs");
   });
 
   it("opens life management as an exact hidden native Session", () => {
