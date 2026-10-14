@@ -9,6 +9,7 @@ import { shellDictionary } from "../i18n/shellDictionary";
 export const UPDATE_BANNER_DISMISSED_STORAGE_KEY = "vibelution.workbench.update-banner-dismissed.v1";
 
 const UPDATE_BANNER_HEAD_TOKEN_LENGTH = 7;
+const UPDATE_BANNER_COMMIT_KEY_LENGTH = 12;
 
 export function isUpdateBannerVerdict(verdict: CodeFreshnessVerdict | undefined | null): boolean {
   return verdict === "backend_behind" || verdict === "backend_and_frontend_behind" || verdict === "frontend_behind";
@@ -36,7 +37,10 @@ export function shouldShowUpdateBanner({
   if (!head) {
     return false;
   }
-  return String(dismissedHead ?? "").trim() !== head;
+  // Launcher returns a 12-character commit while the backend returns the
+  // complete SHA. Their arrival order must not invalidate the same dismissal.
+  return String(dismissedHead ?? "").trim().slice(0, UPDATE_BANNER_COMMIT_KEY_LENGTH)
+    !== head.slice(0, UPDATE_BANNER_COMMIT_KEY_LENGTH);
 }
 
 export function launcherUpdateBannerCopy(lang: string): { title: string; detail: string } {

@@ -672,6 +672,73 @@ def test_file_write_tool_still_denied_under_empty_write_scope_gate():
     assert reason.rule_id == "policy-planner:policy.writeScopes:write_scope_denied"
 
 
+def _governance_scope_decision(*, policy_overrides=None, denied_tools=(), approval_mode="on_request"):
+    names = (
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "apply_diff_edit_tool",
+        "agent_update_tool",
+    )
+    descriptors = tuple(tool_catalog.build_tool_descriptor(name, args_schema={"type": "object"}) for name in names)
+    policy = normalize_legacy_tool_policy(
+        {
+            "policyId": "policy-governance",
+            "allowedTools": list(names),
+            "writeScopes": [],
+            "mutationAccess": "controlled",
+            **(policy_overrides or {}),
+        },
+        registered_tool_names=list(names),
+    )
+    grant = TurnToolGrant(
+        turn_id="turn-governance",
+        source="supervised",
+        allowed_capabilities=tuple(sorted({capability for descriptor in descriptors for capability in descriptor.capabilities})),
+        denied_tools=tuple(denied_tools),
+        approval_mode=approval_mode,
+    )
+    return evaluate_tool_policy(
+        agent_id="agent-governance",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-governance",
+    )
+
+
+def test_evolution_audit_transactions_do_not_require_workspace_write_scopes():
+    decision = _governance_scope_decision()
+    assert set(decision.executable_tools) == {"open_evolution_transaction_tool", "close_evolution_transaction_tool"}
+    for name in ("apply_diff_edit_tool", "agent_update_tool"):
+        # A mixed runtime_governance + permission_management tool stays gated.
+        assert decision.deny_reason_for(name).code is ToolDenyCode.WRITE_SCOPE_DENIED
+
+
+def test_governance_tag_cannot_exempt_a_mixed_file_write_tool(monkeypatch):
+    name = "open_evolution_transaction_tool"
+    monkeypatch.setitem(tool_catalog.TOOL_CATALOG, name, {
+        **tool_catalog.TOOL_CATALOG[name],
+        "riskTags": ["runtime_governance", "file_write"],
+    })
+    decision = _governance_scope_decision()
+    assert decision.deny_reason_for(name).code is ToolDenyCode.WRITE_SCOPE_DENIED
+    assert "close_evolution_transaction_tool" in decision.executable_tools
+
+
+@pytest.mark.parametrize("overrides,denied,approval_mode,expected", [
+    ({"allowedTools": []}, (), "on_request", ToolDenyCode.NOT_ASSIGNED),
+    ({"blockedTools": ["open_evolution_transaction_tool"]}, (), "on_request", ToolDenyCode.AGENT_BLOCKED),
+    ({"mutationAccess": "none"}, (), "on_request", ToolDenyCode.MUTATION_DENIED),
+    ({}, ("open_evolution_transaction_tool",), "on_request", ToolDenyCode.TURN_DENIED),
+    ({"approvalOverrides": {"open_evolution_transaction_tool": "always"}}, (), "never", ToolDenyCode.APPROVAL_REQUIRED),
+])
+def test_governance_scope_exemption_preserves_other_authorization_gates(overrides, denied, approval_mode, expected):
+    decision = _governance_scope_decision(policy_overrides=overrides, denied_tools=denied, approval_mode=approval_mode)
+    assert "open_evolution_transaction_tool" not in decision.executable_tools
+    assert decision.deny_reason_for("open_evolution_transaction_tool").code is expected
+
+
 def test_registry_projection_carries_write_scope_gate_flag_to_decision():
     """Registry 投影的 writeScopeGated 透传进决策输入：缺字段时 fail-closed 视为受闸。"""
 

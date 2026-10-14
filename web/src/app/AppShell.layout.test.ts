@@ -528,7 +528,7 @@ describe("AppShell layout contract", () => {
 
   it("distinguishes a dirty-workspace behind banner from a moved-ahead main", () => {
     // B-6: behindCount null/0 with a behind verdict = uncommitted changes only.
-    const bannerCall = shellSource.match(/const updateBannerText = updateBannerCopy\([\s\S]*?\);/)?.[0] ?? "";
+    const bannerCall = shellSource.match(/const updateBannerText = [\s\S]*?updateBannerCopy\([\s\S]*?\);/)?.[0] ?? "";
     expect(bannerCall).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
     expect(bannerCall).toContain("codeFreshnessQuery.data?.backend.behindCount ?? null");
     expect(shellDictionary.zh.updateBannerDirtyTitle).toBe("工作区有未提交变化，重启后生效");
@@ -695,12 +695,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("ready && restartWaitsForDocumentReloadRef.current");
   });
 
-  it("surfaces a dismissible update banner only when the backend is behind disk HEAD", () => {
+  it("keeps version notices in the dismissible top-bar popover", () => {
     expect(shellSource).toContain('from "./updateBanner"');
     expect(shellSource).toContain("shouldShowUpdateBanner");
     expect(shellSource).toContain("readStoredUpdateBannerDismissedHead");
     expect(shellSource).toContain("storeUpdateBannerDismissedHead");
-    // Only backend-stale verdicts prompt; frontend-only stays on refresh-frontend.
+    // Workbench and Launcher version decisions share the same notification.
     expect(shellSource).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
 
     // Notification is a collapsed top-bar popover, never a workspace row.
