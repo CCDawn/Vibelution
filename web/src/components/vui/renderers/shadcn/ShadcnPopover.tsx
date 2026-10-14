@@ -9,6 +9,7 @@ export type ShadcnPopoverProps = {
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   sideOffset?: number;
@@ -37,6 +38,7 @@ export function ShadcnPopover({
   open,
   defaultOpen,
   onOpenChange,
+  onEscapeKeyDown,
   side = "bottom",
   align = "start",
   sideOffset = 6,
@@ -60,6 +62,7 @@ export function ShadcnPopover({
           align={align}
           sideOffset={sideOffset}
           collisionPadding={12}
+          onEscapeKeyDown={onEscapeKeyDown}
           aria-label={ariaLabel}
           data-vui={dataVui}
           data-renderer="radix"

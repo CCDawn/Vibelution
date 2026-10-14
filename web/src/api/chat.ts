@@ -21,6 +21,7 @@ import type {
   SessionMessageCurationMutationResponse,
   SessionMessageCurationResponse,
   SessionModelSelection,
+  SessionModelParametersUpdate,
   SessionPinResponse,
   SessionQueryResponse,
   SessionQueuedTurn,
@@ -368,6 +369,21 @@ export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOpt
   );
 }
 
+/** Updates only context and reasoning for the Agent's currently bound model. */
+export function updateSessionModelParameters(
+  sessionId: string,
+  parameters: SessionModelParametersUpdate,
+): Promise<SessionLlmOptions> {
+  return fetchJson<SessionLlmOptions>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/model-parameters`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(parameters),
+    },
+  );
+}
+
 export function fetchSessionMessageCuration(sessionId: string): Promise<SessionMessageCurationResponse> {
   return fetchJson<SessionMessageCurationResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/curation`,
@@ -443,20 +459,6 @@ export function fetchSessionComposerExample(
   return fetchJson<SessionComposerExampleResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/composer-example`,
     { signal: options.signal },
-  );
-}
-
-export function updateSessionReasoningEffort(
-  sessionId: string,
-  reasoningEffort: string,
-): Promise<SessionLlmOptions> {
-  return fetchJson<SessionLlmOptions>(
-    `/api/sessions/${encodeURIComponent(sessionId)}/reasoning-effort`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reasoningEffort }),
-    },
   );
 }
 

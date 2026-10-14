@@ -1013,42 +1013,59 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 ## ConversationTurnModelControl
 
 ### 功能
-普通 Agent 会话的 composer 工具栏只读展示当前 Agent 绑定的对话模型，不提供切换模型的按钮、下拉菜单或会话覆盖。模型绑定的唯一用户修改入口是 Agent 管理页现有的 `AgentModelPicker`。`/模型` 导航到当前 Agent 的配置页，并保留返回当前会话的路径。
+普通 Agent 会话的 composer 工具栏展示当前 Agent 绑定的对话模型。点击模型名旁的参数图标，只能为当前绑定模型编辑上下文窗口和思考强度；不展示模型目录、候选列表或模型切换入口。模型绑定仍由 Agent 管理页现有的 `AgentModelPicker` 修改。`/模型` 导航到当前 Agent 的配置页，并保留返回当前会话的路径。
 
 ### 适用范围
-- **适用**：普通会话 composer 工具栏；读取 llm-options 的 `model`，不消费完整 `choices`。
+- **适用**：普通会话 composer 工具栏；读取 llm-options 的当前 `model` 和 Agent 参数快照，不消费完整 `choices`。
 - **不适用**：Companion 和金融专用 composer；沿用它们已有的独立入口和契约。
-- 思考强度按钮继续只显示 Agent 模型支持的档位，修改仍写回会话；不借此覆盖模型。
+- 思考强度只提供当前模型支持的档位，和上下文窗口一起写回 Agent 配置。
 
 ### 使用方式
 ```tsx
 <ConversationTurnModelControl
+  sessionId={sessionId}
+  agentId={sessionLlmOptions?.agentId}
+  configRevision={sessionLlmOptions?.configRevision}
   model={sessionLlmOptions?.model ?? null}
+  contextWindow={sessionLlmOptions?.contextWindow}
+  maxContextWindow={sessionLlmOptions?.maxContextWindow}
+  currentReasoningEffort={sessionLlmOptions?.currentReasoningEffort ?? ""}
   loading={sessionLlmOptionsLoading}
   error={sessionLlmOptionsError}
+  onSave={saveCurrentModelParameters}
 />
 ```
 
 | Prop | 说明 |
 | --- | --- |
-| model | 后端从当前 Agent 绑定解析的模型；无绑定时为 null |
+| model | 后端从当前 Agent 绑定解析的模型；组件没有模型选择 prop |
+| agentId / configRevision | 写入前校验的 Agent 身份与配置版本 |
+| contextWindow / maxContextWindow | 已生效上下文窗口与当前模型的最大窗口，单位 token |
+| currentReasoningEffort | 当前 Agent 模型的思考强度 |
+| onSave | 一次提交 contextWindow 与 reasoningEffort；路由附加快照字段 |
 | loading | 显示「读取模型…」，不暂时显示前一个 Agent 的名称 |
 | error | 显示「模型读取失败」，不把缓存中的模型冒充当前有效配置 |
 
 ### 视觉与状态
-- 维持工具栏原有紧凑字号、灰阶和模型图标；名称过长时截断，tooltip/title 保留完整名称。
-- 使用 `VTooltip`，提示「模型由 Agent 配置决定，请到 Agent 管理页修改」。
-- 静态文本不显示下拉箭头、覆盖圆点、按下/选中态，也不进入按钮键盘序列。
+- 维持工具栏紧凑字号和灰阶；模型名后使用参数图标标明可配置。名称过长时截断，tooltip/title 保留完整名称。
+- popover 只含上下文窗口、思考强度和一个图标保存动作；两个字段共用胶囊离散滑条，当前数值居中，思考强度下方只读显示模型名。
+- 上下文窗口吸附 8K、16K、32K、64K、128K、常用更大值与当前模型最大值；点击居中数值可精确输入，已输入的自定义数值保留为当前值。右上角 reset 恢复模型最大值。
+- 思考强度只吸附当前模型支持的档位，不显示 Default 刻度；右上角 reset 提交空字符串以恢复模型默认值。
+- 保存中保持面板和输入草稿可见，字段与保存动作禁用；保存失败显示短错误并保留输入。
+- 上下文只接受正整数且不得超过模型上限；即时给出字段级错误与 `aria-invalid`。
 
 ### 数据与行为边界
 - 普通聊天提交始终不携带 composer 的 `modelSelection`；历史草稿中存有模型覆盖也不恢复到普通聊天发送链路。
-- Agent 管理保存后，返回聊天时重新读取绑定；不修改历史 Turn 的模型记录。
+- 保存使用 `PATCH /api/sessions/{session_id}/model-parameters`，携带 `expectedAgentId`、`expectedModelRef`、`expectedConfigRevision`，避免会话或 Agent 切换后写错对象。
+- 保存失败不乐观改写生效值；版本冲突刷新 llm-options，但在 Agent/model 身份不变时保留当前输入供重试。
+- 参数属于 Agent；新请求由服务端在接受时冻结。运行中、已排队和自动重发沿用原值，手动重试/重新生成读取新的 Agent 参数。
 - 金融专用桥接和原生后端的单轮覆盖协议保持原有契约；这里不创建第二套模型写入者。
 
 ### 实现落点
 - `web/src/components/conversation/ConversationTurnModelControl.tsx` 和 `.styles.ts`
 - `web/src/components/conversation/conversationViewTypes.ts`
 - `web/src/routes/chat/ChatCodingRouteWorkbench.tsx`
+- 滑条复用 `VNativeInput` 的 `rangeVariant="capsule"`；渲染落点为 `web/src/components/vui/renderers/shadcn/ShadcnRange.tsx`
 
 ### 反冗余
 - 复用 Agent 管理现有 `AgentModelPicker` 和配置导航，不复制发现/添加/兼容性校验能力。

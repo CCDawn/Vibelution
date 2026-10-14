@@ -1,0 +1,237 @@
+body {
+  min-width: 0;
+}
+
+.preview-page {
+  box-sizing: border-box;
+  display: grid;
+  gap: 20px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 28px 24px 44px;
+}
+
+.preview-heading {
+  display: grid;
+  gap: 5px;
+}
+
+.preview-kicker {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-2xs);
+  font-weight: 650;
+  letter-spacing: 0.12em;
+}
+
+.preview-heading h1 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xl);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.preview-controls {
+  display: block;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.preview-controls summary {
+  cursor: pointer;
+}
+
+.preview-state-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  margin-top: 8px;
+}
+
+.preview-controls button,
+.preview-scenario select {
+  min-height: 30px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 8px;
+  padding: 4px 9px;
+  background: var(--surface-raised);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  cursor: pointer;
+}
+
+.preview-scenario {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.preview-status {
+  margin-left: auto;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.chat-preview {
+  display: grid;
+  gap: 20px;
+  min-height: 330px;
+  padding: 24px 20px 18px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 18px;
+  background: var(--bg-canvas);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+.sample-message {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+}
+
+.sample-message p {
+  margin: 2px 0 0;
+  line-height: 1.6;
+}
+
+.sample-avatar {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--vui-control-muted);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+}
+
+.composer-preview {
+  display: grid;
+  gap: 8px;
+  align-self: end;
+  padding: 11px 12px 9px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 13px;
+  background: var(--surface-raised);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--fg-primary) 5%, transparent);
+}
+
+.composer-preview textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--vui-font-sm);
+}
+
+.composer-preview textarea::placeholder {
+  color: var(--fg-tertiary);
+}
+
+.composer-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-add {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 8px;
+  color: var(--fg-tertiary);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.composer-model-slot {
+  min-width: 0;
+  max-width: 45%;
+  margin-left: auto;
+}
+
+.composer-context {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-2xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.composer-send {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: var(--fg-primary);
+  color: var(--bg-canvas);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.preview-caption {
+  margin: -8px 0 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+@media (max-width: 520px) {
+  .preview-page {
+    gap: 14px;
+    padding: 16px 12px 30px;
+  }
+
+  .preview-controls {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .preview-status {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .chat-preview {
+    min-height: 300px;
+    padding: 16px 10px 12px;
+  }
+
+  .composer-preview {
+    padding: 9px 8px 7px;
+  }
+
+  .composer-footer {
+    gap: 4px;
+  }
+
+  .composer-model-slot {
+    max-width: min(46%, 180px);
+  }
+
+  .composer-context {
+    font-size: 10px;
+  }
+}

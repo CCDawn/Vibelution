@@ -289,6 +289,7 @@ import { VPopover, VButton } from "@/components/vui";
 | --- | --- | --- |
 | `trigger` / children | 触发与面板内容 | trigger 需可 focus |
 | `side` / `align` / `open` | 定位与受控 | 避免挡住主 CTA |
+| `onEscapeKeyDown` | 面板按 Esc 时的原生事件回调 | 内嵌编辑器可 `preventDefault()` 先取消字段编辑；其他状态保留 Radix 默认关闭行为 |
 
 ### 视觉与状态
 - 面板沿用主题内容面、8px 浮层圆角与细边线；内部交互控件仍用对应 VUI primitive。

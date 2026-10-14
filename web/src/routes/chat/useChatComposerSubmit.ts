@@ -1791,6 +1791,8 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   setRuntimeStatusEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
   companionAgentId?: string;
+  /** Synchronous Agent-scoped settings-save gate; omitted on other surfaces. */
+  isModelParametersSavePending?: () => boolean;
 };
 
 export type UseChatComposerSubmitActionsResult = {
@@ -1875,7 +1877,12 @@ export function useChatComposerSubmitActions({
   setMentalModelEnabledForNextTurn,
   setRuntimeStatusEnabledForNextTurn,
   companionAgentId,
+  isModelParametersSavePending,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
+  const isModelParametersSavePendingNow = useCallback(
+    () => Boolean(isModelParametersSavePending?.()),
+    [isModelParametersSavePending],
+  );
   const pendingStopAfterAcceptRef = useRef<Map<string, DeferredStopIntent>>(new Map());
   // Uploading attachments happens before React Query creates the submit/edit
   // mutation. Keep the same submission identity visible to Stop during that
@@ -2579,7 +2586,7 @@ export function useChatComposerSubmitActions({
     queuedBehindActiveTurn = false,
     modelSelection: SessionModelSelection | null = null,
   ) => {
-    if (!isMountedRef.current) {
+    if (!isMountedRef.current || isModelParametersSavePendingNow()) {
       return;
     }
     if (imageUploadInFlightRef.current[sessionId]) {
@@ -2746,6 +2753,23 @@ export function useChatComposerSubmitActions({
           },
         );
       }
+      if (isModelParametersSavePendingNow()) {
+        restoreAttachmentsAfterFailure();
+        if (content || references.length || previewAttachments.length) {
+          removeOptimisticUserMessageFromCache(queryClient, submittedSessionId, {
+            sessionId: submittedSessionId,
+            content,
+            references,
+            clientSubmissionId,
+          });
+          restoreSubmittedDraftAfterFailure(setSessionDrafts, submittedSessionId, content, draftRecoveryGuard);
+        }
+        if (immediatePreview) {
+          setActiveTurnLayersBySession?.((current) => setActiveTurnLayerForSession(current, submittedSessionId, undefined));
+        }
+        restorePendingStopAfterUploadFailure(submittedSessionId);
+        return;
+      }
       const stillOwnedAttachments = attachments.filter((attachment) => (
         isComposerAttachmentOwned(submittedSessionId, attachment.id)
       ));
@@ -2833,6 +2857,7 @@ export function useChatComposerSubmitActions({
     }
   }, [
     companionAgentId,
+    isModelParametersSavePendingNow,
     restoreComposerAttachmentUrls,
     setSessionImageAttachments,
     setActiveTurnLayersBySession,
@@ -2868,7 +2893,7 @@ export function useChatComposerSubmitActions({
   const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
     const sessionId = activeSessionId;
     const content = text.trim();
-    if (!sessionId) {
+    if (!sessionId || isModelParametersSavePendingNow()) {
       return;
     }
     // Optimistic edit (same pending-intent style as withdraw): the new text
@@ -2917,7 +2942,7 @@ export function useChatComposerSubmitActions({
           lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
         );
       });
-  }, [activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [activeSessionId, isModelParametersSavePendingNow, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleFollowupQueueRemove = useCallback((id: string) => {
     const sessionId = activeSessionId;
@@ -2966,7 +2991,7 @@ export function useChatComposerSubmitActions({
   // references stay queued because guidance cannot carry them.
   const handleFollowupQueueSteer = useCallback((id: string) => {
     const sessionId = activeSessionId;
-    if (!sessionId || pendingQueueWithdrawalIdsRef.current.has(id)) {
+    if (!sessionId || isModelParametersSavePendingNow() || pendingQueueWithdrawalIdsRef.current.has(id)) {
       return;
     }
     const item = (sessionFollowupQueues[sessionId] ?? []).find((entry) => entry.id === id);
@@ -3037,6 +3062,7 @@ export function useChatComposerSubmitActions({
       });
   }, [
     activeSessionId,
+    isModelParametersSavePendingNow,
     lang,
     queryClient,
     reportQueuedTurnError,
@@ -3170,7 +3196,7 @@ export function useChatComposerSubmitActions({
   }, [activeSessionId, activeTurnId, detail, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleSubmitTurn = useCallback(() => {
-    if (!activeSessionId) {
+    if (!activeSessionId || isModelParametersSavePendingNow()) {
       return;
     }
     // Optimistic create shells are local-only until the server id is rebased.
@@ -3333,7 +3359,7 @@ export function useChatComposerSubmitActions({
       );
       const continueEdit = () => {
         void (async () => {
-          if (!isMountedRef.current) {
+          if (!isMountedRef.current || isModelParametersSavePendingNow()) {
             return;
           }
           let editSessionId = resolveComposerSessionId(activeSessionId);
@@ -3419,6 +3445,9 @@ export function useChatComposerSubmitActions({
             return;
           }
           editSessionId = resolveComposerSessionId(activeSessionId);
+          if (isModelParametersSavePendingNow()) {
+            return;
+          }
           editResubmitMutation.mutate({
             sessionId: editSessionId,
             messageId: editTarget.messageId,
@@ -3451,6 +3480,7 @@ export function useChatComposerSubmitActions({
     activeDraftEffective,
     activeImageAttachments,
     activeImageInputModelId,
+    isModelParametersSavePendingNow,
     activePhase,
     activeReferenceAttachments,
     activeSessionId,
@@ -3565,7 +3595,7 @@ export function useChatComposerSubmitActions({
   ]);
 
   const handleRegenerateAssistantMessage = useCallback((message: ConversationMessage) => {
-    if (message.role !== "assistant" || !activeSessionId || sessionBusy) {
+    if (message.role !== "assistant" || !activeSessionId || isModelParametersSavePendingNow() || sessionBusy) {
       return;
     }
     const messages = detail?.messages ?? [];
@@ -3591,6 +3621,7 @@ export function useChatComposerSubmitActions({
     const baseMessageId = String(message.nodeId || rerunUser.nodeId || "").trim();
     const clientSubmissionId = createClientSubmissionId(activeSessionId);
     interceptRerun(messages, assistantIndex, () => {
+      if (isModelParametersSavePendingNow()) return;
       regenerateMutation.mutate({
         sessionId: activeSessionId,
         messageId: rerunUser.id,
@@ -3606,6 +3637,7 @@ export function useChatComposerSubmitActions({
     activeSessionId,
     detail,
     interceptRerun,
+    isModelParametersSavePendingNow,
     mentalModelEnabledForNextTurn,
     regenerateMutation,
     runtimeStatusEnabledForNextTurn,
@@ -3615,7 +3647,7 @@ export function useChatComposerSubmitActions({
   // A failed turn has no assistant answer to branch from: retry reruns the
   // latest user message through the same regenerate pipeline as the retry trail.
   const handleRetryFailedTurn = useCallback(() => {
-    if (!activeSessionId || sessionBusy) {
+    if (!activeSessionId || isModelParametersSavePendingNow() || sessionBusy) {
       return;
     }
     const messages = detail?.messages ?? [];
@@ -3635,6 +3667,7 @@ export function useChatComposerSubmitActions({
     const baseMessageId = String(rerunUser.nodeId || "").trim();
     const clientSubmissionId = createClientSubmissionId(activeSessionId);
     interceptRerun(messages, userIndex, () => {
+      if (isModelParametersSavePendingNow()) return;
       regenerateMutation.mutate({
         sessionId: activeSessionId,
         messageId: rerunUser.id,
@@ -3650,6 +3683,7 @@ export function useChatComposerSubmitActions({
     activeSessionId,
     detail,
     interceptRerun,
+    isModelParametersSavePendingNow,
     mentalModelEnabledForNextTurn,
     regenerateMutation,
     runtimeStatusEnabledForNextTurn,
@@ -3933,7 +3967,7 @@ export function useChatComposerSubmitActions({
   ]);
 
   const handleSubmitGuidance = useCallback((mode: SessionGuidanceMode) => {
-    if (!activeSessionId || !sessionBusy || sessionStopping) {
+    if (!activeSessionId || isModelParametersSavePendingNow() || !sessionBusy || sessionStopping) {
       return;
     }
     const content = activeDraftEffective.trim();
@@ -3945,7 +3979,7 @@ export function useChatComposerSubmitActions({
       content,
       mode,
     });
-  }, [activeDraftEffective, activeSessionId, sessionBusy, sessionGuidanceMutation, sessionStopping]);
+  }, [activeDraftEffective, activeSessionId, isModelParametersSavePendingNow, sessionBusy, sessionGuidanceMutation, sessionStopping]);
 
   // Deferred stop intents remain keyed by session while the user moves between
   // sessions. A late submit acceptance is matched by submission identity and

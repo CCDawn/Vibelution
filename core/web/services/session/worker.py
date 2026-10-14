@@ -29,6 +29,7 @@ from core.web.services.financial_research.as_of import (
     research_analysis_date_context,
 )
 from core.llm.error_classification import PERMANENT
+from .turn_model_parameters import pin_agent_model_parameters
 from core.orchestration.context_engine import AgentContextInterrupted
 from core.orchestration.turn_stop_signal import attach_stop_event
 from core.web.services.session.research_thinking_budget import (
@@ -1230,6 +1231,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != agent_id:
         supplied_agent = None
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
+    agent_instance = pin_agent_model_parameters(agent_instance, context.get("model_parameters"))
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
     if supplied_agent:
         # Admission freezes configuration, not lifecycle permission. An Agent
@@ -1484,7 +1486,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 if isinstance(per_turn_model_selection, dict) and per_turn_model_selection
                 else None
             )
-            session_reasoning_effort = s._session_reasoning_effort_snapshot(session_id)
+            accepted_parameters = context.get("model_parameters")
+            session_reasoning_effort = (
+                str(accepted_parameters.get("reasoningEffort") or "")
+                if isinstance(accepted_parameters, dict) and accepted_parameters
+                else s._session_reasoning_effort_snapshot(session_id)
+            )
             # A pinned per-turn reasoning effort outranks the session default;
             # an override without one keeps the session-level effort.
             turn_reasoning_effort = (
@@ -1700,6 +1707,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             "promptTemplateId": str((agent_instance or {}).get("promptTemplateId") or "").strip(),
             "roleKey": str((agent_instance or {}).get("roleKey") or "").strip(),
             "source": "AgentLlmBindings" if agent_instance else "missing_agent",
+            "acceptedModelParameters": dict(context.get("model_parameters") or {}),
             **s._session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
         },

@@ -201,6 +201,7 @@ from .agent_directory.mutations import (
     record_agent_llm_binding_updated_event,
     _sanitize_avatar_stem,
 )
+from .agent_directory.model_parameters import update_agent_model_parameters_if_current
 from .agent_directory.repair_store import (
     _agent_creation_missing_fields,
     _agent_directory_storage_signature,
@@ -911,6 +912,9 @@ reset_agent_instance = agent_session_lifecycle_with_chat_serialized(reset_agent_
 # Mutation pack bodies; serializer wrappers stay on this facade.
 create_agent_instance = agent_session_lifecycle_serialized(create_agent_instance)
 update_agent_instance = agent_session_lifecycle_serialized(update_agent_instance)
+update_agent_model_parameters_if_current = agent_session_lifecycle_serialized(
+    update_agent_model_parameters_if_current
+)
 
 # Ops residual bodies; serializer wrappers stay on this facade.
 ensure_agent_for_session = agent_session_lifecycle_serialized(ensure_agent_for_session)

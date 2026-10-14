@@ -47,6 +47,7 @@ import {
   VStateSurface,
   VStatusChip,
   VStringSelect,
+  VSurface,
   VTabs,
   VTooltip,
   type VStatusTone,
@@ -1870,6 +1871,7 @@ export function ToolsRoute() {
 
   return (
     <VDenseOpsPage
+      chrome="workspace"
       className={styles.route}
       headerClassName={styles.header}
       data-vui-domain-recipe="tools-workbench"
@@ -2112,7 +2114,8 @@ export function ToolsRoute() {
           onKeyDown={handleLeftPanelResizeKeyDown}
         />
 
-        <main className={styles.detailPanel}>
+        <VSurface as="main" className={styles.detailPane} padding="none">
+        <div className={styles.detailPanel}>
           <section
             id="agent-tools-policy"
             className={`${styles.agentPermissionSummaryPanel} ${requestedFocus === "policy" ? styles.deepLinkFocus : ""}`}
@@ -2722,7 +2725,8 @@ export function ToolsRoute() {
               )}
             </section>
           )}
-        </main>
+        </div>
+        </VSurface>
       </div>
       <VConfirmDialog
         open={Boolean(toolConfirm)}

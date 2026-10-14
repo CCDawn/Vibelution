@@ -136,8 +136,9 @@ describe("composerModelEffort", () => {
       "utf8",
     );
     expect(workbench).toContain("model: agentModel");
-    expect(workbench).toContain("currentReasoningEffort: sessionEffort");
-    expect(workbench).toContain("sessionReasoningEffortMutation.mutate({ sessionId: activeSessionId, reasoningEffort })");
+    expect(workbench).toContain('currentReasoningEffort: sessionLlmOptions?.currentReasoningEffort ?? ""');
+    expect(workbench).toContain("sessionModelParametersMutation.mutate({");
+    expect(workbench).toContain("expectedModelRef: options.model.modelRef");
     expect(workbench).not.toContain("selectionAfterModelPick(");
     expect(workbench).not.toContain("if (!followingSessionModel && overrideModel)");
   });
