@@ -10,6 +10,7 @@ import { GRAPH_NODE_TYPE_LABELS, MemoryGraphNodeInspectorPanel, type MemoryGraph
 import { memoryGraphSlice } from "./memory/memoryGraphSlice";
 import { MemoryGraphRelationInspector } from "./MemoryGraphRelationInspector";
 import styles from "./MemoryGraphViewPanel.styles";
+import { PlatformKnowledgeGraphWorkbench } from "./memory/PlatformKnowledgeGraphWorkbench";
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then(module => ({ default: module.MemoryGraphCanvas })));
 
 export type { MemoryGraphRelation } from "./MemoryGraphNodeInspectorPanel";
@@ -47,6 +48,7 @@ export type MemoryGraphViewPanelCopy = MemoryGraphNodeInspectorCopy & {
 };
 
 type MemoryGraphViewPanelProps = {
+  initialScope?: "platform" | "agent";
   copy: MemoryGraphViewPanelCopy;
   graphPayload: MemoryKnowledgeGraphPayload | undefined;
   isGraphLoading?: boolean;
@@ -77,6 +79,12 @@ type MemoryGraphViewPanelProps = {
 };
 
 export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
+  const [scope, setScope] = useState(props.initialScope ?? "platform");
+  return scope === "platform" ? <PlatformKnowledgeGraphWorkbench onAgentView={() => setScope("agent")} /> :
+    <div className={styles.scopeRoot}><div className={styles.scopeToolbar}><VButton variant="ghost" icon={<Layers3 size={14} />} onClick={() => setScope("platform")}>返回平台知识图谱</VButton></div><div className={styles.scopeContent}><AgentMemoryGraphViewPanel {...props} /></div></div>;
+}
+
+function AgentMemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
   const { copy, graphPayload, graphSearchText, activeGraphNodeType, graphTypeEntries, selectedGraphNode,
     onGraphSearchTextChange, onActiveGraphNodeTypeChange, onClearGraphFilters, onSelectGraphNode, onFocusGraphNode } = props;
   const [flat, setFlat] = useState(false);

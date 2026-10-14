@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,6 +45,13 @@ class VirtualHumanSnapshotResponse(BaseModel):
     health: dict[str, Any] | None = None
 
 
+class VirtualHumanMemorySourceReferenceResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    id: str
+
+
 class VirtualHumanMemoryResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -54,6 +61,9 @@ class VirtualHumanMemoryResponse(BaseModel):
     occurredAt: str = ""
     salienceScore: int = 0
     sourceEventIds: list[str] = Field(default_factory=list)
+    sourceKind: Literal["simulation", "verified_action", "character_report", "unknown"] | None = None
+    excludedFromRecall: bool | None = None
+    sourceRefs: list[VirtualHumanMemorySourceReferenceResponse] | None = None
     promotedAt: str = ""
 
 

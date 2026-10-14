@@ -6,6 +6,21 @@ from core.agent_plugins.virtual_human_life.reunion import (
 )
 
 
+def _verified_outcome(summary: str, *, status: str = "succeeded") -> dict:
+    return {
+        "status": status,
+        "summary": summary,
+        "kind": "verified_tool_outcome",
+        "evidence": {
+            "kind": "native_tool_execution",
+            "sessionId": "session-a",
+            "turnId": "turn-a",
+            "toolCallIds": ["tool-a"],
+            "receiptEventIds": ["receipt-a"],
+        },
+    }
+
+
 def test_reunion_context_projects_utc_elapsed_and_character_local_day_gap() -> None:
     context = project_reunion_context(
         previous_user_arrived_at="2026-09-07T15:30:00+00:00",
@@ -88,7 +103,7 @@ def test_shared_experiences_require_session_bound_open_loop_and_successful_past_
         "kind": "activity_completed",
         "title": "一起讨论的旋律",
         "occurredAt": "2026-09-08T10:00:00+00:00",
-        "outcome": {"status": "succeeded", "summary": "把副歌改得更明亮。"},
+        "outcome": _verified_outcome("把副歌改得更明亮。"),
     }
     result = project_shared_experiences(
         open_loops=[
@@ -144,21 +159,21 @@ def test_shared_experiences_exclude_unlinked_private_invalid_and_future_rows() -
             "kind": "activity_completed",
             "title": "共同完成",
             "occurredAt": "2026-09-08T11:00:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "已完成。"},
+            "outcome": _verified_outcome("已完成。"),
         },
         {
             "eventId": "life-future",
             "kind": "activity_completed",
             "title": "尚未发生",
             "occurredAt": "2026-09-08T13:00:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "未来事件。"},
+            "outcome": _verified_outcome("未来事件。"),
         },
         {
             "eventId": "life-failed",
             "kind": "activity_completed",
             "title": "失败活动",
             "occurredAt": "2026-09-08T09:00:00+00:00",
-            "outcome": {"status": "failed", "summary": "没有完成。"},
+            "outcome": _verified_outcome("没有完成。", status="failed"),
         },
         {
             "eventId": "life-plan",
@@ -171,14 +186,14 @@ def test_shared_experiences_exclude_unlinked_private_invalid_and_future_rows() -
             "kind": "activity_completed",
             "title": "人物独自活动",
             "occurredAt": "2026-09-08T10:30:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "只属于人物自己的经历。"},
+            "outcome": _verified_outcome("只属于人物自己的经历。"),
         },
         {
             "eventId": "life-no-turn",
             "kind": "activity_completed",
             "title": "没有来源回合",
             "occurredAt": "2026-09-08T10:45:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "缺少 sourceTurnIds。"},
+            "outcome": _verified_outcome("缺少 sourceTurnIds。"),
         },
     ]
 
@@ -212,14 +227,14 @@ def test_shared_experiences_allow_resolved_loop_but_not_expired_loop() -> None:
             "kind": "activity_completed",
             "title": "已解决的话题",
             "occurredAt": "2026-09-08T10:00:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "后来完成了。"},
+            "outcome": _verified_outcome("后来完成了。"),
         },
         {
             "eventId": "life-expired",
             "kind": "activity_completed",
             "title": "过期未完成",
             "occurredAt": "2026-09-08T09:00:00+00:00",
-            "outcome": {"status": "succeeded", "summary": "不应伪造承诺完成。"},
+            "outcome": _verified_outcome("不应伪造承诺完成。"),
         },
     ]
 
@@ -261,7 +276,7 @@ def test_shared_experiences_are_recent_deduplicated_and_bounded() -> None:
             "kind": "activity_completed",
             "title": f"活动 {index}",
             "occurredAt": f"2026-09-08T{12 + index:02d}:00:00+00:00",
-            "outcome": {"status": "succeeded", "summary": f"结果 {index}"},
+            "outcome": _verified_outcome(f"结果 {index}"),
         }
         for index, event_id in enumerate(event_ids)
     ]

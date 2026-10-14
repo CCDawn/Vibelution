@@ -43,6 +43,7 @@ import type { CompanionRailState } from "./CompanionPersonRail";
 import { CompanionLifeWorldCard } from "./CompanionLifeWorldCard";
 import { CompanionPreferenceCard } from "./CompanionPreferenceCard";
 import { CompanionMemoryRecords } from "./CompanionMemoryRecords";
+import { companionProvenanceLabel } from "./companionProvenance";
 import styles from "./CompanionChatRails.styles";
 
 function ScheduleRows({ activities, lang }: { activities: VirtualHumanActivity[]; lang: "zh" | "en" }) {
@@ -75,8 +76,9 @@ function EventRows({ events, lang }: { events: VirtualHumanLifeEvent[]; lang: "z
         <article key={event.eventId} className={styles.eventItem}>
           <time className={styles.eventTime}>{formatLifeTime(event.occurredAt || "", lang)}</time>
           <div className={styles.eventCopy}>
-            <strong>{event.title || (lang === "zh" ? "生活经历" : "Life event")}</strong>
+            <strong>{event.title || (lang === "zh" ? "经历记录" : "Experience record")}</strong>
             <span>{event.outcome?.summary || event.failureReason || event.kind}</span>
+            <small className={styles.sourceCopy}>{companionProvenanceLabel(event.sourceKind, lang)}</small>
           </div>
         </article>
       ))}
@@ -98,7 +100,7 @@ function DiaryRows({ entries, lang }: { entries: VirtualHumanDiaryEntry[]; lang:
           </div>
           <p className={styles.cardCopy}>{entry.content || (lang === "zh" ? "这条记录暂时没有正文。" : "This note has no body yet.")}</p>
           <span className={styles.memoryMeta}>
-            {entry.sourceEventIds.length} {lang === "zh" ? "条来源事件" : "source event(s)"}
+            {companionProvenanceLabel(entry.sourceKind, lang)} · {entry.sourceEventIds.length} {lang === "zh" ? "条来源事件" : "source event(s)"}
           </span>
         </article>
       ))}
@@ -188,13 +190,25 @@ function DriveRows({ drives, lang }: { drives: VirtualHumanDriveItem[]; lang: "z
     <div className={styles.compactList}>
       {drives.slice(0, 4).map((drive) => {
         const progress = boundedPercent(drive.progress);
+        const isOngoing = drive.progressBasis === "ongoing";
+        const verifiedActivityCount = typeof drive.verifiedActivityCount === "number" && Number.isFinite(drive.verifiedActivityCount)
+          ? Math.max(0, Math.floor(drive.verifiedActivityCount))
+          : null;
         return (
           <div key={drive.driveId} className={styles.progressItem}>
             <div className={styles.progressHeader}>
               <strong>{drive.title}</strong>
-              {typeof drive.progress === "number" ? <span>{progress}%</span> : null}
+              {isOngoing
+                ? <span>{lang === "zh" ? "持续进行" : "Ongoing"}</span>
+                : typeof drive.progress === "number" ? <span>{progress}%</span> : null}
             </div>
-            {typeof drive.progress === "number" ? (
+            {isOngoing ? (
+              <p className={styles.cardCopy}>
+                {verifiedActivityCount !== null
+                  ? (lang === "zh" ? `已记录 ${verifiedActivityCount} 次行动` : `${verifiedActivityCount} verified action(s) recorded`)
+                  : (lang === "zh" ? "暂未提供行动记录次数" : "Action count is not available yet")}
+              </p>
+            ) : typeof drive.progress === "number" ? (
               <div className={styles.progressTrack} aria-label={`${drive.title} ${progress}%`}>
                 <span className={styles.progressFill} style={{ width: `${progress}%` }} />
               </div>
@@ -269,13 +283,36 @@ function rhythmNeedLabel(name: string, lang: "zh" | "en"): string {
   return lang === "zh" ? pair[0] : pair[1];
 }
 
+function chronotypeLabel(value: string, lang: "zh" | "en"): string {
+  const labels: Record<string, [string, string]> = {
+    morning: ["偏早型", "Morning-oriented"],
+    balanced: ["均衡型", "Balanced"],
+    evening: ["偏晚型", "Evening-oriented"],
+  };
+  const normalized = value.trim().toLowerCase();
+  const pair = labels[normalized];
+  return pair ? pair[lang === "zh" ? 0 : 1] : value;
+}
+
+function circadianPhaseLabel(value: string, lang: "zh" | "en"): string {
+  const labels: Record<string, [string, string]> = {
+    morning: ["早晨", "Morning"],
+    day: ["白天", "Daytime"],
+    evening: ["傍晚", "Evening"],
+    sleep_window: ["睡眠时段", "Sleep window"],
+  };
+  const normalized = value.trim().toLowerCase();
+  const pair = labels[normalized];
+  return pair ? pair[lang === "zh" ? 0 : 1] : value;
+}
+
 function RhythmRows({ rhythms, lang }: { rhythms: VirtualHumanRhythmProjection | null | undefined; lang: "zh" | "en" }) {
   const needs = Object.entries(rhythms?.needs ?? {}).sort((left, right) => (right[1]?.level ?? 0) - (left[1]?.level ?? 0));
   if (!rhythms || !needs.length) {
     return <p className={styles.cardCopy}>{lang === "zh" ? "生活节律正在从日常里形成。" : "Her rhythm is still taking shape from lived days."}</p>;
   }
-  const chronotype = rhythms.chronotype?.label || "balanced";
-  const phase = rhythms.circadian?.phase || "day";
+  const chronotype = chronotypeLabel(rhythms.chronotype?.label || "balanced", lang);
+  const phase = circadianPhaseLabel(rhythms.circadian?.phase || "day", lang);
   return (
     <div className={styles.compactList}>
       <div className={styles.compactItem}>
@@ -321,7 +358,7 @@ function InterestRows({ interests, lang }: { interests: VirtualHumanInterest[]; 
 
 function LifeFeedRows({ items, lang }: { items: VirtualHumanLifeFeedItem[]; lang: "zh" | "en" }) {
   if (!items.length) {
-    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有可发布到本地生活动态的真实片段。" : "No source-backed moment is ready for the local life feed yet."}</p>;
+    return <p className={styles.cardCopy}>{lang === "zh" ? "还没有生活动态记录。" : "No life feed entries are available yet."}</p>;
   }
   return (
     <div className={styles.eventList}>
@@ -331,6 +368,7 @@ function LifeFeedRows({ items, lang }: { items: VirtualHumanLifeFeedItem[]; lang
           <div className={styles.eventCopy}>
             <strong>{item.title}</strong>
             <span>{item.summary || item.kind}</span>
+            <small className={styles.sourceCopy}>{companionProvenanceLabel(item.sourceKind, lang)}</small>
           </div>
         </article>
       ))}
@@ -657,7 +695,7 @@ export function CompanionLifeRail({
   const memoryCountLabel = typeof memoryCount === "number"
     ? `${memoryCount}`
     : memoriesQuery.data
-      ? `${memoriesQuery.data.length}`
+      ? `${memoriesQuery.data.filter((memory) => !memory.excludedFromRecall).length}`
       : "--";
   const stateCopy = state === "loading"
     ? (lang === "zh" ? "正在载入生活状态" : "Loading life state")
@@ -807,7 +845,7 @@ export function CompanionLifeRail({
                 <summary className={styles.detailSummary}>{lang === "zh" ? "经历、兴趣与未完话题" : "Events, interests and open topics"}</summary>
                 <div className={styles.detailContent}>
                   <section className={styles.lifeCard}>
-                    <p className={styles.cardLabel}>{lang === "zh" ? "实际经历" : "Lived events"}</p>
+                    <p className={styles.cardLabel}>{lang === "zh" ? "经历记录" : "Experience records"}</p>
                     {todayEventsQuery.isPending ? (
                       <VStateSurface density="compact" title={lang === "zh" ? "正在读取经历" : "Loading lived events"} tone="loading" busy skeletonLines={2} />
                     ) : todayEventsQuery.isError ? (

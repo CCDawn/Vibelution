@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { listAgentProjectMemoryUpdates, listAgentSummaries } from "../../api/agents";
 import {
   fetchKnowledgeDashboardSnapshot,
+  fetchTeamKnowledgeCatalog,
   fetchKnowledgeGovernanceTasks,
   fetchKnowledgePermissionAudit,
   fetchKnowledgeRagHealth,
@@ -37,6 +38,7 @@ import type {
   KnowledgeCentralSourceRegistryPayload,
   KnowledgeDashboardSnapshotPayload,
   KnowledgeGovernanceTasksPayload,
+  TeamKnowledgeOverview,
   KnowledgeIngestionAdaptersPayload,
   KnowledgeItemsPayload,
   KnowledgePermissionAuditPayload,
@@ -231,6 +233,19 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     gcTime: 600_000,
     enabled: (isTeamMemoryView(forcedView) || isManageMemoryView(forcedView)) && Boolean(fallbackKnowledgeActorAgentId),
   });
+  const teamKnowledgeCatalogQuery = useQuery({
+    queryKey: queryKeys.teamKnowledgeCatalog(requestedKnowledgeActorAgentId),
+    queryFn: ({ signal }) =>
+      fetchTeamKnowledgeCatalog<TeamKnowledgeOverview>({
+        agentId: requestedKnowledgeActorAgentId,
+        signal,
+      }),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+    staleTime: 45_000,
+    placeholderData: (previous) => previous,
+    enabled: forcedView === "team",
+  });
   const memoryKnowledgeGraphQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, MEMORY_GRAPH_INCLUDE, requestedTeamId),
     queryFn: ({ signal }) =>
@@ -275,6 +290,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     agentMemoryInventoryQuery,
     agentMemoryDetailQuery,
     knowledgeDashboardSnapshotQuery,
+    teamKnowledgeCatalogQuery,
     memoryKnowledgeGraphQuery,
     memoryKnowledgeGraphNodeDetailQuery,
     githubProjectLibraryQuery,

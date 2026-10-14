@@ -8,6 +8,8 @@ import type {
   MemoryUsageContractPayload,
   GithubProjectLibraryMutationResponse,
   GithubProjectLibraryPayload,
+  PlatformKnowledgeGraphPayload,
+  PlatformKnowledgeGraphDetailPayload,
 } from "./types";
 
 function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -20,6 +22,22 @@ function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
 
 function memoryItemPath(sectionId: string, itemId: string, suffix = ""): string {
   return `/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}${suffix}`;
+}
+
+// Separate cache namespace: operator metadata must never enter an Agent ACL cache.
+export const platformKnowledgeGraphKeys = {
+  overview: (limit: number) => ["platform-knowledge-graph", "local-operator", limit] as const,
+  detail: (nodeId: string) => ["platform-knowledge-graph", "local-operator", "detail", nodeId] as const,
+};
+
+export function fetchPlatformKnowledgeGraph(options: { limit?: number; signal?: AbortSignal } = {}): Promise<PlatformKnowledgeGraphPayload> {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 800) });
+  return fetchJson<PlatformKnowledgeGraphPayload>(`/api/memory/platform-knowledge-graph?${params}`, { signal: options.signal });
+}
+
+export function fetchPlatformKnowledgeGraphNodeDetail(nodeId: string, options: { signal?: AbortSignal } = {}): Promise<PlatformKnowledgeGraphDetailPayload> {
+  const params = new URLSearchParams({ nodeId });
+  return fetchJson<PlatformKnowledgeGraphDetailPayload>(`/api/memory/platform-knowledge-graph/node-detail?${params}`, { signal: options.signal });
 }
 
 export function fetchMemoryOverview<T = MemoryOverview>(options?: {

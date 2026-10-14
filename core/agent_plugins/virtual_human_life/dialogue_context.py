@@ -16,6 +16,7 @@ from .interaction_expression import (
     build_companion_expression_decision,
     classify_companion_user_intent,
 )
+from .life_provenance import event_provenance, is_verified_experience
 from .storage import VirtualHumanLifeStore
 
 _INTERACTION_CONTEXT_PATH = "conversation/interaction_context.json"
@@ -218,6 +219,7 @@ def project_companion_dialogue_context(
         ),
         None,
     )
+    today_events = store.read_jsonl(agent_id, f"events/{local_date}.jsonl")
     completed_experiences = [
         {
             "eventId": str(item.get("eventId") or ""),
@@ -228,11 +230,28 @@ def project_companion_dialogue_context(
             ],
             "factStatus": "completed",
         }
-        for item in store.read_jsonl(agent_id, f"events/{local_date}.jsonl")
+        for item in today_events
+        if isinstance(item, Mapping) and is_verified_experience(item)
+    ][-8:]
+    # Keep the character's narrative available without presenting it as
+    # execution proof or a source for trusted long-term memory.
+    character_reports = [
+        {
+            "eventId": str(item.get("eventId") or ""),
+            "title": str(item.get("title") or "")[:160],
+            "occurredAt": str(item.get("occurredAt") or ""),
+            "outcomeSummary": str((item.get("outcome") or {}).get("summary") or "")[
+                :240
+            ],
+            "sourceKind": "character_report",
+            "factStatus": "self_reported_not_verified",
+        }
+        for item in today_events
         if isinstance(item, Mapping)
         and str(item.get("kind") or "") == "activity_completed"
         and isinstance(item.get("outcome"), Mapping)
         and str((item.get("outcome") or {}).get("status") or "") == "succeeded"
+        and event_provenance(item) == "character_report"
     ][-8:]
     future_plans = [
         {
@@ -266,6 +285,7 @@ def project_companion_dialogue_context(
         },
         "currentActivity": current_activity,
         "completedExperiences": completed_experiences,
+        "characterReports": character_reports,
         "futurePlans": future_plans,
         "interactionContext": interaction_context,
         "expressionDecision": expression_decision,

@@ -22,6 +22,10 @@ import { VMemoryGraphCanvas } from "../components/vui";
 
 输入保留 MemoryKnowledgeGraphNode / Edge DTO 的身份与方向，节点详情与来源读取归 route 的现有 query。`flat` 将节点与关系投影至 z=0 并以左拖平移；3D 恢复空间坐标，左拖全方位环绕、右拖平移；`focusToken` 显式触发聚焦；普通 selection 不重建引擎或重置镜头；`highlightIds` 标记搜索命中。
 
+`mode` 默认为 `galaxy`，保持记忆库与团队图谱现有行为；平台知识图谱可传 `mode="relations"` 在同一 facade 中切换为定向关系阅读。`selectedEdgeId` 控制关系选择，`onSelectEdge` 返回原 DTO 的关系 ID。所有新增节点与关系操作都由 `ShadcnButton` 实现，SVG 本身不接收点击。
+
+`groupByTopic` 默认为 `false`；平台星域显式启用后，非空 `metadata.topicId` 优先于节点类型，`metadata.topicLabel` 提供中文主题名。缺失主题的节点继续使用既有类型分组；稳定主题 key 决定色彩与星云相位，payload 重排不改变布局。聚合 `type="topic"` 节点的 label 包含主题名与数量，`metadata.memberCount` 决定主题体积；即使主题只有一个聚合节点，也绘制体积星云和星点。聚合主题使用原引擎的可键盘选择 nodeLabel，点击区域至少 44px，主题根优先常显；此投影标签沿用既有 DOM 图表几何例外。
+
 ### 非职责
 
 不取数、不写入记忆、不审核、不扩大 ACL、不生成推断关系。渲染聚类是展示分组，不代表服务端事实或访问权限。搜索和邻域展开只在返回的 payload 内执行，截断提示由页面展示。
@@ -38,6 +42,8 @@ import { VMemoryGraphCanvas } from "../components/vui";
 
 关系线使用主题前景色而非面板边框色；浅色与深色的默认线透明度分别为 0.58 与 0.42，选中、高亮与无关关系仍有清楚的层级。主题切换立即更新现有关系透明度，保留当前选择。星云的线性颜色经 Three.js 输出颜色空间转换；每个非空主题簇有 96 个可辨星点，保留真实三维分布与哑光节点，不以灰雾替代星域纹理。
 
+关系模式使用常驻中文关系按钮与箭头表达 source → target，优先显示 DTO 的中文 label，已知类型使用中文映射，未知类型显示「关联（type）」。`edge.metadata.status="candidate"` 使用虚线与「待确认」文字。画布宽度小于 660px、节点超过 12 个、文字或关系密度无法清晰排布时，自动使用完整可滚动的关系列表；列表仍保留全部节点按钮和关系解释入口。缺失端点的关系不渲染，以免显示未授权或不存在的节点；空节点与空关系各有明确提示。
+
 ### 实现落点
 
 拖动热路径使用 GPU 批量绘制：同形状、大小与主题颜色的节点和光环共用实例批次，关系曲线合为 LineSegments，选中关系方向箭头只提交可见实例。实例透明度保持节点选择、邻域与搜索高亮语义；较大的点击命中球保留空间位置和选中缩放，仅用于 Raycaster，不进入渲染场景。节点材质、三维坐标与体积星云采样保持现有视觉契约。
@@ -45,6 +51,8 @@ import { VMemoryGraphCanvas } from "../components/vui";
 标签尺寸、候选顺序及状态按输入变化缓存，读尺寸与写位置分批处理；字体、主题几何、宽度以及摘要展开会失效缓存。候选保留选中优先与星域公平顺序，遍历全部视口内节点直到填满显示预算，避免密集星域因候选截断丢失标签；选中标签无空位时仍保留可见位置。字体加载、标签 hover/focus 可以唤醒按需画布，卸载时释放监听。图谱仍使用原 VUI product API 与同一 renderer，不新增第二套图谱实现。
 
 领域 API：`product/memory/VMemoryGraphCanvas.tsx`；交互与 Three 实现：`renderers/shadcn/memory/`；页面：`routes/MemoryGraphViewPanel.tsx`。Three 投影坐标与 canvas 绘制为受控 inline 几何例外，其他界面使用 Tailwind 与 VUI。
+
+关系 renderer 为 `renderers/shadcn/memory/ShadcnMemoryRelationGraph.tsx`。节点及关系按钮的位置与 SVG 路径是同一受控图表几何例外；页面不导入 renderer、不复制 Three 或 NebulaField。
 
 ### 反冗余
 

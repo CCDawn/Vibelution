@@ -3,9 +3,34 @@ import { describe, expect, it } from "vitest";
 import railSource from "./CompanionLifeRail.tsx?raw";
 import memorySource from "./CompanionMemoryRecords.tsx?raw";
 import preferenceSource from "./CompanionPreferenceCard.tsx?raw";
+import provenanceSource from "./companionProvenance.ts?raw";
 import styles from "./CompanionChatRails.styles";
 
 describe("virtual-human life rail memory projection", () => {
+  it("uses one provenance label across memories, events, diary, and life feed", () => {
+    expect(memorySource).toContain("companionProvenanceLabel(memory.sourceKind, lang, memory.excludedFromRecall)");
+    expect(memorySource).toContain("companionProvenanceLabel(selected.sourceKind, lang, selected.excludedFromRecall)");
+    expect(railSource).toContain("companionProvenanceLabel(event.sourceKind, lang)");
+    expect(railSource).toContain("companionProvenanceLabel(entry.sourceKind, lang)");
+    expect(railSource).toContain("companionProvenanceLabel(item.sourceKind, lang)");
+    expect(railSource).toContain('"经历记录" : "Experience record"');
+    expect(railSource).toContain('"还没有生活动态记录。" : "No life feed entries are available yet."');
+    expect(provenanceSource).toContain('sourceKind === "simulation" && excludedFromRecall === true');
+    expect(provenanceSource).toContain('simulation: ["日程模拟", "Schedule simulation"]');
+    expect(provenanceSource).toContain('simulation_isolated: ["日程模拟（已隔离）", "Schedule simulation (isolated)"]');
+  });
+
+  it("uses ongoing action counts and readable Chinese rhythm labels", () => {
+    expect(railSource).toContain('const isOngoing = drive.progressBasis === "ongoing";');
+    expect(railSource).toContain('lang === "zh" ? "持续进行" : "Ongoing"');
+    expect(railSource).toContain("已记录 ${verifiedActivityCount} 次行动");
+    expect(railSource).toContain('morning: ["偏早型", "Morning-oriented"]');
+    expect(railSource).toContain('balanced: ["均衡型", "Balanced"]');
+    expect(railSource).toContain('evening: ["偏晚型", "Evening-oriented"]');
+    expect(railSource).toContain('sleep_window: ["睡眠时段", "Sleep window"]');
+    expect(railSource).toContain("circadianPhaseLabel(rhythms.circadian?.phase || \"day\", lang)");
+  });
+
   it("opens stored episodic memory text and source records without claiming shared experiences", () => {
     expect(railSource).toContain("fetchVirtualHumanMemories");
     expect(railSource).toContain("CompanionLifeWorldCard");

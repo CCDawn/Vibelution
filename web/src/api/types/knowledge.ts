@@ -44,6 +44,19 @@ export type KnowledgeBasePermissions = {
   canRate: boolean;
 };
 
+export type TeamKnowledgeAccessReason = "allowed" | "no_actor" | "not_member";
+
+export type TeamKnowledgeReader = {
+  agentId: string;
+  displayName: string;
+};
+
+export type TeamKnowledgeAccess = {
+  canRead: boolean;
+  reason: TeamKnowledgeAccessReason;
+  readers: TeamKnowledgeReader[];
+};
+
 export type TeamKnowledgeBase = {
   knowledgeBaseId: string;
   scopedKnowledgeBaseId?: string;
@@ -68,6 +81,8 @@ export type TeamKnowledgeBase = {
   };
   pendingProposals: KnowledgeRefinementProposal[];
   permissions: KnowledgeBasePermissions;
+  /** Operator catalog only. Absent on actor-filtered overview payloads. */
+  access?: TeamKnowledgeAccess;
 };
 
 export type TeamKnowledgeOverview = {

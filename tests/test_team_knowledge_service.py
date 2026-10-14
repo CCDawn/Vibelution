@@ -1589,6 +1589,58 @@ def test_empty_actor_cannot_create_or_read_governed_knowledge_service(knowledge_
     assert internal_health["summary"]["knowledgeBaseCount"] == 1
 
 
+def test_team_knowledge_catalog_lists_bases_the_actor_cannot_read(knowledge_env):
+    base = knowledge_env["base"]
+    lead = knowledge_env["lead"]
+    member = knowledge_env["member"]
+    outsider = knowledge_env["outsider"]
+
+    outsider_overview = team_knowledge_service.list_knowledge_overview(agent_id=outsider["agentId"])
+    assert outsider_overview["summary"]["knowledgeBaseCount"] == 0
+
+    empty_catalog = team_knowledge_service.list_team_knowledge_catalog()
+    assert empty_catalog["summary"]["knowledgeBaseCount"] == 1
+    empty_row = empty_catalog["knowledgeBases"][0]
+    assert empty_row["knowledgeBaseId"] == base["knowledgeBaseId"]
+    assert empty_row["name"] == "Shared Decisions"
+    assert empty_row["stats"]["itemCount"] == 0
+    assert empty_row["pendingProposals"] == []
+    assert "items" not in empty_row
+    assert empty_row["permissions"]["canRead"] is False
+    assert empty_row["access"]["canRead"] is False
+    assert empty_row["access"]["reason"] == "no_actor"
+    reader_ids = {reader["agentId"] for reader in empty_row["access"]["readers"]}
+    assert reader_ids == {lead["agentId"], member["agentId"]}
+    assert all(reader["displayName"] for reader in empty_row["access"]["readers"])
+
+    outsider_catalog = team_knowledge_service.list_team_knowledge_catalog(agent_id=outsider["agentId"])
+    outsider_row = outsider_catalog["knowledgeBases"][0]
+    assert outsider_row["access"]["reason"] == "not_member"
+    assert outsider_row["permissions"]["canRead"] is False
+    assert outsider_row["pendingProposals"] == []
+
+    member_catalog = team_knowledge_service.list_team_knowledge_catalog(agent_id=member["agentId"])
+    member_row = member_catalog["knowledgeBases"][0]
+    assert member_row["access"]["reason"] == "allowed"
+    assert member_row["access"]["canRead"] is True
+    assert member_row["permissions"]["canRead"] is True
+
+    member_overview = team_knowledge_service.list_knowledge_overview(agent_id=member["agentId"])
+    assert member_overview["summary"]["knowledgeBaseCount"] == 1
+
+    private_base = team_knowledge_service.create_agent_knowledge_base(
+        member["agentId"],
+        name="Private Agent KB",
+        actor_agent_id=member["agentId"],
+    )
+    catalog_ids = {
+        row["knowledgeBaseId"]
+        for row in team_knowledge_service.list_team_knowledge_catalog(agent_id=member["agentId"])["knowledgeBases"]
+    }
+    assert base["knowledgeBaseId"] in catalog_ids
+    assert private_base["knowledgeBaseId"] not in catalog_ids
+
+
 def test_internal_team_knowledge_base_list_uses_lightweight_team_identity(knowledge_env, monkeypatch):
     team = knowledge_env["team"]
 

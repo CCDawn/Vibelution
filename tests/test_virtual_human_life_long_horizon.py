@@ -183,6 +183,11 @@ def test_injected_clock_crosses_midnight_without_waiting_days_and_keeps_agents_i
             tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
         ),
         episodic_writer=write_episode,
+        activity_evidence_resolver=lambda _agent, request: {
+            "kind": "native_tool_execution", "sessionId": request["sessionId"],
+            "turnId": request["turnId"], "toolCallIds": ["call-a"],
+            "receiptEventIds": ["receipt-a"],
+        },
         episodic_lister=lambda agent_id, limit=500: [
             item for item in episodes if item["agentId"] == agent_id
         ][-limit:],
@@ -202,14 +207,23 @@ def test_injected_clock_crosses_midnight_without_waiting_days_and_keeps_agents_i
 
     before_a = service.snapshot("agent-a")
     activity = before_a["todaySchedule"]["activities"][1]
+    activity["requiredToolNames"] = ["write_file_tool"]
+    service.save_schedule("agent-a", before_a["todaySchedule"])
+    execution = {"runtimeAgentId": "agent-a", "sessionId": "session-agent-a", "turnId": "turn-creative"}
+    started = service.execute_command(
+        "agent-a", command="startActivity", expected_version=before_a["state"]["stateVersion"],
+        idempotency_key="accelerated-start-creative",
+        arguments={"activityId": activity["activityId"], "executionContext": execution},
+    )
     completed = service.execute_command(
         "agent-a",
         command="completeActivity",
-        expected_version=before_a["state"]["stateVersion"],
+        expected_version=started["stateVersion"],
         idempotency_key="accelerated-complete-creative",
         arguments={
             "localDate": before_a["state"]["localDate"],
             "activityId": activity["activityId"],
+            "executionContext": execution,
             "outcome": {
                 "status": "succeeded",
                 "summary": "完成并保存了一段可以继续发展的原创旋律。",
@@ -220,7 +234,8 @@ def test_injected_clock_crosses_midnight_without_waiting_days_and_keeps_agents_i
     )
     event_id = completed["result"]["eventId"]
     after_activity = service.snapshot("agent-a")
-    assert after_activity["causal"]["drives"]["projects"][0]["progress"] > 0
+    assert after_activity["causal"]["drives"]["projects"][0]["progressBasis"] == "ongoing"
+    assert after_activity["causal"]["drives"]["projects"][0]["verifiedActivityCount"] == 1
     assert after_activity["causal"]["affect"]["activeEpisodeIds"]
     source_affect_id = next(
         item["episodeId"]

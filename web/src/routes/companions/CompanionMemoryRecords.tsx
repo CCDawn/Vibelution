@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 
 import { fetchVirtualHumanEvents } from "../../api/virtualHumanLife";
@@ -6,6 +6,7 @@ import { queryKeys } from "../../api/queryKeys";
 import type { VirtualHumanEpisodicMemory, VirtualHumanLifeEvent } from "../../api/types";
 import { usePageVisibility } from "../../app/pollingPolicy";
 import { VButton, VDialog } from "../../components/vui";
+import { companionProvenanceLabel } from "./companionProvenance";
 import styles from "./CompanionMemoryRecords.styles";
 
 type Language = "zh" | "en";
@@ -39,10 +40,22 @@ function sourceDates(memory: VirtualHumanEpisodicMemory | undefined): string[] {
 function rawMemorySource(memory: VirtualHumanEpisodicMemory): string {
   // Legacy responses may carry a source field outside the current DTO. Keep
   // its original value as provenance, never infer an event from its wording.
-  return ["source", "sourceKind", "sourceRef"].flatMap((key) => {
+  return ["source", "sourceRef"].flatMap((key) => {
     const value: unknown = Reflect.get(memory, key);
     return typeof value === "string" && value.trim() ? [`${key}: ${value}`] : [];
   }).join(" · ");
+}
+
+function memorySourceReferences(memory: VirtualHumanEpisodicMemory): Array<{ type: string; id: string }> {
+  const seen = new Set<string>();
+  return (memory.sourceRefs ?? []).flatMap((reference) => {
+    const type = typeof reference.type === "string" ? reference.type.trim() : "";
+    const id = typeof reference.id === "string" ? reference.id.trim() : "";
+    const key = `${type}\u0000${id}`;
+    if (!type || !id || seen.has(key)) return [];
+    seen.add(key);
+    return [{ type, id }];
+  });
 }
 
 function isSimulation(event: VirtualHumanLifeEvent): boolean {
@@ -52,8 +65,7 @@ function isSimulation(event: VirtualHumanLifeEvent): boolean {
 }
 
 function eventSourceLabel(event: VirtualHumanLifeEvent, lang: Language): string {
-  if (isSimulation(event)) return lang === "zh" ? "日程模拟记录" : "Schedule simulation record";
-  return lang === "zh" ? "来源事件记录" : "Source event record";
+  return companionProvenanceLabel(event.sourceKind || (isSimulation(event) ? "simulation" : "unknown"), lang);
 }
 
 export function CompanionMemoryRecords({
@@ -65,9 +77,18 @@ export function CompanionMemoryRecords({
   memories: VirtualHumanEpisodicMemory[];
   lang: Language;
 }) {
+  const sortedMemories = [...memories].sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left));
+  const [memoryPage, setMemoryPage] = useState(() => ({ agentId, memories, visibleCount: 6 }));
+  const memoryPageMatches = memoryPage.agentId === agentId && memoryPage.memories === memories;
+  const visibleCount = memoryPageMatches ? memoryPage.visibleCount : 6;
+  const visibleMemories = sortedMemories.slice(0, visibleCount);
+  const remainingCount = sortedMemories.length - visibleMemories.length;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const readButtonRef = useRef<HTMLButtonElement | null>(null);
   const pageVisible = usePageVisibility();
+  useEffect(() => {
+    setMemoryPage({ agentId, memories, visibleCount: 6 });
+  }, [agentId, memories]);
   const selected = memories.find((memory) => memory.episodeId === selectedId);
   const dates = selected && sourceIds(selected).length ? sourceDates(selected) : [];
   const eventQueries = useQueries({
@@ -86,15 +107,16 @@ export function CompanionMemoryRecords({
     .map((event) => [event.eventId, event]));
 
   function sourceSummary(memory: VirtualHumanEpisodicMemory): string {
+    const label = companionProvenanceLabel(memory.sourceKind, lang, memory.excludedFromRecall);
     const ids = sourceIds(memory);
-    if (!ids.length) return lang === "zh" ? "来源未知" : "Source unknown";
+    if (!ids.length) return label;
     const events = ids.flatMap((id) => eventsById.get(id) ? [eventsById.get(id)!] : []);
-    if (events.some(isSimulation)) return lang === "zh" ? "含日程模拟记录" : "Includes schedule simulation";
-    if (memory.episodeId !== selectedId) return lang === "zh" ? `${ids.length} 条关联来源 · 待核对` : `${ids.length} linked source(s) · unchecked`;
-    if (sourcesPending) return lang === "zh" ? "正在读取来源" : "Loading source";
-    if (sourcesError) return lang === "zh" ? "来源暂不可用" : "Source unavailable";
-    if (events.length !== ids.length) return lang === "zh" ? "来源未完全确认" : "Source partly unknown";
-    return lang === "zh" ? `${ids.length} 条来源事件记录` : `${ids.length} source event record(s)`;
+    if (events.some(isSimulation)) return `${label} · ${lang === "zh" ? "含日程模拟记录" : "Includes schedule simulation"}`;
+    if (memory.episodeId !== selectedId) return `${label} · ${lang === "zh" ? `${ids.length} 条关联来源待核对` : `${ids.length} linked source(s) unchecked`}`;
+    if (sourcesPending) return `${label} · ${lang === "zh" ? "正在读取来源" : "Loading source"}`;
+    if (sourcesError) return `${label} · ${lang === "zh" ? "来源暂不可用" : "Source unavailable"}`;
+    if (events.length !== ids.length) return `${label} · ${lang === "zh" ? "来源未完全确认" : "Source partly unknown"}`;
+    return `${label} · ${lang === "zh" ? `${ids.length} 条来源事件记录` : `${ids.length} source event record(s)`}`;
   }
 
   if (!memories.length) {
@@ -103,13 +125,16 @@ export function CompanionMemoryRecords({
 
   return (
     <div className={styles.list}>
-      {[...memories].sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left)).slice(0, 6).map((memory) => (
+      {visibleMemories.map((memory) => (
         <article key={memory.episodeId} className={styles.record}>
           <div className={styles.header}>
             <strong>{lang === "zh" ? "记忆记录" : "Memory record"}</strong>
             <time dateTime={memory.occurredAt || undefined}>{formatTimestamp(memory.occurredAt, lang)}</time>
           </div>
           <p className={styles.preview}>{memory.text || (lang === "zh" ? "这条记忆没有正文。" : "This memory has no body.")}</p>
+          {memory.excludedFromRecall ? (
+            <p className={styles.note}>{lang === "zh" ? "已排除出回忆检索，历史记录仍保留。" : "Excluded from recall; the historical record remains available."}</p>
+          ) : null}
           <div className={styles.footer}>
             <span className={styles.source}>{sourceSummary(memory)}</span>
             <VButton variant="ghost" density="compact" onPress={(event) => { readButtonRef.current = event.currentTarget; setSelectedId(memory.episodeId); }} aria-label={lang === "zh" ? "阅读记忆正文与来源" : "Read memory and source"}>
@@ -118,11 +143,24 @@ export function CompanionMemoryRecords({
           </div>
         </article>
       ))}
+      {remainingCount > 0 ? (
+        <VButton
+          variant="ghost"
+          density="compact"
+          onPress={() => setMemoryPage({ agentId, memories, visibleCount: Math.min(visibleCount + 6, sortedMemories.length) })}
+          aria-label={lang === "zh" ? `查看更多记忆，还有 ${remainingCount} 条` : `Show more memories, ${remainingCount} remaining`}
+        >
+          {lang === "zh" ? `查看更多记忆（还有 ${remainingCount} 条）` : `Show more memories (${remainingCount} remaining)`}
+        </VButton>
+      ) : null}
       <VDialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedId(null); }} onCloseAutoFocus={(event) => { if (readButtonRef.current?.isConnected) { event.preventDefault(); readButtonRef.current.focus(); } }} title={lang === "zh" ? "记忆记录" : "Memory record"} description={lang === "zh" ? "现存正文与来源" : "Stored text and source"} size="lg">
         {selected ? (
           <div className={styles.content}>
             <p className={styles.body}>{selected.text || (lang === "zh" ? "这条记忆没有正文。" : "This memory has no body.")}</p>
             <p className={styles.note}>{lang === "zh" ? "当前接口只提供以上正文，未提供更长内容。" : "The current response supplies the text above; no longer body was provided."}</p>
+            {selected.excludedFromRecall ? (
+              <p className={styles.note}>{lang === "zh" ? "已排除出回忆检索，历史记录仍保留。" : "Excluded from recall; the historical record remains available."}</p>
+            ) : null}
             <div className={styles.metadata}>
               <p>{lang === "zh" ? "记录时间" : "Recorded"} · {formatTimestamp(selected.occurredAt, lang)}</p>
               {selected.promotedAt ? <p>{lang === "zh" ? "保留为长期记忆" : "Kept as long-term memory"} · {formatTimestamp(selected.promotedAt, lang)}</p> : null}
@@ -131,9 +169,21 @@ export function CompanionMemoryRecords({
             </div>
             <section className={styles.sources} aria-label={lang === "zh" ? "记忆来源" : "Memory source"}>
               <h3>{lang === "zh" ? "来源" : "Source"}</h3>
+              <p className={styles.source}>{companionProvenanceLabel(selected.sourceKind, lang, selected.excludedFromRecall)}</p>
+              {selected.sourceKind === "simulation" && selected.excludedFromRecall !== true ? (
+                <p className={styles.note}>{lang === "zh" ? "此模拟来源尚未确认已排除出回忆检索。" : "This simulated source has not been confirmed as excluded from recall."}</p>
+              ) : null}
               {rawMemorySource(selected) ? <p className={styles.source}>{rawMemorySource(selected)}</p> : null}
-              {!sourceIds(selected).length ? <p className={styles.note}>{lang === "zh" ? "来源未知：当前记录没有关联来源事件。" : "Source unknown: no source events are linked to this record."}</p> : null}
-              {sourceIds(selected).length > 0 && !dates.length ? <p className={styles.note}>{lang === "zh" ? "记录时间缺失，无法定位来源事件；来源未知。" : "The record date is missing; source events cannot be located and their source is unknown."}</p> : null}
+              {!sourceIds(selected).length && !memorySourceReferences(selected).length && (selected.sourceKind === undefined || selected.sourceKind === "unknown") ? <p className={styles.note}>{lang === "zh" ? "来源未核实：当前记录没有关联来源事件。" : "Source unverified: no source events are linked to this record."}</p> : null}
+              {sourceIds(selected).length > 0 && !dates.length ? <p className={styles.note}>{lang === "zh" ? "记录时间缺失，无法定位关联来源事件。" : "The record date is missing; linked source events cannot be located."}</p> : null}
+              {memorySourceReferences(selected).length > 0 ? (
+                <details className={styles.source}>
+                  <summary>{lang === "zh" ? "记忆来源引用" : "Memory source references"}</summary>
+                  {memorySourceReferences(selected).map((reference) => (
+                    <p key={`${reference.type}:${reference.id}`}>{reference.type}: {reference.id}</p>
+                  ))}
+                </details>
+              ) : null}
               {sourceIds(selected).length > 0 && sourcesPending ? <p role="status" className={styles.note}>{lang === "zh" ? "正在读取来源事件…" : "Loading source events…"}</p> : null}
               {sourceIds(selected).length > 0 && sourcesError ? (
                 <div className={styles.metadata}>
@@ -154,7 +204,7 @@ export function CompanionMemoryRecords({
                         {isSimulation(event) ? <p className={styles.note}>{lang === "zh" ? "这是日程模拟生成的记录，不能据此确认真实行动或共同经历。" : "This record was generated by schedule simulation and does not confirm a real action or shared experience."}</p> : null}
                       </>
                     ) : dates.length > 0 && !sourcesPending && !sourcesError ? (
-                      <p className={styles.note}>{lang === "zh" ? "本次来源查询中未找到此事件，来源未知。" : "This event was not found in this source query; its source is unknown."}</p>
+                      <p className={styles.note}>{lang === "zh" ? "本次来源查询中未找到此事件，仍待核实。" : "This event was not found in this source query and remains unverified."}</p>
                     ) : null}
                     <details className={styles.source}>
                       <summary>{lang === "zh" ? "来源引用" : "Source reference"}</summary>

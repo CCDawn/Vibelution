@@ -52,6 +52,10 @@ type MemoryContentBrowsePanelProps = {
   entriesLoading?: boolean;
   /** Group titles that start collapsed; searching always expands them. */
   collapsibleGroupTitles?: string[];
+  /** Optional controls above search, such as the team-library reading identity. */
+  header?: ReactNode;
+  /** Replaces the entry list when a selected card cannot show its contents. */
+  selectedNotice?: ReactNode;
   /** Secondary library tools remain accessible inside the reader, without another page shell. */
   supplementaryContent?: ReactNode;
 };
@@ -146,6 +150,8 @@ export function MemoryContentBrowsePanel({
   errorText = "",
   entriesLoading = false,
   collapsibleGroupTitles = [],
+  header,
+  selectedNotice,
   supplementaryContent,
 }: MemoryContentBrowsePanelProps) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -157,6 +163,7 @@ export function MemoryContentBrowsePanel({
 
   const rail = (
     <div className={styles.rail}>
+      {header}
       {onSearchTextChange ? (
         <label className={styles.searchBox}>
           <Search size={15} />
@@ -239,7 +246,9 @@ export function MemoryContentBrowsePanel({
       <div className={styles.readerScroll}>
         {errorText ? <VStateSurface tone="error" title={copy.loadFailed}>{errorText}</VStateSurface> : null}
         {supplementaryContent}
-        {selectedCard ? (
+        {selectedCard && selectedNotice ? (
+          selectedNotice
+        ) : selectedCard ? (
           <div className={styles.entryList}>
             {entriesLoading && !entries.length ? (
               <VSection title={copy.loading}>

@@ -200,3 +200,88 @@ export function recoverFromBuiltAssetResourceError(
     resourceUrl,
   });
 }
+
+type ReloadGraceTimer = {
+  setTimeout: (handler: () => void, timeoutMs: number) => unknown;
+  clearTimeout: (handle: unknown) => void;
+};
+
+export type ReloadGraceOptions = {
+  degradeMs?: number;
+  onDegrade?: (error: unknown) => void;
+  timer?: ReloadGraceTimer;
+};
+
+/** Default grace before a requested recovery reload is treated as vetoed. */
+const ROUTE_CHUNK_RELOAD_GRACE_MS = 4_000;
+
+export type ReloadGracePromise<T> = Promise<T> & { cancel: () => void };
+
+function resolveReloadGraceTimer(timer?: ReloadGraceTimer): ReloadGraceTimer | undefined {
+  if (timer) {
+    return timer;
+  }
+  if (typeof globalThis.setTimeout !== "function" || typeof globalThis.clearTimeout !== "function") {
+    return undefined;
+  }
+  return {
+    setTimeout: (handler, timeoutMs) => globalThis.setTimeout(handler, timeoutMs),
+    clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+  };
+}
+
+/**
+ * Keeps a lazy route suspension pending while its recovery reload can still
+ * take effect, then degrades to the original chunk error so React Router's
+ * errorElement can render actionable recovery instead of freezing the view
+ * forever. Needed because the recovery reload can be silently vetoed by the
+ * project-close beforeunload guard (one-shot unload pass expired / re-armed).
+ *
+ * `cancel()` clears the degrade timer for the successful-reload path and test
+ * teardown; a cancelled grace stays pending, which is correct once the
+ * document is already unloading. `onDegrade` fires at most once, before the
+ * rejection, and never masks the original error if telemetry throws.
+ */
+export function createReloadGracePromise<T>(
+  error: unknown,
+  options: ReloadGraceOptions = {},
+): ReloadGracePromise<T> {
+  const degradeMs = options.degradeMs ?? ROUTE_CHUNK_RELOAD_GRACE_MS;
+  const timer = resolveReloadGraceTimer(options.timer);
+  let degradeHandle: unknown;
+  let settled = false;
+
+  const grace = new Promise<T>((_resolve, reject) => {
+    if (!timer) {
+      // No scheduler (constrained runtime): keep suspending rather than drop
+      // a reload that may still be in flight with no degrade point left.
+      return;
+    }
+    degradeHandle = timer.setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (options.onDegrade) {
+        try {
+          options.onDegrade(error);
+        } catch {
+          // Telemetry must never replace the original chunk error.
+        }
+      }
+      reject(error);
+    }, degradeMs);
+  }) as ReloadGracePromise<T>;
+
+  grace.cancel = () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    if (timer) {
+      timer.clearTimeout(degradeHandle);
+    }
+  };
+
+  return grace;
+}

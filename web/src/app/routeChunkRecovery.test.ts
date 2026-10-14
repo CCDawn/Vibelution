@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createReloadGracePromise,
   isDynamicImportFetchError,
   isLocalBuiltAssetResourceError,
   recoverFromBuiltAssetResourceError,
@@ -108,5 +109,130 @@ describe("route chunk recovery", () => {
     expect(recoverFromBuiltAssetResourceError("/assets/ConfigRoute-CeO6d7JC.js", win, (event) => reports.push(event))).toBe(false);
     expect(win.location.reload).toHaveBeenCalledTimes(1);
     expect(reports[1].eventCode).toBe("browser.route_chunk_recovery.reload_skipped");
+  });
+});
+
+function trackPromise<T>(promise: Promise<T>) {
+  const state = {
+    status: "pending" as "pending" | "fulfilled" | "rejected",
+    reason: undefined as unknown,
+  };
+  promise.then(
+    () => {
+      state.status = "fulfilled";
+    },
+    (error) => {
+      state.status = "rejected";
+      state.reason = error;
+    },
+  );
+  return state;
+}
+
+describe("reload grace promise", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stays pending while the recovery reload can still take effect", async () => {
+    vi.useFakeTimers();
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js");
+    const onDegrade = vi.fn();
+    const grace = createReloadGracePromise<{ default: unknown }>(error, { degradeMs: 4000, onDegrade });
+    const tracked = trackPromise(grace);
+
+    await vi.advanceTimersByTimeAsync(3999);
+
+    expect(tracked.status).toBe("pending");
+    expect(onDegrade).not.toHaveBeenCalled();
+    // Test teardown: clear the pending degrade timer.
+    grace.cancel();
+  });
+
+  it("rejects with the original error and fires onDegrade exactly once after the default grace", async () => {
+    vi.useFakeTimers();
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js");
+    const onDegrade = vi.fn();
+    const grace = createReloadGracePromise<{ default: unknown }>(error, { onDegrade });
+    const tracked = trackPromise(grace);
+
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(tracked.status).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(tracked.status).toBe("rejected");
+    expect(tracked.reason).toBe(error);
+    expect(onDegrade).toHaveBeenCalledTimes(1);
+    expect(onDegrade).toHaveBeenCalledWith(error);
+
+    // No double-settle: extra ticks (or a late cancel) never re-fire the degrade.
+    grace.cancel();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(onDegrade).toHaveBeenCalledTimes(1);
+    expect(tracked.status).toBe("rejected");
+    expect(tracked.reason).toBe(error);
+  });
+
+  it("clears the degrade timer on cancel so a successful reload path stays silent", async () => {
+    vi.useFakeTimers();
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js");
+    const onDegrade = vi.fn();
+    const grace = createReloadGracePromise<{ default: unknown }>(error, { degradeMs: 400, onDegrade });
+    const tracked = trackPromise(grace);
+
+    grace.cancel();
+    await vi.runAllTimersAsync();
+
+    expect(tracked.status).toBe("pending");
+    expect(onDegrade).not.toHaveBeenCalled();
+  });
+
+  it("keeps a throwing onDegrade hook from masking the original chunk error", async () => {
+    vi.useFakeTimers();
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js");
+    const grace = createReloadGracePromise<{ default: unknown }>(error, {
+      degradeMs: 100,
+      onDegrade: () => {
+        throw new Error("telemetry sink down");
+      },
+    });
+    const tracked = trackPromise(grace);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(tracked.status).toBe("rejected");
+    expect(tracked.reason).toBe(error);
+  });
+
+  it("supports an injectable timer and guards settle races through cancel", () => {
+    const scheduled: Array<{ handler: () => void; timeoutMs: number }> = [];
+    let clearedCount = 0;
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js");
+    const onDegrade = vi.fn();
+    const grace = createReloadGracePromise<{ default: unknown }>(error, {
+      degradeMs: 250,
+      onDegrade,
+      timer: {
+        setTimeout: (handler, timeoutMs) => {
+          scheduled.push({ handler, timeoutMs });
+          return scheduled.length;
+        },
+        clearTimeout: () => {
+          clearedCount += 1;
+        },
+      },
+    });
+    const tracked = trackPromise(grace);
+
+    expect(scheduled).toEqual([{ handler: expect.any(Function), timeoutMs: 250 }]);
+    expect(clearedCount).toBe(0);
+
+    grace.cancel();
+    expect(clearedCount).toBe(1);
+
+    // A late timer callback (double-fire) must not degrade a cancelled grace.
+    scheduled[0]?.handler();
+    expect(tracked.status).toBe("pending");
+    expect(onDegrade).not.toHaveBeenCalled();
   });
 });

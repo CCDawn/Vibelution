@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .causal_contracts import CAUSAL_SCHEMA_VERSION
+from .life_provenance import is_verified_experience
 
 _LABELS = {
     "reading": "阅读",
@@ -15,14 +16,6 @@ _LABELS = {
     "skill_practice": "技能练习",
     "learning": "学习",
     "study": "学习",
-}
-_VERIFIED_OUTCOME_KINDS = {
-    "verified_tool_outcome",
-    "artifact_created",
-    "reading_completed",
-    "news_explored",
-    "skill_practiced",
-    "verified",
 }
 
 
@@ -49,9 +42,7 @@ def project_interests(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             not event_id
             or event_id in processed
             or interest_key not in _LABELS
-            or str(event.get("kind") or "") != "activity_completed"
-            or str(outcome.get("status") or "") != "succeeded"
-            or str(outcome.get("kind") or "") not in _VERIFIED_OUTCOME_KINDS
+            or not is_verified_experience(event)
         ):
             continue
         processed.append(event_id)
