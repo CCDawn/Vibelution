@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { queryKeys } from "../../src/api/queryKeys";
 import type { SessionLlmModelOption } from "../../src/api/types";
 import { VuiProvider } from "../../src/components/vui/VuiProvider";
-import { PreviewModelParametersControl } from "./PreviewModelParametersControl";
+import { ConversationTurnModelControl } from "../../src/components/conversation/ConversationTurnModelControl";
 import { dictionaryDomainsQueryKey, normalizeDictionaryDomains } from "../../src/i18n/dictionaryDomainIds";
 import { loadDictionaryDomains } from "../../src/i18n/loadDictionaryDomains";
 import "../../src/design/tokens.css";
@@ -36,25 +36,28 @@ const agents: PreviewAgent[] = [
     configRevision: 12,
     contextWindow: 128_000,
     maxContextWindow: 200_000,
-    currentReasoningEffort: "medium",
+    currentReasoningEffort: "high",
     model: {
-      modelId: "openai/gpt-5.6-sol",
-      modelRef: "openai/gpt-5.6-sol",
-      label: "GPT-5.6 Sol",
-      model: "gpt-5.6-sol",
+      modelId: "openai/gpt-6.1-sol",
+      modelRef: "openai/gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+      model: "gpt-6.1-sol",
       providerId: "openai",
       providerLabel: "OpenAI",
       providerKind: "openai",
       apiKeyConfigured: true,
       missingApiKey: false,
       supportsReasoningEffort: true,
-      reasoningEffortValues: ["low", "medium", "high"],
+      reasoningEffortValues: ["low", "medium", "high", "xhigh", "max", "ultra"],
       reasoningEffortOptions: [
         { value: "low", label: "低", description: "快速响应" },
         { value: "medium", label: "中", description: "平衡" },
         { value: "high", label: "高", description: "更充分推理" },
+        { value: "xhigh", label: "很高", description: "" },
+        { value: "max", label: "最大", description: "" },
+        { value: "ultra", label: "极致", description: "" },
       ],
-      defaultReasoningEffort: "medium",
+      defaultReasoningEffort: "high",
       isDefault: true,
     },
   },
@@ -189,7 +192,7 @@ function App() {
           <div className="composer-footer">
             <span className="composer-add" aria-hidden="true">+</span>
             <div className="composer-model-slot">
-              <PreviewModelParametersControl
+              <ConversationTurnModelControl
                 sessionId={agent.sessionId}
                 agentId={agent.agentId}
                 configRevision={agent.configRevision}

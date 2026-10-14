@@ -79,6 +79,19 @@ export function useChatSessionDetailMutations({
   const approvalOperations = useRef(new Map<string, number>());
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+  function refreshAgentModelOptions(sessionId: string, agentId: string, skipSavedSession = false) {
+    const key = queryKeys.sessionLlmOptions(sessionId);
+    // Refetch Agent-scoped settings without copying a session-specific payload
+    // into another session, including when navigation overtakes the response.
+    void queryClient.invalidateQueries({
+      predicate: (query) => {
+        const candidate = query.queryKey;
+        if (candidate.length !== key.length || candidate[0] !== key[0] || candidate[2] !== key[2]) return false;
+        if (candidate[1] === sessionId) return !skipSavedSession;
+        return (query.state.data as SessionLlmOptions | undefined)?.agentId === agentId;
+      },
+    });
+  }
   const sessionModelParametersMutation = useMutation({
     mutationFn: (variables: { sessionId: string; parameters: SessionModelParametersUpdate }) =>
       updateSessionModelParameters(variables.sessionId, variables.parameters),
@@ -105,16 +118,14 @@ export function useChatSessionDetailMutations({
           return payload;
         });
       }
-      if (activeSessionIdRef.current === variables.sessionId && !cacheMatched) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
+      refreshAgentModelOptions(variables.sessionId, expected.expectedAgentId, cacheMatched);
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
     },
     onError: (_error, variables) => {
       const isRevisionConflict = isFetchJsonHttpError(_error) && _error.status === 409;
-      if (isRevisionConflict && activeSessionIdRef.current === variables.sessionId) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionLlmOptions(variables.sessionId) });
+      if (isRevisionConflict) {
+        refreshAgentModelOptions(variables.sessionId, variables.parameters.expectedAgentId);
         void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
         void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       }

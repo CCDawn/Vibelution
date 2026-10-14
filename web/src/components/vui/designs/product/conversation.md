@@ -1042,13 +1042,15 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 | agentId / configRevision | 写入前校验的 Agent 身份与配置版本 |
 | contextWindow / maxContextWindow | 已生效上下文窗口与当前模型的最大窗口，单位 token |
 | currentReasoningEffort | 当前 Agent 模型的思考强度 |
-| onSave | 只提交 contextWindow 与 reasoningEffort；路由附加快照字段 |
+| onSave | 一次提交 contextWindow 与 reasoningEffort；路由附加快照字段 |
 | loading | 显示「读取模型…」，不暂时显示前一个 Agent 的名称 |
 | error | 显示「模型读取失败」，不把缓存中的模型冒充当前有效配置 |
 
 ### 视觉与状态
 - 维持工具栏紧凑字号和灰阶；模型名后使用参数图标标明可配置。名称过长时截断，tooltip/title 保留完整名称。
-- popover 只含上下文窗口、思考强度和一个图标保存动作；不增加解释段或模型选择项。
+- popover 只含上下文窗口、思考强度和一个图标保存动作；两个字段共用胶囊离散滑条，当前数值居中，思考强度下方只读显示模型名。
+- 上下文窗口吸附 8K、16K、32K、64K、128K、常用更大值与当前模型最大值；点击居中数值可精确输入，已输入的自定义数值保留为当前值。右上角 reset 恢复模型最大值。
+- 思考强度只吸附当前模型支持的档位，不显示 Default 刻度；右上角 reset 提交空字符串以恢复模型默认值。
 - 保存中保持面板和输入草稿可见，字段与保存动作禁用；保存失败显示短错误并保留输入。
 - 上下文只接受正整数且不得超过模型上限；即时给出字段级错误与 `aria-invalid`。
 
@@ -1063,6 +1065,7 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 - `web/src/components/conversation/ConversationTurnModelControl.tsx` 和 `.styles.ts`
 - `web/src/components/conversation/conversationViewTypes.ts`
 - `web/src/routes/chat/ChatCodingRouteWorkbench.tsx`
+- 滑条复用 `VNativeInput` 的 `rangeVariant="capsule"`；渲染落点为 `web/src/components/vui/renderers/shadcn/ShadcnRange.tsx`
 
 ### 反冗余
 - 复用 Agent 管理现有 `AgentModelPicker` 和配置导航，不复制发现/添加/兼容性校验能力。

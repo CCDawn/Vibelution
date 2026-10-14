@@ -63,6 +63,41 @@ function renderControl(
   );
 }
 
+async function withInteractiveControl(
+  check: (render: (props?: Partial<React.ComponentProps<typeof ConversationTurnModelControl>>) => Promise<void>, onSave: ReturnType<typeof vi.fn>) => Promise<void>,
+) {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const onSave = vi.fn();
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+  const render = async (props: Partial<React.ComponentProps<typeof ConversationTurnModelControl>> = {}) => {
+    await act(async () => root.render(
+      <QueryClientProvider client={queryClient}>
+        <ConversationTurnModelControl sessionId="session-a" agentId="agent-a" configRevision={4} model={luna} contextWindow={64_000} maxContextWindow={128_000} currentReasoningEffort="high" onSave={onSave} {...props} />
+      </QueryClientProvider>,
+    ));
+  };
+  try {
+    await render();
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')?.click());
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="conversation-model-parameters-panel"]')).not.toBeNull());
+    await check(render, onSave);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    queryClient.clear();
+  }
+}
+
+async function editNativeValue(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 describe("ConversationTurnModelControl", () => {
   it("shows the Agent model and opens parameters without a model chooser", () => {
     const html = renderControl();
@@ -139,7 +174,9 @@ describe("ConversationTurnModelControl", () => {
         expect(found).not.toBeNull();
       });
       const panel = () => document.body.querySelector<HTMLElement>('[data-testid="conversation-model-parameters-panel"]');
-      const contextInput = () => document.body.querySelector<HTMLInputElement>('input[aria-label="上下文上限"]');
+      const numberTrigger = document.body.querySelector<HTMLButtonElement>('button[aria-label="精确设置上下文，当前 64000 tokens"]');
+      await act(async () => numberTrigger?.click());
+      const contextInput = () => document.body.querySelector<HTMLInputElement>('input[aria-label="精确上下文大小"]');
       const saveButton = () => document.body.querySelector<HTMLButtonElement>('button[aria-label="保存模型参数"]');
       const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
       await act(async () => {
@@ -157,12 +194,9 @@ describe("ConversationTurnModelControl", () => {
       });
       expect(saveButton()?.disabled).toBe(false);
       if (clearEffort) {
-        const select = document.body.querySelector<HTMLElement>('[role="combobox"][aria-label="思考强度"]');
-        await act(async () => select?.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })));
-        const defaultOption = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
-          .find((option) => option.textContent === "默认");
-        expect(defaultOption).toBeDefined();
-        await act(async () => defaultOption?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+        const reset = document.body.querySelector<HTMLButtonElement>('button[aria-label="恢复默认思考强度"]');
+        expect(reset).not.toBeNull();
+        await act(async () => reset?.click());
       }
       await act(async () => saveButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
       expect(onSave).toHaveBeenCalledWith({ contextWindow: 32_000, reasoningEffort: clearEffort ? "" : reasoningEffort });
@@ -180,5 +214,49 @@ describe("ConversationTurnModelControl", () => {
     expect(styles.trigger).toContain("h-7");
     expect(styles.popover).toContain("w-[min(272px,calc(100vw-16px))]");
     expect(styles.saveButton).toContain("!h-7");
+  });
+
+  it("preserves failed drafts across revisions and accepts the resolved default after successful saving", async () => {
+    await withInteractiveControl(async (render, onSave) => {
+      const reset = () => document.body.querySelector<HTMLButtonElement>('button[aria-label="恢复默认思考强度"]')!;
+      const save = () => document.body.querySelector<HTMLButtonElement>('button[aria-label="保存模型参数"]')!;
+      await act(async () => reset().click());
+      await act(async () => save().click());
+      expect(onSave).toHaveBeenCalledWith({ contextWindow: 64_000, reasoningEffort: "" });
+      await render({ pending: true });
+      expect(save().disabled).toBe(true);
+      expect(document.body.querySelector<HTMLInputElement>('input[aria-label="思考强度"]')?.disabled).toBe(true);
+      await render({ configRevision: 5, pending: false, errorMessage: "配置已变更，请重试", contextWindow: 32_000 });
+      expect(document.body.querySelector('output')?.textContent).toBe("默认");
+      expect(document.body.querySelector('button[aria-label="精确设置上下文，当前 64000 tokens"]')).not.toBeNull();
+      expect(save().disabled).toBe(false);
+      await render({ pending: true, configRevision: 5, contextWindow: 32_000 });
+      await render({ pending: false, configRevision: 6, contextWindow: 65_536, currentReasoningEffort: "low" });
+      expect(save().disabled).toBe(true);
+      expect(document.body.querySelector('output')?.textContent).toBe("低");
+      const context = document.body.querySelector<HTMLInputElement>('input[aria-label="上下文大小"]')!;
+      expect(context.getAttribute("aria-valuetext")).toBe("65,536 tokens");
+      expect(context.value).toBe("4");
+    });
+  });
+
+  it("keeps exact custom context values, cancels numeric edits and resets drafts when Agent identity changes", async () => {
+    await withInteractiveControl(async (render, onSave) => {
+      const numberButton = () => document.body.querySelector<HTMLButtonElement>('button[aria-label^="精确设置上下文"]')!;
+      const numberInput = () => document.body.querySelector<HTMLInputElement>('input[aria-label="精确上下文大小"]')!;
+      await act(async () => numberButton().click());
+      await editNativeValue(numberInput(), "65536");
+      await act(async () => numberInput().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+      expect(numberButton().textContent).toBe("65,536");
+      expect(document.body.querySelector<HTMLInputElement>('input[aria-label="上下文大小"]')?.value).toBe("4");
+      await act(async () => numberButton().click());
+      await editNativeValue(numberInput(), "32000");
+      await act(async () => numberInput().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+      expect(numberButton().textContent).toBe("65,536");
+      await act(async () => document.body.querySelector<HTMLButtonElement>('button[aria-label="保存模型参数"]')?.click());
+      expect(onSave).toHaveBeenCalledWith({ contextWindow: 65_536, reasoningEffort: "high" });
+      await render({ agentId: "agent-b", contextWindow: 16_000, currentReasoningEffort: "low" });
+      expect(document.body.querySelector('[data-testid="conversation-model-parameters-panel"]')).toBeNull();
+    });
   });
 });

@@ -10,7 +10,6 @@ import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
 import composerSource from "../routes/chat/useChatComposerSubmit.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
 import helperSource from "../routes/chat/chatSessionDetailHelpers.ts?raw";
-import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
 
 describe("Chat session tool approval API", () => {
