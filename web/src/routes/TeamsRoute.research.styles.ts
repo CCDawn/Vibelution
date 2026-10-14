@@ -173,7 +173,7 @@ const styles = {
   researchStageCardReadonly:
     "researchStageCardReadonly min-w-0 [&_.researchStageCardMetrics]:opacity-90 [&_.researchStageActions]:mt-auto [&_.researchStageActions]:border-t [&_.researchStageActions]:border-[var(--vui-border-subtle)] [&_.researchStageActions]:pt-2.5",
   researchStageCardDone:
-    "researchStageCardDone min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-faint),var(--vui-surface-row)),var(--vui-surface-row)_55%)]",
+    "researchStageCardDone min-w-0 border-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_var(--vui-alpha-wash-faint),var(--vui-surface-row))]",
   researchExperimentMethodReadonly:
     "researchExperimentMethodReadonly min-w-0 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-type-caption-size)] text-[var(--fg-secondary)] [&>strong]:font-[820] [&>strong]:text-[var(--fg-primary)]",
   researchStageViewLink:

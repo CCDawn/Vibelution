@@ -59,11 +59,13 @@ function Harness({
   mutations,
   savePendingRef,
   actionsRef,
+  detail = sessionDetail,
 }: {
   queryClient: QueryClient;
   mutations: ChatComposerTurnMutations;
   savePendingRef: { current: boolean };
   actionsRef: { current: UseChatComposerSubmitActionsResult | null };
+  detail?: SessionDetail;
 }) {
   const [busy, setBusy] = useState(false);
   const [editTarget, setEditTarget] = useState<ChatEditTarget | null>(null);
@@ -98,7 +100,7 @@ function Harness({
     activeImageInputModelId: "model-1",
     latestUserMessageId: userMessage.id,
     activeTurnId: "turn-1",
-    detail: sessionDetail,
+    detail,
     setMentalModelEnabledForNextTurn: () => undefined,
     setRuntimeStatusEnabledForNextTurn: () => undefined,
     isModelParametersSavePending: () => savePendingRef.current,
@@ -126,6 +128,24 @@ describe("useChatComposerSubmit Agent model parameter save gate", () => {
     host = undefined;
     queryClient = undefined;
     vi.clearAllMocks();
+  });
+
+  it.each(["retry", "regenerate"])("%s repeats the original request instead of an inserted guidance note", async (action) => {
+    queryClient = new QueryClient();
+    const detail = { ...sessionDetail, messages: [userMessage, { id: "guidance-1", role: "user", content: "插入的指导", metadata: { kind: "user_guidance", turnId: "turn-1" } }, assistantMessage] } as SessionDetail;
+    queryClient.setQueryData(queryKeys.session(sessionId), detail);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const mutations = makeMutations();
+    const actionsRef: { current: UseChatComposerSubmitActionsResult | null } = { current: null };
+    await act(async () => root?.render(
+      <QueryClientProvider client={queryClient!}>
+        <Harness queryClient={queryClient!} mutations={mutations} savePendingRef={{ current: false }} actionsRef={actionsRef} detail={detail} />
+      </QueryClientProvider>,
+    ));
+    await act(async () => action === "retry" ? actionsRef.current?.handleRetryFailedTurn() : actionsRef.current?.handleRegenerateAssistantMessage(assistantMessage));
+    expect(mutations.regenerateMutation.mutate).toHaveBeenCalledWith(expect.objectContaining({ messageId: "user-1", content: "原始请求" }));
   });
 
   it("blocks same-frame new submissions while keeping stop available", async () => {

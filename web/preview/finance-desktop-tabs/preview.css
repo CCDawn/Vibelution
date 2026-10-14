@@ -35,7 +35,7 @@ html, body, #root { height: 100%; min-width: 0; margin: 0; }
 .session-tabs-scroll { min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: thin; }
 .session-tabs { display: block !important; width: max-content; min-width: 100%; }
 .session-tabs-list { flex-wrap: nowrap !important; width: max-content; min-width: 100%; max-width: none !important; justify-content: flex-start; background: transparent !important; border: 0 !important; padding: 0 !important; gap: 2px !important; }
-.session-tab { flex-shrink: 0; min-height: 32px !important; width: 185px; max-width: 185px !important; padding: 0 10px !important; border-radius: var(--radius-control) !important; font-size: 12px !important; box-shadow: none !important; }
+.session-tab { flex-shrink: 0; min-height: 32px !important; width: 185px; max-width: 185px !important; padding: 0 10px !important; border-radius: var(--radius-control) !important; font-size: 12px !important; }
 .session-tab[data-state="active"] { border-color: var(--vui-border-subtle) !important; background: var(--vui-surface-workspace) !important; }
 .tab-label { display: flex; min-width: 0; width: 100%; align-items: center; gap: 7px; white-space: nowrap; }
 .tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -65,7 +65,6 @@ html, body, #root { height: 100%; min-width: 0; margin: 0; }
 .composer-area { flex-shrink: 0; padding: 8px 28px 20px; }
 .composer { max-width: 760px; margin: 0 auto; border-radius: var(--radius-card) !important; background: var(--vui-surface-panel) !important; }
 .composer-input { min-height: 44px !important; resize: none !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; font-size: 13px !important; }
-.composer-input:focus-visible { outline: 0 !important; }
 .composer-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .composer-hint { min-width: 0; flex: 1; color: var(--fg-tertiary); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preview-notice { flex-shrink: 0; padding: 7px 22px; border-top: 1px solid var(--vui-border-subtle); font-size: 11px; color: var(--fg-secondary); background: var(--vui-surface-inset); }

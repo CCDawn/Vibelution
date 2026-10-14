@@ -21,6 +21,9 @@ pathname 决定当前项及按钮高亮。Radix 管理键盘、Esc、外点和�
 ### 适用范围
 本地金融专家的桌面 A 股、港股和美股研究与独立 A 股模拟账户。参考 TradingAgents-CN v3.0 社区版的研究、筛选、自选、报告、记忆、技能、学习与模拟交易信息架构；独立实现，不复制受限前后端源码。真实券商交易与 Pro 专属交易系统不属于这个页面。
 
+### 平面控件视觉
+金融工作区与桌面标签预览直接遵循共享 VUI 平面控件基线。按钮、标签页、表单与普通面板使用纯色、细边框与可见键盘焦点；不再维护金融专属的渐变、阴影和焦点覆盖层。主按钮沿用共享 `--vui-primary-face`，保持白字对比度至少 4.5:1；浮层使用共享 overlay 层次。
+
 ### 使用方式
 复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。收起按钮在各栏标题处，收起后在中间标题处恢复；展开时共享 separator 保留拖动与键盘调整。标题、图标、状态、股票代码和引用页码保持单行，长标题截断并提供完整 title，正文与错误正常换行。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter，研究设置提供当前会话的模型选择，助手配置入口保留在左栏底部；原生工具授权入口仍完整保留。
 GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且并发串行。

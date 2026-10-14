@@ -4,6 +4,8 @@ import apiSource from "./chat.ts?raw";
 import chatTypesSource from "./types/chat.ts?raw";
 import evolutionApiSource from "./evolution.ts?raw";
 import routeSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import detailQueriesSource from "../routes/chat/useChatSessionDetailQueries.ts?raw";
+import surfaceModelSource from "../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import querySeamsSource from "../routes/chat/chatSessionQuerySeams.ts?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
@@ -79,7 +81,8 @@ describe("Chat session tool approval API", () => {
     expect(composerSource).toContain("submitSessionGuidance");
     expect(composerModelSource).toContain("postSessionImageAttachment");
     expect(mutationSource).toContain("updateSessionModelParameters");
-    expect(routeSource).toContain("fetchSessionLlmOptions");
+    expect(detailQueriesSource).toContain("fetchSessionLlmOptions");
+    expect(routeSource).toContain("useChatSessionDetailQueries(");
     expect(routeSource).toContain("expectedAgentId: options.agentId");
     expect(routeSource).not.toContain("updateSessionReasoningEffort");
     expect(composerSource).not.toContain("/api/sessions/");
@@ -94,7 +97,7 @@ describe("Chat session tool approval API", () => {
     expect(composerSource).toContain("switchSessionHead");
     expect(composerSource).toContain("baseMessageId");
     expect(routeSource).toContain("switchHeadMutation");
-    expect(routeSource).toContain("onSwitchMessageVersion");
+    expect(surfaceModelSource).toContain("onSwitchMessageVersion");
   });
 
   it("owns review-candidate transport outside the chat lifecycle hook", () => {

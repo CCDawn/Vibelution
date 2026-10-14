@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import lazySource from "./LazyConversationView.tsx?raw";
 import prefetchSource from "./prefetchConversationView.ts?raw";
 import routeSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
+import warmupSource from "../../routes/chat/useChatSessionWarmup.ts?raw";
 import workspaceSource from "../../routes/chat/ChatSessionWorkspacePanel.tsx?raw";
 
 describe("conversation view load contract (T1/T2)", () => {
@@ -14,7 +15,8 @@ describe("conversation view load contract (T1/T2)", () => {
 
   it("warms ConversationView after session intent from Chat route", () => {
     expect(routeSource).toContain("prefetchConversationView");
-    expect(routeSource).toContain("requestIdleCallback");
+    expect(warmupSource).toContain("requestIdleCallback");
+    expect(routeSource).toContain("useChatSessionWarmup(");
   });
 
   it("does not mount ConversationView without a session surface", () => {

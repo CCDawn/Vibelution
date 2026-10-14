@@ -245,11 +245,14 @@ def prepare_agent_turn(
         if carryover_status != "absent" and callable(clear_active_state):
             clear_active_state()
         restore_chat_history = getattr(agent, "seed_chat_history", None)
-        if callable(restore_chat_history) and history_items:
+        # An explicit empty list starts a fresh ledger seed; None or invalid
+        # input keeps the existing same-turn context and its provenance.
+        has_history_seed = bool(history_items) or isinstance(_maybe_json(chat_history), list)
+        if callable(restore_chat_history) and has_history_seed:
             restore_chat_history(history_items)
             ledger_fp = _coerce_text(chat_history_ledger_fingerprint).strip()
             seed_ledger_fp = getattr(agent, "seed_chat_history_ledger_fingerprint", None)
-            if ledger_fp and callable(seed_ledger_fp):
+            if callable(seed_ledger_fp):
                 seed_ledger_fp(ledger_fp)
 
     host_seeded_runtime_context = False

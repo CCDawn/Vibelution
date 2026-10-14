@@ -99,6 +99,22 @@ async function editNativeValue(input: HTMLInputElement, value: string) {
 }
 
 describe("ConversationTurnModelControl", () => {
+  it("keeps the current provider's raw effort names and supported stops", async () => {
+    await withInteractiveControl(async (render) => {
+      await render({
+        model: { ...luna, reasoningEffortValues: ["low", "xhigh", "max"], reasoningEffortOptions: [{ value: "max", label: "最大" }], defaultReasoningEffort: "low" },
+        currentReasoningEffort: "max",
+      });
+      const slider = document.body.querySelector<HTMLInputElement>('input[aria-label="思考强度"]')!;
+      expect(slider.max).toBe("2");
+      expect(slider.getAttribute("aria-valuetext")).toBe("max");
+      expect(document.body.querySelector('output')?.textContent).toBe("max");
+      await editNativeValue(slider, "1");
+      expect(slider.getAttribute("aria-valuetext")).toBe("xhigh");
+      expect(document.body.querySelector('output')?.textContent).toBe("xhigh");
+    });
+  });
+
   it("shows the Agent model and opens parameters without a model chooser", () => {
     const html = renderControl();
     expect(html).toContain("Luna 5.6");
@@ -233,7 +249,7 @@ describe("ConversationTurnModelControl", () => {
       await render({ pending: true, configRevision: 5, contextWindow: 32_000 });
       await render({ pending: false, configRevision: 6, contextWindow: 65_536, currentReasoningEffort: "low" });
       expect(save().disabled).toBe(true);
-      expect(document.body.querySelector('output')?.textContent).toBe("低");
+      expect(document.body.querySelector('output')?.textContent).toBe("low");
       const context = document.body.querySelector<HTMLInputElement>('input[aria-label="上下文大小"]')!;
       expect(context.getAttribute("aria-valuetext")).toBe("65,536 tokens");
       expect(context.value).toBe("4");

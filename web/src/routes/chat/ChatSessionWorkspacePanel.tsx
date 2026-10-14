@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, type ComponentProps, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, type ReactNode } from "react";
 
 import type {
   FileContent,
@@ -11,6 +11,7 @@ import {
 } from "../../components/conversation/activeTurnStreamState";
 import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
+import type { ChatConversationSurfaceModel } from "./useChatConversationSurfaceModel";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
 import { ChatToolApprovalDialog, type ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
@@ -20,8 +21,6 @@ import styles from "./ChatSessionWorkspacePanel.styles";
 const ChatFilePreviewPanel = lazy(() =>
   import("./ChatFilePreviewPanel").then((module) => ({ default: module.ChatFilePreviewPanel })),
 );
-
-type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">;
 
 /**
  * Stable empty context value: an inline `{}` default would re-create the
@@ -65,7 +64,7 @@ export type ChatSessionWorkspaceAlternateSurface = {
 
 /** Agent-tab transcript frame. `conversation` null keeps the loading shell. */
 export type ChatSessionWorkspaceConversationFrame = {
-  conversation: ConversationBridgeProps | null;
+  conversation: ChatConversationSurfaceModel | null;
   conversationFocused: boolean;
   /** Fixed note at the start of one specialist chat. Ordinary sessions pass nothing. */
   preface?: ReactNode;
@@ -234,9 +233,13 @@ export function ChatSessionWorkspacePanel({
             >
               <ActiveTurnStreamStateContext.Provider value={activeTurnStreamState ?? EMPTY_ACTIVE_TURN_STREAM_STATE}>
                 <ChatConversationComposerBridge
-                  {...conversation}
+                  sessionId={conversation.sessionId}
+                  messages={conversation.messages}
+                  {...conversation.transcript}
+                  {...conversation.participants}
+                  {...conversation.composerChrome}
+                  {...conversation.turnActions}
                   toolApproval={approvalSurface}
-                  composer={conversation.composer}
                   fallback={conversationLoadingFallback}
                 />
               </ActiveTurnStreamStateContext.Provider>

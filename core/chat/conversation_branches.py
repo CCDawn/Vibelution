@@ -45,6 +45,7 @@ class BranchNode:
     role: str
     sequence: int
     active: bool
+    message_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ def analyze_conversation_branches(events: Iterable[TurnJournalEvent]) -> Convers
             role=str(message.get("role") or "").strip().lower(),
             sequence=order_by_event_id.get(aliases[0], 0),
             active=False,
+            message_kind=str(metadata.get("kind") or "").strip(),
         )
         provisional[logical_id] = node
         child_ids_by_parent.setdefault(parent_node_id, []).append(logical_id)
@@ -241,7 +243,7 @@ def resolve_head_target(view: ConversationBranchView, node_id: str) -> tuple[str
 
 
 def resolve_active_user_node_id(view: ConversationBranchView, node_id: str) -> str:
-    """Return the user-message node that owns an active-path target, else ``""``."""
+    """Return the original user request for an active target, skipping guidance."""
 
     normalized = str(node_id or "").strip()
     normalized = view.node_id_by_event.get(normalized, normalized)
@@ -251,7 +253,7 @@ def resolve_active_user_node_id(view: ConversationBranchView, node_id: str) -> s
     seen: set[str] = set()
     while cursor is not None and cursor.node_id not in seen:
         seen.add(cursor.node_id)
-        if cursor.role == "user":
+        if cursor.role == "user" and cursor.message_kind not in {"user_guidance", "user_interrupt_guidance"}:
             return cursor.node_id
         cursor = view.nodes.get(cursor.parent_node_id)
     return ""

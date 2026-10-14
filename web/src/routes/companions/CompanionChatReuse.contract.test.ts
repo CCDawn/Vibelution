@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import lobbySource from "../CompanionsRoute.tsx?raw";
 import chatSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
+import statusRailSource from "../chat/ChatCodingStatusRail.tsx?raw";
+import chatConversationSurfaceModelSource from "../chat/useChatConversationSurfaceModel.tsx?raw";
 import centerTabsSource from "../chat/ChatCenterTabStrip.tsx?raw";
+import codingCenterTabsSource from "../chat/ChatCodingCenterTabs.tsx?raw";
 import streamSource from "../chat/useSessionDetailStream.ts?raw";
 import sessionEventStreamSource from "../chat/sessionEventStream.ts?raw";
 import conversationHeaderSource from "./CompanionConversationHeader.tsx?raw";
@@ -47,8 +50,10 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("companionMode,");
     expect(chatSource).toContain("<ChatCenterSessionSurface");
     expect(chatSource).toContain("<CompanionPersonRail");
-    expect(chatSource).toContain("<CompanionLifeRail");
-    expect(chatSource).toContain("<CompanionConversationHeader");
+    expect(chatSource).toContain("<ChatCodingStatusRail");
+    expect(statusRailSource).toContain("<CompanionLifeRail");
+    expect(codingCenterTabsSource).toContain("<CompanionConversationHeader");
+    expect(chatSource).toContain("<ChatCodingCenterTabs");
     expect(centerTabsSource).toContain("companionHeader ?? (");
     expect(conversationHeaderSource).toContain("<CompanionPortrait");
     expect(conversationHeaderSource).toContain("<CompanionProactiveSettingsPopover");
@@ -65,13 +70,14 @@ describe("virtual-human native Chat reuse", () => {
     expect(lobbySource).not.toContain("EventSource");
     expect(lifeRailSource).not.toContain("EventSource");
     expect(personRailSource).not.toContain("EventSource");
-    expect(chatSource).toContain("showSessionTabs={!financeSurface && !verifiedCompanionMode");
-    expect(chatSource).toContain("showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}");
+    expect(codingCenterTabsSource).toContain("showSessionTabs={!financeSurface && !verifiedCompanionMode");
+    expect(codingCenterTabsSource).toContain("showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}");
+    expect(chatSource).toContain("<ChatCodingCenterTabs");
   });
 
   it("opens life management as an exact hidden native Session", () => {
-    const lifeStart = chatSource.indexOf("onOpenLifeSteward={(stewardSessionId) => {");
-    const lifeSteward = chatSource.slice(lifeStart, chatSource.indexOf("/>", lifeStart));
+    const lifeStart = statusRailSource.indexOf("onOpenLifeSteward={(stewardSessionId) => {");
+    const lifeSteward = statusRailSource.slice(lifeStart, statusRailSource.indexOf("/>", lifeStart));
     expect(lifeStart).toBeGreaterThanOrEqual(0);
     expect(lifeSteward).toContain("openSession(stewardSessionId,");
     expect(lifeSteward).toContain('telemetrySource: "virtual_human_life_steward"');
@@ -79,15 +85,16 @@ describe("virtual-human native Chat reuse", () => {
   });
 
   it("removes technical composer chrome only from the verified companion presentation", () => {
-    expect(chatSource).toContain("companionMode: verifiedCompanionMode");
-    expect(chatSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
-    expect(chatSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined");
-    expect(chatSource).toContain("permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent");
-    expect(chatSource).toContain("llmControl: undefined");
-    expect(chatSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl");
-    expect(chatSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
-    expect(chatSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
-    expect(chatSource).toContain("statusRail={verifiedCompanionMode ? (");
+    expect(chatConversationSurfaceModelSource).toContain("companionMode: verifiedCompanionMode");
+    expect(chatConversationSurfaceModelSource).toContain("showMentalSnapshots: !verifiedCompanionMode");
+    expect(chatConversationSurfaceModelSource).toContain("composerLeadingControl: verifiedCompanionMode ? undefined");
+    expect(chatConversationSurfaceModelSource).toContain("permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent");
+    expect(chatConversationSurfaceModelSource).toContain("llmControl: undefined");
+    expect(chatConversationSurfaceModelSource).toContain("turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl");
+    expect(chatConversationSurfaceModelSource).toContain("composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing");
+    expect(chatConversationSurfaceModelSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
+    expect(statusRailSource).toContain("if (verifiedCompanionMode)");
+    expect(chatSource).toContain("statusRail={(");
     expect(chatSource).toContain("conversationIndex={financeSurface ? null : verifiedCompanionMode ? (");
   });
 
@@ -139,7 +146,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(portraitMotionSource).toContain("@keyframes companion-portrait-breathe");
     expect(portraitMotionSource).toContain("@keyframes companion-portrait-blink");
     expect(portraitMotionSource).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(chatSource).toContain("companionMode: verifiedCompanionMode");
+    expect(chatConversationSurfaceModelSource).toContain("companionMode: verifiedCompanionMode");
     expect(chatSource).not.toContain("EmbodimentState");
   });
 });

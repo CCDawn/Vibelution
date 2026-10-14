@@ -10,6 +10,7 @@ const styles = {
   ...tokenCoreStyles,
 } as Record<string, string>;
 import chatCodingRouteSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatConversationSurfaceModelSource from "./chat/useChatConversationSurfaceModel.tsx?raw";
 import chatSessionSurfaceModelSource from "./chat/chatSessionSurfaceModel.ts?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
@@ -54,6 +55,6 @@ describe("ChatCodingRoute left status panel layout contract", () => {
   it("keeps provider failure status compact and hides numeric operator identities", () => {
     expect(routeAndSessionSurfaceSource).toContain("const compactSessionStateLine = detail?.lastTurnError");
     expect(routeAndSessionSurfaceSource).toContain("detail.lastTurnError.httpStatus || detail.lastTurnError.reasonCode");
-    expect(chatCodingRouteSource).toContain("resolveChatUserDisplayName(runtime?.userName)");
+    expect(chatConversationSurfaceModelSource).toContain("resolveChatUserDisplayName(runtime?.userName)");
   });
 });

@@ -22,8 +22,6 @@ import {
   HeartHandshake,
   MessageCircleHeart,
   RotateCcw,
-  PanelLeftOpen,
-  List,
   Search,
   Sparkles,
   Trash2,
@@ -32,22 +30,20 @@ import {
   useCallback,
   useEffect,
   lazy,
-  Suspense,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listSessionChildSessions, fetchSessionLlmOptions } from "../../api/chat";
+import { useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
+import { useChatSessionWarmup } from "./useChatSessionWarmup";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
-import { archiveAgent } from "../../api/agents";
 import {
   listVirtualHumanCompanionActivity,
   listVirtualHumanCompanions,
 } from "../../api/agentPlugins";
 import { fetchKnowledgeOverview, listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
-import { ChatRightRail } from "./ChatRightRail";
 import {
   EMPTY_CHAT_RIGHT_RAIL,
   openChatRightRailTab,
@@ -64,6 +60,7 @@ import { prefetchConversationView } from "../../components/conversation/prefetch
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { ConversationRerunFileChoiceDialog } from "../../components/conversation/ConversationRerunFileChoiceDialog";
+import { ChatCodingWorkbenchDialogs } from "./ChatCodingWorkbenchDialogs";
 import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
 import {
@@ -86,18 +83,16 @@ import {
   ConversationMessage,
   ToolCall,
   VirtualHumanCompanion,
-  AgentPermissionPreset,
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { PaneResizeHandle } from "../../components/layout/PaneResizeHandle";
-import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { PaneCollapseHandle } from "../../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
@@ -125,9 +120,6 @@ import {
 } from "../chatLiveQueryPolicy";
 import { resolveChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
 import {
-  resolveChatUserDisplayName,
-} from "../chatCompactPanel";
-import {
   browserDesktopNotificationBridge,
   createDesktopConversationNotifier,
 } from "../chatDesktopNotifications";
@@ -139,7 +131,6 @@ import {
   agentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "../agentDisplay";
-import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
 import { directoryTeamBlockIds } from "../agentConversationDirectoryModel";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
@@ -150,13 +141,9 @@ import {
 } from "../conversationIndexModel";
 import {
   activeTurnTerminalRefreshKey,
-  activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
   isActiveTurnSettledByMessages,
-  selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
-  toolStartToFirstPaintMs,
-  runningToolPaintKeys,
 } from "../chatActiveTurnLayer";
 import {
   ActiveTurnLayersStoreProvider,
@@ -168,20 +155,20 @@ import {
   isChildSession,
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
-import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
 import { useFinancialResearchSessionBridge } from "../finance/FinancialResearchBridge";
 import { FinancialResearchLiveProjection } from "../finance/FinancialResearchLiveProjection";
 import { EMPTY_FINANCIAL_MESSAGES } from "../finance/stockResearchModel";
 import { useFinancialAssistants } from "../finance/useFinancialAssistants";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
+import { useChatConversationSurfaceModel } from "./useChatConversationSurfaceModel";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
+import { ChatCodingStatusRail } from "./ChatCodingStatusRail";
+import { recordConversationStreamingFramePaint } from "./recordConversationStreamingFramePaint";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu";
-import { ChatGroupManagementDialog } from "./ChatGroupManagementDialog";
 import {
-  chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
   isBusyPhase,
   MAX_LEFT_PANEL_WIDTH,
@@ -193,7 +180,8 @@ import {
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatSessionBrowser } from "./ChatSessionBrowser";
-import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
+import { ChatCodingCenterTabs } from "./ChatCodingCenterTabs";
+import { ChatCodingGroupSurface } from "./ChatCodingGroupSurface";
 import { ChatConversationIndexPanel } from "./ChatConversationIndexPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
@@ -230,18 +218,11 @@ import {
   activeGroupRoomIdFromRouteSelection,
   activeSessionIdFromRouteSelection,
 } from "./chatSelectionProjection";
-import { resolveAuthoritativeArchivedSessionIds } from "./chatSessionRouteSync";
-import {
-  remainingAgentsAfterConfirmedArchive,
-  restoreOptimisticallyArchivedAgent,
-  useChatAgentArchiveQueue,
-} from "./useChatAgentArchiveQueue";
-import { useChatArchivedAgentRetirement } from "./useChatArchivedAgentRetirement";
+import { useChatAgentArchiveFlow } from "./useChatAgentArchiveFlow";
 import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
-import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
 import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
@@ -257,7 +238,7 @@ import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
-import { buildComposerContextRingModel } from "./composerContextModel";
+import { buildComposerContextRingModel, resolveComposerContextLimit } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
@@ -281,7 +262,6 @@ import {
   contextCompositionSegmentClass,
   contextCompositionSegmentLabel,
   promptSegmentDisplayLabel,
-  cacheCompositionSegmentLabel,
   agentRoleClass,
   avatarInitials,
   avatarImageUrlFrom,
@@ -290,31 +270,23 @@ import {
 import {
   SESSION_DETAIL_INITIAL_MESSAGE_LIMIT,
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
-  fetchSessionDetailWindow,
   isSessionDetailHardLoading,
-  prefetchSessionDetailWindow,
-  cancelUnobservedSessionPrefetches,
   resolveActiveSessionDetailForUi,
-  resolveNeighborSessionIdsForPrefetch,
   sessionDetailSnapshotKey,
   latestMentalSnapshot,
 } from "./chatSessionDetailHelpers";
 import {
   forgetSessionDetailPaint,
   shouldShowStickyTranscriptPending,
-  touchSessionKeepAlive,
 } from "./chatSessionPaintCache";
 import {
-  sessionDetailStructuralSharing,
   useStableSessionDetailPaint,
-  useStableSessionDetailPlaceholder,
   useSessionToolApprovalsQuery,
   type SessionToolApprovalPollingInput,
 } from "./chatSessionQuerySeams";
 
 import {
   cliAgentRunIdFromTabId,
-  cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
@@ -343,28 +315,6 @@ const CliAgentRunTerminalPanel = lazy(() =>
   import("./CliAgentRunTerminalPanel").then((module) => ({
     default: module.CliAgentRunTerminalPanel,
   })),
-);
-
-/** Secondary-lazy: open only when creating an Agent (keeps wizard graph out of Chat shell). */
-const AgentCreateWizardDialog = lazy(() =>
-  import("../agent-create/AgentCreateWizardDialog").then((module) => ({
-    default: module.AgentCreateWizardDialog,
-  })),
-);
-
-/** Secondary-lazy: cache donut dialog opens from status rail action. */
-const CacheDetailDialog = lazy(() =>
-  import("./CacheDetailDialog").then((module) => ({
-    default: module.CacheDetailDialog,
-  })),
-);
-
-/** S2: not required for first paint of direct chat center. */
-const ChatGroupCenterSurface = lazy(() =>
-  import("./ChatGroupCenterSurface").then((module) => ({ default: module.ChatGroupCenterSurface })),
-);
-const ChatFileWorkspaceTabs = lazy(() =>
-  import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
 );
 
 /**
@@ -1145,163 +1095,36 @@ export function ChatCodingRouteWorkbench() {
       return { ...current, [activeId]: "" };
     });
   }, [activeSessionId]);
-  const sessionDetailPlaceholder = useStableSessionDetailPlaceholder({
+  const {
+    sessionDetailQuery,
+    sessionLlmOptionsQuery,
+    activeRootSessionId,
+    childSessionsQuery,
+  } = useChatSessionDetailQueries({
     activeSessionId,
-    cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
-    summary: activeSessionId
-      ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
-      : undefined,
-  });
-  const sessionDetailQuery = useQuery<SessionDetail>({
-    queryKey: queryKeys.session(activeSessionId ?? "none"),
-    // Temp create shells are local-only; never GET/stream them until rebased.
-    enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
-    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
-      signal,
-      // When SSE owns live transcript, skip expensive secondary lists on poll/refetch.
-      // First paint still hydrates fully until stream ownership is true.
-      includeSecondary: !chatLiveQueryPolicy.directSessionStreamOwnsLiveQueries,
-    }),
-    // Select + GET often race on switch; brief freshness avoids immediate double rebuild
-    // when /select already wrote a windowed detail into the same query key.
-    staleTime: 1_500,
-    structuralSharing: sessionDetailStructuralSharing,
-    placeholderData: sessionDetailPlaceholder,
-    refetchInterval: startupDetailSettledSessionId === activeSessionId
-      ? chatLiveQueryPolicy.sessionDetailRefetchInterval
-      : false,
-    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
-  });
-  useEffect(() => {
-    if (!activeSessionId) {
-      setStartupDetailSettledSessionId("");
-      return;
-    }
-    if (
-      sessionDetailQuery.isFetching
-      || !sessionDetailQuery.data
-      || sessionDetailQuery.data.id !== activeSessionId
-    ) {
-      return;
-    }
-    setStartupDetailSettledSessionId((current) => current === activeSessionId ? current : activeSessionId);
-  }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching]);
-  const sessionLlmOptionsQuery = useQuery({
-    queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
-    enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
-    queryFn: () => fetchSessionLlmOptions(activeSessionId ?? ""),
-    staleTime: 30_000,
-    // Re-read the Agent binding when returning from Agent management.
-    refetchOnMount: "always",
-  });
-  // Explicit missing/archived session keeps its URL and renders the blocking
-  // unavailable surface. Background misses must never fall back to another
-  // session and must never navigate.
-  const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
-  const childSessionLiveQueryPolicy = resolveChatLiveQueryPolicy({
-    ...chatLiveQueryPolicyInput,
-    activeRootSessionId: activeRootSessionId || "",
-  });
-  const childSessionsQuery = useQuery({
-    queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
-    queryFn: () => listSessionChildSessions(activeRootSessionId),
-    enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,
-    refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
-    refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
-  });
-  useEffect(() => {
-    const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
-    const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoomQuery.data);
-    if ((financeSurface || sessionsQuery.data) && directReady && groupReady) {
-      setChatStartupDataReady(true);
-    }
-  }, [
-    activeGroupRoomQuery.data,
-    activeSessionId,
-    financeSurface,
-    standardGroupRoomActive,
-    sessionDetailQuery.data,
-    sessionsQuery.data,
-  ]);
-  useEffect(() => {
-    if (!chatStartupDataReady || chatRouteStartupReadyLoggedRef.current) {
-      return;
-    }
-    chatRouteStartupReadyLoggedRef.current = true;
-    postBrowserTelemetry({
-      phase: "navigation",
-      eventCode: "browser.chat_route.startup_data_ready",
-      message: "Chat route startup data is ready.",
-      fields: {
-        durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
-        activeSession: Boolean(activeSessionId),
-        standardGroupRoomActive,
-        runtimeReady: Boolean(runtimeQuery.data),
-        sessionsReady: Boolean(sessionsQuery.data),
-        conversationsReady: Boolean(conversationsQuery.data),
-        teamsReady: Boolean(teamsQuery.data),
-        sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true),
-        groupRoomReady: Boolean(!standardGroupRoomActive || activeGroupRoomQuery.data),
-      },
-    });
-  }, [
-    activeGroupRoomQuery.data,
-    activeSessionId,
-    chatStartupDataReady,
-    conversationsQuery.data,
-    standardGroupRoomActive,
-    runtimeQuery.data,
-    sessionDetailQuery.data,
-    sessionsQuery.data,
-    teamsQuery.data,
-  ]);
-  useEffect(() => {
-    setDirectSessionBackgroundSyncActive(Boolean(
-      activeSessionId
-      && directSessionPanelActive
-      && isBusyPhase(sessionDetailQuery.data?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status),
-    ));
-  }, [
-    activeSessionId,
-    directSessionActiveSummary?.currentPhase,
-    directSessionActiveSummary?.status,
+    queryClient,
+    sessions: sessionsQuery.data,
+    directSessionActiveSummary,
+    chatLiveQueryPolicy,
+    chatLiveQueryPolicyInput,
+    secondaryChatDataEnabled,
     directSessionPanelActive,
-    sessionDetailQuery.data?.currentPhase,
-  ]);
-  // A hidden window can miss frames or a stream restart; refocusing must not
-  // trust the cached transcript, so force one authoritative resync for the
-  // active session and the indexes that feed badges and notification titles.
-  const previousPageVisibleRef = useRef(pageVisible);
-  const refetchSessionDetailRef = useRef(sessionDetailQuery.refetch);
-  refetchSessionDetailRef.current = sessionDetailQuery.refetch;
-  const focusResyncSessionIdRef = useRef(activeSessionId || "");
-  focusResyncSessionIdRef.current = activeSessionId || "";
-  useEffect(() => {
-    const previousPageVisible = previousPageVisibleRef.current;
-    previousPageVisibleRef.current = pageVisible;
-    const resyncSessionId = focusResyncSessionIdRef.current;
-    if (!pageVisible || previousPageVisible || !resyncSessionId) {
-      return;
-    }
-    // enabled:false does not stop refetch(). A temp shell has no server row;
-    // this GET 404s and the error surface replaces the composer.
-    if (!isTempSessionId(resyncSessionId)) {
-      void refetchSessionDetailRef.current();
-    }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
-    postBrowserTelemetry({
-      phase: "session_stream",
-      eventCode: "browser.session_stream.focus_resync",
-      message: "Focus after a hidden period forced an authoritative session resync.",
-      level: "info",
-      fields: {
-        sessionId: resyncSessionId,
-        streamShouldConnect: sessionStreamDecisionSnapshotRef.current.shouldConnect,
-        visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
-      },
-    });
-  }, [pageVisible, queryClient]);
+    standardGroupRoomActive,
+    activeGroupRoom: activeGroupRoomQuery.data,
+    financeSurface,
+    runtime: runtimeQuery.data,
+    conversations: conversationsQuery.data,
+    teams: teamsQuery.data,
+    pageVisible,
+    chatStartupDataReady,
+    startupDetailSettledSessionId,
+    setStartupDetailSettledSessionId,
+    setChatStartupDataReady,
+    setDirectSessionBackgroundSyncActive,
+    chatRouteMountStartedAtRef,
+    chatRouteStartupReadyLoggedRef,
+    sessionStreamDecisionSnapshotRef,
+  });
 
   const {
     submitTurnMutation,
@@ -1383,7 +1206,11 @@ export function ChatCodingRouteWorkbench() {
     suppressRenameBlurUntilRef,
   });
 
-  const retireArchivedAgentSessions = useChatArchivedAgentRetirement({
+  const {
+    enqueueAgentArchive,
+    isAgentArchivePending,
+    pendingArchiveAgentIds,
+  } = useChatAgentArchiveFlow({
     clearSessionTransientUiState,
     directSessionSelectionGenerationRef,
     forgetSessionDetailPaint,
@@ -1393,87 +1220,11 @@ export function ChatCodingRouteWorkbench() {
     retiredDirectSessionIdsRef,
     setSelectedAgentId,
     setSessionComposerErrors,
-    chatRoute: { replaceIfStillViewing },
-  });
-
-  const {
-    enqueueArchive: enqueueAgentArchive,
-    isAgentArchivePending,
-    pendingAgentIds: pendingArchiveAgentIds,
-  } = useChatAgentArchiveQueue({
-    executeArchive: (agentId: string) => archiveAgent(agentId) as Promise<AgentArchiveResponse>,
-    onOptimisticArchive: (agentId: string) => {
-      void queryClient.cancelQueries({ queryKey: queryKeys.agents() });
-      void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
-      void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
-      const currentAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
-      const currentSessions = (
-        queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions())
-        ?? sessionsQuery.data
-        ?? []
-      );
-      const archivedAgentIndex = currentAgents.findIndex((agent) => agent.agentId === agentId);
-      const archivedAgent = archivedAgentIndex >= 0 ? currentAgents[archivedAgentIndex] : null;
-      const remainingAgents = currentAgents.filter((agent) => agent.agentId !== agentId);
-      const archivedSessionIds = currentSessions
-        .filter((session) => String(session.agentId || "").trim() === agentId)
-        .map((session) => session.id);
-
-      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
-      setAgentContextMenu(null);
-      return {
-        agent: archivedAgent,
-        agentIndex: archivedAgentIndex,
-        agents: currentAgents,
-        sessions: currentSessions,
-        optimisticArchivedSessionIds: archivedSessionIds,
-      };
-    },
-    onArchiveSuccess: (_agentId, agent, context) => {
-      const archivedSessionIds = resolveAuthoritativeArchivedSessionIds({
-        optimisticSessionIds: context.optimisticArchivedSessionIds,
-        archiveSummary: agent.archiveSummary,
-      });
-      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
-        current?.filter((item) => item.agentId !== agent.agentId),
-      );
-      // Another Agent may already be optimistically hidden while its FIFO
-      // request is still pending. Keep it eligible as the semantic fallback
-      // until its own archive succeeds.
-      const remainingAgents = remainingAgentsAfterConfirmedArchive(context.agents, agent.agentId);
-      retireArchivedAgentSessions({
-        agentId: agent.agentId,
-        archivedSessionIds,
-        sessions: queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? context.sessions,
-        remainingAgents,
-      });
-      setSessionComposerErrors((current) => ({
-        ...current,
-        __sessions__: "",
-      }));
-    },
-    onArchiveFailure: (_agentId, error, context) => {
-      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
-        restoreOptimisticallyArchivedAgent(current, {
-          agent: context.agent,
-          index: context.agentIndex,
-        }),
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        __sessions__: describeError(error, t("loadFailed")),
-      }));
-    },
-    onQueueDrained: async () => {
-      try {
-        await chatWorkspaceCache.afterAgentArchived();
-      } catch (error) {
-        setSessionComposerErrors((current) => ({
-          ...current,
-          __sessions__: describeError(error, t("loadFailed")),
-        }));
-      }
-    },
+    replaceIfStillViewing,
+    sessions: sessionsQuery.data,
+    setAgentContextMenu,
+    t,
+    chatWorkspaceCache,
   });
 
   const {
@@ -1563,96 +1314,17 @@ export function ChatCodingRouteWorkbench() {
     stopGroupRoundPending: stopGroupRoundMutation.isPending,
   });
 
-  useEffect(() => {
-    if (activeSessionId && sessionDetailQuery.data?.id === activeSessionId) {
-      hydrateSession(activeSessionId, [], "agent");
-    }
-  }, [activeSessionId, hydrateSession, sessionDetailQuery.data?.id]);
-
-  // C5: keep recent session ids warm (sticky paint + scroll memory lifetime ring).
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    touchSessionKeepAlive(activeSessionId);
-  }, [activeSessionId]);
-
-  // T1: warm ConversationView after session intent is known (does not mount).
-  useEffect(() => {
-    if (!activeSessionId || groupPanelActive) {
-      return;
-    }
-    let cancelled = false;
-    const run = () => {
-      if (!cancelled) {
-        void prefetchConversationView();
-      }
-    };
-    const idleRequest = (window as Window & {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    }).requestIdleCallback;
-    const handle = typeof idleRequest === "function"
-      ? idleRequest(run, { timeout: 800 })
-      : window.setTimeout(run, 120);
-    return () => {
-      cancelled = true;
-      if (typeof idleRequest === "function") {
-        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
-      } else {
-        window.clearTimeout(handle as number);
-      }
-    };
-  }, [activeSessionId, groupPanelActive]);
-
-  // C: idle-prefetch a few neighbor session detail windows (Cursor list warm pattern).
-  const activePrefetchTargetRef = useRef(activeSessionId);
-  activePrefetchTargetRef.current = activeSessionId;
-  useEffect(() => {
-    if (financeSurface || groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
-      return;
-    }
-    const neighborIds = resolveNeighborSessionIdsForPrefetch({
-      sessions: sessionsQuery.data,
-      activeSessionId,
-    });
-    if (!neighborIds.length) {
-      return;
-    }
-    let cancelled = false;
-    const ownedPendingIds = new Set<string>();
-    const run = async () => {
-      for (const sessionId of neighborIds) {
-        if (cancelled) {
-          return;
-        }
-        try {
-          const alreadyFetching = queryClient.getQueryState(queryKeys.session(sessionId))?.fetchStatus === "fetching";
-          if (!alreadyFetching) ownedPendingIds.add(sessionId);
-          await prefetchSessionDetailWindow(queryClient, sessionId);
-        } catch {
-          return;
-        } finally {
-          ownedPendingIds.delete(sessionId);
-        }
-      }
-    };
-    const idleRequest = (window as Window & {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    }).requestIdleCallback;
-    const handle = typeof idleRequest === "function"
-      ? idleRequest(() => void run(), { timeout: 1_500 })
-      : window.setTimeout(() => void run(), 280);
-    return () => {
-      cancelled = true;
-      void cancelUnobservedSessionPrefetches(queryClient, ownedPendingIds, activePrefetchTargetRef.current || "");
-      if (typeof idleRequest === "function") {
-        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
-      } else {
-        window.clearTimeout(handle as number);
-      }
-    };
-  }, [activeSessionId, financeSurface, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
-
+  useChatSessionWarmup({
+    activeSessionId,
+    sessionDetailId: sessionDetailQuery.data?.id,
+    hydrateSession,
+    financeSurface,
+    groupPanelActive,
+    secondaryChatDataEnabled,
+    pageVisible,
+    sessions: sessionsQuery.data,
+    queryClient,
+  });
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
@@ -1988,89 +1660,14 @@ export function ChatCodingRouteWorkbench() {
     });
   }, [activeSessionId, activeTurnSettledByDetail, detail, queryClient, setActiveTurnLayersBySession, activeTurnLayersBySessionRef]);
   const handleConversationStreamingFramePaint = useCallback((metrics: ConversationStreamingFramePaintMetrics) => {
-    const sessionId = String(metrics.sessionId || "").trim();
-    if (!sessionId || sessionId !== activeSessionId) {
-      return;
-    }
-    const now = Date.now();
-    const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId];
-    const paintedToolSelection = selectFirstUnpaintedRunningTool(
-      paintedActiveTurn,
-      paintedRunningToolIdsBySessionRef.current[sessionId] ?? [],
-    );
-    const newlyPaintedRunningTool = paintedToolSelection.tool;
-    const newlyPaintedRunningTools = paintedToolSelection.tools;
-    const firstPaintedToolAtById = {
-      ...(firstPaintedRunningToolAtBySessionRef.current[sessionId] ?? {}),
-    };
-    const runningPaintKeys = runningToolPaintKeys(paintedActiveTurn);
-    runningPaintKeys.forEach(({ toolId, fallbackKey, ordinalKey }) => {
-      [toolId, fallbackKey, ordinalKey].filter(Boolean).forEach((key) => {
-        if (!Number.isFinite(firstPaintedToolAtById[key])) {
-          firstPaintedToolAtById[key] = now;
-        }
-      });
-    });
-    firstPaintedRunningToolAtBySessionRef.current = {
-      ...firstPaintedRunningToolAtBySessionRef.current,
-      [sessionId]: firstPaintedToolAtById,
-    };
-    const lastLoggedAt = lastConversationStreamingFrameTelemetryAtRef.current[sessionId] ?? 0;
-    if (now - lastLoggedAt < 1_000 && !newlyPaintedRunningTool) {
-      return;
-    }
-    if (newlyPaintedRunningTools.length > 0) {
-      const newlyPaintedFallbackKeys = paintedToolSelection.toolIds.flatMap((toolId) => {
-        const keys = runningPaintKeys.find((key) => key.toolId === toolId);
-        return keys ? [keys.fallbackKey, keys.ordinalKey] : [];
-      }).filter(Boolean);
-      paintedRunningToolIdsBySessionRef.current = {
-        ...paintedRunningToolIdsBySessionRef.current,
-        [sessionId]: Array.from(new Set([
-          ...(paintedRunningToolIdsBySessionRef.current[sessionId] ?? []),
-          ...paintedToolSelection.toolIds,
-          ...newlyPaintedFallbackKeys,
-        ])).slice(-64),
-      };
-    }
-    const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
-    const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
-    const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool, index) => {
-      const toolId = paintedToolSelection.toolIds[index];
-      const paintKeys = runningPaintKeys.find((key) => key.toolId === toolId);
-      const firstPaintCandidates = [
-        firstPaintedToolAtById[toolId],
-        firstPaintedToolAtById[paintKeys?.fallbackKey ?? ""],
-        firstPaintedToolAtById[paintKeys?.ordinalKey ?? ""],
-      ]
-        .filter(Number.isFinite);
-      const firstPaintedAt = firstPaintCandidates.length > 0 ? Math.min(...firstPaintCandidates) : undefined;
-      return Math.max(maximum, toolStartToFirstPaintMs(tool, firstPaintedAt, now));
-    }, 0);
-    lastConversationStreamingFrameTelemetryAtRef.current = {
-      ...lastConversationStreamingFrameTelemetryAtRef.current,
-      [sessionId]: now,
-    };
-    postBrowserTelemetry({
-      phase: "conversation_stream",
-      eventCode: "browser.conversation_stream.frame_painted",
-      message: "Conversation streaming frame was committed by the conversation view.",
-      level: "info",
-      fields: {
-        sessionId,
-        turnId: paintedActiveTurn?.turnId ?? "",
-        streamingMessageCount: metrics.streamingMessageCount,
-        renderedTextLength: metrics.renderedTextLength,
-        scrollSignalLength: metrics.scrollSignal.length,
-        activeTurnTextLength: activeTurnLayerTextLength(paintedActiveTurn),
-        paintedAtMs: Math.round(paintedAtMs),
-        lastAssistantDeltaAppliedAtMs: Math.round(lastAssistantDeltaAppliedAtMs),
-        applyToPaintMs: lastAssistantDeltaAppliedAtMs
-          ? Math.max(0, Math.round(paintedAtMs - lastAssistantDeltaAppliedAtMs))
-          : 0,
-        toolStartToBrowserPaintMs: Math.max(0, toolStartToBrowserPaintMs),
-        activeStatusSource: paintedActiveTurn?.ledgerSeq ? "assistant_delta" : "optimistic_submit",
-      },
+    recordConversationStreamingFramePaint({
+      metrics,
+      activeSessionId,
+      activeTurnLayersBySessionRef,
+      paintedRunningToolIdsBySessionRef,
+      firstPaintedRunningToolAtBySessionRef,
+      lastConversationStreamingFrameTelemetryAtRef,
+      lastAssistantDeltaAppliedAtRef,
     });
   }, [activeSessionId]);
   const {
@@ -2161,30 +1758,8 @@ export function ChatCodingRouteWorkbench() {
     }),
     [detail, lang, lastCacheComposition, numberFormatter, t],
   );
-  const {
-    providerCacheInputTokens,
-    providerCachedInputTokens,
-    cacheCalibrationReason,
-    cacheComputedOverestimatedInputTokens,
-    cacheProviderExtraCachedInputTokens,
-    cacheCalibrationSummaryText,
-    trueCacheDonutSegments,
-    upperBoundCacheInputTokens,
-    upperBoundCachedInputTokens,
-    upperBoundCacheCompositionPercent,
-    cachePromptCompositionTotalTokens,
-    cachePromptDonutSegments,
-    cacheCompositionPercent,
-    averageCacheObservedTurnCount,
-    cacheCompositionAverageValue,
-    cacheDetailAvailable,
-    cacheDetailDialogTitle,
-    cacheDetailOpenLabel,
-    cacheCompositionSummary,
-    cacheCompositionTitle,
-    cacheCompositionUpperBoundLabel,
-    cacheCompositionAverageLabel,
-  } = cacheDetailViewModel;
+  const cacheCompositionPercent = cacheDetailViewModel.cacheCompositionPercent;
+  const cacheDetailAvailable = cacheDetailViewModel.cacheDetailAvailable;
   const {
     cacheDetailOpen,
     openCacheDetail,
@@ -2195,7 +1770,12 @@ export function ChatCodingRouteWorkbench() {
   });
   const composerContextRing = useMemo(() => {
     const usageUsed = lastContextComposition?.totalTokens ?? detail?.contextUsage?.used ?? 0;
-    const usageLimit = lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0;
+    const usageLimit = resolveComposerContextLimit({
+      sessionId: activeSessionId,
+      agentId: detail?.agentId,
+      modelParameters: !financeSurface && !verifiedCompanionMode ? sessionLlmOptionsQuery.data : undefined,
+      observedLimit: lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0,
+    });
     const runtimeCompression = runtime?.contextCompression;
     const compressionLevels = runtimeCompression?.strategy?.levels ?? [];
     return buildComposerContextRingModel({
@@ -2221,6 +1801,11 @@ export function ChatCodingRouteWorkbench() {
       tokensPerSecond: detail?.llmUsage?.tokensPerSecond ?? null,
     });
   }, [
+    activeSessionId,
+    detail?.agentId,
+    financeSurface,
+    verifiedCompanionMode,
+    sessionLlmOptionsQuery.data,
     cacheCompositionPercent,
     cacheDetailAvailable,
     detail?.contextUsage?.limit,
@@ -3283,265 +2868,88 @@ export function ChatCodingRouteWorkbench() {
     });
   }, [activeGroupRoomId, activeSessionId, detail?.sessionKind, groupPanelActive, ordinaryChangeRail]);
 
-  // Conversation surface model, memoized so unrelated workbench renders (rails,
-  // dialogs, composer state) do not re-render ConversationView: the memo gate
-  // lives on ConversationView and needs stable prop references. The streaming
-  // activeTurnMessage is intentionally NOT part of this model — it is
-  // projected from the active-turn layer store inside
-  // ChatConversationComposerBridge, the single per-frame subscriber.
-  const conversationModel = useMemo(
-    () => (detail ? {
-      sessionId: activeSessionId ?? detail.id,
-      title: detail.title,
-      phase: detail.currentPhase,
-      // Session summary carries an absolute workspace root (backend resolves
-      // relative paths against PROJECT_ROOT); markdown workspace-file links
-      // resolve against it. Undefined keeps links inert (legacy behavior).
-      sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,
-      messages: detail.messages,
-      transcriptPending: sessionTranscriptPending,
-      hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
-      earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending,
-      onStreamingFramePaint: handleConversationStreamingFramePaint,
-      assistantDisplayName: activeAgentDisplayName,
-      assistantAvatarImageUrl: activeAgentAvatarImageUrl,
-      assistantAvatarFallback: activeAgentAvatarFallback,
-      resolveTurnAvatar: resolveConversationTurnAvatar,
-      userDisplayName: resolveChatUserDisplayName(runtime?.userName),
-      userAvatarPreset: runtime?.userProfile?.avatarPreset,
-      userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
-      taskSummary: currentTaskSummary,
-      changedFiles: detail.changedFiles ?? EMPTY_SESSION_CHANGED_FILES,
-      defaultFileContext: detail.defaultFileContext,
-      showHeader: false,
-      showSessionOverview: false,
-      companionMode: verifiedCompanionMode,
-      // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
-      showMentalSnapshots: !verifiedCompanionMode,
-      promptSuggestionEnabled: activePromptSuggestionEnabled,
-      composerFocusSignal:
-        composerFocusRequest.sessionId === activeSessionId
-          ? composerFocusRequest.signal
-          : "",
-      onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
-      composer: financeSurface ? { ...companionConversationComposer, placeholder: lang === "zh" ? "追问这只股票…" : "Ask about this stock…" } : companionConversationComposer,
-      composerLeadingControl: verifiedCompanionMode ? undefined : (
-        <ChatComposerPlusMenu
-          lang={lang}
-          attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
-          onAddAttachments={handleAddComposerAttachments}
-          sessionReferences={composerSessionReferenceOptions}
-          onAddSessionReference={handleAddComposerReference}
-          knowledgeReferenceOptions={composerKnowledgeReferenceOptions}
-          onAddKnowledgeReference={handleAddComposerReference}
-          labels={{
-            composerAttachFiles: t("composerAttachFiles"),
-            composerReferenceKnowledgeFiles: t("composerReferenceKnowledgeFiles"),
-            composerReferenceKnowledgeUnavailable: t("composerReferenceKnowledgeUnavailable"),
-            composerReferenceKnowledgeTitle: t("composerReferenceKnowledgeTitle"),
-            composerReferenceKnowledgeDescription: t("composerReferenceKnowledgeDescription"),
-            composerReferenceKnowledgeSearch: t("composerReferenceKnowledgeSearch"),
-            composerReferenceKnowledgeEmpty: t("composerReferenceKnowledgeEmpty"),
-          }}
-          mentalModelEnabled={mentalModelEnabledForNextTurn}
-          runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
-          promptSuggestionEnabled={activePromptSuggestionEnabled}
-          capabilityDisabled={!activeSessionId}
-          onMentalModelEnabledChange={handleMentalModelEnabledChange}
-          onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
-          onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
-          directSession={!financeSurface && agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
-            id: agentPrimaryDirectSessionId,
-            label: sessionBindingMismatchLine,
-            onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
-            onPrefetch: () => handlePrefetchDirectSession(agentPrimaryDirectSessionId),
-          } : null}
-          group={standardGroupRoomActive && activeGroupRoom ? {
-            title: activeGroupRoom.title,
-            onManage: () => setGroupManageDialogOpen(true),
-            teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
-            onOpenTeam: activeGroupTeamOwned && activeGroupTeam
-              ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
-              : undefined,
-          } : null}
-        />
-      ),
-      permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent ? {
-        value: activeSessionAgent.permissionPreset || "request_approval",
-        disabled: (
-          agentPermissionPresetMutation.isPending
-          || activeSessionAgent.configSchemaVersion < 2
-          || activeSessionAgent.configRevision < 1
-          || !activeSessionAgent.configHash
-        ),
-        pending: (
-          agentPermissionPresetMutation.isPending
-          && agentPermissionPresetMutation.variables?.agentId === activeSessionAgent.agentId
-        ),
-        agentName: activeAgentDisplayName,
-        onChange: (permissionPreset: AgentPermissionPreset) => {
-          if (
-            !activeSessionId
-            || agentPermissionPresetMutation.isPending
-            || activeSessionAgent.configSchemaVersion < 2
-            || activeSessionAgent.configRevision < 1
-            || !activeSessionAgent.configHash
-          ) {
-            return;
-          }
-          agentPermissionPresetMutation.mutate({
-            agentId: activeSessionAgent.agentId,
-            sessionId: activeSessionId,
-            permissionPreset,
-            expectedConfigRevision: activeSessionAgent.configRevision,
-          });
-        },
-      } : undefined,
-      llmControl: undefined,
-      turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl,
-      onOpenAgentModelConfig: !financeSurface && !verifiedCompanionMode && activeSessionAgent
-        ? () => handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? "") ?? null)
-        : undefined,
-      composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing,
-      onOpenComposerContextDetail: !financeSurface && !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
-      onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
-      onOpenSideChat: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinarySideChat : undefined,
-      onOpenRailFile: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinaryRailFile : undefined,
-      slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
-      slashSkillsCatalogState: verifiedCompanionMode ? "ready" : slashSkillsCatalogState,
-      composerReferenceOptions: verifiedCompanionMode ? [] : composerKnowledgeReferenceOptions,
-      cancelComposerModeLabel: t("cancelEditMessage"),
-      turnError: detail.lastTurnError,
-      stopLabel: t("stop"),
-      stopPendingLabel: t("stopPending"),
-      safeGuidanceLabel: t("safeGuidance"),
-      safeGuidancePendingLabel: t("safeGuidancePending"),
-      interruptGuidanceLabel: t("interruptGuidance"),
-      interruptGuidancePendingLabel: t("interruptGuidancePending"),
-      editUserMessageLabel: t("editAndResendMessage"),
-      onComposerChange: handleComposerChange,
-      onAddComposerAttachments: handleAddComposerAttachments,
-      onRemoveComposerAttachment: handleRemoveComposerAttachment,
-      onRetryComposerAttachment: handleRetryComposerAttachmentUpload,
-      onRetryComposerAttachmentUploads: handleRetryComposerAttachmentUploads,
-      onAddComposerReference: handleAddComposerReference,
-      onRemoveComposerReference: handleRemoveComposerReference,
-      onEditUserMessage: handleEditUserMessage,
-      onRegenerateAssistantMessage: handleRegenerateAssistantMessage,
-      onSwitchMessageVersion: handleSwitchMessageVersion,
-      onForkSessionFromNode: verifiedCompanionMode ? undefined : handleForkSessionFromNode,
-      branchVersionSwitchDisabled: (
-        sessionBusy
-        || (switchHeadMutation.isPending
-          && switchHeadMutation.variables?.sessionId === activeSessionId)
-      ),
-      regenerableAssistantMessageId,
-      regenerateDisabled: sessionBusy || regenerateMutation.isPending || modelParametersSavePending,
-      regeneratePending: (
-        regenerateMutation.isPending
-        && regenerateMutation.variables?.sessionId === activeSessionId
-      ),
-      onRetryTurn: handleRetryFailedTurn,
-      retryTurnDisabled: sessionBusy || regenerateMutation.isPending || modelParametersSavePending,
-      retryTurnPending: (
-        regenerateMutation.isPending
-        && regenerateMutation.variables?.sessionId === activeSessionId
-      ),
-      onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
-      onLoadEarlierMessages: handleLoadEarlierSessionMessages,
-      onSubmit: handleSubmitTurn,
-      onStop: handleStopTurn,
-      onSafeGuidance: () => handleSubmitGuidance("safe"),
-      onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
-      onFollowupQueueUpdate: handleFollowupQueueUpdate,
-      onFollowupQueueRemove: handleFollowupQueueRemove,
-      onFollowupQueueMove: handleFollowupQueueMove,
-      onFollowupQueueSteer: handleFollowupQueueSteer,
-      onFollowupQueueSendNow: handleFollowupQueueSendNow,
-      followupQueueSteerLabel: t("immediateSteer"),
-    } : null),
-    [
-      activeAgentAvatarFallback,
-      activeAgentAvatarImageUrl,
-      activeAgentDisplayName,
-      activeGroupRoom,
-      activeGroupTeam,
-      activeGroupTeamOwned,
-      activePromptSuggestionEnabled,
-      activeSessionAgent,
-      activeSessionId,
-      agentDirectSessionMismatch,
-      agentPermissionPresetMutation,
-      agentPrimaryDirectSessionId,
-      cacheDetailAvailable,
-      composerContextRing,
-      composerFocusRequest,
-      composerKnowledgeReferenceOptions,
-      composerSessionReferenceOptions,
-      currentTaskSummary,
-      detail,
-      financeSurface,
-      handleAddComposerAttachments,
-      handleAddComposerReference,
-      handleCancelEditMessage,
-      handleComposerChange,
-      handleConversationStreamingFramePaint,
-      handleCreateAgentSession,
-      handleEditUserMessage,
-      handleFollowupQueueMove,
-      handleFollowupQueueRemove,
-      handleFollowupQueueSendNow,
-      handleFollowupQueueSteer,
-      handleFollowupQueueUpdate,
-      handleForkSessionFromNode,
-      handleLoadEarlierSessionMessages,
-      handleMentalModelEnabledChange,
-      handleOpenDirectSession,
-      handlePrefetchDirectSession,
-      handlePromptSuggestionEnabledChange,
-      handleRegenerateAssistantMessage,
-      handleRemoveComposerAttachment,
-      handleRemoveComposerReference,
-      handleRetryComposerAttachmentUpload,
-      handleRetryComposerAttachmentUploads,
-      handleRetryFailedTurn,
-      handleRuntimeStatusEnabledChange,
-      handleStopTurn,
-      handleSubmitGuidance,
-      handleSubmitTurn,
-      handleSwitchMessageVersion,
-      lang,
-      loadEarlierSessionMessagesMutation,
-      mentalModelEnabledForNextTurn,
-      navigate,
-      openCacheDetail,
-      openOrdinaryRailFile,
-      openOrdinarySideChat,
-      ordinaryChangeRail,
-      regenerateMutation,
-      regenerableAssistantMessageId,
-      resolvedEditTarget,
-      resolveConversationTurnAvatar,
-      runtime,
-      selectedChatAgent,
-      sessionBusy,
-      modelParametersSavePending,
-      sessionModelParametersMutation,
-      activeSessionAgent,
-      handleOpenAgentConfig,
-      sessionBindingMismatchLine,
-      sessionTranscriptPending,
-      setGroupManageDialogOpen,
-      settleSessionComposerFocusRequest,
-      slashCommandSuggestions,
-      slashSkillsCatalogState,
-      standardGroupRoomActive,
-      switchHeadMutation,
-      t,
-      verifiedCompanionMode,
-      companionConversationComposer,
-    ],
-  );
+  const conversationModel = useChatConversationSurfaceModel({
+    activeAgentAvatarFallback,
+    activeAgentAvatarImageUrl,
+    activeAgentDisplayName,
+    activeGroupRoom,
+    activeGroupTeam,
+    activeGroupTeamOwned,
+    activePromptSuggestionEnabled,
+    activeSessionAgent,
+    activeSessionId,
+    agentDirectSessionMismatch,
+    agentPermissionPresetMutation,
+    agentPrimaryDirectSessionId,
+    cacheDetailAvailable,
+    companionConversationComposer,
+    composerContextRing,
+    composerFocusRequest,
+    composerKnowledgeReferenceOptions,
+    composerSessionReferenceOptions,
+    currentTaskSummary,
+    detail,
+    financeSurface,
+    handleAddComposerAttachments,
+    handleAddComposerReference,
+    handleCancelEditMessage,
+    handleComposerChange,
+    handleConversationStreamingFramePaint,
+    handleCreateAgentSession,
+    handleEditUserMessage,
+    handleFollowupQueueMove,
+    handleFollowupQueueRemove,
+    handleFollowupQueueSendNow,
+    handleFollowupQueueSteer,
+    handleFollowupQueueUpdate,
+    handleForkSessionFromNode,
+    handleLoadEarlierSessionMessages,
+    handleMentalModelEnabledChange,
+    handleOpenAgentConfig,
+    handleOpenDirectSession,
+    handlePrefetchDirectSession,
+    handlePromptSuggestionEnabledChange,
+    handleRegenerateAssistantMessage,
+    handleRemoveComposerAttachment,
+    handleRemoveComposerReference,
+    handleRetryComposerAttachmentUpload,
+    handleRetryComposerAttachmentUploads,
+    handleRetryFailedTurn,
+    handleRuntimeStatusEnabledChange,
+    handleStopTurn,
+    handleSubmitGuidance,
+    handleSubmitTurn,
+    handleSwitchMessageVersion,
+    lang,
+    loadEarlierSessionMessagesMutation,
+    mentalModelEnabledForNextTurn,
+    navigate,
+    openCacheDetail,
+    openOrdinaryRailFile,
+    openOrdinarySideChat,
+    ordinaryChangeRail,
+    regenerateMutation,
+    regenerableAssistantMessageId,
+    resolveConversationTurnAvatar,
+    resolvedEditTarget,
+    runtime,
+    runtimeStatusEnabledForNextTurn,
+    selectedChatAgent,
+    sessionBindingMismatchLine,
+    sessionBusy,
+    modelParametersSavePending,
+    sessionTranscriptPending,
+    sessionsById,
+    setGroupManageDialogOpen,
+    settleSessionComposerFocusRequest,
+    slashCommandSuggestions,
+    slashSkillsCatalogState,
+    standardGroupRoomActive,
+    switchHeadMutation,
+    t,
+    turnModelControl,
+    verifiedCompanionMode,
+  });
 
   const financialResearchBridge = useFinancialResearchSessionBridge({
     sessionId: activeSessionId ?? "",
@@ -3595,89 +3003,42 @@ export function ChatCodingRouteWorkbench() {
         </VButton>
       ) : null
       }
-      statusRail={verifiedCompanionMode ? (
-      <CompanionLifeRail
-        className={statusRailClassName}
-        collapsed={statusRailCollapsed}
-        overlayOpen={statusRailOverlayOpen}
-        companion={activeCompanion}
-        state={companionRailState}
-        errorMessage={companionRailError}
+      statusRail={(
+      <ChatCodingStatusRail
+        activeCliAgentRun={activeCliAgentRun}
+        activeCompanion={activeCompanion}
+        activeGroupRoomId={activeGroupRoomId}
+        activeSessionId={activeSessionId}
+        changePreview={changePreview}
+        changeRail={changeRail}
+        changeRailOpened={changeRailOpened}
+        changedPathSet={changedPathSet}
+        cliAgentRunTabs={cliAgentRunTabs}
+        companionRailError={companionRailError}
+        companionRailState={companionRailState}
+        describeError={describeError}
+        detail={detail}
+        gitRail={gitRail}
+        gitReviewPath={gitReviewPath}
+        groupPanelActive={groupPanelActive}
+        handleCliAgentTerminalSessionChange={handleCliAgentTerminalSessionChange}
         lang={lang}
-        onOpenLifeSteward={(stewardSessionId) => {
-          openSession(stewardSessionId, {
-            replace: false,
-            telemetrySource: "virtual_human_life_steward",
-          });
-        }}
+        openPreviewTab={openPreviewTab}
+        openSession={openSession}
+        ordinaryChangeRail={ordinaryChangeRail}
+        railModel={railModel}
+        reviewSource={reviewSource}
+        sessionReviewPath={sessionReviewPath}
+        setReviewPick={setReviewPick}
+        statusRailClassName={statusRailClassName}
+        statusRailCollapsed={statusRailCollapsed}
+        statusRailOverlayOpen={statusRailOverlayOpen}
+        t={t}
+        toggleChangeRail={toggleChangeRail}
+        updateRailModel={updateRailModel}
+        verifiedCompanionMode={verifiedCompanionMode}
       />
-      ) : ordinaryChangeRail && (changeRail.show || changeRailOpened) ? (
-      <ChatRightRail
-        className={statusRailClassName}
-        lang={lang}
-        sessionId={groupPanelActive ? "" : (activeSessionId ?? "")}
-        sessionKind={groupPanelActive ? "group" : detail?.sessionKind}
-        model={railModel}
-        onModelChange={updateRailModel}
-        onOpenSession={(id) => openSession(id, { telemetrySource: "right_rail_project" })}
-        onCollapse={toggleChangeRail}
-        devtools={detail ? {
-          phase: detail.currentPhase,
-          status: detail.status,
-          messages: detail.messages,
-        } : null}
-        terminalRun={activeCliAgentRun ?? cliAgentRunTabs[0] ?? null}
-        terminalMountedInCenter={Boolean(activeCliAgentRun)}
-        onTerminalSessionChange={handleCliAgentTerminalSessionChange}
-        onOpenFile={(path) => {
-          if (activeSessionId) {
-            openPreviewTab(activeSessionId, path);
-          }
-        }}
-        preface={groupPanelActive ? null : <FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
-        review={{
-          sessionTitle: lang === "zh" ? "这次对话" : "This chat",
-          sessionEmptyLabel: lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet",
-          sessionPaths: changeRail.paths,
-          sessionSelectedPath: reviewSource === "git" ? null : sessionReviewPath,
-          sessionChangedPaths: changedPathSet,
-          gitTitle: gitRail.branch
-            ? (lang === "zh" ? `仓库 · ${gitRail.branch}` : `Repository · ${gitRail.branch}`)
-            : (lang === "zh" ? "仓库" : "Repository"),
-          gitEmptyLabel: lang === "zh" ? "工作区是干净的" : "The worktree is clean",
-          gitPending: gitRail.pending,
-          gitPendingLabel: lang === "zh" ? "正在读取仓库" : "Reading the repository",
-          gitUnavailableLabel: gitRail.unavailable
-            ? (gitRail.errorText || describeError(gitRail.error, t("loadFailed")))
-            : "",
-          gitPaths: gitRail.paths,
-          gitSelectedPath: gitReviewPath,
-          gitDetailByPath: gitRail.detailByPath,
-          diff: changePreview.diff,
-          diffLoading: changePreview.diffLoading,
-          hasDiff: changePreview.hasDiff,
-          file: changePreview.file,
-          fileLoading: changePreview.fileLoading,
-          fileError: changePreview.fileError ? describeError(changePreview.fileError, t("loadFailed")) : "",
-          sourceLabel: detail?.title ?? t("currentSession"),
-          onSelectSessionFile: (path) => {
-            if (!activeSessionId) {
-              return;
-            }
-            setReviewPick({ sessionId: activeSessionId, source: "session", path });
-            openPreviewTab(activeSessionId, path);
-          },
-          onSelectGitFile: (path) => {
-            const reviewKey = groupPanelActive ? `group:${activeGroupRoomId}` : activeSessionId;
-            if (!reviewKey) {
-              return;
-            }
-            gitRail.selectPath(path);
-            setReviewPick({ sessionId: reviewKey, source: "git", path });
-          },
-        }}
-      />
-      ) : null}
+      )}
       leftResizeHandle={
       financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
@@ -3709,135 +3070,64 @@ export function ChatCodingRouteWorkbench() {
         className={centerPaneClassName}
         surfaceClassName={styles.centerSurface}
         tabStrip={(
-          <ChatCenterTabStrip
-            styles={styles}
+          <ChatCodingCenterTabs
             lang={lang}
-            agentSessionLabel={t("agentSession")}
             chatReturnTarget={chatReturnTarget}
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            showSessionTabs={!financeSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
-            showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}
-            companionHeader={verifiedCompanionMode && activeCompanion ? (
-              <CompanionConversationHeader companion={activeCompanion} lang={lang} />
-            ) : null}
-            conversationIndexControl={!financeSurface && !verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
-              <VIconButton
-                tooltip=""
-                id="chat-conversation-index-toggle"
-                className={styles.conversationIndexToggle}
-                label={lang === "zh" ? "展开会话列" : "Expand conversation column"}
-                aria-expanded={false}
-                aria-controls="chat-conversation-index-pane"
-                icon={<PanelLeftOpen size={16} aria-hidden="true" />}
-                onClick={() => {
-                  setLeftRailCollapsed(false);
-                  window.requestAnimationFrame(() => document.getElementById("chat-conversation-index-collapse")?.focus());
-                }}
-              />
-            ) : null}
-            workspaceActiveTab={conversationWorkspaceTab}
-            sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
-              <VIconButton
-                label={lang === "zh" ? "浏览会话" : "Browse sessions"}
-                icon={<List size={16} strokeWidth={1.5} aria-hidden="true" />}
-                className={sessionBrowserVisible ? `${styles.toolbarIconButton} ${styles.tabActive}` : styles.toolbarIconButton}
-                aria-pressed={sessionBrowserVisible}
-                onPress={() => setSessionBrowserOpen(current => !current)}
-              />
-            ) : null}
-            sessionActionsControl={headerExportVisible && conversationModel ? <ConversationShareExportButton
-              key={conversationModel.sessionId}
-              sessionId={conversationModel.sessionId}
-              messages={conversationModel.messages}
-              language={lang}
-              presentation="menu"
-              isDisabled={conversationModel.messages.length === 0}
-            /> : undefined}
+            financeSurface={financeSurface}
+            verifiedCompanionMode={verifiedCompanionMode}
+            selectedChatAgentId={selectedChatAgentId}
+            agentSessionTabs={agentSessionTabs}
+            cliAgentRunTabs={cliAgentRunTabs}
+            activeCompanion={activeCompanion}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
+            conversationIndexCollapsed={conversationIndexCollapsed}
+            setLeftRailCollapsed={setLeftRailCollapsed}
+            conversationWorkspaceTab={conversationWorkspaceTab}
+            sessionBrowserVisible={sessionBrowserVisible}
+            setSessionBrowserOpen={setSessionBrowserOpen}
+            headerExportVisible={headerExportVisible}
+            conversationModel={conversationModel}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
-            statusRailAvailable={verifiedCompanionMode}
-            rightRailLabel={ordinaryChangeRail && !sessionBrowserVisible ? (lang === "zh" ? "侧栏" : "Side") : undefined}
-            rightRailOpen={ordinaryChangeRail ? changeRailVisible : statusRailOverlayOpen}
+            ordinaryChangeRail={ordinaryChangeRail}
+            changeRailVisible={changeRailVisible}
             statusRailOverlayOpen={statusRailOverlayOpen}
-            onActivateAgentFallbackTab={() => {
-              setSessionBrowserOpen(false);
-              activeSessionId && setActiveTab(activeSessionId, "agent");
-            }}
-            onToggleLeftOverlay={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
-            onToggleRightOverlay={toggleChangeRail}
-            sessionTabs={(
-              <AgentSessionTabStrip
-                activeSessionId={activeSessionId}
-                activeCliAgentRunId={activeCliAgentRunId}
-                agentsById={agentsById}
-                buildSessionReferencePayload={buildSessionReferencePayload}
-                contextMenuSessionId={contextMenuSessionId}
-                cliAgentRuns={cliAgentRunTabs}
-                createPending={createSessionMutation.isPending}
-                createDisabled={!selectedChatAgentId}
-                deletePendingSessionId={
-                  deleteSessionMutation.isPending
-                    ? String(deleteSessionMutation.variables?.sessionId || "").trim()
-                    : ""
-                }
-                editingSessionId={editingSessionId}
-                editingSessionTitle={editingSessionTitle}
-                lang={lang}
-                renamePending={renameSessionMutation.isPending}
-                renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-                resolveModelLabel={resolveModelLabel}
-                sessions={agentSessionTabs}
-                teams={teams}
-                runtimeRunningSessionIds={runtimeRunningSessionIds}
-                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-                statusLabel={statusLabel}
-                t={t}
-                workspaceActiveTab={conversationWorkspaceTab}
-                onCancelRename={cancelRenameSession}
-                onContextMenu={openSessionContextMenu}
-                onDragReference={startSessionReferenceDrag}
-                onOpenCliAgentRun={(runId) => {
-                  setSessionBrowserOpen(false);
-                  if (activeSessionId) {
-                    setActiveTab(activeSessionId, cliAgentRunTabId(runId));
-                  }
-                }}
-                onCloseCliAgentRun={(runId) => {
-                  const run = cliAgentRunTabs.find((item) => item.id === runId);
-                  if (run) {
-                    void closeCliAgentRun(run);
-                  }
-                }}
-                onCreateSession={handleCreateSession}
-                onDeleteSession={handleDeleteSession}
-                onOpenDirectSession={handleOpenDirectSession}
-                onPrefetchDirectSession={handlePrefetchDirectSession}
-                onRenameTitleChange={setEditingSessionTitle}
-                onSetActiveTab={(sessionId, tab) => {
-                  setSessionBrowserOpen(false);
-                  setActiveTab(sessionId, tab);
-                }}
-                onSubmitRename={submitRenameSession}
-              />
-            )}
-            fileTabs={(
-              <ChatFileWorkspaceTabs
-                activeTab={workspace.activeTab}
-                closePreviewTabLabel={t("closePreviewTab")}
-                hidden={groupPanelActive}
-                openTabs={workspace.openTabs}
-                onCloseTab={(tabPath) => {
-                  activeSessionId && closePreviewTab(activeSessionId, tabPath);
-                }}
-                onOpenTab={(tabPath) => {
-                  setSessionBrowserOpen(false);
-                  activeSessionId && setActiveTab(activeSessionId, tabPath);
-                }}
-              />
-            )}
+            toggleChangeRail={toggleChangeRail}
+            setResponsiveOverlayPane={setResponsiveOverlayPane}
+            activeSessionId={activeSessionId}
+            setActiveTab={setActiveTab}
+            activeCliAgentRunId={activeCliAgentRunId}
+            agentsById={agentsById}
+            buildSessionReferencePayload={buildSessionReferencePayload}
+            contextMenuSessionId={contextMenuSessionId}
+            createSessionPending={createSessionMutation.isPending}
+            deleteSessionPending={deleteSessionMutation.isPending}
+            pendingDeleteSessionId={String(deleteSessionMutation.variables?.sessionId || "").trim()}
+            editingSessionId={editingSessionId}
+            editingSessionTitle={editingSessionTitle}
+            renamePending={renameSessionMutation.isPending}
+            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+            resolveModelLabel={resolveModelLabel}
+            teams={teams}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+            statusLabel={statusLabel}
+            t={t}
+            onCancelRename={cancelRenameSession}
+            onContextMenu={openSessionContextMenu}
+            onDragReference={startSessionReferenceDrag}
+            closeCliAgentRun={closeCliAgentRun}
+            onCreateSession={handleCreateSession}
+            onDeleteSession={handleDeleteSession}
+            onOpenDirectSession={handleOpenDirectSession}
+            onPrefetchDirectSession={handlePrefetchDirectSession}
+            onRenameTitleChange={setEditingSessionTitle}
+            onSubmitRename={submitRenameSession}
+            workspace={workspace}
+            closePreviewTab={closePreviewTab}
           />
         )}
         surface={(
@@ -3879,7 +3169,7 @@ export function ChatCodingRouteWorkbench() {
             )}
             groupPanelActive={groupPanelActive}
             groupSurface={(
-            <ChatGroupCenterSurface
+            <ChatCodingGroupSurface
               lang={lang}
               projectBusActive={projectBusActive}
               standardGroupRoomActive={standardGroupRoomActive}
@@ -3888,9 +3178,7 @@ export function ChatCodingRouteWorkbench() {
               activeGroupRoomId={activeGroupRoomId}
               availableGroupParticipantCount={availableGroupParticipantCount}
               visibleGroupParticipants={availableGroupParticipants}
-              onOpenGroupTeam={!chatReturnTarget && activeGroupTeam ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId)) : undefined}
               onManageGroupRoom={() => setGroupManageDialogOpen(true)}
-              artifactTeamId={activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined}
               activeGroupParticipantById={activeGroupParticipantById}
               projectBusTimeline={projectBusTimeline}
               projectBusEvents={projectBusEvents}
@@ -3903,31 +3191,17 @@ export function ChatCodingRouteWorkbench() {
               groupStopDisabled={groupStopDisabled}
               expandedGroupMessageIds={expandedGroupMessageIds}
               chatMentionTargets={chatMentionTargets}
-              userDisplayName={runtime?.userName || (lang === "zh" ? "我" : "Me")}
-              composerLeadingControl={standardGroupRoomActive && activeGroupRoom ? (
-                <ChatComposerPlusMenu
-                  lang={lang}
-                  showAddReference={false}
-                  showCapabilities={false}
-                  attachmentDisabled
-                  sessionReferences={[]}
-                  mentalModelEnabled={mentalModelEnabledForNextTurn}
-                  runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
-                  promptSuggestionEnabled={activePromptSuggestionEnabled}
-                  capabilityDisabled
-                  onMentalModelEnabledChange={handleMentalModelEnabledChange}
-                  onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
-                  onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
-                  group={{
-                    title: activeGroupRoom.title,
-                    onManage: () => setGroupManageDialogOpen(true),
-                    teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
-                    onOpenTeam: activeGroupTeamOwned && activeGroupTeam
-                      ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
-                      : undefined,
-                  }}
-                />
-              ) : undefined}
+              runtimeUserName={runtime?.userName}
+              mentalModelEnabled={mentalModelEnabledForNextTurn}
+              runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+              promptSuggestionEnabled={activePromptSuggestionEnabled}
+              onMentalModelEnabledChange={handleMentalModelEnabledChange}
+              onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+              onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
+              chatReturnTarget={chatReturnTarget}
+              activeGroupTeam={activeGroupTeam}
+              activeGroupTeamOwned={activeGroupTeamOwned}
+              onNavigateTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
               projectBusRefreshing={projectAgentBusQuery.isFetching}
               projectBusRefreshError={projectAgentBusQuery.isError ? describeError(projectAgentBusQuery.error, t("loadFailed")) : ""}
               projectBusSendPending={sendProjectBusMessageMutation.isPending}
@@ -4132,7 +3406,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
     >
-      <ChatGroupManagementDialog
+      <ChatCodingWorkbenchDialogs
         open={groupManageDialogOpen}
         onOpenChange={setGroupManageDialogOpen}
         lang={lang}
@@ -4174,77 +3448,26 @@ export function ChatCodingRouteWorkbench() {
         onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
         onResetActiveGroupRoom={handleResetActiveGroupRoom}
         onToggleGroupManageSession={handleToggleGroupManageSession}
-      />
-      {cacheDetailOpen && cacheDetailAvailable ? (
-        <Suspense fallback={null}>
-          <CacheDetailDialog
-            averageCacheObservedTurnCount={averageCacheObservedTurnCount}
-            cacheCompositionAverageLabel={cacheCompositionAverageLabel}
-            cacheCompositionAverageValue={cacheCompositionAverageValue}
-            cacheCompositionPercent={cacheCompositionPercent}
-            cacheCompositionTitle={cacheCompositionTitle}
-            cacheCompositionUpperBoundLabel={cacheCompositionUpperBoundLabel}
-            cacheComputedOverestimatedInputTokens={cacheComputedOverestimatedInputTokens}
-            cacheDetailDialogTitle={cacheDetailDialogTitle}
-            cachePromptCompositionTotalTokens={cachePromptCompositionTotalTokens}
-            cachePromptDonutSegments={cachePromptDonutSegments}
-            cacheProviderExtraCachedInputTokens={cacheProviderExtraCachedInputTokens}
-            cacheCalibrationReason={cacheCalibrationReason}
-            cacheCalibrationSummaryText={cacheCalibrationSummaryText}
-            closeLabel={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
-            lang={lang}
-            missingSegmentLabel={cacheCompositionSegmentLabel("missing", "missing", t)}
-            numberFormatter={numberFormatter}
-            onClose={closeCacheDetail}
-            previousCacheHitLabel={t("previousCacheHit")}
-            providerCachedInputTokens={providerCachedInputTokens}
-            providerCacheInputTokens={providerCacheInputTokens}
-            trueCacheDonutSegments={trueCacheDonutSegments}
-            upperBoundCachedInputTokens={upperBoundCachedInputTokens}
-            upperBoundCacheCompositionPercent={upperBoundCacheCompositionPercent}
-            upperBoundCacheInputTokens={upperBoundCacheInputTokens}
-            promptSnapshot={detail?.agentPromptSnapshot}
-            promptAssembly={detail?.lastPromptAssembly}
-            lastLlmPayloadTrace={lastLlmPayloadTrace}
-          />
-        </Suspense>
-      ) : null}
-      {agentCreateWizardOpen ? (
-        <Suspense fallback={null}>
-          <AgentCreateWizardDialog
-            open={agentCreateWizardOpen}
-            triggerRef={agentCreateTriggerRef}
-            triggerId="chat-agent-create-trigger"
-            onClose={() => setAgentCreateWizardOpen(false)}
-            onCreated={(agent) => {
-              setSelectedAgentId(agent.agentId);
-              setRightIndexPanel("conversations");
-            }}
-            onStartConversation={async (agent) => {
-              if (!agent.directSessionId) return false;
-              handleOpenAgent(agent);
-              return true;
-            }}
-            onOpenAdvancedConfig={(agent) => {
-              setAgentCreateWizardOpen(false);
-              navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
-            }}
-          />
-        </Suspense>
-      ) : null}
-      <ChatDangerConfirmDialog
-        open={Boolean(pendingConfirm)}
-        title={pendingConfirmPresentation?.title ?? ""}
-        confirmLabel={pendingConfirmPresentation?.confirmLabel ?? ""}
-        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
-        confirmPending={pendingConfirmPresentation?.confirmPending ?? false}
-        onOpenChange={(open) => {
-          if (!open) {
-            dismissPendingConfirm();
-          }
-        }}
-        onCancel={dismissPendingConfirm}
-        onConfirm={confirmPendingWorkbenchAction}
+        cacheDetailOpen={cacheDetailOpen}
+        cacheDetailAvailable={cacheDetailAvailable}
+        cacheDetailViewModel={cacheDetailViewModel}
+        t={t}
+        numberFormatter={numberFormatter}
+        closeCacheDetail={closeCacheDetail}
+        promptSnapshot={detail?.agentPromptSnapshot}
+        promptAssembly={detail?.lastPromptAssembly}
+        lastLlmPayloadTrace={lastLlmPayloadTrace}
+        agentCreateWizardOpen={agentCreateWizardOpen}
+        agentCreateTriggerRef={agentCreateTriggerRef}
+        setAgentCreateWizardOpen={setAgentCreateWizardOpen}
+        setSelectedAgentId={setSelectedAgentId}
+        setRightIndexPanel={setRightIndexPanel}
+        handleOpenAgent={handleOpenAgent}
+        navigate={navigate}
+        pendingConfirm={pendingConfirm}
+        pendingConfirmPresentation={pendingConfirmPresentation}
+        dismissPendingConfirm={dismissPendingConfirm}
+        confirmPendingWorkbenchAction={confirmPendingWorkbenchAction}
       />
     </ChatSessionWorkbenchShell>
       <ConversationRerunFileChoiceDialog

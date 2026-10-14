@@ -1,4 +1,24 @@
-import type { SessionCacheCompositionSegment } from "../../api/types";
+import type { SessionCacheCompositionSegment, SessionLlmOptions } from "../../api/types";
+
+/** Live Agent settings size the composer; the observed call remains immutable. */
+export function resolveComposerContextLimit(options: {
+  sessionId: string | null;
+  agentId?: string;
+  modelParameters?: Pick<SessionLlmOptions, "sessionId" | "agentId" | "contextWindow">;
+  observedLimit: number;
+}): number {
+  const parameters = options.modelParameters;
+  const configured = parameters?.contextWindow;
+  return options.sessionId
+    && options.agentId
+    && parameters?.sessionId === options.sessionId
+    && parameters.agentId === options.agentId
+    && typeof configured === "number"
+    && Number.isSafeInteger(configured)
+    && configured > 0
+    ? configured
+    : options.observedLimit;
+}
 
 export type ComposerContextSegment = {
   key: string;
