@@ -157,4 +157,85 @@ describe("projectAgentMessageTimelineMessages", () => {
       timelineMessages: [historical], activeTurnMessage: current, companionMode: true,
     }).messages.map((message) => message.id)).toEqual(["historical-final", "current-running"]);
   });
+
+  it("hides a companion follow-up that repeats the previous reply", () => {
+    const spoken = (id: string, text: string, timestamp: string) => assistantMessage(id, {
+      content: "",
+      turnId: id,
+      status: "completed",
+      timestamp,
+      turnItems: [{
+        id: `${id}:1`,
+        itemId: id,
+        version: 3,
+        sessionId: "session-1",
+        turnId: id,
+        type: "agent_message",
+        phase: "final_answer",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        text,
+      }],
+    });
+    const first = spoken("first-reply", "今天有点累，想早点休息。", "2026-10-14T01:00:00Z");
+    const repeat = spoken("repeat-reply", "今天有点累，想早点休息。", "2026-10-14T01:01:00Z");
+    const extension = spoken("extension-reply", "今天有点累，想早点休息。明天再聊。", "2026-10-14T01:02:00Z");
+    const user = {
+      id: "user-again",
+      role: "user" as const,
+      content: "嗯",
+      timestamp: "2026-10-14T01:03:00Z",
+    };
+    const afterUser = spoken("after-user", "今天有点累，想早点休息。", "2026-10-14T01:04:00Z");
+
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [first, repeat],
+      companionMode: true,
+    }).messages.map((message) => message.id)).toEqual(["first-reply"]);
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [first, repeat],
+      companionMode: false,
+    }).messages.map((message) => message.id)).toEqual(["first-reply", "repeat-reply"]);
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [first, extension, user, afterUser],
+      companionMode: true,
+    }).messages.map((message) => message.id)).toEqual([
+      "first-reply",
+      "extension-reply",
+      "user-again",
+      "after-user",
+    ]);
+  });
+
+  it("drops a settled companion turn that only has thinking", () => {
+    const thinking = assistantMessage("thinking-only", {
+      content: "",
+      turnId: "turn-thinking",
+      status: "completed",
+      timestamp: "2026-10-14T02:00:00Z",
+      turnItems: [{
+        id: "thinking:1",
+        itemId: "thinking",
+        version: 3,
+        sessionId: "session-1",
+        turnId: "turn-thinking",
+        type: "reasoning",
+        status: "completed",
+        revision: 1,
+        sequence: 1,
+        terminal: true,
+        text: "这段思考不该占一条消息",
+      }],
+    });
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [thinking],
+      companionMode: true,
+    }).messages).toEqual([]);
+    expect(projectAgentMessageTimelineMessages({
+      timelineMessages: [thinking],
+      companionMode: false,
+    }).messages.map((message) => message.id)).toEqual(["thinking-only"]);
+  });
 });

@@ -10,6 +10,11 @@ import {
   projectConversationMessageFromTurnItemsV2,
 } from "../../routes/chatTurnProtocol";
 import { buildAgentMessageTimelineRowIdentities, type AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
+import {
+  companionMessageSpokenText,
+  companionTurnHasVisibleError,
+  companionUnrepeatedSpeech,
+} from "./companionSpokenDisplay";
 import { chronologicalConversationMessages } from "./conversationMessageOrder";
 import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 
@@ -79,6 +84,31 @@ function messageTurnId(message: ConversationMessage) {
   ).replace(/^live:/, "").trim();
 }
 
+function suppressCompanionRestatedFollowups(messages: ConversationMessage[]) {
+  let previousAnswer = "";
+  return messages.filter((message) => {
+    if (message.role === "user") {
+      previousAnswer = "";
+      return true;
+    }
+    if (message.role !== "assistant") {
+      return true;
+    }
+    const spoken = companionMessageSpokenText(message);
+    if (assistantTurnIsInFlight(message) && !spoken) {
+      return true;
+    }
+    if (!spoken) {
+      return companionTurnHasVisibleError(message);
+    }
+    const visible = companionUnrepeatedSpeech(previousAnswer, spoken);
+    if (visible) {
+      previousAnswer = spoken;
+    }
+    return Boolean(visible) || companionTurnHasVisibleError(message);
+  });
+}
+
 function suppressSupersededCompanionInFlightMessages(messages: ConversationMessage[]) {
   const terminalAssistants = messages.flatMap((message) => {
     if (
@@ -134,7 +164,9 @@ export function projectAgentMessageTimelineMessages({
   ]);
   const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
   const messages = companionMode
-    ? suppressSupersededCompanionInFlightMessages(orderedMessages)
+    ? suppressCompanionRestatedFollowups(
+      suppressSupersededCompanionInFlightMessages(orderedMessages),
+    )
     : orderedMessages;
   const agentMessages = messages.map(conversationMessageToAgentMessage);
   return {
