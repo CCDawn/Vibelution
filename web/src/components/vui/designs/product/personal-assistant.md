@@ -62,7 +62,7 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 ### 非职责
 不伪造进度、不执行管理命令、不自行判定任务完成。
 ### 视觉与状态
-VStateSurface 表达加载与失败；空列表用简短文案；共享状态标签与语义 token。
+VStateSurface 表达加载与失败；空列表用简短文案；共享状态标签与语义 token。统计卡片按侧栏可用宽度自动分列，中文标签保持单行，覆盖桌面展开窗口的最小侧栏宽度。
 ### 实现落点
 `routes/personalAssistant/PersonalAssistantOverview.tsx`。
 ### 反冗余

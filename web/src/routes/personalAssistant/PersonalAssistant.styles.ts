@@ -12,7 +12,7 @@ const styles = {
   overview: "flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-y-auto p-3 text-sm",
   sectionHeader: "flex items-center justify-between gap-2 font-medium",
   sectionTitle: "mt-2 text-xs font-medium text-[var(--fg-secondary)]",
-  metrics: "grid grid-cols-3 gap-2 text-xs [&>div]:rounded-vui-soft [&>div]:border [&>div]:border-[var(--vui-border-subtle)] [&>div]:p-2 [&_dd]:mt-1 [&_dd]:text-lg [&_dd]:font-medium",
+  metrics: "grid grid-cols-[repeat(auto-fit,minmax(min(100%,4.5rem),1fr))] gap-2 text-xs [&>div]:rounded-vui-soft [&>div]:border [&>div]:border-[var(--vui-border-subtle)] [&>div]:p-2 [&_dt]:whitespace-nowrap [&_dd]:mt-1 [&_dd]:text-lg [&_dd]:font-medium",
   list: "space-y-1",
   rowButton: "flex w-full min-w-0 items-center justify-between gap-2 text-left",
   agentRow: "flex min-w-0 items-center justify-between gap-2 px-2 py-1 text-xs",
