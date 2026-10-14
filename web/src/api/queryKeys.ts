@@ -1,4 +1,7 @@
 export const queryKeys = {
+  personalAssistant: () => ["personal-assistant"] as const,
+  personalAssistantOverview: () => ["personal-assistant", "overview"] as const,
+  personalAssistantBinding: (agentId: string, sessionId: string) => ["personal-assistant", "binding", agentId, sessionId] as const,
   digestApprovals: (teamId: string) => ["teams", teamId, "hypothesis-first", "digest-approvals"] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,

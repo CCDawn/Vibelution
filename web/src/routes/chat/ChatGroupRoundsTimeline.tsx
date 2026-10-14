@@ -125,6 +125,7 @@ export function GroupRoundsTimeline({
   items,
   purposeFallback,
   userDisplayName,
+  showRoundTopics = true,
   lang,
   formatTime,
   statusLabel,
@@ -146,6 +147,7 @@ export function GroupRoundsTimeline({
   items: GroupTimelineItem[];
   purposeFallback: string;
   userDisplayName: string;
+  showRoundTopics?: boolean;
   lang: "zh" | "en";
   formatTime: (value: string) => string;
   statusLabel: (value: string) => string;
@@ -266,7 +268,7 @@ export function GroupRoundsTimeline({
               </VButton>
             </div> : null}
             <div id={transcriptId}>
-            <article className={styles.groupTopicMessage}>
+            {showRoundTopics && round.topic.trim() ? <article className={styles.groupTopicMessage}>
               <div className={styles.groupTopicBubble}>
                 <div className={styles.groupStreamIdentity} data-testid="group-stream-topic-identity">
                   {renderAgentAvatar(
@@ -285,7 +287,7 @@ export function GroupRoundsTimeline({
                   />
                 </p>
               </div>
-            </article>
+            </article> : null}
             <div className={styles.groupMessageList}>
               {groupConsecutiveBy(
                 round.messages ?? [],

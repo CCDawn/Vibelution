@@ -193,6 +193,55 @@ const desktopPaths: DesktopPaths = {
 };
 
 describe("Electron window provider state", () => {
+  it.each(["main", "branch"])("focuses and delivers only to the %s workbench owning the assistant origin", async owner => {
+    const main = new FakeWindow(42, "", 4242);
+    const branch = new FakeWindow(43, "", 4343);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: url => new URL(url).port === "8001" ? branch : main,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:assistant", url: "http://127.0.0.1:8001/personal-assistant" });
+    const mainFocus = main.focusCount;
+    const branchFocus = branch.focusCount;
+    const payload = { sessionId: "owned-session", source: "desktop-assistant" };
+    const origin = owner === "main" ? "http://127.0.0.1:8000" : "http://127.0.0.1:8001";
+    expect(provider.focusAndSendToWorkbenchOrigin(origin, "conversation:opened", payload)).toBe(true);
+    expect(main.focusCount - mainFocus).toBe(owner === "main" ? 1 : 0);
+    expect(branch.focusCount - branchFocus).toBe(owner === "branch" ? 1 : 0);
+    expect((owner === "main" ? main : branch).sentIpc).toEqual([{ channel: "conversation:opened", payload }]);
+    expect((owner === "main" ? branch : main).sentIpc).toEqual([]);
+    expect(branch.loadedUrls).toEqual(["http://127.0.0.1:8001/personal-assistant"]);
+  });
+  it("does not open or deliver when the matching registered owner is absent or no longer live", async () => {
+    const main = new FakeWindow(42, "", 4242);
+    const branch = new FakeWindow(43, "", 4343);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: url => new URL(url).port === "8001" ? branch : main,
+    });
+    await provider.openOrFocusWorkbench();
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8001", "conversation:opened", {})).toBe(false);
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:assistant", url: "http://127.0.0.1:8001/" });
+    branch.destroy();
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8001", "conversation:opened", {})).toBe(false);
+    expect(main.sentIpc).toEqual([]);
+    expect(branch.sentIpc).toEqual([]);
+  });
+  it("rejects ambiguous owners and a target whose live origin changed", async () => {
+    const main = new FakeWindow(42, "", 4242);
+    const branch = new FakeWindow(43, "", 4343);
+    let creation = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createWorkbenchWindow: () => creation++ === 0 ? main : branch,
+    });
+    await provider.openOrFocusWorkbench();
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:duplicate", url: "http://127.0.0.1:8000/" });
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8000", "conversation:opened", {})).toBe(false);
+    await provider.openOrFocusInstanceWorkbench({ instanceId: "worktree:duplicate", url: "http://127.0.0.1:8001/" });
+    await branch.loadURL("http://127.0.0.1:8002/");
+    expect(provider.focusAndSendToWorkbenchOrigin("http://127.0.0.1:8001", "conversation:opened", {})).toBe(false);
+    expect(main.sentIpc).toEqual([]);
+    expect(branch.sentIpc).toEqual([]);
+  });
   it("uses electron as the provider authority", () => {
     expect(closedWindowState("workbench")).toEqual({
       role: "workbench",
@@ -1602,6 +1651,7 @@ describe("IPC channels", () => {
       "conversationNotificationOpened",
       "endDesktopPetWindowDrag",
       "focusWorkbenchWindow",
+      "getDesktopAssistantContext",
       "getDesktopShellSummary",
       "getLauncherFreshness",
       "getLauncherState",
@@ -1617,6 +1667,7 @@ describe("IPC channels", () => {
       "requestDesktopShellExit",
       "requestWindowClose",
       "requestWorkbenchRestart",
+      "setDesktopPetExpanded",
       "showItemInFolder",
       "showLauncherWindow"
     ]);

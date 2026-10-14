@@ -104,6 +104,8 @@ describe("router route contracts", () => {
     expectRouteErrorSurface(pet, "workbench");
     expectLazyFallback(pet, "正在打开工作台", "workbench");
     expect(findWorkbenchRoute("pet")).toBeTruthy();
+    expect(findTopRoute("/desktop-assistant").children).toBeUndefined();
+    expect(findWorkbenchRoute("personal-assistant")).toBeTruthy();
   });
 
   it("guards split evolution routes with loading fallback and error boundary elements", () => {

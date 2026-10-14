@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+// @ts-expect-error This contract runs in Node, outside the browser type environment.
+import { readFile } from "node:fs/promises";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { basename, extname, join, relative } from "node:path";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
@@ -38,6 +40,10 @@ const conversationParentStyleConsumers = [
 ];
 const productSharedParentStyleConsumers = [
   ...conversationParentStyleConsumers,
+  // Both assistant surfaces and the overview share their scoped, typed product style owner.
+  "routes/PersonalAssistantRoute.tsx",
+  "routes/desktopPet/DesktopAssistantRoute.tsx",
+  "routes/personalAssistant/PersonalAssistantOverview.tsx",
   "app/SpecialistAgentMenu.tsx", // shell-owned nav geometry is passed via props
   // Settings-align wave 3: the extracted ConfigSectionEditor shares the owning
   // route's style module (ConfigRoute.styles) instead of owning a copy.
@@ -293,14 +299,15 @@ const legacyStyleMapFiles = new Set<string>([
 ]);
 
 function walkFiles(dir: string): string[] {
-  const entries = readdirSync(dir);
+  const entries = readdirSync(dir, { withFileTypes: true });
   return entries.flatMap((entry) => {
-    const fullPath = join(dir, entry);
-    const stats = statSync(fullPath);
-    if (stats.isDirectory()) {
+    const fullPath = join(dir, entry.name);
+    // Dirent metadata avoids a separate stat call for every source file.
+    // Follow directory links as before so the contract keeps the same scope.
+    if (entry.isDirectory() || entry.isSymbolicLink() && statSync(fullPath).isDirectory()) {
       return walkFiles(fullPath);
     }
-    return /\.(ts|tsx|css)$/.test(entry) ? [fullPath] : [];
+    return /\.(ts|tsx|css)$/.test(entry.name) ? [fullPath] : [];
   });
 }
 
@@ -313,17 +320,23 @@ function relativeFromSourceRoot(file: string): string {
 }
 
 describe("VUI architecture boundary", () => {
-  it("keeps @heroui/react out of package.json and source imports", () => {
+  it("keeps @heroui/react out of package.json and source imports", async () => {
     const packageJson = readText(packageJsonPath);
     expect(packageJson).not.toContain(heroUiImportToken);
 
     const boundarySelf = relativeFromSourceRoot(fileURLToPath(import.meta.url)).replace(/\\/g, "/");
-    const offenders = walkFiles(sourceRoot)
-      .filter((file) => readText(file).includes(heroUiImportToken))
-      .map(relativeFromSourceRoot)
-      .filter((file) => file !== boundarySelf)
-      // Tests may name the token to forbid it (e.g. `.not.toContain("@heroui/react")`).
+    // Apply the existing test exemption before reading file contents.
+    const files = walkFiles(sourceRoot)
       .filter((file) => !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"));
+    const offenders: string[] = [];
+    // Bounded parallel reads keep cold Windows scans within the test deadline.
+    for (let offset = 0; offset < files.length; offset += 16) {
+      const matches = await Promise.all(files.slice(offset, offset + 16).map(async (file) => {
+        const source = await readFile(file, "utf-8");
+        return source.includes(heroUiImportToken) ? relativeFromSourceRoot(file) : null;
+      }));
+      offenders.push(...matches.filter((file): file is string => file !== null && file !== boundarySelf));
+    }
 
     expect(offenders).toEqual([]);
   });

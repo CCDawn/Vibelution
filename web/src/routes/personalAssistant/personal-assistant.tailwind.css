@@ -1,0 +1,6 @@
+@import "tailwindcss" source(none);
+@import "../../design/theme.tailwind.css";
+@source "./*.tsx";
+@source "./*.styles.ts";
+@source "../PersonalAssistantRoute.tsx";
+@source "../desktopPet/DesktopAssistantRoute.tsx";

@@ -136,6 +136,8 @@ MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
+    "personal_assistant_overview_tool",
+    "personal_assistant_manage_tool",
     "financial_report_query_tool",
     "financial_market_snapshot_tool",
     "financial_index_context_tool",
@@ -890,6 +892,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "web_research",
         "capabilityTags": ["financial_reports", "rag_retrieval", "citations", "read_only"],
         "riskTags": ["network_access", "model_cost"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "personal_assistant_overview_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["platform_overview", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "personal_assistant_manage_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["platform_management", "agent_lifecycle", "session_lifecycle"],
+        "riskTags": ["delete_or_cleanup", "permission_management", "runtime_restart"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "research_knowledge_query_tool": {

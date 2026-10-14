@@ -470,7 +470,7 @@ def isolate_closeout_post_merge_prebuild(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
+def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request, reset_singletons):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")
     # Every data-root resolution funnels through `vibelution_storage`, whose
@@ -586,15 +586,27 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
                 session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
+
+        def finish_background_work():
+            # Restore storage roots only after their producers and async reads
+            # finish. Modules may drain early; executor shutdown is idempotent.
+            isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
+            isolated_executor.shutdown(wait=True, cancel_futures=True)
+            isolated_projection_executor.shutdown(wait=True, cancel_futures=True)
+            from tests.helpers.session_background_reads import settle_session_background_reads
+
+            settle_session_background_reads()
+            session_service._invalidate_session_list_cache()
+
         try:
-            yield
+            yield finish_background_work
         finally:
             with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
                 chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
             with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
                 chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
             try:
-                isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
+                finish_background_work()
             finally:
                 monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", previous_chat_room_executor)
                 try:

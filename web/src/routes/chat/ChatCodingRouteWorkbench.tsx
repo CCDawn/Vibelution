@@ -724,6 +724,9 @@ export function ChatCodingRouteWorkbench() {
   }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
   const verifiedCompanionMode = Boolean(activeCompanion);
   const financeSurface = location.pathname === "/finance";
+  // Presentation only: the outer assistant route has already verified the canonical Agent/Session binding.
+  const personalAssistantSurface = location.pathname === "/personal-assistant" || location.pathname === "/desktop-assistant";
+  const embeddedSurface = financeSurface || personalAssistantSurface;
   const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
@@ -991,7 +994,7 @@ export function ChatCodingRouteWorkbench() {
     requestedSessionId,
     requestedRoomId,
     showArchivedSessions,
-    sessionDirectoryEnabled: !financeSurface,
+    sessionDirectoryEnabled: !embeddedSurface,
   });
 
   const archivedSessions = useMemo(
@@ -1112,7 +1115,7 @@ export function ChatCodingRouteWorkbench() {
     directSessionPanelActive,
     standardGroupRoomActive,
     activeGroupRoom: activeGroupRoomQuery.data,
-    financeSurface,
+    financeSurface: embeddedSurface,
     runtime: runtimeQuery.data,
     conversations: conversationsQuery.data,
     teams: teamsQuery.data,
@@ -1319,7 +1322,7 @@ export function ChatCodingRouteWorkbench() {
     activeSessionId,
     sessionDetailId: sessionDetailQuery.data?.id,
     hydrateSession,
-    financeSurface,
+    financeSurface: embeddedSurface,
     groupPanelActive,
     secondaryChatDataEnabled,
     pageVisible,
@@ -1340,7 +1343,7 @@ export function ChatCodingRouteWorkbench() {
   // Group rooms share the ordinary right rail (review/git, file preview,
   // devtools); session-scoped kinds (side chats, subagent directory) stay
   // hidden through the launcher filter, and rail state keys off the room id.
-  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface;
+  const ordinaryChangeRail = !verifiedCompanionMode && !embeddedSurface;
   const {
     fileContentQuery,
     changeRail,
@@ -1369,7 +1372,7 @@ export function ChatCodingRouteWorkbench() {
     group: groupPanelActive,
   });
 
-  const sessionBrowserVisible = sessionBrowserOpen && !financeSurface && !verifiedCompanionMode && !groupPanelActive;
+  const sessionBrowserVisible = sessionBrowserOpen && !embeddedSurface && !verifiedCompanionMode && !groupPanelActive;
   const {
     layoutRef,
     dragState,
@@ -1395,7 +1398,7 @@ export function ChatCodingRouteWorkbench() {
   } = useChatWorkbenchLayout({
     standardGroupRoomActive,
     statusRailEnabled: !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))),
-    indexRailEnabled: !financeSurface,
+    indexRailEnabled: !embeddedSurface,
   });
   useEffect(() => {
     if (!ordinaryChangeRail) {
@@ -3096,7 +3099,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
       leftResizeHandle={
-      financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
+      embeddedSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
@@ -3128,17 +3131,17 @@ export function ChatCodingRouteWorkbench() {
         tabStrip={(
           <ChatCodingCenterTabs
             lang={lang}
-            chatReturnTarget={chatReturnTarget}
+            chatReturnTarget={personalAssistantSurface ? null : chatReturnTarget}
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            financeSurface={financeSurface}
+            financeSurface={embeddedSurface}
             verifiedCompanionMode={verifiedCompanionMode}
             selectedChatAgentId={selectedChatAgentId}
             agentSessionTabs={agentSessionTabs}
             cliAgentRunTabs={cliAgentRunTabs}
             activeCompanion={activeCompanion}
-            leftOverlayVisible={responsiveLayout.leftVisible}
+            leftOverlayVisible={personalAssistantSurface || responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexCollapsed={conversationIndexCollapsed}
             setLeftRailCollapsed={setLeftRailCollapsed}
@@ -3327,7 +3330,7 @@ export function ChatCodingRouteWorkbench() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       />) : null
       }
-      conversationIndex={financeSurface ? null : verifiedCompanionMode ? (
+      conversationIndex={embeddedSurface ? null : verifiedCompanionMode ? (
       <CompanionPersonRail
         className={conversationIndexPaneClassName}
         collapsed={conversationIndexCollapsed}

@@ -877,6 +877,14 @@ def _composer_starters_for_detail(detail: dict | None) -> list[dict[str, str]]:
             specialized = None
         if specialized:
             return specialized
+        # A personal profile changes only empty-composer copy. Native admission,
+        # queue, transcript and ordinary coding/finance starters remain intact.
+        from core.web.services.personal_assistant_service import (
+            composer_starters_for_agent as personal_starters,
+        )
+        specialized = personal_starters(agent_id, str((detail or {}).get("id") or ""))
+        if specialized:
+            return specialized
     return get_composer_starter_commands(session_service.PROJECT_ROOT)
 
 

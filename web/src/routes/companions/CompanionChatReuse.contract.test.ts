@@ -96,7 +96,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatConversationSurfaceModelSource).toContain("promptSuggestionEnabled: !verifiedCompanionMode && activePromptSuggestionEnabled");
     expect(statusRailSource).toContain("if (verifiedCompanionMode)");
     expect(chatSource).toContain("statusRail={(");
-    expect(chatSource).toContain("conversationIndex={financeSurface ? null : verifiedCompanionMode ? (");
+    expect(chatSource).toContain("conversationIndex={embeddedSurface ? null : verifiedCompanionMode ? (");
   });
 
   it("keeps route-layer JSON transport in web/src/api", () => {

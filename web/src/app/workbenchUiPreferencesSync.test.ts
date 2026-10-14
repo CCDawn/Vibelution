@@ -26,12 +26,15 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { stop?.(); stop = undefined; resetWorkbenchUiPreferencesSyncForTests(); vi.useRealTimers(); localStorage.clear(); });
+afterEach(() => { stop?.(); stop = undefined; resetWorkbenchUiPreferencesSyncForTests(); vi.restoreAllMocks(); vi.useRealTimers(); localStorage.clear(); });
 
 async function start() { stop = startWorkbenchUiPreferencesSync(); await settle(); }
 
 describe("workbench pane preference synchronization", () => {
   it("keeps an unsynced local resize when the page reloads before the debounce fires", async () => {
+    // Generation ids may contain the same digits as a width; they are not a
+    // duplicate width snapshot. Keep the observed collision deterministic.
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce("f3793044-532a-4925-b0ee-610f0f6db6c7");
     await start();
     writePaneLayout("finance", widths(304));
     stop?.();
@@ -39,8 +42,10 @@ describe("workbench pane preference synchronization", () => {
     vi.mocked(saveWorkbenchUiPreferences).mockRejectedValue(new Error("offline"));
     await start();
     expect(readPaneLayout("finance")).toEqual(widths(304));
-    expect(localStorage.getItem(pendingKey)).toContain("finance");
-    expect(localStorage.getItem(pendingKey)).not.toContain("304");
+    expect(JSON.parse(localStorage.getItem(pendingKey)!)).toEqual({
+      schemaVersion: 1,
+      layouts: { finance: "f3793044-532a-4925-b0ee-610f0f6db6c7" },
+    });
   });
 
   it("accepts newer server widths for a clean local cache", async () => {

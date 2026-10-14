@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { chatSelectionPathname } from "./useChatRouteSelection";
 
 const useChatRouteSelectionSourcePath = fileURLToPath(new URL("./useChatRouteSelection.ts", import.meta.url));
 const useChatWorkspaceActionsSourcePath = fileURLToPath(new URL("./useChatWorkspaceActions.ts", import.meta.url));
@@ -31,7 +32,12 @@ function navigatesToChatSelection(source: string): string[] {
 describe("Chat route write boundary (single authority)", () => {
   it("useChatRouteSelection is the only module allowed to build session/room route targets", () => {
     const writerSource = readSource(useChatRouteSelectionSourcePath);
-    expect(writerSource).toContain('pathname === "/finance" ? "/finance" : "/chat"');
+    for (const path of ["/chat", "/finance", "/personal-assistant", "/desktop-assistant"]) {
+      expect(chatSelectionPathname(path)).toBe(path);
+    }
+    for (const path of ["/agents", "/personal-assistant/nested", "/desktop-assistant/"]) {
+      expect(chatSelectionPathname(path)).toBe("/chat");
+    }
     expect(writerSource).toContain("serializeChatRouteSelection");
 
     for (const [path, source] of [
@@ -96,7 +102,8 @@ describe("Chat route write boundary (single authority)", () => {
     expect(source).toContain("activeGroupRoomIdFromRouteSelection(chatRouteSelection)");
     expect(source).toContain("useChatRouteSelection()");
     expect(source).toContain("canonicalizeBareRoute(bareRouteBootstrapTarget)");
-    expect(source).toContain("indexRailEnabled: !financeSurface");
+    expect(source).toContain("indexRailEnabled: !embeddedSurface");
+    expect(source).toContain("const embeddedSurface = financeSurface || personalAssistantSurface");
     // No direct Chat selection navigation remains in the workbench shell.
     for (const line of source.split("\n")) {
       if (line.includes("navigate(`/chat")) {

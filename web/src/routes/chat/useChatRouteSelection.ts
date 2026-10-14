@@ -10,9 +10,9 @@ import {
   type ChatRouteSelection,
 } from "./chatSelectionProjection";
 
-/** The stock assistant keeps its own page. Ordinary chat stays on /chat. */
+/** Dedicated native-session hosts keep their own page. Ordinary chat stays on /chat. */
 export function chatSelectionPathname(pathname: string) {
-  return pathname === "/finance" ? "/finance" : "/chat";
+  return pathname === "/finance" || pathname === "/personal-assistant" || pathname === "/desktop-assistant" ? pathname : "/chat";
 }
 
 export type ChatRouteNavigateOptions = {

@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, screen, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { requestRendererWindowClose } from "./windows/rendererWindowClose.js";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
@@ -237,7 +237,7 @@ import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
 import { createPetSettingsControl, petSettingsOrigin } from "./windows/petSettingsControl.js";
-import { PET_WINDOW_HEIGHT, PET_WINDOW_WIDTH } from "./windows/petWindowBounds.js";
+import { desktopPetWindowExpandedBounds } from "./windows/petWindowBounds.js";
 import {
   beginDesktopPetWindowDrag,
   desktopPetWindowBoundsAt,
@@ -3268,17 +3268,18 @@ ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
 });
 
 const controlPetFromSettings = createPetSettingsControl(() => windowProvider);
-ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown) => {
+ipcMain.handle(IPC_CHANNELS.controlDesktopPet, async (event, open: unknown, mode: unknown) => {
   const instances = windowProvider?.instanceWindowStates() ?? [];
   assertTrustedIpcSender(event, [...trustedIpcOrigins(), ...instances.filter(item => item.open).map(item => new URL(item.url).origin)]);
   if (event.senderFrame !== event.sender.mainFrame) throw new Error("Blocked pet settings subframe");
   const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, instances);
   const origin = petSettingsOrigin(event.senderFrame.url, identity.role);
-  return controlPetFromSettings(origin, open);
+  return controlPetFromSettings(origin, open, mode);
 });
 
 ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
   assertDesktopPetIpcSender(event);
+  const fromDesktopAssistant = new URL(String(event.senderFrame?.url)).pathname === "/desktop-assistant";
   const sessionId = String(rawSessionId || "").trim();
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(sessionId)) {
     throw new Error("invalid desktop pet session id");
@@ -3286,6 +3287,18 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
   const provider = windowProvider;
   if (provider === null) {
     return { schemaVersion: 1, opened: false };
+  }
+  if (fromDesktopAssistant) {
+    const pet = provider.snapshot().pet;
+    if (!pet.open || new URL(pet.url).pathname !== "/desktop-assistant") {
+      return { schemaVersion: 1, opened: false };
+    }
+    const delivered = provider.focusAndSendToWorkbenchOrigin(new URL(pet.url).origin, IPC_CHANNELS.conversationNotificationOpened, {
+      schemaVersion: 1,
+      sessionId,
+      source: "desktop-assistant",
+    });
+    return { schemaVersion: 1, opened: delivered };
   }
   let state = await provider.focusWorkbench();
   if (!state.open) {
@@ -3305,12 +3318,35 @@ ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId:
 let activeDesktopPetWindowDrag: { senderId: number; drag: DesktopPetWindowDrag } | null = null;
 
 function assertDesktopPetIpcSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
-  assertTrustedIpcSender(event as IpcMainInvokeEvent, trustedIpcOrigins());
+  const pet = windowProvider?.snapshot().pet;
+  const origins = pet?.open ? [...trustedIpcOrigins(), new URL(pet.url).origin] : trustedIpcOrigins();
+  assertTrustedIpcSender(event as IpcMainInvokeEvent, origins);
   const rawUrl = String(event.senderFrame?.url || "");
-  if (!isDesktopPetWindowUrl(rawUrl)) {
+  const identity = identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, windowProvider?.instanceWindowStates() ?? []);
+  if (event.senderFrame !== event.sender.mainFrame || identity.role !== "desktop-pet" || !isDesktopPetWindowUrl(rawUrl)) {
     throw new Error("blocked desktop pet ipc sender");
   }
 }
+
+ipcMain.handle(IPC_CHANNELS.getDesktopAssistantContext, (event) => {
+  assertDesktopPetIpcSender(event);
+  if (new URL(String(event.senderFrame?.url)).pathname !== "/desktop-assistant") {
+    throw new Error("blocked desktop assistant context sender");
+  }
+  return { role: "desktop-assistant", mode: "assistant" };
+});
+
+ipcMain.handle(IPC_CHANNELS.setDesktopPetExpanded, (event, expanded: unknown) => {
+  assertDesktopPetIpcSender(event);
+  if (typeof expanded !== "boolean") throw new Error("Invalid desktop pet expanded state");
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || window.isDestroyed()) throw new Error("Desktop pet window is not available");
+  const current = window.getBounds();
+  const bounds = desktopPetWindowExpandedBounds(current, screen.getDisplayMatching(current).workArea, expanded);
+  activeDesktopPetWindowDrag = null;
+  window.setBounds(bounds, false);
+  return { expanded, width: bounds.width, height: bounds.height };
+});
 
 function desktopPetWindowFromEvent(event: IpcMainEvent): BrowserWindow | null {
   try {
@@ -3327,14 +3363,14 @@ ipcMain.on(IPC_CHANNELS.beginDesktopPetWindowDrag, (event, rawPoint: unknown) =>
   if (window === null || !isDesktopPetDragPoint(rawPoint)) {
     return;
   }
-  const { x, y } = window.getBounds();
+  const { x, y, width, height } = window.getBounds();
   activeDesktopPetWindowDrag = {
     senderId: event.sender.id,
     drag: beginDesktopPetWindowDrag(rawPoint, {
       x,
       y,
-      width: PET_WINDOW_WIDTH,
-      height: PET_WINDOW_HEIGHT,
+      width,
+      height,
     }),
   };
 });

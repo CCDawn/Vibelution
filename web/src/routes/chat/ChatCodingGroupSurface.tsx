@@ -3,6 +3,7 @@
  * Lazy so the direct-chat first paint does not pull the group graph.
  */
 import { lazy } from "react";
+import { useLocation } from "react-router-dom";
 
 import type { Team } from "../../api/types";
 import { ChatComposerPlusMenu } from "./ChatComposerPlusMenu";
@@ -14,7 +15,7 @@ const ChatGroupCenterSurface = lazy(() =>
 
 export type ChatCodingGroupSurfaceProps = Omit<
   ChatGroupCenterSurfaceProps,
-  "composerLeadingControl" | "userDisplayName" | "onOpenGroupTeam" | "artifactTeamId"
+  "composerLeadingControl" | "userDisplayName" | "onOpenGroupTeam" | "artifactTeamId" | "showRoundTopics"
 > & {
   runtimeUserName?: string | null;
   mentalModelEnabled: boolean;
@@ -48,6 +49,7 @@ export function ChatCodingGroupSurface({
   activeGroupRoom,
   ...surfaceProps
 }: ChatCodingGroupSurfaceProps) {
+  const { pathname } = useLocation();
   const userDisplayName = runtimeUserName || (lang === "zh" ? "我" : "Me");
   const artifactTeamId = activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined;
   const onOpenGroupTeam = !chatReturnTarget && activeGroupTeam
@@ -86,6 +88,7 @@ export function ChatCodingGroupSurface({
       activeGroupRoom={activeGroupRoom}
       onManageGroupRoom={onManageGroupRoom}
       userDisplayName={userDisplayName}
+      showRoundTopics={pathname !== "/teams"}
       onOpenGroupTeam={onOpenGroupTeam}
       artifactTeamId={artifactTeamId}
       composerLeadingControl={composerLeadingControl}

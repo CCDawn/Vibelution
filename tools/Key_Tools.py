@@ -13,6 +13,10 @@ from typing import Annotated, Callable, Dict, List, Literal, Optional
 from pydantic import Field
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
+from tools.personal_assistant_tools import (
+    personal_assistant_overview_tool as _personal_assistant_overview_impl,
+    personal_assistant_manage_tool as _personal_assistant_manage_impl,
+)
 from tools.memory_tools import (
     commit_compressed_memory_tool as _commit_compressed_impl,
     get_core_context_tool as _get_core_context_impl,
@@ -2863,6 +2867,27 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def personal_assistant_overview_tool() -> str:
+        """【个人助理平台概览】读取 Agent 和会话公开状态；不读取其他会话正文或私密记忆。"""
+        return _personal_assistant_overview_impl()
+
+    @tool
+    def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
+        """【个人助理管理】收到用户指令后执行；每次须原生审批具体操作和参数。
+
+        action 为 agent_create、agent_update、agent_archive、session_create、
+        session_update、session_stop、session_delete、knowledge_acl_grant 或 restart。
+        arguments_json 使用相应原生工具的具名参数 JSON 对象；restart 仅接受 reason。
+        agent_create: display_name，primary_mode/role_key/prompt_template_id/model_id 可选。
+        agent_update: agent_id、updates_json（PATCH配置字段JSON，可选expected_config_revision）。
+        agent_archive: agent_id。session_create: agent_id、title。
+        session_update: session_id、title（可选agent_id）。session_stop: session_id、turn_id。
+        session_delete: session_id。knowledge_acl_grant: knowledge_base_id、target_agent_id、permissions_json。
+        不支持 purge、任意命令或任意 API。重启、删除及权限变更先说明对象和影响。
+        """
+        return _personal_assistant_manage_impl(action, arguments_json)
+
+    @tool
     def financial_report_query_tool(question: str, ticker: str, report_period: str) -> str:
         """
         【财报证据问答】调用已配置的 RAGFlow 财报助手，按公司及报告期检索并回答。
@@ -3662,6 +3687,8 @@ def _build_key_tools() -> List[BaseTool]:
         computer_use_task_tool,
         computer_use_session_tool,
         financial_report_query_tool,
+        personal_assistant_overview_tool,
+        personal_assistant_manage_tool,
         financial_market_snapshot_tool,
         financial_index_context_tool,
         financial_market_screen_tool,

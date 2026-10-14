@@ -612,13 +612,17 @@ describe("chat right rail interaction", () => {
       title: "a.md",
       filePath: "C:/repo/a.md",
     });
+    const truncatedFile = {
+      path: "C:/repo/a.md",
+      language: "markdown",
+      content: "文件正文",
+      truncated: true,
+    };
+    // The stale cache refetch must preserve this test's file fixture; the
+    // default API mock otherwise replaces it with an untruncated response.
+    filesApi.fetchFileContent.mockResolvedValueOnce(truncatedFile);
     const host = await mount(client, model, (queryClient) => {
-      queryClient.setQueryData(queryKeys.fileContent("C:/repo/a.md"), {
-        path: "C:/repo/a.md",
-        language: "markdown",
-        content: "文件正文",
-        truncated: true,
-      });
+      queryClient.setQueryData(queryKeys.fileContent("C:/repo/a.md"), truncatedFile);
     });
     expect(host.textContent).toContain("文件正文");
     expect(host.textContent).toContain("只显示了前面一部分");

@@ -2604,6 +2604,8 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
         "_resolve_session_agent_llm",
         lambda *_args, **_kwargs: SimpleNamespace(
             model_id="test-dialogue-model",
+            model_ref=session_agent["llmBindings"]["dialogue"]["modelId"],
+            reasoning_effort_requested="",
             config=SimpleNamespace(),
             log_fields=lambda: {"llmModelId": "test-dialogue-model"},
         ),
@@ -2740,6 +2742,8 @@ def test_session_worker_seeds_active_skill_contract_on_later_turn(tmp_path, monk
         "_resolve_session_agent_llm",
         lambda *_args, **_kwargs: SimpleNamespace(
             model_id="test-dialogue-model",
+            model_ref=session_agent["llmBindings"]["dialogue"]["modelId"],
+            reasoning_effort_requested="",
             config=SimpleNamespace(),
             log_fields=lambda: {"llmModelId": "test-dialogue-model"},
         ),
@@ -2822,11 +2826,8 @@ def test_edit_resubmit_session_message_routes_slash_skill_into_scheduled_context
         },
     )
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    session_agent = agent_directory_service.create_agent_instance(
-        display_name="Edit Resubmit Slash Agent",
-        primary_mode="chat",
-    )
-    _bind_seeded_session_agent(tmp_path, session_agent)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _bind_seeded_submittable_agent(tmp_path)
     append_conversation_event(
         tmp_path,
         "session-live",

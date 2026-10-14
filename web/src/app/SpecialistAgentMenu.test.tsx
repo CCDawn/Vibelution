@@ -36,11 +36,11 @@ async function key(target: Element, value: string) {
 }
 
 describe("specialist agent menu", () => {
-  it("opens downward with two choices and closes on Escape without changing route", async () => {
+  it("opens downward with three independent choices and closes on Escape without changing route", async () => {
     await render(); await pointer(trigger());
     const menu = document.querySelector('[role="menu"]');
     expect(menu?.getAttribute("data-side")).toBe("bottom");
-    expect([...document.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent)).toEqual(["炒股智能体", "虚拟人智能体"]);
+    expect([...document.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent)).toEqual(["炒股智能体", "虚拟人智能体", "个人助理"]);
     await key(menu!, "Escape");
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(container.querySelector("output")?.textContent).toBe("/chat");
@@ -55,7 +55,7 @@ describe("specialist agent menu", () => {
   it("supports keyboard selection and browser back with route-driven highlight", async () => {
     await render(); trigger().focus(); await key(trigger(), "ArrowDown");
     const items = [...document.querySelectorAll('[role="menuitem"]')];
-    expect(items.length).toBe(2);
+    expect(items.length).toBe(3);
     items[0].dispatchEvent(new FocusEvent("focus"));
     (items[0] as HTMLElement).focus();
     await key(items[0], "ArrowDown");
@@ -87,5 +87,14 @@ describe("specialist agent menu", () => {
     expect(container.querySelector("output")?.textContent).toBe("/chat?session=existing&companion=person");
     expect(specialistAgentSection("/finance-malicious")).toBe("");
     expect(specialistAgentSection("/companions/profile")).toBe("companions");
+  });
+  it("opens the personal assistant independently and rejects prefix lookalikes", async () => {
+    await render(); await pointer(trigger());
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find(element => element.textContent === "个人助理")!;
+    await act(async () => (item as HTMLElement).click()); await settle();
+    expect(container.querySelector("output")?.textContent).toBe("/personal-assistant");
+    expect(trigger().getAttribute("data-agent-section")).toBe("personal-assistant");
+    expect(specialistAgentSection("/personal-assistant-malicious")).toBe("");
+    expect(openFinance).not.toHaveBeenCalled();
   });
 });

@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
   ...(!isLauncherControlWindow && !isDesktopPetWindow ? {
     requestWindowClose: () => ipcRenderer.invoke(IPC_CHANNELS.requestWindowClose),
-    controlDesktopPet: (open?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open),
+    controlDesktopPet: (open?: boolean, mode?: "pet" | "assistant") => ipcRenderer.invoke(IPC_CHANNELS.controlDesktopPet, open, mode),
     requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger),
     getLauncherFreshness: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherFreshness),
     showLauncherWindow: () => ipcRenderer.invoke(IPC_CHANNELS.showLauncherWindow)
@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
     : {}),
   ...(isDesktopPetWindow
     ? {
+        getDesktopAssistantContext: () =>
+          ipcRenderer.invoke(IPC_CHANNELS.getDesktopAssistantContext),
+        setDesktopPetExpanded: (expanded: boolean) =>
+          ipcRenderer.invoke(IPC_CHANNELS.setDesktopPetExpanded, expanded),
         openConversationFromPet: (sessionId: string) =>
           ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId),
         beginDesktopPetWindowDrag: (point: unknown) =>

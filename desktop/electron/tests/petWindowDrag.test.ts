@@ -7,6 +7,11 @@ import {
 } from "../src/windows/petWindowDrag.js";
 
 describe("desktop pet main-process window drag", () => {
+  it("preserves expanded dimensions while dragging", () => {
+    const drag = beginDesktopPetWindowDrag({ screenX: 100, screenY: 200 }, { x: 20, y: 30, width: 760, height: 600 });
+    expect(desktopPetWindowBoundsAt(drag, { screenX: 140, screenY: 150 }))
+      .toEqual({ x: 60, y: -20, width: 760, height: 600 });
+  });
   it("anchors movement to the pointer start while preserving the original size", () => {
     const drag = beginDesktopPetWindowDrag(
       { screenX: 410.4, screenY: 270.2 },

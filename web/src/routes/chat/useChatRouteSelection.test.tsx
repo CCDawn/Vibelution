@@ -45,7 +45,7 @@ let container: HTMLElement;
 
 function mount(initialEntries: string[]) {
   router = createMemoryRouter(
-    [{ path: "/chat", element: React.createElement(Host) }, { path: "/finance", element: React.createElement(Host) }],
+    ["/chat", "/finance", "/personal-assistant", "/desktop-assistant"].map(path => ({ path, element: React.createElement(Host) })),
     { initialEntries },
   );
   observedNavigationTypes = [];
@@ -79,6 +79,14 @@ afterEach(() => {
 });
 
 describe("chat route selection model", () => {
+  it.each(["/personal-assistant", "/desktop-assistant", "/finance", "/chat"])("keeps native session selection on %s", async pathname => {
+    mount([`${pathname}?session=old`]);
+    await act(async () => latest().openSession("native-session"));
+    expect(router.state.location.pathname).toBe(pathname);
+    expect(committedSearch()).toBe("?session=native-session");
+    await act(async () => latest().openSession("other", { surface: "chat" }));
+    expect(router.state.location.pathname).toBe("/chat");
+  });
   it("parses session, room, project bus, bare and invalid routes", () => {
     expect(parseChatRouteSelection("?session=session-a")).toEqual({
       kind: "session",
