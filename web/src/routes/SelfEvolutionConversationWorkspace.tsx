@@ -108,19 +108,30 @@ function statusLabel(status: string | null | undefined, lang: "zh" | "en") {
   const labels: Record<string, [string, string]> = {
     queued: ["排队中", "Queued"], running: ["运行中", "Running"], stopping: ["停止中", "Stopping"],
     awaiting_user_approval: ["等待审查", "Awaiting review"], completed: ["已完成", "Completed"],
-    done: ["已完成", "Done"], failed: ["已中断", "Interrupted"], cancelled: ["已取消", "Cancelled"],
+    done: ["已完成", "Done"], failed: ["运行失败", "Run failed"], cancelled: ["已取消", "Cancelled"],
     pending: ["待开始", "Pending"], approved: ["已批准", "Approved"], rejected: ["已拒绝", "Rejected"],
   };
   return labels[key]?.[lang === "zh" ? 0 : 1] || text(status) || (lang === "zh" ? "未知" : "Unknown");
 }
 
-function formatEvidence(value: unknown) {
+function formatEvidence(value: unknown, lang: "zh" | "en"): string {
   if (typeof value === "string") return value;
-  try { return JSON.stringify(value, null, 2); } catch { return String(value ?? ""); }
+  if (value == null) return lang === "zh" ? "未返回结果" : "No result returned";
+  if (typeof value === "boolean") return lang === "zh" ? (value ? "是" : "否") : String(value);
+  if (Array.isArray(value)) return value.map((item) => formatEvidence(item, lang)).join("\n");
+  if (typeof value === "object") {
+    const labels: Record<string, string> = lang === "zh" ? {
+      command: "命令", status: "状态", result: "结果", summary: "摘要", message: "说明",
+      output: "输出", passed: "通过", success: "成功", exitCode: "退出码", exit_code: "退出码",
+      name: "名称", type: "类型", outcome: "结果", reason: "原因", error: "错误", durationSeconds: "耗时（秒）",
+    } : {};
+    return Object.entries(value).map(([key, item]) => `${labels[key] || key}${lang === "zh" ? "：" : ": "}${formatEvidence(item, lang)}`).join("\n");
+  }
+  return String(value);
 }
 
 function phaseState(done: boolean, current: boolean, interrupted: boolean, lang: "zh" | "en") {
-  if (interrupted && current) return lang === "zh" ? "中断" : "Interrupted";
+  if (interrupted && current) return lang === "zh" ? "失败" : "Failed";
   if (done) return lang === "zh" ? "已完成" : "Done";
   if (current) return lang === "zh" ? "当前" : "Current";
   return lang === "zh" ? "未开始" : "Not started";
@@ -230,11 +241,29 @@ export function canConfirmAutonomousAction(input: {
   return selectedRun.phase === "cleanup_failed";
 }
 
-function EvidenceList({ rows, empty }: { rows: Array<{ label: string; value: unknown }>; empty: string }) {
+export function canConfirmObservationAction(run: SelfObservationRun | null, requestedRunId: string, pending: boolean) {
+  return Boolean(run && run.runId === requestedRunId && !pending
+    && ["queued", "running"].includes(text(run.status).toLowerCase())
+    && run.actionStates?.terminate?.enabled);
+}
+
+export function canConfirmWorktreeAction(input: {
+  run: SupervisedWorktreeRun | null;
+  requestedRunId: string;
+  action: string;
+  pending: boolean;
+  locked: boolean;
+}) {
+  const { run, requestedRunId, action, pending, locked } = input;
+  if (!run || run.runId !== requestedRunId || pending || action !== "terminate" && locked) return false;
+  return actionEnabled(run, action === "approve_review" ? "approveReview" : action);
+}
+
+function EvidenceList({ rows, empty, lang }: { rows: Array<{ label: string; value: unknown }>; empty: string; lang: "zh" | "en" }) {
   return rows.length ? <div className={styles.evidenceList}>
     {rows.map((row, index) => <article className={styles.evidenceRow} key={row.label + ":" + index}>
       <span className={styles.evidenceLabel}>{row.label}</span>
-      <pre className={styles.evidenceValue}>{formatEvidence(row.value)}</pre>
+      <p className={styles.evidenceValue}>{formatEvidence(row.value, lang)}</p>
     </article>)}
   </div> : <p className={styles.emptyEvidence}>{empty}</p>;
 }
@@ -304,6 +333,56 @@ export function SelfEvolutionConversationWorkspace({
   const durationValid = Number.isInteger(durationSeconds) && durationSeconds >= 30 && durationSeconds <= 3600;
   const observationGoalValid = observationInputMode === "blank" || Boolean(observationGoal.trim());
 
+  const resultSummary = useMemo(() => {
+    if (!selectedRun) return null;
+    const rows: Array<{ label: string; value: unknown }> = [];
+    const unavailable = lang === "zh" ? "暂无可用摘要。" : "No summary is available yet.";
+    if (selectedRunKind === "observation" && observationRun) {
+      rows.push({ label: lang === "zh" ? "观察结果" : "Observation result", value: text(observationRun.report) || unavailable });
+      rows.push({ label: lang === "zh" ? "改动范围" : "Changes", value: lang === "zh" ? "只读观察，不生成代码改动。" : "Read-only observation produces no code changes." });
+      if (observationRun.boundaryViolation) rows.push({ label: lang === "zh" ? "边界异常" : "Boundary issue", value: observationRun.boundaryViolation });
+    } else {
+      const files = selectedRunKind === "autonomous"
+        ? autonomousRun?.resultReport?.changedFiles ?? autonomousRun?.candidate?.changedFiles ?? []
+        : worktreeRun?.mergeAnalysis?.changedFiles ?? [];
+      const summary = selectedRunKind === "autonomous"
+        ? text(autonomousRun?.resultReport?.summary) || text(autonomousRun?.candidate?.summary)
+        : text(worktreeRun?.workflowSteps?.find((step) => step.role === "candidate")?.summary);
+      rows.push({ label: lang === "zh" ? "候选结果" : "Candidate result", value: summary || unavailable });
+      rows.push({ label: lang === "zh" ? "改动范围" : "Changes", value: files.length
+        ? (lang === "zh" ? `${files.length} 个文件` : `${files.length} files`) + "\n" + files.slice(0, 3).map((file) => file.path).join("\n")
+          + (files.length > 3 ? (lang === "zh" ? "\n其余路径见改动页。" : "\nSee Changes for the remaining paths.") : "")
+        : (lang === "zh" ? "暂无改动记录。" : "No change records are available yet.") });
+      if (selectedRunKind === "autonomous") {
+        const records = autonomousRun?.resultReport?.verification ?? autonomousRun?.candidate?.verification ?? [];
+        const conclusions = records.flatMap((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+          const record = item as Record<string, unknown>;
+          const fields = Object.entries(record).filter(([key, value]) =>
+            ["status", "outcome", "passed", "success", "exitCode", "exit_code"].includes(key)
+            && ["string", "boolean", "number"].includes(typeof value)
+            && (typeof value !== "string" || Boolean(value.trim())));
+          if (!fields.length) return [];
+          const name = typeof record.name === "string" ? record.name : typeof record.command === "string" ? record.command : "";
+          return [formatEvidence({ ...(name ? { name } : {}), ...Object.fromEntries(fields) }, lang)];
+        });
+        rows.push({ label: lang === "zh" ? "验证记录" : "Verification records", value: records.length
+          ? (lang === "zh" ? `${records.length} 条记录` : `${records.length} records`) + "\n"
+            + (conclusions.length ? conclusions.slice(0, 3).join("\n")
+              + (conclusions.length > 3 ? (lang === "zh" ? "\n其余记录见验证页。" : "\nSee Verification for the remaining records.") : "")
+              : (lang === "zh" ? "尚无明确验证结论，请查看验证页。" : "No explicit verification conclusion is available. See Verification."))
+          : (lang === "zh" ? "暂无验证记录，尚不能判断是否通过。" : "No verification records are available; a pass cannot be determined yet.") });
+      } else {
+        rows.push({ label: lang === "zh" ? "评估结论" : "Evaluation result", value: text(worktreeRun?.approvalDecision?.evaluationState)
+          || text(worktreeRun?.decision?.evaluationState) || (lang === "zh" ? "暂无明确评估结论，请查看验证页。" : "No explicit evaluation result is available. See Verification.") });
+      }
+    }
+    return <section className={styles.resultSummary} aria-label={lang === "zh" ? "本轮摘要" : "Run summary"}>
+      <h3 className={styles.summaryHeading}>{lang === "zh" ? "本轮摘要" : "Run summary"}</h3>
+      <EvidenceList lang={lang} rows={rows} empty={unavailable} />
+    </section>;
+  }, [selectedRun, selectedRunKind, autonomousRun, observationRun, worktreeRun, lang]);
+
   const evidenceTabs = useMemo(() => {
     const changes: Array<{ label: string; value: unknown }> = [];
     const verification: Array<{ label: string; value: unknown }> = [];
@@ -351,9 +430,9 @@ export function SelfEvolutionConversationWorkspace({
     }
     const empty = lang === "zh" ? "没有可展示的真实记录。" : "No records are available.";
     return [
-      { id: "changes", label: lang === "zh" ? "改动" : "Changes", content: <EvidenceList rows={changes} empty={selectedRunKind === "observation" ? (lang === "zh" ? "只读观察不会生成代码改动。" : "Read-only observation produces no code changes.") : empty} /> },
-      { id: "verification", label: lang === "zh" ? "验证" : "Verification", content: <EvidenceList rows={verification} empty={empty} /> },
-      { id: "version", label: lang === "zh" ? "版本" : "Version", content: <EvidenceList rows={versions} empty={empty} /> },
+      { id: "changes", label: lang === "zh" ? "改动" : "Changes", content: <EvidenceList lang={lang} rows={changes} empty={selectedRunKind === "observation" ? (lang === "zh" ? "只读观察不会生成代码改动。" : "Read-only observation produces no code changes.") : empty} /> },
+      { id: "verification", label: lang === "zh" ? "验证" : "Verification", content: <EvidenceList lang={lang} rows={verification} empty={empty} /> },
+      { id: "version", label: lang === "zh" ? "版本" : "Version", content: <EvidenceList lang={lang} rows={versions} empty={empty} /> },
     ];
   }, [selectedRunKind, autonomousRun, observationRun, worktreeRun, lang]);
 
@@ -409,7 +488,7 @@ export function SelfEvolutionConversationWorkspace({
         <label className={styles.formField}><span>{lang === "zh" ? "进化目标" : "Evolution goal"}</span><VNativeTextarea rows={5} value={goalInput} onChange={(event) => onGoalInputChange(event.target.value)} placeholder={lang === "zh" ? "描述希望 Agent 调查并改进的具体问题" : "Describe the specific problem for the Agent to investigate and improve"} /></label>
         <div className={styles.budgetRow}><span>{lang === "zh" ? "迭代预算" : "Iteration budget"}</span><strong>1 {lang === "zh" ? "轮" : "iteration"}</strong><span>{lang === "zh" ? "当前服务端仅接受 1 轮" : "The service currently accepts one iteration"}</span></div>
         {startWorktreeError ? <p className={styles.errorText} role="alert">{startWorktreeError}</p> : null}
-        <VButton type="button" variant="primary" isDisabled={startPending || runLocked || !goalInput.trim()} onPress={() => setConfirmation({ kind: "start-autonomous" })}>{startPending ? (lang === "zh" ? "正在启动…" : "Starting…") : (lang === "zh" ? "审查并启动" : "Review and start")}</VButton>
+        <VButton type="button" className={styles.setupPrimaryAction} variant="primary" isDisabled={startPending || runLocked || !goalInput.trim()} onPress={() => setConfirmation({ kind: "start-autonomous" })}>{startPending ? (lang === "zh" ? "正在启动…" : "Starting…") : (lang === "zh" ? "审查并启动" : "Review and start")}</VButton>
       </div> : <div className={styles.formStack}>
         <div className={styles.modePicker} role="group" aria-label={lang === "zh" ? "观察输入方式" : "Observation input mode"}>
           <VButton type="button" variant={observationInputMode === "prompt" ? "primary" : "secondary"} aria-pressed={observationInputMode === "prompt"} onPress={() => setObservationInputMode("prompt")}>{lang === "zh" ? "提示词观察" : "Prompted"}</VButton>
@@ -420,8 +499,9 @@ export function SelfEvolutionConversationWorkspace({
         {!durationValid ? <p className={styles.errorText} role="alert">{lang === "zh" ? "观察时长须为 30 到 3600 秒的整数。" : "Duration must be a whole number from 30 to 3600 seconds."}</p> : null}
         {observationStartError ? <p className={styles.errorText} role="alert">{observationStartError}</p> : null}
         <p className={styles.subtleText}>{lang === "zh" ? "观察只读取上下文，不创建候选改动。" : "Observation reads context and creates no candidate changes."}</p>
-        <VButton type="button" variant="primary" isDisabled={observationStartPending || runLocked || !observationGoalValid || !durationValid} onPress={() => setConfirmation({ kind: "start-observation" })}>{observationStartPending ? (lang === "zh" ? "正在启动…" : "Starting…") : (lang === "zh" ? "审查并启动观察" : "Review and start observation")}</VButton>
+        <VButton type="button" className={styles.setupPrimaryAction} variant="primary" isDisabled={observationStartPending || runLocked || !observationGoalValid || !durationValid} onPress={() => setConfirmation({ kind: "start-observation" })}>{observationStartPending ? (lang === "zh" ? "正在启动…" : "Starting…") : (lang === "zh" ? "审查并启动观察" : "Review and start observation")}</VButton>
       </div>}
+      {selectedRun ? <VButton type="button" variant="secondary" className={styles.setupPrimaryAction} onPress={() => setSetupOpen(false)}>{lang === "zh" ? "取消新建" : "Cancel setup"}</VButton> : null}
       {runLocked ? <p className={styles.subtleText}>{lang === "zh" ? "已有自进化运行占用运行锁。" : "An existing self-evolution run holds the run lock."}</p> : overview?.readiness?.nextAction ? <p className={styles.subtleText}>{overview.readiness.nextAction}</p> : null}
     </div>
   );
@@ -429,7 +509,7 @@ export function SelfEvolutionConversationWorkspace({
   const autonomousActions = (() => {
     if (selectedRunKind !== "autonomous" || !autonomousRun?.runId) return null;
     if (autonomousRun.status === "failed" && autonomousRun.phase === "integration_failed") return <VButton type="button" variant="primary" icon={<GitCommitHorizontal size={15} />} isDisabled={autonomousActionPending} onPress={() => setConfirmation({ kind: "autonomous-action", runId: autonomousRun.runId, action: "approve" })}>{lang === "zh" ? "重试 Git 集成" : "Retry Git integration"}</VButton>;
-    if (autonomousRun.phase === "cleanup_failed") return <VButton type="button" variant="secondary" icon={<RotateCcw size={15} />} isDisabled={autonomousActionPending} onPress={() => setConfirmation({ kind: "autonomous-action", runId: autonomousRun.runId, action: "retry_cleanup" })}>{lang === "zh" ? "重试候选清理" : "Retry candidate cleanup"}</VButton>;
+    if (autonomousRun.phase === "cleanup_failed") return <VButton type="button" variant="primary" icon={<RotateCcw size={15} />} isDisabled={autonomousActionPending} onPress={() => setConfirmation({ kind: "autonomous-action", runId: autonomousRun.runId, action: "retry_cleanup" })}>{lang === "zh" ? "重试候选清理" : "Retry candidate cleanup"}</VButton>;
     if (autonomousRun.status === "awaiting_user_approval") return <>
       <VButton type="button" variant="primary" icon={<Check size={15} />} isDisabled={autonomousActionPending} onPress={() => setConfirmation({ kind: "autonomous-action", runId: autonomousRun.runId, action: "approve" })}>{lang === "zh" ? "批准并集成" : "Approve and integrate"}</VButton>
       <VButton type="button" variant="danger" icon={<X size={15} />} isDisabled={autonomousActionPending} onPress={() => setConfirmation({ kind: "autonomous-action", runId: autonomousRun.runId, action: "reject" })}>{lang === "zh" ? "拒绝候选" : "Reject candidate"}</VButton>
@@ -440,22 +520,61 @@ export function SelfEvolutionConversationWorkspace({
     ? <VButton type="button" variant="danger" icon={<Square size={14} />} isDisabled={observationActionPending || !observationRun.actionStates?.terminate?.enabled} title={observationRun.actionStates?.terminate?.reason} onPress={() => setConfirmation({ kind: "terminate-observation", runId: observationRun.runId })}>{lang === "zh" ? "终止观察" : "Stop observation"}</VButton>
     : null;
   const worktreeActions = selectedRunKind === "worktree" && worktreeRun ? <>
-    {actionEnabled(worktreeRun, "terminate") ? <VButton type="button" variant="danger" icon={<Square size={14} />} isDisabled={worktreeActionPending} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "terminate" })}>{lang === "zh" ? "终止运行" : "Stop run"}</VButton> : null}
-    {actionEnabled(worktreeRun, "approveReview") ? <VButton type="button" variant="secondary" isDisabled={worktreeActionPending || worktreeRunLocked} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "approve_review" })}>{lang === "zh" ? "通过审查" : "Approve review"}</VButton> : null}
     {actionEnabled(worktreeRun, "merge") ? <VButton type="button" variant="primary" icon={<GitCommitHorizontal size={15} />} isDisabled={worktreeActionPending || worktreeRunLocked} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "merge" })}>{lang === "zh" ? "集成候选" : "Integrate candidate"}</VButton> : null}
+    {actionEnabled(worktreeRun, "approveReview") ? <VButton type="button" variant={actionEnabled(worktreeRun, "merge") ? "secondary" : "primary"} icon={<Check size={15} />} isDisabled={worktreeActionPending || worktreeRunLocked} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "approve_review" })}>{lang === "zh" ? "通过审查" : "Approve review"}</VButton> : null}
+    {actionEnabled(worktreeRun, "terminate") ? <VButton type="button" variant="danger" icon={<Square size={14} />} isDisabled={worktreeActionPending} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "terminate" })}>{lang === "zh" ? "终止运行" : "Stop run"}</VButton> : null}
     {actionEnabled(worktreeRun, "discard") ? <VButton type="button" variant="danger" isDisabled={worktreeActionPending || worktreeRunLocked} onPress={() => setConfirmation({ kind: "worktree-action", runId: worktreeRun.runId, action: "discard" })}>{lang === "zh" ? "丢弃候选" : "Discard candidate"}</VButton> : null}
   </> : null;
+  const failed = selectedStatus === "failed";
+  const autonomousRetry = selectedRunKind === "autonomous" && autonomousRun
+    && (failed && autonomousRun.phase === "integration_failed" || autonomousRun.phase === "cleanup_failed");
+  const awaitingReview = selectedStatus === "awaiting_user_approval"
+    || selectedRunKind === "worktree" && actionEnabled(worktreeRun, "approveReview");
+  const canMerge = selectedRunKind === "worktree" && actionEnabled(worktreeRun, "merge");
+  const resultTitle = failed ? (lang === "zh" ? "本轮未能完成" : "This run could not finish")
+    : selectedRunKind === "autonomous" && autonomousRun?.phase === "cleanup_failed" ? (lang === "zh" ? "候选清理未完成" : "Candidate cleanup is incomplete")
+      : canMerge ? (lang === "zh" ? "候选可以进入集成" : "Candidate is ready for integration")
+        : awaitingReview ? (lang === "zh" ? "候选等待人工审查" : "Candidate awaits human review")
+          : selectedStatus === "cancelled" ? (lang === "zh" ? "本轮已取消" : "This run was cancelled")
+            : selectedStatus === "completed" || selectedStatus === "done" ? (lang === "zh" ? "本轮已完成" : "This run is complete")
+              : (lang === "zh" ? "当前运行进度" : "Current run progress");
+  const latestMessage = selectedRunKind === "observation" ? text(observationRun?.latestMessage) : text(worktreeRun?.latestMessage);
+  const failureReason = selectedRunKind === "autonomous" ? text(autonomousRun?.error?.message)
+    : selectedRunKind === "observation" && text(observationRun?.boundaryViolation) ? text(observationRun?.boundaryViolation)
+      : latestMessage ? (lang === "zh" ? "最新记录：" : "Latest record: ") + latestMessage : "";
+  const statusReason = failed || selectedRunKind === "autonomous" && autonomousRun?.phase === "cleanup_failed"
+    ? failureReason || (lang === "zh" ? "服务端没有返回失败原因，请查看本轮对话与验证记录。" : "The service returned no failure reason. Check the conversation and verification records.")
+    : canMerge ? text(worktreeRun?.mergeAnalysis?.reason) || (lang === "zh" ? "确认集成前，先核对改动与验证记录。" : "Check changes and verification before integration.")
+      : awaitingReview ? (lang === "zh" ? "先核对改动与验证记录，再决定是否通过审查。" : "Check changes and verification before approving the candidate.")
+        : selectedStatus === "cancelled" ? (lang === "zh" ? "已有对话和证据仍可查看。" : "The conversation and evidence remain available.")
+          : selectedStatus === "completed" || selectedStatus === "done" ? (lang === "zh" ? "结果以本轮真实记录为准，集成记录可在版本中查看。" : "Use this run's records to review the result and integration details.")
+            : currentPhase?.label ? (lang === "zh" ? "当前阶段：" : "Current phase: ") + currentPhase.label
+              : (lang === "zh" ? "运行状态会随服务端记录更新。" : "Run state follows the service records.");
+  const actionAvailable = selectedRunKind === "autonomous" ? Boolean(autonomousActions) && !autonomousActionPending
+    : selectedRunKind === "observation" ? Boolean(observationAction) && Boolean(observationRun?.actionStates?.terminate?.enabled) && !observationActionPending
+      : selectedRunKind === "worktree" && !worktreeActionPending && (actionEnabled(worktreeRun, "terminate")
+        || !worktreeRunLocked && ["merge", "approveReview", "discard"].some((key) => actionEnabled(worktreeRun, key)));
+  const actionPending = selectedRunKind === "autonomous" ? autonomousActionPending
+    : selectedRunKind === "observation" ? observationActionPending : worktreeActionPending;
+  const actionHint = actionPending ? (lang === "zh" ? "正在提交操作，请等待状态更新。" : "Submitting the action. Wait for the state to update.")
+    : selectedRunKind === "worktree" && worktreeRunLocked ? (lang === "zh" ? "当前运行锁阻止审查与候选操作。" : "The run lock blocks review and candidate actions.")
+      : selectedRunKind === "observation" && observationAction ? text(observationRun?.actionStates?.terminate?.reason)
+        || (lang === "zh" ? "当前不允许终止观察。" : "Observation cannot be stopped at present.")
+        : (lang === "zh" ? "当前没有可执行操作，可继续查看对话与证据。" : "No action is available now. Review the conversation and evidence.");
   const actionErrors = [autonomousActionError, observationActionError, worktreeActionError, startWorktreeError, observationStartError, guardNotice].map(text).filter(Boolean).join("\n");
   const footer = selectedRun ? <div className={styles.footerContent}>
-    <div className={styles.footerStatus}><VStatusChip tone={selectedStatus === "completed" || selectedStatus === "done" ? "success" : selectedStatus === "failed" ? "danger" : selectedStatus === "awaiting_user_approval" ? "warning" : "neutral"}>{statusLabel(selectedStatus, lang)}</VStatusChip>{selectedGoal ? <span className={styles.footerGoal} title={selectedGoal}>{selectedGoal}</span> : null}</div>
+    <div className={styles.footerStatus}><VStatusChip tone={failed ? "danger" : autonomousRetry || awaitingReview || canMerge ? "warning" : selectedStatus === "completed" || selectedStatus === "done" ? "success" : "neutral"}>{statusLabel(selectedStatus, lang)}</VStatusChip></div>
+    <h3 className={styles.footerHeading}>{resultTitle}</h3>
+    <p className={styles.footerReason}>{statusReason}</p>
     <div className={styles.footerActions}>{autonomousActions}{observationAction}{worktreeActions}</div>
+    {!actionAvailable ? <p className={styles.footerHint}>{actionHint}</p> : null}
     {actionFeedback ? <p className={styles.feedbackText} role="status">{actionFeedback}</p> : null}
     {actionErrors ? <p className={styles.errorText} role="alert">{actionErrors}</p> : null}
   </div> : null;
 
   const runSummary = selectedRun ? <div className={styles.sourceSummary}>
     <span>{selectedRunKind === "autonomous" ? (lang === "zh" ? "自主闭环" : "Autonomous loop") : selectedRunKind === "observation" ? (lang === "zh" ? "只读观察" : "Read-only observation") : (lang === "zh" ? "隔离工作树" : "Isolated worktree")}</span>
-    <strong>{selectedGoal || selectedRun.runId}</strong><span>{lang === "zh" ? "状态" : "Status"} · {statusLabel(selectedStatus, lang)}</span>
+    <span>{lang === "zh" ? "运行 ID" : "Run ID"} · {selectedRun.runId}</span>
   </div> : null;
   const evidenceSourceGoal = selectedGoal || (lang === "zh" ? "等待选择自进化运行" : "Select a self-evolution run");
   const title = selectedRunKind === "autonomous" ? autonomousRun?.request.goal || (lang === "zh" ? "自进化自动闭环" : "Autonomous self-evolution")
@@ -487,11 +606,8 @@ export function SelfEvolutionConversationWorkspace({
         pending: autonomousActionPending,
       });
     }
-    if (confirmation.kind === "terminate-observation") return selectedRunKind === "observation" && observationRun?.runId === confirmation.runId && !observationActionPending && ["queued", "running"].includes(text(observationRun.status).toLowerCase()) && Boolean(observationRun.actionStates?.terminate?.enabled);
-    if (selectedRunKind !== "worktree" || worktreeRun?.runId !== confirmation.runId || worktreeActionPending) return false;
-    if (confirmation.action !== "terminate" && worktreeRunLocked) return false;
-    const actionKey = confirmation.action === "approve_review" ? "approveReview" : confirmation.action;
-    return actionEnabled(worktreeRun, actionKey);
+    if (confirmation.kind === "terminate-observation") return selectedRunKind === "observation" && canConfirmObservationAction(observationRun, confirmation.runId, observationActionPending);
+    return selectedRunKind === "worktree" && canConfirmWorktreeAction({ run: worktreeRun, requestedRunId: confirmation.runId, action: confirmation.action, pending: worktreeActionPending, locked: worktreeRunLocked });
   })();
 
   const submitConfirmation = () => {
@@ -526,6 +642,7 @@ export function SelfEvolutionConversationWorkspace({
       sourceTitle={lang === "zh" ? "进化目标" : "Evolution goal"}
       sourceIcon={<Target size={15} />}
       sourceSummary={runSummary}
+      resultSummary={resultSummary}
       trackContext={selectedRunKind === "autonomous" ? (lang === "zh" ? "迭代预算 · 1 轮" : "Iteration budget · 1") : selectedRunKind === "observation" ? (lang === "zh" ? "只读观察 · 无代码改动" : "Read-only observation · no code changes") : selectedRunKind === "worktree" ? (lang === "zh" ? "隔离工作树 · 旧版自进化" : "Isolated worktree · legacy self-evolution") : undefined}
       setupTitle={setupMode === "autonomous" ? (lang === "zh" ? "新建自进化目标" : "New self-evolution goal") : (lang === "zh" ? "配置只读观察" : "Configure read-only observation")}
       phases={phases.map(({ id, label, statusLabel, current, disabled }) => ({ id, label, statusLabel, current, disabled }))}
