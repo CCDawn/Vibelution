@@ -166,11 +166,20 @@ export function LauncherRoute() {
       }
       const fallback = lang === "zh" ? "Launcher 拒绝了该操作。" : "Launcher rejected the operation.";
       const message = response.message || fallback;
+      const queuedRestart = response.accepted && response.code === "restart_queued";
       // A refusal must stay visible on the row it belongs to: name the branch
       // and flag the notice as an error instead of a neutral status line.
+      // A queued restart is accepted but does not move the window, so the
+      // reason has to stay on the row. A plain success still stays quiet.
       setRowFeedback(
         response.accepted
-          ? response.shellStale
+          ? queuedRestart
+            ? {
+                instanceId: request.instanceId,
+                tone: "info",
+                message,
+              }
+            : response.shellStale
             ? {
                 instanceId: request.instanceId,
                 tone: "info",

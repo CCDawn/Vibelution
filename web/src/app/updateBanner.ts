@@ -19,6 +19,18 @@ export function isLauncherUpdateAvailable(freshness: LauncherFreshness | undefin
   return Boolean(freshness && (freshness.current === false || freshness.shellStale || freshness.updateAvailable));
 }
 
+/**
+ * A stale desktop shell opens Launcher only when the workbench itself is current.
+ * Frontend or backend staleness keeps the restart action: opening Launcher does
+ * not load the new interface build.
+ */
+export function launcherUpdateReplacesWorkbenchRestart(input: {
+  verdict: CodeFreshnessVerdict | undefined | null;
+  launcherFreshness?: LauncherFreshness | null;
+}): boolean {
+  return isLauncherUpdateAvailable(input.launcherFreshness) && !isUpdateBannerVerdict(input.verdict);
+}
+
 export function shouldShowUpdateBanner({
   verdict,
   diskHead,

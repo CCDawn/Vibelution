@@ -64,6 +64,7 @@ import {
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import {
   isLauncherUpdateAvailable,
+  launcherUpdateReplacesWorkbenchRestart,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -1509,9 +1510,14 @@ export function AppShell() {
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
   // Workbench and Launcher versions share the delayed 120s polling cadence.
-  // Launcher-only updates open its existing management window.
+  // A stale shell opens Launcher only when the workbench code is already current.
+  // A behind frontend or backend keeps restart, which is what loads the new UI.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
   const launcherUpdateAvailable = isLauncherUpdateAvailable(launcherFreshnessQuery.data);
+  const launcherUpdateReplacesRestart = launcherUpdateReplacesWorkbenchRestart({
+    verdict: updateBannerVerdict,
+    launcherFreshness: launcherFreshnessQuery.data,
+  });
   const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
   const updateBannerVisible = shouldShowUpdateBanner({
     verdict: updateBannerVerdict,
@@ -1519,7 +1525,7 @@ export function AppShell() {
     dismissedHead: updateBannerDismissedHead,
     launcherFreshness: launcherFreshnessQuery.data,
   });
-  const updateBannerText = launcherUpdateAvailable
+  const updateBannerText = launcherUpdateReplacesRestart
     ? launcherUpdateBannerCopy(lang)
     : updateBannerVerdict === "frontend_behind"
       ? frontendUpdateBannerCopy(lang)
@@ -1544,6 +1550,12 @@ export function AppShell() {
     setUpdateBannerDismissedHead(updateBannerDiskHead);
     storeUpdateBannerDismissedHead(updateBannerDiskHead);
   }, [updateBannerDiskHead]);
+  const openLauncherFromBanner = useCallback(() => {
+    setLauncherWindowError("");
+    void showLauncherWindow().catch((error: unknown) => {
+      setLauncherWindowError(error instanceof Error ? error.message : (lang === "en" ? "Could not open Launcher." : "无法打开启动管理。"));
+    });
+  }, [lang]);
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
       return;
@@ -2998,19 +3010,21 @@ export function AppShell() {
                 <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
                 <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
               </div>
-              {!launcherUpdateAvailable && updateBannerRestartNotice ? (
+              {!launcherUpdateReplacesRestart && updateBannerRestartNotice ? (
                 <span className={styles.updateBannerNote}>{updateBannerRestartNotice}</span>
+              ) : null}
+              {launcherUpdateAvailable && !launcherUpdateReplacesRestart ? (
+                <span className={styles.updateBannerNote}>
+                  {lang === "en"
+                    ? "The desktop shell also has an update. This restart loads the new interface. Open Launcher to replace the shell."
+                    : "桌面壳也有更新。这次重启先换上新界面；更换桌面壳请打开启动管理。"}
+                </span>
               ) : null}
               {launcherUpdateAvailable && launcherWindowError ? <span className={styles.updateBannerNote}>{launcherWindowError}</span> : null}
               <div className={styles.updateBannerActions}>
-                {launcherUpdateAvailable ? (
+                {launcherUpdateReplacesRestart ? (
                   <VButton type="button" variant="secondary" className={styles.updateBannerRestartButton}
-                    onPress={() => {
-                      setLauncherWindowError("");
-                      void showLauncherWindow().catch((error: unknown) => {
-                        setLauncherWindowError(error instanceof Error ? error.message : (lang === "en" ? "Could not open Launcher." : "无法打开启动管理。"));
-                      });
-                    }}>
+                    onPress={openLauncherFromBanner}>
                     {lang === "en" ? "Open Launcher" : "打开启动管理"}
                   </VButton>
                 ) : <VButton type="button" variant="secondary"
@@ -3019,6 +3033,11 @@ export function AppShell() {
                   title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
                 </VButton>}
+                {launcherUpdateAvailable && !launcherUpdateReplacesRestart ? (
+                  <VButton type="button" variant="ghost" onPress={openLauncherFromBanner}>
+                    {lang === "en" ? "Open Launcher" : "打开启动管理"}
+                  </VButton>
+                ) : null}
                 <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
                   title={updateBannerDismissActionLabel}>
                   {lang === "en" ? "Dismiss" : "暂不提醒"}

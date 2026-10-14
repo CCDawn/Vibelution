@@ -270,6 +270,10 @@ describe("Electron main Launcher IPC facade", () => {
     expect(readyBody).not.toContain("waitForWorkbenchHttp");
     expect(lifecycleBody).toContain("mainLineBackendIsReusable");
     expect(lifecycleBody).toContain("packagedDesktopShellIsStale");
+    expect(lifecycleBody).toContain("!packagedShellBlocksReuse");
+    expect(lifecycleBody).not.toContain("!packagedShellStale");
+    expect(lifecycleBody).toContain("packagedShellAdvisoryStale");
+    expect(lifecycleBody).toContain("status.launchBlocking");
     expect(lifecycleBody).toContain("已打开工作台窗口。");
 
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
