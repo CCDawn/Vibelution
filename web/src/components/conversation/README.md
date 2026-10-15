@@ -40,6 +40,7 @@ tool rendering should live outside the shell.
 | Turn avatar / header compaction | `conversationTurnAvatar.ts`, `ConversationTurnAvatarContent.tsx` |
 | Agent thread bridge / projection hooks | `useAgentThread.ts`, `useAgentMessageTimelineProjection.ts` |
 | Prefetch (idle warm, no mount) | `prefetchConversationView.ts`, `LazyConversationView.tsx` |
+| Text-selection quote menu | `useConversationSelectionQuote.tsx` |
 | Shell composition only | `ConversationView.tsx` |
 
 ## ConversationView block map (M6)
@@ -59,6 +60,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Tool activity strip | tool lifecycle UI | `ConversationToolActivity.tsx` |
 | Composer | draft, attachments, slash, submit keys | composer pure modules + Chat route hooks |
 | Image preview mount | conditional React.lazy dialog | keep shell gate |
+| Text-selection quote | quote / copy / reference / side-chat menu | `useConversationSelectionQuote.tsx` |
 
 ## Ownership map
 
@@ -69,6 +71,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Stream EventSource ownership | Chat route stream hooks | ConversationView |
 | Markdown / tool renderers | dedicated renderer modules | re-inlining into shell |
 | Prefetch without mount | `prefetchConversationView.ts` | mounting ConversationView early |
+| Timeline text-selection quote | `useConversationSelectionQuote.tsx` | stick-bottom / history-load scroll |
 
 ## Structure program
 
