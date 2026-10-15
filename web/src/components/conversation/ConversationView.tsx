@@ -27,12 +27,6 @@ import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
-import { ConversationSelectionQuoteMenu } from "./ConversationSelectionQuoteMenu";
-import {
-  buildQuotedDraftText,
-  extractConversationSelectionSnapshot,
-  type ConversationSelectionRect,
-} from "./conversationTextSelection";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
 import {
@@ -57,7 +51,6 @@ import {
   assistantTurnIsInFlight,
   assistantTurnIsStreaming,
 } from "../../routes/chatTurnProtocol";
-import { buildMessageReferencePayload } from "../../routes/chat/chatComposerSubmitModel";
 import {
   applyOptimisticCuration,
   buildMessageCurationMap,
@@ -207,6 +200,7 @@ import { createConversationTimelineRows } from "./conversationTimelineRows";
 import { useComputerUseResults } from "./useComputerUseResults";
 import { useConversationComposer } from "./useConversationComposer";
 import { useConversationFind } from "./useConversationFind";
+import { useConversationSelectionQuote } from "./useConversationSelectionQuote";
 import { VButton } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -549,143 +543,17 @@ export const ConversationView = React.memo(function ConversationView({
   const [forkDialogMessage, setForkDialogMessage] = useState<ConversationMessage | null>(null);
   const [forkScope, setForkScope] = useState<ConversationForkScope>("visible_path");
   const [forkPending, setForkPending] = useState(false);
-  // Text-selection quote menu (zai-org/ZCode useTextSelection pattern,
-  // Apache-2.0): snapshot of the selected text. The menu centers itself on
-  // that viewport rect.
-  const timelineAreaRef = useRef<HTMLDivElement | null>(null);
-  const selectionQuoteDismissedTextRef = useRef<string | null>(null);
-  const selectionQuoteTextRef = useRef("");
-  const [selectionQuoteMenu, setSelectionQuoteMenu] = useState<{
-    text: string;
-    rect: ConversationSelectionRect;
-    sourceMessageId: string;
-  } | null>(null);
-  // Selection quote lifecycle: document-level selectionchange + mouseup/keyup,
-  // rAF-coalesced. The menu opens only for a non-empty selection fully inside
-  // the timeline (never the composer), and closes on collapse, timeline
-  // scroll, outside mousedown, or Escape (Escape also arms a dismiss guard so
-  // keyup cannot immediately re-open the same selection).
-  useEffect(() => {
-    let frame: number | null = null;
-    const evaluateSelection = () => {
-      frame = null;
-      const timelineArea = timelineAreaRef.current;
-      const snapshot = extractConversationSelectionSnapshot(window.getSelection(), timelineRef.current);
-      if (!snapshot || !timelineArea) {
-        selectionQuoteDismissedTextRef.current = null;
-        selectionQuoteTextRef.current = "";
-        setSelectionQuoteMenu(null);
-        return;
-      }
-      selectionQuoteTextRef.current = snapshot.text;
-      if (selectionQuoteDismissedTextRef.current !== null) {
-        // Escape dismissed this selection; a genuinely different selection
-        // (new text) re-arms the menu, the same one stays dismissed.
-        if (snapshot.text === selectionQuoteDismissedTextRef.current) {
-          return;
-        }
-        selectionQuoteDismissedTextRef.current = null;
-      }
-      setSelectionQuoteMenu({
-        text: snapshot.text,
-        sourceMessageId: snapshot.sourceMessageId,
-        rect: snapshot.rect,
-      });
-    };
-    const scheduleEvaluation = () => {
-      if (frame !== null) {
-        return;
-      }
-      frame = requestAnimationFrame(evaluateSelection);
-    };
-    const handleDocumentMouseDown = (event: MouseEvent) => {
-      // Mousedown inside the menu belongs to an action click, not a dismissal.
-      if (event.target instanceof Element && event.target.closest("[data-conversation-selection-menu]")) {
-        return;
-      }
-      selectionQuoteDismissedTextRef.current = null;
-      setSelectionQuoteMenu(null);
-    };
-    const handleDocumentKeydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        selectionQuoteDismissedTextRef.current = selectionQuoteTextRef.current;
-        setSelectionQuoteMenu(null);
-      }
-    };
-    const handleTimelineScroll = () => {
-      setSelectionQuoteMenu(null);
-    };
-    const timeline = timelineRef.current;
-    document.addEventListener("selectionchange", scheduleEvaluation);
-    document.addEventListener("mouseup", scheduleEvaluation);
-    document.addEventListener("keyup", scheduleEvaluation);
-    document.addEventListener("keydown", handleDocumentKeydown);
-    document.addEventListener("mousedown", handleDocumentMouseDown);
-    timeline?.addEventListener("scroll", handleTimelineScroll);
-    return () => {
-      if (frame !== null) {
-        cancelAnimationFrame(frame);
-      }
-      document.removeEventListener("selectionchange", scheduleEvaluation);
-      document.removeEventListener("mouseup", scheduleEvaluation);
-      document.removeEventListener("keyup", scheduleEvaluation);
-      document.removeEventListener("keydown", handleDocumentKeydown);
-      document.removeEventListener("mousedown", handleDocumentMouseDown);
-      timeline?.removeEventListener("scroll", handleTimelineScroll);
-    };
-  }, []);
-  const handleSelectionSideChat = useCallback(() => {
-    if (!selectionQuoteMenu || !onOpenSideChat) {
-      return;
-    }
-    onOpenSideChat(buildQuotedDraftText("", selectionQuoteMenu.text), false);
-    setSelectionQuoteMenu(null);
-    selectionQuoteDismissedTextRef.current = null;
-    window.getSelection()?.removeAllRanges();
-  }, [onOpenSideChat, selectionQuoteMenu]);
-  const handleSelectionQuoteToComposer = useCallback(() => {
-    if (!selectionQuoteMenu) {
-      return;
-    }
-    onComposerChange(buildQuotedDraftText(composerValue, selectionQuoteMenu.text));
-    setSelectionQuoteMenu(null);
-    selectionQuoteDismissedTextRef.current = null;
-    // Park focus and the caret at the end of the appended quote.
-    requestAnimationFrame(() => {
-      const input = composerInputRef.current;
-      if (!input) {
-        return;
-      }
-      input.focus();
-      const end = input.value.length;
-      input.setSelectionRange(end, end);
-    });
-  }, [composerValue, onComposerChange, selectionQuoteMenu]);
-  const handleSelectionCopy = useCallback(() => {
-    if (!selectionQuoteMenu) {
-      return;
-    }
-    void copyTextToClipboard(selectionQuoteMenu.text);
-    setSelectionQuoteMenu(null);
-  }, [selectionQuoteMenu]);
-  /**
-   * Structured quote: attaches the selection as a `message` reference chip
-   * (contract: referenceId `message:{sourceMessageId}` + source session/
-   * message ids + quote + single-line title). Only offered when the selection
-   * anchor lives inside a message row.
-   */
-  const handleSelectionReferenceToComposer = useCallback(() => {
-    if (!selectionQuoteMenu?.sourceMessageId || !onAddComposerReference) {
-      return;
-    }
-    onAddComposerReference(buildMessageReferencePayload({
-      sourceSessionId: sessionId,
-      sourceMessageId: selectionQuoteMenu.sourceMessageId,
-      quote: selectionQuoteMenu.text,
-    }));
-    setSelectionQuoteMenu(null);
-    selectionQuoteDismissedTextRef.current = null;
-  }, [onAddComposerReference, selectionQuoteMenu, sessionId]);
+  const { timelineAreaRef, menu: selectionQuoteMenu } = useConversationSelectionQuote({
+    sessionId,
+    lang,
+    composerValue,
+    timelineRef,
+    composerInputRef,
+    onComposerChange,
+    onOpenSideChat,
+    onAddComposerReference,
+    copyText: copyTextToClipboard,
+  });
   const assistantLabel = assistantDisplayName?.trim() || t("agent");
   const userLabel = userDisplayName?.trim() || t("operator");
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
@@ -2542,21 +2410,7 @@ export const ConversationView = React.memo(function ConversationView({
         )}
       </div>
 
-{selectionQuoteMenu ? (
-        <ConversationSelectionQuoteMenu
-          selectionRect={selectionQuoteMenu.rect}
-          quoteLabel={lang === "zh" ? "引用到输入框" : "Quote to composer"}
-          referenceLabel={lang === "zh" ? "作为引用" : "As reference"}
-          copyLabel={lang === "zh" ? "复制" : "Copy"}
-          sideLabel={lang === "zh" ? "辅助对话" : "Side chat"}
-          onSideChat={onOpenSideChat ? handleSelectionSideChat : undefined}
-          onQuote={handleSelectionQuoteToComposer}
-          onReference={selectionQuoteMenu.sourceMessageId && onAddComposerReference
-            ? handleSelectionReferenceToComposer
-            : undefined}
-          onCopy={handleSelectionCopy}
-        />
-      ) : null}
+{selectionQuoteMenu}
 
 {!isAtBottom ? (
         <VButton
