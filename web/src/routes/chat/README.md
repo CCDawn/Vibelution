@@ -104,7 +104,7 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 - `useChatWorkbenchLayout.ts` — panel widths, resize drag/keyboard, responsive collapse/overlay, layout CSS vars/class names
 - `chatComposerSubmitModel.ts` — composer draft/attachment/reference pure helpers, image classify, submit guards, mental-model toggle storage, optimistic turn id
 - `chatSubmittedAttachmentPreviews.ts` — submission-owned local previews; composer cleanup cannot revoke them, and authoritative message replacement or session cache removal releases them
-- `useChatComposerSubmit.ts` — `useChatComposerTurnMutations` (submit/edit/stop/guidance) + `useChatComposerSubmitActions` (handlers/upload pipeline); no second EventSource
+- `useChatComposerSubmit.ts` — `useChatComposerTurnMutations` (submit/edit/stop/guidance) + `useChatComposerSubmitActions` (handlers/upload pipeline); accepted-submit projection readback lives in `chatSubmitAcceptanceReadback.ts`; no second EventSource
   Ordinary submit success removes only references in its submitted snapshot; references added or re-quoted while pending remain in the next draft.
 
 ## Phase E (done for structure ROI)
