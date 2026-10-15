@@ -25,6 +25,15 @@ describe("chat composer user-action telemetry contract", () => {
     expect(composerSource).toContain(".blocked(guardReason");
   });
 
+  it("keeps the accepted-submit projection readback in its own module", () => {
+    const readbackSource = readFileSync(join(here, "chatSubmitAcceptanceReadback.ts"), "utf8");
+    const turnMutationsSource = readFileSync(join(here, "useChatComposerTurnMutations.ts"), "utf8");
+    expect(readbackSource).toContain("browser.chat_submit.accepted_projection_readback");
+    expect(readbackSource).toContain("export function useAcceptedSubmitProjectionReadback");
+    expect(turnMutationsSource).toContain("useAcceptedSubmitProjectionReadback(");
+    expect(turnMutationsSource).not.toContain("acceptedSubmitReadbacksRef");
+  });
+
   it("keeps the native Session submit as the ordinary fallback and gates the plugin transport", () => {
     expect(composerSource).toMatch(
       /if \(companionAgentId\) \{[\s\S]*submitVirtualHumanConversationMessage\(companionAgentId, sessionId, payload\)[\s\S]*\}\s*return submitSessionMessage\(sessionId,/,
