@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const lifecycleSource = readFileSync(join(here, "useChatWorkspaceLifecycle.ts"), "utf8");
+const sessionCreateSource = readFileSync(join(here, "useChatSessionCreateMutation.ts"), "utf8");
 const sessionChangeSource = readFileSync(join(here, "useChatSessionChangeMutations.ts"), "utf8");
 const groupWorkspaceSource = readFileSync(join(here, "useChatGroupWorkspaceMutations.ts"), "utf8");
 const routeSelectionSource = readFileSync(join(here, "useChatRouteSelection.ts"), "utf8");
@@ -12,14 +13,15 @@ const actionsSource = readFileSync(join(here, "useChatWorkspaceActions.ts"), "ut
 
 describe("chat workspace user-action telemetry contract", () => {
   it("tracks session lifecycle mutations through startUserAction", () => {
-    expect(lifecycleSource).toContain('startUserAction("session_create"');
+    expect(sessionCreateSource).toContain('startUserAction("session_create"');
+    expect(lifecycleSource).toContain("useChatSessionCreateMutation(");
     expect(sessionChangeSource).toContain('startUserAction("session_delete"');
     expect(sessionChangeSource).toContain('startUserAction("session_rename"');
     expect(sessionChangeSource).toContain('startUserAction("session_clear_history"');
     expect(sessionChangeSource).toContain('startUserAction("session_add_to_review"');
     expect(lifecycleSource).toContain("useChatSessionChangeMutations(");
-    expect(lifecycleSource).toContain("telemetry?.succeeded({");
-    expect(lifecycleSource).toContain("telemetry?.failed(error");
+    expect(sessionCreateSource).toContain("telemetry?.succeeded({");
+    expect(sessionCreateSource).toContain("telemetry?.failed(error");
     expect(sessionChangeSource).toContain("telemetry?.succeeded({");
     expect(sessionChangeSource).toContain("telemetry?.failed(error");
   });

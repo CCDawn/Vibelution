@@ -6,6 +6,7 @@ import { chatSelectionPathname } from "./useChatRouteSelection";
 const useChatRouteSelectionSourcePath = fileURLToPath(new URL("./useChatRouteSelection.ts", import.meta.url));
 const useChatWorkspaceActionsSourcePath = fileURLToPath(new URL("./useChatWorkspaceActions.ts", import.meta.url));
 const useChatWorkspaceLifecycleSourcePath = fileURLToPath(new URL("./useChatWorkspaceLifecycle.ts", import.meta.url));
+const useChatSessionCreateMutationSourcePath = fileURLToPath(new URL("./useChatSessionCreateMutation.ts", import.meta.url));
 const useChatSessionChangeMutationsSourcePath = fileURLToPath(new URL("./useChatSessionChangeMutations.ts", import.meta.url));
 const useChatGroupWorkspaceMutationsSourcePath = fileURLToPath(new URL("./useChatGroupWorkspaceMutations.ts", import.meta.url));
 const useChatArchivedAgentRetirementSourcePath = fileURLToPath(new URL("./useChatArchivedAgentRetirement.ts", import.meta.url));
@@ -43,6 +44,7 @@ describe("Chat route write boundary (single authority)", () => {
     for (const [path, source] of [
       [useChatWorkspaceActionsSourcePath, readSource(useChatWorkspaceActionsSourcePath)],
       [useChatWorkspaceLifecycleSourcePath, readSource(useChatWorkspaceLifecycleSourcePath)],
+      [useChatSessionCreateMutationSourcePath, readSource(useChatSessionCreateMutationSourcePath)],
       [useChatSessionChangeMutationsSourcePath, readSource(useChatSessionChangeMutationsSourcePath)],
       [useChatGroupWorkspaceMutationsSourcePath, readSource(useChatGroupWorkspaceMutationsSourcePath)],
       [useChatArchivedAgentRetirementSourcePath, readSource(useChatArchivedAgentRetirementSourcePath)],
@@ -81,11 +83,18 @@ describe("Chat route write boundary (single authority)", () => {
   it("workspace lifecycle uses compare-and-swap route transitions only", () => {
     const source = readSource(useChatWorkspaceLifecycleSourcePath);
     expect(source).toContain("replaceIfStillViewing");
-    expect(source).toContain("routeSelectionRef.current");
+    expect(source).toContain("useChatSessionCreateMutation(");
     expect(source).not.toContain("setActiveSession");
     expect(source).not.toContain("setSearchParams");
     expect(navigatesToChatSelection(source)).toEqual([]);
-    // Temp create failure must not auto-restore a previous session.
+  });
+
+  it("session create compares-and-swaps the temp route and never auto-restores", () => {
+    const source = readSource(useChatSessionCreateMutationSourcePath);
+    expect(source).toContain("chatRoute.openSession(tempSessionId)");
+    expect(source).toContain("replaceIfStillViewing");
+    expect(source).toContain("routeSelectionRef.current");
+    expect(navigatesToChatSelection(source)).toEqual([]);
     expect(source).toContain("Never auto-restore");
   });
 

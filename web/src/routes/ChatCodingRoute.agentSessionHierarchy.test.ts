@@ -7,6 +7,7 @@ import visibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?
 import agentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
 import tabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import lifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
+import sessionCreateSource from "./chat/useChatSessionCreateMutation.ts?raw";
 import sessionChangeSource from "./chat/useChatSessionChangeMutations.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 
@@ -39,7 +40,8 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(tabStripSource).toContain("在当前 Agent 下新建会话");
     expect(routeSource).toContain("onCreateSession={handleCreateSession}");
     expect(routeSource).not.toContain("<span>{lang === \"zh\" ? \"新建会话\" : \"New session\"}</span>");
-    expect(lifecycleSource).toContain("setEditingSessionTitle(");
+    expect(lifecycleSource).toContain("useChatSessionCreateMutation(");
+    expect(sessionCreateSource).toContain("setEditingSessionTitle(");
     // Failure recovery opens a retry editor only when none is already active.
     // The callback behavior suite covers preserving newer same-session input.
     expect(sessionChangeSource).toContain("if (!editingSessionIdRef.current) {");
@@ -47,15 +49,15 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(sessionChangeSource).not.toContain("!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId");
     // Create shows the new session directly: the create flow never opens the
     // rename editor, so no temp-id editor is entered and no draft is trusted.
-    expect(lifecycleSource).not.toContain("setEditingSessionId(tempSessionId)");
-    expect(lifecycleSource).not.toContain("editingSessionIdRef.current = tempSessionId");
-    expect(lifecycleSource).toContain("const editingTempTitle = Boolean(");
+    expect(sessionCreateSource).not.toContain("setEditingSessionId(tempSessionId)");
+    expect(sessionCreateSource).not.toContain("editingSessionIdRef.current = tempSessionId");
+    expect(sessionCreateSource).toContain("const editingTempTitle = Boolean(");
     // Only an operator-opened rename on the temp tab survives the remap.
-    expect(lifecycleSource).toContain("if (keepFocusOnCreated && editingTempTitle) {");
-    expect(lifecycleSource).toContain("suppressRenameBlurUntilRef.current = Date.now() + 2500");
+    expect(sessionCreateSource).toContain("if (keepFocusOnCreated && editingTempTitle) {");
+    expect(sessionCreateSource).toContain("suppressRenameBlurUntilRef.current = Date.now() + 2500");
     // New sessions start from the placeholder label (backend + optimistic shell).
-    expect(lifecycleSource).toContain("const title = defaultNewSessionTitle(lang);");
-    expect(lifecycleSource).not.toContain("renameAgentDirectoryEntries(agents, agentId, confirmedTitle)");
+    expect(sessionCreateSource).toContain("const title = defaultNewSessionTitle(lang);");
+    expect(sessionCreateSource).not.toContain("renameAgentDirectoryEntries(agents, agentId, confirmedTitle)");
   });
 
   it("uses each session title without root-child visual hierarchy", () => {
