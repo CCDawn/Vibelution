@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationTimelineFollowSource from "./useConversationTimelineFollow.ts?raw";
 import {
   buildConversationHeightOffsets,
   findConversationIndexAtOffset,
@@ -20,11 +21,16 @@ import {
 describe("conversation timeline follow state", () => {
   it("keeps timeline follow helpers outside the React component file", () => {
     expect(conversationViewSource).toContain("from \"./conversationTimelineFollowState\"");
-    expect(conversationViewSource).toContain("resolveTimelineFollowState({");
-    expect(conversationViewSource).not.toContain("export function isTimelineNearBottom");
-    expect(conversationViewSource).not.toContain("export function resolveTimelineFollowState");
-    expect(conversationViewSource).not.toContain("type TimelineFollowStateInput");
-    expect(conversationViewSource).not.toContain("type TimelineFollowState =");
+    expect(conversationTimelineFollowSource).toContain("from \"./conversationTimelineFollowState\"");
+    // The follow-state consumer moved into the extracted hook with PR #35;
+    // neither the component nor the hook may re-define the helpers.
+    expect(conversationTimelineFollowSource).toContain("resolveTimelineFollowState({");
+    for (const source of [conversationViewSource, conversationTimelineFollowSource]) {
+      expect(source).not.toContain("export function isTimelineNearBottom");
+      expect(source).not.toContain("export function resolveTimelineFollowState");
+      expect(source).not.toContain("type TimelineFollowStateInput");
+      expect(source).not.toContain("type TimelineFollowState =");
+    }
   });
 
   it("treats positions within the bottom threshold as near bottom", () => {
