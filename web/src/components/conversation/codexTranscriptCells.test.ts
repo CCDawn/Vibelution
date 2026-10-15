@@ -29,6 +29,65 @@ function message(overrides: Partial<AgentMessage>): AgentMessage {
 }
 
 describe("codexTranscriptCells", () => {
+  it.each([false, true])("keeps commentary instead of its cached temporary answer (terminal=%s)", (terminal) => {
+    const texts = ["我先摸清当前工作区和最近进展，再给结论。", "我先确认研究载体在哪，再谈进展。"];
+    const commentary: CodexTranscriptCell[] = texts.map((text, index) => ({
+      id: `commentary-${index}`, kind: "assistant_markdown", messageId: "m1",
+      status: "completed", tone: "neutral", phase: "commentary", terminal: true, text,
+    }));
+    const answer: CodexTranscriptCell = {
+      id: "cached-answer", kind: "assistant_markdown", messageId: "m1",
+      status: terminal ? "completed" : "running", tone: "neutral", phase: "final_answer",
+      terminal, text: texts.join(" \n"),
+    };
+    const cells = dedupeProgressAgainstAnswerCells([...commentary, answer]);
+    expect(cells.map((cell) => cell.id)).toContain(terminal ? "cached-answer" : "commentary-0");
+    expect(cells.some((cell) => cell.id === "cached-answer")).toBe(terminal);
+  });
+
+  it("keeps a distinct live answer after accumulated commentary", () => {
+    const cells: CodexTranscriptCell[] = [
+      { id: "progress", kind: "assistant_markdown", messageId: "m1", phase: "commentary", status: "completed", tone: "neutral", text: "先读取日志。" },
+      { id: "answer", kind: "assistant_markdown", messageId: "m1", phase: "final_answer", status: "running", tone: "running", terminal: false, text: "先读取日志。根因已确认。" },
+    ];
+    expect(dedupeProgressAgainstAnswerCells(cells).map((cell) => cell.id)).toContain("answer");
+  });
+
+  it.each(["completed", "failed"] as const)("ends an older thought after a %s tool", (status) => {
+    const cells = settleCodexTranscriptActiveStatuses([
+      { id: "thought", kind: "reasoning_summary", messageId: "m1", status: "running", tone: "running" },
+      { id: "tool", kind: "tool_call", messageId: "m1", status, tone: status === "failed" ? "error" : "neutral" },
+    ], { turnStreaming: true });
+    expect(cells.map((cell) => cell.status)).toEqual(["completed", status]);
+  });
+
+  it("ends an older thought when answer output begins", () => {
+    const cells = settleCodexTranscriptActiveStatuses([
+      { id: "thought", kind: "reasoning_summary", messageId: "m1", status: "running", tone: "running" },
+      { id: "answer", kind: "assistant_markdown", messageId: "m1", phase: "final_answer", status: "running", tone: "running", text: "结论。" },
+    ], { turnStreaming: true });
+    expect(cells.map((cell) => cell.status)).toEqual(["completed", "running"]);
+  });
+
+  it("keeps new reasoning live when a cached commentary mirror follows it", () => {
+    const text = "先检查日志，再确认状态边界。";
+    const cells = settleCodexTranscriptActiveStatuses([
+      { id: "progress", kind: "assistant_markdown", messageId: "m1", phase: "commentary", status: "completed", tone: "neutral", terminal: true, text },
+      { id: "new-thought", kind: "reasoning_summary", messageId: "m1", status: "running", tone: "running", text: "现在继续分析另一个问题。" },
+      { id: "cached-answer", kind: "assistant_markdown", messageId: "m1", phase: "final_answer", status: "running", tone: "running", terminal: false, text },
+    ], { turnStreaming: true });
+    expect(cells.find((cell) => cell.id === "new-thought")?.status).toBe("running");
+  });
+
+  it("settles pending narration after the turn ends while keeping tool approval pending", () => {
+    const cells = settleCodexTranscriptActiveStatuses([
+      { id: "thought", kind: "reasoning_summary", messageId: "m1", status: "pending", tone: "running" },
+      { id: "progress", kind: "assistant_markdown", messageId: "m1", phase: "commentary", status: "pending", tone: "running" },
+      { id: "approval", kind: "tool_call", messageId: "m1", status: "pending", tone: "running" },
+    ], { turnStreaming: false });
+    expect(cells.map((cell) => cell.status)).toEqual(["completed", "completed", "pending"]);
+  });
+
   it("keeps the user-facing commentary copy when it restates the reasoning stream", () => {
     const cells: CodexTranscriptCell[] = [
       {

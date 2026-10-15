@@ -1036,21 +1036,47 @@ function isFinalAnswerTranscriptCell(cell: CodexTranscriptCell) {
     && Boolean(thoughtLikeCellText(cell));
 }
 
+function commentaryAnswerMirrors(
+  cells: readonly CodexTranscriptCell[],
+): Set<CodexTranscriptCell> {
+  const commentaryKeys = cells
+    .filter(isCommentaryTranscriptCell)
+    .map((cell) => thoughtLikeCellText(cell).replace(/\s+/g, ""))
+    .filter(Boolean);
+  const coverageKeys = [...commentaryKeys, commentaryKeys.join("")];
+  // Older deltas can leave a temporary answer in the active-turn cache after
+  // the same text is classified as commentary. Prefer that explicit phase;
+  // terminal answers and distinct live answer text retain their own lane.
+  return new Set(cells.filter((cell) => {
+    if (!isFinalAnswerTranscriptCell(cell) || cell.terminal === true) {
+      return false;
+    }
+    if (cell.status !== "running" && cell.status !== "pending" && cell.terminal !== false) {
+      return false;
+    }
+    const textKey = thoughtLikeCellText(cell).replace(/\s+/g, "");
+    return coverageKeys.some((key) => key && (
+      textKey === key || (textKey.length >= 24 && key.includes(textKey))
+    ));
+  }));
+}
+
 /**
  * Codex can emit the same sentence as progress commentary and then again as the
- * final answer (openai/codex#15633). Show the answer once: drop the progress
- * copy only when the repeated text is long enough to be a real duplicate rather
- * than a short fragment the answer legitimately mentions.
+ * final answer (openai/codex#15633). Preserve a terminal answer; temporary
+ * commentary mirrors keep only the explicitly classified progress lane.
  */
 export function dedupeProgressAgainstAnswerCells(
   cells: readonly CodexTranscriptCell[],
 ): CodexTranscriptCell[] {
-  const answerTexts = cells
+  const mirrors = commentaryAnswerMirrors(cells);
+  const visibleCells = cells.filter((cell) => !mirrors.has(cell));
+  const answerTexts = visibleCells
     .filter(isFinalAnswerTranscriptCell)
     .map(thoughtLikeCellText)
     .filter(Boolean);
   if (answerTexts.length === 0) {
-    return [...cells];
+    return visibleCells;
   }
   const MIN_DUPLICATE_TEXT_LENGTH = 40;
   const repeatsAnswer = (text: string) => answerTexts.some((answer) => {
@@ -1061,7 +1087,7 @@ export function dedupeProgressAgainstAnswerCells(
     const longer = shorter === text ? answer : text;
     return shorter.length >= MIN_DUPLICATE_TEXT_LENGTH && longer.includes(shorter);
   });
-  return cells.filter((cell) => !isCommentaryTranscriptCell(cell) || !repeatsAnswer(thoughtLikeCellText(cell)));
+  return visibleCells.filter((cell) => !isCommentaryTranscriptCell(cell) || !repeatsAnswer(thoughtLikeCellText(cell)));
 }
 
 /** Apply thought + tool identity dedupe for a single transcript cell list. */
@@ -1097,14 +1123,15 @@ export function settleCodexTranscriptActiveStatuses(
     return cells;
   }
   // Turn finished: close spinning process/thought rows (including commentary).
-  // Keep `pending` (e.g. ready/awaiting approval) so approval cards still attach.
+  // Pending tool approvals keep their contract; pending narration cannot keep
+  // a settled turn's thinking spinner alive.
   if (options?.turnStreaming === false) {
     let changed = false;
     const next = cells.map((cell) => {
       if (cell.kind === "user") {
         return cell;
       }
-      if (cell.status !== "running") {
+      if (cell.status !== "running" && !(cell.status === "pending" && isThoughtLikeTranscriptCell(cell))) {
         return cell;
       }
       changed = true;
@@ -1130,9 +1157,24 @@ export function settleCodexTranscriptActiveStatuses(
   if (latestActiveIndex < 0) {
     return cells;
   }
+  // A newer tool, narration segment or answer ends the previous thought even
+  // when that newer item has already completed. Generic status rows alone do
+  // not establish a segment boundary.
+  const mirrors = commentaryAnswerMirrors(cells);
+  let latestSegmentIndex = -1;
+  for (let index = cells.length - 1; index >= 0; index -= 1) {
+    if (mirrors.has(cells[index])) {
+      continue;
+    }
+    const kind = cells[index].kind;
+    if (kind === "tool_call" || kind === "reasoning_summary" || kind === "assistant_markdown") {
+      latestSegmentIndex = index;
+      break;
+    }
+  }
   let changed = false;
   const next = cells.map((cell, index) => {
-    if (index === latestActiveIndex) {
+    if (index === latestActiveIndex && !(isThoughtLikeTranscriptCell(cell) && index < latestSegmentIndex)) {
       return cell;
     }
     if (cell.status !== "running" && cell.status !== "pending") {

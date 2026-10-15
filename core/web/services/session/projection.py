@@ -2447,6 +2447,28 @@ def _merge_live_content_into_turn_items(
         (index for index, item in enumerate(merged) if _is_session_turn_final_answer_item(item)),
         -1,
     )
+    content_key = s._assistant_projection_text_key(content_text)
+    commentary_keys = [
+        key
+        for item in merged
+        if _is_session_turn_commentary_item(item)
+        if (key := s._assistant_projection_text_key(s._sanitize_message_content(
+            "assistant", item.get("text") or item.get("summary") or "",
+        )))
+    ]
+    # Capture can accumulate several model preambles across tool batches.
+    # Their concatenation is still commentary, including an earlier temporary
+    # answer that was projected before the journal classified those segments.
+    commentary_covers_content = bool(content_key) and any(
+        content_key == key or (len(content_key) >= 24 and content_key in key)
+        for key in [*commentary_keys, "".join(commentary_keys)]
+        if key
+    )
+    if commentary_covers_content and (
+        final_index < 0 or not _is_committed_session_turn_final_answer_item(merged[final_index])
+    ):
+        return [item for index, item in enumerate(merged) if index != final_index]
+
     if final_index >= 0:
         final_item = merged[final_index]
         if _is_committed_session_turn_final_answer_item(final_item):
@@ -2490,29 +2512,6 @@ def _merge_live_content_into_turn_items(
                 next_item["source"] = source
             merged[final_index] = s._compact_codex_record(next_item)
         return merged
-
-    content_key = s._assistant_projection_text_key(content_text)
-    if content_key:
-        for item in merged:
-            if not _is_session_turn_commentary_item(item):
-                continue
-            commentary_text = s._sanitize_message_content(
-                "assistant",
-                item.get("text") or item.get("summary") or "",
-            )
-            commentary_key = s._assistant_projection_text_key(commentary_text)
-            if not commentary_key:
-                continue
-            # Responses-style providers expose the latest commentary segment as
-            # live ``content`` until a distinct final-answer segment arrives.
-            # Mirroring that envelope into a provisional final row renders the
-            # same text twice and later replaces the active row identity.  A
-            # shorter live prefix is covered by the committed commentary too;
-            # content that extends beyond commentary remains eligible to bridge.
-            if content_key == commentary_key or (
-                len(content_key) >= 24 and content_key in commentary_key
-            ):
-                return merged
 
     item_id = s._session_turn_agent_message_item_id(session_id, turn_id or "turn")
     sequence = max(

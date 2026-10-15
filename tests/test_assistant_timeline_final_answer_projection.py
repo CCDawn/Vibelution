@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.web.services import session_service
 
 
@@ -303,6 +305,61 @@ def test_turn_items_projection_does_not_mirror_commentary_as_provisional_final(m
     ]
     assert [item.get("text") for item in items].count(commentary_text) == 1
     assert not any(item.get("phase") == "final_answer" for item in items)
+
+
+@pytest.mark.parametrize("with_provisional_answer", [False, True])
+@pytest.mark.parametrize("answer_suffix", ["", "真正的回答已经开始。"])
+def test_turn_items_projection_recognizes_accumulated_commentary(
+    monkeypatch, with_provisional_answer: bool, answer_suffix: str,
+) -> None:
+    texts = [
+        "我先摸清当前工作区和最近进展，再给结论。",
+        '我先确认这个项目里"研究"的载体在哪，再谈进展。',
+    ]
+    commentary = [
+        {
+            "version": 2,
+            "itemId": f"commentary-{index}",
+            "type": "commentary",
+            "phase": "commentary",
+            "status": "completed",
+            "text": text,
+            "sequence": index,
+        }
+        for index, text in enumerate(texts, 1)
+    ]
+    content = " \n".join(texts)
+    journal_items = list(commentary)
+    if with_provisional_answer:
+        journal_items.append({
+            "version": 2,
+            "itemId": "old-provisional-answer",
+            "type": "assistant_message",
+            "phase": "final_answer",
+            "status": "in_progress",
+            "provisional": True,
+            "terminal": False,
+            "text": content,
+            "sequence": 3,
+        })
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda _: [])
+    monkeypatch.setattr(
+        session_service, "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": journal_items,
+    )
+
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-commentary-aggregate",
+        turn_id="turn-commentary-aggregate",
+        message_id="message-commentary-aggregate",
+        content=content + answer_suffix,
+        done=False,
+        source="assistant_delta",
+    )
+
+    assert [item["text"] for item in items if item.get("phase") == "commentary"] == texts
+    final_texts = [item["text"] for item in items if item.get("phase") == "final_answer"]
+    assert final_texts == ([content + answer_suffix] if answer_suffix else [])
 
 
 def test_turn_items_projection_keeps_distinct_live_final_after_commentary(monkeypatch) -> None:
