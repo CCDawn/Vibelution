@@ -43,7 +43,6 @@ import {
   getLocalBranchInstances,
   getLauncherFreshness,
   hasLauncherFreshnessBridge,
-  showLauncherWindow,
   isLauncherControlPlaneNotReady,
   requestWorkbenchWindowCloseOnPageHide,
 } from "../api/launcher";
@@ -64,6 +63,7 @@ import {
 import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import {
   isLauncherUpdateAvailable,
+  isUpdateBannerVerdict,
   launcherUpdateBannerCopy,
   frontendUpdateBannerCopy,
   readStoredUpdateBannerDismissedHead,
@@ -1112,13 +1112,12 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
-  const [launcherWindowError, setLauncherWindowError] = useState("");
   const [updateBannerDismissedHead, setUpdateBannerDismissedHead] = useState(readStoredUpdateBannerDismissedHead);
   const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const restartCompletionDismissTimerRef = useRef<number | null>(null);
-  // True from "立即重启" until this document reloads. The workbench snapshot
+  // True from "重启更新" until this document reloads. The workbench snapshot
   // stays "open and healthy" for the whole request, so it must not count as
   // a finished restart.
   const restartWaitsForDocumentReloadRef = useRef(false);
@@ -1509,7 +1508,8 @@ export function AppShell() {
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
   // Workbench and Launcher versions share the delayed 120s polling cadence.
-  // Launcher-only updates open its existing management window.
+  // Either kind of update restarts this window. The banner does not send the
+  // user to Launcher to find a second button.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
   const launcherUpdateAvailable = isLauncherUpdateAvailable(launcherFreshnessQuery.data);
   const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
@@ -1519,7 +1519,7 @@ export function AppShell() {
     dismissedHead: updateBannerDismissedHead,
     launcherFreshness: launcherFreshnessQuery.data,
   });
-  const updateBannerText = launcherUpdateAvailable
+  const updateBannerText = !isUpdateBannerVerdict(updateBannerVerdict) && launcherUpdateAvailable
     ? launcherUpdateBannerCopy(lang)
     : updateBannerVerdict === "frontend_behind"
       ? frontendUpdateBannerCopy(lang)
@@ -2998,27 +2998,16 @@ export function AppShell() {
                 <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
                 <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
               </div>
-              {!launcherUpdateAvailable && updateBannerRestartNotice ? (
+              {updateBannerRestartNotice ? (
                 <span className={styles.updateBannerNote}>{updateBannerRestartNotice}</span>
               ) : null}
-              {launcherUpdateAvailable && launcherWindowError ? <span className={styles.updateBannerNote}>{launcherWindowError}</span> : null}
               <div className={styles.updateBannerActions}>
-                {launcherUpdateAvailable ? (
-                  <VButton type="button" variant="secondary" className={styles.updateBannerRestartButton}
-                    onPress={() => {
-                      setLauncherWindowError("");
-                      void showLauncherWindow().catch((error: unknown) => {
-                        setLauncherWindowError(error instanceof Error ? error.message : (lang === "en" ? "Could not open Launcher." : "无法打开启动管理。"));
-                      });
-                    }}>
-                    {lang === "en" ? "Open Launcher" : "打开启动管理"}
-                  </VButton>
-                ) : <VButton type="button" variant="secondary"
+                <VButton type="button" variant="secondary"
                   className={styles.updateBannerRestartButton}
                   onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
                   title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
-                </VButton>}
+                </VButton>
                 <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
                   title={updateBannerDismissActionLabel}>
                   {lang === "en" ? "Dismiss" : "暂不提醒"}

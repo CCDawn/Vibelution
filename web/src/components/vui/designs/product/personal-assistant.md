@@ -28,7 +28,7 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 ### 非职责
 不持有 transcript、composer、记忆副本或执行进度；原生 Session/SSE 与审批持有权威。
 ### 视觉与状态
-聊天为主体，可调整、可收起的概览侧栏；加载、错误与身份冲突用 VStateSurface；窄屏可收起概览。
+聊天为主体，可调整、可收起的概览侧栏；加载、错误与身份冲突用 VStateSurface；窄屏可收起概览。页面根节点在横向 VWorkbenchFrame 中占满可用宽度并参与伸展，避免按内容宽度缩成左侧窄列。
 ### 实现落点
 `routes/PersonalAssistantRoute.tsx`、`routes/personalAssistant/*`。
 ### 反冗余

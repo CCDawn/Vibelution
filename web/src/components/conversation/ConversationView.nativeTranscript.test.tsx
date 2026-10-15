@@ -505,6 +505,25 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html.slice(runningStart, runningEnd)).toContain(styles.statusSpinner);
   });
 
+  it("ends stale thinking and keeps accumulated progress out of the final response", () => {
+    const texts = ["我先摸清当前工作区和最近进展，再给结论。", "我先确认研究载体在哪，再谈进展。"];
+    const base = { version: 3 as const, sessionId: "session-1", turnId: "turn-progress-boundary", revision: 1 };
+    const html = renderConversation([{
+      id: "assistant-progress-boundary", role: "assistant", timestamp: "2026-10-15T01:00:00Z",
+      turnId: base.turnId, status: "running", turnItems: [
+        { ...base, id: "thought", itemId: "thought", sequence: 1, type: "reasoning", status: "running", terminal: false, text: "检查状态边界。" },
+        { ...base, id: "progress-1", itemId: "progress-1", sequence: 2, type: "agent_message", phase: "commentary", status: "completed", terminal: true, text: texts[0] },
+        { ...base, id: "tool", itemId: "tool", sequence: 3, type: "tool_call", status: "completed", terminal: true, callId: "call-1", toolName: "read_file_tool", output: "读取完成。" },
+        { ...base, id: "progress-2", itemId: "progress-2", sequence: 4, type: "agent_message", phase: "commentary", status: "completed", terminal: true, text: texts[1] },
+        { ...base, id: "cached-answer", itemId: "cached-answer", sequence: 5, type: "agent_message", phase: "final_answer", status: "running", terminal: false, text: texts.join(" ") },
+      ],
+    }]);
+    expect(html).not.toContain('data-codex-final-response="true"');
+    expect(html.match(/data-codex-progress-cell="true"/g)).toHaveLength(2);
+    expect(html).not.toContain("思考中");
+    expect(html).toContain("已思考");
+  });
+
   it("does not derive individual thought streaming from the whole assistant turn", () => {
     expect(conversationViewSource).not.toContain(
       'input.status === "running" || input.status === "pending" || assistantTurnIsStreaming(message)',

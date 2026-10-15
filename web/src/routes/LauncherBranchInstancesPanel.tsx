@@ -138,6 +138,7 @@ export function LauncherBranchInstancesPanel({
         startWorkbench: "启动工作台",
         openWorkbench: "打开工作台",
         switchWorkbench: "切换到工作台",
+        switchWorkbenchHint: "回到已经打开的工作台窗口。这一步不会更新代码。",
         recoverWorkbench: "恢复工作台",
         recoverWorkbenchHint: "恢复将先保存当前任务记录，再重启工作台。",
         retryStart: "重试启动",
@@ -204,6 +205,7 @@ export function LauncherBranchInstancesPanel({
         startWorkbench: "Start workbench",
         openWorkbench: "Open workbench",
         switchWorkbench: "Switch to workbench",
+        switchWorkbenchHint: "Bring the open workbench window forward. This does not update code.",
         recoverWorkbench: "Recover workbench",
         recoverWorkbenchHint: "Recovery saves the current task record before restarting the workbench.",
         retryStart: "Retry start",
@@ -429,7 +431,7 @@ export function LauncherBranchInstancesPanel({
             density="compact"
             isDisabled={startBusy || stopBusy || admissionBlocked}
             isPending={startBusy || stopBusy}
-            title={building ? labels.buildingHint : recovering ? labels.recoverWorkbenchHint : undefined}
+            title={building ? labels.buildingHint : recovering ? labels.recoverWorkbenchHint : openAction === "switch" ? labels.switchWorkbenchHint : undefined}
             onPress={requestOpen}
           >
             {startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}

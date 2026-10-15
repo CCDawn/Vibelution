@@ -11,6 +11,7 @@ import {
   storeUpdateBannerDismissedHead,
   updateBannerCopy,
   updateBannerHeadToken,
+  updateBannerRestartLabel,
   updateBannerRestartReloadsDocument,
 } from "./updateBanner";
 
@@ -44,8 +45,10 @@ describe("shouldShowUpdateBanner", () => {
     expect(shouldShowUpdateBanner({ verdict: "current", diskHead: "new-head", dismissedHead: "new-head", launcherFreshness })).toBe(false);
     expect(isLauncherUpdateAvailable({ current: null, label: "unknown" })).toBe(false);
     expect(isLauncherUpdateAvailable({ current: true, label: "current" })).toBe(false);
-    expect(launcherUpdateBannerCopy("zh").detail).toContain("打开启动管理");
+    expect(launcherUpdateBannerCopy("zh").detail).toContain("重启");
+    expect(launcherUpdateBannerCopy("zh").detail).not.toContain("打开启动管理");
     expect(frontendUpdateBannerCopy("zh").title).toContain("前端有更新");
+    expect(updateBannerRestartLabel("zh")).toBe("重启更新");
   });
   it("shows when the backend is behind and no dismissal matches the disk HEAD", () => {
     expect(shouldShowUpdateBanner({

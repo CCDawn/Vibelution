@@ -14,6 +14,7 @@ from ..knowledge_read_service import _safe_source_url
 from ..team_workflow.research_runtime.operator_authorization import require_server_operator
 from ..team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
 from ..runtime_scene_service import record_runtime_scene_event
+from .display_names import choose_display_topic, document_display_name, reference_display_name
 
 OFFICIAL_RELATIONS = {"supports": "支持", "maps_to": "映射到", "inspires": "启发", "approved_for_ingestion": "经审核收录"}
 
@@ -67,8 +68,9 @@ def _project(*, knowledge_base_id: str = ""):
             continue
         owner_node = node_id(owner_type, owner, owner_value)
         identity = owner.get(owner_type) or {}
-        graph.add_node(owner_node, owner_type, str(identity.get("displayName") or identity.get("name") or owner_value),
-                       metadata={"ownerType": owner_type, "ownerId": owner_value})
+        owner_label = str(identity.get("displayName") or identity.get("name") or ("未命名团队" if owner_type == "team" else "未命名智能体"))
+        graph.add_node(owner_node, owner_type, owner_label,
+                       metadata={"ownerType": owner_type, "ownerId": owner_value, "ownerLabel": owner_label})
         edge("project:vibelution", owner_node, f"project_has_{owner_type}", "包含", "ownership", "来自正式知识 owner 注册表。")
         all_items = knowledge._read_jsonl(knowledge._items_path_for_owner(owner))
         for base in bases:
@@ -76,7 +78,7 @@ def _project(*, knowledge_base_id: str = ""):
             base_node = node_id("knowledge_base", owner, base_id)
             base_name = str(base.get("name") or base_id)
             graph.add_node(base_node, "knowledge_base", base_name, summary=str(base.get("description") or ""),
-                metadata={"ownerType": owner_type, "ownerId": owner_value, "knowledgeBaseId": base_id})
+                metadata={"ownerType": owner_type, "ownerId": owner_value, "ownerLabel": owner_label, "knowledgeBaseId": base_id})
             edge(owner_node, base_node, f"{owner_type}_has_knowledge_base", "拥有知识库", "ownership", "来自知识库 owner 字段。")
             artifacts = {str(row.get("sourceArtifactId") or ""): row for row in knowledge._source_artifacts_for_base(owner, base_id)}
             states = lifecycle.lifecycle_states_for_base(owner, base, all_items, artifacts)
@@ -91,18 +93,17 @@ def _project(*, knowledge_base_id: str = ""):
                 official = raw_metadata.get("officialResearchGraph") if isinstance(raw_metadata.get("officialResearchGraph"), dict) else {}
                 synced = official.get("status") == "synced"
                 tags = [str(tag).strip()[:160] for tag in item.get("tags") or [] if isinstance(tag, str) and tag.strip()]
-                domain = str(official.get("targetDomain") or "").strip()[:160] if synced else ""
-                topic_label = domain or (sorted(set(tags))[0] if tags else base_name)
-                basis = "official_target_domain" if domain else "tag" if tags else "knowledge_base"
+                topic_label, basis, grouping_reason = choose_display_topic(item, base)
                 topic_key = f"{basis}:{topic_label}" if basis != "knowledge_base" else f"{basis}:{base_node}"
                 topic_id = "topic:" + hashlib.sha256(topic_key.encode()).hexdigest()[:24]
                 topics.setdefault(topic_id, {"id": topic_id, "label": topic_label, "groupingBasis": basis, "nodeIds": []})
                 graph.add_node(topic_id, "topic", topic_label, metadata={"groupingBasis": basis, "topicId": topic_id, "topicLabel": topic_label})
                 item_node = node_id("knowledge_item", owner, item_id)
-                metadata = {"ownerType": owner_type, "ownerId": owner_value, "knowledgeBaseId": base_id,
+                metadata = {"ownerType": owner_type, "ownerId": owner_value, "ownerLabel": owner_label, "knowledgeBaseId": base_id,
                     "knowledgeItemId": item_id, "knowledgeState": "active", "tags": tags, "topicId": topic_id,
                     "topicLabel": topic_label, "groupingBasis": basis, "revision": int(item.get("revision") or 1),
-                    "groupingReason": "按已同步科研领域分组。" if domain else "以标签排序首项作为主主题，未表示全部分类。" if tags else "无主题标签，按所属知识库分组。",
+                    "groupingReason": grouping_reason,
+                    "originalTitle": str(item.get("title") or ""),
                     "sourceArtifactIds": [str(value) for value in item.get("sourceArtifactIds") or []],
                     "centralSourceIds": sorted({str(artifacts[str(value)].get("centralSourceId") or "")
                         for value in item.get("sourceArtifactIds") or [] if str(value) in artifacts and artifacts[str(value)].get("centralSourceId")}),
@@ -111,11 +112,11 @@ def _project(*, knowledge_base_id: str = ""):
                     "reviewedAt": str(item.get("reviewedAt") or official.get("reviewedAt") or ""),
                     "proposalId": str(official.get("proposalId") or ""), "batchId": str(item.get("batchId") or official.get("batchId") or ""),
                     "fullContentIncluded": False}
-                graph.add_node(item_node, "knowledge_item", str(item.get("title") or item_id), summary=str(item.get("summary") or ""),
+                graph.add_node(item_node, "knowledge_item", document_display_name(item.get("title")), summary=str(item.get("summary") or ""),
                     status="active", created_at=str(item.get("createdAt") or ""), updated_at=str(item.get("updatedAt") or ""), metadata=metadata)
                 topics[topic_id]["nodeIds"].append(item_node)
                 edge(base_node, item_node, "knowledge_base_has_item", "收录", "ownership", "条目已写入正式知识库且当前生命周期有效。")
-                edge(topic_id, item_node, "topic_has_item", "归入主题", "knowledge", f"按 {basis} 字段分组，不表示因果或支持关系。")
+                edge(topic_id, item_node, "topic_has_item", "归入主题", "knowledge", grouping_reason)
                 for source_id in dict.fromkeys(str(value) for value in item.get("sourceArtifactIds") or []):
                     source = artifacts.get(source_id)
                     if source is None:
@@ -125,8 +126,8 @@ def _project(*, knowledge_base_id: str = ""):
                     if "url" in source_ref:
                         source_ref["url"] = _safe_source_url(source_ref["url"])
                     source_state = lifecycle.source_lifecycle_state(source, now=knowledge.utc_now_iso())
-                    graph.add_node(source_node, "source_artifact", str(source.get("title") or source_id), status=source_state,
-                        metadata={"ownerType": owner_type, "ownerId": owner_value, "knowledgeBaseId": base_id,
+                    graph.add_node(source_node, "source_artifact", document_display_name(source.get("title"), source=True), status=source_state,
+                        metadata={"ownerType": owner_type, "ownerId": owner_value, "ownerLabel": owner_label, "knowledgeBaseId": base_id,
                             "sourceArtifactId": source_id, "centralSourceId": str(source.get("centralSourceId") or ""),
                             "sourceType": str(source.get("sourceType") or ""), "sourceRef": source_ref, "sourceState": source_state,
                             "sourceHash": str(source.get("sourceHash") or ""), "lifecycleRevision": int(source.get("lifecycleRevision") or 0),
@@ -143,8 +144,9 @@ def _project(*, knowledge_base_id: str = ""):
                             continue
                         kind = str(relation["relation"])
                         ref_node = node_id("official_research_ref", owner, f"{relation.get('sourceType') or 'research_ref'}:{relation['sourceId']}")
-                        graph.add_node(ref_node, "official_research_ref", str(relation["sourceId"]), status="official_synced",
-                            metadata={"ownerType": owner_type, "ownerId": owner_value, "sourceType": str(relation.get("sourceType") or "research_ref"),
+                        ref_label, ref_summary = reference_display_name(str(relation.get("sourceType") or "research_ref"), str(relation["sourceId"]), str(item.get("title") or ""), str(relation.get("sourceTitle") or relation.get("title") or ""))
+                        graph.add_node(ref_node, "official_research_ref", ref_label, summary=ref_summary, status="official_synced",
+                            metadata={"ownerType": owner_type, "ownerId": owner_value, "ownerLabel": owner_label, "sourceType": str(relation.get("sourceType") or "research_ref"),
                                 "sourceId": str(relation["sourceId"]), "topicId": topic_id, "topicLabel": topic_label,
                                 "reviewedByAgentId": str(official.get("reviewedByAgentId") or ""), "reviewedAt": str(official.get("reviewedAt") or "")})
                         source_topic_membership(ref_node, topic_id)

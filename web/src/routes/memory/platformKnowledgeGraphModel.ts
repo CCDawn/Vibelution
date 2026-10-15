@@ -2,7 +2,15 @@ import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode, PlatformKnowle
 
 export type PlatformRelationLayer = "knowledge" | "ownership" | "evidence";
 export const platformLayerLabels: Record<PlatformRelationLayer, string> = { knowledge: "知识关联", ownership: "归属关系", evidence: "证据关系" };
-export const topicBasisLabels = { tag: "按主标签聚合", knowledge_base: "按知识库聚合", official_target_domain: "按已审核科研领域聚合" } as const;
+export const topicBasisLabels = { tag: "按内容标签聚合", knowledge_base: "按知识库聚合", official_target_domain: "按已审核科研领域聚合", title_keywords: "按标题关键词分组" } as const;
+
+export function isAdministrativeRelation(edge: MemoryKnowledgeGraphEdge) {
+  return edge.type === "official_approved_for_ingestion";
+}
+
+export function isContentRelation(edge: MemoryKnowledgeGraphEdge) {
+  return relationLayer(edge) === "knowledge" && edge.type !== "topic_has_item";
+}
 
 export function relationLayer(edge: MemoryKnowledgeGraphEdge): PlatformRelationLayer {
   return edge.metadata.layer === "ownership" ? "ownership" : edge.metadata.layer === "evidence" ? "evidence" : "knowledge";

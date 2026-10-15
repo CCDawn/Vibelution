@@ -227,6 +227,19 @@ describe("LauncherRoute lifecycle intent ordering", () => {
     expect(document.body.textContent).not.toContain("启动请求被拒绝");
   });
 
+  it("shows a queued restart on the row because the window does not move", async () => {
+    apiMocks.requestBranchInstanceLifecycle.mockResolvedValue({
+      accepted: true,
+      code: "restart_queued",
+      message: "有进行中的任务，已登记预约重启：任务结束后自动执行。",
+    });
+    await renderRoute();
+    await click("请求启动");
+    await waitFor(() => apiMocks.getLauncherBranchInstances.mock.calls.length > 1, "queued restart refreshes state");
+    expect(document.querySelector('[data-testid="row-feedback"]')?.textContent).toContain("已登记预约重启");
+    expect(document.querySelector("main > p")).toBeNull();
+  });
+
   it("keeps the shell freshness feedback on the row without adding a success footer", async () => {
     apiMocks.requestBranchInstanceLifecycle.mockResolvedValue({ accepted: true, shellStale: true });
     await renderRoute();
