@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { ConversationMessage } from "../../api/types";
 import {
   buildConversationTurnNavDirectory,
   CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS,
@@ -9,6 +10,8 @@ import {
   conversationTurnNavLabel,
   conversationTurnNavRowKind,
   resolveConversationTurnNavCurrentIndex,
+  turnNavPlainPreviewText,
+  turnNavPreviewText,
   type ConversationTurnNavEntry,
   type ConversationTurnNavRowInput,
 } from "./conversationTurnNavigation";
@@ -209,5 +212,33 @@ describe("conversationTurnNavigation", () => {
   it("keeps the minimap gated behind a six-turn minimum", () => {
     expect(CONVERSATION_TURN_NAV_MIN_TURNS).toBe(6);
     expect(turnDirectory()).toHaveLength(4);
+  });
+
+  it("reads the user prompt or the assistant answer, then strips markdown for hover cards", () => {
+    const user: ConversationMessage = {
+      id: "u1",
+      role: "user",
+      timestamp: "2026-01-02T10:30:00Z",
+      content: [
+        "```js",
+        "const hidden = 1;",
+        "``` ![shot](img.png) [docs](https://example.test)",
+        "# Heading",
+        "> quote",
+        "**bold** __em__ ~~gone~~ `tick`",
+      ].join("\n"),
+    };
+    expect(turnNavPreviewText(undefined)).toBe("");
+    expect(turnNavPreviewText(user)).toContain("```js");
+    expect(turnNavPlainPreviewText(undefined)).toBe("");
+    expect(turnNavPlainPreviewText(user)).toBe("docs Heading quote bold em gone tick");
+    expect(turnNavPlainPreviewText({
+      id: "a1",
+      role: "assistant",
+      turnId: "turn-1",
+      status: "completed",
+      timestamp: "2026-01-02T10:30:05Z",
+      turnItems: [],
+    })).toBe("");
   });
 });
