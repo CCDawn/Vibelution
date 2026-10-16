@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="390" viewBox="0 0 600 390" role="img" aria-labelledby="title desc">
+<title id="title">Vibelution</title><desc id="desc">让 Agent 协作，让知识延续。</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#101f28"/><stop offset="1" stop-color="#143b3b"/></linearGradient></defs><rect width="600" height="390" rx="16" fill="url(#bg)"/>
+<circle cx="555" cy="30" r="120" fill="none" stroke="#8ad9c7" opacity=".16"/><circle cx="555" cy="30" r="170" fill="none" stroke="#8ad9c7" opacity=".12"/>
+<g font-family="Segoe UI, Microsoft YaHei, sans-serif"><text x="38" y="52" fill="#91bfb6" font-size="16" letter-spacing="3">YOUR LOCAL AI WORKBENCH</text><text x="34" y="138" fill="#f7fbf9" font-size="74" font-weight="650" letter-spacing="-2">Vibelution</text><text x="38" y="211" fill="#dcece6" font-size="35">让 Agent 协作，</text><text x="38" y="261" fill="#dcece6" font-size="35">让知识延续。</text><path d="M38 300H562" stroke="#8ac4b2" opacity=".23"/><text x="38" y="346" fill="#a9c7bf" font-size="22">团队研究 · 知识记忆 · 验证进化</text></g></svg>

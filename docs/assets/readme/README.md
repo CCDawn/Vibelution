@@ -110,3 +110,22 @@ python docs/assets/readme/capture.py
 ### 本轮验证范围
 
 已用 GitHub Markdown API 的实际清洗结果核对 `picture/source` 保留情况，并在本地隔离浏览器检查桌面与 390px、浅色与深色的 README 排版。图片、内部链接及中英文能力对应分别检查。此验证不等于线上发布，也不等于本轮安装、真实模型对话或产品运行验收。
+
+## 2026-10-16 完整功能展示
+
+中英文首页采用简洁封面、团队分工图、能力索引、快速开始和六组完整截图。所有新素材位于 `showcase/`；旧素材保留，避免破坏已有引用。英文正文与图解独立翻译，产品截图保留原有中文界面。
+
+六张 PNG 来自用户在本次 README 任务中提供并明确允许使用的截图，逐字节保留原图，不裁剪、不替换文字、不补造运行结果。以下日期为收录日期，不推定为截图拍摄时间。
+
+| 文件 | 原始附件标识 | 展示范围与限制 |
+| --- | --- | --- |
+| `showcase/conversation.png` | `68699234-76ad-4a80-a687-a610c3b6f67d` | 会话分组、标签与输入区；新会话状态不证明任务完成。 |
+| `showcase/team.png` | `d50604b2-96f5-4b62-b905-0fb31ec22f16` | 团队成员、组织画布与详情；组织关系不表示当前任务进度。 |
+| `showcase/knowledge.png` | `4b1453e2-f154-44d3-a7d7-ea3b27afbde2` | 平台知识全景；主题分组和空间距离不代表支持、反驳或因果关系。 |
+| `showcase/evolution.png` | `104084c1-2af6-4c4c-8fd5-47fbe0675e9b` | 监督进化对话、候选与阶段；分数仅属图中个例，激活缺少运行版本证据。 |
+| `showcase/finance.png` | `1a1ffc17-d75d-4281-83c5-d62dc179415b` | 金融工作台入口；空状态不证明研究完成、数据接通或实盘交易。 |
+| `showcase/companion.png` | `5100607f-ea6b-44e5-a955-9c88750b5ed2` | 人物场景、状态与对话；不单独证明主动调度或动画运行。第三方角色权利归原权利人。 |
+
+`showcase/cover.zh.svg`、`cover.en.svg` 及对应 `cover-mobile.*.svg` 是可编辑的文字封面。`showcase/team-flow.*.svg` 与 `team-flow-mobile.*.svg` 是依据团队截图整理的角色分工示意，明确标注为非产品界面、非执行记录；桌面横排和手机纵排分别排版。可编辑组合预览见 [中文图解](showcase/team-diagram.zh.html) / [English diagram](showcase/team-diagram.en.html)。这些图解无外部字体或图片依赖。
+
+功能描述沿用上方事实来源，并补充 [团队前端](../../../web/src/routes/teams/TeamHomeSurface.tsx)、[金融工作台](../../../web/src/routes/finance/README.md) 与 [虚拟人插件](../../../core/agent_plugins/virtual_human_life/README.md)。本轮不修改产品界面或运行配置；首页素材更新不代表产品功能重新验收或远端发布。

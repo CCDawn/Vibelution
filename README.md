@@ -1,40 +1,42 @@
-<h1 align="center">Vibelution</h1>
-
-<p align="center"><strong>你的本地 AI Agent 工作台</strong></p>
-<p align="center">从一次对话开始，把编码、团队研究、知识积累与持续改进放在一起。</p>
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/showcase/cover-mobile.zh.svg">
+  <img src="docs/assets/readme/showcase/cover.zh.svg" alt="Vibelution — 让 Agent 协作，让知识延续。你的本地 AI Agent 工作台。" width="1200">
+</picture>
 
 <p align="center">
   中文 · <a href="README.en.md">English</a><br>
-  <a href="#快速开始">快速开始</a> · <a href="docs/guides/first-conversation.md">第一次对话</a> · <a href="#工作台里能做什么">功能导览</a>
+  <a href="#start">快速开始</a> · <a href="#features">功能导览</a> · <a href="docs/guides/first-conversation.md">第一次对话</a> · <a href="docs/README.md">文档</a><br>
+  本地工作台 &nbsp; / &nbsp; 本地或云端模型 &nbsp; / &nbsp; MIT 代码许可证
 </p>
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/CCDawn/Vibelution?style=flat-square" alt="MIT License"></a>
-  <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows 桌面工作台"></a>
-  <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-2b9d98?style=flat-square" alt="欢迎反馈"></a>
-</p>
+<a id="teams"></a>
+## 一个团队，各司其职
+
+把规划、开发与评审交给不同的 Agent。在同一张画布上查看成员分工，通过群聊和成员消息推进任务，保留讨论与交接记录。
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/workbench.mobile.zh.png">
-  <img src="docs/assets/readme/workbench.zh.png" alt="生产工作台的公开任务示例：导航、Agent 列表、问题、工具过程、完整回答与输入区。" width="960">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/showcase/team-flow-mobile.zh.svg">
+  <img src="docs/assets/readme/showcase/team-flow.zh.svg" alt="团队分工示意：规划师派发任务给两位开发工程师，两位开发工程师向评审员提审。" width="960">
 </picture>
 
-*工作台路由的隔离展示，使用固定公开任务数据，未调用模型。[素材来源与再生成](docs/assets/readme/README.md)*
+*依据团队截图整理的分工示意，非产品界面。[查看真实团队画布 ↓](#team-interface)*
 
-<details>
-<summary><strong>查看完整三栏工作台与文件审查</strong></summary>
+<a id="features"></a>
+## 从日常对话，到持续协作
 
-[![同一公开任务的完整桌面工作台：会话、工具过程、文件差异与仓库改动](docs/assets/readme/workbench-overview.zh.png)](docs/assets/readme/workbench-overview.zh.png)
+| 你想做什么 | 在 Vibelution 中 |
+| --- | --- |
+| [开始对话与编码](#conversation) | 按 Agent 和团队管理会话，查看工具过程与工作区产物。 |
+| [让团队一起工作](#teams) | 明确成员职责，在画布、群聊与成员会话之间协作。 |
+| [把资料留给下一次](#knowledge) | 管理私有记忆与正式知识，按主题浏览并追溯来源。 |
+| [用验证推动改进](#evolution) | 查看基线、候选、复评、审核和版本激活的过程。 |
+| [开展金融研究](#finance) | 在专属工作台组织研究、行情、模拟资产和报告。 |
+| [与虚拟人相伴](#companion) | 在人物场景中对话，为启用插件的 Agent 配置生活与记忆。 |
 
-同一生产路由的宽屏取景；点击图片可查看原图。
+<a id="start"></a>
+## 开始你的第一次对话
 
-</details>
-
-从一次会话开始，Agent 可以阅读项目、执行获准的工具操作，并把回答、过程和文件改动留在同一工作区里。你能在任务推进时核对它做了什么，再按需要延伸到团队研究与知识复用。
-
-## 快速开始
-
-推荐先体验 **Windows 桌面工作台**。准备 **Python 3.11+（推荐 3.12）、Node.js 22.12+ 和 Git**，在 PowerShell 中执行：
+推荐先体验 **Windows 桌面工作台**。准备 Python 3.11+（推荐 3.12）、Node.js 22.12+ 和 Git，在 PowerShell 中执行：
 
 ```powershell
 git clone https://github.com/CCDawn/Vibelution.git
@@ -42,124 +44,110 @@ cd Vibelution
 powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 ```
 
-1. 打开桌面的 **Vibelution Launcher**，按[模型配置指南](docs/ops/config/INDEX.md)填写服务商、模型和密钥引用。配置文件默认位于 `%USERPROFILE%\Documents\Vibelution\config\config.toml`。
-2. 进入「对话」，创建或选择一个 Agent，然后新建会话。
-3. 发送一条普通文字问题；看到自己的消息和 Agent 回复后，再尝试文件、工具或团队任务。
+1. 打开桌面的 **Vibelution Launcher**，按[模型配置指南](docs/ops/config/INDEX.md)设置服务商、模型和密钥引用。
+2. 进入「对话」，创建或选择一个 Agent，再新建会话。
+3. 发送第一条消息，收到回复后，再尝试文件、工具或团队任务。
 
-**[跟着「第一次对话」完成上手 →](docs/guides/first-conversation.md)**
+[第一次对话 →](docs/guides/first-conversation.md) · [Windows 安装与排错](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)
 
-[Windows 安装与排错](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md) · [让 AI 帮你部署](docs/guides/agent-deploy-runbook.md)
+macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，便携安装包仍在规划中。工作台在本机运行；使用云端模型时，请求会发给所选服务商，并可能产生费用。
 
-macOS / Linux 按对应指南从终端启动浏览器工作台。当前安装需要上述运行环境，便携安装包仍在规划中。
+<a id="team-interface"></a>
+## 团队画布的实际界面
 
-## 工作台里能做什么
+成员列表、组织画布和成员详情放在同一个工作区。选择节点查看职责，通过群聊与成员消息开展讨论。
 
-| 能力 | 你可以做什么 |
+[![开发团队实际界面：成员列表、四角色画布与成员详情](docs/assets/readme/showcase/team.png)](docs/assets/readme/showcase/team.png)
+
+*用户提供的完整原图，点击可放大查看。画布展示组织关系，右侧保留历史任务记录。*
+
+<a id="conversation"></a>
+## 01 / 从一个会话开始
+
+为不同任务选择不同 Agent，把日常提问、项目讨论和编码工作留在各自的会话里。团队分组和多标签切换，让你更容易找回正在关注的事情。
+
+[![对话工作台：Agent 与团队分组、多会话标签和输入区](docs/assets/readme/showcase/conversation.png)](docs/assets/readme/showcase/conversation.png)
+
+**按任务组织**：Agent、团队与会话集中浏览。**跟进过程**：在任务执行时查看回答与工具活动，并结合工作区文件、预览和终端继续工作。
+
+*图为新会话状态，展示会话组织与输入界面，不是一次任务的完成记录。*
+
+[会话与工作区](web/src/routes/chat/README.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md)
+
+<a id="knowledge"></a>
+## 02 / 让知识有出处，也有去处
+
+各 Agent 的私有记忆、团队资料与正式知识分别管理。在知识全景中按主题浏览，再进入具体资料与来源，把已经积累的内容带到下一次工作中。
+
+[![平台知识全景：按主题分组浏览正式知识，提供知识、归属与证据关系入口](docs/assets/readme/showcase/knowledge.png)](docs/assets/readme/showcase/knowledge.png)
+
+**从主题找到资料**：浏览主题分组、检索知识与来源。**保留依据**：正式知识有提案、审核和来源管理；私有记忆遵循各自的访问范围。
+
+*图中的星域表示主题分组；当前展示数据尚未建立支持、反驳等内容关系，空间距离不代表因果或支持关系。*
+
+[记忆与检索](core/web/services/memory_rag_services.md) · [团队知识](core/web/services/team_knowledge/README.md)
+
+<a id="evolution"></a>
+## 03 / 每一次改进，都能回看依据
+
+自进化围绕目标开展检查、修改与验证；监督进化把基线、候选和独立复评放在同一条流程中，交由审核决定是否集成。
+
+[![监督进化工作台：Agent 评审对话、候选改动与阶段进度](docs/assets/readme/showcase/evolution.png)](docs/assets/readme/showcase/evolution.png)
+
+**看见评审过程**：保留 Agent 对话、候选改动和复评记录。**区分完成阶段**：评测、审批、集成与运行版本激活分别展示，不把一个阶段的成功当成全部完成。
+
+*图中评分仅属于该评测案例；界面仍提示候选正在激活、尚未获得运行版本证明，不代表通用能力已从 30 提升到 99。持续自进化需要用户批准并设置停止条件。*
+
+[两种进化模式](core/web/services/evolution_services.md) · [进化配置](docs/ops/config/06-agent-evolution.md)
+
+<a id="finance"></a>
+## 04 / 一个专属的金融研究工作台
+
+围绕股票与主题展开研究，把分析员协作、行情、模拟账户、组合研究和报告资料放在同一处，减少在不同工具之间搬运上下文。
+
+[![金融研究工作台：研究、行情、资产和资料入口，以及研究对话侧栏](docs/assets/readme/showcase/finance.png)](docs/assets/readme/showcase/finance.png)
+
+| 工作环节 | 已有入口 |
 | --- | --- |
-| **对话与编码** | 与单个 Agent 开始任务，管理会话，查看回答与工具过程；浏览工作区文件、预览产物并使用终端。 |
-| **Agent 与工具** | 分别配置身份、模型、提示词与工具权限，管理 Skills 和 MCP 接入。 |
-| **团队与研究** | 组织成员分工、群聊与消息交接，用研究画布串起资料、讨论、人工确认和阶段产物。 |
-| **知识与记忆** | 阅读各 Agent 的私有记忆，整理项目知识与团队资料，结合检索继续工作。 |
-| **验证与进化** | 围绕目标检查和改进，或对照基线评估候选，查看验证、审核与回滚记录。 |
-| **Git 与版本** | 在工作台检查仓库状态与差异，管理提交，追踪项目改动。 |
-| **模型与运行** | 配置模型与用量，监控本地模型，查看日志与运行诊断。 |
+| 研究与协作 | 股票研究、主题研究、分析员协作、研究任务 |
+| 行情与模拟资产 | 自选行情、股票筛选、模拟账户、组合研究、历史回测与交易复盘 |
+| 资料与积累 | 报告中心、研究记忆、技能中心与学习中心 |
 
-工作台在本机运行。模型可以按配置接入本地或云端服务；云端请求会发给所选服务商并可能产生费用。工具调用、跨 Agent 通信和进化执行受授权与环境约束。
+*图为研究开始前的界面。行情与研究需要相应服务、数据和模型配置；模拟账户与历史回测不等于实盘交易，当前不包含券商交易执行。*
 
-<details>
-<summary><strong>展开查看整体能力关系图</strong></summary>
+[金融工作台说明](web/src/routes/finance/README.md) · [财报服务配置](docs/ops/config/financial-report-agent.md)
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.zh.svg">
-  <img src="docs/assets/readme/product-overview.zh.svg" alt="Vibelution 能力概览：本地工作台连接对话与编码、团队与研究、知识与记忆、验证与进化，配套模型、工具、Git 和运行记录。" width="1200">
-</picture>
+<a id="companion"></a>
+## 05 / 工作之外，也可以聊聊生活
 
-</details>
+在人物场景中继续日常对话。为显式启用虚拟人插件的 Agent 配置人物身份、日程、情绪与长期记忆，让陪伴有自己的呈现方式。
 
-## 从一个任务到持续协作
+[![虚拟人陪伴：人物场景、生活状态与日常对话](docs/assets/readme/showcase/companion.png)](docs/assets/readme/showcase/companion.png)
 
-### 在对话里阅读、讨论与编码
+**人物与场景**：沉浸式人物界面，生活状态与对话同屏。**持续对话**：插件提供主动联系、未完话题与记忆机制，并受启用状态和相关配置约束。
 
-让一个 Agent 先理解问题，再阅读相关文件、提出方案和完成授权的操作。回答、工具过程与工作区产物可以在同一工作台中查看。
+*截图展示人物对话界面；主动调度和动态表现需要运行环境支持。角色名称与第三方素材的权利归各自权利人所有。*
 
-<details>
-<summary><strong>查看会话界面示例</strong></summary>
+[虚拟人插件](core/agent_plugins/virtual_human_life/README.md)
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/conversation.mobile.zh.png">
-  <img src="docs/assets/readme/conversation.zh.png" alt="ConversationView 生产组件隔离示例：项目审查问题、结构化回答与消息输入区。" width="960">
-</picture>
+## 按你的方式配置工作台
 
-*2026-10-11 生产会话组件的隔离示例，使用固定公开数据，未调用模型。*
+| 配套能力 | 用途 |
+| --- | --- |
+| **Agent 配置** | 分别配置身份、模型、提示词与工具权限。 |
+| **工具、Skills 与 MCP** | 查看工具授权、浏览本机技能，并配置受管 MCP 接入。 |
+| **Git 与文件审查** | 查看仓库状态、文件差异和提交，核对任务带来的改动。 |
+| **模型与用量** | 配置模型服务，查看用量与本地模型状态。 |
+| **日志与运行诊断** | 查阅运行记录，定位执行中的问题。 |
 
-</details>
-
-[第一次对话](docs/guides/first-conversation.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md) · [MCP 接入](docs/agents/mcp-managed-agent-gateway.md)
-
-### 在工作台中追踪项目改动
-
-从全局导航进入 Git，检查文件变化与 diff，再决定本次提交的范围。工作区、分支状态和最近提交放在同一个页面中，方便核对 Agent 改了什么。
-
-[Git 配置](docs/ops/config/08-git-ui-user.md)
-
-### 把资料和经验留给下一次工作
-
-各 Agent 的私有记忆独立管理；项目知识与团队资料有各自的入口。可以阅读文件正文、检索材料并核对来源，减少每次重新交代背景的成本。
-
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/memory.mobile.zh.png">
-  <img src="docs/assets/readme/memory.zh.png" alt="记忆阅读组件隔离示例：项目约定、资料来源与下一步安排。" width="960">
-</picture>
-
-*2026-10-11 生产记忆组件的隔离示例，展示公开笔记。保存过不等于已在对话中使用过；当前文件快照也不代表完整修改历史。[记忆与检索](core/web/services/memory_rag_services.md) · [团队知识库](core/web/services/team_knowledge/README.md)*
-
-### 让团队推进研究与评审
-
-为调研、分析、编码与评审安排不同成员，通过群聊、成员消息和团队广播交换材料。研究画布展示任务依赖、人工确认与阶段产物；交接时可分别跟进投递和执行状态。
-
-<details>
-<summary><strong>查看科研案例：画布、团队讨论与知识图谱</strong></summary>
-
-[![科研历史回放：研究画布、成员讨论与知识图谱](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
-
-[▶ 完整演示 · 2 分 37 秒 · 1080p](docs/assets/readme/challenge-cup-demo.mp4) · [下载 MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true)
-
-2026-09-08 录制的科研历史数据回放，含中文配音与字幕，展示流程。实验执行取决于适配器、数据与环境；学术结论仍需核对原始来源和实验结果。
-
-[研究画布原图](docs/assets/readme/research-workflow.png) · [知识图谱原图](docs/assets/readme/challenge-cup-graph.png)
-
-</details>
-
-[研究工作流](core/web/services/team_workflow/README.md) · [通信机制](docs/adr/0002-agent-collaboration-session-addressing.md)
-
-### 用验证决定下一次改进
-
-自进化围绕目标检查、修改与验证；监督进化对照基线复评候选，再由审核决定是否集成。查看改动、评测与回滚记录，保留每次取舍的依据。
-
-<details>
-<summary><strong>查看两种进化方式的流程</strong></summary>
-
-![自进化与监督进化的机制示意](docs/assets/readme/evolution-paths.zh.png)
-
-机制示意。提案与候选不代表已经提升；持续自进化需用户批准并设置停止条件。
-
-</details>
-
-[进化模式](core/web/services/evolution_services.md) · [进化配置](docs/ops/config/06-agent-evolution.md)
-
-## 专项扩展
-
-- **金融研究：** 行情与财报研究、偏好、回测等独立领域模块。[金融研究](core/web/services/financial_research/README.md) · [财报服务接入](docs/ops/config/financial-report-agent.md)。外部服务需单独部署与验证；回测结果用于历史研究。
-- **虚拟人与桌面伙伴：** 为显式启用插件的 Agent 配置人物身份、日程、情绪与长期记忆。生活与对话连续性仍在打磨。[虚拟人插件](core/agent_plugins/virtual_human_life/README.md) · [人物大厅历史截图](docs/assets/readme/companions.png) · [桌宠待机动效](docs/assets/readme/desktop-pet.gif)
+[模型与用量配置](docs/ops/config/INDEX.md) · [MCP 接入](docs/agents/mcp-managed-agent-gateway.md) · [Git 配置](docs/ops/config/08-git-ui-user.md) · [本地模型监控](docs/ops/local-model-monitor.md)
 
 ## 文档与参与
 
-[模型与用量配置](docs/ops/config/INDEX.md) · [Git 配置](docs/ops/config/08-git-ui-user.md) · [本地模型监控](docs/ops/local-model-monitor.md) · [更新记录](CHANGELOG.md)
+[贡献指南](CONTRIBUTING.md) · [文档地图](docs/README.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/CCDawn/Vibelution/issues) · [安全问题](SECURITY.md)
 
-**开发者参考：** [贡献指南](CONTRIBUTING.md) · [源码与文档地图](docs/README.md) · [工具实现索引](tools/README.md) · [测试指南](tests/README.md) · [安全问题](SECURITY.md)
+相关项目：[briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 
-欢迎通过 [GitHub Issues](https://github.com/CCDawn/Vibelution/issues)反馈问题或提出建议。描述你的平台、复现步骤和预期行为，会让问题更容易定位。
+[MIT 代码许可证](LICENSE) · [第三方组件](THIRD_PARTY_COMPONENTS.md)
 
-**相关项目：** [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
-
-[MIT 代码许可证](LICENSE) · [第三方组件](THIRD_PARTY_COMPONENTS.md) · [展示素材来源](docs/assets/readme/README.md)。角色名称与第三方素材的权利归各自权利人所有，代码许可证不授予这些素材的权利。
+[展示素材来源与说明](docs/assets/readme/README.md)。界面截图用于展示功能入口与当时状态，不代替功能验收。代码许可证不授予第三方角色素材的权利。

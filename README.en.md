@@ -1,40 +1,42 @@
-<h1 align="center">Vibelution</h1>
-
-<p align="center"><strong>Your local AI Agent workbench</strong></p>
-<p align="center">Start with a conversation. Bring coding, team research, knowledge, and continuous improvement together.</p>
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/showcase/cover-mobile.en.svg">
+  <img src="docs/assets/readme/showcase/cover.en.svg" alt="Vibelution — Agents collaborate. Knowledge grows. Your local AI Agent workbench." width="1200">
+</picture>
 
 <p align="center">
   <a href="README.md">中文</a> · English<br>
-  <a href="#quick-start">Quick start</a> · <a href="docs/guides/first-conversation.en.md">First conversation</a> · <a href="#what-you-can-do">Feature tour</a>
+  <a href="#start">Quick start</a> · <a href="#features">Feature tour</a> · <a href="docs/guides/first-conversation.en.md">First conversation</a> · <a href="docs/README.md">Documentation</a><br>
+  Local workbench &nbsp; / &nbsp; Local or cloud models &nbsp; / &nbsp; MIT code license
 </p>
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/CCDawn/Vibelution?style=flat-square" alt="MIT License"></a>
-  <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows desktop workbench"></a>
-  <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-2b9d98?style=flat-square" alt="Feedback welcome"></a>
-</p>
+<a id="teams"></a>
+## One team, distinct roles
+
+Assign planning, development, and review to different Agents. See their responsibilities on one canvas, coordinate through group chat and member messages, and retain discussion and handoff records.
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/workbench.mobile.en.png">
-  <img src="docs/assets/readme/workbench.en.png" alt="A public task in the production workbench: navigation, Agent list, question, tool activity, complete answer, and composer." width="960">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/showcase/team-flow-mobile.en.svg">
+  <img src="docs/assets/readme/showcase/team-flow.en.svg" alt="Team role illustration: the planner assigns work to two developers, who submit it to a reviewer." width="960">
 </picture>
 
-*An isolated workbench-route showcase using fixed public task data; no model was called. [Media sources and reproduction](docs/assets/readme/README.md)*
+*Role illustration based on the team screenshot, not a product interface. [See the actual team canvas ↓](#team-interface)*
 
-<details>
-<summary><strong>View the full three-pane workbench and file review</strong></summary>
+<a id="features"></a>
+## From everyday conversations to ongoing collaboration
 
-[![The same public task in the full desktop workbench: conversation, tool activity, file diff, and repository changes](docs/assets/readme/workbench-overview.en.png)](docs/assets/readme/workbench-overview.en.png)
+| What you want to do | In Vibelution |
+| --- | --- |
+| [Start a conversation or coding task](#conversation) | Organize sessions by Agent and team; inspect tool activity and workspace artifacts. |
+| [Work as a team](#teams) | Define member roles and coordinate through the canvas, group chat, and member sessions. |
+| [Keep material for next time](#knowledge) | Manage private memory and formal knowledge; browse topics and trace sources. |
+| [Improve through verification](#evolution) | Follow baselines, candidates, reevaluation, review, and runtime activation. |
+| [Conduct financial research](#finance) | Organize research, market data, simulated assets, and reports in a dedicated workspace. |
+| [Spend time with a virtual companion](#companion) | Chat in character scenes and configure life and memory for plugin-enabled Agents. |
 
-A wide capture of the same production route. Click the image to view the original.
+<a id="start"></a>
+## Start your first conversation
 
-</details>
-
-Start with one conversation: an Agent can read the project, use authorized tools, and keep its answer, activity, and file changes in one workspace. Follow what it did as the task progresses, then extend the work into team research and reusable knowledge.
-
-## Quick start
-
-Start with the **Windows desktop workbench**. Install **Python 3.11+ (3.12 recommended), Node.js 22.12+, and Git**, then run in PowerShell:
+Start with the **Windows desktop workbench**. Install Python 3.11+ (3.12 recommended), Node.js 22.12+, and Git, then run in PowerShell:
 
 ```powershell
 git clone https://github.com/CCDawn/Vibelution.git
@@ -42,124 +44,110 @@ cd Vibelution
 powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 ```
 
-1. Open **Vibelution Launcher** from your desktop. Follow the [model configuration guide](docs/ops/config/INDEX.md) to set up a provider, model, and credential reference. The default config file is `%USERPROFILE%\Documents\Vibelution\config\config.toml`.
-2. Open `Chat`, create or select one Agent, and start a session.
-3. Send a text-only question. Once you see your message and the Agent's reply, try files, tools, or team tasks.
+1. Open **Vibelution Launcher** from your desktop. Follow the [model configuration guide](docs/ops/config/INDEX.md) to configure a provider, model, and credential reference.
+2. Open Chat, create or select an Agent, and start a new session.
+3. Send your first message. Once you receive a reply, try files, tools, or team tasks.
 
-**[Follow the first-conversation guide →](docs/guides/first-conversation.en.md)**
+[First conversation →](docs/guides/first-conversation.en.md) · [Windows installation and troubleshooting](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)
 
-[Windows installation and troubleshooting](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md) · [Deploy with an AI Agent](docs/guides/agent-deploy-runbook.md)
+macOS and Linux use the browser workbench. Installation currently requires the runtimes above; a portable installer is still planned. The workbench runs locally. Cloud model requests are sent to the selected provider and may incur charges.
 
-On macOS / Linux, follow the platform guide to launch the browser workbench from a terminal. Installation currently requires the runtimes above; a portable package is still planned.
+<a id="team-interface"></a>
+## The actual team canvas
 
-## What you can do
+The member list, organization canvas, and member details share one workspace. Select a node to inspect its role, and use group chat or member messages for discussion.
 
-| Capability | What it helps you do |
-| --- | --- |
-| **Chat and coding** | Start tasks with one Agent, manage sessions, inspect answers and tool activity, browse workspace files, preview outputs, and use a terminal. |
-| **Agents and tools** | Configure identities, models, prompts, and permissions independently; manage Skills and MCP integration. |
-| **Teams and research** | Assign roles, use group chat and message handoffs, and connect sources, discussions, human checkpoints, and outputs on a research canvas. |
-| **Knowledge and memory** | Read each Agent's private memory, organize project and team material, and retrieve context for later work. |
-| **Evaluation and evolution** | Inspect and improve against a goal, or evaluate a candidate against a baseline; review validation and rollback records. |
-| **Git and versions** | Inspect repository status and diffs, manage commits, and track project changes in the workbench. |
-| **Models and runtime** | Configure models and usage, monitor local models, and inspect logs and runtime diagnostics. |
+[![Actual development team interface: member list, four-role canvas, and member details](docs/assets/readme/showcase/team.png)](docs/assets/readme/showcase/team.png)
 
-The workbench runs on your machine. Models can use local or cloud services according to your configuration; cloud requests go to the chosen provider and may incur charges. Tool use, cross-Agent communication, and evolution follow permissions and environment constraints.
+*Original user-provided screenshot; click to enlarge. The canvas shows organizational relationships, with historical task records on the right. Product screenshots show the Chinese interface.*
 
-<details>
-<summary><strong>Expand the capability map</strong></summary>
+<a id="conversation"></a>
+## 01 / Start with one session
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/product-overview.mobile.en.svg">
-  <img src="docs/assets/readme/product-overview.en.svg" alt="Vibelution overview: a local workbench connects chat and coding, teams and research, knowledge and memory, evaluation and evolution, with models, tools, Git, and runtime records." width="1200">
-</picture>
+Choose different Agents for different tasks, keeping everyday questions, project discussions, and coding work in their own sessions. Team groups and multiple tabs help you return to the work you care about.
 
-</details>
+[![Chat workbench: Agent and team groups, session tabs, and composer](docs/assets/readme/showcase/conversation.png)](docs/assets/readme/showcase/conversation.png)
 
-## From one task to ongoing collaboration
+**Organize by task:** browse Agents, teams, and sessions together. **Follow the work:** inspect answers and tool activity, then continue with workspace files, previews, and the terminal.
 
-### Read, discuss, and code in a conversation
+*The screenshot shows a new session and its navigation and composer, not a completed task.*
 
-Let one Agent understand the problem, inspect relevant files, propose an approach, and carry out authorized work. Answers, tool activity, and workspace outputs are available in the same workbench.
+[Chat and workspace](web/src/routes/chat/README.md) · [Tool authorization](docs/agents/tool-authorization-entrypoints.md)
 
-<details>
-<summary><strong>View the conversation interface</strong></summary>
+<a id="knowledge"></a>
+## 02 / Keep knowledge connected to its sources
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/conversation.mobile.en.png">
-  <img src="docs/assets/readme/conversation.en.png" alt="Isolated production ConversationView example: a project-review question, structured answer, and message composer." width="960">
-</picture>
+Agent-private memory, team material, and formal knowledge have separate management surfaces. Browse the knowledge overview by topic, then open individual materials and their sources to carry useful context into your next task.
 
-*Production conversation component captured on 2026-10-11 with fixed public example data; no model was called.*
+[![Platform knowledge overview: topic groups and knowledge, ownership, and evidence relation views](docs/assets/readme/showcase/knowledge.png)](docs/assets/readme/showcase/knowledge.png)
 
-</details>
+**Find material through topics:** browse groups and search knowledge and sources. **Retain evidence:** formal knowledge supports proposals, review, and source management; private memory keeps its own access boundaries.
 
-[First conversation](docs/guides/first-conversation.en.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md) · [MCP integration](docs/agents/mcp-managed-agent-gateway.md)
+*The clusters represent topic groups. The displayed data has not established content relations such as support or contradiction; spatial distance does not imply causality or support.*
 
-### Track project changes in the workbench
+[Memory and retrieval](core/web/services/memory_rag_services.md) · [Team knowledge](core/web/services/team_knowledge/README.md)
 
-Open Git from the global navigation, inspect changed files and diffs, then choose the scope of your commit. Worktrees, branch status, and recent commits share one page so you can check what an Agent changed.
+<a id="evolution"></a>
+## 03 / Review the evidence behind each improvement
 
-[Git configuration](docs/ops/config/08-git-ui-user.md)
+Self-evolution checks, changes, and verifies work against a goal. Supervised evolution brings the baseline, candidate, and independent reevaluation into one process, with review deciding whether to integrate the result.
 
-### Keep sources and experience for the next task
+[![Supervised evolution: Agent review conversation, candidate changes, and stage progress](docs/assets/readme/showcase/evolution.png)](docs/assets/readme/showcase/evolution.png)
 
-Agents have separate private memory, alongside dedicated project-knowledge and team-material surfaces. Read file content, retrieve material, and check its sources to spend less time repeating context.
+**Inspect the review:** retain Agent conversations, candidate changes, and reevaluation records. **Distinguish stages:** evaluation, approval, integration, and runtime activation are separate; one successful stage does not complete the entire process.
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/memory.mobile.en.png">
-  <img src="docs/assets/readme/memory.en.png" alt="Isolated memory-reader example showing project conventions, source references, and next steps." width="960">
-</picture>
-
-*Production memory component captured on 2026-10-11 with public example notes. Stored does not mean used in a conversation; a current file snapshot is not a full revision history. [Memory and retrieval](core/web/services/memory_rag_services.md) · [Team knowledge](core/web/services/team_knowledge/README.md)*
-
-### Move research and review forward as a team
-
-Assign members to research, analysis, coding, and review. Exchange material through group chat, member messages, and team broadcasts. The research canvas shows dependencies, human checkpoints, and intermediate outputs; follow delivery and execution separately during handoffs.
-
-<details>
-<summary><strong>Explore a research case: canvas, team discussion, and knowledge graph</strong></summary>
-
-[![Historical research replay: workflow canvas, team discussion, and knowledge graph](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
-
-[▶ Full demo · 2m 37s · 1080p](docs/assets/readme/challenge-cup-demo.mp4) · [Download MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true)
-
-Historical research-data replay recorded on 2026-09-08, with Chinese narration and subtitles. It illustrates the workflow. Experiment execution depends on adapters, data, and environment; scientific conclusions require original sources and experimental results.
-
-[Research canvas original](docs/assets/readme/research-workflow.png) · [Knowledge graph original](docs/assets/readme/challenge-cup-graph.png)
-
-</details>
-
-[Research workflow](core/web/services/team_workflow/README.md) · [Communication model](docs/adr/0002-agent-collaboration-session-addressing.md)
-
-### Let validation guide improvement
-
-Self-evolution inspects, revises, and validates against a goal. Supervised evolution evaluates a candidate against a baseline before an integration decision. Inspect changes, evaluations, and rollback records to preserve the basis for each decision.
-
-<details>
-<summary><strong>Explore the two evolution workflows</strong></summary>
-
-![Conceptual self-evolution and supervised-evolution workflows](docs/assets/readme/evolution-paths.en.png)
-
-Conceptual diagram. A proposal or candidate does not establish a gain; continuous self-evolution requires user approval and stopping conditions.
-
-</details>
+*The score belongs only to the displayed evaluation case. The interface still reports candidate activation without runtime-version evidence; it is not a claim that general capability improved from 30 to 99. Continuous self-evolution requires user approval and stop conditions.*
 
 [Evolution modes](core/web/services/evolution_services.md) · [Evolution configuration](docs/ops/config/06-agent-evolution.md)
 
-## Specialized extensions
+<a id="finance"></a>
+## 04 / A dedicated financial research workspace
 
-- **Financial research:** dedicated modules for market and report research, preferences, backtesting, and more. [Financial research](core/web/services/financial_research/README.md) · [Report-service integration](docs/ops/config/financial-report-agent.md). External services require separate deployment and validation; backtests are for historical research.
-- **Virtual characters and desktop companions:** configure identities, schedules, moods, and long-term memory for Agents with the plugin explicitly enabled. Life and conversation continuity are still being refined. [Virtual-life plugin](core/agent_plugins/virtual_human_life/README.md) · [Historical character-lobby capture](docs/assets/readme/companions.png) · [Desktop companion idle animation](docs/assets/readme/desktop-pet.gif)
+Research stocks and topics with analyst collaboration, market data, simulated accounts, portfolio research, and report materials in one place, reducing the need to move context between tools.
+
+[![Financial research workspace: research, market, asset, and material navigation with a research chat pane](docs/assets/readme/showcase/finance.png)](docs/assets/readme/showcase/finance.png)
+
+| Work area | Available entry points |
+| --- | --- |
+| Research and collaboration | Stock research, topic research, analyst collaboration, research tasks |
+| Market data and simulated assets | Watchlist quotes, stock screening, simulated accounts, portfolio research, historical backtests, trade review |
+| Materials and learning | Reports, research memory, skills, learning |
+
+*The screenshot shows the workspace before research starts. Market data and research require the relevant services, data, and model configuration. Simulated accounts and historical backtests are not live trading; broker trade execution is not included.*
+
+[Financial workspace](web/src/routes/finance/README.md) · [Financial report service setup](docs/ops/config/financial-report-agent.md)
+
+<a id="companion"></a>
+## 05 / There is room for everyday life, too
+
+Continue everyday conversations in character scenes. Configure identity, schedules, emotions, and long-term memory for Agents with the virtual-human plugin explicitly enabled.
+
+[![Virtual companion: character scene, life status, and everyday conversation](docs/assets/readme/showcase/companion.png)](docs/assets/readme/showcase/companion.png)
+
+**Character and scene:** an immersive interface with life status and conversation together. **Conversation continuity:** the plugin provides proactive-contact, unfinished-topic, and memory mechanisms, subject to enablement and configuration.
+
+*The screenshot shows the conversation interface. Proactive scheduling and animated presentation depend on runtime support. Character names and third-party assets belong to their respective rights holders.*
+
+[Virtual-human plugin](core/agent_plugins/virtual_human_life/README.md)
+
+## Configure the workbench your way
+
+| Supporting capability | Purpose |
+| --- | --- |
+| **Agent configuration** | Configure identity, models, prompts, and tool permissions separately. |
+| **Tools, Skills, and MCP** | Inspect tool authorization, browse local skills, and configure managed MCP access. |
+| **Git and file review** | Inspect repository status, file differences, and commits to understand task changes. |
+| **Models and usage** | Configure model services and inspect usage and local model status. |
+| **Logs and runtime diagnostics** | Inspect execution records and investigate problems. |
+
+[Models and usage](docs/ops/config/INDEX.md) · [MCP access](docs/agents/mcp-managed-agent-gateway.md) · [Git configuration](docs/ops/config/08-git-ui-user.md) · [Local model monitoring](docs/ops/local-model-monitor.md)
 
 ## Documentation and participation
 
-[Model and usage configuration](docs/ops/config/INDEX.md) · [Git configuration](docs/ops/config/08-git-ui-user.md) · [Local-model monitoring](docs/ops/local-model-monitor.md) · [Changelog](CHANGELOG.md)
+[Contributing](CONTRIBUTING.md) · [Documentation map](docs/README.md) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/CCDawn/Vibelution/issues) · [Security](SECURITY.md)
 
-**Developer references:** [Contributing](CONTRIBUTING.md) · [Source and documentation map](docs/README.md) · [Tool implementation index](tools/README.md) · [Testing](tests/README.md) · [Security](SECURITY.md)
+Related projects: [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 
-Report problems or suggest improvements through [GitHub Issues](https://github.com/CCDawn/Vibelution/issues). Include your platform, reproduction steps, and expected behavior to help locate the issue.
+[MIT code license](LICENSE) · [Third-party components](THIRD_PARTY_COMPONENTS.md)
 
-**Related projects:** [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
-
-[MIT code license](LICENSE) · [Third-party components](THIRD_PARTY_COMPONENTS.md) · [Media sources](docs/assets/readme/README.md). Character names and third-party assets belong to their respective rights holders; the code license does not grant rights to those assets.
+[Media sources and notes](docs/assets/readme/README.md). Screenshots show feature entry points and their state at capture time; they do not replace functional acceptance. The code license does not grant rights to third-party character assets.

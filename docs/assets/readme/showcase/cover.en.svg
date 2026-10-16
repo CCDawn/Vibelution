@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="230" viewBox="0 0 1200 230" role="img" aria-labelledby="title desc">
+<title id="title">Vibelution</title><desc id="desc">Your local AI Agent workbench.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#101f28"/><stop offset="1" stop-color="#143b3b"/></linearGradient><radialGradient id="glow"><stop stop-color="#59c7aa" stop-opacity=".19"/><stop offset="1" stop-color="#59c7aa" stop-opacity="0"/></radialGradient></defs>
+<rect width="1200" height="230" rx="16" fill="url(#bg)"/><circle cx="1020" cy="100" r="310" fill="url(#glow)"/>
+<g fill="none" stroke="#8ad9c7" opacity=".12"><circle cx="1030" cy="115" r="85"/><circle cx="1030" cy="115" r="145"/><circle cx="1030" cy="115" r="205"/></g>
+<path d="m963 64 65 107 68-107" fill="none" stroke="#9ed9c5" stroke-width="13" stroke-linecap="square" opacity=".7"/>
+<g font-family="Segoe UI, Microsoft YaHei, sans-serif"><text x="48" y="43" fill="#91bfb6" font-size="13" letter-spacing="4">YOUR LOCAL AI WORKBENCH</text><text x="44" y="129" fill="#f7fbf9" font-size="78" font-weight="650" letter-spacing="-2">Vibelution</text><text x="48" y="188" fill="#dcece6" font-size="30" font-weight="500">Agents collaborate. Knowledge grows.</text></g>
+</svg>
