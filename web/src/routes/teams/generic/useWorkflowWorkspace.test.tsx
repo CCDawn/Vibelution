@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Flow } from "./workflowModel";
 import { useWorkflowWorkspace } from "./useWorkflowWorkspace";
 import { createWorkflow } from "./workflowTemplates";
+import { teamFlowKeys } from "../../../api/genericTeamWorkflows";
 
 const api = vi.hoisted(() => ({ flows: vi.fn(), runs: vi.fn(), save: vi.fn() }));
 vi.mock("../../../api/genericTeamWorkflows", async importOriginal => ({
@@ -54,4 +55,17 @@ it("retains the draft and exposes a stale-revision save failure", async () => {
   expect(state.flow?.name).toBe("本地草稿");
   expect(state.dirty).toBe(true);
   expect(state.error).toContain("版本已变化");
+});
+
+it("keeps the initially selected flow when saving reorders the server cache", async () => {
+  const other = { ...createWorkflow("另一条流程", "blank", []), revision: 1 };
+  act(() => client.setQueryData(teamFlowKeys.flows("team-a"), { schemaVersion: 1, teamId: "team-a", flows: [initial, other] }));
+  await flush();
+  api.save.mockResolvedValue({ ...initial, name: "编辑后的流程", revision: 2 });
+  act(() => state.editFlow(flow => ({ ...flow, name: "编辑后的流程" })));
+  await act(async () => { await state.save(); });
+  await flush();
+  expect(state.flow?.id).toBe(initial.id);
+  expect(state.flow?.name).toBe("编辑后的流程");
+  expect(state.dirty).toBe(false);
 });

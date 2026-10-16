@@ -33,7 +33,10 @@ export function useWorkflowWorkspace(teamId: string) {
     refetchInterval: query => query.state.data?.runs.some(run => run.status === "running") ? visible ? 1500 : 10_000 : false,
   });
   useEffect(() => {
-    if (definitions.data) setFlows(current => mergeSavedFlows(current, definitions.data.flows, dirtyIds));
+    if (definitions.data) {
+      setFlows(current => mergeSavedFlows(current, definitions.data.flows, dirtyIds));
+      setFlowId(current => current || definitions.data.flows[0]?.id || "");
+    }
   }, [definitions.data, dirtyIds]);
 
   const flow = flows.find(item => item.id === flowId) ?? flows[0];
