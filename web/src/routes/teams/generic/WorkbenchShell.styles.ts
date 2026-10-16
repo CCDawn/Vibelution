@@ -76,7 +76,7 @@ const styles = {
   heading3: "text-lg font-semibold",
   text14: "mt-3 !text-sm text-[#85938b]",
   control8: "mt-5",
-  column3: "generic-team-workspace flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#f1f4f0] text-[#263b30]",
+  column3: "generic-team-workspace flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-[#f1f4f0] text-[#263b30]",
   caption17: "flex shrink-0 items-center justify-between gap-2 bg-[#e6f1e8] px-5 py-1.5 text-xs text-[#356d4a]",
   row14: "flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-red-100 bg-red-50 px-5 py-2 text-sm text-red-800",
   row15: "flex min-h-0 min-w-0 flex-1 p-2 sm:p-3",
