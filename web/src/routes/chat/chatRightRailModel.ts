@@ -61,6 +61,8 @@ export type ChatRightRailTab = {
   submissionGeneration?: number;
   /** Latest accepted generation that still requires an authoritative detail readback. */
   pendingReadbackGeneration?: number;
+  /** `center` draws this tab in the top session bar. Missing means the right rail. */
+  host?: "rail" | "center";
 };
 
 export type ChatRightRailModel = {
@@ -85,6 +87,7 @@ export type ChatRightRailOpenInput = {
   targetId?: string;
   filePath?: string;
   url?: string;
+  host?: "rail" | "center";
 };
 
 const KIND_LABELS: Record<ChatRightRailKind, { zh: string; en: string }> = {
@@ -161,6 +164,7 @@ export function openChatRightRailTab(
   const retained = existing ?? recentlyClosed;
   const title = (input.title || retained?.title || chatRightRailKindLabel(input.kind, "zh")).trim();
   const retainedSideState = input.kind === "side" && retained?.kind === "side" ? retained : undefined;
+  const host = input.host ?? retained?.host;
   const tab: ChatRightRailTab = {
     id,
     kind: input.kind,
@@ -169,6 +173,7 @@ export function openChatRightRailTab(
     targetId: input.targetId ?? retained?.targetId,
     filePath: input.filePath ?? retained?.filePath,
     url: input.url !== undefined ? input.url : retained?.url,
+    ...(host === "center" ? { host } : {}),
     ...(retainedSideState ? {
       draft: retainedSideState.draft,
       draftRevision: retainedSideState.draftRevision,
@@ -248,6 +253,35 @@ export function reorderChatRightRailTab(
   }
   tabs.splice(to, 0, moved);
   return { ...model, tabs };
+}
+
+export function setChatRightRailTabHost(
+  model: ChatRightRailModel,
+  id: string,
+  host: "rail" | "center",
+): ChatRightRailModel {
+  const tab = model.tabs.find((item) => item.id === id);
+  if (!tab) {
+    return model;
+  }
+  if ((tab.host ?? "rail") === host && model.activeId === id) {
+    return model;
+  }
+  return {
+    ...model,
+    activeId: id,
+    tabs: model.tabs.map((item) => {
+      if (item.id !== id) {
+        return item;
+      }
+      if (host === "rail") {
+        const next = { ...item };
+        delete next.host;
+        return next;
+      }
+      return { ...item, host };
+    }),
+  };
 }
 
 export function searchChatRightRailTabs(model: ChatRightRailModel, query: string): {

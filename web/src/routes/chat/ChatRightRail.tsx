@@ -1,5 +1,6 @@
 import { Bell, Code2, FileDiff, FileSearch, Globe, ListTodo, MessageSquare, PanelRightClose, Plus, Search, Terminal, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createSessionChild, fetchSessionDetail, listSessionChildSessions, submitSessionMessage } from "../../api/chat";
@@ -52,6 +53,15 @@ import { isTempSessionId } from "../sessionOptimisticIds";
 import styles from "./ChatRightRail.styles";
 
 import { isProjectUtilityKind } from "../../app/projectUtilityRail";
+import {
+  dockedSessionTabId,
+  PANE_DOCK_MIME,
+  readPaneDock,
+  sessionIdFromDockedTab,
+  writePaneDock,
+  type DockedSession,
+  type PaneDockPayload,
+} from "./chatPaneDock";
 import { ProjectUtilityPanel } from "./ProjectUtilityPanel";
 
 const LAUNCHER_ICONS: Partial<Record<ChatRightRailKind, typeof Search>> = {
@@ -154,6 +164,24 @@ type ChatRightRailProps = {
   onOpenSession?: (sessionId: string) => void;
   id?: string;
   sideClient?: ChatRightRailSideClient;
+  paneDock?: ChatRightRailPaneDock;
+};
+
+export type ChatRightRailPaneDock = {
+  dockedSessions: DockedSession[];
+  activeDockedSessionId: string | null;
+  parkSessionId: string | null;
+  centerHost: HTMLElement | null;
+  showCenterPane: boolean;
+  ownerSessionId: string;
+  onDockHostChange: (node: HTMLDivElement | null) => void;
+  onDockSession: (input: { sessionId: string; title: string }) => void;
+  onFocusDockedSession: (sessionId: string) => void;
+  onUndockSession: (sessionId: string) => void;
+  onClearDockedFocus: () => void;
+  onSurfaceDrop: (payload: PaneDockPayload) => void;
+  onPresentCenter: (tabId: string) => void;
+  onDismissCenter: () => void;
 };
 
 function failureText(error: unknown, fallback: string) {
@@ -200,6 +228,7 @@ function RailThread({
   onDraftChange,
   onSubmissionTracked,
   onSubmissionReadback,
+  emptyText,
 }: {
   boundSessionId: string;
   parentSessionId: string;
@@ -215,6 +244,7 @@ function RailThread({
   onDraftChange?: (draft: string, expectedRevision?: number) => void;
   onSubmissionTracked?: () => void;
   onSubmissionReadback?: (generation: number) => void;
+  emptyText?: string;
 }) {
   const [draft, setDraft] = useState(initialDraft);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -362,7 +392,7 @@ function RailThread({
   return (
     <form className={styles.thread} onSubmit={(event) => void onSubmit(event)}>
       <div className={styles.transcript} aria-live="polite">
-        {lines.length === 0 && !pendingLine ? <p className={styles.note}>{copy.empty}</p> : null}
+        {lines.length === 0 && !pendingLine ? <p className={styles.note}>{emptyText || copy.empty}</p> : null}
         {lines.map((line) => (
           <p
             key={line.id}
@@ -559,6 +589,7 @@ export function ChatRightRail({
   onOpenSession,
   id = "chat-status-pane",
   sideClient = defaultSideClient,
+  paneDock,
 }: ChatRightRailProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -604,6 +635,7 @@ export function ChatRightRail({
       directoryEnded: "已结束",
       directoryRunningEmpty: "现在没有正在进行的子会话",
       directoryEndedEmpty: "还没有结束的子会话",
+      movedToSessionBar: "已放到上方会话栏",
     }
     : {
       rail: "Right column",
@@ -641,6 +673,7 @@ export function ChatRightRail({
       directoryEnded: "Finished",
       directoryRunningEmpty: "Nothing is running",
       directoryEndedEmpty: "Nothing has finished",
+      movedToSessionBar: "Open in the session bar",
     };
   const active = activeChatRightRailTab(model);
   const launcher = chatRightRailLauncherKinds(sessionKind).filter((kind) => Boolean(sessionId) || isProjectUtilityKind(kind));
@@ -661,229 +694,50 @@ export function ChatRightRail({
     }
     setSearchOpen(false);
   };
-  return (
-    <section id={id} className={`${styles.shell} ${className}`} aria-label={copy.rail}>
-      <VSurface padding="none" className={styles.panel}>
-      <div className={styles.toolbar}>
-        {model.tabs.length === 0 ? <span className={styles.title}>{lang === "zh" ? "侧栏" : "Side"}</span> : null}
-        <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
-          {model.tabs.map((tab) => {
-            const selected = tab.id === model.activeId;
-            const label = chatRightRailTabLabel(tab, lang);
-            return (
-              <div
-                key={tab.id}
-                role="tab"
-                aria-label={label}
-                aria-selected={selected}
-                data-chat-right-rail-tab={tab.id}
-                draggable
-                className={selected ? `${styles.tab} ${styles.tabActive}` : styles.tab}
-                onMouseDown={(event) => {
-                  if (event.button === 1) {
-                    event.preventDefault();
-                    suppressClickTabId.current = tab.id;
-                  }
-                }}
-                onAuxClick={(event) => {
-                  if (event.button !== 1) {
-                    return;
-                  }
-                  event.preventDefault();
-                  suppressClickTabId.current = tab.id;
-                  onModelChange((current) => closeChatRightRailTab(current, tab.id));
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setTabMenu({ id: tab.id, x: event.clientX, y: event.clientY });
-                }}
-                onDragStart={(event) => {
-                  const target = event.target;
-                  if (target instanceof Element && target.closest("[data-chat-right-rail-close]")) {
-                    event.preventDefault();
-                    return;
-                  }
-                  draggingTabId.current = tab.id;
-                  suppressClickTabId.current = tab.id;
-                  event.dataTransfer?.setData("text/plain", tab.id);
-                  if (event.dataTransfer) {
-                    event.dataTransfer.effectAllowed = "move";
-                  }
-                }}
-                onDragOver={(event) => {
-                  if (!draggingTabId.current || draggingTabId.current === tab.id) {
-                    return;
-                  }
-                  event.preventDefault();
-                  if (event.dataTransfer) {
-                    event.dataTransfer.dropEffect = "move";
-                  }
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const from = draggingTabId.current || event.dataTransfer?.getData("text/plain") || "";
-                  draggingTabId.current = null;
-                  if (!from || from === tab.id) {
-                    return;
-                  }
-                  onModelChange((current) => reorderChatRightRailTab(current, from, tab.id));
-                }}
-                onDragEnd={() => {
-                  draggingTabId.current = null;
-                }}
-              >
-                <VButton
-                  type="button"
-                  contentLayout="plain"
-                  draggable
-                  className={styles.tabLabel}
-                  onClick={(event) => {
-                    if (event.button !== 0 || suppressClickTabId.current === tab.id) {
-                      suppressClickTabId.current = null;
-                      return;
-                    }
-                    onModelChange((current) => (
-                      current.activeId === tab.id ? current : { ...current, activeId: tab.id }
-                    ));
-                  }}
-                >
-                  {label}
-                </VButton>
-                <VButton
-                  type="button"
-                  isIconOnly
-                  aria-label={`${copy.close}${label}`}
-                  className={styles.tabClose}
-                  data-chat-right-rail-close=""
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onModelChange((current) => closeChatRightRailTab(current, tab.id));
-                  }}
-                >
-                  <X size={12} aria-hidden="true" />
-                </VButton>
-              </div>
-            );
-          })}
-        </div>
-        <div className={styles.tools}>
-          <VButton
-            type="button"
-            isIconOnly
-            aria-label={copy.search}
-            aria-expanded={searchOpen}
-            className={styles.iconButton}
-            onClick={() => setSearchOpen((open) => !open)}
-          >
-            <Search size={16} aria-hidden="true" />
-          </VButton>
-          <VDropdownMenu
-            align="end"
-            side="bottom"
-            aria-label={copy.add}
-            trigger={(
-              <VButton type="button" isIconOnly aria-label={copy.add} className={styles.iconButton}>
-                <Plus size={16} aria-hidden="true" />
-              </VButton>
-            )}
-            items={launcher.map((kind) => ({
-              id: kind,
-              label: chatRightRailKindLabel(kind, lang),
-              onSelect: () => activate(kind),
-            }))}
-          />
-          <VButton
-            type="button"
-            isIconOnly
-            aria-label={copy.collapse}
-            className={styles.iconButton}
-            onClick={onCollapse}
-          >
-            <PanelRightClose size={16} aria-hidden="true" />
-          </VButton>
-        </div>
-      </div>
-      {tabMenu ? (
-        <VDropdownMenu
-          open
-          position={{ x: tabMenu.x, y: tabMenu.y }}
-          aria-label={copy.tabMenu}
-          onOpenChange={(open) => {
-            if (!open) {
-              setTabMenu(null);
-            }
-          }}
-          items={[
-            {
-              id: "close-current",
-              label: copy.closeCurrent,
-              onSelect: () => onModelChange((current) => closeChatRightRailTab(current, tabMenu.id)),
-            },
-            {
-              id: "close-others",
-              label: copy.closeOthers,
-              disabled: model.tabs.length < 2,
-              onSelect: () => onModelChange((current) => closeOtherChatRightRailTabs(current, tabMenu.id)),
-            },
-            {
-              id: "close-all",
-              label: copy.closeAll,
-              onSelect: () => onModelChange((current) => closeAllChatRightRailTabs(current)),
-            },
-          ]}
-        />
-      ) : null}
-      {searchOpen ? (
-        <div className={styles.search}>
-          <VInput
-            aria-label={copy.search}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-          />
-          {matches.open.length === 0 && matches.closed.length === 0 ? (
-            <p className={styles.note}>{copy.none}</p>
-          ) : null}
-          {matches.open.length > 0 ? (
-            <ul className={styles.searchList}>
-              {matches.open.map((tab) => (
-                <li key={tab.id}>
-                  <VButton
-                    type="button"
-                    contentLayout="plain"
-                    className={styles.searchButton}
-                    onClick={() => onModelChange({ ...model, activeId: tab.id })}
-                  >
-                    {chatRightRailTabLabel(tab, lang)}
-                  </VButton>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {matches.closed.length > 0 ? (
-            <>
-              <p className={styles.searchHeading}>{copy.closed}</p>
-              <ul className={styles.searchList}>
-                {matches.closed.map((tab) => (
-                  <li key={tab.id}>
-                    <VButton
-                      type="button"
-                      contentLayout="plain"
-                      className={styles.searchButton}
-                      onClick={() => onModelChange(openChatRightRailTab(model, tab))}
-                    >
-                      {`${copy.reopen} ${chatRightRailTabLabel(tab, lang)}`}
-                    </VButton>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+  const visibleRailTabs = model.tabs.filter((tab) => tab.host !== "center");
+  const dockedSessions = paneDock?.dockedSessions ?? [];
+  const parkedPageVisible = Boolean(
+    paneDock?.parkSessionId && paneDock.activeDockedSessionId === paneDock.parkSessionId,
+  );
+  const otherDockedSession = paneDock?.activeDockedSessionId && paneDock.activeDockedSessionId !== paneDock.parkSessionId
+    ? dockedSessions.find((session) => session.sessionId === paneDock.activeDockedSessionId) ?? null
+    : null;
+  const portalCenterPane = Boolean(paneDock?.showCenterPane && paneDock.centerHost && !parkedPageVisible);
+  const showRailPane = !parkedPageVisible && !otherDockedSession;
+  const acceptPaneDock = (event: ReactDragEvent<HTMLElement>) => {
+    if (!paneDock || !event.dataTransfer?.types.includes(PANE_DOCK_MIME)) {
+      return false;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    return true;
+  };
+  const railBody = (
       <div className={styles.body}>
         {preface}
+        {paneDock?.parkSessionId ? (
+          <div
+            ref={paneDock.onDockHostChange}
+            className={parkedPageVisible ? styles.body : "hidden"}
+            data-chat-docked-session-host=""
+          />
+        ) : null}
+        {otherDockedSession ? (
+          <RailThread
+            key={`docked:${otherDockedSession.sessionId}`}
+            boundSessionId={otherDockedSession.sessionId}
+            parentSessionId={sessionId}
+            createOnSend={false}
+            lang={lang}
+            client={sideClient}
+            emptyText={lang === "zh" ? "这场会话还没有内容。" : "This chat is empty."}
+            onBound={() => undefined}
+          />
+        ) : null}
+        {showRailPane ? (
+        <>
         {active && isProjectUtilityKind(active.kind) ? <ProjectUtilityPanel kind={active.kind} lang={lang} sessionId={sessionId || undefined} onOpenSession={onOpenSession} /> : null}
-        {model.tabs.length === 0 ? (
+        {model.tabs.length === 0 && dockedSessions.length === 0 ? (
           <div className={styles.launcher}>
             <p className={styles.launcherHint}>{copy.openTab}</p>
             <ul className={styles.launcherList}>
@@ -1123,7 +977,344 @@ export function ChatRightRail({
         {active && (active.kind === "workflow" || active.kind === "trajectory" || active.kind === "bash" || (active.kind === "subagent" && !active.targetId)) ? (
           <VEmptyState title={copy.contextualEmpty} />
         ) : null}
+        </>
+        ) : null}
       </div>
+  );
+  return (
+    <section
+      id={id}
+      className={`${styles.shell} ${className}`}
+      aria-label={copy.rail}
+      onDragOver={acceptPaneDock}
+      onDrop={(event) => {
+        if (!paneDock) {
+          return;
+        }
+        const payload = readPaneDock(event.dataTransfer);
+        if (!payload) {
+          return;
+        }
+        event.preventDefault();
+        paneDock.onSurfaceDrop(payload);
+      }}
+    >
+      <VSurface padding="none" className={styles.panel}>
+      <div className={styles.toolbar}>
+        {visibleRailTabs.length === 0 && dockedSessions.length === 0 ? <span className={styles.title}>{lang === "zh" ? "侧栏" : "Side"}</span> : null}
+        <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
+          {dockedSessions.map((session) => {
+            const tabId = dockedSessionTabId(session.sessionId);
+            const selected = paneDock?.activeDockedSessionId === session.sessionId;
+            const label = session.title || session.sessionId;
+            return (
+              <div
+                key={tabId}
+                role="tab"
+                aria-label={label}
+                aria-selected={selected}
+                data-chat-right-rail-tab={tabId}
+                draggable
+                className={selected ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+                onDragStart={(event) => {
+                  draggingTabId.current = tabId;
+                  writePaneDock(event.dataTransfer, { v: 1, source: "rail", tabId });
+                  event.dataTransfer?.setData("text/plain", tabId);
+                  if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = "move";
+                  }
+                }}
+                onDragOver={acceptPaneDock}
+                onDrop={(event) => {
+                  const payload = readPaneDock(event.dataTransfer);
+                  if (!payload || !paneDock) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  draggingTabId.current = null;
+                  paneDock.onSurfaceDrop(payload);
+                }}
+              >
+                <VButton
+                  type="button"
+                  contentLayout="plain"
+                  className={styles.tabLabel}
+                  onClick={() => paneDock?.onFocusDockedSession(session.sessionId)}
+                >
+                  {label}
+                </VButton>
+                <VButton
+                  type="button"
+                  isIconOnly
+                  aria-label={`${copy.close}${label}`}
+                  className={styles.tabClose}
+                  data-chat-right-rail-close=""
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    paneDock?.onUndockSession(session.sessionId);
+                  }}
+                >
+                  <X size={12} aria-hidden="true" />
+                </VButton>
+              </div>
+            );
+          })}
+          {visibleRailTabs.map((tab) => {
+            const selected = !paneDock?.activeDockedSessionId && tab.id === model.activeId;
+            const label = chatRightRailTabLabel(tab, lang);
+            return (
+              <div
+                key={tab.id}
+                role="tab"
+                aria-label={label}
+                aria-selected={selected}
+                data-chat-right-rail-tab={tab.id}
+                draggable
+                className={selected ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+                onMouseDown={(event) => {
+                  if (event.button === 1) {
+                    event.preventDefault();
+                    suppressClickTabId.current = tab.id;
+                  }
+                }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) {
+                    return;
+                  }
+                  event.preventDefault();
+                  suppressClickTabId.current = tab.id;
+                  onModelChange((current) => closeChatRightRailTab(current, tab.id));
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setTabMenu({ id: tab.id, x: event.clientX, y: event.clientY });
+                }}
+                onDragStart={(event) => {
+                  const target = event.target;
+                  if (target instanceof Element && target.closest("[data-chat-right-rail-close]")) {
+                    event.preventDefault();
+                    return;
+                  }
+                  draggingTabId.current = tab.id;
+                  suppressClickTabId.current = tab.id;
+                  writePaneDock(event.dataTransfer, {
+                    v: 1,
+                    source: "rail",
+                    tabId: tab.id,
+                    sessionId: paneDock?.ownerSessionId,
+                    scope: isProjectUtilityKind(tab.kind) ? "project" : "session",
+                  });
+                  event.dataTransfer?.setData("text/plain", tab.id);
+                  if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = "move";
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (acceptPaneDock(event)) {
+                    return;
+                  }
+                  if (!draggingTabId.current || draggingTabId.current === tab.id) {
+                    return;
+                  }
+                  event.preventDefault();
+                  if (event.dataTransfer) {
+                    event.dataTransfer.dropEffect = "move";
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const payload = paneDock ? readPaneDock(event.dataTransfer) : null;
+                  const from = draggingTabId.current || event.dataTransfer?.getData("text/plain") || "";
+                  draggingTabId.current = null;
+                  if (payload && paneDock) {
+                    const dockedSessionId = sessionIdFromDockedTab(payload.source === "rail" ? payload.tabId : "");
+                    const moving = payload.source === "rail" ? model.tabs.find((item) => item.id === payload.tabId) : undefined;
+                    if (payload.source === "rail" && !dockedSessionId && moving && moving.host !== "center" && payload.tabId !== tab.id) {
+                      paneDock.onClearDockedFocus();
+                      paneDock.onDismissCenter();
+                      onModelChange((current) => reorderChatRightRailTab(current, payload.tabId, tab.id));
+                      return;
+                    }
+                    paneDock.onSurfaceDrop(payload);
+                    return;
+                  }
+                  if (!from || from === tab.id) {
+                    return;
+                  }
+                  onModelChange((current) => reorderChatRightRailTab(current, from, tab.id));
+                }}
+                onDragEnd={() => {
+                  draggingTabId.current = null;
+                }}
+              >
+                <VButton
+                  type="button"
+                  contentLayout="plain"
+                  draggable
+                  className={styles.tabLabel}
+                  onClick={(event) => {
+                    if (event.button !== 0 || suppressClickTabId.current === tab.id) {
+                      suppressClickTabId.current = null;
+                      return;
+                    }
+                    paneDock?.onClearDockedFocus();
+                    paneDock?.onDismissCenter();
+                    onModelChange((current) => (
+                      current.activeId === tab.id ? current : { ...current, activeId: tab.id }
+                    ));
+                  }}
+                >
+                  {label}
+                </VButton>
+                <VButton
+                  type="button"
+                  isIconOnly
+                  aria-label={`${copy.close}${label}`}
+                  className={styles.tabClose}
+                  data-chat-right-rail-close=""
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onModelChange((current) => closeChatRightRailTab(current, tab.id));
+                  }}
+                >
+                  <X size={12} aria-hidden="true" />
+                </VButton>
+              </div>
+            );
+          })}
+        </div>
+        <div className={styles.tools}>
+          <VButton
+            type="button"
+            isIconOnly
+            aria-label={copy.search}
+            aria-expanded={searchOpen}
+            className={styles.iconButton}
+            onClick={() => setSearchOpen((open) => !open)}
+          >
+            <Search size={16} aria-hidden="true" />
+          </VButton>
+          <VDropdownMenu
+            align="end"
+            side="bottom"
+            aria-label={copy.add}
+            trigger={(
+              <VButton type="button" isIconOnly aria-label={copy.add} className={styles.iconButton}>
+                <Plus size={16} aria-hidden="true" />
+              </VButton>
+            )}
+            items={launcher.map((kind) => ({
+              id: kind,
+              label: chatRightRailKindLabel(kind, lang),
+              onSelect: () => activate(kind),
+            }))}
+          />
+          <VButton
+            type="button"
+            isIconOnly
+            aria-label={copy.collapse}
+            className={styles.iconButton}
+            onClick={onCollapse}
+          >
+            <PanelRightClose size={16} aria-hidden="true" />
+          </VButton>
+        </div>
+      </div>
+      {tabMenu ? (
+        <VDropdownMenu
+          open
+          position={{ x: tabMenu.x, y: tabMenu.y }}
+          aria-label={copy.tabMenu}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTabMenu(null);
+            }
+          }}
+          items={[
+            {
+              id: "close-current",
+              label: copy.closeCurrent,
+              onSelect: () => onModelChange((current) => closeChatRightRailTab(current, tabMenu.id)),
+            },
+            {
+              id: "close-others",
+              label: copy.closeOthers,
+              disabled: model.tabs.length < 2,
+              onSelect: () => onModelChange((current) => closeOtherChatRightRailTabs(current, tabMenu.id)),
+            },
+            {
+              id: "close-all",
+              label: copy.closeAll,
+              onSelect: () => onModelChange((current) => closeAllChatRightRailTabs(current)),
+            },
+          ]}
+        />
+      ) : null}
+      {searchOpen ? (
+        <div className={styles.search}>
+          <VInput
+            aria-label={copy.search}
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+          {matches.open.length === 0 && matches.closed.length === 0 ? (
+            <p className={styles.note}>{copy.none}</p>
+          ) : null}
+          {matches.open.length > 0 ? (
+            <ul className={styles.searchList}>
+              {matches.open.map((tab) => (
+                <li key={tab.id}>
+                  <VButton
+                    type="button"
+                    contentLayout="plain"
+                    className={styles.searchButton}
+                    onClick={() => {
+                      onModelChange({ ...model, activeId: tab.id });
+                      if (tab.host === "center") {
+                        paneDock?.onPresentCenter(tab.id);
+                      } else {
+                        paneDock?.onClearDockedFocus();
+                        paneDock?.onDismissCenter();
+                      }
+                    }}
+                  >
+                    {chatRightRailTabLabel(tab, lang)}
+                  </VButton>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {matches.closed.length > 0 ? (
+            <>
+              <p className={styles.searchHeading}>{copy.closed}</p>
+              <ul className={styles.searchList}>
+                {matches.closed.map((tab) => (
+                  <li key={tab.id}>
+                    <VButton
+                      type="button"
+                      contentLayout="plain"
+                      className={styles.searchButton}
+                      onClick={() => onModelChange(openChatRightRailTab(model, tab))}
+                    >
+                      {`${copy.reopen} ${chatRightRailTabLabel(tab, lang)}`}
+                    </VButton>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {portalCenterPane && paneDock?.centerHost ? (
+        <>
+          <div className={styles.body}>
+            <p className={styles.note}>{copy.movedToSessionBar}</p>
+          </div>
+          {createPortal(railBody, paneDock.centerHost)}
+        </>
+      ) : railBody}
       </VSurface>
     </section>
   );

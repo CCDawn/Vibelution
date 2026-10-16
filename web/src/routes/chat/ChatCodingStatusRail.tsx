@@ -5,7 +5,7 @@ import type { TranslationKey } from "../../i18n/dictionary";
 import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
 import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import type { CompanionRailState } from "../companions/CompanionPersonRail";
-import { ChatRightRail } from "./ChatRightRail";
+import { ChatRightRail, type ChatRightRailPaneDock } from "./ChatRightRail";
 import type { ChatRightRailModel } from "./chatRightRailModel";
 import type { ChatChangeRailModel } from "./chatChangeRailModel";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
@@ -52,6 +52,7 @@ export function ChatCodingStatusRail({
   toggleChangeRail,
   updateRailModel,
   verifiedCompanionMode,
+  paneDock,
 }: {
   activeCliAgentRun: CliAgentRunView | undefined;
   activeCompanion: VirtualHumanCompanion | null;
@@ -85,6 +86,7 @@ export function ChatCodingStatusRail({
   toggleChangeRail: () => void;
   updateRailModel: (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => void;
   verifiedCompanionMode: boolean;
+  paneDock?: ChatRightRailPaneDock;
 }) {
   if (verifiedCompanionMode) {
     return (
@@ -116,6 +118,7 @@ export function ChatCodingStatusRail({
         sessionKind={groupPanelActive ? "group" : detail?.sessionKind}
         model={railModel}
         onModelChange={updateRailModel}
+        paneDock={paneDock}
         onOpenSession={(id) => openSession(id, { telemetrySource: "right_rail_project" })}
         onCollapse={toggleChangeRail}
         devtools={detail ? {

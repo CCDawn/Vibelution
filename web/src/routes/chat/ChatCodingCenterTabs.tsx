@@ -14,6 +14,7 @@ import { CompanionConversationHeader } from "../companions/CompanionConversation
 import styles from "../ChatCodingRoute.styles";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { cliAgentRunTabId, type CliAgentRunView } from "./cliAgentRunModel";
+import type { PaneDockPayload, SessionBarDockChip } from "./chatPaneDock";
 
 const ChatFileWorkspaceTabs = lazy(() =>
   import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
@@ -77,6 +78,11 @@ export type ChatCodingCenterTabsProps = {
   onSubmitRename: AgentSessionTabStripProps["onSubmitRename"];
   workspace: { activeTab: string; openTabs: string[] };
   closePreviewTab: (sessionId: string, path: string) => void;
+  paneDockChips?: SessionBarDockChip[];
+  onPaneDockChipSelect?: (chip: SessionBarDockChip) => void;
+  onPaneDockChipClose?: (chip: SessionBarDockChip) => void;
+  onPaneDockDrop?: (payload: PaneDockPayload) => void;
+  onSessionTabSelected?: () => void;
 };
 
 export function ChatCodingCenterTabs({
@@ -137,6 +143,11 @@ export function ChatCodingCenterTabs({
   onSubmitRename,
   workspace,
   closePreviewTab,
+  paneDockChips = [],
+  onPaneDockChipSelect,
+  onPaneDockChipClose,
+  onPaneDockDrop,
+  onSessionTabSelected,
 }: ChatCodingCenterTabsProps) {
   return (
     <ChatCenterTabStrip
@@ -243,10 +254,15 @@ export function ChatCodingCenterTabs({
           onPrefetchDirectSession={onPrefetchDirectSession}
           onRenameTitleChange={onRenameTitleChange}
           onSetActiveTab={(sessionId, tab) => {
+            onSessionTabSelected?.();
             setSessionBrowserOpen(false);
             setActiveTab(sessionId, tab);
           }}
           onSubmitRename={onSubmitRename}
+          paneDockChips={paneDockChips}
+          onPaneDockChipSelect={onPaneDockChipSelect}
+          onPaneDockChipClose={onPaneDockChipClose}
+          onPaneDockDrop={onPaneDockDrop}
         />
       )}
       fileTabs={(

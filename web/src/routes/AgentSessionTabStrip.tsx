@@ -15,6 +15,13 @@ import {
 import styles from "./AgentSessionTabStrip.styles";
 import "./AgentSessionTabStrip.armed.css";
 import { isBusyPhase } from "./chat/chatCodingRouteViewModel";
+import {
+  PANE_DOCK_MIME,
+  readPaneDock,
+  writePaneDock,
+  type PaneDockPayload,
+  type SessionBarDockChip,
+} from "./chat/chatPaneDock";
 import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
 
 /** How long the armed (two-stage confirm) close control waits before disarming itself. */
@@ -179,6 +186,10 @@ export type AgentSessionTabStripProps = {
   onRenameTitleChange: (title: string) => void;
   onSetActiveTab: (sessionId: string, tab: "agent") => void;
   onSubmitRename: (session: SessionSummary, options?: { reason?: "blur" | "explicit" }) => void;
+  paneDockChips?: SessionBarDockChip[];
+  onPaneDockChipSelect?: (chip: SessionBarDockChip) => void;
+  onPaneDockChipClose?: (chip: SessionBarDockChip) => void;
+  onPaneDockDrop?: (payload: PaneDockPayload) => void;
 };
 
 function agentSessionTabElementId(kind: "session" | "cli", id: string) {
@@ -221,6 +232,10 @@ export function AgentSessionTabStrip({
   onRenameTitleChange,
   onSetActiveTab,
   onSubmitRename,
+  paneDockChips = [],
+  onPaneDockChipSelect,
+  onPaneDockChipClose,
+  onPaneDockDrop,
 }: AgentSessionTabStripProps) {
   const visibleSessions = recentAgentSessions(sessions, [activeSessionId, editingSessionId, contextMenuSessionId]);
   const tabGroupRef = useRef<HTMLDivElement>(null);
@@ -335,8 +350,24 @@ export function AgentSessionTabStrip({
       <div
         className={styles.agentSessionTabGroup}
         ref={tabGroupRef}
-        role={keyboardTabs.length > 0 ? "tablist" : undefined}
-        aria-label={keyboardTabs.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
+        role={keyboardTabs.length > 0 || paneDockChips.length > 0 ? "tablist" : undefined}
+        aria-label={keyboardTabs.length > 0 || paneDockChips.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
+        data-pane-dock-target="session-bar"
+        onDragOver={(event) => {
+          if (!onPaneDockDrop || !event.dataTransfer?.types.includes(PANE_DOCK_MIME)) {
+            return;
+          }
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          const payload = readPaneDock(event.dataTransfer);
+          if (!payload || payload.source !== "rail" || !onPaneDockDrop) {
+            return;
+          }
+          event.preventDefault();
+          onPaneDockDrop(payload);
+        }}
       >
       {visibleSessions.map((session) => {
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
@@ -458,11 +489,21 @@ export function AgentSessionTabStrip({
         }
         const dragReferenceProps = {
           draggable: true,
-          onDragStart: (event: DragEvent<HTMLDivElement>) =>
+          onDragStart: (event: DragEvent<HTMLDivElement>) => {
             onDragReference(
               event,
               buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
-            ),
+            );
+            writePaneDock(event.dataTransfer, {
+              v: 1,
+              source: "session",
+              sessionId: session.id,
+              title: sessionTitle,
+            });
+            if (event.dataTransfer) {
+              event.dataTransfer.effectAllowed = "copyMove";
+            }
+          },
         };
         return (
           <div
@@ -547,6 +588,61 @@ export function AgentSessionTabStrip({
               isDisabled={deleteDisabled}
               title={tabCloseTitle}
               label={`${tabCloseTitle} ${sessionTitle}`}
+              icon={<X size={13} />}
+            />
+          </div>
+        );
+      })}
+      {paneDockChips.map((chip) => {
+        const tabClassName = [
+          styles.agentSessionTab,
+          chip.active ? styles.agentSessionTabActive : "",
+        ].filter(Boolean).join(" ");
+        const closeLabel = lang === "zh" ? "关闭" : "Close";
+        return (
+          <div
+            key={chip.key}
+            className={`${tabClassName} ${styles.agentSessionTabClosable}`}
+            role="presentation"
+            data-selected={chip.active ? "true" : undefined}
+            data-pane-dock-chip={chip.tabId}
+            draggable
+            onDragStart={(event) => {
+              writePaneDock(event.dataTransfer, {
+                v: 1,
+                source: "rail",
+                tabId: chip.tabId,
+                sessionId: chip.sessionId,
+                scope: chip.scope,
+              });
+              if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+              }
+            }}
+          >
+            <VButton
+              type="button"
+              contentLayout="plain"
+              className={chip.active ? `${styles.agentSessionTabMainAction} ${styles.agentSessionTabMainActionActive}` : styles.agentSessionTabMainAction}
+              role="tab"
+              aria-selected={chip.active}
+              data-session-tab-active={chip.active ? "true" : "false"}
+              onPress={() => onPaneDockChipSelect?.(chip)}
+              title={chip.title}
+              aria-label={chip.title}
+            >
+              <span className={styles.agentSessionTabTitle}>{chip.title}</span>
+            </VButton>
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.agentSessionTabCloseButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPaneDockChipClose?.(chip);
+              }}
+              title={closeLabel}
+              label={`${closeLabel} ${chip.title}`}
               icon={<X size={13} />}
             />
           </div>

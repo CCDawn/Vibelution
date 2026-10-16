@@ -34,6 +34,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
@@ -53,6 +54,7 @@ import {
 import { requestChatRightRailOpen, subscribeChatRightRailOpen } from "./chatRightRailRequests";
 import { useChatComposerTransientState } from "./useChatComposerTransientState";
 import { useChatRailPreview } from "./useChatRailPreview";
+import { useChatPaneDock } from "./useChatPaneDock";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -1484,6 +1486,29 @@ export function ChatCodingRouteWorkbench() {
       setResponsiveOverlayPane("right");
     }
   };
+  const revealRightRail = useCallback(() => {
+    setChangeRailOpened(true);
+    if (responsiveLayout.rightVisible) {
+      setRightPaneCollapsed(false);
+    } else {
+      setResponsiveOverlayPane("right");
+    }
+  }, [responsiveLayout.rightVisible, setChangeRailOpened, setResponsiveOverlayPane, setRightPaneCollapsed]);
+  const openSessionRouteRef = useRef<(sessionId: string, options?: { telemetrySource?: string }) => void>(() => {});
+  const paneDock = useChatPaneDock({
+    routeSessionId: activeSessionId ?? null,
+    railOwnerId: groupPanelActive ? `group:${activeGroupRoomId}` : (activeSessionId ?? ""),
+    railModel,
+    railsBySession,
+    projectModel: projectRail.model,
+    updateRailModel,
+    setRailsBySession,
+    lang,
+    openSession: (sessionId) => openSessionRouteRef.current(sessionId),
+    revealRightRail,
+    groupPanelActive,
+    sessionBrowserVisible,
+  });
 
   const {
     locale,
@@ -2384,6 +2409,10 @@ export function ChatCodingRouteWorkbench() {
     sessionsRefetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     directRefetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
+  const stripSessions = useMemo(
+    () => agentSessionTabs.filter((session) => !paneDock.dockedSessionIds.has(session.id)),
+    [agentSessionTabs, paneDock.dockedSessionIds],
+  );
 
   const {
     groupCandidateAgents,
@@ -2478,7 +2507,7 @@ export function ChatCodingRouteWorkbench() {
   });
   const {
     handleCreateSession,
-    handleOpenDirectSession,
+    handleOpenDirectSession: openDirectSessionRoute,
     handlePrefetchDirectSession,
     handleOpenAgent,
     handleOpenMentionTarget,
@@ -2556,6 +2585,12 @@ export function ChatCodingRouteWorkbench() {
     openDeleteGroupConfirm,
     openResetGroupConfirm,
   });
+  openSessionRouteRef.current = openDirectSessionRoute;
+  const handleOpenDirectSession = useCallback((sessionId: string, options?: { telemetrySource?: string }) => {
+    paneDock.undockSession(sessionId);
+    paneDock.dismissCenter();
+    openDirectSessionRoute(sessionId, options);
+  }, [openDirectSessionRoute, paneDock.dismissCenter, paneDock.undockSession]);
 
   useDesktopConversationAttention({
     sessions: allVisibleSessions,
@@ -3096,6 +3131,7 @@ export function ChatCodingRouteWorkbench() {
         toggleChangeRail={toggleChangeRail}
         updateRailModel={updateRailModel}
         verifiedCompanionMode={verifiedCompanionMode}
+        paneDock={ordinaryChangeRail ? paneDock.railPaneDock : undefined}
       />
       )}
       leftResizeHandle={
@@ -3138,7 +3174,12 @@ export function ChatCodingRouteWorkbench() {
             financeSurface={embeddedSurface}
             verifiedCompanionMode={verifiedCompanionMode}
             selectedChatAgentId={selectedChatAgentId}
-            agentSessionTabs={agentSessionTabs}
+            agentSessionTabs={stripSessions}
+            paneDockChips={ordinaryChangeRail ? paneDock.chips : []}
+            onPaneDockChipSelect={paneDock.selectChip}
+            onPaneDockChipClose={paneDock.closeChip}
+            onPaneDockDrop={ordinaryChangeRail ? paneDock.onSessionBarDrop : undefined}
+            onSessionTabSelected={paneDock.dismissCenter}
             cliAgentRunTabs={cliAgentRunTabs}
             activeCompanion={activeCompanion}
             leftOverlayVisible={personalAssistantSurface || responsiveLayout.leftVisible}
@@ -3190,31 +3231,8 @@ export function ChatCodingRouteWorkbench() {
           />
         )}
         surface={(
+          <>
           <ChatCenterSessionSurface
-            browser={sessionBrowserVisible ? (
-              <ChatSessionBrowser
-                sessions={allVisibleSessions}
-                agentsById={agentsById}
-                activeSessionId={activeSessionId}
-                lang={lang}
-                resolveModelLabel={resolveModelLabel}
-                runtimeRunningSessionIds={runtimeRunningSessionIds}
-                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-                loading={conversationIndexLoading || (!agentsQuery.data && agentsQuery.isPending)}
-                error={sessionsErrorMessage || (agentsQuery.isError ? describeError(agentsQuery.error, t("loadFailed")) : "")}
-                createPending={createSessionMutation.isPending}
-                createDisabled={!selectedChatAgentId}
-                onOpen={(sessionId) => {
-                  setSessionBrowserOpen(false);
-                  handleOpenDirectSession(sessionId);
-                }}
-                onCreate={() => {
-                  setSessionBrowserOpen(false);
-                  handleCreateSession();
-                }}
-                onRetry={() => { void Promise.allSettled([rawSessionsQuery.refetch(), agentsQuery.refetch()]); }}
-              />
-            ) : undefined}
             terminal={(
               <ChatCliAgentTerminalStack
                 runs={mountedCliAgentRuns}
@@ -3299,8 +3317,40 @@ export function ChatCodingRouteWorkbench() {
               onOpenRailFile={openOrdinaryRailFile}
             />
             )}
-            sessionWorkspace={nativeSessionWorkspace}
+            sessionWorkspace={paneDock.portalWorkspace
+              ? (paneDock.showParkedNote
+                ? <VStateSurface tone="empty" title={lang === "zh" ? "这场会话已在右侧栏" : "This chat is in the right column"} />
+                : null)
+              : nativeSessionWorkspace}
+            browser={sessionBrowserVisible ? (
+              <ChatSessionBrowser
+                sessions={allVisibleSessions}
+                agentsById={agentsById}
+                activeSessionId={activeSessionId}
+                lang={lang}
+                resolveModelLabel={resolveModelLabel}
+                runtimeRunningSessionIds={runtimeRunningSessionIds}
+                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+                loading={conversationIndexLoading || (!agentsQuery.data && agentsQuery.isPending)}
+                error={sessionsErrorMessage || (agentsQuery.isError ? describeError(agentsQuery.error, t("loadFailed")) : "")}
+                createPending={createSessionMutation.isPending}
+                createDisabled={!selectedChatAgentId}
+                onOpen={(sessionId) => {
+                  setSessionBrowserOpen(false);
+                  handleOpenDirectSession(sessionId);
+                }}
+                onCreate={() => {
+                  setSessionBrowserOpen(false);
+                  handleCreateSession();
+                }}
+                onRetry={() => { void Promise.allSettled([rawSessionsQuery.refetch(), agentsQuery.refetch()]); }}
+              />
+            ) : paneDock.showCenterPane ? (
+              <div ref={paneDock.onCenterHostChange} className="flex h-full min-h-0 flex-col overflow-hidden" data-chat-center-dock="" />
+            ) : undefined}
           />
+          {paneDock.portalWorkspace && paneDock.parkHost ? createPortal(nativeSessionWorkspace, paneDock.parkHost) : null}
+          </>
         )}
       />
       )}
