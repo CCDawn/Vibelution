@@ -165,6 +165,8 @@ type ChatRightRailProps = {
   id?: string;
   sideClient?: ChatRightRailSideClient;
   paneDock?: ChatRightRailPaneDock;
+  /** The spanning session row already shows these tabs. Keep search, add, and collapse. */
+  hideTabList?: boolean;
 };
 
 export type ChatRightRailPaneDock = {
@@ -590,6 +592,7 @@ export function ChatRightRail({
   id = "chat-status-pane",
   sideClient = defaultSideClient,
   paneDock,
+  hideTabList = false,
 }: ChatRightRailProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1001,8 +1004,8 @@ export function ChatRightRail({
     >
       <VSurface padding="none" className={styles.panel}>
       <div className={styles.toolbar}>
-        {visibleRailTabs.length === 0 && dockedSessions.length === 0 ? <span className={styles.title}>{lang === "zh" ? "侧栏" : "Side"}</span> : null}
-        <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
+        {hideTabList || !(visibleRailTabs.length === 0 && dockedSessions.length === 0) ? null : <span className={styles.title}>{lang === "zh" ? "侧栏" : "Side"}</span>}
+        {hideTabList ? null : <div role="tablist" aria-label={copy.rail} className={styles.tabs}>
           {dockedSessions.map((session) => {
             const tabId = dockedSessionTabId(session.sessionId);
             const selected = paneDock?.activeDockedSessionId === session.sessionId;
@@ -1184,8 +1187,8 @@ export function ChatRightRail({
               </div>
             );
           })}
-        </div>
-        <div className={styles.tools}>
+        </div>}
+        <div className={hideTabList ? `${styles.tools} ${styles.toolsEnd}` : styles.tools}>
           <VButton
             type="button"
             isIconOnly

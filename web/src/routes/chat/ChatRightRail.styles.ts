@@ -15,6 +15,7 @@ const styles = {
   tabClose:
     `vui-routes-chatrightrail tabClose !h-6 !w-6 !min-w-6 ${quietButton} !px-0 text-[var(--fg-tertiary)]`,
   tools: "vui-routes-chatrightrail tools flex shrink-0 items-center gap-1",
+  toolsEnd: "vui-routes-chatrightrail toolsEnd ml-auto",
   iconButton:
     `vui-routes-chatrightrail iconButton !h-7 !min-h-7 !w-7 !min-w-7 ${quietButton} !px-0 !rounded-[6px] text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted-hover)]`,
   search: "vui-routes-chatrightrail search flex shrink-0 flex-col gap-2 bg-[var(--vui-surface-row)] px-2 py-2",

@@ -47,6 +47,8 @@ import {
 import { fetchKnowledgeOverview, listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
 import {
   EMPTY_CHAT_RIGHT_RAIL,
+  chatRightRailTabLabel,
+  closeChatRightRailTab,
   openChatRightRailTab,
   openFreshChatRightRailSideTab,
   type ChatRightRailModel,
@@ -55,6 +57,7 @@ import { requestChatRightRailOpen, subscribeChatRightRailOpen } from "./chatRigh
 import { useChatComposerTransientState } from "./useChatComposerTransientState";
 import { useChatRailPreview } from "./useChatRailPreview";
 import { useChatPaneDock } from "./useChatPaneDock";
+import { dockedSessionTabId, sessionIdFromDockedTab } from "./chatPaneDock";
 import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -291,6 +294,7 @@ import {
 
 import {
   cliAgentRunIdFromTabId,
+  cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
@@ -1390,6 +1394,9 @@ export function ChatCodingRouteWorkbench() {
     centerPaneClassName,
     statusRailClassName,
     conversationIndexPaneClassName,
+    sessionRowSpansRail,
+    leftResizeHandleClassName,
+    rightResizeHandleClassName,
     leftPanelWidth,
     rightPanelWidth,
     handleResizeStart,
@@ -2414,6 +2421,71 @@ export function ChatCodingRouteWorkbench() {
     () => agentSessionTabs.filter((session) => !paneDock.dockedSessionIds.has(session.id)),
     [agentSessionTabs, paneDock.dockedSessionIds],
   );
+  const railRowTabs = useMemo(() => {
+    if (!sessionRowSpansRail) {
+      return [];
+    }
+    const docked = paneDock.dockedSessions.map((session) => ({
+      id: dockedSessionTabId(session.sessionId),
+      title: session.title || session.sessionId,
+      active: paneDock.activeDockedSessionId === session.sessionId && !activeCliAgentRunId,
+    }));
+    const panels = railModel.tabs.filter((tab) => tab.host !== "center").map((tab) => ({
+      id: tab.id,
+      title: chatRightRailTabLabel(tab, lang),
+      active: railModel.activeId === tab.id && !activeCliAgentRunId && paneDock.activeDockedSessionId == null,
+    }));
+    return [...docked, ...panels];
+  }, [
+    activeCliAgentRunId,
+    lang,
+    paneDock.activeDockedSessionId,
+    paneDock.dockedSessions,
+    railModel.activeId,
+    railModel.tabs,
+    sessionRowSpansRail,
+  ]);
+  const selectRailRowTab = useCallback((tabId: string) => {
+    const dockedSessionId = sessionIdFromDockedTab(tabId);
+    if (dockedSessionId) {
+      paneDock.railPaneDock.onFocusDockedSession(dockedSessionId);
+      return;
+    }
+    const tab = railModel.tabs.find((item) => item.id === tabId);
+    if (!tab) {
+      return;
+    }
+    const run = tab.kind === "terminal" ? (activeCliAgentRun ?? cliAgentRunTabs[0]) : undefined;
+    if (run && activeSessionId) {
+      paneDock.dismissCenter();
+      paneDock.railPaneDock.onClearDockedFocus();
+      setActiveTab(activeSessionId, cliAgentRunTabId(run.id));
+      return;
+    }
+    paneDock.railPaneDock.onClearDockedFocus();
+    paneDock.dismissCenter();
+    updateRailModel((current) => (
+      current.activeId === tabId ? current : { ...current, activeId: tabId }
+    ));
+    revealRightRail();
+  }, [
+    activeCliAgentRun,
+    activeSessionId,
+    cliAgentRunTabs,
+    paneDock,
+    railModel.tabs,
+    revealRightRail,
+    setActiveTab,
+    updateRailModel,
+  ]);
+  const closeRailRowTab = useCallback((tabId: string) => {
+    const dockedSessionId = sessionIdFromDockedTab(tabId);
+    if (dockedSessionId) {
+      paneDock.undockSession(dockedSessionId);
+      return;
+    }
+    updateRailModel((current) => closeChatRightRailTab(current, tabId));
+  }, [paneDock, updateRailModel]);
 
   const {
     groupCandidateAgents,
@@ -3065,6 +3137,76 @@ export function ChatCodingRouteWorkbench() {
             </FollowupQueueTogglePauseContext.Provider>
   );
 
+  const sessionTabStrip = (
+          <ChatCodingCenterTabs
+            lang={lang}
+            chatReturnTarget={personalAssistantSurface ? null : chatReturnTarget}
+            chatReturnLabel={chatReturnLabel}
+            groupPanelActive={groupPanelActive}
+            projectBusActive={projectBusActive}
+            financeSurface={embeddedSurface}
+            verifiedCompanionMode={verifiedCompanionMode}
+            selectedChatAgentId={selectedChatAgentId}
+            agentSessionTabs={stripSessions}
+            paneDockChips={ordinaryChangeRail ? paneDock.chips : []}
+            onPaneDockChipSelect={paneDock.selectChip}
+            onPaneDockChipClose={paneDock.closeChip}
+            onPaneDockDrop={ordinaryChangeRail ? paneDock.onSessionBarDrop : undefined}
+            onSessionTabSelected={paneDock.dismissCenter}
+            cliAgentRunTabs={cliAgentRunTabs}
+            activeCompanion={activeCompanion}
+            leftOverlayVisible={personalAssistantSurface || responsiveLayout.leftVisible}
+            rightOverlayVisible={responsiveLayout.rightVisible}
+            conversationIndexCollapsed={conversationIndexCollapsed}
+            setLeftRailCollapsed={setLeftRailCollapsed}
+            conversationWorkspaceTab={conversationWorkspaceTab}
+            sessionBrowserVisible={sessionBrowserVisible}
+            setSessionBrowserOpen={setSessionBrowserOpen}
+            headerExportVisible={headerExportVisible}
+            conversationModel={conversationModel}
+            conversationIndexOverlayOpen={conversationIndexOverlayOpen}
+            ordinaryChangeRail={ordinaryChangeRail}
+            changeRailVisible={changeRailVisible}
+            statusRailOverlayOpen={statusRailOverlayOpen}
+            toggleChangeRail={toggleChangeRail}
+            setResponsiveOverlayPane={setResponsiveOverlayPane}
+            activeSessionId={activeSessionId}
+            setActiveTab={setActiveTab}
+            activeCliAgentRunId={activeCliAgentRunId}
+            agentsById={agentsById}
+            buildSessionReferencePayload={buildSessionReferencePayload}
+            contextMenuSessionId={contextMenuSessionId}
+            createSessionPending={createSessionMutation.isPending}
+            deleteSessionPending={deleteSessionMutation.isPending}
+            pendingDeleteSessionId={String(deleteSessionMutation.variables?.sessionId || "").trim()}
+            editingSessionId={editingSessionId}
+            editingSessionTitle={editingSessionTitle}
+            renamePending={renameSessionMutation.isPending}
+            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+            resolveModelLabel={resolveModelLabel}
+            teams={teams}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+            statusLabel={statusLabel}
+            t={t}
+            onCancelRename={cancelRenameSession}
+            onContextMenu={openSessionContextMenu}
+            onDragReference={startSessionReferenceDrag}
+            closeCliAgentRun={closeCliAgentRun}
+            onCreateSession={handleCreateSession}
+            onDeleteSession={handleDeleteSession}
+            onOpenDirectSession={handleOpenDirectSession}
+            onPrefetchDirectSession={handlePrefetchDirectSession}
+            onRenameTitleChange={setEditingSessionTitle}
+            onSubmitRename={submitRenameSession}
+            workspace={workspace}
+            closePreviewTab={closePreviewTab}
+            railRowTabs={railRowTabs}
+            onRailRowTabSelect={selectRailRowTab}
+            onRailRowTabClose={closeRailRowTab}
+          />
+  );
+
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
     {financeSurface ? <FinancialResearchLiveProjection sessionId={activeSessionId ?? ""} agentId={detail?.agentId} messages={detail?.messages ?? EMPTY_FINANCIAL_MESSAGES} /> : null}
@@ -3133,6 +3275,7 @@ export function ChatCodingRouteWorkbench() {
         updateRailModel={updateRailModel}
         verifiedCompanionMode={verifiedCompanionMode}
         paneDock={ordinaryChangeRail ? paneDock.railPaneDock : undefined}
+        hideTabList={sessionRowSpansRail}
       />
       )}
       leftResizeHandle={
@@ -3142,7 +3285,7 @@ export function ChatCodingRouteWorkbench() {
         separatorLabel={t("resizeLeftPanel")}
         collapseLabel={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
         expandLabel={lang === "zh" ? "展开会话列" : "Expand conversation column"}
-        className={styles.resizeHandleLeft}
+        className={leftResizeHandleClassName}
         active={dragState?.side === "left"}
         valueNow={leftPanelWidth}
         valueMin={MIN_LEFT_PANEL_WIDTH}
@@ -3152,7 +3295,7 @@ export function ChatCodingRouteWorkbench() {
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
       /> : conversationIndexCollapsed ? null : <PaneResizeHandle
         label={t("resizeLeftPanel")}
-        className={styles.resizeHandleLeft}
+        className={leftResizeHandleClassName}
         active={dragState?.side === "left"}
         valueNow={leftPanelWidth}
         valueMin={MIN_LEFT_PANEL_WIDTH}
@@ -3165,72 +3308,7 @@ export function ChatCodingRouteWorkbench() {
       <ChatWorkbenchCenterColumn
         className={centerPaneClassName}
         surfaceClassName={styles.centerSurface}
-        tabStrip={(
-          <ChatCodingCenterTabs
-            lang={lang}
-            chatReturnTarget={personalAssistantSurface ? null : chatReturnTarget}
-            chatReturnLabel={chatReturnLabel}
-            groupPanelActive={groupPanelActive}
-            projectBusActive={projectBusActive}
-            financeSurface={embeddedSurface}
-            verifiedCompanionMode={verifiedCompanionMode}
-            selectedChatAgentId={selectedChatAgentId}
-            agentSessionTabs={stripSessions}
-            paneDockChips={ordinaryChangeRail ? paneDock.chips : []}
-            onPaneDockChipSelect={paneDock.selectChip}
-            onPaneDockChipClose={paneDock.closeChip}
-            onPaneDockDrop={ordinaryChangeRail ? paneDock.onSessionBarDrop : undefined}
-            onSessionTabSelected={paneDock.dismissCenter}
-            cliAgentRunTabs={cliAgentRunTabs}
-            activeCompanion={activeCompanion}
-            leftOverlayVisible={personalAssistantSurface || responsiveLayout.leftVisible}
-            rightOverlayVisible={responsiveLayout.rightVisible}
-            conversationIndexCollapsed={conversationIndexCollapsed}
-            setLeftRailCollapsed={setLeftRailCollapsed}
-            conversationWorkspaceTab={conversationWorkspaceTab}
-            sessionBrowserVisible={sessionBrowserVisible}
-            setSessionBrowserOpen={setSessionBrowserOpen}
-            headerExportVisible={headerExportVisible}
-            conversationModel={conversationModel}
-            conversationIndexOverlayOpen={conversationIndexOverlayOpen}
-            ordinaryChangeRail={ordinaryChangeRail}
-            changeRailVisible={changeRailVisible}
-            statusRailOverlayOpen={statusRailOverlayOpen}
-            toggleChangeRail={toggleChangeRail}
-            setResponsiveOverlayPane={setResponsiveOverlayPane}
-            activeSessionId={activeSessionId}
-            setActiveTab={setActiveTab}
-            activeCliAgentRunId={activeCliAgentRunId}
-            agentsById={agentsById}
-            buildSessionReferencePayload={buildSessionReferencePayload}
-            contextMenuSessionId={contextMenuSessionId}
-            createSessionPending={createSessionMutation.isPending}
-            deleteSessionPending={deleteSessionMutation.isPending}
-            pendingDeleteSessionId={String(deleteSessionMutation.variables?.sessionId || "").trim()}
-            editingSessionId={editingSessionId}
-            editingSessionTitle={editingSessionTitle}
-            renamePending={renameSessionMutation.isPending}
-            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-            resolveModelLabel={resolveModelLabel}
-            teams={teams}
-            runtimeRunningSessionIds={runtimeRunningSessionIds}
-            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-            statusLabel={statusLabel}
-            t={t}
-            onCancelRename={cancelRenameSession}
-            onContextMenu={openSessionContextMenu}
-            onDragReference={startSessionReferenceDrag}
-            closeCliAgentRun={closeCliAgentRun}
-            onCreateSession={handleCreateSession}
-            onDeleteSession={handleDeleteSession}
-            onOpenDirectSession={handleOpenDirectSession}
-            onPrefetchDirectSession={handlePrefetchDirectSession}
-            onRenameTitleChange={setEditingSessionTitle}
-            onSubmitRename={submitRenameSession}
-            workspace={workspace}
-            closePreviewTab={closePreviewTab}
-          />
-        )}
+        tabStrip={sessionRowSpansRail ? null : sessionTabStrip}
         surface={(
           <>
           <ChatCenterSessionSurface
@@ -3358,7 +3436,7 @@ export function ChatCodingRouteWorkbench() {
       rightResizeHandle={
       !sessionBrowserVisible && (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))) && responsiveLayout.rightVisible ? (ordinaryChangeRail ? (statusRailCollapsed ? null : <PaneResizeHandle
         label={t("resizeRightPanel")}
-        className={styles.resizeHandleRight}
+        className={rightResizeHandleClassName}
         active={dragState?.side === "right"}
         valueNow={rightPanelWidth}
         valueMin={MIN_RIGHT_PANEL_WIDTH}
@@ -3371,7 +3449,7 @@ export function ChatCodingRouteWorkbench() {
         separatorLabel={t("resizeRightPanel")}
         collapseLabel={verifiedCompanionMode ? (lang === "zh" ? "收起状态栏" : "Collapse status rail") : (lang === "zh" ? "收起改动" : "Collapse changes")}
         expandLabel={verifiedCompanionMode ? (lang === "zh" ? "展开状态栏" : "Expand status rail") : (lang === "zh" ? "展开改动" : "Expand changes")}
-        className={styles.resizeHandleRight}
+        className={rightResizeHandleClassName}
         active={dragState?.side === "right"}
         valueNow={rightPanelWidth}
         valueMin={MIN_RIGHT_PANEL_WIDTH}
@@ -3475,7 +3553,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
     >
-
+      {sessionRowSpansRail ? <div className={styles.sessionRowSpan}>{sessionTabStrip}</div> : null}
     </ChatSessionWorkbenchShell>
     )}
       <ChatCodingWorkbenchDialogs

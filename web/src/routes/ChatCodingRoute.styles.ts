@@ -155,6 +155,22 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
     "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-center gap-1.5 overflow-hidden bg-vui-surface-chat px-2.5 py-0 max-[700px]:px-1.5",
+  // Wide docked workbench: one session row across the center column and the right rail.
+  // These overrides stay after the locked column classes so the stylesheet order is stable.
+  sessionRowHost:
+    "vui-routes-chatcodingroute sessionRowHost !grid-rows-[44px_minmax(0,1fr)]",
+  sessionRowSpan:
+    "vui-routes-chatcodingroute sessionRowSpan relative z-10 min-h-0 min-w-0 overflow-hidden [grid-column:3_/_6] [grid-row:1]",
+  centerPaneBodyRow:
+    "vui-routes-chatcodingroute centerPaneBodyRow ![grid-row:2] !grid-rows-[minmax(0,1fr)]",
+  statusRailBodyRow:
+    "vui-routes-chatcodingroute statusRailBodyRow ![grid-row:2]",
+  indexRailSpanRows:
+    "vui-routes-chatcodingroute indexRailSpanRows ![grid-row:1_/_span_2]",
+  resizeHandleLeftSpan:
+    "vui-routes-chatcodingroute resizeHandleLeftSpan ![grid-row:1_/_span_2]",
+  resizeHandleRightBody:
+    "vui-routes-chatcodingroute resizeHandleRightBody ![grid-row:2]",
 
 };
 

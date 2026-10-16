@@ -9,7 +9,7 @@ import type { AgentInstance, ConversationMessage, SessionSummary, Team, VirtualH
 import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { VIconButton } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { AgentSessionTabStrip, type AgentSessionTabStripProps } from "../AgentSessionTabStrip";
+import { AgentSessionTabStrip, type AgentSessionTabStripProps, type SessionBarRailTab } from "../AgentSessionTabStrip";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
 import styles from "../ChatCodingRoute.styles";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
@@ -83,6 +83,9 @@ export type ChatCodingCenterTabsProps = {
   onPaneDockChipClose?: (chip: SessionBarDockChip) => void;
   onPaneDockDrop?: (payload: PaneDockPayload) => void;
   onSessionTabSelected?: () => void;
+  railRowTabs?: SessionBarRailTab[];
+  onRailRowTabSelect?: (tabId: string) => void;
+  onRailRowTabClose?: (tabId: string) => void;
 };
 
 export function ChatCodingCenterTabs({
@@ -148,6 +151,9 @@ export function ChatCodingCenterTabs({
   onPaneDockChipClose,
   onPaneDockDrop,
   onSessionTabSelected,
+  railRowTabs = [],
+  onRailRowTabSelect,
+  onRailRowTabClose,
 }: ChatCodingCenterTabsProps) {
   return (
     <ChatCenterTabStrip
@@ -158,7 +164,7 @@ export function ChatCodingCenterTabs({
       chatReturnLabel={chatReturnLabel}
       groupPanelActive={groupPanelActive}
       projectBusActive={projectBusActive}
-      showSessionTabs={!financeSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+      showSessionTabs={!financeSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 || railRowTabs.length > 0)}
       showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}
       companionHeader={verifiedCompanionMode && activeCompanion ? (
         <CompanionConversationHeader companion={activeCompanion} lang={lang} />
@@ -263,6 +269,9 @@ export function ChatCodingCenterTabs({
           onPaneDockChipSelect={onPaneDockChipSelect}
           onPaneDockChipClose={onPaneDockChipClose}
           onPaneDockDrop={onPaneDockDrop}
+          railRowTabs={railRowTabs}
+          onRailRowTabSelect={onRailRowTabSelect}
+          onRailRowTabClose={onRailRowTabClose}
         />
       )}
       fileTabs={(

@@ -53,6 +53,7 @@ export function ChatCodingStatusRail({
   updateRailModel,
   verifiedCompanionMode,
   paneDock,
+  hideTabList = false,
 }: {
   activeCliAgentRun: CliAgentRunView | undefined;
   activeCompanion: VirtualHumanCompanion | null;
@@ -87,6 +88,7 @@ export function ChatCodingStatusRail({
   updateRailModel: (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => void;
   verifiedCompanionMode: boolean;
   paneDock?: ChatRightRailPaneDock;
+  hideTabList?: boolean;
 }) {
   if (verifiedCompanionMode) {
     return (
@@ -119,6 +121,7 @@ export function ChatCodingStatusRail({
         model={railModel}
         onModelChange={updateRailModel}
         paneDock={paneDock}
+        hideTabList={hideTabList}
         onOpenSession={(id) => openSession(id, { telemetrySource: "right_rail_project" })}
         onCollapse={toggleChangeRail}
         devtools={detail ? {
