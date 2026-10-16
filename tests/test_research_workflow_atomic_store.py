@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,77 +12,7 @@ from core.web.services.team_workflow.research_runtime.atomic_fs import (
     CorruptWorkflowStoreError,
     atomic_write_text,
 )
-from core.web.services.team_workflow.research_runtime.durable_index import DurableWorkflowIndex
-from core.web.services.team_workflow.research_runtime.service import (
-    ResearchWorkflowError,
-    ResearchWorkflowRuntimeService,
-    reset_research_workflow_runtime_service_for_tests,
-)
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
-
-
-def _baseline_run_input() -> dict:
-    fixture_path = Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json"
-    return json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]
-
-
-def test_corrupt_idempotency_index_does_not_create_duplicate_run(tmp_path: Path) -> None:
-    store = WorkflowRunStore(tmp_path / "runs")
-    index = DurableWorkflowIndex(tmp_path / "runs" / "_index")
-    ckpt = str(tmp_path / "ckpt.sqlite")
-    svc = reset_research_workflow_runtime_service_for_tests(
-        run_store=store,
-        checkpoint_path=ckpt,
-        durable_index=index,
-    )
-    first = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-1",
-    )
-    # Corrupt the index after a successful create.
-    index_path = tmp_path / "runs" / "_index" / "idempotency.json"
-    index_path.write_text("{not-json", encoding="utf-8")
-
-    svc2 = ResearchWorkflowRuntimeService(
-        run_store=WorkflowRunStore(tmp_path / "runs"),
-        checkpoint_path=ckpt,
-        durable_index=DurableWorkflowIndex(tmp_path / "runs" / "_index"),
-    )
-    with pytest.raises(CorruptWorkflowStoreError):
-        svc2.create_run(
-            CHALLENGE_CUP_WORKFLOW_ID,
-            run_input=_baseline_run_input(),
-            idempotency_key="idem-1",
-        )
-    # Original run record still present; no silent second run under same key path.
-    listed = store.list_runs(CHALLENGE_CUP_WORKFLOW_ID)
-    assert any(r["runId"] == first["runId"] for r in listed)
-
-
-def test_inconsistent_idempotency_index_fails_closed(tmp_path: Path) -> None:
-    store = WorkflowRunStore(tmp_path / "runs")
-    index = DurableWorkflowIndex(tmp_path / "runs" / "_index")
-    service = reset_research_workflow_runtime_service_for_tests(
-        run_store=store,
-        checkpoint_path=str(tmp_path / "ckpt.sqlite"),
-        durable_index=index,
-    )
-    service.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-mismatch",
-    )
-    index.put_run_id("create:idem-mismatch", "run-unexpected")
-
-    with pytest.raises(ResearchWorkflowError, match="idempotency index points to a different run") as exc_info:
-        service.create_run(
-            CHALLENGE_CUP_WORKFLOW_ID,
-            run_input=_baseline_run_input(),
-            idempotency_key="idem-mismatch",
-        )
-
-    assert exc_info.value.code == "idempotency_index_conflict"
 
 
 def test_atomic_run_update_preserves_previous_record_on_write_failure(tmp_path: Path) -> None:

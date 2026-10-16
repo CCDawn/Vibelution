@@ -24,7 +24,6 @@ const hypothesisSelectionPanelSource = readFileSync(join(here, "teams/challenge-
 const challengeCatalogOverviewSource = readFileSync(join(here, "teams/challenge-cup/ChallengeCatalogOverview.tsx"), "utf8");
 const researchRunLaunchPanelSource = readFileSync(join(here, "teams/research-workflow/ResearchRunLaunchPanel.tsx"), "utf8");
 const challengeRealBatchPanelSource = readFileSync(join(here, "teams/research-workflow/ChallengeRealBatchControlPanel.tsx"), "utf8");
-const challengeMvpProgressPanelSource = readFileSync(join(here, "teams/research-workflow/ChallengeMvpProgressPanel.tsx"), "utf8");
 const researchWorkflowCommandsSource = readFileSync(join(here, "teams/research-workflow/useResearchWorkflowCommands.ts"), "utf8");
 const researchWorkflowRunSource = readFileSync(join(here, "teams/research-workflow/useResearchWorkflowRun.ts"), "utf8");
 const researchWorkflowEventStreamSource = readFileSync(join(here, "teams/research-workflow/useResearchWorkflowEventStream.ts"), "utf8");
@@ -88,8 +87,6 @@ describe("domain user-action telemetry contract", () => {
       "challenge_real_batch_authorize",
       "challenge_real_batch_start",
       "challenge_real_batch_cancel",
-      "challenge_dev_readiness_run",
-      "challenge_dev_batch_run",
       "challenge_workflow_human_gate_resolve",
       "challenge_workflow_offer_submit",
       "challenge_experiment_plan_create",
@@ -167,11 +164,10 @@ describe("domain user-action telemetry contract", () => {
     expect(hypothesisSelectionListSource).toContain("trackHypothesisSelectionRecord(");
     expect(hypothesisSelectionListSource).not.toContain("observeHypothesisLegacyFallback(");
     expect(hypothesisSelectionPanelSource).toContain("trackHypothesisCandidateGenerationOpen(");
-    expect(challengeCatalogOverviewSource).toContain("trackDevBatchRun(");
     expect(challengeCatalogOverviewSource).toContain("observeCatalogActiveWorkChanged(");
   });
 
-  it("wires challenge-cup run launch, real batch, and dev control surfaces", () => {
+  it("wires challenge-cup run launch and real batch surfaces", () => {
     expect(researchRunLaunchPanelSource).toContain("trackExperimentActivation(");
     expect(challengeRealBatchPanelSource).toContain("trackRealBatchAuthorize(");
     expect(challengeRealBatchPanelSource).toContain("trackRealBatchStart(");
@@ -179,8 +175,6 @@ describe("domain user-action telemetry contract", () => {
     expect(challengeRealBatchPanelSource).toContain("observeRealBatchAuthorizeShapeInvalid(");
     expect(challengeRealBatchPanelSource).toContain("observeRealBatchPollLoopStopped(");
     expect(challengeRealBatchPanelSource).toContain("observeRealBatchPhaseChanged(");
-    expect(challengeMvpProgressPanelSource).toContain("trackDevReadinessRun(");
-    expect(challengeMvpProgressPanelSource).toContain("trackDevBatchRun(");
   });
 
   it("wires challenge-cup workflow run, human gate, and stream anomaly surfaces", () => {

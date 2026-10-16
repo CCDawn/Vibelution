@@ -9910,9 +9910,6 @@ def _close_review_meeting_auto_advance_env(
     monkeypatch.setattr(
         chain, "_trigger_deferred_next_review", lambda *_args, **_kwargs: None
     )
-    monkeypatch.setattr(
-        chain, "_auto_advance_converge_tick", lambda *_args, **_kwargs: None
-    )
     return team_id
 
 

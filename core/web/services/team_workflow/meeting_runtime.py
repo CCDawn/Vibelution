@@ -3802,23 +3802,8 @@ def _run_meeting_discussion_impl(
             ),
         },
     )
-    if drafted is not None:
-        # Active-policy hook (autoCloseMeetingRound): a digest draft just
-        # landed (meeting is awaiting_approval).  Gated, audited, quiet —
-        # with no active policy configured this is a no-op before any I/O,
-        # and the executor never breaks the discussion completion result.
-        try:
-            from core.web.services.team_workflow.research_runtime import (
-                automation_policy_executor,
-            )
-
-            automation_policy_executor.attempt_capability_quietly(
-                decision_point="meeting_close",
-                team_id=normalized_team_id,
-                meeting_round_id=normalized_round_id,
-            )
-        except Exception:  # noqa: BLE001 - hooks never break the discussion flow
-            pass
+    # The active-policy autoCloseMeetingRound hook was retired with the T8
+    # auto-advance machine; a landed digest stays awaiting human approval.
     return {
         "schemaVersion": meeting_rounds.SCHEMA_VERSION,
         "teamId": normalized_team_id,

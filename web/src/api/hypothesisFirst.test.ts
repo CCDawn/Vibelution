@@ -115,7 +115,6 @@ describe("hypothesis-first API", () => {
     expect(apiSource).toContain("/collection-requests/");
     expect(apiSource).toContain("/recover");
     expect(apiSource).toContain("/hypothesis-rounds");
-    expect(apiSource).toContain("/hypothesis-first/chain/state");
     expect(apiSource).toContain("/hypothesis-first/chain/state-v2");
     expect(apiSource).toContain("/hypothesis-first/chain/commands");
     // SCI-049 async command window transports.

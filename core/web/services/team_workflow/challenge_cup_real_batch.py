@@ -69,9 +69,6 @@ from core.web.services.team_workflow.research_runtime.catalog_run_authorization 
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     record_catalog_run_authorization as _record_catalog_run_authorization,
 )
-from core.web.services.team_workflow.research_runtime.automation_policy_executor import (
-    attempt_capability_quietly,
-)
 from core.web.services.team_workflow.research_runtime.budget_contract import (
     default_safety_limits,
 )
@@ -842,35 +839,16 @@ def _gate_complete(team_id: str, gate_id: str) -> bool:
 def _concurrency_elevation_allowed(team_id: str, gate_id: str) -> bool:
     """Frozen policy: concurrency above the default needs completed G12 evidence.
 
-    Two fail-closed evidence sources, no bypass: the real-12 batch fully
-    succeeded, or a completed G12 calibration pilot (decision-#13 judgement
-    records persisted through the G12 store) passed its statistical gate —
-    thresholds come from the loadable active policy document when one is
-    configured and bound to the recorded manifest, else the frozen
-    calibration defaults.  The plan-level restriction (only the real-125
-    plan may exceed the frozen default) is unchanged.
+    The retired G12 calibration-pilot evidence path (policy executor +
+    ``g12_calibration_store``) fell back to the conservative default with
+    the T8 auto-advance cut: elevation above the frozen default is now
+    allowed only when the real-12 batch itself fully succeeded.  The
+    plan-level restriction (only the real-125 plan may exceed the frozen
+    default) is unchanged.
     """
     if gate_id != "G125":
         return False
-    if _gate_complete(team_id, "G12"):
-        return True
-    from core.web.services.team_workflow.research_runtime import (
-        automation_policy_executor,
-    )
-    from core.web.services.team_workflow.research_runtime.g12_calibration_store import (
-        g12_calibration_gate_verdict_for_team,
-    )
-
-    try:
-        policy = automation_policy_executor.load_active_policy_from_environment()
-    except Exception:  # noqa: BLE001 - evidence read never breaks batch start
-        policy = None
-    return (
-        g12_calibration_gate_verdict_for_team(
-            team_id, policy=policy
-        ).get("passed")
-        is True
-    )
+    return _gate_complete(team_id, "G12")
 
 
 def _require_gate_progression(team_id: str, gate_id: str) -> None:
@@ -1448,89 +1426,10 @@ def _envelope_has_pending_work(
     )
 
 
-# In-process re-offer cooldown for the question_review adjudication hook.
-#
-# The activation-audit store already dedupes identical attempts (stable
-# auditId over policy identity + decision + reasonCode), so repeated offers
-# cannot grow THAT store; this cooldown bounds the executor's per-attempt
-# scene events for a question that stays parked awaiting human review with
-# failing deterministic gates.  A re-offer still happens periodically, so a
-# policy re-sign (capability flip, calibration refresh) reaches parked
-# questions without any manual reset.
-ADJUDICATION_REOFFER_COOLDOWN_S = 1800.0
-_adjudication_offer_lock = threading.Lock()
-_adjudication_offer_times: dict[tuple[str, str, str], float] = {}
-
-
-def reset_real_batch_adjudication_cooldown_for_tests() -> None:
-    """Test seam: forget prior offers so the next sweep re-offers."""
-
-    with _adjudication_offer_lock:
-        _adjudication_offer_times.clear()
-
-
-def _adjudication_offer_due(
-    key: tuple[str, str, str], *, cooldown_s: float | None = None
-) -> bool:
-    now = time.monotonic()
-    window = ADJUDICATION_REOFFER_COOLDOWN_S if cooldown_s is None else cooldown_s
-    with _adjudication_offer_lock:
-        if len(_adjudication_offer_times) > 4096:
-            _adjudication_offer_times.clear()
-        last = _adjudication_offer_times.get(key)
-        if last is not None and now - last < window:
-            return False
-        _adjudication_offer_times[key] = now
-        return True
-
-
-def _adjudicate_awaiting_approvals(
-    team_id: str, plan_id: str, canonical_team: str
-) -> list[str]:
-    """Offer every awaiting-approval question to the auto-adjudication gate.
-
-    The sweep host hooks the ``question_review`` decision point after each
-    poll: every question parked in ``awaitingApproval`` is offered to the
-    policy executor, which re-verifies its own deterministic evidence gates
-    (schema / citation / semantic / official model call / artifact hash /
-    not-yet-decided) before pressing the same formal review button a human
-    reviewer would.  With no active policy configured — or any gate refusing —
-    nothing happens and the question stays awaiting human review.  Each
-    question is offered at most once per re-offer cooldown window so a
-    parked question cannot grow the per-attempt scene-event stream at the
-    30s sweep cadence.  Failures are isolated per question; this helper
-    never raises.
-    """
-
-    executed: list[str] = []
-    try:
-        envelope = _load_envelope(team_id, plan_id)
-    except Exception:  # noqa: BLE001 - adjudication must never break the sweep
-        return []
-    if envelope is None or bool(envelope.get("cancelled")):
-        return []
-    for question_id, entry in sorted((envelope.get("awaitingApproval") or {}).items()):
-        if not isinstance(entry, Mapping):
-            continue
-        run_id = str(entry.get("runId") or "").strip()
-        if not run_id:
-            continue
-        if not _adjudication_offer_due(
-            (canonical_team, plan_id, str(question_id))
-        ):
-            continue
-        try:
-            record = attempt_capability_quietly(
-                decision_point="question_review",
-                team_id=canonical_team,
-                question_id=str(question_id),
-                payload={"runId": run_id},
-            )
-        except Exception:  # noqa: BLE001 - one question cannot stop the sweep
-            continue
-        if isinstance(record, Mapping) and record.get("decision") == "executed":
-            executed.append(str(question_id))
-    return executed
+# The question_review auto-adjudication hook (policy executor offers, with a
+# per-question re-offer cooldown) was retired with the T8 auto-advance
+# machine: questions parked in awaitingApproval now always wait for the human
+# formal review.
 
 
 def sweep_real_batches(
@@ -1545,16 +1444,13 @@ def sweep_real_batches(
     breaker) the sweep calls the same idempotent :func:`poll_real_batch` the
     route exposes: terminal runs are harvested, human-approved packages are
     promoted, unstarted run references are re-dispatched and the concurrency
-    budget is refilled.  Questions parked in awaiting-approval are then offered
-    to the ``question_review`` auto-adjudication gate (the policy executor,
-    with its own fail-closed deterministic evidence gates); any freshly
-    recorded approval is harvested by a same-pass re-poll.  Every hard gate
-    (current-authorization fence, circuit
-    breaker, cancel) stays inside poll — a refusal is a recorded skip, never a
-    bypass.  Self-throttled like the meeting driver recovery sweep
-    (``force=True`` bypasses for tests); one broken envelope or refused poll is
-    isolated into ``skipped`` and never raises.  Scene evidence is written only
-    for actionable runs so the 30s cadence cannot grow the event store.
+    budget is refilled.  Every hard gate (current-authorization fence,
+    circuit breaker, cancel) stays inside poll — a refusal is a recorded
+    skip, never a bypass.  Self-throttled like the meeting driver recovery
+    sweep (``force=True`` bypasses for tests); one broken envelope or
+    refused poll is isolated into ``skipped`` and never raises.  Scene
+    evidence is written only for actionable runs so the 30s cadence cannot
+    grow the event store.
     """
 
     current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
@@ -1564,7 +1460,6 @@ def sweep_real_batches(
         "polled": 0,
         "harvested": 0,
         "launched": 0,
-        "adjudicated": 0,
         "skipped": 0,
     }
     if not force and not _real_batch_sweep_due(current_ms):
@@ -1597,21 +1492,7 @@ def sweep_real_batches(
         summary["polled"] += 1
         summary["harvested"] += len(result.get("harvested") or [])
         summary["launched"] += len(result.get("launched") or [])
-        adjudicated = _adjudicate_awaiting_approvals(team_id, plan_id, canonical_team)
-        if adjudicated:
-            # The freshly recorded approvals are harvested by the same idempotent
-            # poll in this very pass, so the zero-human chain advances one sweep
-            # tick per question instead of two.
-            summary["adjudicated"] += len(adjudicated)
-            try:
-                result = poll_real_batch(canonical_team, plan_id=plan_id)
-            except Exception:  # noqa: BLE001 - one batch cannot stop the sweep
-                summary["skipped"] += 1
-                continue
-            summary["polled"] += 1
-            summary["harvested"] += len(result.get("harvested") or [])
-            summary["launched"] += len(result.get("launched") or [])
-    if summary["harvested"] or summary["launched"] or summary["adjudicated"]:
+    if summary["harvested"] or summary["launched"]:
         _record_real_batch_sweep_scene_event(summary)
     return summary
 
@@ -1637,7 +1518,6 @@ def _record_real_batch_sweep_scene_event(summary: Mapping[str, Any]) -> None:
                 "polled": int(summary.get("polled") or 0),
                 "harvested": int(summary.get("harvested") or 0),
                 "launched": int(summary.get("launched") or 0),
-                "adjudicated": int(summary.get("adjudicated") or 0),
                 "skipped": int(summary.get("skipped") or 0),
             },
             lifecycle=True,

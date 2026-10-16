@@ -4,12 +4,8 @@ import { resetControlTokenForTests } from "./client";
 import {
   fetchChallengeCatalogReadiness,
   fetchChallengeCupCatalogOverview,
-  fetchChallengeCupDevControlSnapshot,
-  runChallengeCupDevBatch,
-  runChallengeCupDevReadiness,
 } from "./teamExperiment";
 import apiSource from "./teamExperiment.ts?raw";
-import challengeCupTypesSource from "./types/challengeCup.ts?raw";
 import mutationsSource from "../routes/teams/useTeamExperimentLoopMutations.ts?raw";
 import resourcesSource from "../routes/teams/useResearchWorkflowResources.ts?raw";
 import secondarySource from "../routes/teams/useTeamResearchSecondaryQueries.ts?raw";
@@ -69,47 +65,15 @@ describe("team experiment API", () => {
     expect(resourcesSource).not.toContain("/workflow-orchestration/candidates?");
   });
 
-  it("exposes typed Challenge Cup DEV control transports with canonical URLs", () => {
-    expect(apiSource).toContain("export function fetchChallengeCupDevControlSnapshot");
+  it("exposes typed Challenge Cup catalog/token transports with canonical URLs and no DEV controls", () => {
     expect(apiSource).toContain("export function fetchChallengeCupCatalogOverview");
     expect(apiSource).toContain("export function fetchChallengeCupTokenUsage");
-    expect(apiSource).toContain("export function runChallengeCupDevReadiness");
-    expect(apiSource).toContain("export function runChallengeCupDevBatch");
-    expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/catalog-overview");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/token-usage");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/submission-readiness");
-    expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/readiness");
-    expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/batches/");
-    expect(apiSource).toContain("dev-controls/batches/${encodeURIComponent(planId)}");
-    expect(apiSource).toContain("encodeURIComponent(teamId)");
     expect(apiSource).toContain("export function fetchChallengeCatalogReadiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/catalog-readiness");
-  });
-
-  it("requires an explicit retryFailed flag on every batch run request", () => {
-    expect(challengeCupTypesSource).toContain("retryFailed: boolean");
-  });
-
-  it("fetches the DEV control snapshot with team segment encoded", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ header: "X-Vibelution-Control-Token", controlToken: "t" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }))
-      .mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await fetchChallengeCupDevControlSnapshot("team a/b");
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/teams/team%20a%2Fb/workflow-orchestration/challenge-program/dev-controls",
-      expect.objectContaining({ signal: undefined }),
-    );
-    vi.unstubAllGlobals();
+    expect(apiSource).not.toContain("dev-controls");
   });
 
   it("fetches the catalog overview with team segment encoded", async () => {
@@ -159,106 +123,6 @@ describe("team experiment API", () => {
       "/api/teams/team%20a%2Fb/workflow-orchestration/challenge-program/catalog-readiness",
       expect.objectContaining({ signal: undefined }),
     );
-    vi.unstubAllGlobals();
-  });
-
-  it("posts DEV readiness with a dev-mode payload", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
-      })
-      .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, cleanedUp: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await runChallengeCupDevReadiness("team-1", { mode: "dev" });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/teams/team-1/workflow-orchestration/challenge-program/dev-controls/readiness",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ mode: "dev" }),
-      }),
-    ]);
-    vi.unstubAllGlobals();
-  });
-
-  it("posts dev-1 / dev-5 batches with bounded maxItems and explicit retryFailed=false", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
-      })
-      .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, planId: "dev-5" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await runChallengeCupDevBatch("team 1/2", "dev 5/next", { maxItems: 2, retryFailed: false });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/teams/team%201%2F2/workflow-orchestration/challenge-program/dev-controls/batches/dev%205%2Fnext",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ maxItems: 2, retryFailed: false }),
-      }),
-    ]);
-    vi.unstubAllGlobals();
-  });
-
-  it("resumes a dev-5 batch with a null maxItems payload and explicit retryFailed=false", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
-      })
-      .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, planId: "dev-5" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await runChallengeCupDevBatch("team-1", "dev-5", { maxItems: null, retryFailed: false });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/teams/team-1/workflow-orchestration/challenge-program/dev-controls/batches/dev-5",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ maxItems: null, retryFailed: false }),
-      }),
-    ]);
-    vi.unstubAllGlobals();
-  });
-
-  it("posts a repair batch with explicit retryFailed=true", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
-      })
-      .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, planId: "dev-1" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await runChallengeCupDevBatch("team-1", "dev-1", { maxItems: null, retryFailed: true });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/teams/team-1/workflow-orchestration/challenge-program/dev-controls/batches/dev-1",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ maxItems: null, retryFailed: true }),
-      }),
-    ]);
     vi.unstubAllGlobals();
   });
 });

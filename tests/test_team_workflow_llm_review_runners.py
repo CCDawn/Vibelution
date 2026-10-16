@@ -641,8 +641,6 @@ def test_dev_review_meeting_close_keeps_fixture_fallback(monkeypatch):
         "_generate_hypothesis_round",
         lambda *args, **kwargs: {"status": "created", "round": {"status": "closed"}},
     )
-    monkeypatch.setattr(chain, "_record_policy_shadow_decisions", lambda *a, **k: None)
-    monkeypatch.setattr(chain, "_auto_advance_converge_tick", lambda *a, **k: None)
 
     result = chain.close_review_meeting("team-1", "meeting-1", {})
 

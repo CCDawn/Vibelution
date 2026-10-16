@@ -2,7 +2,6 @@ export const queryKeys = {
   personalAssistant: () => ["personal-assistant"] as const,
   personalAssistantOverview: () => ["personal-assistant", "overview"] as const,
   personalAssistantBinding: (agentId: string, sessionId: string) => ["personal-assistant", "binding", agentId, sessionId] as const,
-  digestApprovals: (teamId: string) => ["teams", teamId, "hypothesis-first", "digest-approvals"] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,
   petActivity: () => ["pet", "activity"] as const,
@@ -109,8 +108,6 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "catalog-readiness"] as const,
   challengeCupRealBatchStatus: (teamId: string, planId: string) =>
     ["teams", teamId, "challenge-program", "real-batches", planId, "status"] as const,
-  challengeCupDevControlsSnapshot: (teamId: string) =>
-    ["teams", teamId, "challenge-program", "dev-controls", "snapshot"] as const,
   challengeCupCatalogOverview: (teamId: string) =>
     ["teams", teamId, "challenge-program", "catalog-overview"] as const,
   challengeCupTokenUsage: (teamId: string) =>

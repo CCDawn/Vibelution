@@ -12,13 +12,6 @@ from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
     definition_structure_hash,
 )
-from core.research.workflow.handoff import (
-    can_consume_handoff,
-    controlled_run_unlocked,
-    experiment_entry_unlocked,
-    plan_alone_does_not_unlock_controlled_run,
-    progress_alone_does_not_unlock_experiment,
-)
 from core.research.workflow.iteration_decisions import (
     ITERATION_DEFINITION_EDGE_IDS,
     IterationDecisionKind,
@@ -29,10 +22,6 @@ from core.research.workflow.knowledge_sideflow_definition import (
 from core.research.workflow.models import (
     ActorKind,
     AgentBindingLayers,
-    ArtifactRef,
-    GateKind,
-    HandoffStatus,
-    NodeHandoffRecord,
     NodeRunStatus,
     can_transition_node_run,
 )
@@ -167,61 +156,6 @@ def test_run_snapshot_not_rewritten_by_live_config_change() -> None:
         live,
     )[0] == "agent-b"
     assert agent_id_from_run_snapshot(by_node, "hypothesis_design") == "agent-a"
-
-
-def test_handoff_only_accepted_is_consumable() -> None:
-    base = {
-        "handoffId": "h1",
-        "workflowId": CHALLENGE_CUP_WORKFLOW_ID,
-        "workflowVersionId": "wv-1",
-        "runId": "run-1",
-        "fromNodeId": "knowledge_handoff",
-        "fromNodeRunId": "nr-1",
-        "toNodeId": "hypothesis_design",
-        "gateKind": GateKind.KNOWLEDGE_PACKAGE,
-        "outputArtifactRefs": (
-            ArtifactRef(
-                artifactId="a1",
-                kind="knowledge_package",
-                version="1",
-                contentHash="abc",
-            ),
-        ),
-        "inputSnapshotHash": "abc",
-        "offeredAt": "2026-08-07T00:00:00Z",
-    }
-    pending = NodeHandoffRecord(**base, status=HandoffStatus.PENDING)
-    accepted = NodeHandoffRecord(**base, status=HandoffStatus.ACCEPTED)
-    rejected = NodeHandoffRecord(**base, status=HandoffStatus.REJECTED)
-    assert can_consume_handoff(pending) is False
-    assert can_consume_handoff(accepted) is True
-    assert can_consume_handoff(rejected) is False
-
-
-def test_sources_alone_do_not_unlock_experiment() -> None:
-    assert progress_alone_does_not_unlock_experiment(has_sources=True, has_knowledge_package_accepted=False) is False
-    assert progress_alone_does_not_unlock_experiment(has_sources=True, has_knowledge_package_accepted=True) is True
-    assert experiment_entry_unlocked(knowledge_package_handoff=None) is False
-
-
-def test_plan_alone_does_not_unlock_controlled_run() -> None:
-    assert (
-        plan_alone_does_not_unlock_controlled_run(
-            has_experiment_plan=True,
-            has_frozen_protocol=False,
-            has_smoke_accept=False,
-        )
-        is False
-    )
-    assert (
-        plan_alone_does_not_unlock_controlled_run(
-            has_experiment_plan=True,
-            has_frozen_protocol=True,
-            has_smoke_accept=True,
-        )
-        is True
-    )
-    assert controlled_run_unlocked(smoke_handoff=None, frozen_protocol_present=True) is False
 
 
 def test_projection_never_includes_selected_node_id() -> None:

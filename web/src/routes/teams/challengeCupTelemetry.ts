@@ -78,14 +78,6 @@ export function trackRealBatchCancel(fields: ChallengeCupActionFields): UserActi
   return startUserAction("challenge_real_batch_cancel", fields, { destructive: true });
 }
 
-export function trackDevReadinessRun(fields: ChallengeCupActionFields): UserActionTracker {
-  return startUserAction("challenge_dev_readiness_run", fields);
-}
-
-export function trackDevBatchRun(fields: ChallengeCupActionFields): UserActionTracker {
-  return startUserAction("challenge_dev_batch_run", fields);
-}
-
 export function trackWorkflowHumanGateResolve(fields: ChallengeCupActionFields): UserActionTracker {
   return startUserAction("challenge_workflow_human_gate_resolve", fields);
 }

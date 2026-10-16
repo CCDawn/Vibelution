@@ -68,7 +68,7 @@
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `session_service.py` | Real chat session payloads for the web workbench. | `session/` | `agents.py`, `cli_agents.py`, `sessions.py` | `test_session_fork.py`, `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py` |
+| `session_service.py` | Real chat session payloads for the web workbench. | `session/` | `agents.py`, `cli_agents.py`, `sessions.py` | `test_session_fork.py`, `test_agent_reset_direct_session_safety.py` |
 | `session_archive_service.py` | Session-level archive/unarchive (ZCode-style lightweight archive). | — | `session_archive.py` | `test_session_archive_service.py` |
 
 ## Team workflow / SC / experiment
@@ -82,7 +82,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `team_bundle_service.py` | Team bundle export / import. | — | `team_bundles.py` | `test_team_bundle_routes.py`, `test_team_bundle_service.py` |
-| `team_service.py` | Team registry and organization canvas service. | `team/` | `agents.py`, `research_evidence.py`, `research_loop.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/challenge_cup_real_batch.py` | `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py`, `test_question_experiment_retire.py` |
+| `team_service.py` | Team registry and organization canvas service. | `team/` | `agents.py`, `research_evidence.py`, `research_loop.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/challenge_cup_real_batch.py` | `test_agent_reset_direct_session_safety.py`, `test_question_experiment_retire.py` |
 | `team_template_service.py` | Reusable Team templates for demo and onboarding flows. | — | `team_templates.py` | `test_team_template_routes.py` |
 
 ## Agent directory / config
@@ -93,7 +93,7 @@
 | `agent_bulk_edit_service.py` | Bulk Agent edit orchestration helpers. | — | `agents.py` | `test_agent_bulk_edit_service.py` |
 | `agent_config_change_service.py` | Append-only private drafts and revision evidence for Agent configuration. | — | `agents.py` | `test_agent_config_ssot_contract.py`, `test_agent_config_change_service.py`, `test_agent_config_change_route_contract.py` |
 | `agent_config_workspace_service.py` | Read-only Agent configuration workspace aggregation. | — | `agents.py` | `test_agent_config_ssot_contract.py`, `test_team_service.py`, `test_tool_approval_flow.py` |
-| `agent_directory_service.py` | Persistent AgentInstance registry for chat-facing agents. | `agent_directory/` | `agents.py` | `test_agent_config_ssot_contract.py`, `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py` |
+| `agent_directory_service.py` | Persistent AgentInstance registry for chat-facing agents. | `agent_directory/` | `agents.py` | `test_agent_config_ssot_contract.py`, `test_agent_reset_direct_session_safety.py` |
 | `agent_mode_binding_service.py` | Mode-to-Agent binding store for configurable Agent runtimes. | — | `agents.py` | `test_agent_reset_direct_session_safety.py`, `test_team_service.py`, `test_self_evolution_control_service.py` |
 | `agent_model_candidate_service.py` | Read-only projection of configured and observed Provider models for Agents. | — | — | `test_session_llm_selection.py`, `test_agent_model_candidate_service.py` |
 | `agent_model_promotion_service.py` | Atomic promotion of one observed Provider model into one Agent binding. | — | `agents.py` | `test_agent_config_workspace_routes.py`, `test_agent_model_promotion_service.py` |
@@ -125,7 +125,7 @@
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `chat_room_service.py` | Chat room orchestration for multi-session agent discussion. | — | `agents.py`, `chat_rooms.py`, `team_workflows/hypothesis_first.py` | `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py`, `test_research_workflow_snapshot_projection.py` |
+| `chat_room_service.py` | Chat room orchestration for multi-session agent discussion. | — | `agents.py`, `chat_rooms.py`, `team_workflows/hypothesis_first.py` | `test_agent_reset_direct_session_safety.py`, `test_research_workflow_snapshot_projection.py` |
 | `conversation_service.py` | Unified conversation index for direct agents and group rooms. | — | `conversations.py`, `sessions.py` | `test_session_workspace_isolation.py`, `test_web_session_routes.py`, `test_multi_agent_conversations.py` |
 | `conversation_timeline_service.py` | Conversation timeline projection for chat session messages. | — | — | `test_conversation_timeline_service.py` |
 

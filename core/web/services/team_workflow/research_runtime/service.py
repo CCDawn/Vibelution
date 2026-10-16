@@ -9,43 +9,29 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.research.workflow.bindings import (
     AgentBindingLayers,
-    build_run_binding_snapshots,
     resolve_effective_agent_id,
 )
 from core.research.workflow.checkpoint_store import default_checkpoint_path
-from core.research.workflow.contracts import ContractValidationError
-from core.research.workflow.contracts.automation_policy import (
-    MAX_AUTO_REVISION_ROUNDS_DEFAULT,
-)
-from core.research.workflow.contracts.evolution_lineage import (
-    REVISION_EXHAUSTED_EXCEPTION,
-)
-from core.research.workflow.contracts.retry_taxonomy import DEFAULT_RETRY_TAXONOMY
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
 from core.research.workflow.definition_registry import register_or_resolve
-from core.research.workflow.stage_one_definition import build_stage_one_workflow_definition
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
-from .anomaly_inbox_service import build_anomaly_inbox
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
-from .checkpoint_lifecycle import prepare_initial_checkpoint
 from .durable_index import DurableWorkflowIndex
 from .evidence_remediation_fork import (
     EvidenceRemediationForkError,
     fork_evidence_remediation,
 )
-from .evolution_lineage_writer import write_evolution_lineage_artifact
 from .external_agent_task_reconciliation import (
     has_reconcilable_external_agent_tasks,
     reconcile_external_agent_tasks,
@@ -68,7 +54,6 @@ from .human_task_resolution import (
 from .human_task_resolution import (
     resolve_human_task as resolve_human_task_transition,
 )
-from .iteration_revision_fork import _child_run_id, fork_iteration_revision
 from .node_command_adapter import (
     NodeCommandError,
     NodeCommandUnavailable,
@@ -79,7 +64,6 @@ from .node_completion import complete_node_execution
 from .node_execution import heartbeat_node_execution, start_node_execution
 from .node_execution_support import (
     NodeExecutionError,
-    build_event,
     iso,
     latest_node_run,
     utc_now,
@@ -91,7 +75,6 @@ from .question_launch import (
     QuestionLaunchError,
     activate_experiment_campaign,
     attach_question_run_checkpoints,
-    build_question_run_input,
     list_catalog_question_launch_options,
 )
 from .research_ledger import project_research_ledger
@@ -101,13 +84,6 @@ from .run_domain_queries import (
     project_evaluation,
     project_experiment_campaigns,
     project_hypotheses,
-)
-from .run_lifecycle import (
-    binding_snapshot_payload,
-    build_initial_run_record,
-    create_request_fingerprint,
-    freeze_run_input,
-    run_id_for_create,
 )
 from .run_projection import build_run_canvas_projection
 from .session_binding_bridge import (
@@ -154,20 +130,6 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _create_request_fingerprints(run_input: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return current and legacy fingerprints for a create request.
-
-    The session-scope mode is a server-owned field added by
-    ``freeze_run_input``.  Ignore it for the current idempotency identity, but
-    accept the raw fingerprint when replaying a pre-normalization run.
-    """
-    canonical_request = dict(run_input)
-    canonical_request.pop("workflowSessionScopeV3", None)
-    canonical = create_request_fingerprint(canonical_request)
-    legacy = create_request_fingerprint(run_input)
-    return tuple(dict.fromkeys((canonical, legacy)))
-
-
 def _node_attempt(record: dict[str, Any], node_id: str) -> int:
     attempts = record.get("nodeAttempts") or {}
     if isinstance(attempts, dict):
@@ -194,274 +156,6 @@ class ResearchWorkflowError(Exception):
     def __init__(self, message: str, *, code: str = "workflow_error"):
         super().__init__(message)
         self.code = code
-
-
-# Decision #3 of the 13-decision contract: automatic protocol revision is
-# bounded at ``MAX_AUTO_REVISION_ROUNDS_DEFAULT`` rounds per lineage.  The
-# frozen retry taxonomy owns the stop semantics: once the auto-revision budget
-# is exhausted the only way forward is a human action family, so the parked
-# run reuses the taxonomy's ``human_required`` outcome code instead of
-# inventing a new one.
-_AUTO_REVISION_TAXONOMY_CODE = "budget_exceeded"
-_AUTO_REVISION_EVENT_TYPE = "AutoRevisionExhausted"
-
-
-def _lineage_revision_rounds(
-    store: WorkflowRunStore, run_id: str
-) -> tuple[int, str, list[str]]:
-    """Count persisted auto-revision forks along the parentRunId chain.
-
-    The counter is never held in memory: it is derived from store data, so
-    the bound survives process restarts.  ``parentRunId`` is not exclusive
-    to the revision fork — evidence-remediation and checkpoint continuation
-    children carry it too — so a hop only counts as one already-consumed
-    revision round when the child-side run record carries the revision
-    fork's exclusive ``forkDecisionId``; any other hop is walked through
-    without consuming the budget.  Returns the consumed rounds, the lineage
-    root run id and the forked child run ids in round order (fork evidence
-    for the lineage record).
-    """
-    rounds = 0
-    fork_run_ids: list[str] = []
-    seen: set[str] = set()
-    root_run_id = str(run_id or "").strip()
-    current_id = root_run_id
-    while current_id:
-        record = store.get_run(current_id)
-        if record is None:
-            break
-        root_run_id = current_id
-        parent_id = str(record.get("parentRunId") or "").strip()
-        if not parent_id or parent_id in seen:
-            break
-        seen.add(parent_id)
-        if str(record.get("forkDecisionId") or "").strip():
-            fork_run_ids.append(current_id)
-            rounds += 1
-        current_id = parent_id
-    return rounds, root_run_id, list(reversed(fork_run_ids))
-
-
-def _revision_fork_already_applied(
-    store: WorkflowRunStore, parent_run_id: str, decision_id: str
-) -> bool:
-    """True when this exact decision already forked (idempotent replay)."""
-    child_run_id = _child_run_id(parent_run_id, decision_id)
-    parent = store.get_run(parent_run_id)
-    if parent is None:
-        return False
-    return parent.get("supersededByRunId") == child_run_id and child_run_id in (
-        parent.get("childRunIds") or []
-    )
-
-
-def _auto_revision_exhausted(
-    store: WorkflowRunStore, parent: dict[str, Any], decision: dict[str, Any]
-) -> bool:
-    """True when a revise_protocol decision must no longer fork (decision #3)."""
-    parent_run_id = str(parent["runId"])
-    decision_id = str(decision.get("decisionId") or "").strip()
-    if not decision_id:
-        return False
-    rounds, _, _ = _lineage_revision_rounds(store, parent_run_id)
-    if rounds < MAX_AUTO_REVISION_ROUNDS_DEFAULT:
-        return False
-    return not _revision_fork_already_applied(store, parent_run_id, decision_id)
-
-
-def _park_auto_revision_exhausted(
-    store: WorkflowRunStore,
-    completed: dict[str, Any],
-    decision: dict[str, Any],
-) -> dict[str, Any]:
-    """Stop a revise_protocol decision at the bounded-revision ceiling.
-
-    Instead of forking another automatic child run, the parent stays in a
-    structured, recoverable stop state: ``budget_exceeded`` is the frozen
-    retry-taxonomy ``human_required`` outcome code, the mandatory
-    ``auto_revision_exhausted`` exception is recorded through the canonical
-    evolution-lineage projection writer, and an anomaly-inbox escalation item
-    is emitted with the frozen kind/severity mapping (``build_anomaly_inbox``
-    derives both; no new mapping is introduced here).
-    """
-    parent_run_id = str(completed["runId"])
-    decision_id = str(decision.get("decisionId") or "").strip()
-    rounds, root_run_id, fork_run_ids = _lineage_revision_rounds(
-        store, parent_run_id
-    )
-    now = iso(utc_now())
-    team_id = str(completed.get("teamId") or "").strip()
-    question_id = str(completed.get("questionId") or "").strip()
-    taxonomy_entry = DEFAULT_RETRY_TAXONOMY.entry(_AUTO_REVISION_TAXONOMY_CODE)
-    occurred_at = str(decision.get("decidedAt") or "").strip() or now
-    round_scope = f"revision-lineage:{root_run_id}"
-    candidate_id = (
-        str(decision.get("selectedCandidateRef") or "").strip()
-        or str(completed.get("officialCandidateRef") or "").strip()
-        or root_run_id
-    )
-
-    lineage_write: dict[str, Any] = {
-        "status": "skipped",
-        "blockerCodes": [],
-        "mandatoryExceptionReview": "",
-    }
-    if team_id and question_id:
-        try:
-            write_result = write_evolution_lineage_artifact(
-                team_id=team_id,
-                workflow_run_id=parent_run_id,
-                node_run_id=str(decision.get("nodeRunId") or ""),
-                question_id=question_id,
-                round_id=round_scope,
-                source_collection_run_id=root_run_id,
-                events=[
-                    {
-                        "eventId": f"evt-evlineage-introduced-{root_run_id}",
-                        "candidateId": candidate_id,
-                        "kind": "introduced",
-                        "roundId": round_scope,
-                        "reason": "formal_run_started",
-                        "occurredAt": occurred_at,
-                        "actor": "system_policy",
-                        "revisionAttempt": 0,
-                        "evidenceRefs": [],
-                    },
-                    {
-                        "eventId": (
-                            f"evt-evlineage-{REVISION_EXHAUSTED_EXCEPTION}"
-                            f"-{parent_run_id}-{decision_id}"
-                        ),
-                        "candidateId": candidate_id,
-                        "kind": "revision_exhausted",
-                        "roundId": round_scope,
-                        "reason": REVISION_EXHAUSTED_EXCEPTION,
-                        "occurredAt": occurred_at,
-                        "actor": "system_policy",
-                        "revisionAttempt": 0,
-                        "evidenceRefs": [
-                            {"kind": "fork_run", "ref": fork_run_id}
-                            for fork_run_id in fork_run_ids
-                        ],
-                    },
-                ],
-            )
-            lineage_summary = dict(
-                (write_result.get("evolutionLineage") or {}).get("summary")
-                or {}
-            )
-            lineage_write = {
-                "status": str(write_result.get("status") or ""),
-                "blockerCodes": list(write_result.get("blockerCodes") or []),
-                "mandatoryExceptionReview": str(
-                    lineage_summary.get("mandatoryExceptionReview") or ""
-                ),
-            }
-        except Exception as exc:  # noqa: BLE001 - parking must not depend on the projection
-            lineage_write = {
-                "status": "failed",
-                "blockerCodes": [
-                    f"evolution_lineage_write_failed:{type(exc).__name__}"
-                ],
-                "mandatoryExceptionReview": "",
-            }
-
-    anomaly_items: list[dict[str, Any]] = []
-    if team_id and question_id:
-        try:
-            inbox = build_anomaly_inbox(
-                {
-                    "teamId": team_id,
-                    "questionId": question_id,
-                    "problems": [
-                        {
-                            "code": _AUTO_REVISION_TAXONOMY_CODE,
-                            "sourceKind": "formal_run",
-                            "sourceId": parent_run_id,
-                            "message": (
-                                "automatic protocol revision reached the frozen "
-                                f"{MAX_AUTO_REVISION_ROUNDS_DEFAULT}-round "
-                                "ceiling; human reconciliation is required"
-                            ),
-                            "detectedAt": now,
-                        }
-                    ],
-                },
-                generated_at=now,
-            )
-            anomaly_items = [item.to_dict() for item in inbox.items]
-        except Exception:  # noqa: BLE001 - parking must not depend on the projector
-            anomaly_items = []
-
-    def mutation(current: dict[str, Any]) -> dict[str, Any]:
-        parked = dict(current.get("autoRevision") or {})
-        if (
-            parked.get("stopReason") == REVISION_EXHAUSTED_EXCEPTION
-            and parked.get("decisionId") == decision_id
-        ):
-            return current
-        event = build_event(
-            current,
-            workflowId=current["workflowId"],
-            workflowVersionId=current["workflowVersionId"],
-            checkpointId=(current.get("langGraph") or {}).get("checkpointId")
-            or "",
-            nodeId="iteration_decision",
-            nodeRunId=str(decision.get("nodeRunId") or ""),
-            attempt=int(decision.get("iterationAttempt") or 1),
-            type=_AUTO_REVISION_EVENT_TYPE,
-            summary={
-                "decisionId": decision_id,
-                "revisionRoundCount": rounds,
-                "maxAutoRevisionRounds": MAX_AUTO_REVISION_ROUNDS_DEFAULT,
-                "stopReason": REVISION_EXHAUSTED_EXCEPTION,
-                "outcomeCode": taxonomy_entry.outcome_code,
-                "outcomeClass": taxonomy_entry.outcome_class.value,
-                "mandatoryException": REVISION_EXHAUSTED_EXCEPTION,
-                "anomalyItemCount": len(anomaly_items),
-            },
-        )
-        return {
-            **current,
-            "status": "blocked",
-            "blockedReason": taxonomy_entry.outcome_code,
-            "autoRevision": {
-                "stopReason": REVISION_EXHAUSTED_EXCEPTION,
-                "decisionId": decision_id,
-                "revisionRoundCount": rounds,
-                "maxAutoRevisionRounds": MAX_AUTO_REVISION_ROUNDS_DEFAULT,
-                "lineageRootRunId": root_run_id,
-                "outcomeCode": taxonomy_entry.outcome_code,
-                "outcomeClass": taxonomy_entry.outcome_class.value,
-                "recommendedAction": (
-                    taxonomy_entry.human_actions[0].value
-                    if taxonomy_entry.human_actions
-                    else ""
-                ),
-                "humanActions": [
-                    action.value for action in taxonomy_entry.human_actions
-                ],
-                "mandatoryException": REVISION_EXHAUSTED_EXCEPTION,
-                "blockedAt": now,
-                "lineageRecord": {
-                    "status": str(lineage_write.get("status") or ""),
-                    "blockerCodes": list(
-                        lineage_write.get("blockerCodes") or []
-                    ),
-                    "mandatoryExceptionReview": str(
-                        lineage_write.get("mandatoryExceptionReview") or ""
-                    ),
-                },
-                "anomalyEscalation": {
-                    "status": "emitted" if anomaly_items else "unavailable",
-                    "items": anomaly_items,
-                },
-            },
-            "events": [*(current.get("events") or []), event],
-        }
-
-    store.mutate_run(parent_run_id, mutation)
-    return store.get_run(parent_run_id) or completed
 
 
 def _definition_meta_from(
@@ -503,8 +197,6 @@ class ResearchWorkflowRuntimeService:
         # Per-(workflowId, teamId) controlled config; team roles are the
         # fallback default source resolved at run creation (never random).
         self._binding_config = binding_config_store or WorkflowBindingConfigStore(self._store.root)
-        # Command-level idempotency is also durable via index keys with prefix.
-        self._command_memory: dict[str, str] = {}  # key -> run_id snapshot path only for process; reloaded from index
         self._last_expired_bundle_reconcile_at: float = 0.0
 
     def get_definition(self, workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID) -> dict[str, Any]:
@@ -579,31 +271,6 @@ class ResearchWorkflowRuntimeService:
             )
         except QuestionLaunchError as exc:
             raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-
-    def create_question_run(
-        self,
-        workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
-        *,
-        team_id: str,
-        question_id: str,
-        safety_limits: Mapping[str, Any],
-        idempotency_key: str,
-    ) -> dict[str, Any]:
-        self.get_definition(workflow_id)
-        try:
-            run_input = build_question_run_input(
-                team_id,
-                question_id=question_id,
-                safety_limits=safety_limits,
-            )
-        except QuestionLaunchError as exc:
-            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-        return self.create_run(
-            workflow_id,
-            run_input=run_input,
-            idempotency_key=idempotency_key,
-            workflow_definition=build_stage_one_workflow_definition(),
-        )
 
     def _effective_binding_layers(self, workflow_id: str, team_id: str) -> AgentBindingLayers:
         """Controlled config (per workflow+team) merged over team-role defaults."""
@@ -776,109 +443,6 @@ class ResearchWorkflowRuntimeService:
         for record in created:
             self._store.append_handoff(run_id, record)
         return created
-
-    def create_run(
-        self,
-        workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
-        *,
-        run_input: Mapping[str, Any],
-        binding_layers: AgentBindingLayers | None = None,
-        idempotency_key: str = "",
-        workflow_definition: Any | None = None,
-    ) -> dict[str, Any]:
-        with self._lock:
-            # ONE rollout-mode reading per creation: the (definition, identity)
-            # The canonical definition identity is threaded through every
-            # downstream use in this transaction.
-            creation_definition, creation_identity = _definition_meta_from(
-                workflow_id,
-                definition=workflow_definition,
-            )
-            create_input_fingerprints = _create_request_fingerprints(run_input)
-            create_input_fingerprint = create_input_fingerprints[0]
-            run_id = run_id_for_create(workflow_id, idempotency_key)
-            create_index_key = f"create:{idempotency_key}" if idempotency_key else ""
-            indexed_run_id = self._index.get_run_id(create_index_key) if create_index_key else None
-            if indexed_run_id and indexed_run_id != run_id:
-                raise ResearchWorkflowError(
-                    "idempotency index points to a different run",
-                    code="idempotency_index_conflict",
-                )
-            existing = self._store.get_run(run_id)
-            if indexed_run_id and existing is None:
-                raise ResearchWorkflowError(
-                    "idempotency index points to a missing run",
-                    code="idempotency_index_missing_run",
-                )
-            if existing:
-                prior_fingerprint = str(existing.get("createInputFingerprint") or "")
-                if prior_fingerprint and prior_fingerprint not in create_input_fingerprints:
-                    raise ResearchWorkflowError(
-                        "idempotencyKey was already used with different run input",
-                        code="idempotency_conflict",
-                    )
-                return existing
-            thread_id = run_id
-            team_id = str(run_input.get("teamId") or "").strip()
-            # Team members always provide workflow defaults. Explicit and
-            # service-level layers may add stage/node overrides only.
-            service_config = self._bindings
-            has_service_config = bool(
-                service_config.workflowDefaults
-                or service_config.stageOverrides
-                or service_config.nodeOverrides
-            )
-            selected_layers = (
-                binding_layers
-                or (service_config if has_service_config else None)
-                or self._binding_config.load(workflow_id, team_id)
-            )
-            layers = effective_binding_layers(team_id, selected_layers)
-            snapshots = build_run_binding_snapshots(
-                run_id=run_id,
-                workflow_version_id=creation_identity.workflowVersionId,
-                layers=layers,
-                captured_at=_utc_now(),
-                definition=creation_definition,
-            )
-            binding_payloads = [binding_snapshot_payload(snapshot) for snapshot in snapshots]
-            created_at = _utc_now()
-            try:
-                input_snapshot = freeze_run_input(
-                    run_input,
-                    workflow_version_id=creation_identity.workflowVersionId,
-                    binding_snapshots=binding_payloads,
-                    created_at=created_at,
-                )
-            except ContractValidationError as exc:
-                raise ResearchWorkflowError(str(exc), code="invalid_run_input") from exc
-
-            # The pinned definition must be the same object identity used for
-            # the initial checkpoint and the frozen run record.
-            definition = creation_definition
-            checkpoint_id = prepare_initial_checkpoint(
-                self._checkpoint_path,
-                thread_id,
-                definition=definition,
-            )
-            record = build_initial_run_record(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                workflow_version_id=creation_identity.workflowVersionId,
-                structure_hash=definition.structureHash,
-                thread_id=thread_id,
-                checkpoint_id=checkpoint_id,
-                input_snapshot=input_snapshot,
-                binding_snapshots=binding_payloads,
-                idempotency_key=idempotency_key,
-                create_input_fingerprint=create_input_fingerprint,
-                created_at=created_at,
-                definition=definition,
-            )
-            self._store.create_run(record)
-            if create_index_key:
-                self._index.put_run_id(create_index_key, run_id)
-            return self.get_run(run_id)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         record = self._store.get_run(run_id)
@@ -1292,49 +856,13 @@ class ResearchWorkflowRuntimeService:
                         payload=payload or {},
                     )
                 if command == "complete_execution":
-                    completed = complete_node_execution(
+                    return complete_node_execution(
                         self._store,
                         checkpoint_path=self._checkpoint_path,
                         run_id=run_id,
                         node_id=node_id,
                         payload=payload or {},
                     )
-                    if node_id == "iteration_decision":
-                        decision = next(
-                            (
-                                dict(item)
-                                for item in reversed(
-                                    completed.get("iterationDecisions") or []
-                                )
-                                if isinstance(item, dict)
-                            ),
-                            None,
-                        )
-                        if (
-                            decision is not None
-                            and decision.get("decisionKind") == "revise_protocol"
-                            and _auto_revision_exhausted(
-                                self._store, completed, decision
-                            )
-                        ):
-                            # Decision #3: the lineage already consumed its
-                            # bounded auto-revision rounds; park the parent
-                            # instead of forking another automatic child run.
-                            return _park_auto_revision_exhausted(
-                                self._store, completed, decision
-                            )
-                        if (
-                            decision is not None
-                            and decision.get("decisionKind") == "revise_protocol"
-                        ):
-                            fork_iteration_revision(
-                                self._store,
-                                self._checkpoint_path,
-                                parent=completed,
-                                decision=decision,
-                            )
-                            return self.get_run(run_id)
-                    return completed
                 if command == "reconcile_execution":
                     return reconcile_expired_execution(
                         self._store,

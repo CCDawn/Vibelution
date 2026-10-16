@@ -52,33 +52,6 @@ import type {
   ReviewNextRoundResponse,
   ReviewRoundLinkListResponse,
 } from "./types/hypothesisFirst";
-import type {
-  BatchDigestApproveItem,
-  BatchDigestApproveResponse,
-  PendingDigestApprovalsResponse,
-} from "./types/hypothesisFirst";
-
-export function fetchPendingDigestApprovals(
-  teamId: string,
-  options?: { signal?: AbortSignal },
-): Promise<PendingDigestApprovalsResponse> {
-  return fetchJson<PendingDigestApprovalsResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/digest-approvals/pending`,
-    { signal: options?.signal },
-  );
-}
-
-export function executeBatchApproveDigests(
-  teamId: string,
-  items: BatchDigestApproveItem[],
-  closedBy: string,
-): Promise<BatchDigestApproveResponse> {
-  return writeJson<BatchDigestApproveResponse>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/digest-approvals/batch-approve`,
-    "POST",
-    { closedBy, items },
-  );
-}
 
 // Re-exported so inspector surfaces classify HTTP errors through this domain
 // module — routes must not import `api/client` directly

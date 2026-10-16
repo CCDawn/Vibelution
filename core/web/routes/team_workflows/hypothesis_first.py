@@ -26,7 +26,6 @@ from core.research.workflow.contracts import (
 from core.web.services import chat_room_service
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow import (
-    digest_approval_queue,
     challenge_question_retire,
     hypothesis_rounds,
     hypothesis_selection,
@@ -64,7 +63,6 @@ from .hypothesis_first_models import (
     AnomalyInboxExtendBudgetRequest,
     AnomalyInboxResponse,
     CandidateEvidenceTrailResponse,
-    ChainStateResponse,
     CloseReviewMeetingResponse,
     CollectionHandoffPayload,
     CollectionHandoffResponse,
@@ -75,10 +73,7 @@ from .hypothesis_first_models import (
     HypothesisSelectionRecordPayload,
     HypothesisSelectionRecordResponse,
     HypothesisSelectionResponse,
-    BatchDigestApprovePayload,
-    BatchDigestApproveResponse,
     MeetingApproveDigestPayload,
-    PendingDigestApprovalsResponse,
     MeetingClosureApprovePayload,
     MeetingDigestDraftPayload,
     MeetingDigestRejectPayload,
@@ -813,26 +808,6 @@ def team_workflow_hypothesis_round_get(team_id: str, round_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Hypothesis-first chain (HF-4)
 # ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/state",
-    response_model=ChainStateResponse,
-    response_model_exclude_unset=True,
-)
-def team_workflow_hypothesis_first_chain_state(
-    team_id: str,
-    question_id: str = Query(..., alias="questionId", min_length=1, max_length=200),
-    workflow_run_id: str = Query("", alias="runId", max_length=200),
-) -> dict:
-    try:
-        return hypothesis_first_chain.chain_state(
-            team_id,
-            question_id,
-            workflow_run_id=workflow_run_id,
-        )
-    except _DOMAIN_ERRORS as exc:
-        _map_domain_error("hypothesis_first.chain.state", team_id, exc)
 
 
 def _etag_matches(if_none_match: str | None, representation_version: str) -> bool:
@@ -1648,42 +1623,6 @@ def team_workflow_hypothesis_first_approve_digest(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.approve_digest", team_id, exc)
-
-
-@router.get(
-    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/digest-approvals/pending",
-    response_model=PendingDigestApprovalsResponse,
-    response_model_exclude_unset=True,
-)
-def team_workflow_hypothesis_first_pending_digest_approvals(team_id: str) -> dict:
-    """Team-wide queue of awaiting digests, oldest first (read-only)."""
-
-    try:
-        return digest_approval_queue.list_pending_digest_approvals(team_id)
-    except _DOMAIN_ERRORS as exc:
-        _map_domain_error("hypothesis_first.chain.digest_approvals.pending", team_id, exc)
-
-
-@router.post(
-    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/digest-approvals/batch-approve",
-    response_model=BatchDigestApproveResponse,
-    response_model_exclude_unset=True,
-)
-def team_workflow_hypothesis_first_batch_approve_digests(
-    team_id: str,
-    payload: BatchDigestApprovePayload,
-) -> dict:
-    """Approve many awaiting digests sequentially; per-item failures isolate."""
-
-    try:
-        return digest_approval_queue.batch_approve_digests(
-            team_id,
-            [item.model_dump() for item in payload.items],
-            closed_by=payload.closedBy,
-            runtime=production_workflow_runtime(),
-        )
-    except _DOMAIN_ERRORS as exc:
-        _map_domain_error("hypothesis_first.chain.digest_approvals.batch", team_id, exc)
 
 
 @router.post(

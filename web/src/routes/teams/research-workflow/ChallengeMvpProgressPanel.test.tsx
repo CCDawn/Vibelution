@@ -1,6 +1,5 @@
 /** @vitest-environment happy-dom */
-import React, { act } from "react";
-import { createRoot } from "react-dom/client";
+import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,17 +35,6 @@ const questionQueryState = vi.hoisted((): { current: QueryState } => ({
 }));
 
 const experimentQueryState = vi.hoisted((): { current: QueryState } => ({
-  current: {
-    isPending: false,
-    isError: false,
-    isSuccess: false,
-    error: null,
-    data: undefined,
-    refetch: () => {},
-  },
-}));
-
-const devControlsQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
@@ -102,9 +90,6 @@ const mutationState = vi.hoisted(() => {
     reset: () => {},
   });
   const map: Record<string, MutationMock> = {
-    runDevReadiness: blank(),
-    runDev1: blank(),
-    runDev5: blank(),
     inspectSubmissionDeliverables: blank(),
     default: blank(),
   };
@@ -122,15 +107,10 @@ const mutationState = vi.hoisted(() => {
 });
 
 const queryClientMock = vi.hoisted(() => ({ invalidateQueries: vi.fn() }));
-const devQueryEnabled = vi.hoisted(() => ({ current: true }));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options?: { queryKey?: readonly unknown[]; enabled?: boolean }) => {
     const key = (options?.queryKey ?? []) as readonly unknown[];
-    if (key.includes("dev-controls")) {
-      devQueryEnabled.current = options?.enabled !== false;
-      return devControlsQueryState.current;
-    }
     if (key.includes("catalog-overview")) {
       return catalogOverviewQueryState.current;
     }
@@ -191,16 +171,6 @@ function setExperimentData(data: unknown) {
 function setMainData(data: { questionStatus: unknown; experimentStatus: unknown }) {
   setQuestionData(data.questionStatus);
   setExperimentData(data.experimentStatus);
-}
-
-function setDevControls(data: unknown) {
-  Object.assign(devControlsQueryState.current, {
-    isPending: false,
-    isError: false,
-    error: null,
-    data,
-    refetch: () => {},
-  });
 }
 
 function setSubmissionReadiness(data: unknown) {
@@ -328,179 +298,6 @@ function experimentStatus() {
   };
 }
 
-type DevSnapshot = {
-  schemaVersion: number;
-  teamId: string;
-  generatedAt: string;
-  mode: string;
-  realCampaignAllowed: boolean;
-  nextLegalAction: string;
-  report: Record<string, unknown> | null;
-  batches: Record<string, Record<string, unknown>>;
-  boundary: Record<string, unknown>;
-};
-
-function devSnapshot(overrides: Partial<DevSnapshot> = {}): DevSnapshot {
-  return {
-    schemaVersion: 1,
-    teamId: "team-1",
-    generatedAt: "2026-08-18T00:00:00Z",
-    mode: "dev",
-    realCampaignAllowed: false,
-    nextLegalAction: "run_dev_readiness",
-    report: null,
-    batches: {},
-    boundary: {
-      mode: "dev",
-      realCampaignAllowed: false,
-      authorizedPlans: ["dev-1", "dev-5"],
-      forbiddenPlans: ["dev-12", "dev-125"],
-      forbiddenFeatures: [
-        "real_qwen_invocation",
-        "network_collection",
-        "cuda_gpu",
-        "dandi_download",
-        "formal_submission",
-        "g1_g5_g12_g125_real_gates",
-      ],
-      fixtureOnly: true,
-    },
-    ...overrides,
-  };
-}
-
-function readyReport() {
-  return {
-    schemaVersion: 1,
-    reportKind: "platform_flow_readiness",
-    status: "READY",
-    mode: "dev",
-    realCampaignAllowed: false,
-    researchAuthorizationRequired: true,
-    nextLegalAction: "RESEARCH_AUTHORIZATION_REQUIRED",
-    generatedAt: "2026-08-18T00:00:00Z",
-    updatedAt: "2026-08-18T00:00:00Z",
-    gates: [
-      { gateId: "r1_clean_clone", status: "PASS", detail: "R1 pytest passed" },
-      { gateId: "source_integrity", status: "PASS", detail: "clean tree verified" },
-    ],
-  };
-}
-
-function batchCheckpoint(planId: string, overrides: Record<string, unknown> = {}) {
-  return {
-    schemaVersion: 1,
-    planId,
-    gateId: planId === "dev-1" ? "G1" : "G5",
-    questionCount: planId === "dev-1" ? 1 : 5,
-    statusSummary: {
-      pending: overrides.pending ?? 0,
-      running: 0,
-      succeeded: overrides.succeeded ?? 0,
-      failed: overrides.failed ?? 0,
-      blocked: overrides.blocked ?? 0,
-    },
-    pendingCount: overrides.pending ?? 0,
-    succeededCount: overrides.succeeded ?? 0,
-    failedCount: overrides.failed ?? 0,
-    blockedCount: overrides.blocked ?? 0,
-    totalAttempts: overrides.totalAttempts ?? (overrides.succeeded ?? 0),
-    completedQuestionIds: overrides.completedQuestionIds ?? [],
-    pendingQuestionIds: overrides.pendingQuestionIds ?? [],
-    lastUpdatedAt: "2026-08-18T00:00:00Z",
-    canResume: overrides.canResume ?? false,
-    ...overrides,
-  };
-}
-
-function stateReadinessOnly() {
-  return devSnapshot({ report: readyReport(), nextLegalAction: "run_dev_1_fixture_batch" });
-}
-
-function stateDev1Done() {
-  return devSnapshot({
-    report: readyReport(),
-    nextLegalAction: "run_dev_5_fixture_batch",
-    batches: {
-      "dev-1": batchCheckpoint("dev-1", { succeeded: 1, completedQuestionIds: ["SCI-091"], totalAttempts: 1 }),
-    },
-  });
-}
-
-function stateDev5Paused() {
-  return devSnapshot({
-    report: readyReport(),
-    nextLegalAction: "resume_dev_5_fixture_batch",
-    batches: {
-      "dev-1": batchCheckpoint("dev-1", { succeeded: 1, completedQuestionIds: ["SCI-091"], totalAttempts: 1 }),
-      "dev-5": batchCheckpoint("dev-5", {
-        succeeded: 2,
-        pending: 3,
-        completedQuestionIds: ["SCI-092", "SCI-093"],
-        pendingQuestionIds: ["SCI-094", "SCI-095", "SCI-096"],
-        totalAttempts: 2,
-        canResume: true,
-      }),
-    },
-  });
-}
-
-function stateDev5Done() {
-  return devSnapshot({
-    report: readyReport(),
-    nextLegalAction: "RESEARCH_AUTHORIZATION_REQUIRED",
-    batches: {
-      "dev-1": batchCheckpoint("dev-1", { succeeded: 1, completedQuestionIds: ["SCI-091"], totalAttempts: 1 }),
-      "dev-5": batchCheckpoint("dev-5", {
-        succeeded: 5,
-        completedQuestionIds: ["SCI-092", "SCI-093", "SCI-094", "SCI-095", "SCI-096"],
-        totalAttempts: 5,
-      }),
-    },
-  });
-}
-
-function stateDev1Repair() {
-  return devSnapshot({
-    report: readyReport(),
-    nextLegalAction: "repair_dev_1_fixture_batch",
-    batches: {
-      "dev-1": batchCheckpoint("dev-1", { failed: 1, succeeded: 0 }),
-    },
-  });
-}
-
-function stateRepairReadiness() {
-  return devSnapshot({
-    report: {
-      schemaVersion: 1,
-      reportKind: "platform_flow_readiness",
-      status: "FAILED",
-      mode: "dev",
-      realCampaignAllowed: false,
-      researchAuthorizationRequired: true,
-      nextLegalAction: "repair_failed_platform_gates",
-      generatedAt: "2026-08-18T00:00:00Z",
-      updatedAt: "2026-08-18T00:00:00Z",
-      gates: [
-        { gateId: "r1_clean_clone", status: "FAIL", detail: "R1 pytest failed" },
-      ],
-    },
-    nextLegalAction: "repair_failed_platform_gates",
-  });
-}
-
-function stateDev5Repair() {
-  return devSnapshot({
-    report: readyReport(),
-    nextLegalAction: "repair_dev_5_fixture_batch",
-    batches: {
-      "dev-1": batchCheckpoint("dev-1", { succeeded: 1, completedQuestionIds: ["SCI-091"], totalAttempts: 1 }),
-      "dev-5": batchCheckpoint("dev-5", { succeeded: 2, blocked: 1, pending: 2, totalAttempts: 3 }),
-    },
-  });
-}
-
 function emptyMainData() {
   return {
     questionStatus: questionStatus(),
@@ -529,14 +326,9 @@ function submissionReadiness() {
   };
 }
 
-function findButton(container: HTMLElement, text: string): HTMLButtonElement | undefined {
-  return Array.from(container.querySelectorAll("button"))
-    .find((button) => button.textContent?.includes(text)) as HTMLButtonElement | undefined;
-}
-
 describe("ChallengeMvpProgressPanel", () => {
   beforeEach(() => {
-    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current, submissionReadinessQueryState.current, catalogOverviewQueryState.current, tokenUsageQueryState.current]) {
+    for (const state of [questionQueryState.current, experimentQueryState.current, submissionReadinessQueryState.current, catalogOverviewQueryState.current, tokenUsageQueryState.current]) {
       Object.assign(state, {
         isPending: false,
         isError: false,
@@ -560,11 +352,11 @@ describe("ChallengeMvpProgressPanel", () => {
   });
 
   it("composes the standalone submission readiness panel", () => {
-    const markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
+    const markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
     expect(markup).toContain('data-vui="challenge-submission-readiness"');
   });
 
-  it("renders Program v2, question rows, and real DEV readiness/boundary data", () => {
+  it("renders Program v2 and question rows", () => {
     setMainData({
       questionStatus: questionStatus([{
         questionId: "SCI-001",
@@ -577,9 +369,8 @@ describe("ChallengeMvpProgressPanel", () => {
       }]),
       experimentStatus: experimentStatus(),
     });
-    setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("AI Research Program v2");
     expect(markup).toContain("合同");
@@ -592,20 +383,12 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("SCI-001");
     expect(markup).toContain("run-9");
     expect(markup).toContain("详情");
-    expect(markup).toContain("运行 DEV readiness");
-    expect(markup).toContain("未运行");
-    expect(markup).toContain("dev-1");
-    expect(markup).toContain("dev-5");
-    expect(markup).toContain("platform_flow_ready.py");
-    expect(markup).toContain("DEV fixture");
-    expect(markup).toContain("dev-12 / dev-125");
   });
 
   it("keeps zero-approved Program state explicit without claiming completion", () => {
     setMainData(emptyMainData());
-    setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("开发/任务未完成");
     expect(markup).toContain("尚缺题目");
@@ -619,14 +402,12 @@ describe("ChallengeMvpProgressPanel", () => {
       questionStatus: questionStatus(),
       experimentStatus: {},
     });
-    setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("Program v2 状态不可用");
     expect(markup).toContain("competitionProgramProjection");
     expect(markup).toContain("单题结果与审核");
-    expect(markup).toContain("运行 DEV readiness");
   });
 
   it("shows the program error independently from available question results", () => {
@@ -638,9 +419,8 @@ describe("ChallengeMvpProgressPanel", () => {
       data: undefined,
       refetch: vi.fn(),
     });
-    setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("比赛状态加载失败");
     expect(markup).toContain("program projection unavailable");
@@ -650,9 +430,8 @@ describe("ChallengeMvpProgressPanel", () => {
 
   it("surfaces the register/publish entry only after the question status loads", () => {
     setMainData(emptyMainData());
-    setDevControls(devSnapshot());
     let markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("登记题目 / 发布产出");
     expect(panelSource).toContain("ChallengeQuestionRegisterDialog");
@@ -666,7 +445,7 @@ describe("ChallengeMvpProgressPanel", () => {
       refetch: vi.fn(),
     });
     markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).not.toContain("登记题目 / 发布产出");
 
@@ -679,14 +458,13 @@ describe("ChallengeMvpProgressPanel", () => {
       refetch: vi.fn(),
     });
     markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).not.toContain("登记题目 / 发布产出");
   });
 
   it("renders pending and error states for program token usage instead of hiding them", () => {
     setMainData(emptyMainData());
-    setDevControls(devSnapshot());
     Object.assign(tokenUsageQueryState.current, {
       isPending: true,
       isError: false,
@@ -695,7 +473,7 @@ describe("ChallengeMvpProgressPanel", () => {
       refetch: vi.fn(),
     });
     let markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("读取 token 消耗");
 
@@ -707,7 +485,7 @@ describe("ChallengeMvpProgressPanel", () => {
       refetch: vi.fn(),
     });
     markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("token 消耗加载失败");
     expect(markup).toContain("token usage unavailable");
@@ -715,11 +493,10 @@ describe("ChallengeMvpProgressPanel", () => {
 
   it("links the jump nav to every rendered progress section", () => {
     setMainData(emptyMainData());
-    setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
-    for (const id of ["program", "submission", "readiness", "batches", "token", "catalog", "dev", "results"]) {
+    for (const id of ["program", "submission", "readiness", "batches", "token", "catalog", "results"]) {
       expect(markup).toContain(`data-testid="ch-cup-jump-ch-cup-${id}"`);
       expect(markup).toContain(`id="ch-cup-${id}"`);
     }
@@ -736,541 +513,28 @@ describe("ChallengeMvpProgressPanel", () => {
       });
     }
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("program and question status unavailable");
     expect(markup).toContain("重试");
   });
 
-  it("advances readiness → dev-1 → dev-5 pause/resume through legal buttons", () => {
+  it("no longer mounts the removed DEV controls surface", () => {
     setMainData(emptyMainData());
-
-    setDevControls(devSnapshot());
-    let markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("运行 DEV readiness");
-    expect(markup).not.toContain("运行 dev-1 fixture");
-    expect(markup).not.toContain("首次运行 dev-5");
-
-    setDevControls(stateReadinessOnly());
-    markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("运行 dev-1 fixture");
-    expect(markup).toContain("READY");
-    expect(markup).toContain("r1_clean_clone");
-    expect(markup).toContain("PASS");
-    expect(markup).toContain("生成 2026-08-18T00:00:00Z");
-    expect(markup).not.toContain("运行 DEV readiness");
-
-    setDevControls(stateDev1Done());
-    markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("开始处理首批题目");
-    expect(markup).toContain("成功 1/1");
-
-    setDevControls(stateDev5Paused());
-    markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("继续处理剩余题目");
-    expect(markup).toContain("暂停可恢复");
-    expect(markup).toContain("成功 2/5");
-    expect(markup).toContain("可继续");
-    expect(markup).not.toContain("canResume=true");
-    expect(markup).not.toContain("首次运行 dev-5");
-
-    setDevControls(stateDev5Done());
-    markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("RESEARCH_AUTHORIZATION_REQUIRED");
-    expect(markup).toContain("成功 5/5");
-    expect(markup).not.toContain("首次运行 dev-5");
-    expect(markup).not.toContain("恢复 dev-5");
-  });
-
-  it("runs dev-5 first with maxItems=2 then resumes with null", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    const runDev5Spy = vi.fn();
-    mutationState.set("runDev5", { mutate: runDev5Spy });
-    setMainData(emptyMainData());
-
-    setDevControls(stateDev1Done());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const firstButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("开始处理首批题目"));
-    expect(firstButton).toBeTruthy();
-    await act(async () => {
-      firstButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(runDev5Spy).toHaveBeenCalledWith({ teamId: "team-1", maxItems: 2 });
-    expect(queryClientMock.invalidateQueries).toHaveBeenCalled();
-
-    setDevControls(stateDev5Paused());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const resumeButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("继续处理剩余题目"));
-    expect(resumeButton).toBeTruthy();
-    await act(async () => {
-      resumeButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(runDev5Spy).toHaveBeenLastCalledWith({ teamId: "team-1", maxItems: null });
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("blocks repair stages and never lets the next stage run", () => {
-    setMainData(emptyMainData());
-
-    setDevControls(stateDev1Repair());
-    let markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("修复 dev-1 fixture");
-    expect(markup).toContain("失败/阻塞");
-    expect(markup).toContain("禁止放行");
-    expect(markup).not.toContain("运行 dev-1 fixture");
-    expect(markup).not.toContain("首次运行 dev-5");
-
-    setDevControls(stateDev5Repair());
-    markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("修复 dev-5 fixture");
-    expect(markup).toContain("禁止放行");
-    expect(markup).not.toContain("首次运行 dev-5");
-    expect(markup).not.toContain("恢复 dev-5");
-  });
-
-  it("surfaces a mutation failure as an in-panel alert and allows a safe retry", () => {
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-    mutationState.set("runDevReadiness", { isError: true, error: new Error("readiness boom") });
     const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
-    expect(markup).toContain('role="alert"');
-    expect(markup).toContain("readiness boom");
-    expect(markup).toContain("可安全重试");
-    expect(markup).toContain("运行 DEV readiness");
-  });
-
-  it("shows pending/loading feedback on the active mutation button and disables it", () => {
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-    mutationState.set("runDevReadiness", { isPending: true });
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
-    );
-    expect(markup).toContain("运行中");
-    expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain('data-pending="true"');
-    expect(markup).toContain('disabled=""');
-  });
-
-  it("shows the DEV-only boundary, forbidden plans, and CLI locator as secondary diagnostics", () => {
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
-    );
-    expect(markup).toContain("DEV 隔离边界");
-    expect(markup).toContain("dev-1 / dev-5");
-    expect(markup).toContain("dev-12 / dev-125");
-    expect(markup).toContain("fixtureOnly=true");
-    expect(markup).toContain("real_qwen_invocation");
-    expect(markup).toContain("开发者诊断");
-    expect(markup).toContain("platform_flow_ready.py");
-    expect(markup).toContain("下一合法动作：运行 DEV readiness");
-  });
-
-  it("routes normal batch actions through retryFailed=false and repair through retryFailed=true", () => {
-    expect(panelSource).toMatch(/async function runDev1[\s\S]*?retryFailed: false/);
-    expect(panelSource).toMatch(/async function runDev5[\s\S]*?retryFailed: false/);
-    expect(panelSource).toMatch(/async function repairDev1[\s\S]*?retryFailed: true/);
-    expect(panelSource).toMatch(/async function repairDev5[\s\S]*?retryFailed: true/);
+    expect(markup).not.toContain('id="ch-cup-dev"');
+    expect(markup).not.toContain("开发态");
+    expect(panelSource).not.toContain("fetchChallengeCupDevControlSnapshot");
+    expect(panelSource).not.toContain("runChallengeCupDevReadiness");
+    expect(panelSource).not.toContain("runChallengeCupDevBatch");
+    expect(panelSource).not.toContain("import.meta.env.DEV");
   });
 
   it("uses the canonical query keys so the planning status dedupes with other panels", () => {
     expect(panelSource).toContain("queryKeys.challengeQuestionRunStatus(teamId)");
     expect(panelSource).toContain("experimentPlanningStatusQueryKey(teamId)");
     expect(panelSource).not.toContain('"program-v2"');
-  });
-
-  it("keeps DEV controls disabled and unqueried without the explicit capability", () => {
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel
-        teamId="team-1"
-        onOpenQuestion={vi.fn()}
-        defaultDevControlsOpen
-        devControlsEnabled={false}
-      />,
-    );
-    expect(devQueryEnabled.current).toBe(false);
-    expect(markup).not.toContain("开发态就绪 / 批次 / 证据 locator");
-    expect(markup).not.toContain("运行 DEV readiness");
-    expect(panelSource).toContain("import.meta.env.DEV");
-    expect(panelSource).toContain("fetchChallengeCupDevControlSnapshot(teamId)");
-    expect(panelSource).toContain('{devControlsEnabled ? <section id="ch-cup-dev"');
-    expect(panelSource).toContain('import challengeMvpProgressPanelContract from "./ChallengeMvpProgressPanel.contract.json"');
-    expect(panelSource).toContain("data-dev-controls={devMarkers.readiness}");
-    expect(panelSource).toContain("data-dev-controls={planId}");
-    expect(panelSource).toContain("([devPlanIds.dev1, devPlanIds.dev5] as const)");
-  });
-
-  it("preserves the existing DEV controls behind the explicit capability", () => {
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel
-        teamId="team-1"
-        onOpenQuestion={vi.fn()}
-        defaultDevControlsOpen
-        devControlsEnabled
-      />,
-    );
-    expect(devQueryEnabled.current).toBe(true);
-    expect(markup).toContain("运行 DEV readiness");
-  });
-
-  it("clicks the full readiness → dev-1 → dev-5(maxItems=2) → resume(null) loop", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    const readinessSpy = vi.fn();
-    const dev1Spy = vi.fn();
-    const runDev5Spy = vi.fn();
-    mutationState.set("runDevReadiness", { mutate: readinessSpy });
-    mutationState.set("runDev1", { mutate: dev1Spy });
-    mutationState.set("runDev5", { mutate: runDev5Spy });
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-
-    let readinessButton = findButton(container, "运行 DEV readiness");
-    expect(readinessButton).toBeTruthy();
-    await act(async () => {
-      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
-    expect(queryClientMock.invalidateQueries).toHaveBeenCalled();
-
-    setDevControls(stateReadinessOnly());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    let dev1Button = findButton(container, "运行 dev-1 fixture");
-    expect(dev1Button).toBeTruthy();
-    await act(async () => {
-      dev1Button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(dev1Spy).toHaveBeenCalledWith({ teamId: "team-1" });
-
-    setDevControls(stateDev1Done());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    let dev5First = findButton(container, "开始处理首批题目");
-    expect(dev5First).toBeTruthy();
-    await act(async () => {
-      dev5First!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(runDev5Spy).toHaveBeenLastCalledWith({ teamId: "team-1", maxItems: 2 });
-
-    setDevControls(stateDev5Paused());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    let resumeButton = findButton(container, "继续处理剩余题目");
-    expect(resumeButton).toBeTruthy();
-    await act(async () => {
-      resumeButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(runDev5Spy).toHaveBeenLastCalledWith({ teamId: "team-1", maxItems: null });
-
-    setDevControls(stateDev5Done());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    expect(container.textContent).toContain("RESEARCH_AUTHORIZATION_REQUIRED");
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("renders a re-run readiness repair action for failed platform gates without advancing", () => {
-    setMainData(emptyMainData());
-    setDevControls(stateRepairReadiness());
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
-    );
-    expect(markup).toContain("重新运行 readiness");
-    expect(markup).toContain("禁止放行");
-    expect(markup).not.toContain("运行 DEV readiness");
-    expect(markup).not.toContain("运行 dev-1 fixture");
-    expect(markup).not.toContain("首次运行 dev-5");
-  });
-
-  it("re-runs readiness from the failed-platform-gates repair action", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    const readinessSpy = vi.fn();
-    mutationState.set("runDevReadiness", { mutate: readinessSpy });
-    setMainData(emptyMainData());
-    setDevControls(stateRepairReadiness());
-
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const repairButton = findButton(container, "重新运行 readiness");
-    expect(repairButton).toBeTruthy();
-    await act(async () => {
-      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
-    expect(queryClientMock.invalidateQueries).toHaveBeenCalled();
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("clicks the dev-1 repair button that posts retryFailed=true", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    const repairDev1Spy = vi.fn();
-    mutationState.set("repairDev1", { mutate: repairDev1Spy });
-    setMainData(emptyMainData());
-    setDevControls(stateDev1Repair());
-
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const repairButton = findButton(container, "修复 dev-1 fixture");
-    expect(repairButton).toBeTruthy();
-    await act(async () => {
-      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(repairDev1Spy).toHaveBeenCalledWith({ teamId: "team-1" });
-    expect(container.querySelector('[data-dev-controls="actions"]')?.textContent).toContain("禁止放行");
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("clicks the dev-5 repair button that posts retryFailed=true", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    const repairDev5Spy = vi.fn();
-    mutationState.set("repairDev5", { mutate: repairDev5Spy });
-    setMainData(emptyMainData());
-    setDevControls(stateDev5Repair());
-
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const repairButton = findButton(container, "修复 dev-5 fixture");
-    expect(repairButton).toBeTruthy();
-    await act(async () => {
-      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(repairDev5Spy).toHaveBeenCalledWith({ teamId: "team-1" });
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("keeps actions disabled while the snapshot refetch is pending and never double-POSTs", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    let resolveRefetch: (() => void) | undefined;
-    const deferred = new Promise<void>((resolve) => {
-      resolveRefetch = resolve;
-    });
-    queryClientMock.invalidateQueries.mockReturnValue(deferred);
-
-    const readinessSpy = vi.fn();
-    mutationState.set("runDevReadiness", { mutate: readinessSpy });
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const readinessButton = findButton(container, "运行 DEV readiness");
-    expect(readinessButton).toBeTruthy();
-
-    await act(async () => {
-      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(readinessSpy).toHaveBeenCalledTimes(1);
-
-    // The snapshot refetch is still pending: the action must stay disabled.
-    expect(readinessButton!.disabled).toBe(true);
-    expect(readinessButton!.getAttribute("disabled")).not.toBeNull();
-
-    // A second click on the disabled action must not trigger a second POST.
-    await act(async () => {
-      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(readinessSpy).toHaveBeenCalledTimes(1);
-
-    // Once the refetch resolves the snapshot advances and the next action appears.
-    await act(async () => {
-      resolveRefetch!();
-    });
-    setDevControls(stateReadinessOnly());
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const nextButton = findButton(container, "运行 dev-1 fixture");
-    expect(nextButton).toBeTruthy();
-    expect(nextButton!.disabled).toBe(false);
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-    queryClientMock.invalidateQueries.mockReset();
-  });
-
-  it("keeps DEV controls operable when the program/question query fails entirely", () => {
-    for (const state of [questionQueryState.current, experimentQueryState.current]) {
-      Object.assign(state, {
-        isPending: false,
-        isError: true,
-        error: new Error("program and question boom"),
-        data: undefined,
-        refetch: vi.fn(),
-      });
-    }
-    setDevControls(devSnapshot());
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
-    );
-    expect(markup).toContain("program and question boom");
-    expect(markup).toContain("运行 DEV readiness");
-    expect(markup).toContain("单题结果与审核");
-    expect(markup).toContain("DEV 隔离边界");
-  });
-
-  it("executes DEV actions even when the program/question query failed", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    for (const state of [questionQueryState.current, experimentQueryState.current]) {
-      Object.assign(state, {
-        isPending: false,
-        isError: true,
-        error: new Error("program and question boom"),
-        data: undefined,
-        refetch: vi.fn(),
-      });
-    }
-    setDevControls(devSnapshot());
-    const readinessSpy = vi.fn();
-    mutationState.set("runDevReadiness", { mutate: readinessSpy });
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const readinessButton = findButton(container, "运行 DEV readiness");
-    expect(readinessButton).toBeTruthy();
-    await act(async () => {
-      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("shows an independent retry for the DEV snapshot error without hiding the program section", () => {
-    setMainData(emptyMainData());
-    Object.assign(devControlsQueryState.current, {
-      isPending: false,
-      isError: true,
-      error: new Error("dev snapshot boom"),
-      data: undefined,
-      refetch: vi.fn(),
-    });
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
-    );
-    expect(markup).toContain("dev snapshot boom");
-    expect(markup).toContain('data-dev-controls="snapshot-retry"');
-    expect(markup).toContain('data-dev-controls="snapshot-readiness-repair"');
-    expect(markup).toContain("AI Research Program v2");
-    expect(markup).toContain("重新运行 DEV readiness");
-  });
-
-  it("can refetch or repair a stale DEV snapshot from the error surface", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    setMainData(emptyMainData());
-    const devRefetch = vi.fn();
-    const readinessSpy = vi.fn();
-    mutationState.set("runDevReadiness", { mutate: readinessSpy });
-    Object.assign(devControlsQueryState.current, {
-      isPending: false,
-      isError: true,
-      error: new Error("dev snapshot boom"),
-      data: undefined,
-      refetch: devRefetch,
-    });
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    });
-    const retryButton = container.querySelector('[data-dev-controls="snapshot-retry"]') as HTMLButtonElement | null;
-    expect(retryButton).toBeTruthy();
-    await act(async () => {
-      retryButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(devRefetch).toHaveBeenCalled();
-    const repairButton = container.querySelector('[data-dev-controls="snapshot-readiness-repair"]') as HTMLButtonElement | null;
-    expect(repairButton).toBeTruthy();
-    await act(async () => {
-      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  });
-
-  it("announces DEV action changes in a live region", () => {
-    setMainData(emptyMainData());
-    setDevControls(devSnapshot());
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
-    );
-    expect(markup).toContain('aria-live="polite"');
-    expect(markup).toContain('data-dev-controls="actions"');
   });
 });

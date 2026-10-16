@@ -197,8 +197,9 @@ def test_challenge_cup_dev_control_routes_declare_response_models() -> None:
     assert _untyped_endpoint_count(
         source, filename="team_workflows/challenge_cup_dev_controls.py"
     ) == 0
-    assert source.count("@router.") == 5
-    assert "workflow-orchestration/challenge-program/dev-controls" in source
+    assert source.count("@router.") == 2
+    assert "workflow-orchestration/challenge-program/catalog-overview" in source
+    assert "workflow-orchestration/challenge-program/token-usage" in source
     assert "challenge-cup-dev-controls\"" not in source
     assert "team_workflow_orchestration_service" in source
 
@@ -214,11 +215,6 @@ def test_challenge_cup_dev_control_routes_stay_thin() -> None:
     service = (REPO_ROOT / "core" / "web" / "services" / "team_workflow" / "challenge_cup_dev_controls.py")
     service_source = service.read_text(encoding="utf-8")
     assert "team_workspace_root" in service_source
-    assert "_strict_json_write" in service_source
-    assert "os.replace" in service_source
     assert "atomic_write_json" not in service_source
     assert "realCampaignAllowed" in service_source
-    assert "require_clean=True" in service_source
-    assert "run_pytest=True" in service_source
     assert "team_service.get_team" in service_source
-    assert "record_runtime_scene_event" in service_source

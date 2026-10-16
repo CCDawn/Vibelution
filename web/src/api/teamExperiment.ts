@@ -1,11 +1,6 @@
 import { fetchJson } from "./client";
 import type {
   ChallengeCupCatalogOverview,
-  ChallengeCupDevBatchRunRequest,
-  ChallengeCupDevBatchRunResponse,
-  ChallengeCupDevControlSnapshot,
-  ChallengeCupDevReadinessRunRequest,
-  ChallengeCupDevReadinessRunResponse,
   ChallengeCupRealBatchAuthorization,
   ChallengeCupRealBatchCancelRequest,
   ChallengeCupRealBatchPlanId,
@@ -375,16 +370,6 @@ export function fetchTeamWorkflowCandidateValidation<T>(
   );
 }
 
-export function fetchChallengeCupDevControlSnapshot(
-  teamId: string,
-  options?: { signal?: AbortSignal },
-): Promise<ChallengeCupDevControlSnapshot> {
-  return fetchJson<ChallengeCupDevControlSnapshot>(
-    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/dev-controls`,
-    { signal: options?.signal },
-  );
-}
-
 export function fetchChallengeCupCatalogOverview(
   teamId: string,
   options?: { signal?: AbortSignal },
@@ -432,35 +417,6 @@ export function approveChallengePhaseOne(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/phase-one/approve`,
     "POST",
     { note },
-  );
-}
-
-export function runChallengeCupDevReadiness(
-  teamId: string,
-  request: ChallengeCupDevReadinessRunRequest,
-): Promise<ChallengeCupDevReadinessRunResponse> {
-  return fetchJson<ChallengeCupDevReadinessRunResponse>(
-    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/dev-controls/readiness`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    },
-  );
-}
-
-export function runChallengeCupDevBatch(
-  teamId: string,
-  planId: string,
-  request: ChallengeCupDevBatchRunRequest,
-): Promise<ChallengeCupDevBatchRunResponse> {
-  return fetchJson<ChallengeCupDevBatchRunResponse>(
-    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/dev-controls/batches/${encodeURIComponent(planId)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    },
   );
 }
 

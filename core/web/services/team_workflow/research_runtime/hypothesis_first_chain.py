@@ -262,9 +262,6 @@ from .hypothesis_first_chain_store import (
 )
 from .hypothesis_first_chain_auto_advance import (
     bind_to_chain as _bind_auto_advance_entry_points,
-    _auto_advance_converge_tick,
-    _auto_advance_meeting_close_tick,
-    _auto_advance_selection_tick,
     _auto_advance_sweep_budget_ms,
     _auto_adjudicate_exhausted_round_locked,
     _auto_adjudication_idempotency_key,
@@ -302,15 +299,7 @@ _FEEDBACK_ITERATION_BACKFILL_BLOCKED_MEMO_MAX_ENTRIES = 256
 
 
 # ---------------------------------------------------------------------------
-# automation policy shadow evaluation (R1.4, advisory-only)
-
-
-def _policy_shadow_scope(meeting_round: Mapping[str, Any]) -> dict[str, str]:
-    """Best-effort scope snapshot for shadow records; never raises."""
-    try:
-        return _scope_envelope_for_meeting(meeting_round)
-    except Exception:  # noqa: BLE001 - advisory record only
-        return {}
+# convergence read-model helpers (shared by the budget-exhaustion advance)
 
 
 def _pending_handoff_count(team_id: str, question_id: str) -> int:
@@ -322,57 +311,6 @@ def _pending_handoff_count(team_id: str, question_id: str) -> int:
         if str(record.get("questionId") or "").upper() == normalized
         and str(record.get("status") or "") != "handed_off"
     )
-
-
-def _record_policy_shadow_decisions(
-    team_id: str,
-    meeting_round: Mapping[str, Any],
-    build_evaluations: Callable[[], list[tuple[str, dict[str, Any], dict[str, Any]]]],
-) -> None:
-    """Record automation-policy shadow evaluations beside real decision points.
-
-    R1.4 shadow core: evaluates what a configured shadow automation policy
-    (``VIBELUTION_AUTO_ADVANCE_POLICY_PATH``) *would* decide if it were active
-    at these decision points and appends human-comparison records to the
-    dedicated shadow store.  Purely advisory — no execution branch reads these
-    records, no command is emitted, and with no policy configured this is a
-    no-op before any context I/O, so the executing chain stays byte-identical.
-    """
-    try:
-        from core.web.services.team_workflow.research_runtime import (
-            policy_shadow_evaluator,
-        )
-
-        policy = policy_shadow_evaluator.load_shadow_policy_from_environment()
-        if policy is None:
-            return
-        scope = _policy_shadow_scope(meeting_round)
-        question_id = str(meeting_round.get("question") or "").strip()
-        recorded = 0
-        for decision_point, context, actual_outcome in build_evaluations():
-            policy_shadow_evaluator.record_policy_shadow_decision(
-                team_id=team_id,
-                question_id=question_id,
-                policy=policy,
-                decision_point=decision_point,
-                context=context,
-                actual_outcome=actual_outcome,
-                scope=scope,
-            )
-            recorded += 1
-        if recorded:
-            _record_scene_event(
-                "policy_shadow_evaluations_recorded",
-                outcome="recorded",
-                fields={"decisionPointCount": recorded},
-            )
-    except Exception as exc:  # noqa: BLE001 - shadow recording must never break the chain
-        _record_scene_event(
-            "policy_shadow_evaluation_failed",
-            outcome="shadow_record_failed",
-            fields={"error": str(exc)},
-            level="warning",
-        )
 
 
 def _formal_command_rejection(exc: Exception) -> HypothesisFirstChainError:
@@ -9221,43 +9159,9 @@ def _close_generation_meeting(
                 ),
                 "error": str(exc) or type(exc).__name__,
             }
-    # Active-policy hook (autoSelectCandidates): gated, audited, quiet.  With
-    # no active policy configured this is a no-op before any I/O.
-    if not exploratory:
-        _auto_advance_selection_tick(normalized_team_id, meeting_round, candidates)
-    # Shadow decision point "meeting_close" (generation digest confirmation):
-    # advisory record only; the return value and every executed branch below
-    # are identical with or without a configured shadow policy.
-    _record_policy_shadow_decisions(
-        normalized_team_id,
-        meeting_round,
-        lambda: [
-            (
-                "meeting_close",
-                {
-                    "meetingRoundId": normalized_round_id,
-                    "meetingType": str(meeting_round.get("meetingType") or ""),
-                    "closureApproved": True,
-                    "digestConfirmed": bool(digest_draft),
-                    "decisionsResolved": bool(
-                        [
-                            item
-                            for item in list(request.get("decisions") or [])
-                            if isinstance(item, Mapping)
-                        ]
-                    ),
-                    "closedBy": str(request.get("closedBy") or "").strip(),
-                    "candidateCount": len(candidates),
-                },
-                {
-                    "outcome": "generation_digest_approved",
-                    "outcomeClass": "acted",
-                    "command": "close_generation_meeting",
-                    "ref": f"meeting_round:{normalized_round_id}",
-                },
-            )
-        ],
-    )
+    # Active-policy hooks (autoSelectCandidates selection tick + shadow
+    # meeting_close record) were retired with the T8 auto-advance machine;
+    # candidate registration above is the human/manual advance path.
     return {
         **result,
         "candidates": candidates,
@@ -14004,76 +13908,10 @@ def close_review_meeting(
             trigger=f"close:{normalized_round_id}",
         )
 
-    # Shadow decision points after the review closure settled: "meeting_close"
-    # (autoCloseMeetingRound) and "converge_question" (autoConvergeQuestion,
-    # mirroring the chain_state convergence gates).  Advisory records only —
-    # the returned result below is identical with or without shadow policy.
-    generated_round = (
-        dict(hypothesis_round.get("round"))
-        if isinstance(hypothesis_round.get("round"), Mapping)
-        else {}
-    )
-    generated_meta_review = (
-        dict(generated_round.get("metaReview"))
-        if isinstance(generated_round.get("metaReview"), Mapping)
-        else {}
-    )
-    new_request_count = len(list(collection.get("requests") or []))
-    skipped_count = len(list(collection.get("skipped") or []))
-    _record_policy_shadow_decisions(
-        normalized_team_id,
-        closed_record,
-        lambda: [
-            (
-                "meeting_close",
-                {
-                    "meetingRoundId": normalized_round_id,
-                    "meetingType": HYPOTHESIS_REVIEW_MEETING_TYPE,
-                    "closureApproved": str(closed_record.get("status") or "") == "closed",
-                    "digestConfirmed": bool(list(result.get("decisions") or [])),
-                    "decisionsResolved": skipped_count == 0,
-                    "unresolvedDecisionCount": skipped_count,
-                    "closedBy": str(request.get("closedBy") or "").strip(),
-                },
-                {
-                    "outcome": "review_meeting_closed",
-                    "outcomeClass": "acted",
-                    "command": "close_review_meeting",
-                    "ref": f"meeting_round:{normalized_round_id}",
-                },
-            ),
-            (
-                "converge_question",
-                {
-                    "roundId": str(hypothesis_round.get("roundId") or ""),
-                    "latestRoundClosed": str(generated_round.get("status") or "") == "closed",
-                    "metaReviewAccepted": generated_meta_review.get("accepted") is True,
-                    "newEvidenceRequestCount": new_request_count,
-                    "pendingHandoffCount": _pending_handoff_count(
-                        normalized_team_id,
-                        str(closed_record.get("question") or ""),
-                    ),
-                },
-                {
-                    "outcome": (
-                        "requested_new_evidence"
-                        if new_request_count
-                        else "closed_without_new_evidence"
-                    ),
-                    "outcomeClass": "escalated" if new_request_count else "acted",
-                    "command": "close_review_meeting",
-                    "ref": f"meeting_round:{normalized_round_id}",
-                },
-            ),
-        ],
-    )
-    # Active-policy hook (autoConvergeQuestion): gated, audited, quiet.  The
-    # executor re-checks the authoritative chain gates (closed round, meta
-    # review accepted, no pending handoffs) and always passes through the
-    # claim-belief hard gate before recording any adjudication.
-    _auto_advance_converge_tick(
-        normalized_team_id, str(closed_record.get("question") or "")
-    )
+    # Shadow decision points (meeting_close / converge_question) and the
+    # autoConvergeQuestion policy tick were retired with the T8 auto-advance
+    # machine; convergence adjudication below stays the budget-exhaustion and
+    # human paths.
     # Recovery owns adjudication and formal creation under the shared V2
     # scope lock. Closure may already hold that OS lock; never nest it here.
     auto_adjudication: dict[str, Any] | None = None

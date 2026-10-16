@@ -605,8 +605,6 @@ from core.web.services.team_workflow.challenge_cup_dev_controls import (
     get_challenge_cup_catalog_overview,
     get_challenge_cup_dev_control_snapshot,
     get_challenge_cup_token_usage,
-    run_challenge_cup_dev_batch,
-    run_challenge_cup_dev_readiness,
 )
 from core.web.services.team_workflow.challenge_catalog_readiness import (
     CatalogReadinessStorageError,

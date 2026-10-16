@@ -26,8 +26,6 @@ HIGH_IMPACT_COMMANDS: frozenset[str] = frozenset(
         "extend_budget",
         "rebind_node",
         "fork_revision",
-        "record_g12_calibration",
-        "read_g12_calibration",
         "read_agent_perception_configuration",
         "configure_agent_perception",
         "read_agent_perception_runtime",

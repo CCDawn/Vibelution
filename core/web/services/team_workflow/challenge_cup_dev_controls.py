@@ -1,17 +1,17 @@
 """Team-scoped Challenge Cup DEV platform controls service.
 
-Owns team storage resolution and persistence for the DEV-only control surface:
-the persisted ChallengeCupPlatformDevelopmentReadinessReport and the dev-1/dev-5
-fixture ``CatalogExecutionState`` checkpoints. The state machines and fixture
-adapters live in ``core.research.competition``; this module never starts a real
-experiment, Qwen invocation, network collection, CUDA/GPU benchmark, DANDI
-download or formal submission.
+Owns team storage resolution and the read-only projections over the persisted
+DEV control surface: the serialized ``CatalogExecutionState`` checkpoints and
+the persisted ``ChallengeCupPlatformDevelopmentReadinessReport``. The state
+machines and fixture adapters live in ``core.research.competition``; this
+module never starts a real experiment, Qwen invocation, network collection,
+CUDA/GPU benchmark, DANDI download or formal submission.
 
 All storage is team-scoped by the authoritative team id resolved from the team
 service, never by the raw request value, so alias requests and similar team ids
-stay isolated. The flow order readiness -> dev-1 -> dev-5 is enforced inside the
-store lock and any out-of-order action raises ``DevFlowConflict`` (mapped to 409
-by the route layer) without dispatching anything.
+stay isolated. Reads run inside the team's cross-process transaction lock;
+``DevFlowConflict`` (mapped to 409 by the route layer) signals a concurrent
+transaction on the same team.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import json
 import os
 import re
 import sqlite3
-import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -40,19 +39,12 @@ from core.research.competition.dev_control_batch import (
     ALLOWED_DEV_BATCH_PLAN_IDS,
     FORBIDDEN_DEV_BATCH_PLAN_IDS,
     dev_fixture_adapter_id,
-    new_dev_batch_state,
     project_dev_batch_checkpoint,
-    project_dev_batch_outcomes,
-    project_dev_batch_state,
-    run_dev_fixture_batch,
-    validate_dev_batch_max_items,
-    validate_dev_batch_plan,
 )
 from core.research.competition.platform_flow_ready import (
     CATALOG_POLICY_VERSION,
     PROGRAM_CONTRACT_VERSION,
     REPORT_KIND,
-    build_platform_flow_readiness_report,
     overall_status,
 )
 from core.research.competition.resources import (
@@ -65,7 +57,6 @@ from core.research.competition.source_boundary import git_is_dirty, git_output
 from core.research.workflow.contracts._validation import ContractValidationError
 from core.research.workflow.contracts.model_invocation_receipt import ModelInvocationReceipt
 from core.web.services import team_service
-from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_workflow.research_projects import team_workspace_root
 
 CONTROLS_DIRNAME = "challenge_cup_dev_controls"
@@ -92,23 +83,9 @@ REQUIRED_READINESS_GATES: tuple[str, ...] = (
     "multimodal",
     "product_projection",
 )
-_RUN_ACTIONS = {
-    "dev-1": ("run_dev_1_fixture_batch",),
-    "dev-5": ("run_dev_5_fixture_batch", "resume_dev_5_fixture_batch"),
-}
-_REPAIR_ACTIONS = {
-    "dev-1": "repair_dev_1_fixture_batch",
-    "dev-5": "repair_dev_5_fixture_batch",
-}
 
 _STORE_LOCK = threading.RLock()
-_READINESS_IN_PROGRESS: set[str] = set()
 _TEAM_TRANSACTIONS_IN_PROGRESS: set[str] = set()
-
-_os_replace = os.replace
-_os_fsync = os.fsync
-_os_fdopen = os.fdopen
-_mkstemp = tempfile.mkstemp
 
 
 class ChallengeCupDevControlsError(ValueError):
@@ -239,44 +216,6 @@ def _team_transaction(team_id: str) -> Iterator[None]:
         if registered:
             with _STORE_LOCK:
                 _TEAM_TRANSACTIONS_IN_PROGRESS.discard(team_id)
-
-
-def _strict_json_write(path: Path, payload: dict[str, Any]) -> None:
-    """Atomically persist a JSON envelope with domain-strict durability.
-
-    Writes via temp-file + flush + fsync + ``os.replace`` with no in-place
-    fallback: any failure keeps the previous file untouched and propagates to
-    the caller. The shared atomic-write helper with its in-place fallback is
-    deliberately not used here because that fallback can overwrite state
-    mid-race.
-    """
-    target = Path(path)
-    fd = -1
-    temp_name = ""
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-        fd, temp_name = _mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
-        with _os_fdopen(fd, "w", encoding="utf-8") as handle:
-            fd = -1
-            handle.write(encoded)
-            handle.flush()
-            _os_fsync(handle.fileno())
-        _os_replace(temp_name, target)
-    except Exception as exc:
-        if fd >= 0:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-        if temp_name:
-            try:
-                Path(temp_name).unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise DevControlsStorageError(
-            f"DEV control store write failed: {target.name}."
-        ) from exc
 
 
 def _read_strict_json(path: Path) -> dict[str, Any]:
@@ -568,11 +507,6 @@ def _read_report_state(
     return projection, evidence
 
 
-def _project_report(team_id: str) -> dict[str, Any] | None:
-    state = _read_report_state(team_id)
-    return state[0] if state is not None else None
-
-
 def _project_batch(
     team_id: str,
     plan_id: str,
@@ -598,27 +532,6 @@ def _require_team(team_id: str) -> str:
     if not authoritative_team_id:
         raise ChallengeCupDevControlsError("Team detail has no authoritative teamId.")
     return authoritative_team_id
-
-
-def _record_scene_event(
-    event_code: str,
-    *,
-    message: str,
-    outcome: str,
-    fields: dict[str, Any] | None = None,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "team_workflow_orchestration",
-            "challenge_cup_dev_controls",
-            event_code,
-            message=message,
-            outcome=outcome,
-            fields=fields,
-            lifecycle=True,
-        )
-    except Exception:  # noqa: BLE001 - diagnostics must never fail the caller
-        pass
 
 
 def _snapshot_next_legal_action(
@@ -1086,298 +999,3 @@ def _median(values: list[int]) -> float:
     if count % 2:
         return float(ordered[middle])
     return (ordered[middle - 1] + ordered[middle]) / 2.0
-
-
-def _persist_report(team_id: str, report: dict[str, Any]) -> dict[str, Any]:
-    if report.get("realCampaignAllowed") is not False:
-        raise ChallengeCupDevControlsError(
-            "Challenge Cup readiness report must never allow a real campaign."
-        )
-    envelope = {
-        "schemaVersion": REPORT_ENVELOPE_SCHEMA_VERSION,
-        "report": report,
-        "realCampaignAllowed": False,
-        "updatedAt": _utc_now(),
-    }
-    _validate_report_envelope(envelope)
-    with _STORE_LOCK:
-        _strict_json_write(_report_path(team_id), envelope)
-    return envelope
-
-
-def run_challenge_cup_dev_readiness(team_id: str, *, mode: str = DEV_ONLY_MODE) -> dict[str, Any]:
-    """Build and atomically persist the DEV readiness report (R1 pytest included).
-
-    The clean-clone destination is a task-owned temporary directory that is
-    always cleaned up, even when the report build fails. A dirty working tree is
-    never READY: ``require_clean`` is always True and ``run_pytest`` is always
-    True under ``build_platform_flow_readiness_report``, and
-    ``realCampaignAllowed`` can never become true. Repairing failed platform
-    gates is always performed by re-running readiness.
-    """
-    authoritative_team_id = _require_team(team_id)
-    if str(mode or "").strip().lower() != DEV_ONLY_MODE:
-        _record_scene_event(
-            "challenge_cup_dev_controls.readiness.rejected",
-            message="Challenge Cup readiness rejected a non-dev mode.",
-            outcome="blocked",
-            fields={
-                "teamId": authoritative_team_id,
-                "errorType": "ChallengeCupDevControlsError",
-            },
-        )
-        raise ChallengeCupDevControlsError(
-            "Challenge Cup readiness is DEV-only; formal modes are not authorized."
-        )
-    with _team_transaction(authoritative_team_id):
-        return _run_readiness_transaction(authoritative_team_id)
-
-
-def _run_readiness_transaction(authoritative_team_id: str) -> dict[str, Any]:
-    with _STORE_LOCK:
-        if authoritative_team_id in _READINESS_IN_PROGRESS:
-            raise DevFlowConflict("DEV readiness is already running for this team.")
-        _READINESS_IN_PROGRESS.add(authoritative_team_id)
-    try:
-        _record_scene_event(
-            "challenge_cup_dev_controls.readiness.started",
-            message="Challenge Cup DEV readiness build started.",
-            outcome="started",
-            fields={"teamId": authoritative_team_id, "mode": DEV_ONLY_MODE},
-        )
-        from core.infrastructure.path_containment import PROJECT_ROOT
-
-        with tempfile.TemporaryDirectory(prefix="challenge-cup-r1-") as tmp_dir:
-            report = build_platform_flow_readiness_report(
-                PROJECT_ROOT,
-                clone_dest=Path(tmp_dir) / "clone",
-                require_clean=True,
-                run_pytest=True,
-                mode=DEV_ONLY_MODE,
-            )
-        envelope = _persist_report(authoritative_team_id, report)
-        _record_scene_event(
-            "challenge_cup_dev_controls.readiness.succeeded",
-            message="Challenge Cup DEV readiness report was persisted.",
-            outcome="succeeded",
-            fields={
-                "teamId": authoritative_team_id,
-                "status": str(report.get("status") or ""),
-                "nextLegalAction": str(report.get("nextLegalAction") or ""),
-            },
-        )
-        return {
-            "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
-            "teamId": authoritative_team_id,
-            "report": _project_report(authoritative_team_id),
-            "cleanedUp": True,
-            "updatedAt": str(envelope.get("updatedAt") or ""),
-        }
-    except Exception as exc:
-        _record_scene_event(
-            "challenge_cup_dev_controls.readiness.failed",
-            message="Challenge Cup DEV readiness build failed.",
-            outcome="failed",
-            fields={
-                "teamId": authoritative_team_id,
-                "errorType": type(exc).__name__,
-                "errorDetail": str(exc)[:320],
-            },
-        )
-        raise
-    finally:
-        with _STORE_LOCK:
-            _READINESS_IN_PROGRESS.discard(authoritative_team_id)
-
-
-def _next_legal_action(
-    team_id: str,
-) -> tuple[str, dict[str, Any] | None]:
-    report_state = _read_report_state(team_id)
-    report = report_state[0] if report_state is not None else None
-    readiness_evidence = report_state[1] if report_state is not None else None
-    batches: dict[str, Any] = {}
-    for plan_id in ALLOWED_DEV_BATCH_PLAN_IDS:
-        projection = _project_batch(team_id, plan_id, readiness_evidence)
-        if projection is not None:
-            batches[plan_id] = projection
-    _validate_cross_plan_invariants(team_id, batches, readiness_evidence)
-    return _snapshot_next_legal_action(report, batches), readiness_evidence
-
-
-def _enforce_batch_flow(plan_id: str, *, next_action: str, retry_failed: bool) -> None:
-    if retry_failed:
-        repair_action = _REPAIR_ACTIONS[plan_id]
-        if next_action != repair_action:
-            raise DevFlowConflict(
-                f"DEV flow conflict: {plan_id} repair requires retryFailed=true and "
-                f"{repair_action}, but the next legal action is {next_action}."
-            )
-        return
-    allowed = _RUN_ACTIONS[plan_id]
-    if next_action not in allowed:
-        raise DevFlowConflict(
-            f"DEV flow conflict: {plan_id} is out of order; the next legal action "
-            f"is {next_action}."
-        )
-
-
-def _invalidate_failed_blocked(state: CatalogExecutionState) -> list[str]:
-    invalidated: list[str] = []
-    for question_id in state.plan.question_ids:
-        if state.status(question_id) in (QuestionStatus.FAILED, QuestionStatus.BLOCKED):
-            state.invalidate(question_id, "repair retry requested")
-            invalidated.append(question_id)
-    return invalidated
-
-
-def run_challenge_cup_dev_batch(
-    team_id: str,
-    plan_id: str,
-    max_items: int | None,
-    *,
-    retry_failed: bool = False,
-) -> dict[str, Any]:
-    """Execute/resume/repair only dev-1 or dev-5 fixture batches and persist checkpoints.
-
-    The flow order readiness -> dev-1 -> dev-5 is enforced inside the team's
-    cross-process transaction lock; an out-of-order request raises ``DevFlowConflict`` and dispatches
-    nothing. The checkpoint is persisted after every completed/failed item, so a
-    dev-5 interruption can always be resumed without re-running succeeded items.
-    ``retry_failed=True`` is only legal when the next legal action is this plan's
-    repair action, and it invalidates only this plan's failed/blocked items;
-    succeeded items are never re-run. dev-12/dev-125 and formal/real scopes are
-    rejected fail-closed. The team must exist before any read or write and its
-    authoritative id is used for every storage path and response field.
-    """
-    authoritative_team_id = _require_team(team_id)
-    try:
-        normalized_plan = validate_dev_batch_plan(plan_id)
-        bounded = validate_dev_batch_max_items(max_items)
-    except Exception as exc:
-        _record_scene_event(
-            "challenge_cup_dev_controls.batch.rejected",
-            message="Challenge Cup DEV fixture batch was rejected.",
-            outcome="blocked",
-            fields={
-                "teamId": authoritative_team_id,
-                "planId": str(plan_id or "")[:80],
-                "errorType": type(exc).__name__,
-                "errorDetail": str(exc)[:320],
-            },
-        )
-        raise
-    try:
-        with _team_transaction(authoritative_team_id):
-            if authoritative_team_id in _READINESS_IN_PROGRESS:
-                raise DevFlowConflict(
-                    "DEV flow conflict: readiness is running for this team."
-                )
-            next_action, readiness_evidence = _next_legal_action(
-                authoritative_team_id
-            )
-            _enforce_batch_flow(
-                normalized_plan,
-                next_action=next_action,
-                retry_failed=retry_failed,
-            )
-            _record_scene_event(
-                "challenge_cup_dev_controls.batch.started",
-                message="Challenge Cup DEV fixture batch started.",
-                outcome="started",
-                fields={
-                    "teamId": authoritative_team_id,
-                    "planId": normalized_plan,
-                    "maxItems": bounded,
-                    "retryFailed": retry_failed,
-                },
-            )
-            present, checkpoint, _, _ = _load_batch_checkpoint(
-                authoritative_team_id, normalized_plan, readiness_evidence
-            )
-            state = (
-                CatalogExecutionState.from_checkpoint(checkpoint)
-                if present
-                else new_dev_batch_state(normalized_plan)
-            )
-            if retry_failed:
-                _invalidate_failed_blocked(state)
-            upstream_checkpoint_updated_at = ""
-            if normalized_plan == "dev-5":
-                dev_1_projection = _project_batch(
-                    authoritative_team_id, "dev-1", readiness_evidence
-                )
-                if dev_1_projection is None:
-                    raise DevControlsStorageError(
-                        "dev-5 cannot bind a missing dev-1 checkpoint."
-                    )
-                upstream_checkpoint_updated_at = dev_1_projection["lastUpdatedAt"]
-
-            def persist(_item: dict[str, Any] | None) -> str:
-                updated_at = _utc_now()
-                envelope = {
-                    "schemaVersion": BATCH_ENVELOPE_SCHEMA_VERSION,
-                    "planId": normalized_plan,
-                    "updatedAt": updated_at,
-                    "readinessEvidence": readiness_evidence,
-                    "upstreamCheckpointUpdatedAt": upstream_checkpoint_updated_at,
-                    "checkpoint": state.to_checkpoint(),
-                }
-                _strict_json_write(
-                    _batch_path(authoritative_team_id, normalized_plan), envelope
-                )
-                return updated_at
-
-            result = run_dev_fixture_batch(state, max_items=bounded, on_item=persist)
-            persisted_at = persist(None)
-            projection = project_dev_batch_state(state, updated_at=persisted_at)
-    except DevFlowConflict as exc:
-        _record_scene_event(
-            "challenge_cup_dev_controls.batch.conflict",
-            message="Challenge Cup DEV fixture batch conflicted with the flow order.",
-            outcome="blocked",
-            fields={
-                "teamId": authoritative_team_id,
-                "planId": normalized_plan,
-                "errorType": "DevFlowConflict",
-                "errorDetail": str(exc)[:320],
-            },
-        )
-        raise
-    except Exception as exc:
-        _record_scene_event(
-            "challenge_cup_dev_controls.batch.failed",
-            message="Challenge Cup DEV fixture batch failed.",
-            outcome="failed",
-            fields={
-                "teamId": authoritative_team_id,
-                "planId": normalized_plan,
-                "errorType": type(exc).__name__,
-                "errorDetail": str(exc)[:320],
-            },
-        )
-        raise
-    _record_scene_event(
-        "challenge_cup_dev_controls.batch.succeeded",
-        message="Challenge Cup DEV fixture batch completed and was persisted.",
-        outcome="succeeded",
-        fields={
-            "teamId": authoritative_team_id,
-            "planId": normalized_plan,
-            "attemptedCount": len(result["attempted"]),
-            "succeededCount": projection["succeededCount"],
-            "pendingCount": projection["pendingCount"],
-            "canResume": projection["canResume"],
-        },
-    )
-    return {
-        "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
-        "teamId": authoritative_team_id,
-        "planId": normalized_plan,
-        "gateId": projection["gateId"],
-        "attempted": result["attempted"],
-        "outcomes": project_dev_batch_outcomes(result["outcomes"]),
-        "checkpoint": projection,
-        "persistedAt": persisted_at,
-        "persisted": True,
-    }

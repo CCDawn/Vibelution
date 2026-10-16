@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { queryKeys } from "../../../api/queryKeys";
-import {
-  fetchChallengeCupCatalogOverview,
-  runChallengeCupDevBatch,
-} from "../../../api/teamExperiment";
-import { observeCatalogActiveWorkChanged, trackDevBatchRun } from "../challengeCupTelemetry";
+import { fetchChallengeCupCatalogOverview } from "../../../api/teamExperiment";
+import { observeCatalogActiveWorkChanged } from "../challengeCupTelemetry";
 import {
   VButton,
-  VConfirmDialog,
   VDenseTable,
   VEmptyState,
   VListDetailPage,
@@ -22,17 +18,14 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import styles from "./ChallengeCatalogOverview.styles";
 import {
-  catalogOverviewActionLabel,
   catalogOverviewAwaitingApprovalCount,
   catalogOverviewCountLabel,
   catalogOverviewDisplayStatus,
   catalogOverviewProgressPercent,
   catalogOverviewStageLabel,
   catalogOverviewStatusLabel,
-  failedQuestionIdsInPlan,
   visibleCatalogOverviewRows,
   type CatalogOverview,
-  type CatalogOverviewAction,
   type CatalogOverviewFilter,
   type CatalogOverviewQuestion,
   type CatalogOverviewDisplayStatus,
@@ -44,8 +37,6 @@ export type ChallengeCatalogOverviewProps = {
   lang?: "zh" | "en";
   onOpenQuestion: (questionId: string) => void;
   onRegisterQuestion?: () => void;
-  /** DEV-only capability for fixture batch retry/continue mutations. */
-  devBatchControlsEnabled?: boolean;
 };
 
 function statusTone(status: CatalogOverviewDisplayStatus): VStatusTone {
@@ -62,37 +53,22 @@ function isCatalogOverview(value: unknown): value is CatalogOverview {
   return Array.isArray(record.questions) && typeof record.questionCount === "number";
 }
 
-export function isDevBatchCatalogAction(
-  row: CatalogOverviewQuestion,
-  devBatchControlsEnabled: boolean,
-): boolean {
-  return devBatchControlsEnabled
-    && Boolean(row.planId)
-    && (row.action === "retry" || row.action === "continue");
-}
-
 export function ChallengeCatalogOverviewView({
   overview,
   lang = "zh",
   selectedId,
   filter,
-  actionPending = false,
-  actionError = "",
   onSelect,
   onFilterChange,
   onAction,
-  devBatchControlsEnabled = false,
 }: {
   overview: CatalogOverview;
   lang?: "zh" | "en";
   selectedId: string;
   filter: CatalogOverviewFilter;
-  actionPending?: boolean;
-  actionError?: string;
   onSelect: (questionId: string) => void;
   onFilterChange: (filter: CatalogOverviewFilter) => void;
   onAction: (row: CatalogOverviewQuestion) => void;
-  devBatchControlsEnabled?: boolean;
 }) {
   const zh = lang === "zh";
   const visible = useMemo(
@@ -243,22 +219,12 @@ export function ChallengeCatalogOverviewView({
               <div className={styles.blockerRemediation}>{selected.blocker.remediationLabel}</div>
             </div>
           ) : null}
-          {actionError ? (
-            <div className={styles.blocker} role="alert" data-testid="catalog-overview-action-error">
-              <div className={styles.blockerMessage}>{actionError}</div>
-            </div>
-          ) : null}
           <VButton
             type="button"
             variant="secondary"
-            isPending={actionPending}
-            isDisabled={actionPending}
-            data-dev-batch-action={devBatchControlsEnabled ? selected.action : "view"}
             onClick={() => onAction(selected)}
           >
-            {devBatchControlsEnabled
-              ? catalogOverviewActionLabel(selected.action, zh)
-              : (zh ? "查看详情" : "View details")}
+            {zh ? "查看详情" : "View details"}
           </VButton>
         </div>
       ) : (
@@ -273,11 +239,9 @@ export function ChallengeCatalogOverview({
   lang = "zh",
   onOpenQuestion,
   onRegisterQuestion,
-  devBatchControlsEnabled = import.meta.env.DEV,
 }: ChallengeCatalogOverviewProps) {
   const zh = lang === "zh";
   const pageVisible = usePageVisibility();
-  const queryClient = useQueryClient();
   const overviewKey = queryKeys.challengeCupCatalogOverview(teamId);
   const overviewQuery = useQuery({
     queryKey: overviewKey,
@@ -295,7 +259,6 @@ export function ChallengeCatalogOverview({
   });
   const [filter, setFilter] = useState<CatalogOverviewFilter>("all");
   const [selectedId, setSelectedId] = useState("");
-  const [pendingRetry, setPendingRetry] = useState<{ planId: string; failedIds: string[] } | null>(null);
 
   // Edge-triggered catalog lifecycle evidence: the overview only polls while
   // work is active, so the quiet transition rides on the final poll.
@@ -318,53 +281,7 @@ export function ChallengeCatalogOverview({
     });
   }, [overviewQuery.data, teamId]);
 
-  const batchMutation = useMutation({
-    onMutate: (input: { planId: string; retryFailed: boolean }) => ({
-      telemetry: trackDevBatchRun({
-        teamId,
-        planId: input.planId,
-        retryFailed: input.retryFailed,
-        maxItems: null,
-        source: "catalog_overview",
-      }),
-    }),
-    mutationFn: (input: { planId: string; retryFailed: boolean }) =>
-      runChallengeCupDevBatch(teamId, input.planId, {
-        maxItems: null,
-        retryFailed: input.retryFailed,
-      }),
-    onSuccess: async (_data, _vars, ctx) => {
-      ctx?.telemetry?.succeeded();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: overviewKey }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.challengeCupDevControlsSnapshot(teamId) }),
-      ]);
-    },
-    onError: (reason: unknown, _vars, ctx) => {
-      ctx?.telemetry?.failed(reason);
-    },
-  });
-  const batchErrorText = batchMutation.error instanceof Error
-    ? batchMutation.error.message
-    : batchMutation.error
-      ? String(batchMutation.error)
-      : "";
-
   const handleAction = (row: CatalogOverviewQuestion) => {
-    const action: CatalogOverviewAction = row.action;
-    if (isDevBatchCatalogAction(row, devBatchControlsEnabled) && action === "retry") {
-      // retryFailed is plan-scoped: confirm the full failed set before mutating
-      // so a per-row button never silently re-runs other questions.
-      const failedIds = isCatalogOverview(overviewQuery.data)
-        ? failedQuestionIdsInPlan(overviewQuery.data.questions, row.planId)
-        : [];
-      setPendingRetry({ planId: row.planId, failedIds });
-      return;
-    }
-    if (isDevBatchCatalogAction(row, devBatchControlsEnabled) && action === "continue") {
-      batchMutation.mutate({ planId: row.planId, retryFailed: false });
-      return;
-    }
     onOpenQuestion(row.questionId);
   };
 
@@ -401,54 +318,14 @@ export function ChallengeCatalogOverview({
   }
 
   return (
-    <>
-      <ChallengeCatalogOverviewView
-        overview={overviewQuery.data}
-        lang={lang}
-        selectedId={selectedId}
-        filter={filter}
-        actionPending={devBatchControlsEnabled && batchMutation.isPending}
-        actionError={devBatchControlsEnabled ? batchErrorText : ""}
-        onSelect={setSelectedId}
-        onFilterChange={setFilter}
-        onAction={handleAction}
-        devBatchControlsEnabled={devBatchControlsEnabled}
-      />
-      <VConfirmDialog
-        open={pendingRetry !== null}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setPendingRetry(null);
-        }}
-        title={zh ? "重试该批次的全部失败题目？" : "Retry every failed question in this batch?"}
-        description={zh
-          ? "重试作用于整个批次：该批次中所有失败题目都会重新运行，不只是当前这一题。"
-          : "Retry is plan-scoped: every failed question in this batch re-runs, not only the current row."}
-        tone="danger"
-        confirmLabel={zh
-          ? `重试全部 ${pendingRetry?.failedIds.length ?? 0} 道失败题`
-          : `Retry all ${pendingRetry?.failedIds.length ?? 0} failed`}
-        cancelLabel={zh ? "取消" : "Cancel"}
-        confirmPending={batchMutation.isPending}
-        confirmDisabled={(pendingRetry?.failedIds.length ?? 0) === 0 || batchMutation.isPending}
-        onConfirm={() => {
-          const planId = pendingRetry?.planId;
-          setPendingRetry(null);
-          if (planId) {
-            batchMutation.mutate({ planId, retryFailed: true });
-          }
-        }}
-      >
-        <div>
-          <p>{zh ? "受影响题目：" : "Affected questions:"}</p>
-          <p>{(pendingRetry?.failedIds ?? []).slice(0, 12).join("、")
-            || (zh ? "（无失败题目）" : "(none)")}</p>
-          {(pendingRetry?.failedIds.length ?? 0) > 12 ? (
-            <p>{zh
-              ? `…以及其余 ${(pendingRetry?.failedIds.length ?? 0) - 12} 道`
-              : `…and ${(pendingRetry?.failedIds.length ?? 0) - 12} more`}</p>
-          ) : null}
-        </div>
-      </VConfirmDialog>
-    </>
+    <ChallengeCatalogOverviewView
+      overview={overviewQuery.data}
+      lang={lang}
+      selectedId={selectedId}
+      filter={filter}
+      onSelect={setSelectedId}
+      onFilterChange={setFilter}
+      onAction={handleAction}
+    />
   );
 }

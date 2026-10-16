@@ -29,8 +29,6 @@ import {
   observeWorkflowStreamInterrupted,
   observeWorkflowStreamReconnected,
   trackDeliverablesExport,
-  trackDevBatchRun,
-  trackDevReadinessRun,
   trackEngineeringProxyMaterialize,
   trackExperimentActivation,
   trackExperimentBaselineRegister,
@@ -74,8 +72,6 @@ const TRACKER_CASES: Array<[string, () => UserActionTracker]> = [
   ["challenge_real_batch_authorize", () => trackRealBatchAuthorize({ teamId: "research-team" })],
   ["challenge_real_batch_start", () => trackRealBatchStart({ teamId: "research-team" })],
   ["challenge_real_batch_cancel", () => trackRealBatchCancel({ teamId: "research-team" })],
-  ["challenge_dev_readiness_run", () => trackDevReadinessRun({ teamId: "research-team" })],
-  ["challenge_dev_batch_run", () => trackDevBatchRun({ teamId: "research-team" })],
   ["challenge_workflow_human_gate_resolve", () => trackWorkflowHumanGateResolve({ teamId: "research-team" })],
   ["challenge_workflow_offer_submit", () => trackWorkflowOfferSubmit({ teamId: "research-team" })],
   ["challenge_experiment_plan_create", () => trackExperimentPlanCreate({ teamId: "research-team" })],
@@ -144,8 +140,6 @@ describe("challengeCupTelemetry user-action trackers", () => {
     cancel.succeeded();
     const reset = trackQuestionRunReset({ teamId: "research-team", questionId: "Q003" });
     reset.succeeded();
-    const readiness = trackDevReadinessRun({ teamId: "research-team", mode: "dev" });
-    readiness.succeeded();
     const payloads = postedPayloads();
     for (const payload of payloads) {
       const fields = payload.fields as Record<string, unknown>;

@@ -114,26 +114,6 @@ def test_unfinished_attempt_blocks_extension(activity, setup):
     assert read_campaign(*activity) == c
 
 
-def test_budget_extension_http_permission_and_scope(activity, setup, monkeypatch):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from core.web.routes.team_workflows.operator_optimization import router
-    c, _ = setup
-    app = FastAPI()
-    app.include_router(router)
-    client = TestClient(app)
-    path = f"/teams/{activity[0]}/workflow-orchestration/research-projects/{activity[1]}/operator-experiments/{activity[2]}/budget/extend"
-    payload = {"expectedCampaignVersion": c.revision, "idempotencyKey": "http", "modelCostLimit": 50, "tokenLimits": {"discussion": 3000}}
-    monkeypatch.setattr("core.web.control.validate_control_request", lambda request: "missing")
-    assert client.post(path, json=payload).status_code == 403
-    monkeypatch.setattr("core.web.control.validate_control_request", lambda request: None)
-    response = client.post(path, json=payload)
-    assert response.status_code == 200, response.text
-    assert response.json()["budget"]["discussion"]["tokenLimit"] == 3000
-    assert client.post(path, json=payload).json() == response.json()
-    assert client.post(path, json={**payload, "idempotencyKey": "stale"}).status_code == 409
-
-
 def test_first_receipt_rejects_unauthorized_limit(activity, setup):
     _, ledger = setup
     _seed(ledger, "first", 1)

@@ -165,7 +165,7 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         assert agent["promptTemplateId"] == "prompt-chat-default"
         assert agent["defaultPromptTemplateId"] == expected_prompt_template
         assert agent["promptTemplateCustomized"] is True
-        assert "挑战杯" in agent["personaProfile"]["background"]
+        assert "科研" in agent["personaProfile"]["background"]
         assert "challenge_cup" in agent["taskProfile"]["taskTypes"]
         assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
         assert agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]

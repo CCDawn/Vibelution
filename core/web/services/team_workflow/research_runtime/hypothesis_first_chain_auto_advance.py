@@ -41,76 +41,14 @@ def bind_to_chain(chain_globals: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# automation policy active execution hooks (gated, audited, quiet)
+# automation policy active execution hooks (retired with the T8 machine)
 #
-# The executor only ever presses the chain's own idempotent buttons after its
-# full safety ladder (kill switch, activation credential, calibration gate,
-# drain mode, capability switch) passes; with no active policy configured
-# every hook below is a no-op before any I/O, so these calls stay
-# behavior-identical to the pre-executor chain.
-
-
-def _auto_advance_selection_tick(
-    team_id: str,
-    meeting_round: Mapping[str, Any],
-    candidates: list[dict[str, Any]],
-) -> None:
-    """Try autoSelectCandidates right after generation candidates register."""
-
-    if (
-        meeting_round.get("candidateAuthority") == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
-        and _meeting_workflow_run_id(meeting_round)
-    ):
-        return
-
-    from core.web.services.team_workflow.research_runtime import (
-        automation_policy_executor,
-    )
-
-    question_id = str(meeting_round.get("question") or "").strip()
-    candidate_ids = [
-        str(item.get("hypothesisId") or item.get("candidateId") or "").strip()
-        for item in candidates
-        if isinstance(item, Mapping)
-    ]
-    automation_policy_executor.attempt_capability_quietly(
-        decision_point="candidate_selection",
-        team_id=team_id,
-        question_id=question_id,
-        candidate_ids=candidate_ids,
-        selection_scope=_question_scope_envelope(team_id, question_id),
-    )
-
-
-
-def _auto_advance_converge_tick(team_id: str, question_id: str) -> None:
-    """Try autoConvergeQuestion after a review closure settles."""
-
-    from core.web.services.team_workflow.research_runtime import (
-        automation_policy_executor,
-    )
-
-    automation_policy_executor.attempt_capability_quietly(
-        decision_point="converge_question",
-        team_id=team_id,
-        question_id=str(question_id or "").strip(),
-    )
-
-
-
-def _auto_advance_meeting_close_tick(team_id: str, meeting_round_id: str) -> None:
-    """Try autoCloseMeetingRound after a summary draft lands (awaiting_approval)."""
-
-    from core.web.services.team_workflow.research_runtime import (
-        automation_policy_executor,
-    )
-
-    automation_policy_executor.attempt_capability_quietly(
-        decision_point="meeting_close",
-        team_id=team_id,
-        meeting_round_id=str(meeting_round_id or "").strip(),
-    )
-
+# The gated policy ticks (candidate_selection / converge_question /
+# meeting_close) were removed with the T8 auto-advance executor: the ladder
+# never activated and the challenge-cup chain is archived.  The budget-
+# exhaustion advance below (digest approval, exhausted-round adjudication,
+# formal-run creation, budget recovery, fenced redrive) is live chain logic
+# and stays untouched.
 
 
 def _auto_redispatch_superseded_reviews(
@@ -3429,9 +3367,6 @@ def _auto_start_created_formal_run(
     return receipt
 
 _EXPORTS = (
-    "_auto_advance_selection_tick",
-    "_auto_advance_converge_tick",
-    "_auto_advance_meeting_close_tick",
     "_auto_redispatch_superseded_reviews",
     "_auto_adjudication_idempotency_key",
     "_auto_adjudication_rejected_key",

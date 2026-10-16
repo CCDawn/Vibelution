@@ -333,7 +333,6 @@ def _expected_routes() -> set[tuple[str, str]]:
         ("POST", f"{prefix}/meeting-rounds/{{meeting_round_id}}/closure"),
         ("GET", f"{prefix}/hypothesis-rounds"),
         ("GET", f"{prefix}/hypothesis-rounds/{{round_id}}"),
-        ("GET", f"{prefix}/hypothesis-first/chain/state"),
         ("GET", f"{prefix}/hypothesis-first/chain/collection-requests"),
         ("GET", f"{prefix}/hypothesis-first/chain/review-round-links"),
         (
@@ -1482,13 +1481,6 @@ def test_chain_query_routes(monkeypatch) -> None:
     client = _client()
 
     response = client.get(
-        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state",
-        params={"questionId": "SCI-096", "runId": "run-096"},
-    )
-    assert response.status_code == 200, response.text
-    assert response.json()["questionId"] == "SCI-096"
-
-    response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/collection-requests",
         params={"questionId": "SCI-096", "runId": "run-096"},
     )
@@ -1509,7 +1501,6 @@ def test_chain_query_routes(monkeypatch) -> None:
     assert response.status_code == 200, response.text
     assert response.json()["trails"][0]["candidateId"] == "cand-1"
     assert calls == [
-        {"kind": "state", "questionId": "SCI-096", "workflowRunId": "run-096"},
         {
             "kind": "collection",
             "questionId": "SCI-096",

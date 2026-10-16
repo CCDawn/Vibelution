@@ -4,9 +4,9 @@ R0.3 boundary (challenge-cup decision record, decisions #10/#12/#13): this
 service loads policy documents, recomputes and verifies their content hash,
 validates them fail-closed, and renders a *static* preview snapshot of what
 activation would change.  It never activates a policy and never executes an
-automation decision itself; the gated execution path lives in
-``automation_policy_executor`` (safety ladder + audit), which uses the
-``stage="activation"`` loader for approved active documents.
+automation decision itself.  The gated execution path (the T8 safety
+ladder) was retired with the challenge-cup archive cut;
+``automation_policy_executor`` now keeps only the global kill switch.
 
 Hash-chain style mirrors the catalog model-policy chain
 (``model_routing.resolve_catalog_model_policy`` feeding

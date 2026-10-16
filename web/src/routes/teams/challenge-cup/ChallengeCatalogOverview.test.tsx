@@ -7,11 +7,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ChallengeCatalogOverview,
   ChallengeCatalogOverviewView,
-  isDevBatchCatalogAction,
 } from "./ChallengeCatalogOverview";
 import {
   catalogOverviewCountLabel,
-  failedQuestionIdsInPlan,
   visibleCatalogOverviewRows,
   type CatalogOverview,
   type CatalogOverviewQuestion,
@@ -19,19 +17,16 @@ import {
 
 const containerApiMock = vi.hoisted(() => ({
   fetchChallengeCupCatalogOverview: vi.fn(),
-  runChallengeCupDevBatch: vi.fn(async () => ({ schemaVersion: 1, ok: true })),
 }));
 
 const containerState = vi.hoisted(() => ({
   overviewData: { current: null as CatalogOverview | null },
-  mutationCalls: [] as Array<{ planId: string; retryFailed: boolean }>,
 }));
 
 vi.mock("../../../api/teamExperiment", () => containerApiMock);
 vi.mock("../../../api/queryKeys", () => ({
   queryKeys: {
     challengeCupCatalogOverview: () => ["challenge-cup-overview"],
-    challengeCupDevControlsSnapshot: () => ["challenge-cup-dev-snapshot"],
   },
 }));
 vi.mock("../../../app/pollingPolicy", () => ({
@@ -47,20 +42,6 @@ vi.mock("@tanstack/react-query", () => ({
     refetch: () => Promise.resolve(),
   }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-  useMutation: (options: {
-    mutationFn: (input: { planId: string; retryFailed: boolean }) => Promise<unknown>;
-    onSuccess?: (result: unknown) => Promise<void>;
-  }) => ({
-    isPending: false,
-    error: null,
-    mutate: (input: { planId: string; retryFailed: boolean }) => {
-      containerState.mutationCalls.push(input);
-      void (async () => {
-        const result = await options.mutationFn(input);
-        await options.onSuccess?.(result);
-      })();
-    },
-  }),
 }));
 
 function question(
@@ -133,16 +114,6 @@ describe("challengeCatalogOverviewModel", () => {
     expect(visibleCatalogOverviewRows(catalog125(), "running")).toHaveLength(1);
     expect(visibleCatalogOverviewRows(catalog125(), "queued")).toHaveLength(121);
   });
-
-  it("collects every failed question of a plan, not only the selected row", () => {
-    const rows = [
-      ...catalog125().filter((row) => row.status !== "queued"),
-      question({ questionId: "SCI-008", status: "failed" }),
-      question({ questionId: "SCI-004", status: "succeeded" }),
-    ];
-    expect(failedQuestionIdsInPlan(rows, "dev-1")).toEqual(["SCI-003", "SCI-008"]);
-    expect(failedQuestionIdsInPlan(rows, "other-plan")).toEqual([]);
-  });
 });
 
 describe("ChallengeCatalogOverviewView", () => {
@@ -184,7 +155,6 @@ describe("ChallengeCatalogOverviewView", () => {
     expect(markup).toContain("单行重试已有 DEV fixture 命令");
     expect(markup).not.toContain("question_failed");
     expect(markup).toContain("查看详情");
-    expect(markup).toContain('data-dev-batch-action="view"');
     expect(markup).not.toContain("SCI-007");
   });
 
@@ -259,7 +229,7 @@ describe("ChallengeCatalogOverviewView", () => {
     expect(markup).not.toContain('data-testid="catalog-overview-row-SCI-002"');
   });
 
-  it("invokes retry on the selected failed row", async () => {
+  it("invokes the detail action on the selected failed row", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const onAction = vi.fn();
     const container = document.createElement("div");
@@ -274,11 +244,10 @@ describe("ChallengeCatalogOverviewView", () => {
           onSelect={() => {}}
           onFilterChange={() => {}}
           onAction={onAction}
-          devBatchControlsEnabled
         />,
       );
     });
-    const button = Array.from(container.querySelectorAll("button")).find((node) => node.textContent === "重试失败题");
+    const button = Array.from(container.querySelectorAll("button")).find((node) => node.textContent === "查看详情");
     expect(button).toBeTruthy();
     await act(async () => {
       button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -293,90 +262,37 @@ describe("ChallengeCatalogOverviewView", () => {
     });
     container.remove();
   });
-
-  it("keeps retry and continue rows read-only without the DEV capability", () => {
-    const failed = question({ questionId: "SCI-003", status: "failed" });
-    const running = question({ questionId: "SCI-007", status: "running" });
-
-    expect(isDevBatchCatalogAction(failed, false)).toBe(false);
-    expect(isDevBatchCatalogAction(running, false)).toBe(false);
-    expect(isDevBatchCatalogAction(failed, true)).toBe(true);
-    expect(isDevBatchCatalogAction(running, true)).toBe(true);
-  });
 });
 
-describe("ChallengeCatalogOverview retry scope confirmation", () => {
+describe("ChallengeCatalogOverview container", () => {
   beforeEach(() => {
     containerApiMock.fetchChallengeCupCatalogOverview.mockClear();
-    containerApiMock.runChallengeCupDevBatch.mockClear();
-    containerState.mutationCalls.length = 0;
     containerState.overviewData.current = overview([
       question({ questionId: "SCI-003", status: "failed" }),
-      question({ questionId: "SCI-008", status: "failed" }),
-      question({ questionId: "SCI-007", status: "running" }),
-      question({ questionId: "SCI-004", status: "queued" }),
     ]);
-    document.body.innerHTML = "";
   });
 
-  function findButton(label: string): HTMLButtonElement | undefined {
-    return Array.from(document.body.querySelectorAll("button"))
-      .find((node) => node.textContent?.trim() === label);
-  }
-
-  async function mountOverview() {
+  it("mounts the read-only overview and opens the question on the detail action", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const onOpenQuestion = vi.fn();
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
     await act(async () => {
       root.render(
-        <ChallengeCatalogOverview teamId="team-1" onOpenQuestion={() => {}} devBatchControlsEnabled />,
+        <ChallengeCatalogOverview teamId="team-1" onOpenQuestion={onOpenQuestion} />,
       );
     });
-    return async () => {
-      await act(async () => {
-        root.unmount();
-      });
-      host.remove();
-    };
-  }
-
-  it("shows the full failed set of the plan before retrying and cancels without mutating", async () => {
-    const unmount = await mountOverview();
-    const retryButton = findButton("重试失败题");
-    expect(retryButton).toBeTruthy();
+    const button = Array.from(host.querySelectorAll("button"))
+      .find((node) => node.textContent === "查看详情");
+    expect(button).toBeTruthy();
     await act(async () => {
-      retryButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(document.body.textContent).toContain("重试该批次的全部失败题目？");
-    expect(document.body.textContent).toContain("不只是当前这一题");
-    expect(document.body.textContent).toContain("SCI-003");
-    expect(document.body.textContent).toContain("SCI-008");
-    expect(findButton("重试全部 2 道失败题")).toBeTruthy();
-
+    expect(onOpenQuestion).toHaveBeenCalledWith("SCI-003");
     await act(async () => {
-      findButton("取消")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      root.unmount();
     });
-    expect(containerState.mutationCalls).toEqual([]);
-    expect(document.body.textContent).not.toContain("重试该批次的全部失败题目？");
-    await unmount();
-  });
-
-  it("confirms the retry as a plan-scoped retryFailed batch", async () => {
-    const unmount = await mountOverview();
-    await act(async () => {
-      findButton("重试失败题")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    await act(async () => {
-      findButton("重试全部 2 道失败题")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(containerState.mutationCalls).toEqual([{ planId: "dev-1", retryFailed: true }]);
-    expect(containerApiMock.runChallengeCupDevBatch).toHaveBeenCalledWith(
-      "team-1",
-      "dev-1",
-      { maxItems: null, retryFailed: true },
-    );
-    await unmount();
+    host.remove();
   });
 });

@@ -12,13 +12,8 @@ from core.research.operator_optimization.contracts import (
     OptimizationCampaign,
     Text,
 )
-from core.research.operator_optimization.cuda_runner import CudaEnvironmentUnavailable
-from core.research.operator_optimization.measurement import MeasurementProtocol
 from core.web.services.team_service import TeamNotFoundError
 from core.web.services.team_workflow.operator_optimization import store
-from core.web.services.team_workflow.operator_optimization.baseline import (
-    prepare_baseline,
-)
 from core.web.services.team_workflow.operator_optimization.commands import (
     authorize_campaign,
 )
@@ -43,19 +38,8 @@ class CampaignCommandRequest(Contract):
     idempotencyKey: str = Field(min_length=1, max_length=200)
 
 
-class ModelBudgetExtendRequest(CampaignCommandRequest):
-    modelCostLimit: float = Field(gt=0, allow_inf_nan=False)
-    tokenLimits: dict[str, int] = Field(default_factory=dict)
-    callLimits: dict[str, int] = Field(default_factory=dict)
-    outputLimits: dict[str, int] = Field(default_factory=dict)
-
-
 class CampaignListResponse(Contract):
     campaigns: tuple[OptimizationCampaign, ...]
-
-
-class BaselinePrepareRequest(CampaignCommandRequest):
-    protocol: MeasurementProtocol
 
 
 class BaselineStartRequest(Contract):
@@ -78,8 +62,6 @@ def _invoke(fn, *args, **kwargs):
         raise HTTPException(403, detail={"code": "command_forbidden", "message": str(exc)}) from exc
     except store.CampaignConflict as exc:
         raise HTTPException(409, detail={"code": "campaign_conflict", "message": str(exc)}) from exc
-    except CudaEnvironmentUnavailable as exc:
-        raise HTTPException(409, detail={"code": "cuda_environment_unavailable", "message": str(exc)}) from exc
     except (FileNotFoundError, TeamNotFoundError) as exc:
         raise HTTPException(404, detail={"code": "campaign_scope_not_found", "message": str(exc)}) from exc
     except (ValueError, ResearchProjectError) as exc:
@@ -111,16 +93,6 @@ def operator_campaign_authorize(team_id: str, project_id: str, campaign_id: str,
         raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
 
 
-@router.post(_PATH + "/{campaign_id}/baseline", response_model=OptimizationCampaign)
-def operator_baseline_prepare(team_id: str, project_id: str, campaign_id: str, payload: BaselinePrepareRequest, request: Request):
-    try:
-        with server_operator_scope_from_http(request):
-            return _invoke(prepare_baseline, team_id, project_id, campaign_id, protocol=payload.protocol,
-                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
-    except PermissionError as exc:
-        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
-
-
 @router.post(_PATH + "/{campaign_id}/baseline/start",
     response_model=ResearchWorkflowCommandReceiptResponse, response_model_exclude_unset=True)
 def operator_baseline_start(team_id: str, project_id: str, campaign_id: str, payload: BaselineStartRequest, request: Request):
@@ -140,15 +112,6 @@ def operator_baseline_start(team_id: str, project_id: str, campaign_id: str, pay
         kind=WorkflowCommandKind.START_NODE, node_id="operator_baseline",
         expected_run_version=payload.expectedRunVersion, idempotency_key=payload.idempotencyKey,
         payload={}, request=request)
-
-
-@router.post(_PATH + "/{campaign_id}/rounds", response_model=OptimizationCampaign)
-def operator_round_prepare(team_id: str, project_id: str, campaign_id: str, payload: CampaignCommandRequest):
-    from core.web.services.team_workflow.operator_optimization.rounds import (
-        prepare_round,
-    )
-    return _invoke(prepare_round, team_id, project_id, campaign_id,
-        expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
 
 
 @router.post(_PATH + "/{campaign_id}/stage2-migrations", response_model=OptimizationCampaign)
@@ -175,31 +138,5 @@ def operator_stage2_migrate(
                 expected_version=payload.expectedCampaignVersion,
                 command_key=payload.idempotencyKey,
             )
-    except PermissionError as exc:
-        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
-
-
-@router.post(_PATH + "/{campaign_id}/rounds/{round_id}/recover", response_model=OptimizationCampaign)
-def operator_round_recover(team_id: str, project_id: str, campaign_id: str, round_id: str,
-                           payload: CampaignCommandRequest, request: Request):
-    from core.web.services.team_workflow.operator_optimization.recovery import recover_round
-
-    try:
-        with server_operator_scope_from_http(request):
-            return _invoke(recover_round, team_id, project_id, campaign_id, round_id,
-                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
-    except PermissionError as exc:
-        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
-
-
-@router.post(_PATH + "/{campaign_id}/budget/extend", response_model=OptimizationCampaign)
-def operator_model_budget_extend(team_id: str, project_id: str, campaign_id: str,
-                                 payload: ModelBudgetExtendRequest, request: Request):
-    from core.web.services.team_workflow.operator_optimization.budget_extension import extend_model_budget
-    try:
-        with server_operator_scope_from_http(request):
-            return _invoke(extend_model_budget, team_id, project_id, campaign_id,
-                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey,
-                model_cost_limit=payload.modelCostLimit, token_limits=payload.tokenLimits, call_limits=payload.callLimits, output_limits=payload.outputLimits)
     except PermissionError as exc:
         raise HTTPException(403, detail={"code": "command_forbidden"}) from exc

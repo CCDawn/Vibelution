@@ -31,48 +31,52 @@ def _baseline_run_input() -> dict:
     return json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]
 
 
-def _service(tmp_path: Path):
-    return reset_research_workflow_runtime_service_for_tests(
-        run_store=WorkflowRunStore(tmp_path / "runs"),
+def _seeded_service(tmp_path: Path):
+    store = WorkflowRunStore(tmp_path / "runs")
+    svc = reset_research_workflow_runtime_service_for_tests(
+        run_store=store,
         checkpoint_path=str(tmp_path / "ckpt.sqlite"),
         durable_index=DurableWorkflowIndex(tmp_path / "runs" / "_index"),
     )
+    return svc, store
+
+
+def _seed_run(store: WorkflowRunStore, run_id: str) -> str:
+    store.create_run(
+        {
+            "runId": run_id,
+            "workflowId": CHALLENGE_CUP_WORKFLOW_ID,
+            "status": "waiting_human",
+            "events": [],
+            "handoffs": [],
+            "humanTasks": [],
+        }
+    )
+    return run_id
 
 
 def test_legacy_cancel_without_operator_context_is_forbidden(tmp_path: Path) -> None:
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-1",
-    )
+    svc, store = _seeded_service(tmp_path)
+    run_id = _seed_run(store, "run-http-1")
     with pytest.raises(ResearchWorkflowError) as exc_info:
-        svc.apply_command(run["runId"], "cancel", idempotency_key="cancel-1")
+        svc.apply_command(run_id, "cancel", idempotency_key="cancel-1")
     assert exc_info.value.code == "command_forbidden"
 
 
 def test_legacy_cancel_viewer_role_is_forbidden(tmp_path: Path) -> None:
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-2",
-    )
+    svc, store = _seeded_service(tmp_path)
+    run_id = _seed_run(store, "run-http-2")
     with server_operator_scope("op-1", roles=("viewer",)):
         with pytest.raises(ResearchWorkflowError) as exc_info:
-            svc.apply_command(run["runId"], "cancel", idempotency_key="cancel-2")
+            svc.apply_command(run_id, "cancel", idempotency_key="cancel-2")
     assert exc_info.value.code == "command_forbidden"
 
 
 def test_legacy_cancel_operator_role_is_allowed(tmp_path: Path) -> None:
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-3",
-    )
+    svc, store = _seeded_service(tmp_path)
+    run_id = _seed_run(store, "run-http-3")
     with server_operator_scope("op-1", roles=("operator",)):
-        updated = svc.apply_command(run["runId"], "cancel", idempotency_key="cancel-3")
+        updated = svc.apply_command(run_id, "cancel", idempotency_key="cancel-3")
     assert updated["status"] == "cancelled"
 
 
