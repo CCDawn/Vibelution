@@ -31,6 +31,10 @@ export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
     // can explicitly open this same designer for any team without changing that default.
     if (!isChallengeCupResearchWorkflowTeam(team) && params.get("teamWorkspace") !== "flows")
         return legacy;
+    const workspaceTeam = { ...team, members: team.members.map(member => {
+        const agent = catalog.activeAgentsById.get(member.agentId);
+        return { ...member, agentName: member.agentName || agent?.displayName || "", agentCode: member.agentCode || agent?.agentCode || "" };
+    }) };
     const goToTeamView = (history: boolean) => {
         const next = workflowTeamParams(params, teamId);
         next.delete("teamWorkspace");
@@ -44,5 +48,5 @@ export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
         }
         setParams(next);
     };
-    return <GenericWorkflowWorkspace key={teamId} team={team} teams={catalog.visibleTeams.map(item => ({ id: item.teamId, label: item.name }))} onTeam={id => setParams(workflowTeamParams(params, id))} onDiscussion={() => goToTeamView(false)} onHistory={() => goToTeamView(true)}/>;
+    return <GenericWorkflowWorkspace key={teamId} team={workspaceTeam} teams={catalog.visibleTeams.map(item => ({ id: item.teamId, label: item.name }))} onTeam={id => setParams(workflowTeamParams(params, id))} onDiscussion={() => goToTeamView(false)} onHistory={() => goToTeamView(true)}/>;
 }
