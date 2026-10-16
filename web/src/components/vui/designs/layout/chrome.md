@@ -112,6 +112,7 @@ import { VTabs } from "@/components/vui";
 | items | id/label/disabled/content | content 可选 |
 | value / onValueChange | 受控 | 固定分段，非无限列表 |
 | density / listClassName | 密度与域几何 | 选中用 data-state，勿 twin Active class |
+| keepPanelsMounted | 默认 false；开启后未选中面板继续挂载并隐藏 | 需要保留表单、任务板本地草稿时使用；保留 Radix trigger/panel 的 ARIA 关联 |
 
 ### 视觉与状态
 - 桌面分段切换沿用原生 segmented control 的低对比外框、纯色表面和清晰选中态；选中与悬停均不叠加渐变或立体阴影；不把每个 tab 画成独立胶囊或强调色按钮。

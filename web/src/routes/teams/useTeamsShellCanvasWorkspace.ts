@@ -24,6 +24,7 @@ import {
   canvasStyleScale,
   canvasViewStyle,
   isCommunicationEdge,
+  resolveCanvasFrameSize,
   type CanvasFrameSize,
   type CanvasViewportStyle,
   type ResearchCanvasLayoutMode,
@@ -234,10 +235,10 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       return;
     }
     const updateFrameSize = () => {
-      setCanvasFrameSize({
-        width: Math.max(420, Math.round(element.clientWidth)),
-        height: Math.max(360, Math.round(element.clientHeight)),
-      });
+      const nextSize = resolveCanvasFrameSize({ width: element.clientWidth, height: element.clientHeight });
+      setCanvasFrameSize((current) =>
+        current.width === nextSize.width && current.height === nextSize.height ? current : nextSize,
+      );
     };
     updateFrameSize();
     if (typeof ResizeObserver === "undefined") {

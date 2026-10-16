@@ -1,7 +1,8 @@
 /**
  * Canvas-mode shell return for Teams workbench (R2-q extract).
  */
-import { type CSSProperties, type Ref, type ReactNode } from "react";
+import { type Ref, type ReactNode } from "react";
+import type { CanvasFrameSize, CanvasViewportStyle } from "./canvasGeometry";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import { TeamsCanvasComposer } from "./TeamsCanvasComposer";
@@ -63,7 +64,9 @@ export type TeamsWorkbenchCanvasPageProps = {
   teamCanvasPending: boolean;
   teamDetailError: boolean;
   teamCanvasError: boolean;
-  canvasViewportStyle: CSSProperties;
+  canvasViewportStyle: CanvasViewportStyle;
+  canvasFrameSize?: CanvasFrameSize;
+  onCanvasViewportChange?: (style: CanvasViewportStyle | null) => void;
   canvasFrameRef: Ref<HTMLDivElement>;
   nodeToneClass: (node: TeamCanvasNode) => string;
   roleBadgeToneClass: (node: TeamCanvasNode, displayTone?: string) => string;
@@ -125,6 +128,8 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           teamDetailError={p.teamDetailError}
           teamCanvasError={p.teamCanvasError}
           canvasViewportStyle={p.canvasViewportStyle}
+          canvasFrameSize={p.canvasFrameSize}
+          onCanvasViewportChange={p.onCanvasViewportChange}
           canvasFrameRef={p.canvasFrameRef as any}
           nodeToneClass={p.nodeToneClass}
           roleBadgeToneClass={p.roleBadgeToneClass}

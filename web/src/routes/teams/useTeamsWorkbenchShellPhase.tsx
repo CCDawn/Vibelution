@@ -205,6 +205,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     displayCanvasNodes,
     visibleEdges,
     canvasViewportStyle,
+    canvasFrameSize,
+    setLockedCanvasViewportStyle,
     teamWorkflowQuery,
     researchStageRoundStatusQuery,
     teamWorkflowCoordinationStatusQuery,
@@ -402,6 +404,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const [canvasRenamingNodeId, setCanvasRenamingNodeId] = useState("");
   const [canvasEdgeLabelDraft, setCanvasEdgeLabelDraft] = useState("");
   const [canvasNodeRenameDraft, setCanvasNodeRenameDraft] = useState("");
+  const [inspectorSelectionRevision, setInspectorSelectionRevision] = useState(0);
 
   useEffect(() => {
     setCanvasSelectedEdgeId("");
@@ -789,6 +792,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
 
   const researchSurfaces = buildTeamsWorkbenchResearchSurfacesFromBag({
     ...d,
+    inspectorSelectionRevision,
     scComposition,
     styles,
     activeWorkflowItemCount,
@@ -886,11 +890,14 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       teamDetailError: teamDetailQuery.isError,
       teamCanvasError: teamCanvasQuery.isError,
       canvasViewportStyle,
+      canvasFrameSize,
+      onCanvasViewportChange: setLockedCanvasViewportStyle,
       canvasFrameRef,
       nodeToneClass: nodeTone,
       roleBadgeToneClass: roleBadgeTone,
       completionFlowSlot: renderKnowledgeCollectionCompletionFlowPanel(),
       onSelectNode: (nodeId: string) => {
+        setInspectorSelectionRevision((current) => current + 1);
         setSelectedNodeId(nodeId);
         setCanvasSelectedEdgeId("");
         setCanvasEdgeLabelDraft("");

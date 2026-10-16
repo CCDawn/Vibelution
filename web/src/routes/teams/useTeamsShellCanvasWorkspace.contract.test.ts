@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Team } from "../../api/types";
 import type {
@@ -125,6 +125,8 @@ it("measures the canvas when it mounts after loading and when its element change
   act(() => api.canvasFrameRef(null));
   act(() => api.canvasFrameRef(makeFrame(800, 600)));
   expect(capturedApi?.canvasFrameSize).toEqual({ width: 800, height: 600 });
+  act(() => api.canvasFrameRef(makeFrame(280, 240)));
+  expect(capturedApi?.canvasFrameSize).toEqual({ width: 280, height: 240 });
 });
 
 describe("useTeamsShellCanvasWorkspace non-research shell ownership", () => {
@@ -136,6 +138,34 @@ describe("useTeamsShellCanvasWorkspace non-research shell ownership", () => {
     host = null;
     root = null;
     capturedApi = null;
+  });
+
+  it("refits to a live narrow pane resize and disconnects the old observer", () => {
+    let notifyResize = () => undefined;
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => undefined) { notifyResize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+    try {
+      const api = mountHook(baseInput({ requestedVisibleTeamId: USER_TEAM_ID }));
+      const frame = document.createElement("div");
+      let width = 640;
+      let height = 480;
+      Object.defineProperties(frame, {
+        clientWidth: { get: () => width },
+        clientHeight: { get: () => height },
+      });
+      act(() => api.canvasFrameRef(frame));
+      expect(capturedApi?.canvasFrameSize).toEqual({ width: 640, height: 480 });
+      act(() => { width = 215; height = 190; notifyResize(); });
+      expect(capturedApi?.canvasFrameSize).toEqual({ width: 215, height: 190 });
+      act(() => api.canvasFrameRef(null));
+      expect(disconnect).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("seeds the canvas shell in the initial state when the requested team is non-research", () => {

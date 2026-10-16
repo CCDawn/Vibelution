@@ -1,9 +1,10 @@
 import { Eye } from "lucide-react";
 
 import type { TeamCanvasNode } from "../../api/types";
+import { VStatusChip } from "../../components/vui";
 import { canvasNodeStatusLabel, teamNodeFunctionLabel } from "./teamRouteShellModel";
 import styles from "./TeamCanvasReadOnlyInspector.styles";
-import { canvasNodeTitle } from "./teamCanvasNodePresentation";
+import { canvasNodeTitle, canvasNodeSecondaryLines } from "./teamCanvasNodePresentation";
 
 export type TeamCanvasReadOnlyInspectorProps = {
   lang: "zh" | "en";
@@ -37,6 +38,9 @@ export function TeamCanvasReadOnlyInspector({
   issueListClassName = styles.issues,
   issueClassName = "",
 }: TeamCanvasReadOnlyInspectorProps) {
+  const title = node ? canvasNodeTitle(node, agentName) : "";
+  const role = node ? functionLabel || teamNodeFunctionLabel(node, "", lang) : "";
+  const secondary = node ? canvasNodeSecondaryLines(node, agentName || node.agentName || node.agentCode || "", role, title) : null;
   return (
     <section
       className={className}
@@ -44,58 +48,45 @@ export function TeamCanvasReadOnlyInspector({
       data-testid="team-canvas-read-only-inspector"
     >
       <div className={noticeClassName}>
-        <Eye size={15} />
-        <div>
-          <strong>{lang === "zh" ? "只读组织画布" : "Read-only canvas"}</strong>
-          <span>
-            {lang === "zh"
-              ? "查看团队成员与职责，选择画布节点可切换详情。"
-              : "View team members and roles. Select a canvas node to inspect it."}
-          </span>
-        </div>
+        <Eye size={14} aria-hidden="true" />
+        <span>{lang === "zh" ? "组织关系 · 只读" : "Organization · Read only"}</span>
       </div>
       {node ? (
-        <div className={nodeClassName}>
-          <div>
-            <span>{lang === "zh" ? "节点" : "Node"}</span>
-            <strong>{canvasNodeTitle(node, agentName)}</strong>
+        <>
+          <div className={styles.identity}>
+            <h3>{title}</h3>
+            <VStatusChip tone={node.status === "stale" || !node.agentId ? "warning" : "neutral"}>
+              {canvasNodeStatusLabel(node, lang)}
+            </VStatusChip>
           </div>
+          <div className={nodeClassName}>
           <div>
             <span>{lang === "zh" ? "职责" : "Role"}</span>
-            <strong>{functionLabel || node.role || node.type}</strong>
+            <strong>{role}</strong>
           </div>
-          <div>
+          {secondary?.agent ? <div>
             <span>Agent</span>
-            <strong>
-              {agentName || node.agentName || node.agentCode || (lang === "zh" ? "未绑定" : "unbound")}
-            </strong>
+            <strong>{secondary.agent}</strong>
+          </div> : null}
+          {secondary?.purpose ? <div className={nodeWideClassName}>
+            <span>{lang === "zh" ? "说明" : "Purpose"}</span>
+            <strong>{secondary.purpose}</strong>
+          </div> : null}
           </div>
-          <div>
-            <span>{lang === "zh" ? "状态" : "Status"}</span>
-            <strong>{canvasNodeStatusLabel(node, lang)}</strong>
-          </div>
-          <div className={nodeWideClassName}>
-            <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-            <strong>{node.purpose || (lang === "zh" ? "暂无说明" : "No purpose yet")}</strong>
-          </div>
-        </div>
+        </>
       ) : (
         <div className={emptyClassName}>
           {lang === "zh" ? "选择一个节点查看详情。" : "Select a node to inspect details."}
         </div>
       )}
-      <div className={issueListClassName}>
-        {validationIssues.length ? (
-          validationIssues.map((issue) => (
+      {validationIssues.length ? <div className={issueListClassName} role="status">
+          {validationIssues.map((issue) => (
             <div key={`${issue.code}-${issue.nodeId}-${issue.edgeId}`} className={issueClassName}>
               <strong>{issue.code}</strong>
               <span>{issue.message}</span>
             </div>
-          ))
-        ) : (
-          <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
-        )}
-      </div>
+          ))}
+      </div> : null}
     </section>
   );
 }

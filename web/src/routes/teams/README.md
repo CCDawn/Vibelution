@@ -64,6 +64,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Organization canvas surface | `TeamOrganizationCanvasSurface.tsx` | inlining graph/drag chrome in TeamsRoute |
 | Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |
 | Read-only canvas inspector | `TeamCanvasReadOnlyInspector.tsx` | ad-hoc read-only blocks in route |
+| Organization inspector sections | `TeamInspectorTabs.tsx` | one mounted member/task/record panel per section; use VTabs retained panels to preserve drafts |
 | Team discussion + broadcast | `TeamCommunicationPanel.tsx` | duplicating task/broadcast JSX in board/canvas shells |
 | Research workflow stage host | `TeamResearchWorkflowPanelHost.tsx` + `renderResearchWorkflowModules` in `TeamsRoute` | inlining workflow section chrome / stage modules twice in board+canvas |
 | Board primary overview/launcher | `TeamResearchBoardPrimarySurface.tsx` | board fill loading/empty/ready + launcher branch buried in route return |

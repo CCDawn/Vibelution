@@ -33,7 +33,7 @@ describe("TeamCommunicationPanel extraction contract", () => {
   });
 
   it("panel owns discussion, broadcast, and history surfaces", () => {
-    expect(panelSource).toContain('id="research-workflow-discussion"');
+    expect(panelSource).toContain('section === "all" ? "research-workflow-discussion"');
     expect(panelSource).toContain("teamTaskForm");
     expect(panelSource).toContain("teamMessageForm");
     expect(panelSource).toContain("teamHistoryPanel");

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatRoomDetail, Team } from "../../api/types";
 import { TeamCommunicationPanel, type TeamCommunicationPanelProps } from "./TeamCommunicationPanel";
+import { TeamInspectorTabs } from "./TeamInspectorTabs";
 
 vi.mock("../../api/teamMemberMessages", () => ({
   listTeamMemberMessages: vi.fn().mockResolvedValue({ messages: [] }),
@@ -85,6 +86,20 @@ function renderPanel(overrides: Partial<TeamCommunicationPanelProps> = {}) {
 }
 
 describe("TeamCommunicationPanel round controls", () => {
+  it("places task actions and history in separate slots without duplicating the task board", () => {
+    const team = { ...selectedTeam, teamTemplateId: "dev-team", members: [] } as Team;
+    const tasks = renderPanel({ selectedTeam: team, section: "tasks" });
+    const records = renderPanel({ selectedTeam: team, section: "records" });
+    expect(tasks).toContain("共享任务板");
+    expect(tasks).toContain("团队广播");
+    expect(tasks).not.toContain("最近团队广播");
+    expect(tasks).not.toContain("成员通信");
+    expect(records).toContain("最近团队广播");
+    expect(records).toContain("成员通信");
+    expect(records).not.toContain("共享任务板");
+    expect(records).not.toContain("<form");
+  });
+
   it("tells a development team how the planned round closes", () => {
     const html = renderPanel({
       selectedTeam: {
@@ -109,6 +124,62 @@ describe("TeamCommunicationPanel round controls", () => {
     host?.remove();
     host = null;
     root = null;
+  });
+
+  it("retains task and broadcast drafts across inspector sections and dispatches the native payloads", async () => {
+    const onStartTeamRound = vi.fn();
+    const onSendTeamMessage = vi.fn();
+    const props = {
+      ...baseProps,
+      linkedRoomBusy: false,
+      onStartTeamRound,
+      onSendTeamMessage,
+    };
+    function DraftInspector() {
+      const [topic, setTopic] = React.useState("");
+      const [message, setMessage] = React.useState("");
+      const draftProps = { ...props, teamTaskTopic: topic, onTeamTaskTopicChange: setTopic, teamMessage: message, onTeamMessageChange: setMessage };
+      return <TeamInspectorTabs lang="zh" selectedNodeId="node-a" members={<p>成员</p>}
+        tasks={<TeamCommunicationPanel {...draftProps} section="tasks" />}
+        records={<TeamCommunicationPanel {...draftProps} section="records" />} />;
+    }
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => root?.render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <DraftInspector />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ));
+    const taskInput = host.querySelector<HTMLTextAreaElement>('form[aria-label="团队任务"] textarea')!;
+    const broadcastInput = host.querySelector<HTMLTextAreaElement>('form[aria-label="团队广播"] textarea')!;
+    await act(async () => {
+      for (const [input, value] of [[taskInput, "检查现有任务链路"], [broadcastInput, "保留广播草稿"]] as const) {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+    for (const label of ["任务", "记录", "成员", "任务"]) {
+      const tab = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+        .find((element) => element.textContent === label);
+      await act(async () => tab?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    }
+    expect(host.querySelector('form[aria-label="团队任务"] textarea')).toBe(taskInput);
+    expect(host.querySelector('form[aria-label="团队广播"] textarea')).toBe(broadcastInput);
+    expect(taskInput.value).toBe("检查现有任务链路");
+    expect(broadcastInput.value).toBe("保留广播草稿");
+    expect(host.querySelectorAll('form[aria-label="团队任务"]')).toHaveLength(1);
+    for (const label of ["团队任务", "团队广播"]) {
+      await act(async () => host?.querySelector(`form[aria-label="${label}"]`)
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    }
+    expect(onStartTeamRound).toHaveBeenCalledWith({
+      roomId: "room-1", teamId: "team-1", topic: "检查现有任务链路", mode: "round_robin", purpose: "discussion",
+    });
+    expect(onSendTeamMessage).toHaveBeenCalledWith({ teamId: "team-1", content: "保留广播草稿", interruptMode: "none" });
   });
 
   it("shows the shared task board only on a development team", () => {

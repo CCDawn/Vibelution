@@ -32,7 +32,7 @@ import {
 const styles: Record<string, string> = {
   actionRow: `actionRow min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
   canvas:
-    "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-tint),transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
+    "canvas min-w-0 min-h-0 relative flex-1 overflow-hidden bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-tint),transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   canvasLayoutModeSwitch:
     "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))] !gap-1 !p-0 content-start",
   canvasPanel:
@@ -48,7 +48,7 @@ const styles: Record<string, string> = {
   canvasToolbar:
     "canvasToolbar min-w-0 !grid min-h-[44px] grid-cols-[minmax(0,1fr)_max-content] items-start gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 max-[900px]:grid-cols-[minmax(0,1fr)] [&>div:first-child]:grid [&>div:first-child]:min-w-0 [&>div:first-child]:gap-1 [&_small]:min-w-0 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:leading-tight [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)]",
   canvasViewport:
-    "canvasViewport min-w-0 grid min-h-0 gap-2 p-2 relative box-content h-[760px] w-[1180px] origin-top-left pl-[var(--canvas-offset-x,0px)] pt-[var(--canvas-offset-y,0px)] [transform:scale(var(--canvas-scale,1))]",
+    "canvasViewport absolute inset-0 origin-top-left [transform:translate(var(--canvas-offset-x,0px),var(--canvas-offset-y,0px))_scale(var(--canvas-scale,1))]",
   dangerButton:
     `dangerButton min-w-0 ${vuiControlQuietClass} ${vuiStateDangerSoftClass}`,
   deliveryList:
@@ -59,7 +59,7 @@ const styles: Record<string, string> = {
   edgeOrganization:
     "edgeOrganization min-w-0 text-[var(--accent-cool)] [stroke-width:1.75px] opacity-90",
   edges:
-    "edges min-w-0 absolute inset-0 z-0 h-[760px] w-[1180px] overflow-visible text-[var(--accent-cool)] pointer-events-none [transform:translate(var(--canvas-offset-x,0px),var(--canvas-offset-y,0px))] [&>path]:fill-none [&>path]:stroke-current [&>path]:[stroke-linecap:butt] [&>path]:[stroke-linejoin:round] [&>path]:[stroke-width:1.5px] [&>path]:opacity-80",
+    "edges min-w-0 absolute inset-0 z-0 h-full w-full overflow-visible text-[var(--accent-cool)] pointer-events-none [&>path]:fill-none [&>path]:stroke-current [&>path]:[stroke-linecap:butt] [&>path]:[stroke-linejoin:round] [&>path]:[stroke-width:1.5px] [&>path]:opacity-80",
   empty:
     "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   emptyCanvasContent:
@@ -89,9 +89,9 @@ const styles: Record<string, string> = {
     `messageError min-w-0 ${vuiStateDangerSoftClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   messageResult:
     "messageResult min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  node: `node min-w-0 !absolute left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))] z-[1] !grid h-[108px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 ${vuiOpaqueRowClass} p-2 text-left text-[var(--fg-primary)] shadow-none touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate`,
+  node: `node min-w-0 !absolute left-[var(--node-x,0px)] top-[var(--node-y,0px)] z-[1] !grid h-[108px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 ${vuiOpaqueRowClass} p-2 text-left text-[var(--fg-primary)] shadow-none touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate`,
   nodeActive:
-    `nodeActive min-w-0 ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
+    `nodeActive min-w-0 ${vuiStateSelectedRowClass} outline outline-2 outline-offset-2 outline-[var(--accent-cool)]`,
   nodeBindingPlaceholder:
     "nodeBindingPlaceholder min-w-0",
   nodeBindingSection:

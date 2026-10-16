@@ -448,10 +448,10 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   return <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
     <TeamWorkspaceFrame title={nativeConversationOpen ? selectedMember ? `${selectedMemberDisplay?.name} · ${lang === "zh" ? "对话" : "Conversation"}` : lang === "zh" ? "团队讨论" : "Team discussion" : lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
       layoutId={WORKBENCH_LAYOUT_IDS.teams} resize={props.workspace?.resize}
-      responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation" }, inspector: { label: lang === "zh" ? "本轮操作与成员详情" : "Round actions and member details" } }}
+      responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation" }, inspector: { label: lang === "zh" ? "团队详情" : "Team details", narrowPlacement: "bottom" } }}
       ariaLabel={selectedTeam?.name || (lang === "zh" ? "团队主页" : "Team home")}
       railTitle={props.workspace?.teamSwitcher} rail={props.workspace?.navigation}
-      inspectorTitle={canvasOpen || memberConversation ? (lang === "zh" ? "成员详情" : "Member details") : (lang === "zh" ? "本轮操作" : "Round actions")}
+      inspectorTitle={canvasOpen ? (lang === "zh" ? "团队详情" : "Team details") : memberConversation ? (lang === "zh" ? "成员详情" : "Member details") : (lang === "zh" ? "本轮操作" : "Round actions")}
       mainScroll={!canvasOpen && !nativeConversationOpen} canvas={canvasOpen ? props.workspace?.canvas : nativeConversationOpen ? nativeBody : conversation}
       inspector={canvasOpen ? props.workspace?.inspector : nativeConversationOpen && nativeSelectionReady ? nativeInspector : roundActions}
       toolbar={<><VButton density="compact" variant={canvasOpen ? "primary" : "ghost"} aria-pressed={canvasOpen}

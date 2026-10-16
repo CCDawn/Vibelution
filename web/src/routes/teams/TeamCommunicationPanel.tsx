@@ -38,6 +38,8 @@ const styles = {
 } as Record<string, string>;
 
 export type TeamCommunicationPanelProps = {
+  /** Organization inspector slots; standalone research discussion keeps all. */
+  section?: "all" | "tasks" | "records";
   lang: "zh" | "en";
   selectedTeam: Team | null;
   linkedChatRoomId: string;
@@ -87,6 +89,7 @@ export type TeamCommunicationPanelProps = {
  * Extracted from TeamsRoute to dedupe identical discussion/broadcast JSX.
  */
 export function TeamCommunicationPanel({
+  section = "all",
   lang,
   selectedTeam,
   linkedChatRoomId,
@@ -126,13 +129,15 @@ export function TeamCommunicationPanel({
   const memberMessagesQuery = useQuery({
     queryKey: ["teams", selectedTeam?.teamId || "", "member-messages"],
     queryFn: ({ signal }) => listTeamMemberMessages(selectedTeam?.teamId || "", 40, { signal }),
-    enabled: Boolean(selectedTeam?.teamId),
+    enabled: Boolean(selectedTeam?.teamId) && section !== "tasks",
   });
   const memberMessages = memberMessagesQuery.data?.messages ?? [];
 
   return (
-    <div className={styles.researchDiscussionPanel} id="research-workflow-discussion">
+    <div className={styles.researchDiscussionPanel} id={section === "all" ? "research-workflow-discussion" : undefined}>
+      {section !== "records" ? <>
       <form
+        aria-label={lang === "zh" ? "团队任务" : "Team task"}
         className={styles.teamTaskForm}
         onSubmit={(event) => {
           event.preventDefault();
@@ -264,6 +269,7 @@ export function TeamCommunicationPanel({
         />
       ) : null}
       <form
+        aria-label={lang === "zh" ? "团队广播" : "Team broadcast"}
         className={styles.teamMessageForm}
         onSubmit={(event) => {
           event.preventDefault();
@@ -316,6 +322,8 @@ export function TeamCommunicationPanel({
           <div className={styles.messageError}>{messageError.message}</div>
         ) : null}
       </form>
+      </> : null}
+      {section !== "tasks" ? <>
       <section className={styles.teamHistoryPanel} data-team-member-messages>
         <div className={styles.sectionTitle}>
           <strong>{lang === "zh" ? "成员通信" : "Member messages"}</strong>
@@ -431,6 +439,7 @@ export function TeamCommunicationPanel({
           <div className={styles.messageError}>{revokeError.message}</div>
         ) : null}
       </section>
+      </> : null}
     </div>
   );
 }

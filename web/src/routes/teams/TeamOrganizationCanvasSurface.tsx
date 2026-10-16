@@ -22,13 +22,14 @@ import type {
 } from "../../api/types";
 import {
   VActionGroup,
+  VButton,
   VNativeButton,
   VNativeInput,
   VStateSurface,
   VSurface,
   VTooltip,
 } from "../../components/vui";
-import { edgeLine, isCommunicationEdge, teamCanvasNodeStyle } from "./canvasGeometry";
+import { canvasStyleScale, canvasViewStyle, edgeLine, isCommunicationEdge, teamCanvasNodeStyle, type CanvasFrameSize, type CanvasViewportStyle } from "./canvasGeometry";
 import { canvasNodeAgentLine, canvasNodeSecondaryLines, canvasNodeTitle } from "./teamCanvasNodePresentation";
 import nodeStyles from "./TeamOrganizationCanvasSurface.styles";
 import { teamNodeFunctionLabel } from "./teamRouteShellModel";
@@ -93,7 +94,9 @@ export type TeamOrganizationCanvasSurfaceProps = {
   teamCanvasPending: boolean;
   teamDetailError: boolean;
   teamCanvasError: boolean;
-  canvasViewportStyle: CSSProperties;
+  canvasViewportStyle: CanvasViewportStyle;
+  canvasFrameSize?: CanvasFrameSize;
+  onCanvasViewportChange?: (style: CanvasViewportStyle | null) => void;
   canvasFrameRef: Ref<HTMLDivElement>;
   nodeToneClass: (node: TeamCanvasNode) => string;
   roleBadgeToneClass: (node: TeamCanvasNode, displayTone?: string) => string;
@@ -155,6 +158,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
     teamDetailError,
     teamCanvasError,
     canvasViewportStyle,
+    canvasFrameSize,
+    onCanvasViewportChange,
     canvasFrameRef,
     nodeToneClass,
     roleBadgeToneClass,
@@ -329,8 +334,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
       ) : null}
       {completionFlowSlot}
       {canvas ? (
-        <div className={styles.canvas} ref={canvasFrameRef}>
-          <div className={styles.canvasViewport} style={canvasViewportStyle}>
+        <div className={styles.canvas} ref={canvasFrameRef} data-testid="team-canvas-frame">
+          <div className={styles.canvasViewport} style={canvasViewportStyle} data-testid="team-canvas-world">
             <svg className={styles.edges} width="100%" height="100%" data-testid="team-canvas-edges">
               <defs>
                 <marker
@@ -476,7 +481,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                   className={[
                     "absolute z-[2] flex -translate-x-1/2 -translate-y-[130%] items-center gap-1 rounded-md border",
                     "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-1 shadow-sm",
-                    "left-[calc(var(--canvas-offset-x,0px)+var(--overlay-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--overlay-y,0px))]",
+                    "left-[var(--overlay-x,0px)] top-[var(--overlay-y,0px)]",
                   ].join(" ")}
                   style={{
                     "--overlay-x": `${(selectedAuthoringEdgeLine.x1 + 2 * selectedAuthoringEdgeLine.cx + selectedAuthoringEdgeLine.x2) / 4}px`,
@@ -523,7 +528,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                   className={[
                     "absolute z-[2] flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-md border",
                     "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-1 shadow-sm",
-                    "left-[calc(var(--canvas-offset-x,0px)+var(--overlay-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--overlay-y,0px))]",
+                    "left-[var(--overlay-x,0px)] top-[var(--overlay-y,0px)]",
                   ].join(" ")}
                   style={{
                     "--overlay-x": `${renamingNode.x + 86}px`,
@@ -557,6 +562,22 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                 </div>
               ) : null}
           </div>
+          {onCanvasViewportChange ? (
+            <VActionGroup className={nodeStyles.viewControls} ariaLabel={lang === "zh" ? "画布视图" : "Canvas view"}>
+              <VButton density="compact" variant="secondary" onClick={() => onCanvasViewportChange(null)} isDisabled={!displayCanvasNodes.length}>
+                {lang === "zh" ? "适应全部" : "Fit all"}
+              </VButton>
+              <VButton density="compact" variant="secondary" onClick={() => onCanvasViewportChange(canvasViewStyle(displayCanvasNodes, canvasFrameSize, { scale: 1 }))} isDisabled={!displayCanvasNodes.length}>
+                100%
+              </VButton>
+              <VButton density="compact" variant="secondary" onClick={() => onCanvasViewportChange(canvasViewStyle(displayCanvasNodes, canvasFrameSize, { scale: canvasStyleScale(canvasViewportStyle), selectedNodeId }))} isDisabled={!displayCanvasNodes.some((node) => node.id === selectedNodeId)}>
+                {lang === "zh" ? "定位选中" : "Focus selected"}
+              </VButton>
+              <span className={nodeStyles.zoomLabel} aria-label={lang === "zh" ? "当前缩放" : "Current zoom"}>
+                {Math.round(canvasStyleScale(canvasViewportStyle) * 100)}%
+              </span>
+            </VActionGroup>
+          ) : null}
         </div>
       ) : (
         <div className={styles.emptyCanvasPanel} ref={canvasFrameRef}>

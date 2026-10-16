@@ -4,8 +4,9 @@ import type { TeamCanvasNode } from "../../api/types";
 
 export const NODE_WIDTH = 172;
 export const NODE_HEIGHT = 108;
-export const CANVAS_VIEWPORT_WIDTH = 1180;
-export const CANVAS_VIEWPORT_HEIGHT = 760;
+// Used only until the mounted frame can be measured.
+export const CANVAS_VIEWPORT_WIDTH = 420;
+export const CANVAS_VIEWPORT_HEIGHT = 360;
 export const RESEARCH_CANVAS_AUTO_LAYOUT_START_X = 64;
 export const RESEARCH_CANVAS_AUTO_LAYOUT_CENTER_Y = 250;
 export const RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP = 216;
@@ -174,7 +175,21 @@ export function autoLayoutResearchCanvasNodes(
   }));
 }
 
-export function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
+export function resolveCanvasFrameSize(frameSize?: CanvasFrameSize): CanvasFrameSize {
+  const measured = (value: number | undefined, fallback: number) =>
+    value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
+  return {
+    width: measured(frameSize?.width, CANVAS_VIEWPORT_WIDTH),
+    height: measured(frameSize?.height, CANVAS_VIEWPORT_HEIGHT),
+  };
+}
+
+/** Offsets are screen pixels; nodes and edges share translate(x, y) scale(s). */
+export function canvasViewStyle(
+  nodes: TeamCanvasNode[],
+  frameSize?: CanvasFrameSize,
+  view: { scale?: number; selectedNodeId?: string } = {},
+): CanvasViewportStyle {
   if (!nodes.length) {
     return {
       "--canvas-offset-x": "0px",
@@ -182,27 +197,25 @@ export function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrame
       "--canvas-scale": "1",
     };
   }
-  const minX = Math.min(...nodes.map((node) => node.x));
-  const minY = Math.min(...nodes.map((node) => node.y));
-  const maxX = Math.max(...nodes.map((node) => node.x + NODE_WIDTH));
-  const maxY = Math.max(...nodes.map((node) => node.y + NODE_HEIGHT));
+  const selectedNode = nodes.find((node) => node.id === view.selectedNodeId);
+  const focusedNodes = selectedNode ? [selectedNode] : nodes;
+  const minX = Math.min(...focusedNodes.map((node) => node.x));
+  const minY = Math.min(...focusedNodes.map((node) => node.y));
+  const maxX = Math.max(...focusedNodes.map((node) => node.x + NODE_WIDTH));
+  const maxY = Math.max(...focusedNodes.map((node) => node.y + NODE_HEIGHT));
   const boundsWidth = maxX - minX;
   const boundsHeight = maxY - minY;
-  const frameWidth = Math.max(420, Math.round(frameSize?.width || CANVAS_VIEWPORT_WIDTH));
-  const frameHeight = Math.max(360, Math.round(frameSize?.height || CANVAS_VIEWPORT_HEIGHT));
-  const scale = Math.min(
-    1,
-    Math.max(
-      0.58,
-      Math.min((frameWidth - 72) / Math.max(boundsWidth, 1), (frameHeight - 104) / Math.max(boundsHeight, 1)),
-    ),
-  );
-  const targetX = Math.max(40, Math.round((frameWidth / scale - boundsWidth) / 2));
-  const targetY = Math.max(54, Math.round((frameHeight / scale - boundsHeight) / 2));
+  const { width: frameWidth, height: frameHeight } = resolveCanvasFrameSize(frameSize);
+  // Reserve room below the graph for the view controls, even in a narrow pane.
+  const availableWidth = Math.max(1, frameWidth - 48);
+  const availableHeight = Math.max(1, frameHeight - 88);
+  const scale = view.scale && Number.isFinite(view.scale) && view.scale > 0
+    ? view.scale
+    : Math.min(1, availableWidth / Math.max(boundsWidth, 1), availableHeight / Math.max(boundsHeight, 1));
   return {
-    "--canvas-offset-x": `${Math.round(targetX - minX)}px`,
-    "--canvas-offset-y": `${Math.round(targetY - minY)}px`,
-    "--canvas-scale": scale.toFixed(3),
+    "--canvas-offset-x": `${frameWidth / 2 - (minX + boundsWidth / 2) * scale}px`,
+    "--canvas-offset-y": `${(frameHeight - 40) / 2 - (minY + boundsHeight / 2) * scale}px`,
+    "--canvas-scale": String(scale),
   };
 }
 

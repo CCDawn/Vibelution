@@ -27,6 +27,8 @@ export type VTabsProps = {
   /** Extra classes on each tab trigger (merged after density chrome). */
   triggerClassName?: string;
   contentClassName?: string;
+  /** Keep inactive panel bodies mounted, preserving local form state. */
+  keepPanelsMounted?: boolean;
   "aria-label"?: string;
   "data-vui"?: string;
 };
@@ -45,6 +47,7 @@ export function VTabs({
   listClassName,
   triggerClassName,
   contentClassName,
+  keepPanelsMounted = false,
   "aria-label": ariaLabel,
   "data-vui": dataVui = "tabs",
 }: VTabsProps) {
@@ -108,9 +111,11 @@ export function VTabs({
               <TabsPrimitive.Content
                 key={item.id}
                 value={item.id}
+                forceMount={keepPanelsMounted ? true : undefined}
                 className={cn(
                   "min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)]",
                   contentClassName,
+                  keepPanelsMounted && "data-[state=inactive]:hidden",
                 )}
                 data-slot="tabs-content"
               >

@@ -3,6 +3,7 @@
  * Route owns state/mutations; this factory mounts already-extracted panels.
  */
 import { lazy, Suspense, type ReactNode } from "react";
+import { TeamInspectorTabs } from "./TeamInspectorTabs";
 
 /** Keep communication + workflow hosts out of the eager TeamsRoute graph. */
 const TeamCommunicationPanel = lazy(() =>
@@ -60,6 +61,8 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
     sourceCollectionOverviewErrors,
     sourceCollectionOverviewResult,
     selectedTeam,
+    selectedNodeId,
+    inspectorSelectionRevision,
     startSourceCollectionRunMutation,
     setSelectedSourceCollectionRunId,
     setSourceCollectionOutputDraft,
@@ -286,12 +289,13 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
     );
   }
 
-  function renderTeamCommunicationPanel() {
+  function renderTeamCommunicationPanel(section: "all" | "tasks" | "records" = "all") {
     if (!showTeamCommunicationPanel) {
       return null;
     }
     return withWorkflowSuspense(
       <TeamCommunicationPanel
+        section={section}
         lang={lang}
         selectedTeam={selectedTeam}
         linkedChatRoomId={linkedChatRoomId}
@@ -334,6 +338,21 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
 
 
   function renderTeamsInspectorSharedPanels() {
+    if (!researchWorkflowTeamSelected) {
+      return <TeamInspectorTabs
+        key={selectedTeam?.teamId || "no-team"}
+        lang={lang}
+        selectedNodeId={selectedNodeId}
+        selectionRevision={inspectorSelectionRevision}
+        members={<>
+          {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
+          {renderTeamNodeBindingPanel()}
+          {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
+        </>}
+        tasks={renderTeamCommunicationPanel("tasks")}
+        records={renderTeamCommunicationPanel("records")}
+      />;
+    }
     return (
       <>
         {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
