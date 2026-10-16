@@ -31,6 +31,7 @@ from typing import Any
 
 import pytest
 from core.research.workflow.contracts import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
     ActorRef,
     CommandRequest,
     WorkflowCommandKind,
@@ -385,7 +386,9 @@ def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatc
     assert [item["roleId"] for item in resolved["participantRoleSnapshot"]] == resolved[
         "participantRoleIds"
     ]
-    assert resolved["teamRoleContractVersion"] == 2
+    assert resolved["teamRoleContractVersion"] == (
+        CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.team_role_contract_version
+    )
     assert resolved["participantPolicyVersion"] == 2
     assert len(resolved["resolutionHash"]) == 64
 
