@@ -1005,8 +1005,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("const showRowStop = stoppable && !singleLifecycleButton");
     expect(panelSource).toContain("{inFlightStart ? (");
     expect(panelSource).toContain("onPress={() => askBatchStop([item.id], \"stop\")}");
-    expect(panelSource).toMatch(/\{inFlightStart \? \([\s\S]{0,700}?\{labels\.stop\}/);
-    expect(panelSource).not.toMatch(/\{inFlightStart \? \([\s\S]{0,700}?\{openLabel\}/);
+    expect(panelSource).toMatch(/\{inFlightStart \? \([\s\S]{0,900}?icon=\{stoppable \? <LoaderCircle[\s\S]{0,500}?\{labels\.stop\}/);
+    expect(panelSource).not.toMatch(/\{inFlightStart \? \([\s\S]{0,900}?\{openLabel\}/);
     expect(panelSource).not.toContain("{ id: \"stop\"");
     expect(panelSource).toContain("<VActionGroup");
     expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);
@@ -1078,11 +1078,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStartInstance(building)).toBe(false);
     expect(groupBranchInstances([building]).running.map((item) => item.id)).toEqual(["worktree:building"]);
     expect(groupBranchInstances([building]).attention).toEqual([]);
-    // The one in-flight button is labeled Stop. The long build explanation stays in the title.
+    // The one in-flight button spins and says Stop. The long build explanation stays in the title.
     expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
     expect(panelSource).toContain("{inFlightStart ? (");
-    expect(panelSource).toMatch(/\{inFlightStart \? \([\s\S]{0,700}?\{labels\.stop\}/);
-    expect(panelSource).not.toContain("icon={stoppable ? <LoaderCircle");
+    expect(panelSource).toMatch(/\{inFlightStart \? \([\s\S]{0,900}?icon=\{stoppable \? <LoaderCircle[\s\S]{0,500}?\{labels\.stop\}/);
     expect(panelSource).not.toContain("{startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}");
     expect(panelSource).toContain("stoppable ? `${labels.buildingHint} ${labels.cancelStartHint}` : labels.buildingHint");
     expect(panelSource).toContain("buildingHint: \"前端代码有更新，正在构建新版本，约需几分钟。\"");

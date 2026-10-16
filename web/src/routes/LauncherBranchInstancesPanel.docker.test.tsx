@@ -392,6 +392,7 @@ describe("Launcher branch workspace interactions", () => {
 
     const stopAction = button("停止");
     expect(stopAction.disabled).toBe(false);
+    expect(stopAction.querySelector("svg.animate-spin")).not.toBeNull();
     expect(stopAction.title).toContain("前端代码有更新，正在构建新版本，约需几分钟。");
     expect(stopAction.title).toContain("停止这次尚未完成的启动。");
     await click(stopAction);
@@ -413,6 +414,7 @@ describe("Launcher branch workspace interactions", () => {
 
     const stopAction = button("停止");
     expect(stopAction.disabled).toBe(false);
+    expect(stopAction.querySelector("svg.animate-spin")).not.toBeNull();
     expect(stopAction.title).toContain("停止这次尚未完成的启动。");
     await click(stopAction);
     expect(onLifecycle).not.toHaveBeenCalled();

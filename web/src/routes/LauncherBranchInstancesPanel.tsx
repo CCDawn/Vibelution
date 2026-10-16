@@ -1,4 +1,4 @@
-import { GitBranch, Ellipsis, Search } from "lucide-react";
+import { GitBranch, Ellipsis, LoaderCircle, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -376,8 +376,8 @@ export function LauncherBranchInstancesPanel({
     const building = state === "building";
     const startingOrRestarting = state === "starting" || state === "restarting";
     const inFlightStart = building || startingOrRestarting;
-    // While a start is in flight the one button says Stop, because that is
-    // what the press does. A second stop button appears only after it finishes.
+    // While a start is in flight the one button keeps a spinner and says Stop.
+    // A second stop button appears only after that in-flight state finishes.
     const singleLifecycleButton = inFlightStart || stopBusy;
     const openAction = workbenchOpenAction(item, state);
     const openLabel = {
@@ -440,6 +440,7 @@ export function LauncherBranchInstancesPanel({
             density="compact"
             isDisabled={!stoppable}
             isPending={!stoppable}
+            icon={stoppable ? <LoaderCircle size={14} strokeWidth={2.25} className={styles.pendingIcon} aria-hidden="true" /> : undefined}
             title={building
               ? (stoppable ? `${labels.buildingHint} ${labels.cancelStartHint}` : labels.buildingHint)
               : (stoppable ? labels.cancelStartHint : undefined)}
