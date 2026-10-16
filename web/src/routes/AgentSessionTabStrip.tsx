@@ -190,6 +190,16 @@ export type AgentSessionTabStripProps = {
   onPaneDockChipSelect?: (chip: SessionBarDockChip) => void;
   onPaneDockChipClose?: (chip: SessionBarDockChip) => void;
   onPaneDockDrop?: (payload: PaneDockPayload) => void;
+  /** Right-rail pages drawn in the same session row. Drag still uses the pane-dock payload. */
+  railRowTabs?: SessionBarRailTab[];
+  onRailRowTabSelect?: (tabId: string) => void;
+  onRailRowTabClose?: (tabId: string) => void;
+};
+
+export type SessionBarRailTab = {
+  id: string;
+  title: string;
+  active: boolean;
 };
 
 function agentSessionTabElementId(kind: "session" | "cli", id: string) {
@@ -236,6 +246,9 @@ export function AgentSessionTabStrip({
   onPaneDockChipSelect,
   onPaneDockChipClose,
   onPaneDockDrop,
+  railRowTabs = [],
+  onRailRowTabSelect,
+  onRailRowTabClose,
 }: AgentSessionTabStripProps) {
   const visibleSessions = recentAgentSessions(sessions, [activeSessionId, editingSessionId, contextMenuSessionId]);
   const tabGroupRef = useRef<HTMLDivElement>(null);
@@ -350,8 +363,8 @@ export function AgentSessionTabStrip({
       <div
         className={styles.agentSessionTabGroup}
         ref={tabGroupRef}
-        role={keyboardTabs.length > 0 || paneDockChips.length > 0 ? "tablist" : undefined}
-        aria-label={keyboardTabs.length > 0 || paneDockChips.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
+        role={keyboardTabs.length > 0 || paneDockChips.length > 0 || railRowTabs.length > 0 ? "tablist" : undefined}
+        aria-label={keyboardTabs.length > 0 || paneDockChips.length > 0 || railRowTabs.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
         data-pane-dock-target="session-bar"
         onDragOver={(event) => {
           if (!onPaneDockDrop || !event.dataTransfer?.types.includes(PANE_DOCK_MIME)) {
@@ -643,6 +656,59 @@ export function AgentSessionTabStrip({
               }}
               title={closeLabel}
               label={`${closeLabel} ${chip.title}`}
+              icon={<X size={13} />}
+            />
+          </div>
+        );
+      })}
+      {railRowTabs.map((tab) => {
+        const tabClassName = [
+          styles.agentSessionTab,
+          tab.active ? styles.agentSessionTabActive : "",
+        ].filter(Boolean).join(" ");
+        const closeLabel = lang === "zh" ? "关闭" : "Close";
+        return (
+          <div
+            key={tab.id}
+            className={`${tabClassName} ${styles.agentSessionTabClosable}`}
+            role="presentation"
+            data-selected={tab.active ? "true" : undefined}
+            data-session-rail-tab={tab.id}
+            draggable
+            onDragStart={(event) => {
+              writePaneDock(event.dataTransfer, {
+                v: 1,
+                source: "rail",
+                tabId: tab.id,
+              });
+              if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+              }
+            }}
+          >
+            <VButton
+              type="button"
+              contentLayout="plain"
+              className={tab.active ? `${styles.agentSessionTabMainAction} ${styles.agentSessionTabMainActionActive}` : styles.agentSessionTabMainAction}
+              role="tab"
+              aria-selected={tab.active}
+              data-session-tab-active={tab.active ? "true" : "false"}
+              onPress={() => onRailRowTabSelect?.(tab.id)}
+              title={tab.title}
+              aria-label={tab.title}
+            >
+              <span className={styles.agentSessionTabTitle}>{tab.title}</span>
+            </VButton>
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.agentSessionTabCloseButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRailRowTabClose?.(tab.id);
+              }}
+              title={closeLabel}
+              label={`${closeLabel} ${tab.title}`}
               icon={<X size={13} />}
             />
           </div>

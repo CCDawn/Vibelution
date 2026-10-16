@@ -63,6 +63,10 @@ export type UseChatWorkbenchLayoutResult = {
   centerPaneClassName: string;
   statusRailClassName: string;
   conversationIndexPaneClassName: string;
+  /** Wide docked rail: the session row spans the center column and the right rail. */
+  sessionRowSpansRail: boolean;
+  leftResizeHandleClassName: string;
+  rightResizeHandleClassName: string;
   handleResizeStart: (side: ResizableSide, event: PointerEvent<HTMLDivElement>) => void;
   handleResizeKeyDown: (side: ResizableSide, event: KeyboardEvent<HTMLDivElement>) => void;
   closeResponsiveOverlayPane: () => void;
@@ -308,19 +312,22 @@ export function useChatWorkbenchLayout({
   const reclaimStatusRailTrack =
     statusRailCollapsed
     && responsiveLayout.mode === "wide";
+  // One session row only while the wide grid still has both the center and the docked rail.
+  const sessionRowSpansRail = responsiveLayout.mode === "wide" && statusRailDocked && indexRailEnabled;
   const chatLayoutClassName = [
     layoutModeClassName,
     reclaimStatusRailTrack ? styles.layoutStatusRailCollapsed : "",
     indexRailEnabled ? "" : styles.layoutConversationOnly,
+    sessionRowSpansRail ? styles.sessionRowHost : "",
   ].filter(Boolean).join(" ");
   // A one-column template (finance, overlay, mobile) must not also place this
   // pane on column 3. That placement creates an empty leading track.
   const centerOnFirstColumn = responsiveLayout.mode === "overlay"
     || responsiveLayout.mode === "mobile"
     || !indexRailEnabled;
-  const centerPaneClassName = centerOnFirstColumn
+  const centerPaneClassName = `${centerOnFirstColumn
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : `${styles.centerPane} ${styles.centerPaneDocked}`;
+    : `${styles.centerPane} ${styles.centerPaneDocked}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}` : ""}`;
   // Critical: when docked status rail is collapsed, do NOT attach leftRail
   // (grid-column:5). A non-display:none item on column 5 creates implicit
   // grid tracks and a blank right strip after route remounts.
@@ -328,12 +335,22 @@ export function useChatWorkbenchLayout({
     ? `${styles.leftRail} ${styles.overlayPane} ${styles.overlayPaneRight}`
     : statusRailCollapsed
       ? styles.paneCollapsed
-      : styles.leftRail;
+      : sessionRowSpansRail
+        ? `${styles.leftRail} ${styles.statusRailBodyRow}`
+        : styles.leftRail;
   const conversationIndexPaneClassName = conversationIndexOverlayOpen
     ? `${rightPaneClassName} ${styles.overlayPane} ${styles.overlayPaneLeft}`
     : conversationIndexCollapsed
       ? styles.paneCollapsed
-      : rightPaneClassName;
+      : sessionRowSpansRail
+        ? `${rightPaneClassName} ${styles.indexRailSpanRows}`
+        : rightPaneClassName;
+  const leftResizeHandleClassName = sessionRowSpansRail
+    ? `${styles.resizeHandleLeft} ${styles.resizeHandleLeftSpan}`
+    : styles.resizeHandleLeft;
+  const rightResizeHandleClassName = sessionRowSpansRail
+    ? `${styles.resizeHandleRight} ${styles.resizeHandleRightBody}`
+    : styles.resizeHandleRight;
 
   const closeResponsiveOverlayPane = useCallback(() => {
     const closingPane = responsiveOverlayPane;
@@ -363,6 +380,9 @@ export function useChatWorkbenchLayout({
     centerPaneClassName,
     statusRailClassName,
     conversationIndexPaneClassName,
+    sessionRowSpansRail,
+    leftResizeHandleClassName,
+    rightResizeHandleClassName,
     handleResizeStart,
     handleResizeKeyDown,
     closeResponsiveOverlayPane,

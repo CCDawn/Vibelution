@@ -47,5 +47,11 @@ describe("ChatSessionWorkbenchShell geometry host", () => {
     expect(centerPaneBlock).not.toContain("[grid-column:3]");
     expect(styles).toContain("centerPaneDocked [grid-column:3] [grid-row:1]");
     expect(styles).toContain("centerPaneOverlay [grid-column:1] [grid-row:1]");
+    expect(styles).toContain("sessionRowHost !grid-rows-[44px_minmax(0,1fr)]");
+    expect(styles).toContain("sessionRowSpan");
+    expect(layout).toContain("sessionRowSpansRail");
+    expect(workbench).toContain("styles.sessionRowSpan");
+    expect(workbench).toContain("hideTabList={sessionRowSpansRail}");
+    expect(workbench).toContain("agentSessionTabs={stripSessions}");
   });
 });
