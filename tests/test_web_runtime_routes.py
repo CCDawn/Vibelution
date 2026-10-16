@@ -2903,8 +2903,17 @@ def test_launcher_lifecycle_intent_empty_long_poll_does_not_repeat_write_claims(
         "LIFECYCLE_DB_PATH",
         tmp_path / "launcher" / "lifecycle.sqlite3",
     )
-    monotonic_values = iter([0.0, 0.0, 0.2])
-    monkeypatch.setattr(lifecycle_intent_store.time, "monotonic", lambda: next(monotonic_values))
+    monotonic_values = iter((0.0, 0.0, 0.2))
+    last_monotonic = 0.0
+
+    def monotonic() -> float:
+        nonlocal last_monotonic
+        # Teardown can read the clock after the poll script ends. Keep the last
+        # sample instead of raising StopIteration out of a fixture generator.
+        last_monotonic = next(monotonic_values, last_monotonic)
+        return last_monotonic
+
+    monkeypatch.setattr(lifecycle_intent_store.time, "monotonic", monotonic)
     monkeypatch.setattr(lifecycle_intent_store.time, "sleep", lambda _seconds: None)
     original_claim_once = lifecycle_intent_store._claim_desktop_action_once
     claim_attempts = 0
