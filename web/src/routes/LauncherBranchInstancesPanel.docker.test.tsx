@@ -279,15 +279,15 @@ describe("Launcher branch workspace interactions", () => {
           (node.textContent || "").includes("确认清理分支实例"),
         );
       await openRowCleanupDialog("codex/residue");
-      await waitForDialog(() => cleanupDialog()?.textContent?.includes("读取分支实例失败") === true);
+      await waitForDialog(() => cleanupDialog()?.textContent?.includes("暂时无法确认是否已合入 main") === true);
 
       // Merge status is the only warning before deleting an unmerged branch:
       // a failed read keeps confirm locked but must explain and offer retry.
-      expect(cleanupDialog()?.textContent).toContain("重试读取");
+      expect(cleanupDialog()?.textContent).toContain("重新确认");
       const confirmInError = findDialogConfirmButton(cleanupDialog());
       expect(confirmInError?.disabled).toBe(true);
 
-      await click(button("重试读取", cleanupDialog()!));
+      await click(button("重新确认", cleanupDialog()!));
       await waitForDialog(() => cleanupDialog()?.textContent?.includes("codex/residue") === true);
       const confirmAfterRetry = findDialogConfirmButton(cleanupDialog());
       expect(confirmAfterRetry?.disabled).toBe(false);
