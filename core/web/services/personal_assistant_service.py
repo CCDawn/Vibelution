@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 
 from core.web.services import agent_directory_service as directory
@@ -16,13 +18,14 @@ TOOLS = (
     "append_personal_memory_tool",
     "supersede_personal_memory_tool",
 )
-POLICY = {
+LEGACY_POLICY = {
     "allowedTools": list(TOOLS),
     "preferredTools": list(TOOLS),
     "networkAccess": "none",
     "mutationAccess": "controlled",
     "maxCallsPerTurn": 8,
 }
+POLICY = {**LEGACY_POLICY, "writeScopes": ["private"]}
 PERSONA = {
     "personality": "温和、可靠，尊重用户的偏好和注意力。",
     "communicationStyle": "用中文先讲结论，说明观察依据和需要用户决定的事项。",
@@ -113,6 +116,21 @@ def _owns_session(agent: dict, row: dict | None) -> bool:
     )
 
 
+def _needs_default_policy_upgrade(agent: dict) -> bool:
+    """Recognize only the untouched, private v1 assistant provisioning policy."""
+    policy_id = "tool-" + agent["agentId"]
+    if (
+        agent.get("createdBy") != "user_personal_assistant"
+        or agent.get("toolPolicyId") != policy_id
+    ):
+        return False
+    expected = directory.normalize_tool_policy(LEGACY_POLICY, policy_id)
+    version = (agent.get("toolPolicy") or {}).get("policyVersion")
+    pending = (agent.get("metadata") or {}).get("personalAssistantSetup") != "ready"
+    expected["policyVersion"] = 1 if pending and version == 1 else 2
+    return agent.get("toolPolicy") == expected
+
+
 def _project(agent: dict) -> dict:
     ready = (agent.get("metadata") or {}).get("personalAssistantSetup") == "ready"
     valid = _owns_session(agent, _session_row(agent))
@@ -122,9 +140,9 @@ def _project(agent: dict) -> dict:
         "directSessionId": str(agent.get("directSessionId") or "") if valid else "",
         "status": "active",
         "setupStatus": "ready"
-        if ready and valid
+        if ready and valid and not _needs_default_policy_upgrade(agent)
         else "session_missing"
-        if ready
+        if ready and not valid
         else "setup_required",
         "renderer": "whale",
         "profile": PROFILE,
@@ -147,6 +165,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
         raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
     with _LOCK:
         agent = _profile_agent()
+        created = agent is None
         if agent is None:
             agent = directory.create_agent_instance(
                 display_name=name,
@@ -173,13 +192,23 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 "个人助理会话已归档或属于其他 Agent，请先核对绑定。"
             )
         pending = (agent.get("metadata") or {}).get("personalAssistantSetup") != "ready"
-        if pending:
+        if pending and created:
             directory.update_agent_instance(
                 agent["agentId"],
                 persona_profile=PERSONA,
                 task_profile=TASK,
                 tool_policy=POLICY,
                 delegation_policy={"allowSubagents": False, "allowWakeMessages": False},
+            )
+        elif _needs_default_policy_upgrade(agent):
+            # Explicit provisioning upgrades only the unmodified legacy policy.
+            # User-authored policies and all persona/task fields remain intact.
+            directory.update_agent_instance(
+                agent["agentId"],
+                tool_policy=POLICY,
+                expected_tool_policy_fingerprint=directory.tool_policy_fingerprint(
+                    agent["toolPolicy"]
+                ),
             )
         if not row:
             # Native service owns unbinding/recreation of deleted direct Sessions.
@@ -199,8 +228,15 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
         }
 
 
-def get_platform_overview() -> dict:
+def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
     """Public summaries only; no transcript, prompt, tool arguments or config."""
+    if (
+        type(offset) is not int
+        or offset < 0
+        or type(limit) is not int
+        or not 1 <= limit <= 100
+    ):
+        raise ValueError("概览 offset 必须为非负整数，limit 必须为 1–100。")
     agents = directory.list_agents(detail="summary")
     sessions = session_service.list_sessions()
     activity = pet_activity_service.get_pet_activity()
@@ -214,9 +250,8 @@ def get_platform_overview() -> dict:
         }
         for row in activity["sessions"]
         if row["tone"] in {"approval", "error"}
-    ][:100]
-    return {
-        "generatedAt": activity["generatedAt"],
+    ]
+    public = {
         "counts": {
             "agents": len(agents),
             "sessions": len(sessions),
@@ -230,7 +265,7 @@ def get_platform_overview() -> dict:
                 "displayName": row["displayName"],
                 "status": row["status"],
             }
-            for row in agents[:100]
+            for row in agents
         ],
         "sessions": [
             {
@@ -242,13 +277,31 @@ def get_platform_overview() -> dict:
                     agent_name=row.get("agentDisplayName"),
                 ),
                 "status": str(row.get("status") or ""),
+                "turnId": session_service._current_session_turn_id(row["id"]),
                 "currentPhase": str(
                     live.get(row["id"], {}).get("phase")
                     or row.get("currentPhase")
                     or "idle"
                 ),
             }
-            for row in sessions[:100]
+            for row in sessions
         ],
         "attention": attention,
+    }
+    revision = hashlib.sha256(
+        json.dumps(public, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    end = offset + limit
+    return {
+        "generatedAt": activity["generatedAt"],
+        "counts": public["counts"],
+        "agents": public["agents"][offset:end],
+        "sessions": public["sessions"][offset:end],
+        "attention": attention[offset:end],
+        "pagination": {
+            "offset": offset,
+            "limit": limit,
+            "revision": revision,
+            "nextOffset": end if end < max(len(agents), len(sessions), len(attention)) else None,
+        },
     }

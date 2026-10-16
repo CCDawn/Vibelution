@@ -74,12 +74,12 @@ def _receipt(raw: str) -> str:
     )
 
 
-def personal_assistant_overview_tool() -> str:
+def personal_assistant_overview_tool(offset: int = 0, limit: int = 100) -> str:
     """Read public platform status without private memories or transcripts."""
     try:
         _identity()
         return json.dumps(
-            {"ok": True, **service.get_platform_overview()}, ensure_ascii=False
+            {"ok": True, **service.get_platform_overview(offset=offset, limit=limit)}, ensure_ascii=False
         )
     except (ValueError, directory.AgentDirectoryError) as exc:
         return _error(str(exc))

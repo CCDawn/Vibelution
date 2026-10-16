@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from core.web.services import personal_assistant_service as service
@@ -53,6 +53,7 @@ class SessionSummary(BaseModel):
     title: str
     status: str
     currentPhase: str
+    turnId: str
 
 
 class Attention(BaseModel):
@@ -62,12 +63,20 @@ class Attention(BaseModel):
     sessionId: str
 
 
+class OverviewPagination(BaseModel):
+    offset: StrictInt = Field(ge=0)
+    limit: StrictInt = Field(ge=1, le=100)
+    nextOffset: StrictInt | None
+    revision: str
+
+
 class OverviewResponse(BaseModel):
     generatedAt: str
     counts: Counts
     agents: list[AgentSummary]
     sessions: list[SessionSummary]
     attention: list[Attention]
+    pagination: OverviewPagination
 
 
 @router.get("/personal-assistant", response_model=AssistantResponse)
@@ -89,5 +98,8 @@ def create_assistant(payload: CreateRequest) -> dict:
 
 
 @router.get("/personal-assistant/overview", response_model=OverviewResponse)
-def overview() -> dict:
-    return service.get_platform_overview()
+def overview(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=100),
+) -> dict:
+    return service.get_platform_overview(offset=offset, limit=limit)

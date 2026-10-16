@@ -2867,9 +2867,15 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
-    def personal_assistant_overview_tool() -> str:
-        """【个人助理平台概览】读取 Agent 和会话公开状态；不读取其他会话正文或私密记忆。"""
-        return _personal_assistant_overview_impl()
+    def personal_assistant_overview_tool(offset: int = 0, limit: int = 100) -> str:
+        """【个人助理平台概览】分页读取 Agent、会话及异常公开状态；不读正文或私密记忆。
+
+        offset 为非负整数，limit 为 1–100（默认100）。pagination.nextOffset 非空时，
+        用它继续查询，不能将首屏当成全部；翻页时比对 pagination.revision，
+        变化则从 offset=0 重新读取。sessions.turnId 是当前原生轮次标识；
+        停止前须读取并原样传入，过期时重新查询，不得猜测；空值表示未取得活动轮次。
+        """
+        return _personal_assistant_overview_impl(offset=offset, limit=limit)
 
     @tool
     def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
@@ -2878,10 +2884,15 @@ def _build_key_tools() -> List[BaseTool]:
         action 为 agent_create、agent_update、agent_archive、session_create、
         session_update、session_stop、session_delete、knowledge_acl_grant 或 restart。
         arguments_json 使用相应原生工具的具名参数 JSON 对象；restart 仅接受 reason。
-        agent_create: display_name，primary_mode/role_key/prompt_template_id/model_id 可选。
+        agent_create 必须提供 display_name、primary_mode、prompt_template_id、model_id
+        （或 llm_bindings_json）；模型、使用位置和提示词不自动补默认值，未知时先向用户确认。
+        primary_mode 非 chat 时还必须提供 role_key、persona_profile_json、task_profile_json、
+        tool_policy_json（含非空 allowedTools）。这些 JSON 字符串需使用平台现有格式。
         agent_update: agent_id、updates_json（PATCH配置字段JSON，可选expected_config_revision）。
         agent_archive: agent_id。session_create: agent_id、title。
         session_update: session_id、title（可选agent_id）。session_stop: session_id、turn_id。
+        停止回执只表示请求受理，需再次概览确认终态。重启 accepted 不等于 completed；
+        unknown 表示结果未确认，须先核对平台状态，不得盲目重复提交。
         session_delete: session_id。knowledge_acl_grant: knowledge_base_id、target_agent_id、permissions_json。
         不支持 purge、任意命令或任意 API。重启、删除及权限变更先说明对象和影响。
         """

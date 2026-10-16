@@ -129,8 +129,34 @@ def _runtime_manager_controls_current_project() -> bool:
         snapshot_root = str((snapshot or {}).get("projectRoot") or "").strip()
         return bool(snapshot_root) and Path(snapshot_root).resolve() == PROJECT_ROOT.resolve()
     except Exception as exc:
-        _debug_logger.warning(f"Runtime manager 检测失败，降级为 legacy restarter: {exc}")
+        _debug_logger.warning(f"Runtime manager 检测失败: {type(exc).__name__}")
         return False
+
+
+def _session_restart_receipt(
+    session_id: str,
+    *,
+    status: str,
+    message: str,
+    command_id: str = "",
+    error: str = "",
+    accepted: bool = False,
+    completed: bool = False,
+) -> str:
+    """A session restart reports queue acceptance separately from completion."""
+    return json.dumps(
+        {
+            "ok": status in {"accepted", "completed"},
+            "status": status,
+            "message": message,
+            "error": error,
+            "sessionId": session_id,
+            "commandId": command_id,
+            "accepted": accepted,
+            "completed": completed,
+        },
+        ensure_ascii=False,
+    )
 
 
 def _request_runtime_manager_restart(
@@ -143,6 +169,13 @@ def _request_runtime_manager_restart(
     """Submit a restart intent to the runtime manager when it is live."""
 
     if not _runtime_manager_controls_current_project():
+        if session_id:
+            return _session_restart_receipt(
+                session_id,
+                status="blocked",
+                error="runtime_manager_unavailable",
+                message="Runtime Manager 未管理当前项目，未执行会话重启。",
+            )
         return None
     command_type = "hot_restart_workbench" if session_id else "restart_self_evolution_run"
     args = (
@@ -164,6 +197,7 @@ def _request_runtime_manager_restart(
             "payload": {"reason": reason or "legacy_self_restart"},
         }
     )
+    command_id = ""
     try:
         from core.runtime_manager.command_queue import submit_command, wait_for_result
 
@@ -172,45 +206,72 @@ def _request_runtime_manager_restart(
             args=args,
             requested_by="trigger_self_restart_tool",
         )
-        result = wait_for_result(command["commandId"], timeout_seconds=10.0 if not session_id else 2.0)
+        command_id = command["commandId"]
+        result = wait_for_result(command_id, timeout_seconds=10.0 if not session_id else 2.0)
     except TimeoutError:
         if session_id:
-            return "\n".join(
-                [
-                    "✓ 前后端热重启事务已交给 Runtime Manager",
-                    f"Command: {command['commandId']}",
-                    f"Session: {session_id}",
-                    f"Run: {run_id or '-'}",
-                    f"原因: {reason}",
-                    "",
-                    "状态: Runtime Manager 将继续执行备份、重启、验证、失败现场保存、回滚和会话唤醒。",
-                    "",
-                    "当前轮将结束，请等待热重启完成后系统自动唤醒本会话。",
-                ]
+            return _session_restart_receipt(
+                session_id,
+                command_id=command_id,
+                status="accepted" if command_id else "blocked",
+                error="" if command_id else "runtime_manager_submit_failed",
+                accepted=bool(command_id),
+                message=(
+                    "重启请求已提交给 Runtime Manager，等待结果超时，尚未确认重启完成。"
+                    if command_id else "重启请求提交超时，未取得受理回执。"
+                ),
             )
         raise
     except Exception as exc:
+        if session_id:
+            return _session_restart_receipt(
+                session_id,
+                command_id=command_id,
+                status="unknown" if command_id else "blocked",
+                error="runtime_manager_result_unavailable" if command_id else "runtime_manager_submit_failed",
+                accepted=bool(command_id),
+                message=(
+                    "重启请求已提交，但无法读取结果，不能确认重启是否完成。"
+                    if command_id else "重启请求提交异常，未取得受理回执；请先核对平台状态，不要直接重试。"
+                ),
+            )
         _debug_logger.error(f"Runtime manager 重启意图提交失败，降级为 legacy restarter: {exc}")
         return None
+    if session_id:
+        if not isinstance(result, dict) or not isinstance(result.get("ok"), bool):
+            return _session_restart_receipt(
+                session_id,
+                command_id=command_id,
+                status="unknown",
+                error="runtime_manager_invalid_result",
+                accepted=True,
+                message="Runtime Manager 返回了无效回执，不能确认重启结果。",
+            )
+        if not result["ok"]:
+            return _session_restart_receipt(
+                session_id,
+                command_id=command_id,
+                status="blocked",
+                error=str(result.get("errorType") or "runtime_manager_rejected"),
+                message=str(result.get("message") or "Runtime Manager 拒绝了会话重启。"),
+            )
+        completed = result.get("completed") is True
+        return _session_restart_receipt(
+            session_id,
+            command_id=command_id,
+            status="completed" if completed else "accepted",
+            accepted=True,
+            completed=completed,
+            message=(
+                str(result.get("message") or "Runtime Manager 已确认热重启完成。")
+                if completed else "Runtime Manager 已受理重启请求，尚未确认重启完成。"
+            ),
+        )
     if not bool(result.get("ok")):
         _debug_logger.error(f"Runtime manager 拒绝重启意图，降级为 legacy restarter: {result}")
         return None
     intent = result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {}
     intent_id = str(intent.get("intentId") or "").strip()
-    if session_id:
-        if not bool(result.get("ok")):
-            return f"错误: 前后端热重启被拒绝: {result.get('message') or result}"
-        return "\n".join(
-            [
-                "✓ 前后端热重启已完成",
-                f"Command: {command['commandId']}",
-                f"Session: {session_id}",
-                f"Run: {run_id or '-'}",
-                f"原因: {reason}",
-                "",
-                str(result.get("message") or "Runtime Manager 已完成热重启闭环。"),
-            ]
-        )
     return "\n".join(
         [
             "✓ 重启意图已交给 Runtime Manager",
@@ -410,6 +471,9 @@ def trigger_self_restart_tool(
     
     Returns:
         操作结果的描述字符串。
+        绑定 sessionId/session_id 时只使用 Runtime Manager，返回 JSON 回执：
+        accepted 仅表示请求已提交，completed 才表示已确认完成；
+        blocked/unknown 均不能视为重启成功，也不会回退启动旧进程。
         
         成功时返回：
         ```
@@ -457,6 +521,19 @@ def trigger_self_restart_tool(
     _debug_logger.info("触发自我重启")
     _debug_logger.info("=" * 60)
 
+    normalized_session_id = str(sessionId or session_id or "").strip()
+    normalized_run_id = str(runId or run_id or "").strip()
+    normalized_resume_message = str(resumeMessage or resume_message or "").strip()
+    if normalized_session_id:
+        # Native session persistence belongs to the control plane. Never write
+        # global CLI memory or start a legacy agent.py process for a web session.
+        return _request_runtime_manager_restart(
+            reason,
+            session_id=normalized_session_id,
+            run_id=normalized_run_id,
+            resume_message=normalized_resume_message,
+        )
+
     # 0. 【强制记忆快照】在重启前自动保存状态
     # 这是最后一道防线，确保即使 Agent 没有主动保存记忆，系统也会自动保存
     try:
@@ -488,9 +565,6 @@ def trigger_self_restart_tool(
     _debug_logger.info(f"脚本路径: {script_path}")
     _debug_logger.info(f"重启原因: {reason}")
 
-    normalized_session_id = str(sessionId or session_id or "").strip()
-    normalized_run_id = str(runId or run_id or "").strip()
-    normalized_resume_message = str(resumeMessage or resume_message or "").strip()
     manager_result = _request_runtime_manager_restart(
         reason,
         session_id=normalized_session_id,
@@ -661,6 +735,12 @@ def _restart_trigger_succeeded(result: str) -> bool:
     """判断重启触发是否成功。"""
     if not isinstance(result, str):
         return False
+    try:
+        receipt = json.loads(result)
+    except (TypeError, ValueError):
+        receipt = None
+    if isinstance(receipt, dict):
+        return receipt.get("ok") is True and receipt.get("status") in {"accepted", "completed"}
     lowered = result.lower()
     return not (
         lowered.startswith("错误")

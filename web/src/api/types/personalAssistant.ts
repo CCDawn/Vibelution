@@ -13,6 +13,7 @@ export type PersonalAssistantOverview = {
   generatedAt: string;
   counts: { agents: number; sessions: number; running: number; waiting: number; failed: number };
   agents: Array<{ id: string; displayName: string; status: string }>;
-  sessions: Array<{ id: string; agentId: string; title: string; status: string; currentPhase: string }>;
+  sessions: Array<{ id: string; agentId: string; title: string; status: string; currentPhase: string; turnId?: string }>;
   attention: Array<{ id: string; kind: string; title: string; sessionId?: string }>;
+  pagination?: { offset: number; limit: number; nextOffset: number | null; revision?: string };
 };

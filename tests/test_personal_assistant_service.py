@@ -406,7 +406,7 @@ def test_platform_overview_uses_native_activity_and_only_projects_safe_summaries
     overview = service.get_platform_overview()
 
     assert calls == [1]
-    assert set(overview) == {"generatedAt", "counts", "agents", "sessions", "attention"}
+    assert set(overview) == {"generatedAt", "counts", "agents", "sessions", "attention", "pagination"}
     assert overview["counts"] == {
         "agents": 2,
         "sessions": 4,
@@ -424,7 +424,7 @@ def test_platform_overview_uses_native_activity_and_only_projects_safe_summaries
         set(row) == {"id", "displayName", "status"} for row in overview["agents"]
     )
     assert all(
-        set(row) == {"id", "agentId", "title", "status", "currentPhase"}
+        set(row) == {"id", "agentId", "title", "status", "currentPhase", "turnId"}
         for row in overview["sessions"]
     )
     assert all(
@@ -463,3 +463,84 @@ def test_platform_overview_keeps_total_counts_when_summaries_are_bounded(
     overview = service.get_platform_overview()
     assert overview["counts"]["agents"] == overview["counts"]["sessions"] == 125
     assert len(overview["agents"]) == len(overview["sessions"]) == 100
+    assert overview["pagination"]["nextOffset"] == 100
+    remaining = service.get_platform_overview(offset=100)
+    assert len(remaining["agents"]) == len(remaining["sessions"]) == 25
+    assert remaining["pagination"]["nextOffset"] is None
+    assert overview["pagination"]["revision"] == remaining["pagination"]["revision"]
+    assert not {row["id"] for row in overview["sessions"]}.intersection(
+        row["id"] for row in remaining["sessions"]
+    )
+    sessions[-1]["title"] = "另一个公开状态"
+    assert service.get_platform_overview(offset=100)["pagination"]["revision"] != overview["pagination"]["revision"]
+
+
+def test_created_assistant_can_execute_personal_memory_tools(personal_env):
+    from core.authorization.tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_policy
+    from core.authorization.tool_policy_models import TurnToolGrant
+    from core.web.services import tool_catalog
+
+    assistant = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(assistant["agentId"])
+    names = ("append_personal_memory_tool", "supersede_personal_memory_tool")
+    descriptors = [tool_catalog.build_tool_descriptor(name, args_schema={}) for name in service.TOOLS]
+    policy = normalize_legacy_tool_policy(agent["toolPolicy"], registered_tool_names=service.TOOLS, policy_id=agent["toolPolicyId"])
+    decision = evaluate_tool_policy(agent_id=agent["agentId"], policy=policy,
+        grant=TurnToolGrant(turn_id="memory-turn", source="session", allowed_capabilities=tuple({cap for row in descriptors for cap in row.capabilities}), denied_tools=(), approval_mode="on_request"),
+        descriptors=descriptors, registry_version=1, registry_fingerprint="test")
+    assert set(names) <= set(decision.executable_tools)
+    assert agent["toolPolicy"]["writeScopes"] == ["private"]
+
+
+def test_legacy_default_upgrade_is_explicit_and_preserves_user_profiles(personal_env):
+    row = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    legacy = dict(agent["toolPolicy"], writeScopes=[], policyVersion=2)
+    directory.update_agent_instance(row["agentId"], persona_profile={"identityNotes": "自己的身份"}, task_profile={"constraints": "自己的约束"})
+    _corrupt_agent(row["agentId"], toolPolicy=legacy)
+    state = directory.load_state()
+    state["toolPolicies"][agent["toolPolicyId"]] = legacy
+    directory.save_state(state)
+    actual = directory.get_agent(row["agentId"])
+    assert actual["toolPolicy"] == legacy
+    assert actual["createdBy"] == "user_personal_assistant"
+    before = directory.load_state()
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    assert directory.load_state() == before
+    assert service.create_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    repaired = directory.get_agent(row["agentId"])
+    assert repaired["toolPolicy"]["writeScopes"] == ["private"]
+    assert repaired["personaProfile"]["identityNotes"] == "自己的身份"
+    assert repaired["taskProfile"]["constraints"] == "自己的约束"
+    after = directory.load_state()
+    service.create_personal_assistant()
+    assert directory.load_state() == after
+
+
+@pytest.mark.parametrize("changes", [{"policyVersion": 3}, {"maxCallsPerTurn": 5}, {"allowedTools": [], "preferredTools": []}, {"perToolRules": {"personal_assistant_manage_tool": {"approval": "always"}}}])
+def test_legacy_upgrade_preserves_custom_and_resaved_policies(personal_env, changes):
+    row = service.create_personal_assistant()["assistant"]
+    policy = {**directory.get_agent(row["agentId"])["toolPolicy"], "writeScopes": [], "policyVersion": 2, **changes}
+    _corrupt_agent(row["agentId"], toolPolicy=policy)
+    before = directory.get_agent(row["agentId"])["toolPolicy"]
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    service.create_personal_assistant()
+    assert directory.get_agent(row["agentId"])["toolPolicy"] == before
+
+
+def test_resuming_pending_setup_preserves_user_policy_and_profiles(personal_env, monkeypatch):
+    original = session_service.ensure_agent_direct_session
+    def fail(**_kwargs):
+        raise RuntimeError("injected setup failure")
+
+    monkeypatch.setattr(session_service, "ensure_agent_direct_session", fail)
+    with pytest.raises(RuntimeError):
+        service.create_personal_assistant()
+    row = service.get_personal_assistant()["assistant"]
+    directory.update_agent_instance(row["agentId"], tool_policy={"allowedTools": [], "preferredTools": [], "networkAccess": "none"}, persona_profile={"identityNotes": "用户设置"})
+    before = directory.get_agent(row["agentId"])
+    monkeypatch.setattr(session_service, "ensure_agent_direct_session", original)
+    assert service.create_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    after = directory.get_agent(row["agentId"])
+    assert after["toolPolicy"] == before["toolPolicy"]
+    assert after["personaProfile"] == before["personaProfile"]
