@@ -34,6 +34,7 @@ const LAUNCHER_API_PATHS = new Set([
   "freshness",
   "branch-instances",
   "branch-instances/cleanup",
+  "branch-instances/cleanup-metadata",
   "settings/workbench-window",
   "settings/startup",
   "developer-mode",

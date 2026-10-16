@@ -577,6 +577,21 @@ export function requestBranchInstanceLifecycle(
   });
 }
 
+export type LauncherCleanupMergeStatus = {
+  schemaVersion: number;
+  items: Array<{ id: string; mergedToMain: boolean }>;
+};
+
+export function getLauncherCleanupMergeStatus(items: Array<{ id: string; head?: string }>) {
+  return fetchLauncherJson<LauncherCleanupMergeStatus>("branch-instances/cleanup-metadata", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      items: items.map((item) => ({ id: item.id, head: item.head || "" })),
+    }),
+  });
+}
+
 export function requestBranchInstanceCleanup(instanceIds: string[], confirm: boolean) {
   return fetchLauncherJson<LauncherBranchInstanceCleanupResponse>("branch-instances/cleanup", {
     method: "POST",

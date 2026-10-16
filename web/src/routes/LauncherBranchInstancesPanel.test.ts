@@ -26,6 +26,8 @@ import {
   instanceVisibleStatusLabel,
   instanceStopLabel,
   isCleanupEligible,
+  deriveCleanupRisks,
+  overlayCleanupMergeStatus,
   overlayCleanupMetadata,
   paginateItems,
   pendingIntentToOperation,
@@ -213,7 +215,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("cleanupSelected");
     expect(panelSource).toContain("requestBranchInstanceCleanup");
     expect(panelSource).toContain("queryClient.invalidateQueries({ queryKey: [\"launcher\", \"branch-instances\"] })");
-    expect(panelSource).toContain("getLauncherBranchInstances({ cleanupMetadata: true })");
+    expect(panelSource).toContain("getLauncherCleanupMergeStatus(metadataTargets)");
+    expect(panelSource).toContain("branch-cleanup-merge");
+    expect(panelSource).not.toContain("getLauncherBranchInstances({ cleanupMetadata: true })");
     expect(panelSource).toContain("cleanupMutation");
     expect(panelSource).toContain("pendingIds");
     expect(panelSource).toContain("batchStopIds");
@@ -227,9 +231,12 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("batchStopItems.filter((item) => canStopInstance(item, pendingOperation))");
     expect(panelSource).not.toContain("confirmPending={lifecyclePending}");
     expect(panelSource).toContain("confirmDisabled={lifecyclePending || !items.some((item) => item.id === forceStopId && canForceStopInstance(item))}");
-    expect(panelSource).toContain("needsCleanupMetadata");
-    expect(panelSource).toContain("overlayCleanupMetadata");
+    expect(panelSource).toContain("metadataTargets");
+    expect(panelSource).toContain("overlayCleanupMergeStatus");
     expect(panelSource).toContain("waitingCleanupConfirmMetadata");
+    expect(panelSource).toContain("labels.cleanupMergeChecking");
+    expect(panelSource).toContain("launcherBranchDisplayName(item)");
+    expect(panelSource).not.toContain("labels.listLoadingTitle}</p>");
   });
 
   it("keeps cleanup selection in the active branch list without pagination", () => {
@@ -258,6 +265,16 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(row.cleanupEligible).toBe(true);
     expect(row.cleanupRisks).toEqual(["delete_unmerged"]);
     expect(overlayCleanupMetadata([base], null)).toEqual([base]);
+  });
+
+  it("applies merge flags onto the rows already on screen", () => {
+    const base = instance({ id: "worktree:task", dirty: true, alive: true, head: "abc1234", branch: "codex/task" });
+    const [row] = overlayCleanupMergeStatus(base ? [base] : [], [{ id: "worktree:task", mergedToMain: false }]);
+    expect(row.mergedToMain).toBe(false);
+    expect(row.dirty).toBe(true);
+    expect(row.cleanupRisks).toEqual(["discard_dirty", "stop_then_remove", "delete_unmerged"]);
+    expect(deriveCleanupRisks(instance({ kind: "retired", mergedToMain: false, branch: "codex/old", head: "abc1234" }))).toEqual([]);
+    expect(overlayCleanupMergeStatus([base], null)).toEqual([base]);
   });
 
   it("disables start and shows remaining cooldown time while admission is blocked", () => {

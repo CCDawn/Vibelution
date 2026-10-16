@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from core.launcher.api_contract import (
+    BranchInstanceCleanupMergePayload,
     BranchInstanceCleanupPayload,
     DesktopActionClaimPayload,
     DesktopActionResultPayload,
@@ -16,6 +17,7 @@ from core.launcher.api_contract import (
     DeveloperModePayload,
     LauncherAcceptedCommandResponse,
     LauncherBranchInstanceListResponse,
+    LauncherCleanupMergeResponse,
     LauncherCleanupPlanResponse,
     LauncherDesktopActionResponse,
     LauncherDesktopSessionResponse,
@@ -119,6 +121,17 @@ def launcher_branch_instances(cleanupMetadata: bool = False) -> dict:
         return launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
     return launcher_service.list_launcher_branch_instances()
 
+
+
+@router.post(
+    "/launcher/branch-instances/cleanup-metadata",
+    response_model=LauncherCleanupMergeResponse,
+    response_model_exclude_unset=True,
+)
+def launcher_branch_instances_cleanup_metadata(payload: BranchInstanceCleanupMergePayload) -> dict:
+    return launcher_service.lookup_launcher_cleanup_merge(
+        [item.model_dump() for item in payload.items]
+    )
 
 
 @router.post(

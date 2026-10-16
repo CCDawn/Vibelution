@@ -509,6 +509,9 @@ describe("launcherApiBridgeTimeoutMs", () => {
     expect(launcherApiBridgeTimeoutMs("branch-instances?cleanupMetadata=1", "GET")).toBe(
       PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS
     );
+    expect(launcherApiBridgeTimeoutMs("branch-instances/cleanup-metadata", "POST")).toBe(
+      PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS
+    );
   });
 
   it("keeps the heavy launcher mutations on their own budgets", () => {

@@ -232,6 +232,14 @@ def list_launcher_branch_instances(*, include_cleanup_metadata: bool = False) ->
     return annotate_cleanup_metadata(payload, git_timeout=2.0)
 
 
+def lookup_launcher_cleanup_merge(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Check whether the given commits are in main, without listing worktrees."""
+
+    from core.launcher.branch_instance_cleanup import lookup_cleanup_merge_status
+
+    return lookup_cleanup_merge_status(entries, git_timeout=2.0)
+
+
 def _current_project_bundle_for_branch_list() -> dict[str, Any]:
     """Overlay the current checkout from on-disk launcher/runtime-manager state.
 

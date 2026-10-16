@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import stat
 import time
@@ -31,6 +32,8 @@ RISK_STOP_THEN_REMOVE = "stop_then_remove"
 RISK_DELETE_UNMERGED = "delete_unmerged"
 
 PROTECTED_BRANCHES = frozenset({"main"})
+_COMMIT_HEAD = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_MAX_MERGE_LOOKUPS = 200
 
 StopRunner = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -68,6 +71,46 @@ def annotate_cleanup_metadata(
         item["cleanupEligible"] = cleanup_eligible(item)
         item["cleanupRisks"] = cleanup_risks(item, merged_to_main=merged)
     return payload
+
+
+def lookup_cleanup_merge_status(
+    entries: Iterable[dict[str, Any]],
+    *,
+    integration_root: Path | str | None = None,
+    git_timeout: float = 2.0,
+) -> dict[str, Any]:
+    """Return merge flags for commits the caller already has.
+
+    The confirm dialog already shows the selected rows. This lookup does not
+    rebuild the worktree inventory or run ``git status``.
+    """
+
+    root = Path(integration_root or PROJECT_ROOT)
+    normalized: list[tuple[str, str]] = []
+    for raw in entries:
+        if len(normalized) >= _MAX_MERGE_LOOKUPS:
+            break
+        if not isinstance(raw, dict):
+            continue
+        instance_id = str(raw.get("id") or "").strip()
+        if not instance_id or len(instance_id) > 300 or any(char in instance_id for char in "\r\n"):
+            continue
+        head = str(raw.get("head") or "").strip()
+        if not _COMMIT_HEAD.fullmatch(head):
+            head = ""
+        normalized.append((instance_id, head))
+    merged = _merged_to_main_lookup(
+        root,
+        [head for _, head in normalized if head],
+        timeout=git_timeout,
+    )
+    return {
+        "schemaVersion": 1,
+        "items": [
+            {"id": instance_id, "mergedToMain": bool(merged.get(head)) if head else False}
+            for instance_id, head in normalized
+        ],
+    }
 
 
 def cleanup_eligible(item: dict[str, Any]) -> bool:
