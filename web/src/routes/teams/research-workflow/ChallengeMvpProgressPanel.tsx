@@ -356,7 +356,7 @@ export function ChallengeMvpProgressPanel({
     <VSurface tone="panel" className={styles.root} data-vui="competition-program-progress-panel">
       <div className={styles.header}>
         <div>
-          <div className={styles.eyebrow}>Challenge Cup Program v2</div>
+          <div className={styles.eyebrow}>AI Research Program v2</div>
           <strong className={styles.title}>{program?.program.title || (zh ? "比赛状态尚未投影" : "Program projection unavailable")}</strong>
         </div>
         <VButton

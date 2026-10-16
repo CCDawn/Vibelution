@@ -581,7 +581,7 @@ describe("ChallengeMvpProgressPanel", () => {
     const markup = renderToStaticMarkup(
       <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />,
     );
-    expect(markup).toContain("Challenge Cup Program v2");
+    expect(markup).toContain("AI Research Program v2");
     expect(markup).toContain("合同");
     expect(markup).toContain("2.2.0");
     expect(markup).toContain("125 题批准");
@@ -1223,7 +1223,7 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("dev snapshot boom");
     expect(markup).toContain('data-dev-controls="snapshot-retry"');
     expect(markup).toContain('data-dev-controls="snapshot-readiness-repair"');
-    expect(markup).toContain("Challenge Cup Program v2");
+    expect(markup).toContain("AI Research Program v2");
     expect(markup).toContain("重新运行 DEV readiness");
   });
 

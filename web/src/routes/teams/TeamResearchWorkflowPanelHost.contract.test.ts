@@ -39,7 +39,7 @@ describe("TeamResearchWorkflowPanelHost extraction contract", () => {
     expect(hostSource).toContain("ProgressiveRegionSkeleton");
     expect(hostSource).not.toContain('tone="loading"');
     expect(hostSource).toContain("Research workflow is not initialized yet.");
-    expect(hostSource).toContain("Select research-team to view the Challenge Cup workflow.");
+    expect(hostSource).toContain("Select research-team to view the AI research workflow.");
     expect(hostSource).toContain("children");
   });
 
