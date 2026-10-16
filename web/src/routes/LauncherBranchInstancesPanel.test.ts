@@ -107,19 +107,19 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     // an endless loading state on the confirm dialog.
     expect(panelSource).toContain("cleanupConfirmMetadataFailed");
     expect(panelSource).toContain("cleanupMetadataQuery.refetch()");
-    // Stop stays a row-level control, never an overflow item.
-    expect(panelSource).toMatch(/\{showStop \? \(\s*<VButton[\s\S]{0,400}?askBatchStop\(\[item\.id\], "stop"\)/);
+    // Stop stays a row-level control once the instance is running, never an overflow item.
+    expect(panelSource).toMatch(/\{showRowStop \? \(\s*<VButton[\s\S]{0,400}?askBatchStop\(\[item\.id\], "stop"\)/);
     // Force-stop is tiered by verified process liveness: the inline button
     // renders for the danger/secondary tiers. A row shown as stopped with no
     // live runtime is hidden. A verified-dead spawn that is not shown as
     // stopped leaves the row and enters the overflow menu.
-    expect(panelSource).toMatch(/\{showForceStop \? \(\s*<VButton[\s\S]{0,400}?variant=\{forceStopTierValue === "danger" \? "danger" : "secondary"\}[\s\S]{0,400}?setForceStopId\(item\.id\)/);
+    expect(panelSource).toMatch(/\{showForceStopInline \? \(\s*<VButton[\s\S]{0,500}?variant=\{forceStopTierValue === "danger" \? "danger" : "secondary"\}[\s\S]{0,400}?setForceStopId\(item\.id\)/);
     expect(panelSource).toContain('title={forceStopTierValue === "danger" ? labels.forceStopHint : labels.forceStopStaleHint}');
     expect(panelSource).not.toContain('{ id: "stop"');
     expect(panelSource).toContain('{ id: "force-stop"');
-    // The menu route exists only for the verified-dead tier; danger/secondary
-    // rows keep their inline button and never grow an overflow entry.
-    expect(panelSource).toMatch(/forceStopMenuOnly \? \[\{ id: "force-stop"[\s\S]{0,200}?setForceStopId\(item\.id\)/);
+    // Verified-dead rows, and in-flight rows that keep a single action button,
+    // put force-stop in the overflow menu.
+    expect(panelSource).toMatch(/forceStopInMenu \? \[\{ id: "force-stop"[\s\S]{0,200}?setForceStopId\(item\.id\)/);
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -988,8 +988,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
   it("does not globally disable stop while a start is in flight", () => {
     expect(panelSource).toContain("const startBusy");
     expect(panelSource).toContain("const stopBusy");
-    expect(panelSource).toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
+    expect(panelSource).toContain("isDisabled={!stoppable}");
     expect(panelSource).toContain("isDisabled={stopBusy}\n            isPending={stopBusy}");
+    expect(panelSource).not.toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
     expect(panelSource).not.toContain("disabled: lifecyclePending || inFlight");
     expect(panelSource).not.toContain("isDisabled={lifecyclePending || startBusy || stopBusy}");
     expect(panelSource).toContain("if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id))");
@@ -997,12 +998,15 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
   });
 
-  it("keeps Stop available as a row-level control while a start is in flight", () => {
+  it("keeps Stop on the same button while a start is in flight", () => {
     const startable = instance({ id: "worktree:startable", shortName: "startable" });
-    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
-    expect(panelSource).toContain("const showStop = canStopInstance(item, pendingOperation) || stopBusy");
-    expect(panelSource).toContain("{instanceStopLabel(item, zh, pendingOperation)}\n          </VButton>");
-    expect(panelSource).toContain("isPending={startBusy || stopBusy}");
+    expect(panelSource).toContain("const inFlightStart = building || startingOrRestarting");
+    expect(panelSource).toContain("const singleLifecycleButton = inFlightStart || stopBusy");
+    expect(panelSource).toContain("const showRowStop = stoppable && !singleLifecycleButton");
+    expect(panelSource).toContain("{inFlightStart ? (");
+    expect(panelSource).toContain("onPress={() => askBatchStop([item.id], \"stop\")}");
+    expect(panelSource).toContain("{openLabel}");
+    expect(panelSource).not.toContain("{ id: \"stop\"");
     expect(panelSource).toContain("<VActionGroup");
     expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);
   });
@@ -1044,7 +1048,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("lifecycleIntentRejectMessage");
   });
 
-  it("turns the start control into a disabled Building state while the frontend build gates the start", () => {
+  it("keeps the original workbench label on the button while a frontend build gates the start", () => {
     const building = instance({
       id: "worktree:building",
       shortName: "building",
@@ -1065,8 +1069,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(
       instanceRuntimeState(building, { instanceId: "worktree:building", operation: "restart" as const })
     ).toBe("building");
-    // The disabled pending button contract is keyed off this state: the row
-    // above with a live start intent renders isPending + 构建中… through it.
+    // The status column still reads 构建中. The row button keeps its action label.
     expect(instanceRuntimeStateLabel("building", true)).toBe("构建中");
     expect(instanceRuntimeStateLabel("building", false)).toBe("Building");
     expect(shouldHoldOpenClickGuard("building")).toBe(true);
@@ -1074,15 +1077,14 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStartInstance(building)).toBe(false);
     expect(groupBranchInstances([building]).running.map((item) => item.id)).toEqual(["worktree:building"]);
     expect(groupBranchInstances([building]).attention).toEqual([]);
-    // The primary control stays visible but disabled with a pending spinner;
-    // the long build explanation is carried by its tooltip, not inline text.
+    // The primary control stays the original action. The spinner sits on it,
+    // and the long build explanation stays in the title.
     expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
-    expect(panelSource).toContain("isPending={startBusy || stopBusy}");
-    expect(panelSource).toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
-    expect(panelSource).toContain("{startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}");
-    expect(panelSource).toContain("title={building ? labels.buildingHint : recovering ? labels.recoverWorkbenchHint : openAction === \"switch\" ? labels.switchWorkbenchHint : undefined}");
-    expect(panelSource).toContain('building: "构建中…"');
-    expect(panelSource).toContain('building: "Building…"');
+    expect(panelSource).toContain("{inFlightStart ? (");
+    expect(panelSource).toContain("icon={stoppable ? <LoaderCircle");
+    expect(panelSource).toContain("{openLabel}");
+    expect(panelSource).not.toContain("{startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}");
+    expect(panelSource).toContain("stoppable ? `${labels.buildingHint} ${labels.cancelStartHint}` : labels.buildingHint");
     expect(panelSource).toContain("buildingHint: \"前端代码有更新，正在构建新版本，约需几分钟。\"");
     expect(panelSource).toContain("buildingHint: \"The frontend has updates and a new build is running. This takes a few minutes.\"");
     // Build state keeps the row out of attention and out of cleanup.

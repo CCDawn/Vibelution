@@ -235,7 +235,9 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("requestInstanceLifecycle");
     expect(homeRouteSource).toContain("pendingOperation={lifecycleIntents}");
     expect(routeSource.match(/shouldApplyLifecycleMutationFeedback/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
-    expect(branchInstancesPanelSource).toContain("isPending={startBusy || stopBusy}");
+    expect(branchInstancesPanelSource).toContain("isPending={stopBusy}");
+    expect(branchInstancesPanelSource).toContain("const singleLifecycleButton = inFlightStart || stopBusy");
+    expect(branchInstancesPanelSource).not.toContain("isPending={startBusy || stopBusy}");
     expect(branchInstancesPanelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
     expect(branchInstancesPanelSource).toContain("startingOrRestarting");
     expect(branchInstancesPanelSource).toContain("openClickGuardsRef");
@@ -273,7 +275,7 @@ describe("LauncherRoute layout contract", () => {
     // variant and the overflow menu entry are both gated on the tier.
     expect(branchInstancesPanelSource).toContain("forceStopTier(item, pendingOperation)");
     expect(branchInstancesPanelSource).toContain('variant={forceStopTierValue === "danger" ? "danger" : "secondary"}');
-    expect(branchInstancesPanelSource).toContain('forceStopMenuOnly ? [{ id: "force-stop"');
+    expect(branchInstancesPanelSource).toContain('forceStopInMenu ? [{ id: "force-stop"');
   });
 
   it("names the branch and raises the notice tone when a lifecycle request is refused", () => {

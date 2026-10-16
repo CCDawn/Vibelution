@@ -1,4 +1,4 @@
-import { GitBranch, Ellipsis, Search } from "lucide-react";
+import { GitBranch, Ellipsis, LoaderCircle, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -163,8 +163,8 @@ export function LauncherBranchInstancesPanel({
         failed: "部分实例未能清理",
         cleanupMetadataError: "读取分支实例失败，无法确认合入状态。",
         retryMetadata: "重试读取",
-        building: "构建中…",
         buildingHint: "前端代码有更新，正在构建新版本，约需几分钟。",
+        cancelStartHint: "再按一次停止这次启动。",
       }
     : {
         all: "All",
@@ -230,8 +230,8 @@ export function LauncherBranchInstancesPanel({
         failed: "Some instances could not be cleaned",
         cleanupMetadataError: "Could not read branch instances to confirm merge status.",
         retryMetadata: "Retry",
-        building: "Building…",
         buildingHint: "The frontend has updates and a new build is running. This takes a few minutes.",
+        cancelStartHint: "Press again to stop this start.",
       };
 
   const [activeTab, setActiveTab] = useState<BranchTableTab>("all");
@@ -375,6 +375,10 @@ export function LauncherBranchInstancesPanel({
     const stopBusy = state === "stopping";
     const building = state === "building";
     const startingOrRestarting = state === "starting" || state === "restarting";
+    const inFlightStart = building || startingOrRestarting;
+    // Start, build, restart, and stop stay on the original button. A second
+    // stop button appears only after that in-flight state has finished.
+    const singleLifecycleButton = inFlightStart || stopBusy;
     const openAction = workbenchOpenAction(item, state);
     const openLabel = {
       start: labels.startWorkbench,
@@ -385,18 +389,22 @@ export function LauncherBranchInstancesPanel({
     }[openAction];
     const recovering = openAction === "recover";
     const admissionBlocked = isAdmissionBlocked(item);
-    // While a frontend build gates the start, the primary control stays
-    // visible but disabled with a pending spinner so the wait reads as
-    // progress instead of a frozen button.
+    // Admission and reject copy still key off showOpen during in-flight
+    // states. The open button itself stays hidden while one lifecycle
+    // button owns the row.
     const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy;
-    const showStop = canStopInstance(item, pendingOperation) || stopBusy;
+    const stoppable = canStopInstance(item, pendingOperation);
+    const showRowStop = stoppable && !singleLifecycleButton;
     // Reachability (confirm dialog + dispatch) stays with canForceStopInstance.
     // A row shown as stopped, with no live backend or window, does not offer
-    // force-stop. Live and in-flight rows keep the red button. A verified-dead
-    // spawn that is not shown as stopped stays in the overflow menu.
+    // force-stop. A live row keeps the red button. An in-flight row that
+    // already has one lifecycle button, and a verified-dead spawn, put it
+    // in the overflow menu.
     const forceStopTierValue = forceStopTier(item, pendingOperation);
     const forceStopMenuOnly = canForceStopInstance(item) && forceStopTierValue === "menu";
     const showForceStop = canForceStopInstance(item) && (forceStopTierValue === "danger" || forceStopTierValue === "secondary");
+    const showForceStopInline = showForceStop && !singleLifecycleButton;
+    const forceStopInMenu = forceStopMenuOnly || (showForceStop && singleLifecycleButton);
     const requestOpen = () => {
       if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id)) {
         return;
@@ -425,17 +433,43 @@ export function LauncherBranchInstancesPanel({
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
       >
-        {showOpen ? (
+        {inFlightStart ? (
           <VButton
             type="button"
             variant={detailId === item.id ? "primary" : "secondary"}
             density="compact"
-            isDisabled={startBusy || stopBusy || admissionBlocked}
-            isPending={startBusy || stopBusy}
-            title={building ? labels.buildingHint : recovering ? labels.recoverWorkbenchHint : openAction === "switch" ? labels.switchWorkbenchHint : undefined}
+            isDisabled={!stoppable}
+            isPending={!stoppable}
+            icon={stoppable ? <LoaderCircle size={14} strokeWidth={2.25} className={styles.pendingIcon} aria-hidden="true" /> : undefined}
+            title={building
+              ? (stoppable ? `${labels.buildingHint} ${labels.cancelStartHint}` : labels.buildingHint)
+              : (stoppable ? labels.cancelStartHint : undefined)}
+            onPress={() => askBatchStop([item.id], "stop")}
+          >
+            {openLabel}
+          </VButton>
+        ) : null}
+        {stopBusy ? (
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            isDisabled={stopBusy}
+            isPending={stopBusy}
+          >
+            {instanceRuntimeStateLabel(state, zh)}
+          </VButton>
+        ) : null}
+        {showOpen && !singleLifecycleButton ? (
+          <VButton
+            type="button"
+            variant={detailId === item.id ? "primary" : "secondary"}
+            density="compact"
+            isDisabled={admissionBlocked}
+            title={recovering ? labels.recoverWorkbenchHint : openAction === "switch" ? labels.switchWorkbenchHint : undefined}
             onPress={requestOpen}
           >
-            {startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}
+            {openLabel}
           </VButton>
         ) : null}
         {showOpen && !building && admissionBlocked ? (
@@ -444,20 +478,18 @@ export function LauncherBranchInstancesPanel({
         {showOpen && !building && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
         ) : null}
-        {/* Lifecycle controls stay on the row: stop must be reachable without opening the overflow menu. */}
-        {showStop ? (
+        {/* A running row keeps Stop beside Open. In-flight start and stop stay on the one primary button. */}
+        {showRowStop ? (
           <VButton
             type="button"
             variant="secondary"
             density="compact"
-            isDisabled={stopBusy}
-            isPending={stopBusy}
             onPress={() => askBatchStop([item.id], "stop")}
           >
             {instanceStopLabel(item, zh, pendingOperation)}
           </VButton>
         ) : null}
-        {showForceStop ? (
+        {showForceStopInline ? (
           <VButton
             type="button"
             variant={forceStopTierValue === "danger" ? "danger" : "secondary"}
@@ -474,7 +506,7 @@ export function LauncherBranchInstancesPanel({
           items={[
             { id: "details", label: zh ? "查看详情" : "View details", onSelect: () => { onSelect(item.id); setDetailId(item.id); } },
             ...(isCleanupEligible(item) ? [{ id: "cleanup", label: labels.cleanup, danger: true, disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy, onSelect: () => askCleanup([item.id]) }] : []),
-            ...(forceStopMenuOnly ? [{ id: "force-stop", label: labels.forceStop, danger: true, disabled: lifecyclePending, onSelect: () => setForceStopId(item.id) }] : []),
+            ...(forceStopInMenu ? [{ id: "force-stop", label: labels.forceStop, danger: true, disabled: lifecyclePending, onSelect: () => setForceStopId(item.id) }] : []),
           ]} />
       </VActionGroup>
       {feedback ? (
