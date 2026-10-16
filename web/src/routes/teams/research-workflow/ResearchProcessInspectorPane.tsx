@@ -312,6 +312,7 @@ export function ResearchProcessInspectorPane(props: {
   ) {
     return (
       <ResearchRunLaunchPanel
+        presentation="inline"
         lang={lang}
         teamId={scope.teamId}
         busy={state.busy}

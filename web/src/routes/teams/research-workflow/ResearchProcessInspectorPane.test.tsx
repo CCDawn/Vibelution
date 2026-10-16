@@ -526,6 +526,7 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     });
 
     expect(container.querySelector('[data-testid="mock-research-run-launch-panel"]')).not.toBeNull();
+    expect(launchLeafHarness.props?.presentation).toBe("inline");
     const onStartHypothesis = launchLeafHarness.props?.onStartHypothesis as ((questionId: string) => void) | undefined;
     expect(onStartHypothesis).toBeTypeOf("function");
     onStartHypothesis?.("SCI-001");

@@ -1,5 +1,7 @@
 export default {
   root: "flex min-h-full min-w-0 flex-col gap-3 p-3",
+  inlineRoot: "flex min-w-0 flex-col gap-4 !rounded-none !border-0 !bg-transparent",
+  inlineActions: "flex min-w-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--vui-border-subtle)] pt-4",
   state: "m-3",
   selectedQuestion: "grid min-w-0 gap-1 border-[var(--vui-border-subtle)]",
   questionTitle: "truncate [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-primary)]",
