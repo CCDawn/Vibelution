@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -242,6 +243,12 @@ describe("desktop shell freshness", () => {
       "--no-browser"
     ]);
     expect(options.windowsHide).toBe(true);
+    const source = readFileSync(new URL("../src/process/desktopShellFreshness.ts", import.meta.url), "utf8");
+    const start = source.indexOf("export async function inspectDesktopShell");
+    const end = source.indexOf("export async function scheduleDesktopShellRefresh");
+    const inspectSource = source.slice(start, end);
+    expect(inspectSource).toContain("timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS");
+    expect(inspectSource).not.toContain("PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS");
   });
 
   it("schedules a detached refresh helper with the live Electron pid", async () => {

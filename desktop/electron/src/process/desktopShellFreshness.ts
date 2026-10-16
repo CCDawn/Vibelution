@@ -264,7 +264,9 @@ export async function inspectDesktopShell(input: {
     cwd: input.workspaceRoot,
     spawnImpl: input.spawnImpl,
     failureLabel: "desktop shell status",
-    timeoutMs: PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+    // Frontend content hashes exceed the 5s query budget. A killed read is
+    // projected as an unknown version, so this status uses the command budget.
+    timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
     signal: input.signal,
     killPolicy: "child"
   });
