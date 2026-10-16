@@ -17,6 +17,8 @@ import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+
+from core.infrastructure.owned_executor import OwnedThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
@@ -552,7 +554,12 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request, rese
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     previous_chat_room_executor = chat_room_service._CHAT_ROOM_EXECUTOR
-    isolated_chat_room_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room")
+    # OwnedThreadPoolExecutor (like production) so a second app lifespan in the
+    # same test can reopen the pool after the first lifespan shut it down; a
+    # plain ThreadPoolExecutor cannot prove retirement and fails reopen.
+    isolated_chat_room_executor = OwnedThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="pytest-chat-room"
+    )
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", isolated_chat_room_executor)
     with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
         chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
