@@ -381,20 +381,20 @@ describe("Launcher branch workspace interactions", () => {
     expect(onStopMany).not.toHaveBeenCalled();
   });
 
-  it("keeps one pressable start button during a frontend build and stops from that button", async () => {
+  it("shows Stop on the only button during a frontend build", async () => {
     const building = instance({ id: "worktree:building", branch: "codex/building", state: "building", alive: false });
     await renderPanel([building], true);
 
     expect(host.textContent).toContain("构建中");
     expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "构建中")).toBe(false);
-    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "停止")).toBe(false);
+    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "启动工作台")).toBe(false);
     expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "正在启动")).toBe(false);
 
-    const openAction = button("启动工作台");
-    expect(openAction.disabled).toBe(false);
-    expect(openAction.title).toContain("前端代码有更新，正在构建新版本，约需几分钟。");
-    expect(openAction.title).toContain("再按一次停止这次启动。");
-    await click(openAction);
+    const stopAction = button("停止");
+    expect(stopAction.disabled).toBe(false);
+    expect(stopAction.title).toContain("前端代码有更新，正在构建新版本，约需几分钟。");
+    expect(stopAction.title).toContain("停止这次尚未完成的启动。");
+    await click(stopAction);
     expect(onLifecycle).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("确认停止这些工作台");
     expect(button("停止", document.querySelector('[role="dialog"]')!).disabled).toBe(false);
@@ -403,18 +403,18 @@ describe("Launcher branch workspace interactions", () => {
     expect(onStopMany).toHaveBeenCalledWith([building.id]);
   });
 
-  it("keeps the original workbench button while a start is in flight", async () => {
+  it("shows Stop on the only button while a start is in flight", async () => {
     const starting = instance({ id: "worktree:starting", branch: "codex/starting", state: "starting", alive: false });
     await renderPanel([starting], true);
 
     expect(host.textContent).toContain("正在启动");
     expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "正在启动")).toBe(false);
-    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "停止")).toBe(false);
+    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "启动工作台")).toBe(false);
 
-    const openAction = button("启动工作台");
-    expect(openAction.disabled).toBe(false);
-    expect(openAction.title).toContain("再按一次停止这次启动。");
-    await click(openAction);
+    const stopAction = button("停止");
+    expect(stopAction.disabled).toBe(false);
+    expect(stopAction.title).toContain("停止这次尚未完成的启动。");
+    await click(stopAction);
     expect(onLifecycle).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("确认停止这些工作台");
   });
