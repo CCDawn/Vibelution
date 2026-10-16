@@ -144,7 +144,7 @@ Continue everyday conversations in character scenes. Configure identity, schedul
 
 ## Documentation and participation
 
-[Contributing](CONTRIBUTING.md) · [Documentation map](docs/README.md) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/CCDawn/Vibelution/issues) · [Security](SECURITY.md)
+[Contributing](CONTRIBUTING.md) · [Documentation map](docs/README.md) · [Testing guide](tests/README.md) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/CCDawn/Vibelution/issues) · [Security](SECURITY.md)
 
 Related projects: [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 

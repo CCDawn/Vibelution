@@ -144,7 +144,7 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 ## 文档与参与
 
-[贡献指南](CONTRIBUTING.md) · [文档地图](docs/README.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/CCDawn/Vibelution/issues) · [安全问题](SECURITY.md)
+[贡献指南](CONTRIBUTING.md) · [文档地图](docs/README.md) · [测试指南](tests/README.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/CCDawn/Vibelution/issues) · [安全问题](SECURITY.md)
 
 相关项目：[briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 
