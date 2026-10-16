@@ -276,6 +276,7 @@ type LauncherCopy = {
   languageZh: string;
   languageEn: string;
   saveStartupSettings: string;
+  savePortSettings: string;
   portOverride: string;
   invalidPort: string;
   userGuide: string;
@@ -323,6 +324,7 @@ type LauncherCopy = {
   maintenancePlanEmpty: string;
   maintenancePlanMissingForProfile: string;
   maintenancePlanProfileMismatch: string;
+  maintenanceSummaryUnavailable: string;
   maintenanceTargets: string;
   maintenanceEstimated: string;
   maintenanceActiveWorkPolicy: string;
@@ -1127,6 +1129,7 @@ export function LauncherToolsRoute() {
         languageZh: "中文",
         languageEn: "英文",
         saveStartupSettings: "保存启动设置",
+        savePortSettings: "保存端口设置",
         portOverride: "端口被环境变量覆盖",
         invalidPort: "端口必须是 1-65535 的整数",
         userGuide: "当前建议",
@@ -1163,7 +1166,7 @@ export function LauncherToolsRoute() {
         maintenancePanelTitle: "项目维护",
         maintenanceEmptyItems: "当前档位没有匹配的清理项。",
         maintenanceOwnerLauncher: "启动器管理",
-        maintenanceHint: "清理与恢复初始化由 Launcher 生成计划、校验档位和 planHash，并在执行前阻止 active work；默认保留用户会话和 Agent/Team 结构。",
+        maintenanceHint: "清理与恢复初始化由 Launcher 生成计划、校验档位和 planHash，有进行中的任务时不会执行；默认保留用户会话和 Agent/Team 结构。",
         maintenanceProfile: "维护档位",
         maintenanceCleanStart: "干净启动",
         maintenanceFactoryRuntime: "恢复初始化",
@@ -1174,10 +1177,11 @@ export function LauncherToolsRoute() {
         maintenancePlanEmpty: "当前计划没有可执行目标。",
         maintenancePlanMissingForProfile: "当前档位尚未生成预览，请先生成预览。",
         maintenancePlanProfileMismatch: "当前档位与预览计划不一致，请重新生成预览。",
+        maintenanceSummaryUnavailable: "维护清单没有读到，暂时不能生成预览。",
         maintenanceTargets: "目标",
         maintenanceEstimated: "预计释放",
-        maintenanceActiveWorkPolicy: "active work 存在时阻止执行",
-        maintenanceRequiresConfirm: "确认执行当前 Launcher 维护计划？执行前会再次校验档位、planId、planHash 和 active work。",
+        maintenanceActiveWorkPolicy: "有进行中的任务时不会执行。",
+        maintenanceRequiresConfirm: "确认执行当前 Launcher 维护计划？执行前会再次校验档位、planId、planHash，以及是否有进行中的任务。",
         maintenanceApplied: "Launcher 维护计划已执行",
         maintenanceLoading: "正在读取维护盘点",
         developerModeNoiseOverview: "噪声概览",
@@ -1405,6 +1409,7 @@ export function LauncherToolsRoute() {
         languageZh: "Chinese",
         languageEn: "English",
         saveStartupSettings: "Save startup settings",
+        savePortSettings: "Save port settings",
         portOverride: "Port is overridden by environment",
         invalidPort: "Ports must be integers from 1 to 65535",
         userGuide: "Current guidance",
@@ -1441,7 +1446,7 @@ export function LauncherToolsRoute() {
         maintenancePanelTitle: "Project maintenance",
         maintenanceEmptyItems: "No cleanup items match this profile.",
         maintenanceOwnerLauncher: "Managed by Launcher",
-        maintenanceHint: "Cleanup and restore initialization are planned by Launcher, validated with profile and planHash, and blocked when active work exists. The default keeps user sessions and Agent/Team structure.",
+        maintenanceHint: "Cleanup and restore initialization are planned by Launcher, validated with profile and planHash, and do not run while a task is in progress. The default keeps user sessions and Agent/Team structure.",
         maintenanceProfile: "Maintenance profile",
         maintenanceCleanStart: "Clean start",
         maintenanceFactoryRuntime: "Restore initialization",
@@ -1452,9 +1457,10 @@ export function LauncherToolsRoute() {
         maintenancePlanEmpty: "This profile has no executable targets.",
         maintenancePlanMissingForProfile: "Generate a preview for the selected profile first.",
         maintenancePlanProfileMismatch: "The selected profile does not match this preview plan. Generate a new preview.",
+        maintenanceSummaryUnavailable: "The maintenance list did not load, so a preview cannot be generated yet.",
         maintenanceTargets: "targets",
         maintenanceEstimated: "Estimated",
-        maintenanceActiveWorkPolicy: "Blocks execution when active work exists",
+        maintenanceActiveWorkPolicy: "Does not run while a task is in progress.",
         maintenanceRequiresConfirm: "Apply this Launcher maintenance plan? Vibelution will re-check profile, planId, planHash, and active work before executing.",
         maintenanceApplied: "Launcher maintenance plan applied",
         maintenanceLoading: "Reading maintenance inventory",

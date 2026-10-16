@@ -60,6 +60,13 @@ describe("Launcher tools navigation and density", () => {
     expect(maintenancePanelSource).not.toContain("Launcher 维护中心");
     expect(maintenancePanelSource).not.toContain("selectedProfile?.label || copy.maintenanceFactoryRuntime");
     expect(maintenancePanelSource).toContain("copy.maintenanceActiveWorkPolicy");
+    expect(maintenancePanelSource).toContain("const summaryMissing = !loading && !summary");
+    expect(maintenancePanelSource).toContain("copy.maintenanceSummaryUnavailable");
+    expect(maintenancePanelSource).toContain("{loading ? copy.maintenanceLoading : planGapCopy}");
+    expect(routeSource).toContain('maintenanceSummaryUnavailable: "维护清单没有读到，暂时不能生成预览。"');
+    expect(routeSource).toContain('maintenanceActiveWorkPolicy: "有进行中的任务时不会执行。"');
+    expect(routeSource).toContain('savePortSettings: "保存端口设置"');
+    expect(routeSource).toContain('saveStartupSettings: "保存启动设置"');
     expect(maintenancePanelSource).toContain('className="w-full min-w-0"');
   });
 });

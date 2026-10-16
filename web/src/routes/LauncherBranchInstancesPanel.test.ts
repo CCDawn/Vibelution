@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LauncherBranchInstance } from "../api/launcher";
 import panelSource from "./LauncherBranchInstancesPanel.tsx?raw";
+import detailSource from "./LauncherBranchDetailPanel.tsx?raw";
 import panelStyles from "./LauncherBranchInstancesPanel.styles";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
@@ -22,6 +23,7 @@ import {
   canRequestOpenInstance,
   instanceRuntimeState,
   instanceRuntimeStateLabel,
+  instanceVisibleStatusLabel,
   instanceStopLabel,
   isCleanupEligible,
   overlayCleanupMetadata,
@@ -217,6 +219,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("batchStopIds");
     expect(panelSource).toContain("onStopMany");
     expect(panelSource).toContain("const batchStopPending = batchStopItems.some((item) => instanceRuntimeState(item, pendingOperation) === \"stopping\")");
+    expect(panelSource).toContain("confirmPending={cleanupMutation.isPending}");
+    expect(panelSource).not.toContain("confirmPending={cleanupMutation.isPending || waitingCleanupConfirmMetadata}");
+    expect(panelSource).toContain("confirmDisabled={pendingItems.length === 0 || waitingCleanupConfirmMetadata}");
+    expect(panelSource).toContain("<p className={styles.confirmName}>{launcherBranchDisplayName(item)}</p>");
     expect(panelSource).toContain("confirmPending={batchStopPending}");
     expect(panelSource).toContain("batchStopItems.filter((item) => canStopInstance(item, pendingOperation))");
     expect(panelSource).not.toContain("confirmPending={lifecyclePending}");
@@ -1099,5 +1105,15 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(instanceRuntimeState(starting, { instanceId: "worktree:starting", operation: "start" })).toBe("starting");
     expect(instanceRuntimeState(starting)).toBe("starting");
     expect(instanceRuntimeStateLabel("starting", true)).toBe("正在启动");
+  });
+
+  it("shows a retired checkout as retired on the row and in the detail", () => {
+    const retired = instance({ kind: "retired", branch: "codex/old", shortName: "retired+codex/old" });
+    expect(instanceVisibleStatusLabel(retired, "stopped", true)).toBe("已退役");
+    expect(instanceVisibleStatusLabel(retired, "stopped", false)).toBe("Retired");
+    expect(instanceVisibleStatusLabel(instance({ kind: "worktree" }), "stopped", true)).toBe("已停止");
+    expect(panelSource).toContain("instanceVisibleStatusLabel(item, state, zh)");
+    expect(detailSource).toContain("instanceVisibleStatusLabel(item, state, zh)");
+    expect(detailSource).not.toContain("instanceRuntimeStateLabel(state, zh)");
   });
 });

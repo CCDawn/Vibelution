@@ -15,7 +15,7 @@ type LauncherPortSettingsCopy = {
   frontendPort: string;
   frontendPortHint: string;
   portOverride: string;
-  saveStartupSettings: string;
+  savePortSettings: string;
   invalidPort: string;
 };
 
@@ -161,7 +161,7 @@ export function LauncherPortSettingsPanel({
             onPress={savePorts}
             icon={pending ? <LoaderCircle size={14} className={styles.spin} /> : <RefreshCw size={14} />}
           >
-            {copy.saveStartupSettings}
+            {copy.savePortSettings}
           </VButton>
         </div>
       </div>

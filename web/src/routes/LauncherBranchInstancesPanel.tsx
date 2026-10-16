@@ -19,6 +19,7 @@ import {
   groupBranchInstances,
   instanceRuntimeState,
   instanceRuntimeStateLabel,
+  instanceVisibleStatusLabel,
   instanceStopLabel,
   instanceWindowOpen,
   isAdmissionBlocked,
@@ -308,7 +309,7 @@ export function LauncherBranchInstancesPanel({
     mutationFn: (instanceIds: string[]) => requestBranchInstanceCleanup(instanceIds, true),
     onSuccess: (payload) => {
       const failed = [...payload.failed, ...payload.skipped];
-      setNotice(failed.length > 0 ? `${labels.failed}：${failed.map((item) => item.shortName || item.id).join("、")}` : labels.done);
+      setNotice(failed.length > 0 ? `${labels.failed}：${failed.map((item) => launcherBranchDisplayName(item)).join("、")}` : labels.done);
       setNoticeTone(failed.length > 0 ? "error" : "neutral");
       setSelectedIds((current) => current.filter((id) => !payload.cleaned.some((item) => item.id === id)));
       void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
@@ -503,7 +504,7 @@ export function LauncherBranchInstancesPanel({
       minWidth: 110,
       fill: true,
       render: (item: LauncherBranchInstance) => (
-        <VTooltip content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`} width="wide">
+        <VTooltip content={`${launcherBranchDisplayName(item)} · ${item.path || item.displayPath || item.id}`} width="wide">
           <span className={styles.branchName}>{launcherBranchDisplayName(item)}{item.current ? <small className={styles.currentMarker}>{zh ? "当前" : "Current"}</small> : null}</span>
         </VTooltip>
       ),
@@ -517,7 +518,7 @@ export function LauncherBranchInstancesPanel({
         const state = instanceRuntimeState(item, pendingOperation);
         return <div className={styles.runtimeStack}>
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
-            <span className={state === "running" ? styles.runtimeRunning : state === "failed" ? styles.runtimeFailed : styles.runtimeOther}>{instanceRuntimeStateLabel(state, zh)}</span>
+            <span className={state === "running" ? styles.runtimeRunning : state === "failed" ? styles.runtimeFailed : styles.runtimeOther}>{instanceVisibleStatusLabel(item, state, zh)}</span>
           </LauncherBranchStatusHelp>
           {state === "running" && !instanceWindowOpen(item) ? (
             // The window hint only adds information when it contradicts a live
@@ -573,7 +574,7 @@ export function LauncherBranchInstancesPanel({
       isCleanupEligible(item) ? (
         <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
           <VCheckbox
-            aria-label={`${labels.cleanup} ${item.shortName || item.branch || item.id}`}
+            aria-label={`${labels.cleanup} ${launcherBranchDisplayName(item)}`}
             isSelected={cleanupSelected.includes(item.id)}
             onChange={(next) => toggleSelected(item, next)}
           />
@@ -640,7 +641,7 @@ export function LauncherBranchInstancesPanel({
         size="md"
         confirmLabel={labels.cleanup}
         cancelLabel={zh ? "取消" : "Cancel"}
-        confirmPending={cleanupMutation.isPending || waitingCleanupConfirmMetadata}
+        confirmPending={cleanupMutation.isPending}
         confirmDisabled={pendingItems.length === 0 || waitingCleanupConfirmMetadata}
         onConfirm={() => {
           if (pendingIds && pendingIds.length > 0) {
@@ -672,7 +673,7 @@ export function LauncherBranchInstancesPanel({
             const risks = cleanupRiskLabels(item, zh);
             return (
               <li key={item.id} className={styles.confirmItem}>
-                <p className={styles.confirmName}>{item.shortName || item.branch || item.id}</p>
+                <p className={styles.confirmName}>{launcherBranchDisplayName(item)}</p>
                 <p className={styles.confirmPath}>{item.path || item.displayPath || item.branch || item.id}</p>
                 <ul className={styles.confirmRisks}>
                   {(risks.length > 0 ? risks : [labels.noRisk]).map((risk) => (
@@ -712,7 +713,7 @@ export function LauncherBranchInstancesPanel({
         <ul className={styles.confirmList}>
           {batchStopItems.map((item) => (
             <li key={item.id} className={styles.confirmItem}>
-              <p className={styles.confirmName}>{item.shortName || item.branch || item.id}</p>
+              <p className={styles.confirmName}>{launcherBranchDisplayName(item)}</p>
               <p className={styles.confirmPath}>{item.path || item.displayPath || item.branch || item.id}</p>
             </li>
           ))}

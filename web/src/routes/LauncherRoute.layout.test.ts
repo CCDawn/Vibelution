@@ -796,6 +796,9 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelSource).toContain("controlsDisabled");
     expect(portSettingsPanelSource).toContain("<details");
     expect(portSettingsPanelSource).toContain("copy.portSettingsHint");
+    expect(portSettingsPanelSource).toContain("{copy.savePortSettings}");
+    expect(portSettingsPanelSource).not.toContain("saveStartupSettings");
+    expect(startupSettingsPanelSource).toContain("copy.saveStartupSettings");
     // The collapsed summary title must stay on one line in the compact top strip.
     expect(startupSettingsPanelStyles.settingsTitle).toContain("shrink-0");
     expect(startupSettingsPanelStyles.settingsTitle).toContain("whitespace-nowrap");

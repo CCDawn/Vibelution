@@ -481,6 +481,17 @@ export function instanceRuntimeStateLabel(state: InstanceRuntimeState, isZh: boo
   }[state];
 }
 
+export function instanceVisibleStatusLabel(
+  item: { kind?: string | null },
+  state: InstanceRuntimeState,
+  isZh: boolean,
+): string {
+  if (item.kind === "retired") {
+    return isZh ? "已退役" : "Retired";
+  }
+  return instanceRuntimeStateLabel(state, isZh);
+}
+
 export function isOperableInstance(item: LauncherBranchInstance): boolean {
   return Boolean(item.checkedOut && (item.kind === "main" || item.kind === "worktree"));
 }

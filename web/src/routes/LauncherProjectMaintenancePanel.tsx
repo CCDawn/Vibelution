@@ -28,6 +28,7 @@ type LauncherProjectMaintenanceCopy = {
   maintenancePlanEmpty: string;
   maintenancePlanMissingForProfile: string;
   maintenancePlanProfileMismatch: string;
+  maintenanceSummaryUnavailable: string;
   maintenancePlanReady: string;
   maintenancePreview: string;
   maintenanceProfile: string;
@@ -93,11 +94,26 @@ export function LauncherProjectMaintenancePanel({
   const planRows = visiblePlan?.preview.items.slice(0, 5) ?? [];
   const canPreview = Boolean(summary) && !loading && !previewPending && !applyPending;
   const canApply = Boolean(visiblePlan) && !loading && !previewPending && !applyPending;
-  const applyTitle = !plan
-    ? copy.maintenancePlanMissingForProfile
-    : !planProfileMatches
-      ? copy.maintenancePlanProfileMismatch
-      : copy.maintenanceApply;
+  const summaryMissing = !loading && !summary;
+  const nothingToClean = Boolean(summary) && selectedItems.length === 0;
+  const planGapCopy = summaryMissing
+    ? copy.maintenanceSummaryUnavailable
+    : nothingToClean
+      ? copy.maintenanceEmptyItems
+      : plan && !planProfileMatches
+        ? copy.maintenancePlanProfileMismatch
+        : copy.maintenancePlanMissingForProfile;
+  const applyTitle = loading
+    ? copy.maintenanceLoading
+    : summaryMissing
+      ? copy.maintenanceSummaryUnavailable
+      : nothingToClean
+        ? copy.maintenanceEmptyItems
+        : !plan
+          ? copy.maintenancePlanMissingForProfile
+          : !planProfileMatches
+            ? copy.maintenancePlanProfileMismatch
+            : copy.maintenanceApply;
 
   return (
     <section
@@ -108,7 +124,7 @@ export function LauncherProjectMaintenancePanel({
       data-endpoint-apply="maintenance/reset/apply"
     >
       <div className={styles.maintenanceActions}>
-        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} disabledReason={loading ? copy.maintenanceLoading : copy.maintenanceHint} tooltip={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
+        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} disabledReason={loading ? copy.maintenanceLoading : summaryMissing ? copy.maintenanceSummaryUnavailable : copy.maintenanceHint} tooltip={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
           <span>{copy.maintenancePreview}</span>
         </VButton>
         <VButton type="button" variant="primary" className={styles.primaryButton} onPress={onApply} isDisabled={!canApply} disabledReason={applyTitle} tooltip={copy.maintenanceApply} icon={applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}>
@@ -194,7 +210,7 @@ export function LauncherProjectMaintenancePanel({
               )}
             </div>
           ) : (
-            <small>{plan && !planProfileMatches ? copy.maintenancePlanProfileMismatch : copy.maintenancePlanMissingForProfile}</small>
+            <small>{loading ? copy.maintenanceLoading : planGapCopy}</small>
           )}
         </PersistedHeightListShell>
       </div>
