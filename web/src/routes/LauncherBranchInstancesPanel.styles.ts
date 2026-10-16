@@ -55,6 +55,7 @@ const styles = {
   branchName: "font-medium text-[var(--fg-primary)]",
   actionCell: "z-[1] min-w-0",
   actionButtons: "flex !flex-nowrap items-center justify-end gap-1",
+  pendingIcon: "animate-spin motion-reduce:animate-none",
   actionStack: "grid min-w-0 justify-items-end gap-0.5",
   rowFeedback: "mt-0.5 block max-w-[18rem] truncate text-left [font-size:var(--vui-font-2xs)] text-vui-fg-tertiary",
   rowFeedbackError: "mt-0.5 block max-w-[18rem] truncate text-left [font-size:var(--vui-font-2xs)] text-[var(--state-error)]",
