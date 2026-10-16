@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { VTabs } from "../../components/vui";
+import styles from "./TeamInspectorTabs.styles";
 
 export type TeamInspectorTabsProps = {
   lang: "zh" | "en";
@@ -34,7 +35,7 @@ export function TeamInspectorTabs({
   ];
 
   return (
-    <div className="grid min-w-0 gap-3" data-team-inspector-tabs>
+    <div className={styles.root} data-team-inspector-tabs>
       <VTabs
         aria-label={lang === "zh" ? "团队详情" : "Team details"}
         value={activeTab}
@@ -45,8 +46,8 @@ export function TeamInspectorTabs({
           label,
           content: <div data-team-inspector-section={id}>{content}</div>,
         }))}
-        listClassName="w-full flex-nowrap"
-        triggerClassName="flex-1"
+        listClassName={styles.list}
+        triggerClassName={styles.trigger}
       />
     </div>
   );
