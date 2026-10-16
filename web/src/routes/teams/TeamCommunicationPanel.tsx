@@ -39,7 +39,8 @@ const styles = {
 
 export type TeamCommunicationPanelProps = {
   /** Organization inspector slots; standalone research discussion keeps all. */
-  section?: "all" | "tasks" | "records";
+  section?: "all" | "tasks" | "records" | "record-actions";
+  recordsReadOnly?: boolean;
   lang: "zh" | "en";
   selectedTeam: Team | null;
   linkedChatRoomId: string;
@@ -90,6 +91,7 @@ export type TeamCommunicationPanelProps = {
  */
 export function TeamCommunicationPanel({
   section = "all",
+  recordsReadOnly = false,
   lang,
   selectedTeam,
   linkedChatRoomId,
@@ -129,9 +131,24 @@ export function TeamCommunicationPanel({
   const memberMessagesQuery = useQuery({
     queryKey: ["teams", selectedTeam?.teamId || "", "member-messages"],
     queryFn: ({ signal }) => listTeamMemberMessages(selectedTeam?.teamId || "", 40, { signal }),
-    enabled: Boolean(selectedTeam?.teamId) && section !== "tasks",
+    enabled: Boolean(selectedTeam?.teamId) && section !== "tasks" && section !== "record-actions",
   });
   const memberMessages = memberMessagesQuery.data?.messages ?? [];
+
+  if (section === "record-actions") {
+    const broadcasts = teamBusEvents.filter(event => event.createdBy === "user" && !isProjectAgentBusEventRevoked(event));
+    return <section className={styles.recordActions} aria-label={lang === "zh" ? "广播操作" : "Broadcast actions"}>
+      <h3 className={styles.recordActionsHeading}>{lang === "zh" ? "广播操作" : "Broadcast actions"}</h3>
+      {broadcasts.length ? broadcasts.map(event => <div key={event.eventId} className={styles.recordActionItem}>
+        <p className={styles.recordActionCopy}>{event.summary || event.content}</p>
+        <VNativeButton className={styles.revokeButton} disabled={revokePendingEventId === event.eventId}
+          onClick={() => selectedTeam?.teamId && onRevokeTeamMessage({teamId: selectedTeam.teamId,eventId:event.eventId})}>
+          {revokePendingEventId === event.eventId ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
+        </VNativeButton>
+      </div>) : <p className={styles.recordActionEmpty}>{lang === "zh" ? "没有可撤回的团队广播。" : "No team broadcasts to revoke."}</p>}
+      {revokeError ? <p role="alert" className={styles.messageError}>{revokeError.message}</p> : null}
+    </section>;
+  }
 
   return (
     <div className={styles.researchDiscussionPanel} id={section === "all" ? "research-workflow-discussion" : undefined}>
@@ -415,7 +432,7 @@ export function TeamCommunicationPanel({
                       </span>
                     ))}
                   </div>
-                  {event.createdBy === "user" && !revoked ? (
+                  {!recordsReadOnly && event.createdBy === "user" && !revoked ? (
                     <VNativeButton
                       type="button"
                       className={styles.revokeButton}

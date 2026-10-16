@@ -64,18 +64,21 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+let showOperations = true;
 function boardElement(speakingMemberId = "") {
   if (!client) {
     throw new Error("query client missing");
   }
   return (
     <QueryClientProvider client={client}>
-      <DevTeamTaskBoard lang="zh" teamId="team-1" members={members} speakingMemberId={speakingMemberId} />
+      <DevTeamTaskBoard lang="zh" teamId="team-1" members={members} speakingMemberId={speakingMemberId}
+        renderWorkspace={({display,operations}) => <><main data-task-display>{display}</main>{showOperations ? <aside data-task-operations>{operations}</aside> : null}</>} />
     </QueryClientProvider>
   );
 }
 
-async function renderBoard(speakingMemberId = "") {
+async function renderBoard(speakingMemberId = "", selectFirst = true) {
+  showOperations = true;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -86,6 +89,7 @@ async function renderBoard(speakingMemberId = "") {
   await act(async () => {
     await listDevTeamTasks.mock.results[0]?.value;
   });
+  if (selectFirst) await selectTask();
 }
 
 async function setSpeaker(speakingMemberId: string) {
@@ -94,7 +98,15 @@ async function setSpeaker(speakingMemberId: string) {
   });
 }
 
+async function selectTask(taskId = "task-1") {
+  await act(async () => {
+    await vi.waitFor(() => expect(host?.querySelector(`button[aria-label="选择任务 ${taskId}"]`)).toBeTruthy());
+    host?.querySelector<HTMLButtonElement>(`button[aria-label="选择任务 ${taskId}"]`)?.click();
+  });
+}
+
 async function openEditor(taskId = "task-1") {
+  await selectTask(taskId);
   await act(async () => {
     await vi.waitFor(() => expect(host?.querySelector(`button[aria-label="编辑 ${taskId}"]`)).toBeTruthy());
     host?.querySelector<HTMLButtonElement>(`button[aria-label="编辑 ${taskId}"]`)?.click();
@@ -112,6 +124,44 @@ describe("DevTeamTaskBoard", () => {
     host = null;
     root = null;
     client = null;
+  });
+
+  it("keeps cards read-only and moves selected task editing to the operations slot", async () => {
+    listDevTeamTasks.mockResolvedValue({schemaVersion:1,teamId:"team-1",tasks:[readyTask],updatedAt:""});
+    await renderBoard("", false);
+    expect(host?.querySelector('[data-task-operations]')?.textContent).toContain("选择任务后");
+    expect(host?.querySelector('button[aria-label="编辑 task-1"]')).toBeNull();
+    await openEditor();
+    expect(host?.querySelector('[data-task-display] input,[data-task-display] textarea')).toBeNull();
+    expect(host?.querySelector('input[aria-label="修改主题 task-1"]')?.closest('[data-task-operations]')).toBeTruthy();
+    expect(host?.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("preserves the edit draft and revision across a responsive pane unmount", async () => {
+    listDevTeamTasks.mockResolvedValue({schemaVersion:1,teamId:"team-1",tasks:[readyTask],updatedAt:""});
+    mutateDevTeamTask.mockResolvedValue({schemaVersion:1,teamId:"team-1",tasks:[],updatedAt:""});
+    await renderBoard(); await openEditor();
+    await act(async()=>{setNativeValue(host!.querySelector('input[aria-label="修改主题 task-1"]')!,"抽屉草稿");});
+    showOperations=false;await setSpeaker("");
+    expect(host?.querySelector('input[aria-label="修改主题 task-1"]')).toBeNull();
+    listDevTeamTasks.mockResolvedValue({schemaVersion:1,teamId:"team-1",tasks:[{...readyTask,revision:2,subject:"远端刷新"}],updatedAt:""});
+    await act(async()=>{await client?.refetchQueries({queryKey:["teams","team-1","dev-tasks"],exact:true});});
+    showOperations=true;await setSpeaker("");
+    expect(host?.querySelector<HTMLInputElement>('input[aria-label="修改主题 task-1"]')?.value).toBe("抽屉草稿");
+    await act(async()=>{host?.querySelector<HTMLButtonElement>('button[aria-label="保存修改 task-1"]')?.click();});
+    expect(mutateDevTeamTask).toHaveBeenCalledWith("team-1","task-1",expect.objectContaining({expectedRevision:1,subject:"抽屉草稿"}));
+  });
+
+  it("does not discard a different task draft when an earlier save finishes", async () => {
+    const other={...readyTask,id:"task-2",subject:"另一个任务"};
+    listDevTeamTasks.mockResolvedValue({schemaVersion:1,teamId:"team-1",tasks:[readyTask,other],updatedAt:""});
+    const saved=deferred<DevTeamTaskList>();mutateDevTeamTask.mockReturnValue(saved.promise);
+    await renderBoard();await openEditor();
+    await act(async()=>{setNativeValue(host!.querySelector('input[aria-label="修改主题 task-1"]')!,"A已提交");host?.querySelector<HTMLButtonElement>('button[aria-label="保存修改 task-1"]')?.click();});
+    await openEditor("task-2");
+    await act(async()=>{setNativeValue(host!.querySelector('input[aria-label="修改主题 task-2"]')!,"B本地草稿");});
+    await act(async()=>{saved.resolve({schemaVersion:1,teamId:"team-1",tasks:[{...readyTask,revision:2,subject:"A已提交"},other],updatedAt:""});await saved.promise;});
+    expect(host?.querySelector<HTMLInputElement>('input[aria-label="修改主题 task-2"]')?.value).toBe("B本地草稿");
   });
 
   it("lets an engineer claim a ready task and shows the overlap warning", async () => {
@@ -314,7 +364,7 @@ describe("DevTeamTaskBoard", () => {
   it("lets the planner add a task without writing it into the room", async () => {
     listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
     createDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
-    await renderBoard();
+    await renderBoard("", false);
 
     expect(host?.querySelector('input[aria-label="任务主题"]')).toBeNull();
     await act(async () => {
@@ -341,7 +391,7 @@ describe("DevTeamTaskBoard", () => {
     });
   });
 
-  it("keeps planning forms folded and shows owner, dependencies, next step and output", async () => {
+  it("keeps planning forms folded and shows owner, dependencies and output", async () => {
     listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [
       { ...readyTask, ownerMemberId: "m-a", ownerName: "工程师A", ownerRole: "开发工程师 A", blockedBy: ["task-2"], ready: false },
       { ...readyTask, id: "task-2", subject: "准备接口", status: "completed", workspaceBranch: "codex/api", ready: false },
@@ -354,7 +404,7 @@ describe("DevTeamTaskBoard", () => {
     expect(host?.querySelector('input[aria-label="任务主题"]')).toBeNull();
     expect(host?.querySelector('[aria-label="任务概览"]')?.textContent).toContain("完成 1");
     expect(host?.textContent).toContain("工程师A · 开发工程师 A");
-    expect(host?.textContent).toContain("检查依赖与写范围，满足条件后再认领");
+    expect(host?.querySelector("[data-task-display] input, [data-task-display] textarea")).toBeNull();
     expect(host?.textContent).toContain("工作区 codex/api");
     expect(listDevTeamTaskChanges).not.toHaveBeenCalled();
   });

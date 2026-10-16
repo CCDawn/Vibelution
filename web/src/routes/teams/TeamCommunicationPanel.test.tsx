@@ -268,6 +268,18 @@ describe("TeamCommunicationPanel round controls", () => {
     expect(html).not.toContain("新建任务");
   });
 
+  it("keeps records read-only while exposing existing revoke actions in the operations section", () => {
+    const event = {eventId:"event-1",createdBy:"user",content:"核对接口",summary:"接口广播",messageType:"notice",createdAt:"",deliveries:[],interruptions:[]} as TeamCommunicationPanelProps["teamBusEvents"][number];
+    const display = renderPanel({section:"records", recordsReadOnly:true,teamBusEvents:[event]});
+    expect(display).toContain("接口广播");
+    expect(display).not.toContain(">撤回<");
+    expect(display).not.toContain("<form");
+    const actions = renderPanel({section:"record-actions",teamBusEvents:[event]});
+    expect(actions).toContain(">撤回<");
+    expect(actions).not.toContain("成员通信");
+    expect(actions).not.toContain("<form");
+  });
+
   it("shows an in-place stop action while the linked room is busy", () => {
     const html = renderPanel();
 

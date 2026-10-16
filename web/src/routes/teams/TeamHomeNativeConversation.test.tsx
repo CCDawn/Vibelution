@@ -56,25 +56,23 @@ function clickAction(host: ParentNode, label: string) {
   act(() => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent === label)!.click());
 }
 describe("approved team workspace", () => {
-  it("defaults to discussion with no inspector and canonicalizes the linked group", () => withSurface("", (host) => {
+  it("defaults to discussion with one operations rail and canonicalizes the linked group", () => withSurface("", (host) => {
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("讨论");
-    expect(host.querySelector('[data-team-panel="inspector"]')).toBeNull();
+    expect(host.querySelector('[data-team-panel="inspector"]')?.textContent).toContain("本轮目标");
     expect(host.querySelector('[data-testid="native-chat-owner"]')).not.toBeNull();
     expect(host.querySelector('output')?.textContent).toContain("room=r");
   }, { conversationRequested: false }));
-  it("keeps tasks in the main pane while showing and closing member details", () => withSurface("teamView=tasks&teamConversation=group&room=r", (host) => {
+  it("keeps the center on tasks and shows a single action rail without right tabs", () => withSurface("teamView=tasks&teamConversation=group&room=r", (host) => {
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("任务");
-    clickAction(host, "详情");
-    expect(document.body.querySelector('[data-team-panel="inspector"]')?.textContent).toContain("画布详情");
-    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("任务");
-    act(() => document.body.querySelector<HTMLButtonElement>('button[aria-label="关闭详情"]')!.click());
-    expect(host.querySelector('[data-team-panel="inspector"]')).toBeNull();
+    expect(host.querySelectorAll('[data-team-panel="inspector"]')).toHaveLength(1);
+    expect(host.querySelector('[data-team-panel="inspector"] [role="tab"]')).toBeNull();
+    expect(host.querySelector('[data-team-panel="content"] form')).toBeNull();
+    expect(host.querySelector('button[aria-label="关闭详情"]')).toBeNull();
   }));
   it("starts the selected team's real round from the canvas without changing the selected view", () => {
     const start = vi.fn();
     withSurface("teamView=canvas&teamConversation=group&room=r", (host) => {
-      clickAction(host, "开始新一轮");
-      act(() => document.body.querySelector('form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+      act(() => host.querySelector('[data-team-panel="inspector"] form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
       expect(start).toHaveBeenCalledWith({ roomId: "r", teamId: "t", topic: "交付登录页", mode: "round_robin", purpose: "discussion" });
       expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("画布");
     }, { teamTaskTopic: "交付登录页", onStartTeamRound: start });
@@ -82,7 +80,7 @@ describe("approved team workspace", () => {
   it("keeps stop confirmation and shows the room's running status even before the latest round catches up", () => {
     const stop = vi.fn();
     withSurface("teamConversation=group&room=r", (host) => {
-      expect(host.querySelector('[aria-label="当前轮次"]')?.textContent).toContain("进行中");
+      expect(host.querySelector('[aria-label="轮次操作"]')?.textContent).toContain("进行中");
       selectView(host, "任务");
       clickAction(host, "停止本轮");
       expect(stop).not.toHaveBeenCalled();

@@ -49,7 +49,9 @@ import {
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
 import { TeamSettingsToolbarAction } from "./TeamSettingsToolbarAction";
-import { TeamConversationRail } from "./TeamConversationRail";
+import { useTeamMemberSessionRecovery } from "./useTeamMemberSessionRecovery";
+import { TeamMemberOperations } from "./TeamMemberOperations";
+import { TeamConversationRail, teamMemberSessionId } from "./TeamConversationRail";
 import {
   canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   isChallengeCupCanonicalizationTeamOwned,
@@ -407,6 +409,10 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const [inspectorSelectionRevision, setInspectorSelectionRevision] = useState(0);
   const [teamSettingsOpen, setTeamSettingsOpen] = useState(false);
   const [teamSettingsMemberId, setTeamSettingsMemberId] = useState("");
+  const [memberActionsRevision, setMemberActionsRevision] = useState(0);
+  const recoverMemberSession = useTeamMemberSessionRecovery({team:selectedTeam,room:linkedRoomDetail ?? null,
+    roomDataUpdatedAt: linkedChatRoomQuery.dataUpdatedAt,
+    searchParams, replaceSearch: next => navigate(`/teams?${next.toString()}`, {replace:true})});
   useEffect(() => { setTeamSettingsOpen(false); setTeamSettingsMemberId(""); }, [effectiveTeamId]);
 
   useEffect(() => {
@@ -696,6 +702,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   });
   const openTeamConversation = (memberId = "", sessionId = "") => {
     if (!selectedTeam) return;
+    setTeamSettingsMemberId("");
     const next = new URLSearchParams(searchParams);
     next.set("teamId", selectedTeam.teamId);
     next.set("teamConversationTeamId", selectedTeam.teamId);
@@ -705,17 +712,25 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     next.set("returnTo", `/teams?teamId=${encodeURIComponent(selectedTeam.teamId)}&teamMode=canvas`);
     next.set("returnLabel", lang === "zh" ? "返回团队" : "Back to team");
     next.delete("session"); next.delete("room"); next.delete("teamMember"); next.delete("companion");
-    if (memberId && sessionId) { next.set("teamMember", memberId); next.set("session", sessionId); }
+    if (memberId) { next.set("teamMember", memberId); if (sessionId) next.set("session", sessionId); }
     else if (linkedChatRoomId) next.set("room", linkedChatRoomId);
     navigate(`/teams?${next.toString()}`);
   };
+  const homeWorkspaceActive = !researchWorkflowTeamSelected || teamConversationRequested || teamCanvasRequested;
   const memberRecoveryProps = {
-    memberConfiguration: <TeamSettingsToolbarAction hideTrigger open={teamSettingsOpen} initialMemberId={teamSettingsMemberId}
+    memberConfiguration: homeWorkspaceActive ? null : <TeamSettingsToolbarAction hideTrigger open={teamSettingsOpen} initialMemberId={teamSettingsMemberId}
       onOpenChange={(open) => { setTeamSettingsOpen(open); if (!open) setTeamSettingsMemberId(""); }}
       lang={lang} team={selectedTeam} agents={activeAgents} teams={visibleTeams}
       agentsById={d.activeAgentsById as Map<string, (typeof activeAgents)[number]>} />,
-    onConfigureMember: (memberId: string) => { setTeamSettingsMemberId(memberId); setTeamSettingsOpen(true); },
-    onSyncRoom: () => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId),
+    onConfigureMember: (memberId: string) => {
+      if (homeWorkspaceActive) {
+        const member = selectedTeam?.members.find((item: { memberId: string }) => item.memberId === memberId);
+        if (member) { openTeamConversation(memberId, teamMemberSessionId(member, linkedRoomDetail)); setTeamSettingsMemberId(memberId); setMemberActionsRevision(value => value + 1); }
+      } else { setTeamSettingsMemberId(memberId); setTeamSettingsOpen(true); }
+    },
+    onSyncRoom: () => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId, {
+      onSuccess: (savedTeam: import("../../api/types").Team) => recoverMemberSession(savedTeam, searchParams.get("teamMember") || ""),
+    }),
     syncPending: selectedTeamSyncPending,
     syncDisabledReason: activeTeamMemberCount === 0
       ? (lang === "zh" ? "请先配置可用成员" : "Configure an active member first")
@@ -858,10 +873,16 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     researchWorkflowStatusText,
   } = researchSurfaces;
 
+  const homeCanvasActive = searchParams.get("teamView") === "canvas"
+    || (!searchParams.get("teamView") && searchParams.get("teamConversation") === "canvas");
+  const homeSelectedNode = displayCanvasNodes.find((node: {id:string}) => node.id === selectedNodeId) ?? displayCanvasNodes[0];
+  const operationsMemberId = homeCanvasActive
+    ? selectedTeam?.members.find((member: {memberId:string;agentId:string}) => member.memberId === homeSelectedNode?.id || (member.agentId && member.agentId === homeSelectedNode?.agentId))?.memberId || ""
+    : searchParams.get("teamMember") || "";
   if (researchCanvasVisible) {
     // Next-step / stage index live in the left status rail; inspector stays for node details.
     const researchFlowSlot = null;
-    return renderTeamsWorkbenchCanvasPage({
+    const renderCanvasPage = (memberActions:ReactNode) => renderTeamsWorkbenchCanvasPage({
       lang,
       styles,
       teamsRailResize,
@@ -876,6 +897,12 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       hideInspector: false,
       validationValid: !(validation && !validation.valid),
       inspectorBody: renderTeamsInspectorSharedPanels(),
+      memberActionsRevision,
+      canvasDetails: researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null,
+      canvasActions: renderTeamNodeBindingPanel(),
+      memberActions,
+      records: renderTeamCommunicationPanel("records", true),
+      recordActions: renderTeamCommunicationPanel("record-actions"),
       selectedTeam,
       selectedTeamReferenceName: selectedTeamReference?.name,
       effectiveTeamId,
@@ -955,6 +982,12 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
         onSyncRoom: () => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId),
       } : undefined,
     });
+    return selectedTeam && homeWorkspaceActive ? <TeamMemberOperations key={selectedTeam.teamId}
+        lang={lang} team={selectedTeam}
+        memberId={operationsMemberId}
+        agents={activeAgents} teams={visibleTeams} agentsById={d.activeAgentsById} configureRevision={teamSettingsMemberId === searchParams.get("teamMember") ? memberActionsRevision : 0}
+        onSaved={recoverMemberSession} onSyncRoom={memberRecoveryProps.onSyncRoom} syncPending={selectedTeamSyncPending}
+        syncDisabledReason={memberRecoveryProps.syncDisabledReason} syncError={memberRecoveryProps.syncError} renderWorkspace={renderCanvasPage} /> : renderCanvasPage(null);
   }
 
   // Right inspector column: stage tools / workflow (not stacked under primary → empty floor).
