@@ -1,0 +1,16 @@
+export const taskDependencyPickerStyles = {
+  field: "grid min-w-0 gap-2 text-vui-2xs text-vui-fg-secondary",
+  controls: "flex min-w-0 items-start gap-2",
+  trigger: "flex min-h-11 w-full min-w-0 flex-1 items-center justify-between gap-3 border border-vui-border-subtle bg-vui-surface-base px-3 py-2 text-left text-vui-2xs text-vui-fg-primary [&>span]:whitespace-normal [&>span]:[overflow-wrap:anywhere]",
+  clear: "min-h-11 shrink-0 px-2 text-vui-fg-secondary",
+  popover: "w-[min(420px,calc(100vw-24px))] min-w-0 max-w-[calc(100vw-24px)] p-3 [&_button]:min-h-11",
+  search: "grid gap-1.5 text-vui-2xs text-vui-fg-tertiary [&_input]:min-h-11 [&_input]:w-full [&_input]:min-w-0 [&_input]:border [&_input]:border-vui-border-subtle [&_input]:bg-vui-surface-base [&_input]:px-2.5 [&_input]:py-2 [&_input]:text-vui-fg-primary [&_input]:max-sm:text-vui-base",
+  options: "my-2 grid max-h-[min(320px,40dvh)] gap-1 overflow-y-auto overscroll-contain",
+  option: "flex min-h-13 w-full rounded-[var(--radius-control)] p-2 hover:bg-vui-surface-row-hover has-[:checked]:bg-vui-surface-row-hover",
+  optionLabel: "grid min-w-0 gap-1 text-vui-2xs leading-relaxed text-vui-fg-primary [overflow-wrap:anywhere] [&_small]:text-vui-fg-tertiary",
+  id: "font-mono [overflow-wrap:anywhere]",
+  empty: "m-0 px-2 py-4 text-vui-2xs text-vui-fg-secondary",
+  footer: "flex justify-between gap-2 border-t border-vui-border-subtle pt-2 [&_button]:border [&_button]:border-vui-border-subtle [&_button]:px-3 [&_button]:py-2 [&_button]:text-vui-2xs",
+  selected: "grid gap-1",
+  selectedRow: "flex items-center gap-1.5 rounded-[var(--radius-control)] bg-vui-surface-base pl-2 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:text-vui-2xs [&>span]:leading-relaxed [&>span]:[overflow-wrap:anywhere] [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:p-2 [&_button]:text-vui-lg",
+} as const;

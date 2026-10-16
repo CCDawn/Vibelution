@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
@@ -50,6 +50,7 @@ export function useArchivedRunResetRedirect({
 }
 
 export function useResearchWorkflowWorkspace(teamId: string) {
+  const [questionPickerOpen, setQuestionPickerOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useMemo(
     () => parseResearchProcessLocation(searchParams),
@@ -96,5 +97,5 @@ export function useResearchWorkflowWorkspace(teamId: string) {
     [replaceParams],
   );
 
-  return { ...location, replaceParams, selectNode, openPanel };
+  return { ...location, replaceParams, selectNode, openPanel, questionPickerOpen, setQuestionPickerOpen };
 }

@@ -75,10 +75,16 @@ const harness = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("./useResearchWorkflowWorkspace", async () => ({
-  ...(await vi.importActual<typeof import("./useResearchWorkflowWorkspace")>("./useResearchWorkflowWorkspace")),
-  useResearchWorkflowWorkspace: () => harness.location,
-}));
+vi.mock("./useResearchWorkflowWorkspace", async () => {
+  const { useState } = await vi.importActual<typeof import("react")>("react");
+  return {
+    ...(await vi.importActual<typeof import("./useResearchWorkflowWorkspace")>("./useResearchWorkflowWorkspace")),
+    useResearchWorkflowWorkspace: () => {
+      const [questionPickerOpen, setQuestionPickerOpen] = useState(false);
+      return { ...harness.location, questionPickerOpen, setQuestionPickerOpen };
+    },
+  };
+});
 vi.mock("./useResearchWorkflowRun", () => ({
   useResearchWorkflowRun: () => harness.runState,
 }));
@@ -471,6 +477,32 @@ describe("ResearchProcessWorkspace", () => {
     root = rendered.root;
     expect(rendered.container.textContent).toContain("无法读取研究状态");
     expect(rendered.container.textContent).not.toContain("先选择研究题目");
+  });
+
+  it("opens the existing question picker from the empty canvas without selecting a question", async () => {
+    harness.catalog.questions = [{ questionId: "SCI-005", title: "待选择题目", checkpoint: null }];
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    const empty = rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')!;
+    const choose = Array.from(empty.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "选择题目")!;
+    const options = await openSwitchSelect(choose);
+    expect(Array.from(options).some((option) => option.textContent?.includes("SCI-005"))).toBe(true);
+    expect(harness.location.replaceParams).not.toHaveBeenCalled();
+    await pickSwitchOption(Array.from(options).find((option) => option.textContent?.includes("SCI-005")) as HTMLElement);
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({ questionId: "SCI-005", runId: "", node: null, panel: "launch" });
+  });
+
+  it("opens the real archive from the empty canvas when the question catalog is empty", async () => {
+    harness.catalog.questions = [];
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    const empty = rendered.container.querySelector('[data-vui="canvas-workbench-canvas"]')!;
+    const choose = Array.from(empty.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "选择题目")!;
+    expect(choose.disabled).toBe(true);
+    const archive = Array.from(empty.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "打开题目档案")!;
+    await act(async () => archive.click());
+    expect(harness.location.openPanel).toHaveBeenCalledWith("question");
+    expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
   it("returns a reset question from an archived run URL to hypothesis generation", async () => {

@@ -248,6 +248,20 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
       data-vui-region="teams-canvas"
       data-testid="team-organization-canvas-surface"
     >
+      {hideToolbar ? (
+        <div className={styles.canvasToolbar} data-testid="team-canvas-relationship-toolbar">
+          <span className={styles.saveState}>{lang === "zh" ? "组织关系" : "Organization"}{researchCanvasReadOnly ? (lang === "zh" ? " · 节点只读" : " · Read-only nodes") : ""}</span>
+          <VTooltip content={communicationEdgeHint}>
+            <VButton type="button" variant="secondary" aria-pressed={showCommunicationEdges}
+              className={showCommunicationEdges ? styles.layerButtonActive : ""}
+              onClick={onToggleCommunicationEdges} isDisabled={!canvas || communicationEdgeCount === 0}
+              disabledReason={communicationEdgeCount === 0 ? (lang === "zh" ? "暂无通信关系" : "No communication relationships") : undefined}>
+              <Link2 size={14} />
+              {lang === "zh" ? `通信关系 · ${showCommunicationEdges ? "已显示" : "已隐藏"}` : `Communication · ${showCommunicationEdges ? "Shown" : "Hidden"}`}
+            </VButton>
+          </VTooltip>
+        </div>
+      ) : null}
       {hideToolbar ? null : (
         <div className={styles.canvasToolbar} data-testid="team-canvas-toolbar">
           {/* View controls (edge layer, room link) stay reachable in read-only
@@ -265,6 +279,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                 type="button"
                 className={showCommunicationEdges ? styles.layerButtonActive : ""}
                 onClick={onToggleCommunicationEdges}
+                aria-pressed={showCommunicationEdges}
                 isDisabled={!canvas || communicationEdgeCount === 0}
               >
                 <Link2 size={14} />

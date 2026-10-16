@@ -225,7 +225,8 @@ describe("TeamCommunicationPanel round controls", () => {
     expect(html).toContain('aria-label="当前身份"');
     expect(html).toContain("开发工程师 A");
     expect(html).not.toContain("新建任务");
-    expect(html).not.toContain("<select");
+    expect(html).not.toMatch(/<select[^>]*aria-label="当前身份"/);
+    expect(html).toContain("工程师A · 开发工程师 A");
   });
 
   it("keeps the last speaker when the round is open again and nobody is speaking", () => {

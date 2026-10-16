@@ -7,7 +7,7 @@
  * surface never writes canvas or Agent config.
  */
 import { Archive, UserMinus, Users } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
@@ -29,6 +29,7 @@ import styles from "./TeamSettingsDialog.styles";
 
 export type TeamSettingsDialogProps = {
   open: boolean;
+  initialMemberId?: string;
   lang: "zh" | "en";
   team: Team | null;
   /** Active agent directory (agents.json projection) for rebind/add options. */
@@ -49,6 +50,7 @@ export type TeamSettingsDialogProps = {
 
 export function TeamSettingsDialog({
   open,
+  initialMemberId,
   lang,
   team,
   agents,
@@ -67,6 +69,17 @@ export function TeamSettingsDialog({
   const navigate = useNavigate();
   const [draft, setDraft] = useState(() => createTeamSettingsDraft(team));
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const focusRequestedMember = useCallback((content: HTMLDivElement | null) => {
+    if (!content || !initialMemberId) return;
+    // Dialog content mounts in a portal; focus after its own autofocus pass.
+    queueMicrotask(() => {
+      if (!content.isConnected) return;
+      const row = Array.from(content.querySelectorAll<HTMLElement>("[data-team-settings-member]"))
+        .find((item) => item.dataset.teamSettingsMember === initialMemberId);
+      row?.scrollIntoView?.({ block: "nearest" });
+      row?.querySelector<HTMLButtonElement>('[role="combobox"]')?.focus();
+    });
+  }, [initialMemberId]);
   const teamId = team?.teamId || "";
   const teamUpdatedAt = team?.updatedAt || "";
 
@@ -127,7 +140,7 @@ export function TeamSettingsDialog({
       aria-label={copy.title}
       hideClose={pending}
     >
-      <div className={styles.content}>
+      <div ref={focusRequestedMember} className={styles.content}>
         {locked ? <p className={styles.lockedNotice}>{copy.lockedNotice}</p> : null}
 
         <section className={styles.section} aria-label={copy.basicsHeading}>
@@ -179,6 +192,7 @@ export function TeamSettingsDialog({
               return (
                 <div
                   key={member.memberId || member.agentId}
+                  data-team-settings-member={member.memberId}
                   className={[styles.memberRow, member.remove ? styles.memberRowMarkedRemove : ""].filter(Boolean).join(" ")}
                 >
                   <div className={styles.memberMeta}>

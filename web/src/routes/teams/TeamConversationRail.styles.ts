@@ -9,4 +9,6 @@ export default {
   name: "block truncate text-vui-micro-13 font-medium",
   role: "block truncate text-vui-2xs leading-5 text-[var(--fg-tertiary)]",
   navigation: "min-h-0 flex-1 border-t border-[var(--vui-border-subtle)] pt-2",
+  recovery: "flex flex-wrap items-center justify-between gap-2 px-2 pb-2",
+  recoveryHint: "text-vui-2xs text-[var(--fg-secondary)]",
 } as const;

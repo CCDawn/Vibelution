@@ -18,6 +18,10 @@ export type TeamSettingsToolbarActionProps = {
   agents: AgentConfigWorkspaceAgent[];
   teams: Team[];
   agentsById: Map<string, AgentConfigWorkspaceAgent>;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  initialMemberId?: string;
+  hideTrigger?: boolean;
 };
 
 export function TeamSettingsToolbarAction({
@@ -26,8 +30,14 @@ export function TeamSettingsToolbarAction({
   agents,
   teams,
   agentsById,
+  open: controlledOpen,
+  onOpenChange,
+  initialMemberId,
+  hideTrigger = false,
 }: TeamSettingsToolbarActionProps) {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlledOpen ?? localOpen;
+  const setOpen = (value: boolean) => { setLocalOpen(value); onOpenChange?.(value); };
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const settings = useTeamSettingsActions({
     onArchived: () => setOpen(false),
@@ -42,7 +52,7 @@ export function TeamSettingsToolbarAction({
 
   return (
     <>
-      <VButton
+      {hideTrigger ? null : <VButton
         ref={triggerRef}
         type="button"
         variant="ghost"
@@ -54,9 +64,10 @@ export function TeamSettingsToolbarAction({
         onClick={() => setOpen(true)}
       >
         {label}
-      </VButton>
+      </VButton>}
       <TeamSettingsDialog
         open={open}
+        initialMemberId={initialMemberId}
         lang={lang}
         team={team}
         agents={agents}

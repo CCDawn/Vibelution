@@ -84,6 +84,25 @@ afterEach(() => {
 });
 
 describe("TeamOrganizationCanvasSurface viewport", () => {
+  it("keeps the communication switch reachable when the authoring toolbar is hidden", () => {
+    const toggle = vi.fn();
+    const element = mount(<TeamOrganizationCanvasSurface {...surfaceProps({ communicationEdgeCount: 1, onToggleCommunicationEdges: toggle })} />);
+    const toolbar = element.querySelector('[data-testid="team-canvas-relationship-toolbar"]')!;
+    const button = toolbar.querySelector<HTMLButtonElement>('button')!;
+    expect(button.textContent).toContain("通信关系 · 已隐藏");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    act(() => button.click());
+    expect(toggle).toHaveBeenCalledOnce();
+    expect(element.querySelector('[data-testid="team-canvas-toolbar"]')).toBeNull();
+    act(() => root?.render(<TeamOrganizationCanvasSurface {...surfaceProps({ communicationEdgeCount: 1, showCommunicationEdges: true, onToggleCommunicationEdges: toggle })} />));
+    expect(button.textContent).toContain("通信关系 · 已显示");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    act(() => root?.render(<TeamOrganizationCanvasSurface {...surfaceProps({ onToggleCommunicationEdges: toggle })} />));
+    const disabledButton = toolbar.querySelector<HTMLButtonElement>('button')!;
+    expect(disabledButton.disabled).toBe(true);
+    act(() => disabledButton.click());
+    expect(toggle).toHaveBeenCalledOnce();
+  });
   it.each(["mouse", "touch"])("pans background with %s capture without editing nodes and stops on cancel", (pointerType) => {
     const pointerDown = vi.fn();
     const { viewport, world, changed } = mountInteractive({ researchCanvasReadOnly: false, onNodePointerDown: pointerDown });

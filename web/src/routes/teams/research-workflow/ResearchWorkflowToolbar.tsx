@@ -34,6 +34,8 @@ export function ResearchWorkflowToolbar(props: {
   awaitingHumanCount?: number;
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
+  questionPickerOpen?: boolean;
+  onQuestionPickerOpenChange?: (open: boolean) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
   /** Workspace switcher (team) — same row as experiment, not a second chrome strip. */
   leading?: ReactNode;
@@ -43,7 +45,9 @@ export function ResearchWorkflowToolbar(props: {
   experimentActions?: ReactNode;
 }) {
   const { lang } = useShellI18n();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [localPickerOpen, setLocalPickerOpen] = useState(false);
+  const pickerOpen = props.questionPickerOpen ?? localPickerOpen;
+  const setPickerOpen = (open: boolean) => { setLocalPickerOpen(open); props.onQuestionPickerOpenChange?.(open); };
   const isZh = lang === "zh";
   const runStatusBadge = researchRunStatusBadge(props.runStatus, lang);
   const selectedQuestionId = props.identity?.questionId || null;

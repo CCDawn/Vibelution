@@ -108,6 +108,17 @@ describe("TeamSettingsDialog", () => {
     document.body.innerHTML = "";
   });
 
+  it("focuses the requested member rebind control when opened from a recovery entry", async () => {
+    const result = renderDialog(<TeamSettingsDialog open initialMemberId="member-1" lang="zh" team={makeTeam()}
+      agents={baseAgents} teams={[]} agentsById={baseAgentsById} pending={false} createRoomPending={false}
+      errorMessage="" onSubmit={vi.fn()} onCreateRoom={vi.fn()} onClose={vi.fn()} />);
+    host = result.host; root = result.root;
+    await act(async () => undefined);
+    const row = document.body.querySelector('[data-team-settings-member="member-1"]')!;
+    expect(row).not.toBeNull();
+    expect(document.activeElement).toBe(row.querySelector('[role="combobox"]'));
+  });
+
   it("renders basics, editable member rows, and room section for an editable team", () => {
     const team = makeTeam({
       linkedChatRoom: {

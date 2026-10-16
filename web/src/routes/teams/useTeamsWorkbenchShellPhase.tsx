@@ -405,6 +405,9 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const [canvasEdgeLabelDraft, setCanvasEdgeLabelDraft] = useState("");
   const [canvasNodeRenameDraft, setCanvasNodeRenameDraft] = useState("");
   const [inspectorSelectionRevision, setInspectorSelectionRevision] = useState(0);
+  const [teamSettingsOpen, setTeamSettingsOpen] = useState(false);
+  const [teamSettingsMemberId, setTeamSettingsMemberId] = useState("");
+  useEffect(() => { setTeamSettingsOpen(false); setTeamSettingsMemberId(""); }, [effectiveTeamId]);
 
   useEffect(() => {
     setCanvasSelectedEdgeId("");
@@ -706,13 +709,27 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     else if (linkedChatRoomId) next.set("room", linkedChatRoomId);
     navigate(`/teams?${next.toString()}`);
   };
-  const teamShellRail = selectedTeam ? <TeamConversationRail team={selectedTeam} room={linkedRoomDetail ?? null} lang={lang}
+  const memberRecoveryProps = {
+    memberConfiguration: <TeamSettingsToolbarAction hideTrigger open={teamSettingsOpen} initialMemberId={teamSettingsMemberId}
+      onOpenChange={(open) => { setTeamSettingsOpen(open); if (!open) setTeamSettingsMemberId(""); }}
+      lang={lang} team={selectedTeam} agents={activeAgents} teams={visibleTeams}
+      agentsById={d.activeAgentsById as Map<string, (typeof activeAgents)[number]>} />,
+    onConfigureMember: (memberId: string) => { setTeamSettingsMemberId(memberId); setTeamSettingsOpen(true); },
+    onSyncRoom: () => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId),
+    syncPending: selectedTeamSyncPending,
+    syncDisabledReason: activeTeamMemberCount === 0
+      ? (lang === "zh" ? "请先配置可用成员" : "Configure an active member first")
+      : linkedRoomBusy ? (lang === "zh" ? "请等待当前团队讨论结束" : "Wait for the current team discussion to finish") : undefined,
+    syncError: syncTeamChatRoomMutation.variables === selectedTeam?.teamId && syncTeamChatRoomMutation.error instanceof Error
+      ? syncTeamChatRoomMutation.error.message : undefined,
+  };
+  const teamShellRail = selectedTeam ? <TeamConversationRail {...memberRecoveryProps} team={selectedTeam} room={linkedRoomDetail ?? null} lang={lang}
     agentsById={d.activeAgentsById}
     selectedMemberId={teamConversationRequested ? searchParams.get("teamMember") || "" : ""}
     groupSelected={teamConversationRequested && searchParams.get("teamConversation") === "group"}
     onOpenGroup={() => openTeamConversation()} onOpenMember={(member, sessionId) => openTeamConversation(member.memberId, sessionId)}
     navigation={researchWorkflowTeamSelected ? teamStatusRail : undefined} /> : teamStatusRail;
-  const teamConversationRail = selectedTeam ? <TeamConversationRail team={selectedTeam} room={linkedRoomDetail ?? null} lang={lang}
+  const teamConversationRail = selectedTeam ? <TeamConversationRail {...memberRecoveryProps} team={selectedTeam} room={linkedRoomDetail ?? null} lang={lang}
     agentsById={d.activeAgentsById}
     selectedMemberId="" groupSelected={false} onOpenGroup={() => openTeamConversation()}
     onOpenMember={(member, sessionId) => openTeamConversation(member.memberId, sessionId)} /> : null;

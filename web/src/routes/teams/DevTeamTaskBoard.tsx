@@ -21,6 +21,7 @@ import {
   VChip,
 } from "../../components/vui";
 import { taskBoardStyles as styles } from "./DevTeamTaskBoard.styles";
+import { TaskDependencyPicker } from "./TaskDependencyPicker";
 
 const STATUS_LABELS: Record<string, { zh: string; en: string }> = {
   pending: { zh: "待办", en: "Pending" },
@@ -216,6 +217,9 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
   const [blockers, setBlockers] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [creating, setCreating] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("");
+  useEffect(() => { setStatusFilter(""); setOwnerFilter(""); }, [teamId]);
   const tasksQuery = useQuery({
     queryKey: taskKey(teamId),
     queryFn: ({ signal }) => listDevTeamTasks(teamId, { signal }),
@@ -268,6 +272,11 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
   const actorRole = roleOf(members, actorId);
   const isPlanner = actorRole === "规划师";
   const tasks = tasksQuery.data?.tasks ?? [];
+  const actor = members.find((member) => member.memberId === actorId);
+  const visibleTasks = tasks.filter((task) => (!statusFilter || task.status === statusFilter)
+    && (!ownerFilter || (ownerFilter === "__unassigned__" ? !task.ownerMemberId : task.ownerMemberId === ownerFilter)));
+  const hasFilters = Boolean(statusFilter || ownerFilter);
+  const clearFilters = () => { setStatusFilter(""); setOwnerFilter(""); };
   const errorMessage = createTask.error instanceof Error
     ? createTask.error.message
     : changeTask.error instanceof Error
@@ -282,23 +291,49 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
       aria-label={text("共享任务板", "Shared task board")}
       title={text("共享任务板", "Shared task board")}
       className={styles.root}
-      meta={text(`${tasks.length} 个任务`, `${tasks.length} tasks`)}
+      meta={hasFilters
+        ? text(`显示 ${visibleTasks.length} / ${tasks.length} 个任务`, `Showing ${visibleTasks.length} / ${tasks.length} tasks`)
+        : text(`${tasks.length} 个任务`, `${tasks.length} tasks`)}
     >
       <div className={styles.toolbar}>
         <div className={styles.summary} aria-label={text("任务概览", "Task summary")}>
+          <VNativeButton type="button" className={styles.filterChip} aria-pressed={!statusFilter} onClick={() => setStatusFilter("")}>
+            {text("全部", "All")} <span>{tasks.length}</span>
+          </VNativeButton>
           {Object.entries(STATUS_LABELS).map(([key, label]) => (
-            <span key={key}>{lang === "zh" ? label.zh : label.en} {tasks.filter((task) => task.status === key).length}</span>
+            <VNativeButton type="button" className={styles.filterChip} key={key} aria-pressed={statusFilter === key} onClick={() => setStatusFilter(key)}>
+              {lang === "zh" ? label.zh : label.en} <span>{tasks.filter((task) => task.status === key).length}</span>
+            </VNativeButton>
           ))}
         </div>
       <div className={styles.actor}>
         {text("当前身份", "Acting as")}
-        <strong aria-label={text("当前身份", "Acting as")}>{actorRole || text("未指定", "Unassigned")}</strong>
+        <strong aria-label={text("当前身份", "Acting as")}>{actor ? [actor.agentName || actor.memberId, actor.role].filter(Boolean).join(" · ") : text("未指定", "Unassigned")}</strong>
       {isPlanner ? (
         <VNativeButton className={styles.primaryButton} aria-expanded={creating} onClick={() => setCreating(!creating)}>
           {creating ? text("收起新建", "Close new task") : text("新建任务", "Add task")}
         </VNativeButton>
       ) : null}
       </div>
+      </div>
+      <div className={styles.filters} aria-label={text("任务筛选", "Task filters")}>
+        <VStringSelect
+          className={styles.ownerFilter}
+          ariaLabel={text("筛选负责人", "Filter by owner")}
+          value={ownerFilter}
+          onValueChange={setOwnerFilter}
+          options={[
+            { value: "", label: text("全部负责人", "All owners") },
+            { value: "__unassigned__", label: text("未指定负责人", "Unassigned") },
+            ...members.map((member) => ({ value: member.memberId, label: [member.agentName || member.memberId, member.role].filter(Boolean).join(" · ") })),
+            ...Array.from(new Set(tasks.map((task) => task.ownerMemberId).filter((id) => id && !members.some((member) => member.memberId === id)))).map((id) => {
+              const task = tasks.find((item) => item.ownerMemberId === id);
+              return { value: id, label: [task?.ownerName || id, task?.ownerRole].filter(Boolean).join(" · ") };
+            }),
+          ]}
+        />
+        {hasFilters ? <VNativeButton type="button" className={styles.button} onClick={clearFilters}>{text("清除筛选", "Clear filters")}</VNativeButton> : null}
+        <span className={styles.filterResult} role="status">{text(`显示 ${visibleTasks.length} / ${tasks.length} 个任务`, `Showing ${visibleTasks.length} / ${tasks.length} tasks`)}</span>
       </div>
       {isPlanner && creating ? (
         <form
@@ -339,15 +374,9 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
             onChange={(event) => setScopes(event.target.value)}
           />
           </label>
-          <label className={styles.field}>{text("依赖任务编号", "Dependency IDs")}
-          <VNativeInput
-            className={styles.input}
-            aria-label={text("依赖任务", "Blocked by")}
-            value={blockers}
-            placeholder={text("依赖任务编号，例如 task-1", "Blocked by, for example task-1")}
-            onChange={(event) => setBlockers(event.target.value)}
-          />
-          </label>
+          <div className={styles.field}>
+            <TaskDependencyPicker lang={lang} label={text("依赖任务", "Dependencies")} tasks={tasks} value={blockers} onChange={setBlockers} />
+          </div>
           </div>
           <div className={styles.actions}>
           <VStringSelect
@@ -358,7 +387,7 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
               { value: "", label: text("先不指定负责人", "No owner yet") },
               ...members.filter((member) => member.role !== "规划师").map((member) => ({
                 value: member.memberId,
-                label: member.role,
+                label: [member.agentName || member.memberId, member.role].filter(Boolean).join(" · "),
               })),
             ]}
           />
@@ -379,8 +408,14 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
           {text("规划师新建后，工程师认领，评审员收口或退回。", "The planner adds a task, an engineer claims it, and the reviewer closes or sends it back.")}
         </VStateSurface>
       ) : null}
+      {!tasksQuery.isLoading && tasks.length > 0 && visibleTasks.length === 0 ? (
+        <VStateSurface tone="empty" density="compact" title={text("没有符合筛选条件的任务", "No tasks match these filters")}>
+          <p>{text("换一个状态或负责人，或清除筛选查看全部任务。", "Choose a different status or owner, or clear filters to view every task.")}</p>
+          <VNativeButton type="button" className={styles.button} onClick={clearFilters}>{text("清除筛选", "Clear filters")}</VNativeButton>
+        </VStateSurface>
+      ) : null}
       <div className={styles.list}>
-      {tasks.map((task) => (
+      {visibleTasks.map((task) => (
         <TaskCard
           key={task.id}
           lang={lang}
@@ -474,12 +509,22 @@ function TaskCard({
   return (
     <article className={styles.card} aria-label={task.subject}>
       <div className={styles.cardHeader}>
-        <strong className={styles.title}>{task.subject}</strong>
-        <VChip tone={task.status === "completed" ? "success" : task.status === "rework" ? "warning" : task.status === "in_progress" ? "info" : "neutral"}>
-          {lang === "zh" ? status.zh : status.en}
-        </VChip>
+        <div className={styles.titleLine}>
+          <strong className={styles.title} title={task.subject}>{task.subject}</strong>
+          <span className={styles.inlineTaskId}>{task.id}</span>
+        </div>
+        <div className={styles.headerActions}>
+          <VChip tone={task.status === "completed" ? "success" : task.status === "rework" ? "warning" : task.status === "in_progress" ? "info" : "neutral"}>
+            {lang === "zh" ? status.zh : status.en}
+          </VChip>
+          {canPlan && task.status !== "completed" ? (
+            <VNativeButton className={styles.button} aria-label={text(`编辑 ${task.id}`, `Edit ${task.id}`)} aria-expanded={editing} onClick={() => {
+              if (!editing) setEditRevision(task.revision);
+              setEditing(!editing);
+            }}>{editing ? text("收起编辑", "Close editor") : text("编辑", "Edit")}</VNativeButton>
+          ) : null}
+        </div>
       </div>
-      <span className={styles.taskId}>{task.id}</span>
       {task.description ? <p className={styles.description}>{task.description}</p> : null}
       <dl className={styles.facts}>
         <div className={styles.fact}>
@@ -507,7 +552,7 @@ function TaskCard({
       {canReview && (task.status === "in_progress" || task.status === "rework" || task.status === "completed") ? (
         <TaskChangeList lang={lang} teamId={teamId} taskId={task.id} />
       ) : null}
-      <div className={styles.actions}>
+      {canClaim || (canReview && ["in_progress", "rework", "completed"].includes(task.status)) ? <div className={styles.actions}>
       {canClaim ? (
         <VNativeButton
           className={styles.primaryButton}
@@ -553,13 +598,8 @@ function TaskCard({
           </VNativeButton>
         </>
       ) : null}
-      {canPlan && task.status !== "completed" ? (
-        <VNativeButton className={styles.button} aria-label={text(`编辑 ${task.id}`, `Edit ${task.id}`)} aria-expanded={editing} onClick={() => {
-          if (!editing) setEditRevision(task.revision);
-          setEditing(!editing);
-        }}>{editing ? text("收起编辑", "Close editor") : text("编辑任务", "Edit task")}</VNativeButton>
-      ) : null}
-      </div>
+
+      </div> : null}
       {canPlan && task.status !== "completed" && editing ? (
         <div className={styles.form}>
           <VNativeInput
@@ -583,12 +623,13 @@ function TaskCard({
             placeholder={text("写范围，例如 web/src/routes/login", "Write scopes, for example web/src/routes/login")}
             onChange={(event) => setScopeDraft(event.target.value)}
           />
-          <VNativeInput
-            className={styles.input}
-            aria-label={text(`修改依赖 ${task.id}`, `Edit dependencies ${task.id}`)}
+          <TaskDependencyPicker
+            lang={lang}
+            label={text(`修改依赖 ${task.id}`, `Edit dependencies ${task.id}`)}
+            tasks={tasks}
+            currentTaskId={task.id}
             value={blockerDraft}
-            placeholder={text("依赖任务编号，例如 task-1", "Blocked by, for example task-1")}
-            onChange={(event) => setBlockerDraft(event.target.value)}
+            onChange={setBlockerDraft}
           />
           <VNativeButton
             className={styles.primaryButton}
@@ -615,7 +656,7 @@ function TaskCard({
               { value: "", label: text("不指定", "Unassigned") },
               ...members.filter((member) => member.role !== "规划师").map((member) => ({
                 value: member.memberId,
-                label: member.role,
+                label: [member.agentName || member.memberId, member.role].filter(Boolean).join(" · "),
               })),
             ]}
           />

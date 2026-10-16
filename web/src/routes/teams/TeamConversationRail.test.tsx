@@ -23,3 +23,33 @@ it("keeps team and canonical members in one actionable list, disabling unlinked 
     expect(group).toHaveBeenCalledOnce(); expect(member).toHaveBeenCalledExactlyOnceWith(team.members[0], "native-a");
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it("routes missing sessions to sync and stale members to their configuration, retaining the busy and error state", () => {
+  const team = { name: "开发团队", members: [
+    { memberId: "missing", agentId: "a", agentName: "林舟", role: "协调", agentStatus: "active" },
+    { memberId: "stale", agentId: "b", agentName: "顾言", role: "实现", agentStatus: "stale" },
+  ] } as Team;
+  const room = { participants: [{ kind: "agent", agentId: "b", sessionId: "stale-native" }] } as ChatRoomDetail;
+  const sync = vi.fn(), configure = vi.fn(), member = vi.fn();
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const render = (pending = false) => act(() => root.render(<TeamConversationRail team={team} room={room} lang="zh"
+    selectedMemberId="" groupSelected={false} onOpenGroup={vi.fn()} onOpenMember={member}
+    onSyncRoom={sync} onConfigureMember={configure} syncPending={pending} syncError="同步失败，请重试" />));
+  try {
+    render();
+    const syncButton = host.querySelector<HTMLButtonElement>('[aria-label="林舟 · 同步会话"]')!;
+    const configureButton = host.querySelector<HTMLButtonElement>('[aria-label="顾言 · 配置成员"]')!;
+    expect(host.textContent).toContain("会话尚未同步");
+    expect(host.textContent).toContain("成员配置不可用");
+    act(() => { syncButton.click(); configureButton.click(); });
+    expect(sync).toHaveBeenCalledOnce();
+    expect(configure).toHaveBeenCalledExactlyOnceWith("stale");
+    expect(member).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("同步失败，请重试");
+    render(true);
+    expect(syncButton.disabled).toBe(true);
+    expect(configureButton.disabled).toBe(false);
+    act(() => syncButton.click());
+    expect(sync).toHaveBeenCalledOnce();
+  } finally { act(() => root.unmount()); host.remove(); }
+});

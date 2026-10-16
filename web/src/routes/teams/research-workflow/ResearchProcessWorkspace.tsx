@@ -841,6 +841,8 @@ export function ResearchProcessWorkspace({
             experimentOptions={experimentOptions}
             panel={location.panel}
             onSelectExperiment={selectExperiment}
+            questionPickerOpen={location.questionPickerOpen}
+            onQuestionPickerOpenChange={location.setQuestionPickerOpen}
             onOpenPanel={location.openPanel}
             experimentActions={experimentIdentity?.questionId ? (
               <ResearchExperimentResetAction
@@ -899,8 +901,15 @@ export function ResearchProcessWorkspace({
           <ResearchCenteredEmptyState
             title={lang === "zh" ? "先选择研究题目" : "Choose a research question first"}
             hint={lang === "zh"
-              ? "在右侧当前任务中搜索题目；选择后再展开阶段进度与流程画布。"
-              : "Search in the current-task panel. Stage progress and the workflow canvas appear after selection."}
+              ? "从顶部题目选择器选一个题目，即可查看阶段进度与流程。需要查找更多题目时，打开题目档案。"
+              : "Choose a question from the toolbar to view its stages and workflow. Open the question archive to find more questions."}
+            actions={<>
+              <VButton onClick={() => location.setQuestionPickerOpen(true)} isDisabled={experimentOptions.length === 0}
+                disabledReason={experimentOptions.length === 0 ? (isZh ? "暂无可选择的题目，请打开题目档案" : "No questions available; open the question archive") : undefined}>
+                {isZh ? "选择题目" : "Choose question"}
+              </VButton>
+              <VButton variant="secondary" onClick={() => location.openPanel("question")}>{isZh ? "打开题目档案" : "Open question archive"}</VButton>
+            </>}
           />
         ) : (
           <>

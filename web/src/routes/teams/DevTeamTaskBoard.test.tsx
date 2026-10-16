@@ -124,7 +124,7 @@ describe("DevTeamTaskBoard", () => {
       });
     });
     expect(host?.querySelector('select[aria-label="当前身份"]')).toBeNull();
-    expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("开发工程师 A");
+    expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("工程师A · 开发工程师 A");
     const claim = host?.querySelector<HTMLButtonElement>('button[aria-label="认领 task-1"]');
     expect(claim).toBeTruthy();
     await act(async () => {
@@ -224,7 +224,7 @@ describe("DevTeamTaskBoard", () => {
   });
 
   it("lets the planner change the description and dependencies", async () => {
-    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask, { ...readyTask, id: "task-2", subject: "准备接口", status: "completed" }], updatedAt: "" });
     mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
     await renderBoard();
     await openEditor();
@@ -234,18 +234,20 @@ describe("DevTeamTaskBoard", () => {
       });
     });
     const description = host?.querySelector<HTMLTextAreaElement>('textarea[aria-label="修改说明 task-1"]');
-    const blockers = host?.querySelector<HTMLInputElement>('input[aria-label="修改依赖 task-1"]');
+    const blockers = host?.querySelector<HTMLButtonElement>('button[aria-label="修改依赖 task-1"]');
     const save = host?.querySelector<HTMLButtonElement>('button[aria-label="保存修改 task-1"]');
     expect(description?.value).toBe("只改团队页");
-    expect(blockers?.value).toBe("");
+    expect(blockers?.textContent).toContain("搜索并选择依赖任务");
     expect(save?.disabled).toBe(true);
     await act(async () => {
       if (description) {
         setNativeValue(description, "改过的说明");
       }
-      if (blockers) {
-        setNativeValue(blockers, "task-2");
-      }
+      blockers?.click();
+    });
+    await act(async () => {
+      document.querySelector<HTMLInputElement>('input[aria-label="task-2 · 准备接口 · 完成"]')?.click();
+      Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "完成选择")?.click();
     });
     expect(save?.disabled).toBe(false);
     await act(async () => {
@@ -276,6 +278,37 @@ describe("DevTeamTaskBoard", () => {
       });
     });
     expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
+  });
+
+  it("filters tasks without hiding dependency choices or allowing a self dependency", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [
+      readyTask,
+      { ...readyTask, id: "task-2", subject: "准备接口", status: "completed", ready: false },
+    ], updatedAt: "" });
+    await renderBoard();
+    await act(async () => {
+      await vi.waitFor(() => expect(host?.querySelectorAll("article").length).toBe(2));
+      Array.from(host?.querySelectorAll("button[aria-pressed]") ?? []).find((button) => button.textContent?.startsWith("待办"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host?.querySelectorAll("article").length).toBe(1);
+    await openEditor();
+    await act(async () => { host?.querySelector<HTMLButtonElement>('button[aria-label="修改依赖 task-1"]')?.click(); });
+    expect(document.querySelector('input[aria-label="task-2 · 准备接口 · 完成"]')).toBeTruthy();
+    expect(document.querySelector('input[aria-label="task-1 · 补任务板 · 待办"]')).toBeNull();
+    await act(async () => {
+      const search = document.querySelector<HTMLInputElement>('input[aria-label="搜索依赖任务"]');
+      if (search) setNativeValue(search, "不存在的任务");
+    });
+    expect(document.body.textContent).toContain("没有匹配的任务");
+    await act(async () => {
+      Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "完成选择")?.click();
+      Array.from(host?.querySelectorAll("button[aria-pressed]") ?? []).find((button) => button.textContent?.startsWith("退回"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(host?.textContent).toContain("没有符合筛选条件的任务");
+    await act(async () => {
+      Array.from(host?.querySelectorAll("button") ?? []).find((button) => button.textContent === "清除筛选")?.click();
+    });
+    expect(host?.querySelectorAll("article").length).toBe(2);
   });
 
   it("lets the planner add a task without writing it into the room", async () => {
@@ -434,20 +467,20 @@ describe("DevTeamTaskBoard", () => {
     await renderBoard("m-a");
     await act(async () => {
       await vi.waitFor(() => {
-        expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("开发工程师 A");
+        expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("工程师A · 开发工程师 A");
         expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeTruthy();
       });
     });
     expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
 
     await setSpeaker("");
-    expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("开发工程师 A");
+    expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("工程师A · 开发工程师 A");
     expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeTruthy();
 
     await setSpeaker("m-rev");
     await act(async () => {
       await vi.waitFor(() => {
-        expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("评审员");
+        expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("评审员 · 评审员");
       });
     });
     expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeNull();
