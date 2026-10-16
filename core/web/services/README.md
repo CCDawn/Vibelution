@@ -32,8 +32,8 @@
 
 ## 统计
 
-- Facade `*_service.py`：**89**
-- 有 pack README：**7**
+- Facade `*_service.py`：**90**
+- 有 pack README：**8**
 - 仅单文件 facade：**82**
 
 ## Domain 速查
@@ -41,7 +41,7 @@
 | Domain | Facades |
 | --- | ---: |
 | Session / Chat hot path (`session`) | 2 |
-| Team workflow / SC / experiment (`team_workflow`) | 1 |
+| Team workflow / SC / experiment (`team_workflow`) | 2 |
 | Team registry / canvas (`team`) | 3 |
 | Agent directory / config (`agent`) | 24 |
 | Chat room / conversation index (`chat`) | 3 |
@@ -75,6 +75,7 @@
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
+| `generic_team_workflow_service.py` | User-defined sequential workflows with native Session execution. | `team_workflow/generic/` | `generic_team_workflows.py` | `test_generic_team_workflows.py` |
 | `team_workflow_orchestration_service.py` | Team workflow orchestration and candidate-store service. | `team_workflow/` | `team_workflows/_models.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/experiment.py`, `team_workflows/knowledge.py`, `team_workflows/orchestration.py` | `test_candidate_session_read_gate.py`, `test_source_collection_writeback_recovery.py`, `test_evidence_relation_feedback.py` |
 
 ## Team registry / canvas
