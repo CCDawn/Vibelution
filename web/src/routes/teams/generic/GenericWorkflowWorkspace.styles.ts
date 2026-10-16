@@ -6,7 +6,7 @@ const styles = {
   heading1: "text-sm font-semibold text-[var(--fg-primary)]",
   grid1: "grid min-w-0 gap-2",
   caption1: "text-xs font-medium text-[var(--fg-secondary)]",
-  column1: "flex h-full min-h-0 flex-col",
+  column1: "generic-team-workspace flex h-full min-h-0 flex-col",
   control1: "border-b border-black/5 px-5 py-4",
   caption2: "mb-1 text-xs",
   heading2: "text-base font-semibold",
