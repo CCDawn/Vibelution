@@ -1,14 +1,13 @@
 import { Activity, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { ArrowUpRight, GitBranch, ListTodo, MessageSquare, MoreHorizontal, PanelRight, Play, Square, X } from "lucide-react";
+import { ArrowUpRight, GitBranch, ListTodo, MessageSquare, Play, Square } from "lucide-react";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { AgentInstance, ChatRoomDetail, ChatRoomMessage, ChatRoomRound, Team } from "../../api/types";
 import {
   VButton,
   VConfirmDialog,
-  VDialog,
   VPopover,
   VTabs,
   VRouteLinkButton,
@@ -61,7 +60,7 @@ export type TeamHomeSurfaceProps = {
   onOpenOrganization: () => void;
   conversationRequested?: boolean;
   agentsById?: ReadonlyMap<string, Partial<AgentInstance>>;
-  workspace?: { navigation: ReactNode; teamSwitcher: ReactNode; toolbar: ReactNode; canvas: ReactNode; inspector: ReactNode; selectionRevision?: number; resize: TeamWorkspaceFrameProps["resize"] };
+  workspace?: { navigation: ReactNode; teamSwitcher: ReactNode; toolbar: ReactNode; canvas: ReactNode; inspector: ReactNode; memberActions?: ReactNode; records?: ReactNode; recordActions?: ReactNode; canvasDetails?: ReactNode; canvasActions?: ReactNode; selectionRevision?: number; resize: TeamWorkspaceFrameProps["resize"] };
 };
 
 const roundStateCopy: Record<string, { zh: string; en: string; tone: "neutral" | "accent" | "success" | "warning" | "danger" }> = {
@@ -214,10 +213,15 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [roundActionsOpen, setRoundActionsOpen] = useState(false);
+  const [operationsNarrow, setOperationsNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 980);
+  useEffect(() => {
+    const update = () => { setOperationsNarrow(window.innerWidth < 980); setInspectorOpen(false); };
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
   const ownedSelection = searchParams.get("teamConversationTeamId") === teamId;
   const requestedView = ownedSelection ? searchParams.get("teamView") : null;
-  const homeView = requestedView === "tasks" || requestedView === "canvas" ? requestedView
+  const homeView = requestedView === "tasks" || requestedView === "canvas" || requestedView === "records" ? requestedView
     : requestedView === "discussion" ? "discussion"
       : ownedSelection && searchParams.get("teamConversation") === "canvas" ? "canvas" : "discussion";
   const memberConversation = ownedSelection && searchParams.get("teamConversation") === "member";
@@ -255,9 +259,6 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   useEffect(() => {
     if (props.workspace?.selectionRevision) setInspectorOpen(true);
   }, [props.workspace?.selectionRevision]);
-  useEffect(() => {
-    if (linkedRoomBusy) setRoundActionsOpen(false);
-  }, [linkedRoomBusy]);
   useEffect(() => { setNavigationOpen(false); }, [searchParams]);
   const stopTriggerRef = useRef<HTMLButtonElement | null>(null);
   const lastRoomRevisionRef = useRef<{ roomId: string; revision: string } | null>(null);
@@ -395,10 +396,11 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
         </div>
   </div>;
   const roundActions = <aside className={styles.actionRail}>
-          <section aria-labelledby="team-home-round-action">
-            <h3 id="team-home-round-action" className={styles.sectionTitle}>
-              {linkedRoomBusy ? (lang === "zh" ? "本轮正在运行" : "Round in progress") : (lang === "zh" ? "开始下一轮" : "Start next round")}
-            </h3>
+          <section aria-label={lang === "zh" ? "轮次操作" : "Round actions"}>
+            <div className={styles.operationsHeading}>
+              <h3 className={styles.sectionTitle}>{lang === "zh" ? "本轮目标" : "Round goal"}</h3>
+              <RoundStatus status={currentStatus} lang={lang} />
+            </div>
 
             {!linkedChatRoomId ? (
               <div className={styles.spaceAbove}>
@@ -463,56 +465,47 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
     : linkedChatRoomPending ? <VStateSurface tone="loading" title={lang === "zh" ? "正在读取关联会话" : "Loading linked conversation"} skeletonLines={3} />
       : memberConversation ? <VStateSurface tone="error" title={lang === "zh" ? "成员会话尚不可用" : "Member session unavailable"}>{lang === "zh" ? "请刷新团队或同步群聊后再打开。" : "Refresh the team or sync its room."}</VStateSurface>
         : <div className={styles.viewScroll}>{conversation}</div>;
-  const taskBody = selectedTeam?.teamTemplateId === "dev-team" ? <DevTeamTaskBoard
-    lang={lang} teamId={teamId} members={selectedTeam.members}
-    speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members, linkedRoomDetail)} />
-    : <section className={styles.roundTask} aria-label={lang === "zh" ? "本轮任务" : "Round task"}>
-      <h3 className={styles.sectionTitle}>{currentTitle}</h3>
-      <RoundStatus status={currentStatus} lang={lang} />
-      <p className={styles.actionCopy}>{currentSummary || (lang === "zh" ? "在讨论中跟进成员输出；团队轮次状态与任务完成情况分别记录。" : "Follow member output in Discussion; round status and task completion are tracked separately.")}</p>
-      <VButton variant="secondary" onClick={() => openHomeView("discussion")}>{lang === "zh" ? "查看团队讨论" : "View discussion"}</VButton>
-    </section>;
-  const selectedMemberDetails = memberConversation && selectedMember && homeView === "discussion" ? <section className={styles.memberInspector}>
-    <h3 className={styles.inspectorHeading}>{selectedMemberDisplay?.name}</h3><p>{selectedMemberDisplay?.role}</p><p className={styles.inspectorQuiet}>{selectedMember.purpose}</p>
-  </section> : null;
+  const fallbackTaskBody = <section className={styles.roundTask} aria-label={lang === "zh" ? "本轮任务" : "Round task"}>
+    <h3 className={styles.sectionTitle}>{currentTitle}</h3><RoundStatus status={currentStatus} lang={lang} />
+    <p className={styles.actionCopy}>{currentSummary || (lang === "zh" ? "在讨论中跟进成员输出；团队轮次状态与任务完成情况分别记录。" : "Follow member output in Discussion; round status and task completion are tracked separately.")}</p>
+  </section>;
+  const selectedMemberDetails = memberConversation && selectedMember ? <p className={styles.memberSummary}>
+    <strong>{selectedMemberDisplay?.role}</strong><span>{selectedMember.purpose}</span>
+  </p> : null;
+  const renderWorkspace = ({ display, operations }: { display: ReactNode; operations: ReactNode }) => {
   const workspaceBody = <div className={styles.workspaceBody}>
-    <section className={styles.roundBanner} aria-label={lang === "zh" ? "当前轮次" : "Current round"}>
-      <div className={styles.bannerCopy}><p className={styles.eyebrow}>{lang === "zh" ? "本轮目标" : "Round goal"}</p><h3 className={styles.bannerTitle}>{currentTitle}</h3></div>
-      <div className={styles.bannerActions}><RoundStatus status={currentStatus} lang={lang} />
-        {linkedRoomBusy ? <VButton ref={stopTriggerRef} variant="secondary" density="compact" icon={<Square size={14} aria-hidden="true" />}
-          aria-label={lang === "zh" ? "停止当前团队讨论" : "Stop current team round"}
-          isPending={stopRoundPending} isDisabled={stopRoundPending || linkedRoomDetail?.status === "stopping"} onPress={stopRound}>
-          {lang === "zh" ? "停止本轮" : "Stop round"}</VButton>
-          : <VButton density="compact" icon={<Play size={14} aria-hidden="true" />} onClick={() => setRoundActionsOpen(true)} isPending={startRoundPending}>
-            {lang === "zh" ? linkedChatRoomId ? "开始新一轮" : "同步群聊" : linkedChatRoomId ? "Start round" : "Sync room"}</VButton>}
-      </div>
-    </section>
-    {stopRoundError ? <p role="alert" className={styles.bannerError}>{stopRoundError.message}</p> : null}
     <VTabs aria-label={lang === "zh" ? "团队工作视图" : "Team workspace views"} value={homeView} onValueChange={openHomeView} keepPanelsMounted
       className={styles.mainTabs} listClassName={styles.mainTabList} triggerClassName={styles.mainTabTrigger} contentClassName={styles.mainTabContent}
       items={[
-        { id: "discussion", label: <><MessageSquare size={15} aria-hidden="true" />{lang === "zh" ? "讨论" : "Discussion"}</>, content: <Activity mode={homeView === "discussion" ? "visible" : "hidden"}>{nativeBody}</Activity> },
-        { id: "tasks", label: <><ListTodo size={15} aria-hidden="true" />{lang === "zh" ? "任务" : "Tasks"}</>, content: <div className={styles.viewScroll}>{taskBody}</div> },
-        { id: "canvas", label: <><GitBranch size={15} aria-hidden="true" />{lang === "zh" ? "画布" : "Canvas"}</>, content: props.workspace?.canvas },
+        { id: "discussion", label: <><MessageSquare size={15} aria-hidden="true" />{lang === "zh" ? "讨论" : "Discussion"}</>, content: <Activity mode={homeView === "discussion" ? "visible" : "hidden"}><div className={styles.discussionBody}>{selectedMemberDetails}{nativeBody}</div></Activity> },
+        { id: "tasks", label: <><ListTodo size={15} aria-hidden="true" />{lang === "zh" ? "任务" : "Tasks"}</>, content: <div className={styles.viewScroll}>{display}</div> },
+        { id: "records", label: lang === "zh" ? "记录" : "Records", content: <div className={styles.viewScroll}>{props.workspace?.records}</div> },
+        { id: "canvas", label: <><GitBranch size={15} aria-hidden="true" />{lang === "zh" ? "画布" : "Canvas"}</>, content: <div className={styles.canvasDisplay}>{props.workspace?.canvas}
+          {Boolean(props.workspace?.selectionRevision) && props.workspace?.canvasDetails ? <div className={styles.canvasDetails}>{props.workspace.canvasDetails}</div> : null}
+        </div> },
       ]} />
+  </div>;
+  const personOperations = Boolean((selectedMember && homeView === "discussion") || homeView === "canvas");
+  const operationsPane = <div className={styles.operationsPane}>
+    {roundActions}
+    <div className={homeView === "records" || personOperations ? "hidden" : styles.taskOperations}>{operations}</div>
+    {personOperations ? <section className={styles.memberOperations}>{props.workspace?.memberActions}{homeView === "canvas" ? props.workspace?.canvasActions : null}</section> : null}
+    {homeView === "records" ? <section className={styles.memberOperations}>{props.workspace?.recordActions}</section> : null}
+    <div className={styles.teamTools}><VPopover align="end" aria-label={lang === "zh" ? "更多团队操作" : "More team actions"}
+      trigger={<VButton variant="ghost">{lang === "zh" ? "更多团队操作" : "More team actions"}</VButton>}>
+      <div className={styles.moreActions}>{roomLink ? <VRouteLinkButton to={roomLink} variant="ghost">{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null}{props.workspace?.toolbar}</div>
+    </VPopover></div>
   </div>;
   return <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
     <TeamWorkspaceFrame title={props.workspace ? homeView === "discussion" ? selectedMember ? `${selectedMemberDisplay?.name} · ${lang === "zh" ? "对话" : "Conversation"}` : lang === "zh" ? "团队讨论" : "Team discussion" : selectedTeam?.name || (lang === "zh" ? "团队工作台" : "Team workspace") : lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
       layoutId={WORKBENCH_LAYOUT_IDS.teams} resize={props.workspace?.resize}
-      responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation", open: navigationOpen, onOpenChange: setNavigationOpen }, inspector: { label: lang === "zh" ? "成员与记录" : "Members and records", narrowPlacement: "bottom", open: inspectorOpen, onOpenChange: setInspectorOpen } }}
+      responsive={{ enabled: Boolean(props.workspace) && operationsNarrow, rail: { label: lang === "zh" ? "团队导航" : "Team navigation", open: navigationOpen, onOpenChange: setNavigationOpen }, inspector: { label: lang === "zh" ? "操作" : "Operations", narrowPlacement: "side", open: inspectorOpen, onOpenChange: setInspectorOpen } }}
       ariaLabel={selectedTeam?.name || (lang === "zh" ? "团队主页" : "Team home")}
       railTitle={props.workspace?.teamSwitcher} rail={props.workspace?.navigation}
-      inspectorTitle={props.workspace ? selectedMemberDetails ? lang === "zh" ? "成员详情" : "Member details" : lang === "zh" ? "成员与记录" : "Members and records" : lang === "zh" ? "本轮操作" : "Round actions"}
-      inspectorActions={props.workspace ? <VButton density="compact" variant="ghost" aria-label={lang === "zh" ? "关闭详情" : "Close details"} icon={<X size={15} />} onClick={() => setInspectorOpen(false)} /> : undefined}
+      inspectorTitle={lang === "zh" ? "操作" : "Operations"} inspectorScroll={!props.workspace} inspectorHeaderHidden={Boolean(props.workspace) && operationsNarrow}
       mainScroll={!props.workspace} canvas={props.workspace ? workspaceBody : conversation}
-      inspector={props.workspace ? inspectorOpen ? selectedMemberDetails ?? props.workspace.inspector : undefined : roundActions}
-      toolbar={props.workspace ? <>
-        <VButton density="compact" variant="ghost" icon={<PanelRight size={15} aria-hidden="true" />} aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{lang === "zh" ? "详情" : "Details"}</VButton>
-        <VPopover aria-label={lang === "zh" ? "团队操作" : "Team actions"} align="end" trigger={<VButton density="compact" variant="ghost" aria-label={lang === "zh" ? "更多团队操作" : "More team actions"} icon={<MoreHorizontal size={16} />} />}>
-          <div className={styles.moreActions}>{roomLink ? <VRouteLinkButton to={roomLink} variant="ghost">{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null}{props.workspace.toolbar}</div>
-        </VPopover>
-      </> : roomLink ? <VRouteLinkButton to={roomLink} variant="secondary">{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null} />
-    <VDialog open={roundActionsOpen} onOpenChange={setRoundActionsOpen} title={lang === "zh" ? "团队轮次" : "Team round"}>{roundActions}</VDialog>
+      inspector={props.workspace ? operationsPane : roundActions}
+      toolbar={!props.workspace && roomLink ? <VRouteLinkButton to={roomLink} variant="secondary">{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : undefined} />
     <VConfirmDialog
         open={confirmStopOpen}
         onOpenChange={setConfirmStopOpen}
@@ -526,4 +519,10 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
         onConfirm={confirmStopRound}
       />
   </div>;
+  };
+  return props.workspace && selectedTeam?.teamTemplateId === "dev-team" ? <DevTeamTaskBoard
+    key={teamId} lang={lang} teamId={teamId} members={selectedTeam.members}
+    speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members, linkedRoomDetail)}
+    selectionRevision={`${props.workspace.selectionRevision ?? 0}|${selectedMember?.memberId ?? ""}`} onSelectTask={() => setInspectorOpen(true)}
+    renderWorkspace={renderWorkspace} /> : renderWorkspace({display: fallbackTaskBody, operations: null});
 }

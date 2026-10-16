@@ -21,6 +21,7 @@ from core.web.services import runtime_scene_service
 
 from . import service as launcher_service
 from .api_contract import (
+    BranchInstanceCleanupMergePayload,
     BranchInstanceCleanupPayload,
     DesktopActionClaimPayload,
     DesktopActionResultPayload,
@@ -125,6 +126,13 @@ def launcher_branch_instances(cleanupMetadata: bool = False) -> dict:
         return launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
     return launcher_service.list_launcher_branch_instances()
 
+
+
+@router.post("/api/launcher/branch-instances/cleanup-metadata")
+def launcher_branch_instances_cleanup_metadata(payload: BranchInstanceCleanupMergePayload) -> dict:
+    return launcher_service.lookup_launcher_cleanup_merge(
+        [item.model_dump() for item in payload.items]
+    )
 
 
 @router.post("/api/launcher/branch-instances/cleanup")

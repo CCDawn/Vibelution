@@ -8,7 +8,7 @@ import { fetchPlatformKnowledgeGraph, fetchPlatformKnowledgeGraphNodeDetail } fr
 import { PlatformKnowledgeGraphWorkbench } from "./PlatformKnowledgeGraphWorkbench";
 import { VuiProvider } from "../../components/vui";
 vi.mock("../../api/memory", () => ({ fetchPlatformKnowledgeGraph: vi.fn(), fetchPlatformKnowledgeGraphNodeDetail: vi.fn(), platformKnowledgeGraphKeys: { overview: (limit: number) => ["platform", limit], detail: (id: string) => ["platform-detail", id] } }));
-vi.mock("../../components/vui/product/memory/VMemoryGraphCanvas", () => ({ VMemoryGraphCanvas: ({ nodes, edges, onSelectNode }: { nodes: MemoryKnowledgeGraphNode[]; edges: MemoryKnowledgeGraphEdge[]; onSelectNode: (id: string) => void }) => <div data-testid="canvas" data-edges={edges.map(edge => edge.type).join(",")}>{nodes.map(node => <button key={node.id} onClick={() => onSelectNode(node.id)}>{node.label}</button>)}</div> }));
+vi.mock("../../components/vui/product/memory/VMemoryGraphCanvas", () => ({ VMemoryGraphCanvas: ({ nodes, edges, onSelectNode, appearance, mode }: { nodes: MemoryKnowledgeGraphNode[]; edges: MemoryKnowledgeGraphEdge[]; onSelectNode: (id: string) => void; appearance?: string; mode?: string }) => <div data-testid="canvas" data-appearance={appearance} data-mode={mode} data-edges={edges.map(edge => edge.type).join(",")}>{nodes.map(node => <button key={node.id} onClick={() => onSelectNode(node.id)}>{node.label}</button>)}</div> }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const node = (id: string, type: string): MemoryKnowledgeGraphNode => ({ id, type, label: id, summary: "", status: "active", createdAt: "", updatedAt: "", metadata: { topicId: "t" }, visual: {}, responsibilityQuestion: "", contentItems: [], childNodeIds: [] });
 const item = node("正式条目", "knowledge_item");
@@ -18,6 +18,27 @@ let root: ReturnType<typeof createRoot> | undefined;
 let host: HTMLDivElement | undefined;
 let client: QueryClient | undefined;
 afterEach(async () => { await act(async () => root?.unmount()); client?.clear(); host?.remove(); vi.clearAllMocks(); });
+it("defaults to real spatial records and sources, keeps source context optional and preserves the relation view", async () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1600 });
+  vi.mocked(fetchPlatformKnowledgeGraph).mockResolvedValue({ nodes: [item, source], edges: [extraEdge], topics: [{ id: "t", label: "主题", nodeIds: [item.id], groupingBasis: "tag" }], summary: { nodeCount: 2, totalNodeCount: 2 }, operatingBoundary: {} } as unknown as PlatformKnowledgeGraphPayload);
+  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await act(async () => root!.render(<QueryClientProvider client={client!}><VuiProvider><PlatformKnowledgeGraphWorkbench onAgentView={() => {}} /></VuiProvider></QueryClientProvider>));
+  const flush = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); }); };
+  await flush();
+  expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-appearance")).toBe("cosmos");
+  expect(host.querySelector('[data-testid="canvas"]')?.textContent).toContain(item.label);
+  expect(host.querySelector('[data-testid="canvas"]')?.textContent).toContain(source.label);
+  expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-edges")).toBe(extraEdge.type);
+  const sourceToggle = [...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(input => input.closest("label")?.textContent?.includes("来源连线"))!;
+  await act(async () => sourceToggle.click()); await flush();
+  expect(host.querySelector('[data-testid="canvas"]')?.textContent).not.toContain(source.label);
+  expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-edges")).toBe("");
+  const relationView = [...host.querySelectorAll("button")].find(button => button.textContent === "关系图")!;
+  await act(async () => relationView.click()); await flush();
+  expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-mode")).toBe("relations");
+  expect(host.querySelector('[data-testid="canvas"]')?.hasAttribute("data-appearance")).toBe(false);
+});
 it("opens a detail-only relation and its shared source without losing the topic context", async () => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1600 });
   vi.mocked(fetchPlatformKnowledgeGraph).mockResolvedValue({ nodes: [item], edges: [], topics: [{ id: "t", label: "主题", nodeIds: [item.id], groupingBasis: "tag" }], summary: { nodeCount: 1, totalNodeCount: 10, truncated: true }, operatingBoundary: {} } as unknown as PlatformKnowledgeGraphPayload);

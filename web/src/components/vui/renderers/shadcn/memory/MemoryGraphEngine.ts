@@ -16,6 +16,8 @@ import {
 } from "./memoryGraphLabels";
 import { nebulaMaterial } from "./NebulaField";
 import { createMemoryGraphBatches } from "./MemoryGraphBatches";
+import { createMemoryGraphCosmosBatches } from "./MemoryGraphCosmosBatches";
+import { createMemoryGraphCosmosLabelElements, positionMemoryGraphCosmosLabels } from "./memoryGraphCosmosLabels";
 import { memoryGraphClusterSeed } from "../../../product/memory/memoryGraphModel";
 import { memoryGraphRendererStyles as styles } from "./memoryGraphRenderer.styles";
 
@@ -37,6 +39,8 @@ export type MemoryGraphEngine = {
   refreshTheme: () => void;
   updateLabels: (visible: boolean) => void;
   focus: (id: string) => void;
+  setView: (view: "side" | "top") => void;
+  setOrbit: (enabled: boolean) => void;
   dispose: () => void;
 };
 
@@ -56,6 +60,8 @@ export type CreateMemoryGraphEngineOptions = {
   onSelectEdge: (id: string) => void;
   canSelectEdge: () => boolean;
   onFailure: (reason?: unknown) => void;
+  appearance?: "cosmos";
+  onOrbitChange?: (enabled: boolean) => void;
 };
 
 type MemoryGraphRuntimeScope = {
@@ -151,6 +157,7 @@ function readTheme(
   THREE: ThreeApi,
   host: HTMLElement,
   clusters: readonly MemoryGraphCluster[],
+  cosmos = false,
 ): MemoryGraphTheme {
   const computed = window.getComputedStyle(host);
   const surface = opaqueCssColor(
@@ -173,7 +180,10 @@ function readTheme(
     const color = cluster.key.startsWith("topic:")
       ? new THREE.Color().setHSL((memoryGraphClusterSeed(cluster.key) % 360) / 360, 0.32, 0.68)
       : new THREE.Color(MUTED_CLUSTER_COLORS[cluster.key] ?? MUTED_CLUSTER_COLORS.operations!);
-    if (lightSurface) color.multiplyScalar(0.58);
+    if (cosmos) {
+      const palette = [0xb4c0ee, 0x91cdd7, 0xaec9b6, 0xa2bced, 0xd7c3a4, 0xc3b5d5, 0xa0c8c1, 0xd4c7aa, 0xadbfd8, 0xcebac3];
+      color.setHex(palette[memoryGraphClusterSeed(cluster.key) % palette.length]);
+    } else if (lightSurface) color.multiplyScalar(0.58);
     clusterColors.set(cluster.key, color.getHex());
   }
   return {
@@ -181,8 +191,8 @@ function readTheme(
     // Relations are graph content, not panel borders. Foreground tokens retain
     // contrast when the workbench switches to pale, opaque border colors.
     edgeColor: cssColor(THREE, host, "--fg-secondary", "rgb(98, 110, 128)"),
-    selectedColor: cssColor(THREE, host, "--accent-cool", "#0a84ff"),
-    lightSurface,
+    selectedColor: cosmos ? 0xc4d3ed : cssColor(THREE, host, "--accent-cool", "#0a84ff"),
+    lightSurface: cosmos ? false : lightSurface,
   };
 }
 function getNodeScale(node: MemoryKnowledgeGraphNode): number {
@@ -249,6 +259,8 @@ function initializeMemoryGraphEngine(
     onSelectEdge,
     canSelectEdge,
   } = options;
+  const cosmos = options.appearance === "cosmos";
+  const root = host.parentElement!;
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -318,7 +330,7 @@ function initializeMemoryGraphEngine(
   );
   const initialDistance = planarFitDistance + contentDepth * 0.5;
   let overviewDistance = initialDistance;
-  const perspectiveDirection = new THREE.Vector3(0.32, 0.22, 1).normalize();
+  const perspectiveDirection = new THREE.Vector3(cosmos ? 0.16 : 0.32, cosmos ? 0.1 : 0.22, 1).normalize();
   const initialCameraPosition = initialTarget.clone().add(perspectiveDirection.clone().multiplyScalar(overviewDistance));
   const flatOverviewPosition = initialTarget.clone().add(new THREE.Vector3(0, 0, overviewDistance));
   camera.position.copy(options.flat ? flatOverviewPosition : initialCameraPosition);
@@ -346,9 +358,9 @@ function initializeMemoryGraphEngine(
   controls.rotateSpeed = 0.58;
   controls.panSpeed = 0.82;
   controls.zoomSpeed = 0.78;
-  controls.minDistance = 5;
+  controls.minDistance = cosmos ? 3 : 5;
   controls.maxDistance = Math.max(42, overviewDistance * 2.35);
-  camera.far = Math.max(220, controls.maxDistance + graphRadius * 1.5 + 10);
+  camera.far = Math.max(cosmos ? 420 : 220, controls.maxDistance + graphRadius * 1.5 + 10);
   camera.updateProjectionMatrix();
   controls.minPolarAngle = 0.04;
   controls.maxPolarAngle = Math.PI - 0.04;
@@ -393,7 +405,7 @@ function initializeMemoryGraphEngine(
     return material;
   };
 
-  const theme = readTheme(THREE, host, clusters);
+  const theme = readTheme(THREE, host, clusters, cosmos);
   const clusterMaterials = new Map<MemoryGraphClusterKey, {
     nebula: import("three").ShaderMaterial;
     dust: import("three").PointsMaterial;
@@ -408,7 +420,7 @@ function initializeMemoryGraphEngine(
     adjacency.degree.clear();
   });
   runtime.addCleanup(() => labelLayer.replaceChildren());
-  const labelElements: MemoryGraphLabelElements = createMemoryGraphLabelElements(
+  const labelElements: MemoryGraphLabelElements = (cosmos ? createMemoryGraphCosmosLabelElements : createMemoryGraphLabelElements)(
     labelLayer,
     nodes,
     edges,
@@ -444,10 +456,16 @@ function initializeMemoryGraphEngine(
   let savedPerspective: { position: Vector3; target: Vector3 } | null = null;
   let pointerStart: { x: number; y: number } | null = null;
   let reducedMotion = isReducedMotion();
+  let autoOrbit = false;
+  let cameraMoving = false;
+  let cameraSignature = "";
+  let cameraSettleTimer = 0;
+  let gesture: { x: number; y: number; dragged: boolean } | null = null;
+  runtime.addCleanup(() => window.clearTimeout(cameraSettleTimer));
 
   for (const [index, cluster] of clusters.entries()) {
     const members = nodes.filter((node) => node.clusterKey === cluster.key);
-    if (!members.length || options.flat) continue;
+    if (!members.length || options.flat || cosmos) continue;
     const clusterColor = theme.clusterColors.get(cluster.key) ?? theme.selectedColor;
     const center = new THREE.Vector3(cluster.center.x, cluster.center.y, cluster.center.z);
     const radius = Math.max(
@@ -502,15 +520,16 @@ function initializeMemoryGraphEngine(
     if (!start || !end) continue;
 
     const middle = start.clone().add(end).multiplyScalar(0.5);
-    if (!options.flat) middle.z += 0.22 + Math.min(0.32, start.distanceTo(end) * 0.02);
+    if (!options.flat && !cosmos) middle.z += 0.22 + Math.min(0.32, start.distanceTo(end) * 0.02);
     const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
     edgePaths.push({ edge, curve });
   }
 
-  const batches = createMemoryGraphBatches({
+  const batches = (cosmos ? createMemoryGraphCosmosBatches : createMemoryGraphBatches)({
     THREE, scene, nodes, edgePaths, theme,
     createNodeGeometry: (node) => createNodeGeometry(THREE, node),
     getNodeScale, disposeGeometry, disposeMaterial,
+    compact: host.clientWidth < 600, pixelRatio: renderer.getPixelRatio(),
   });
   runtime.addCleanup(() => batches.dispose());
   const hitObjects = batches.hits;
@@ -545,7 +564,7 @@ function initializeMemoryGraphEngine(
 
   function refreshTheme() {
     if (runtime.disposed) return;
-    const next = readTheme(THREE, host, clusters);
+    const next = readTheme(THREE, host, clusters, cosmos);
     theme.clusterColors.clear();
     for (const [key, color] of next.clusterColors) theme.clusterColors.set(key, color);
     theme.edgeColor = next.edgeColor;
@@ -576,7 +595,7 @@ function initializeMemoryGraphEngine(
       }
       controls.update();
       renderer.render(scene, camera);
-      positionMemoryGraphLabels({
+      (cosmos ? positionMemoryGraphCosmosLabels : positionMemoryGraphLabels)({
         host,
         labelLayer,
         camera,
@@ -594,19 +613,24 @@ function initializeMemoryGraphEngine(
         cameraTarget: controls.target,
         canSelectEdge,
         scratch,
+        moving: cameraMoving,
       });
-      if (focusAnimation) invalidate();
+      if (cosmos) {
+        root.dataset.cameraPosition = camera.position.toArray().map(value => value.toFixed(3)).join(",");
+        root.dataset.cameraTarget = controls.target.toArray().map(value => value.toFixed(3)).join(",");
+      }
+      if (focusAnimation || (autoOrbit && !document.hidden)) invalidate();
     } catch (error) {
       contextLost = true;
       runtime.fail(error);
     }
   }
 
-  function animateCamera(targetPosition: Vector3, distance?: number) {
+  function animateCamera(targetPosition: Vector3, distance?: number, viewDirection?: Vector3) {
     if (runtime.disposed) return;
     const fromPosition = camera.position.clone();
     const fromTarget = controls.target.clone();
-    const direction = camera.position.clone().sub(controls.target).normalize();
+    const direction = viewDirection?.clone() ?? camera.position.clone().sub(controls.target).normalize();
     const preferredDistance = distance ?? Math.min(18, Math.max(10, camera.position.distanceTo(controls.target)));
     const toTarget = targetPosition.clone();
     const toPosition = toTarget.clone().add(direction.multiplyScalar(preferredDistance));
@@ -630,6 +654,7 @@ function initializeMemoryGraphEngine(
   }
 
   function focus(id: string) {
+    setOrbit(false);
     if (!id) {
       animateCamera(initialTarget, overviewDistance);
       return;
@@ -638,9 +663,26 @@ function initializeMemoryGraphEngine(
     if (position) animateCamera(position);
   }
 
+  function setView(view: "side" | "top") {
+    setOrbit(false);
+    const direction = new THREE.Vector3(...(view === "side" ? [1, 0.18, 0.08] as const : [0.1, 1, 0.12] as const)).normalize();
+    const size = new THREE.Vector3(contentWidth, contentHeight, contentDepth + 5).length();
+    animateCamera(initialTarget, Math.max(12, size / (2 * tangent * Math.min(1, camera.aspect))), direction);
+  }
+
+  function setOrbit(enabled: boolean) {
+    autoOrbit = cosmos && !flatMode && enabled;
+    controls.autoRotate = autoOrbit && !document.hidden;
+    controls.autoRotateSpeed = 0.35;
+    if (autoOrbit) focusAnimation = null;
+    options.onOrbitChange?.(autoOrbit);
+    invalidate();
+  }
+
   function updateFlat(next: boolean) {
     if (runtime.disposed) return;
     if (flatMode === next) return;
+    setOrbit(false);
     const fromPosition = camera.position.clone();
     const fromTarget = controls.target.clone();
     let toPosition: Vector3;
@@ -698,7 +740,7 @@ function initializeMemoryGraphEngine(
     initialCameraPosition.copy(initialTarget).add(perspectiveDirection.clone().multiplyScalar(nextDistance));
     flatOverviewPosition.copy(initialTarget).add(new THREE.Vector3(0, 0, nextDistance));
     controls.maxDistance = Math.max(42, nextDistance * 2.35);
-    camera.far = Math.max(220, controls.maxDistance + graphRadius * 1.5 + 10);
+    camera.far = Math.max(cosmos ? 420 : 220, controls.maxDistance + graphRadius * 1.5 + 10);
     if (wasOverview && !focusAnimation) {
       camera.position.copy(flatMode ? flatOverviewPosition : initialCameraPosition);
       controls.target.copy(initialTarget);
@@ -747,6 +789,7 @@ function initializeMemoryGraphEngine(
   function onMotionPreferenceChange(event: MediaQueryListEvent) {
     if (runtime.disposed) return;
     reducedMotion = event.matches;
+    if (reducedMotion) setOrbit(false);
     controls.enableDamping = !reducedMotion;
     if (reducedMotion && focusAnimation) {
       camera.position.copy(focusAnimation.toPosition);
@@ -764,7 +807,29 @@ function initializeMemoryGraphEngine(
       runtime.fail(error);
     }
   };
-  const onControlsChange = () => invalidate();
+  const onControlsChange = () => {
+    if (cosmos) {
+      const signature = camera.position.toArray().concat(controls.target.toArray()).map(value => value.toFixed(4)).join(",");
+      if (signature !== cameraSignature) {
+        cameraSignature = signature; cameraMoving = true;
+        window.clearTimeout(cameraSettleTimer);
+        cameraSettleTimer = window.setTimeout(() => { cameraMoving = false; invalidate(); }, 180);
+      }
+    }
+    invalidate();
+  };
+  const onControlsStart = () => { focusAnimation = null; setOrbit(false); };
+  const onVisibility = () => { controls.autoRotate = autoOrbit && !document.hidden; if (!document.hidden) invalidate(); };
+  const onRootPointerDown = (event: PointerEvent) => {
+    gesture = { x: event.clientX, y: event.clientY, dragged: false };
+    if (!(event.target instanceof Element) || !event.target.closest("[data-orbit-toggle]")) { focusAnimation = null; setOrbit(false); }
+  };
+  const onRootPointerMove = (event: PointerEvent) => {
+    if (gesture && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 4) gesture.dragged = true;
+  };
+  const onRootClick = (event: MouseEvent) => {
+    if (event.detail > 0 && gesture?.dragged) { event.preventDefault(); event.stopImmediatePropagation(); }
+  };
   const onFontsLoaded = () => invalidate();
   const labelEvents = ["pointerover", "pointerout", "focusin", "focusout"] as const;
   const onResize = () => runSafely(resize);
@@ -779,6 +844,11 @@ function initializeMemoryGraphEngine(
   runtime.addCleanup(() => {
     window.removeEventListener("resize", onResize);
     controls.removeEventListener("change", onControlsChange);
+    controls.removeEventListener("start", onControlsStart);
+    document.removeEventListener("visibilitychange", onVisibility);
+    root.removeEventListener("pointerdown", onRootPointerDown, true);
+    root.removeEventListener("pointermove", onRootPointerMove, true);
+    root.removeEventListener("click", onRootClick, true);
     document.fonts?.removeEventListener("loadingdone", onFontsLoaded);
     for (const event of labelEvents) labelLayer.removeEventListener(event, onControlsChange);
     canvas.removeEventListener("pointerdown", onPointerDownSafely);
@@ -790,6 +860,13 @@ function initializeMemoryGraphEngine(
   });
 
   controls.addEventListener("change", onControlsChange);
+  if (cosmos) {
+    controls.addEventListener("start", onControlsStart);
+    document.addEventListener("visibilitychange", onVisibility);
+    root.addEventListener("pointerdown", onRootPointerDown, true);
+    root.addEventListener("pointermove", onRootPointerMove, true);
+    root.addEventListener("click", onRootClick, true);
+  }
   document.fonts?.addEventListener("loadingdone", onFontsLoaded);
   for (const event of labelEvents) labelLayer.addEventListener(event, onControlsChange);
   canvas.addEventListener("pointerdown", onPointerDownSafely);
@@ -817,6 +894,8 @@ function initializeMemoryGraphEngine(
     refreshTheme: guard(refreshTheme),
     updateLabels: guard(updateLabels),
     focus: guard(focus),
+    setView: guard(setView),
+    setOrbit: guard(setOrbit),
     dispose: runtime.dispose,
   };
 }

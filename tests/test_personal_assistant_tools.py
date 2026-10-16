@@ -139,7 +139,7 @@ def test_overview_tool_delegates_only_after_canonical_identity(
         "attention": [],
     }
     monkeypatch.setattr(
-        service, "get_platform_overview", lambda: calls.append(1) or payload
+        service, "get_platform_overview", lambda **_kwargs: calls.append(1) or payload
     )
     assert json.loads(tools.personal_assistant_overview_tool()) == {
         "ok": True,
@@ -336,9 +336,41 @@ def test_overview_registered_descriptor_has_no_mutation_or_approval():
             "_personal_assistant_overview_impl": tools.personal_assistant_overview_tool,
         },
     )
-    assert wrapper.args_schema.model_json_schema()["properties"] == {}
+    assert set(wrapper.args_schema.model_json_schema()["properties"]) == {"offset", "limit"}
     descriptor = tool_catalog.build_tool_descriptor(
         OVERVIEW, args_schema=wrapper.args_schema.model_json_schema()
     )
     assert descriptor.risk == "read" and descriptor.approval == "never"
     assert "read_only" in descriptor.capabilities
+
+
+def test_overview_supplies_native_turn_for_managed_stop(assistant_runtime, monkeypatch):
+    monkeypatch.setattr(directory, "list_agents", lambda **_kwargs: [directory.get_agent(assistant_runtime["agentId"])])
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [{"id": "worker-session", "agentId": "worker", "title": "工作", "status": "running"}])
+    monkeypatch.setattr(session_service, "_current_session_turn_id", lambda session_id: "native-worker-turn" if session_id == "worker-session" else "")
+    monkeypatch.setattr(service.pet_activity_service, "get_pet_activity", lambda: {"generatedAt": "test", "sessions": []})
+    calls = []
+    monkeypatch.setattr(session_service, "request_stop_session_turn", lambda session_id, **kwargs: calls.append((session_id, kwargs)) or {"id": session_id})
+    overview = json.loads(tools.personal_assistant_overview_tool())
+    target = overview["sessions"][0]
+    result = json.loads(tools.personal_assistant_manage_tool("session_stop", json.dumps({"session_id": target["id"], "turn_id": target["turnId"]})))
+    assert result["ok"] is True
+    assert calls == [("worker-session", {"expected_turn_id": "native-worker-turn"})]
+
+
+def test_stale_overview_turn_cannot_stop_a_new_turn(assistant_runtime, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    monkeypatch.setattr(session_service, "_get_session_turn_control", lambda _session_id: SimpleNamespace(turn_id="new-turn", request_stop=_forbid))
+    result = json.loads(tools.personal_assistant_manage_tool("session_stop", '{"session_id":"worker-session","turn_id":"old-turn"}'))
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+
+
+def test_agent_creation_reports_real_required_fields_without_creating(assistant_runtime, monkeypatch):
+    monkeypatch.setattr(session_service, "create_chat_session", _forbid)
+    result = json.loads(tools.personal_assistant_manage_tool("agent_create", '{"display_name":"新助手"}'))
+    assert result["ok"] is False
+    assert result["error"] == "invalid_input"
+    assert all(field in result["message"] for field in ("对话模型", "使用位置", "提示词"))

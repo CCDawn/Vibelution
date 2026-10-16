@@ -1044,6 +1044,32 @@ describe("ResearchRunLaunchPanel session draft", () => {
     expect(markup).not.toContain("三阶段合计");
   });
 
+  it("embeds the launch form without a repeated heading and retains its hypothesis action", async () => {
+    Object.assign(queryState.current, {
+      data: launchOptions({ questions: [launchQuestion("SCI-003")], experiments: [] }),
+    });
+    const onStartHypothesis = vi.fn();
+    const onSubmit = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ResearchRunLaunchPanel presentation="inline" teamId="team-1" busy={false}
+        initialQuestionId="SCI-003" onStartHypothesis={onStartHypothesis}
+        onSubmit={onSubmit} onCancel={() => undefined} />,
+    ));
+    expect(container.querySelector("h3")).toBeNull();
+    expect(container.querySelector('[aria-label="搜索 125 题"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="选择 125 题"]')).not.toBeNull();
+    const action = findButton(container, "开始假说研究");
+    expect(action?.disabled).toBe(false);
+    await act(async () => action!.click());
+    expect(onStartHypothesis).toHaveBeenCalledWith("SCI-003");
+    expect(onSubmit).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("tracks a new explicit deep-link question while the launch panel stays mounted", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     Object.assign(queryState.current, {

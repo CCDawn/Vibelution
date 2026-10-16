@@ -23,9 +23,13 @@ import {
   canRequestOpenInstance,
   instanceRuntimeState,
   instanceRuntimeStateLabel,
+  instanceProgressLabel,
   instanceVisibleStatusLabel,
+  resetInstanceProgressForTests,
   instanceStopLabel,
   isCleanupEligible,
+  deriveCleanupRisks,
+  overlayCleanupMergeStatus,
   overlayCleanupMetadata,
   paginateItems,
   pendingIntentToOperation,
@@ -213,7 +217,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("cleanupSelected");
     expect(panelSource).toContain("requestBranchInstanceCleanup");
     expect(panelSource).toContain("queryClient.invalidateQueries({ queryKey: [\"launcher\", \"branch-instances\"] })");
-    expect(panelSource).toContain("getLauncherBranchInstances({ cleanupMetadata: true })");
+    expect(panelSource).toContain("getLauncherCleanupMergeStatus(metadataTargets)");
+    expect(panelSource).toContain("branch-cleanup-merge");
+    expect(panelSource).not.toContain("getLauncherBranchInstances({ cleanupMetadata: true })");
     expect(panelSource).toContain("cleanupMutation");
     expect(panelSource).toContain("pendingIds");
     expect(panelSource).toContain("batchStopIds");
@@ -227,9 +233,12 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("batchStopItems.filter((item) => canStopInstance(item, pendingOperation))");
     expect(panelSource).not.toContain("confirmPending={lifecyclePending}");
     expect(panelSource).toContain("confirmDisabled={lifecyclePending || !items.some((item) => item.id === forceStopId && canForceStopInstance(item))}");
-    expect(panelSource).toContain("needsCleanupMetadata");
-    expect(panelSource).toContain("overlayCleanupMetadata");
+    expect(panelSource).toContain("metadataTargets");
+    expect(panelSource).toContain("overlayCleanupMergeStatus");
     expect(panelSource).toContain("waitingCleanupConfirmMetadata");
+    expect(panelSource).toContain("labels.cleanupMergeChecking");
+    expect(panelSource).toContain("launcherBranchDisplayName(item)");
+    expect(panelSource).not.toContain("labels.listLoadingTitle}</p>");
   });
 
   it("keeps cleanup selection in the active branch list without pagination", () => {
@@ -258,6 +267,16 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(row.cleanupEligible).toBe(true);
     expect(row.cleanupRisks).toEqual(["delete_unmerged"]);
     expect(overlayCleanupMetadata([base], null)).toEqual([base]);
+  });
+
+  it("applies merge flags onto the rows already on screen", () => {
+    const base = instance({ id: "worktree:task", dirty: true, alive: true, head: "abc1234", branch: "codex/task" });
+    const [row] = overlayCleanupMergeStatus(base ? [base] : [], [{ id: "worktree:task", mergedToMain: false }]);
+    expect(row.mergedToMain).toBe(false);
+    expect(row.dirty).toBe(true);
+    expect(row.cleanupRisks).toEqual(["discard_dirty", "stop_then_remove", "delete_unmerged"]);
+    expect(deriveCleanupRisks(instance({ kind: "retired", mergedToMain: false, branch: "codex/old", head: "abc1234" }))).toEqual([]);
+    expect(overlayCleanupMergeStatus([base], null)).toEqual([base]);
   });
 
   it("disables start and shows remaining cooldown time while admission is blocked", () => {
@@ -1005,7 +1024,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("const showRowStop = stoppable && !singleLifecycleButton");
     expect(panelSource).toContain("{inFlightStart ? (");
     expect(panelSource).toContain("onPress={() => askBatchStop([item.id], \"stop\")}");
-    expect(panelSource).toContain("{openLabel}");
+    expect(panelSource).toMatch(/\{inFlightStart \? \([\s\S]{0,900}?icon=\{stoppable \? <LoaderCircle[\s\S]{0,500}?\{labels\.stop\}/);
+    expect(panelSource).not.toMatch(/\{inFlightStart \? \([\s\S]{0,900}?\{openLabel\}/);
     expect(panelSource).not.toContain("{ id: \"stop\"");
     expect(panelSource).toContain("<VActionGroup");
     expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);
@@ -1069,7 +1089,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(
       instanceRuntimeState(building, { instanceId: "worktree:building", operation: "restart" as const })
     ).toBe("building");
-    // The status column still reads 构建中. The row button keeps its action label.
+    // The status column still reads 构建中. The row button says Stop.
     expect(instanceRuntimeStateLabel("building", true)).toBe("构建中");
     expect(instanceRuntimeStateLabel("building", false)).toBe("Building");
     expect(shouldHoldOpenClickGuard("building")).toBe(true);
@@ -1077,18 +1097,51 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStartInstance(building)).toBe(false);
     expect(groupBranchInstances([building]).running.map((item) => item.id)).toEqual(["worktree:building"]);
     expect(groupBranchInstances([building]).attention).toEqual([]);
-    // The primary control stays the original action. The spinner sits on it,
-    // and the long build explanation stays in the title.
+    // The one in-flight button spins and says Stop. The long build explanation stays in the title.
     expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
     expect(panelSource).toContain("{inFlightStart ? (");
-    expect(panelSource).toContain("icon={stoppable ? <LoaderCircle");
-    expect(panelSource).toContain("{openLabel}");
+    expect(panelSource).toMatch(/\{inFlightStart \? \([\s\S]{0,900}?icon=\{stoppable \? <LoaderCircle[\s\S]{0,500}?\{labels\.stop\}/);
     expect(panelSource).not.toContain("{startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}");
     expect(panelSource).toContain("stoppable ? `${labels.buildingHint} ${labels.cancelStartHint}` : labels.buildingHint");
     expect(panelSource).toContain("buildingHint: \"前端代码有更新，正在构建新版本，约需几分钟。\"");
     expect(panelSource).toContain("buildingHint: \"The frontend has updates and a new build is running. This takes a few minutes.\"");
     // Build state keeps the row out of attention and out of cleanup.
     expect(panelSource).toContain("disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy");
+  });
+
+  it("does not return to 正在启动 after the frontend build step", () => {
+    resetInstanceProgressForTests();
+    const id = "worktree:progress";
+    const closed = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "closed" },
+    });
+    const building = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "building", phase: "building" },
+    });
+    const starting = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "starting", phase: "opening" },
+    });
+    const pending = { instanceId: id, operation: "start" as const };
+    expect(instanceRuntimeState(closed, pending)).toBe("starting");
+    expect(instanceProgressLabel(closed, "starting", true)).toBe("构建中");
+    expect(instanceProgressLabel(building, "building", true)).toBe("构建中");
+    expect(instanceRuntimeState(starting, pending)).toBe("starting");
+    expect(instanceProgressLabel(starting, "starting", true)).toBe("正在打开");
+    expect(instanceProgressLabel(starting, "starting", false)).toBe("Opening");
+    const running = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "running" },
+    });
+    expect(instanceProgressLabel(running, "running", true)).toBe("正常运行");
+    const again = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "starting", phase: "opening" },
+    });
+    expect(instanceProgressLabel(again, "starting", true)).toBe("正在启动");
+    resetInstanceProgressForTests();
   });
 
   it("keeps the optimistic starting label for a starting payload with a start intent", () => {
@@ -1114,7 +1167,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(instanceVisibleStatusLabel(retired, "stopped", true)).toBe("已退役");
     expect(instanceVisibleStatusLabel(retired, "stopped", false)).toBe("Retired");
     expect(instanceVisibleStatusLabel(instance({ kind: "worktree" }), "stopped", true)).toBe("已停止");
-    expect(panelSource).toContain("instanceVisibleStatusLabel(item, state, zh)");
+    expect(panelSource).toContain("instanceProgressLabel(item, state, zh)");
+    expect(detailSource).toContain("instanceProgressLabel(item, state, zh)");
     expect(detailSource).toContain("instanceVisibleStatusLabel(item, state, zh)");
     expect(detailSource).not.toContain("instanceRuntimeStateLabel(state, zh)");
   });

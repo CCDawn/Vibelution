@@ -35,7 +35,7 @@ def _assistant():
     }
 
 
-def _overview():
+def _overview(**_kwargs):
     return {
         "generatedAt": "2026-10-14T00:00:00+00:00",
         "counts": {"agents": 1, "sessions": 1, "running": 1, "waiting": 0, "failed": 0},
@@ -49,8 +49,10 @@ def _overview():
                 "title": "当前任务",
                 "status": "running",
                 "currentPhase": "reading",
+                "turnId": "worker-turn",
             }
         ],
+        "pagination": {"offset": 0, "limit": 100, "nextOffset": None, "revision": "test-revision"},
         "attention": [
             {
                 "id": "attention-1",
@@ -159,6 +161,16 @@ def test_overview_route_returns_typed_safe_contract(client, monkeypatch):
     assert response.json() == _overview()
 
 
+def test_overview_route_passes_bounded_page_parameters(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(service, "get_platform_overview", lambda **kwargs: calls.append(kwargs) or _overview())
+    assert client.get("/api/personal-assistant/overview?offset=100&limit=25").status_code == 200
+    assert calls == [{"offset": 100, "limit": 25}]
+    for query in ("offset=-1", "limit=0", "limit=101", "offset=oops"):
+        assert client.get("/api/personal-assistant/overview?" + query).status_code == 422
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("corruption", ["count", "renderer", "setupStatus"])
 def test_response_models_reject_invalid_types_or_closed_values(
     personal_env, monkeypatch, corruption
@@ -171,7 +183,7 @@ def test_response_models_reject_invalid_types_or_closed_values(
     if corruption == "count":
         payload = _overview()
         payload["counts"]["running"] = "1"
-        monkeypatch.setattr(service, "get_platform_overview", lambda: payload)
+        monkeypatch.setattr(service, "get_platform_overview", lambda **_kwargs: payload)
         url = "/api/personal-assistant/overview"
     else:
         row = _assistant()

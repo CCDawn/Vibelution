@@ -279,15 +279,15 @@ describe("Launcher branch workspace interactions", () => {
           (node.textContent || "").includes("确认清理分支实例"),
         );
       await openRowCleanupDialog("codex/residue");
-      await waitForDialog(() => cleanupDialog()?.textContent?.includes("读取分支实例失败") === true);
+      await waitForDialog(() => cleanupDialog()?.textContent?.includes("暂时无法确认是否已合入 main") === true);
 
       // Merge status is the only warning before deleting an unmerged branch:
       // a failed read keeps confirm locked but must explain and offer retry.
-      expect(cleanupDialog()?.textContent).toContain("重试读取");
+      expect(cleanupDialog()?.textContent).toContain("重新确认");
       const confirmInError = findDialogConfirmButton(cleanupDialog());
       expect(confirmInError?.disabled).toBe(true);
 
-      await click(button("重试读取", cleanupDialog()!));
+      await click(button("重新确认", cleanupDialog()!));
       await waitForDialog(() => cleanupDialog()?.textContent?.includes("codex/residue") === true);
       const confirmAfterRetry = findDialogConfirmButton(cleanupDialog());
       expect(confirmAfterRetry?.disabled).toBe(false);
@@ -381,20 +381,21 @@ describe("Launcher branch workspace interactions", () => {
     expect(onStopMany).not.toHaveBeenCalled();
   });
 
-  it("keeps one pressable start button during a frontend build and stops from that button", async () => {
+  it("shows Stop on the only button during a frontend build", async () => {
     const building = instance({ id: "worktree:building", branch: "codex/building", state: "building", alive: false });
     await renderPanel([building], true);
 
     expect(host.textContent).toContain("构建中");
     expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "构建中")).toBe(false);
-    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "停止")).toBe(false);
+    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "启动工作台")).toBe(false);
     expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "正在启动")).toBe(false);
 
-    const openAction = button("启动工作台");
-    expect(openAction.disabled).toBe(false);
-    expect(openAction.title).toContain("前端代码有更新，正在构建新版本，约需几分钟。");
-    expect(openAction.title).toContain("再按一次停止这次启动。");
-    await click(openAction);
+    const stopAction = button("停止");
+    expect(stopAction.disabled).toBe(false);
+    expect(stopAction.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(stopAction.title).toContain("前端代码有更新，正在构建新版本，约需几分钟。");
+    expect(stopAction.title).toContain("停止这次尚未完成的启动。");
+    await click(stopAction);
     expect(onLifecycle).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("确认停止这些工作台");
     expect(button("停止", document.querySelector('[role="dialog"]')!).disabled).toBe(false);
@@ -403,18 +404,19 @@ describe("Launcher branch workspace interactions", () => {
     expect(onStopMany).toHaveBeenCalledWith([building.id]);
   });
 
-  it("keeps the original workbench button while a start is in flight", async () => {
+  it("shows Stop on the only button while a start is in flight", async () => {
     const starting = instance({ id: "worktree:starting", branch: "codex/starting", state: "starting", alive: false });
     await renderPanel([starting], true);
 
     expect(host.textContent).toContain("正在启动");
     expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "正在启动")).toBe(false);
-    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "停止")).toBe(false);
+    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "启动工作台")).toBe(false);
 
-    const openAction = button("启动工作台");
-    expect(openAction.disabled).toBe(false);
-    expect(openAction.title).toContain("再按一次停止这次启动。");
-    await click(openAction);
+    const stopAction = button("停止");
+    expect(stopAction.disabled).toBe(false);
+    expect(stopAction.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(stopAction.title).toContain("停止这次尚未完成的启动。");
+    await click(stopAction);
     expect(onLifecycle).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("确认停止这些工作台");
   });

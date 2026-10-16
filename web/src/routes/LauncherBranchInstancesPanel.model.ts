@@ -24,10 +24,7 @@ export function isCleanupEligible(item: LauncherBranchInstance): boolean {
   return item.kind !== "main" && !item.current && item.branch !== "main" && item.id !== "main";
 }
 
-export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
-  if (item.cleanupRisks && item.cleanupRisks.length > 0) {
-    return item.cleanupRisks;
-  }
+export function deriveCleanupRisks(item: LauncherBranchInstance): string[] {
   const risks: string[] = [];
   if (item.dirty) {
     risks.push("discard_dirty");
@@ -35,10 +32,18 @@ export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
   if (item.alive) {
     risks.push("stop_then_remove");
   }
-  if (item.mergedToMain === false) {
+  const hasLocalCommits = Boolean(String(item.head || "").trim() || String(item.branch || "").trim());
+  if (hasLocalCommits && item.mergedToMain === false && item.kind !== "retired") {
     risks.push("delete_unmerged");
   }
   return risks;
+}
+
+export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
+  if (item.cleanupRisks && item.cleanupRisks.length > 0) {
+    return item.cleanupRisks;
+  }
+  return deriveCleanupRisks(item);
 }
 
 export function cleanupRiskLabels(item: LauncherBranchInstance, isZh: boolean): string[] {
@@ -292,6 +297,23 @@ export type InstanceListFilters = {
   unmerged?: boolean;
 };
 
+export function overlayCleanupMergeStatus(
+  items: readonly LauncherBranchInstance[],
+  flags?: readonly { id: string; mergedToMain?: boolean }[] | null,
+): LauncherBranchInstance[] {
+  if (!flags?.length) {
+    return [...items];
+  }
+  const byId = new Map(flags.map((flag) => [flag.id, flag.mergedToMain]));
+  return items.map((item) => {
+    if (!byId.has(item.id)) {
+      return item;
+    }
+    const next = { ...item, mergedToMain: Boolean(byId.get(item.id)) };
+    return { ...next, cleanupRisks: deriveCleanupRisks(next) };
+  });
+}
+
 export function overlayCleanupMetadata(
   items: readonly LauncherBranchInstance[],
   annotated?: readonly LauncherBranchInstance[] | null,
@@ -490,6 +512,51 @@ export function instanceVisibleStatusLabel(
     return isZh ? "已退役" : "Retired";
   }
   return instanceRuntimeStateLabel(state, isZh);
+}
+
+const buildSeenByInstance = new Map<string, true>();
+
+export function resetInstanceProgressForTests(): void {
+  buildSeenByInstance.clear();
+}
+
+function sawFrontendBuild(instanceId: string, state: InstanceRuntimeState): boolean {
+  const id = String(instanceId || "");
+  const seen = buildSeenByInstance.has(id);
+  if (state === "building") {
+    if (id) {
+      buildSeenByInstance.set(id, true);
+    }
+    return true;
+  }
+  if (state !== "starting" && state !== "restarting") {
+    buildSeenByInstance.delete(id);
+  }
+  return seen;
+}
+
+/**
+ * One start moves forward. The click lands before the build gate reports, so
+ * that gap stays on 构建中 instead of flashing 正在启动. After the gate has
+ * been seen, the following start/restart does not return to 正在启动.
+ */
+export function instanceProgressLabel(
+  item: { id?: string | null; kind?: string | null; runtime?: { lifecycleState?: string | null } | null },
+  state: InstanceRuntimeState,
+  isZh: boolean,
+): string {
+  const sawBuild = sawFrontendBuild(String(item.id || ""), state);
+  const payload = String(item.runtime?.lifecycleState || "");
+  const beforeReportedStart = (state === "starting" || state === "restarting")
+    && payload !== "starting"
+    && payload !== "restarting";
+  if (state === "building" || beforeReportedStart) {
+    return instanceVisibleStatusLabel(item, "building", isZh);
+  }
+  if (sawBuild && (state === "starting" || state === "restarting")) {
+    return isZh ? "正在打开" : "Opening";
+  }
+  return instanceVisibleStatusLabel(item, state, isZh);
 }
 
 export function isOperableInstance(item: LauncherBranchInstance): boolean {

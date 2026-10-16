@@ -33,6 +33,12 @@ export type TeamsWorkbenchCanvasPageProps = {
   /** When true, canvas column uses full width (no node inspector). */
   hideInspector?: boolean;
   inspectorBody: ReactNode;
+  memberActions?: ReactNode;
+  canvasDetails?: ReactNode;
+  canvasActions?: ReactNode;
+  records?: ReactNode;
+  recordActions?: ReactNode;
+  memberActionsRevision?: number;
   selectedTeam: Team | null;
   selectedTeamReferenceName?: string;
   effectiveTeamId: string;
@@ -155,7 +161,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
   if (p.teamHome) {
     return <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => undefined}
       workspace={{ navigation: p.teamShellRail, teamSwitcher: p.teamSwitcher, toolbar: p.teamShellToolbar,
-        canvas: organizationCanvas, selectionRevision, inspector: p.inspectorBody, resize: p.teamsRailResize }} />;
+        canvas: organizationCanvas, selectionRevision: selectionRevision + (p.memberActionsRevision ?? 0), inspector: p.inspectorBody, canvasDetails: p.canvasDetails, canvasActions: p.canvasActions, memberActions: p.memberActions, records: p.records, recordActions: p.recordActions, resize: p.teamsRailResize }} />;
   }
   return <TeamsCanvasComposer className={p.styles.route} layoutId={TEAMS_LAYOUT_ID} resize={p.teamsRailResize}
     ariaLabel={p.selectedTeamContextTitle} title={p.lang === "zh" ? "组织画布" : "Organization canvas"}

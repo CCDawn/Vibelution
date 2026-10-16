@@ -443,3 +443,34 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
     emptyMembers: "还没有成员，在下方添加第一位成员。",
   };
 }
+
+/** Mirrors the backend guard: archived and workflow-managed system teams reject PATCH edits. */
+export function isReadOnlyTeam(team: Team): boolean {
+  if (team.status === "archived") {
+    return true;
+  }
+  // Backend-projected systemManaged is the behavior authority; the
+  // id/kind/source enumeration below is the legacy fallback for payloads
+  // that predate the flag. Research/knowledge/AI-search coverage is
+  // preserved on both paths.
+  if (team.systemManaged != null) {
+    return team.systemManaged;
+  }
+  return (
+    team.teamId === "research-team"
+    || team.teamId === "knowledge-expansion-team"
+    || team.teamId === "ai-search-team"
+    || team.teamId === "self-evolution-team"
+    || team.teamId === "supervised-evolution-team"
+    || team.teamKind === "research"
+    || team.teamKind === "knowledge_expansion"
+    || team.teamKind === "ai_search"
+    || team.teamKind === "self_evolution"
+    || team.teamKind === "supervised_evolution"
+    || team.teamSource === "research_organization"
+    || team.teamSource === "knowledge_expansion"
+    || team.teamSource === "ai_search"
+    || team.teamSource === "self_evolution"
+    || team.teamSource === "supervised_evolution"
+  );
+}

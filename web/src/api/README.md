@@ -114,3 +114,7 @@ If `fullStackApiBoundary.test.ts` times out in a wide parallel run, rerun that f
 3. Wire the route/hook to the named function; do not add `fetchJson` in `web/src/routes/`.
 4. Extend `<domain>.test.ts` (or add one) with raw-source assertions.
 5. Confirm `fullStackApiBoundary.test.ts` still passes with ledger `{}`.
+
+## User-defined team workflows
+
+`genericTeamWorkflows.ts` owns team-scoped definition, run, command and artifact transport; DTOs are in `types/genericTeamWorkflow.ts`, and exported `teamFlowKeys` includes team/run identity. Saving uses the definition's expected revision. Start requests carry the saved revision, values and a stable submission key; commands carry the run revision. Cache updates never replace a dirty draft with a background response. Existing research transports remain compatible.

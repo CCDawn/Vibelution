@@ -2008,6 +2008,13 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
             response = build_launcher_state_refresh(
                 electron_window_instance_ids=window_instance_ids,
             )
+        elif path == "branch-instances/cleanup-metadata" and method == "POST":
+            raw_items = body.get("items")
+            if not isinstance(raw_items, list):
+                raw_items = []
+            response = launcher_service.lookup_launcher_cleanup_merge(
+                [item for item in raw_items if isinstance(item, dict)]
+            )
         elif path == "branch-instances/cleanup" and method == "POST":
             instance_ids = body.get("instanceIds")
             if not isinstance(instance_ids, list):

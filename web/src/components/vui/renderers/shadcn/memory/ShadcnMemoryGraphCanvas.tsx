@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Pause, Play } from "lucide-react";
 import { ShadcnButton } from "../ShadcnButton";
 
 import type { VMemoryGraphCanvasProps } from "../../../product/memory/VMemoryGraphCanvas";
 import { layoutMemoryKnowledgeGraph } from "../../../product/memory/memoryGraphModel";
 import { createMemoryGraphEngine, type MemoryGraphEngine } from "./MemoryGraphEngine";
 import { memoryGraphRendererStyles as styles } from "./memoryGraphRenderer.styles";
+import { layoutMemoryGraphCosmos } from "../../../product/memory/memoryGraphCosmosLayout";
 
 const EMPTY_HIGHLIGHTS: string[] = [];
 
@@ -21,9 +23,25 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
     onSelectNode,
     onSelectEdge,
     groupByTopic = false,
+    appearance,
   } = props;
-  const highlightIds = props.highlightIds ?? EMPTY_HIGHLIGHTS;
-  const layout = useMemo(() => layoutMemoryKnowledgeGraph(nodes, edges, { groupByTopic }), [nodes, edges, groupByTopic]);
+  const [compact, setCompact] = useState(() => window.innerWidth < 600);
+  useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 599px)");
+    if (!media) return;
+    const update = () => setCompact(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const cosmosCompact = appearance === "cosmos" && compact;
+  const highlightIds = useMemo(() => {
+    const edge = edges.find(item => item.id === props.selectedEdgeId);
+    return edge ? [...new Set([...(props.highlightIds ?? EMPTY_HIGHLIGHTS), edge.source, edge.target])] : props.highlightIds ?? EMPTY_HIGHLIGHTS;
+  }, [edges, props.selectedEdgeId, props.highlightIds]);
+  const layout = useMemo(() => {
+    const base = layoutMemoryKnowledgeGraph(nodes, edges, { groupByTopic });
+    return appearance === "cosmos" ? layoutMemoryGraphCosmos(base, edges, cosmosCompact) : base;
+  }, [nodes, edges, groupByTopic, appearance, cosmosCompact]);
   const rendererLayout = useMemo(() => {
     if (!flat) return layout;
     return {
@@ -47,6 +65,7 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
     pending: false,
   });
   const [webglState, setWebglState] = useState<WebGlState>("pending");
+  const [orbiting, setOrbiting] = useState(false);
 
   onSelectNodeRef.current = onSelectNode;
   onSelectEdgeRef.current = onSelectEdge;
@@ -63,6 +82,7 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
     let themeObserver: MutationObserver | null = null;
     engineRef.current = null;
     setWebglState("pending");
+    setOrbiting(false);
 
     const fail = () => {
       if (!abandoned) setWebglState("failed");
@@ -102,6 +122,8 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
           flat: initial.flat,
           highlightIds: initial.highlightIds,
           showLabels: true,
+          appearance,
+          onOrbitChange: setOrbiting,
           onSelectNode: (id) => onSelectNodeRef.current(id),
           onSelectEdge: (id) => onSelectEdgeRef.current?.(id),
           canSelectEdge: () => Boolean(onSelectEdgeRef.current),
@@ -137,7 +159,7 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
       engineRef.current?.dispose();
       engineRef.current = null;
     };
-  }, [rendererLayout, edges]);
+  }, [rendererLayout, edges, appearance]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -168,7 +190,8 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
   return (
     <div
       ref={rootRef}
-      className={styles.rendererRoot}
+      className={styles.rendererRoot + (appearance === "cosmos" ? " " + styles.cosmosRoot : "")}
+      data-appearance={appearance}
       data-webgl={webglState}
       data-flat={flat ? "true" : "false"}
       data-zoom-level="overview"
@@ -189,6 +212,14 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
         aria-label="图谱节点与关系"
         hidden={webglState === "failed"}
       />
+      {appearance === "cosmos" && !flat && webglState === "ready" && <div className={styles.spatialControls}>
+        <span className={styles.spatialHint}>拖动旋转 · 滚轮缩放</span>
+        <ShadcnButton variant="ghost" aria-label="从侧面查看三维图谱" onClick={() => engineRef.current?.setView("side")}>侧视</ShadcnButton>
+        <ShadcnButton variant="ghost" aria-label="从上方查看三维图谱" onClick={() => engineRef.current?.setView("top")}>俯视</ShadcnButton>
+        <ShadcnButton variant="ghost" data-orbit-toggle aria-pressed={orbiting} onClick={() => engineRef.current?.setOrbit(!orbiting)}>
+          {orbiting ? <Pause size={13} /> : <Play size={13} />}{orbiting ? "暂停环绕" : "自动环绕"}
+        </ShadcnButton>
+      </div>}
       {webglState === "pending" ? (
         <div className={styles.loading} role="status">正在渲染记忆图谱…</div>
       ) : null}

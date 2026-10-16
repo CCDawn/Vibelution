@@ -25,6 +25,9 @@ export function launcherApiBridgeTimeoutMs(path: string, method: string): number
   if (path === "branch-instances/cleanup") {
     return PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS;
   }
+  if (path === "branch-instances/cleanup-metadata") {
+    return PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS;
+  }
   if (path === "branch-instances" || path === "branch-instances?cleanupMetadata=1") {
     return PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS;
   }

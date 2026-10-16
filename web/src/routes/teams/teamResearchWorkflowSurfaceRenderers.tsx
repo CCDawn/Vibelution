@@ -289,13 +289,14 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
     );
   }
 
-  function renderTeamCommunicationPanel(section: "all" | "tasks" | "records" = "all") {
-    if (!showTeamCommunicationPanel) {
+  function renderTeamCommunicationPanel(section: "all" | "tasks" | "records" | "record-actions" = "all", recordsReadOnly = false) {
+    if (!showTeamCommunicationPanel && !(section === "records" && recordsReadOnly) && section !== "record-actions") {
       return null;
     }
     return withWorkflowSuspense(
       <TeamCommunicationPanel
         section={section}
+        recordsReadOnly={recordsReadOnly}
         lang={lang}
         selectedTeam={selectedTeam}
         linkedChatRoomId={linkedChatRoomId}

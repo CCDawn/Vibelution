@@ -11534,11 +11534,19 @@ def test_atomic_write_text_waits_out_longer_permission_error(tmp_path, monkeypat
 def test_atomic_write_text_falls_back_to_in_place_write_after_replace_timeout(tmp_path, monkeypatch):
     target_path = tmp_path / "state.json"
     replace_calls = {"count": 0}
-    monotonic_values = iter([0.0, state_store.WRITE_RETRY_TIMEOUT_SECONDS + 0.1])
+    monotonic_values = iter((0.0, state_store.WRITE_RETRY_TIMEOUT_SECONDS + 0.1))
+    last_monotonic = 0.0
+
+    def monotonic() -> float:
+        nonlocal last_monotonic
+        # Teardown can read the clock after the timeout path returns. Keep the
+        # last sample instead of raising StopIteration out of a fixture generator.
+        last_monotonic = next(monotonic_values, last_monotonic)
+        return last_monotonic
 
     monkeypatch.setattr(state_store, "ensure_runtime_manager_dirs", lambda: None)
     monkeypatch.setattr(state_store.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(state_store.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(state_store.time, "monotonic", monotonic)
 
     def always_locked_replace(src: str, dst: str):
         replace_calls["count"] += 1

@@ -8,7 +8,7 @@ import { createMemoryGraphEngine } from "./MemoryGraphEngine";
 
 vi.mock("./MemoryGraphEngine", () => ({
   createMemoryGraphEngine: vi.fn(() => ({ updateSelection: vi.fn(), updateHighlights: vi.fn(),
-    updateFlat: vi.fn(), refreshTheme: vi.fn(), updateLabels: vi.fn(), focus: vi.fn(), dispose: vi.fn() })),
+    updateFlat: vi.fn(), refreshTheme: vi.fn(), updateLabels: vi.fn(), focus: vi.fn(), setView: vi.fn(), setOrbit: vi.fn(), dispose: vi.fn() })),
 }));
 vi.mock("three", () => ({}));
 vi.mock("three/addons/controls/OrbitControls.js", () => ({ OrbitControls: vi.fn() }));
@@ -47,4 +47,26 @@ it("preserves the engine on selection and restores spatial coordinates after a r
     await act(async () => root.unmount());
     host.remove();
   }
+});
+
+it("resets the orbit control when changed edges create a stopped replacement engine", async () => {
+  vi.clearAllMocks();
+  const nodes: MemoryKnowledgeGraphNode[] = [{ id: "record", type: "knowledge_item", label: "真实条目", summary: "", status: "active", createdAt: "", updatedAt: "", metadata: {}, visual: {}, responsibilityQuestion: "", childNodeIds: [], contentItems: [] }];
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  const render = async (edges: []) => {
+    await act(async () => root.render(<ShadcnMemoryGraphCanvas nodes={nodes} edges={edges} appearance="cosmos" selectedNodeId="" onSelectNode={() => {}} fallbackText="fallback" />));
+    await vi.waitFor(() => expect(host.querySelector('[data-webgl="ready"]')).not.toBeNull());
+  };
+  try {
+    await render([]);
+    const create = vi.mocked(createMemoryGraphEngine);
+    await act(async () => create.mock.calls[0][0].onOrbitChange?.(true));
+    expect(host.querySelector('[data-orbit-toggle]')?.getAttribute("aria-pressed")).toBe("true");
+    await render([]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.results[0].value!.dispose).toHaveBeenCalledOnce();
+    expect(host.querySelector('[data-orbit-toggle]')?.getAttribute("aria-pressed")).toBe("false");
+    expect(host.querySelector('[data-orbit-toggle]')?.textContent).toContain("自动环绕");
+  } finally { await act(async () => root.unmount()); host.remove(); }
 });

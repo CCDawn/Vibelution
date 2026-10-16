@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   createDevTeamTask,
@@ -12,6 +12,7 @@ import {
 } from "../../api/devTeamTasks";
 import type { TeamMember } from "../../api/types";
 import {
+  VButton,
   VNativeButton,
   VNativeInput,
   VStringSelect,
@@ -42,6 +43,9 @@ type DevTeamTaskBoardProps = {
   teamId: string;
   members: TeamMember[];
   speakingMemberId?: string;
+  selectionRevision?: number | string;
+  onSelectTask?: () => void;
+  renderWorkspace?: (surfaces: { display: ReactNode; operations: ReactNode }) => ReactNode;
 };
 
 const LIVE_ROUND_STATUSES = new Set(["queued", "running", "stopping"]);
@@ -201,7 +205,7 @@ type TaskActionBody = {
   blockedBy?: string[];
 };
 
-export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" }: DevTeamTaskBoardProps) {
+export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "", selectionRevision = 0, onSelectTask, renderWorkspace }: DevTeamTaskBoardProps) {
   const queryClient = useQueryClient();
   const [actorId, setActorId] = useState(() => initialActorId(members, speakingMemberId));
   useEffect(() => {
@@ -217,6 +221,10 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
   const [blockers, setBlockers] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [creating, setCreating] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const selectedTaskIdRef = useRef(selectedTaskId);
+  selectedTaskIdRef.current = selectedTaskId;
+  useEffect(() => { setSelectedTaskId(null); setCreating(false); }, [teamId, selectionRevision]);
   const [statusFilter, setStatusFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
   useEffect(() => { setStatusFilter(""); setOwnerFilter(""); }, [teamId]);
@@ -272,6 +280,18 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
   const actorRole = roleOf(members, actorId);
   const isPlanner = actorRole === "规划师";
   const tasks = tasksQuery.data?.tasks ?? [];
+  const selectedTask = tasks.find(task => task.id === selectedTaskId);
+  const [taskDraft, setTaskDraft] = useState<TaskOperationsDraft | null>(null);
+  const draft = selectedTask ? taskDraft?.taskId === selectedTask.id ? taskDraft : taskOperationsDraft(selectedTask) : null;
+  useEffect(() => {
+    setTaskDraft(previous => {
+      if (!selectedTask) return null;
+      if (previous?.taskId === selectedTask.id && previous.editing) return previous;
+      return {...taskOperationsDraft(selectedTask),note:previous?.taskId === selectedTask.id ? previous.note : ""};
+    });
+  }, [selectedTask, draft?.editing]);
+  const patchDraft = (patch: Partial<TaskOperationsDraft>) => setTaskDraft(previous => selectedTask && selectedTaskIdRef.current === selectedTask.id
+    ? {...(previous?.taskId === selectedTask.id ? previous : taskOperationsDraft(selectedTask)),...patch} : previous);
   const actor = members.find((member) => member.memberId === actorId);
   const visibleTasks = tasks.filter((task) => (!statusFilter || task.status === statusFilter)
     && (!ownerFilter || (ownerFilter === "__unassigned__" ? !task.ownerMemberId : task.ownerMemberId === ownerFilter)));
@@ -286,7 +306,7 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
         : "";
   const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
 
-  return (
+  const display = (
     <VSection
       aria-label={text("共享任务板", "Shared task board")}
       title={text("共享任务板", "Shared task board")}
@@ -306,15 +326,6 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
             </VNativeButton>
           ))}
         </div>
-      <div className={styles.actor}>
-        {text("当前身份", "Acting as")}
-        <strong aria-label={text("当前身份", "Acting as")}>{actor ? [actor.agentName || actor.memberId, actor.role].filter(Boolean).join(" · ") : text("未指定", "Unassigned")}</strong>
-      {isPlanner ? (
-        <VNativeButton className={styles.primaryButton} aria-expanded={creating} onClick={() => setCreating(!creating)}>
-          {creating ? text("收起新建", "Close new task") : text("新建任务", "Add task")}
-        </VNativeButton>
-      ) : null}
-      </div>
       </div>
       <div className={styles.filters} aria-label={text("任务筛选", "Task filters")}>
         <VStringSelect
@@ -335,9 +346,55 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
         {hasFilters ? <VNativeButton type="button" className={styles.button} onClick={clearFilters}>{text("清除筛选", "Clear filters")}</VNativeButton> : null}
         <span className={styles.filterResult} role="status">{text(`显示 ${visibleTasks.length} / ${tasks.length} 个任务`, `Showing ${visibleTasks.length} / ${tasks.length} tasks`)}</span>
       </div>
+      {tasksQuery.error instanceof Error ? (
+        <VStateSurface tone="error" density="compact" title={tasksQuery.error.message} role="alert" />
+      ) : null}
+      {tasksQuery.isLoading ? (
+        <VStateSurface tone="loading" density="compact" title={text("正在读取任务板", "Loading tasks")} />
+      ) : null}
+      {!tasksQuery.isLoading && tasks.length === 0 ? (
+        <VStateSurface tone="empty" density="compact" title={text("还没有任务", "No tasks yet")}>
+          {text("规划师新建后，工程师认领，评审员收口或退回。", "The planner adds a task, an engineer claims it, and the reviewer closes or sends it back.")}
+        </VStateSurface>
+      ) : null}
+      {!tasksQuery.isLoading && tasks.length > 0 && visibleTasks.length === 0 ? (
+        <VStateSurface tone="empty" density="compact" title={text("没有符合筛选条件的任务", "No tasks match these filters")}>
+          <p>{text("换一个状态或负责人，或清除筛选查看全部任务。", "Choose a different status or owner, or clear filters to view every task.")}</p>
+          <VNativeButton type="button" className={styles.button} onClick={clearFilters}>{text("清除筛选", "Clear filters")}</VNativeButton>
+        </VStateSurface>
+      ) : null}
+      <div className={styles.list}>
+      {visibleTasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          lang={lang}
+          teamId={teamId}
+          task={task}
+          members={members}
+          tasks={tasks}
+          selected={selectedTaskId === task.id}
+          canReview={actorRole === "评审员"}
+          onSelect={() => { setSelectedTaskId(task.id); setCreating(false); onSelectTask?.(); }}
+        />
+      ))}
+      </div>
+    </VSection>
+  );
+  const operations = <section className={styles.operations} aria-label={text("任务操作", "Task actions")}>
+      <div className={styles.actor}>
+        {text("当前身份", "Acting as")}
+        <strong aria-label={text("当前身份", "Acting as")}>{actor ? [actor.agentName || actor.memberId, actor.role].filter(Boolean).join(" · ") : text("未指定", "Unassigned")}</strong>
+      {isPlanner ? (
+        <VNativeButton className={styles.primaryButton} aria-expanded={creating} onClick={() => { setCreating(!creating); setSelectedTaskId(null); onSelectTask?.(); }}>
+          {creating ? text("收起新建", "Close new task") : text("新建任务", "Add task")}
+        </VNativeButton>
+      ) : null}
+      </div>
+
+    {errorMessage && !(tasksQuery.error instanceof Error) ? <VStateSurface role="alert" tone="error" density="compact" title={errorMessage} /> : null}
       {isPlanner && creating ? (
         <form
-          className={styles.form}
+          className={styles.editor}
           onSubmit={(event) => {
             event.preventDefault();
             if (!subject.trim() || createTask.isPending) {
@@ -346,6 +403,7 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
             createTask.mutate();
           }}
         >
+          <div className={styles.editorFields}>
           <label className={styles.field}>{text("任务主题", "Task subject")}
           <VNativeInput
             className={styles.input}
@@ -357,7 +415,7 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
           </label>
           <label className={styles.field}>{text("说明与验收", "Description and acceptance")}
           <VNativeTextarea
-            className={styles.input}
+            className={`${styles.input} ${styles.editorTextarea}`}
             aria-label={text("任务说明", "Task description")}
             value={description}
             placeholder={text("验收标准和边界", "Acceptance and boundary")}
@@ -391,123 +449,39 @@ export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" 
               })),
             ]}
           />
+          </div></div>
+          <div className={styles.editorFooter}>
+          <VButton variant="secondary" isDisabled={createTask.isPending} onClick={() => setCreating(false)}>{text("取消", "Cancel")}</VButton>
           <VNativeButton className={styles.primaryButton} type="submit" disabled={!subject.trim() || createTask.isPending}>
             {createTask.isPending ? text("正在创建", "Creating") : text("创建任务", "Create task")}
           </VNativeButton>
           </div>
         </form>
       ) : null}
-      {errorMessage ? (
-        <VStateSurface tone="error" density="compact" title={errorMessage} role="alert" />
-      ) : null}
-      {tasksQuery.isLoading ? (
-        <VStateSurface tone="loading" density="compact" title={text("正在读取任务板", "Loading tasks")} />
-      ) : null}
-      {!tasksQuery.isLoading && tasks.length === 0 ? (
-        <VStateSurface tone="empty" density="compact" title={text("还没有任务", "No tasks yet")}>
-          {text("规划师新建后，工程师认领，评审员收口或退回。", "The planner adds a task, an engineer claims it, and the reviewer closes or sends it back.")}
-        </VStateSurface>
-      ) : null}
-      {!tasksQuery.isLoading && tasks.length > 0 && visibleTasks.length === 0 ? (
-        <VStateSurface tone="empty" density="compact" title={text("没有符合筛选条件的任务", "No tasks match these filters")}>
-          <p>{text("换一个状态或负责人，或清除筛选查看全部任务。", "Choose a different status or owner, or clear filters to view every task.")}</p>
-          <VNativeButton type="button" className={styles.button} onClick={clearFilters}>{text("清除筛选", "Clear filters")}</VNativeButton>
-        </VStateSurface>
-      ) : null}
-      <div className={styles.list}>
-      {visibleTasks.map((task) => (
-        <TaskCard
-          key={task.id}
-          lang={lang}
-          teamId={teamId}
-          task={task}
-          members={members}
-          tasks={tasks}
-          actorRole={actorRole}
-          actorId={actorId}
-          pending={changeTask.isPending}
-          onAction={(body, onSuccess) => changeTask.mutate(body, { onSuccess })}
-        />
-      ))}
-      </div>
-    </VSection>
-  );
+
+    {!creating && selectedTask ? <TaskOperations key={selectedTask.id} lang={lang} teamId={teamId} task={selectedTask}
+      members={members} tasks={tasks} actorRole={actorRole} actorId={actorId} pending={changeTask.isPending}
+      draft={draft!} onDraftChange={patchDraft}
+      onDeselect={() => setSelectedTaskId(null)}
+      onAction={(body, onSuccess) => changeTask.mutate(body, { onSuccess })} /> : null}
+    {!creating && !selectedTask ? <p className={styles.label}>{text("选择任务后，在这里进行操作。", "Select a task to act on it here.")}</p> : null}
+  </section>;
+  return renderWorkspace ? renderWorkspace({ display, operations }) : <>{display}{operations}</>;
 }
 
-function TaskCard({
-  lang,
-  teamId,
-  task,
-  members,
-  tasks,
-  actorRole,
-  actorId,
-  pending,
-  onAction,
-}: {
-  lang: "zh" | "en";
-  teamId: string;
-  task: DevTeamTask;
-  members: TeamMember[];
-  tasks: DevTeamTask[];
-  actorRole: string;
-  actorId: string;
-  pending: boolean;
-  onAction: (body: TaskActionBody, onSuccess?: () => void) => void;
+function TaskCard({ lang, teamId, task, members, tasks, selected, onSelect, canReview }: {
+  lang: "zh" | "en"; teamId: string; task: DevTeamTask; members: TeamMember[]; tasks: DevTeamTask[];
+  selected: boolean; onSelect: () => void; canReview: boolean;
 }) {
-  const [note, setNote] = useState("");
-  const [nextOwner, setNextOwner] = useState(task.ownerMemberId);
-  const scopeText = task.writeScopes.join(", ");
-  const blockerText = task.blockedBy.join(", ");
-  const [subjectDraft, setSubjectDraft] = useState(task.subject);
-  const [descriptionDraft, setDescriptionDraft] = useState(task.description);
-  const [scopeDraft, setScopeDraft] = useState(scopeText);
-  const [blockerDraft, setBlockerDraft] = useState(blockerText);
-  const [editing, setEditing] = useState(false);
-  const [editRevision, setEditRevision] = useState(task.revision);
-  useEffect(() => {
-    if (editing) return;
-    setSubjectDraft(task.subject);
-    setDescriptionDraft(task.description);
-    setScopeDraft(scopeText);
-    setBlockerDraft(blockerText);
-    setNextOwner(task.ownerMemberId);
-  }, [editing, task.revision, task.subject, task.description, task.ownerMemberId, scopeText, blockerText]);
-  const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const text = (zh: string, en: string) => lang === "zh" ? zh : en;
   const status = STATUS_LABELS[task.status] || { zh: task.status, en: task.status };
-  const canClaim = (actorRole === "开发工程师 A" || actorRole === "开发工程师 B")
-    && task.ready
-    && (!task.ownerMemberId || task.ownerMemberId === actorId);
-  const canReview = actorRole === "评审员";
-  const canPlan = actorRole === "规划师";
-  const nextScopes = splitList(scopeDraft);
-  const nextBlockers = splitList(blockerDraft);
-  const sameEdit = subjectDraft.trim() === task.subject
-    && descriptionDraft.trim() === task.description
-    && nextScopes.join("\n") === task.writeScopes.join("\n")
-    && nextBlockers.join("\n") === task.blockedBy.join("\n");
-  const owner = task.ownerName || members.find((member) => member.memberId === task.ownerMemberId)?.agentName;
-  const dependencyLabels = task.blockedBy.map((id) => {
-    const dependency = tasks.find((item) => item.id === id);
-    if (!dependency) return id;
-    const label = STATUS_LABELS[dependency.status];
-    const dependencyStatus = label ? (lang === "zh" ? label.zh : label.en) : dependency.status;
-    return `${id} · ${dependency.subject} (${dependencyStatus})`;
+  const owner = task.ownerName || members.find(member => member.memberId === task.ownerMemberId)?.agentName;
+  const dependencyLabels = task.blockedBy.map(id => {
+    const dependency = tasks.find(item => item.id === id);
+    return dependency ? `${id} · ${dependency.subject} (${STATUS_LABELS[dependency.status]?.[lang] || dependency.status})` : id;
   });
-  const nextStep = task.status === "completed"
-    ? text("已完成，可查看产出", "Completed; inspect the output")
-    : task.status === "in_progress"
-      ? text("负责人继续实现，评审员检查改动后收口", "Owner continues implementation; reviewer checks the changes")
-      : task.status === "rework"
-        ? text("负责人按退回说明修改，再交评审员检查", "Owner addresses the rework note, then requests another review")
-        : !task.ready
-          ? text("检查依赖与写范围，满足条件后再认领", "Check dependencies and write scopes before claiming")
-          : task.ownerMemberId
-            ? text("等待负责人认领并开始", "Waiting for the assigned owner to claim and start")
-            : text("可由开发工程师认领开始", "Ready for an engineer to claim and start");
-
   return (
-    <article className={styles.card} aria-label={task.subject}>
+    <article className={styles.card} aria-label={task.subject} data-task-selected={selected}>
       <div className={styles.cardHeader}>
         <div className={styles.titleLine}>
           <strong className={styles.title} title={task.subject}>{task.subject}</strong>
@@ -517,16 +491,15 @@ function TaskCard({
           <VChip tone={task.status === "completed" ? "success" : task.status === "rework" ? "warning" : task.status === "in_progress" ? "info" : "neutral"}>
             {lang === "zh" ? status.zh : status.en}
           </VChip>
-          {canPlan && task.status !== "completed" ? (
-            <VNativeButton className={styles.button} aria-label={text(`编辑 ${task.id}`, `Edit ${task.id}`)} aria-expanded={editing} onClick={() => {
-              if (!editing) setEditRevision(task.revision);
-              setEditing(!editing);
-            }}>{editing ? text("收起编辑", "Close editor") : text("编辑", "Edit")}</VNativeButton>
-          ) : null}
+          <VNativeButton className={styles.button}
+            aria-label={text(`选择任务 ${task.id}`, `Select task ${task.id}`)} aria-pressed={selected}
+            onClick={onSelect}>
+            {selected ? text("已选中", "Selected") : text("查看", "View")}
+          </VNativeButton>
         </div>
       </div>
       {task.description ? <p className={styles.description}>{task.description}</p> : null}
-      <dl className={styles.facts}>
+      <dl className={selected ? styles.facts : styles.compactFacts}>
         <div className={styles.fact}>
           <dt className={styles.label}>{text("负责人", "Owner")}</dt>
           <dd className={styles.value}>{[owner, task.ownerRole].filter(Boolean).join(" · ") || text("未指定", "Unassigned")}</dd>
@@ -544,7 +517,6 @@ function TaskCard({
           <dd className={styles.value}>{task.workspaceBranch ? `${text("工作区", "Workspace")} ${task.workspaceBranch}` : text("暂无任务工作区", "No task workspace yet")}</dd>
         </div>
       </dl>
-      <div className={styles.next}><span className={styles.label}>{text("下一步", "Next step")}</span><span className={styles.value}>{nextStep}</span></div>
       {task.reviewNote ? <p className={styles.description}>{text("退回说明：", "Rework note: ")}{task.reviewNote}</p> : null}
       {task.writeScopeWarnings.map((warning) => (
         <p className={styles.warning} key={warning} role="status">{warning}</p>
@@ -552,7 +524,144 @@ function TaskCard({
       {canReview && (task.status === "in_progress" || task.status === "rework" || task.status === "completed") ? (
         <TaskChangeList lang={lang} teamId={teamId} taskId={task.id} />
       ) : null}
-      {canClaim || (canReview && ["in_progress", "rework", "completed"].includes(task.status)) ? <div className={styles.actions}>
+    </article>
+  );
+}
+type TaskOperationsDraft = {
+  taskId:string; note:string; nextOwner:string; subjectDraft:string; descriptionDraft:string;
+  scopeDraft:string; blockerDraft:string; editing:boolean; editRevision:number;
+};
+function taskOperationsDraft(task:DevTeamTask):TaskOperationsDraft {
+  return {taskId:task.id,note:"",nextOwner:task.ownerMemberId,subjectDraft:task.subject,descriptionDraft:task.description,
+    scopeDraft:task.writeScopes.join(", "),blockerDraft:task.blockedBy.join(", "),editing:false,editRevision:task.revision};
+}
+
+function TaskOperations({
+  lang,
+  teamId,
+  task,
+  members,
+  tasks,
+  actorRole,
+  actorId,
+  pending,
+  onAction,
+  onDeselect,
+  draft, onDraftChange,
+}: {
+  lang: "zh" | "en";
+  teamId: string;
+  task: DevTeamTask;
+  members: TeamMember[];
+  tasks: DevTeamTask[];
+  actorRole: string;
+  actorId: string;
+  pending: boolean;
+  onAction: (body: TaskActionBody, onSuccess?: () => void) => void;
+  onDeselect: () => void;
+  draft: TaskOperationsDraft;
+  onDraftChange: (patch: Partial<TaskOperationsDraft>) => void;
+}) {
+  const {note,nextOwner,subjectDraft,descriptionDraft,scopeDraft,blockerDraft,editing,editRevision} = draft;
+  const setNote = (note:string) => onDraftChange({note});
+  const setNextOwner = (nextOwner:string) => onDraftChange({nextOwner});
+  const setSubjectDraft = (subjectDraft:string) => onDraftChange({subjectDraft});
+  const setDescriptionDraft = (descriptionDraft:string) => onDraftChange({descriptionDraft});
+  const setScopeDraft = (scopeDraft:string) => onDraftChange({scopeDraft});
+  const setBlockerDraft = (blockerDraft:string) => onDraftChange({blockerDraft});
+  const setEditing = (editing:boolean) => onDraftChange({editing});
+  const setEditRevision = (editRevision:number) => onDraftChange({editRevision});
+  const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const owner = task.ownerName || members.find(member => member.memberId === task.ownerMemberId)?.agentName;
+  const status = STATUS_LABELS[task.status] || { zh: task.status, en: task.status };
+  const canClaim = (actorRole === "开发工程师 A" || actorRole === "开发工程师 B")
+    && task.ready
+    && (!task.ownerMemberId || task.ownerMemberId === actorId);
+  const canReview = actorRole === "评审员";
+  const canPlan = actorRole === "规划师";
+  const nextScopes = splitList(scopeDraft);
+  const nextBlockers = splitList(blockerDraft);
+  const sameEdit = subjectDraft.trim() === task.subject
+    && descriptionDraft.trim() === task.description
+    && nextScopes.join("\n") === task.writeScopes.join("\n")
+    && nextBlockers.join("\n") === task.blockedBy.join("\n");
+  return (
+        <section className={styles.editor} aria-label={text(`任务操作 ${task.id}`, `Task actions ${task.id}`)}>
+          <div className={styles.editorHeading}><h3>{text(editing ? "编辑任务" : "任务操作", editing ? "Edit task" : "Task actions")} <span>{task.id}</span></h3>
+            <VButton variant="ghost" aria-label={text("取消选择任务", "Clear task selection")} onClick={() => {setEditing(false);onDeselect();}}>×</VButton>
+          </div>
+          {editing && canPlan && task.status !== "completed" ? <>
+          <div className={styles.editorFields}>
+            <label className={styles.field}>{text("任务标题", "Task title")}
+              <VNativeInput aria-label={text(`修改主题 ${task.id}`, `Edit subject ${task.id}`)} value={subjectDraft}
+                onChange={(event) => setSubjectDraft(event.target.value)} />
+            </label>
+            <label className={styles.field}>{text("说明与验收标准", "Description and acceptance")}
+              <VNativeTextarea className={styles.editorTextarea} aria-label={text(`修改说明 ${task.id}`, `Edit description ${task.id}`)} value={descriptionDraft}
+                rows={3} onChange={(event) => setDescriptionDraft(event.target.value)} />
+            </label>
+            <div className={styles.formGrid}>
+              <label className={styles.field}>{text("写范围", "Write scopes")}
+                <VNativeInput aria-label={text(`修改写范围 ${task.id}`, `Edit write scopes ${task.id}`)} value={scopeDraft}
+                  onChange={(event) => setScopeDraft(event.target.value)} />
+              </label>
+              <TaskDependencyPicker lang={lang} label={text(`修改依赖 ${task.id}`, `Edit dependencies ${task.id}`)} tasks={tasks}
+                currentTaskId={task.id} value={blockerDraft} onChange={setBlockerDraft} />
+            </div>
+            <div className={styles.ownerSection}>
+              <span className={styles.label}>{text("负责人", "Owner")}</span>
+              <div className={styles.ownerControls}>
+                <VStringSelect ariaLabel={text(`改派 ${task.id}`, `Assign ${task.id}`)} value={nextOwner} onValueChange={setNextOwner}
+                  options={[
+                    { value: "", label: text("暂不指定", "Unassigned") },
+                    ...members.filter((member) => member.role !== "规划师" || member.memberId === task.ownerMemberId).map((member) => ({
+                      value: member.memberId, label: [member.agentName || member.memberId, member.role].filter(Boolean).join(" · "),
+                    })),
+                  ]} />
+                <VButton variant="secondary" isDisabled={pending || nextOwner === task.ownerMemberId}
+                  onClick={() => onAction({ taskId: task.id, action: "assign", expectedRevision: editRevision, ownerMemberId: nextOwner }, () => setEditing(false))}>
+                  {text("应用指派", "Apply owner")}
+                </VButton>
+              </div>
+            </div>
+          </div>
+<div className={styles.editorFooter}>
+            <VButton variant="ghost" className={styles.deleteButton} isDisabled={pending}
+              onClick={() => onAction({ taskId: task.id, action: "delete", expectedRevision: task.revision }, () => setEditing(false))}>
+              {text("删除任务", "Delete task")}
+            </VButton>
+            <div className={styles.footerMain}>
+              <VButton variant="secondary" isDisabled={pending} onClick={() => setEditing(false)}>{text("取消", "Cancel")}</VButton>
+              <VButton variant="primary" isDisabled={pending || !subjectDraft.trim() || sameEdit}
+                aria-label={text(`保存修改 ${task.id}`, `Save edits ${task.id}`)}
+                onClick={() => onAction({
+                  taskId: task.id, action: "update", expectedRevision: editRevision,
+                  subject: subjectDraft.trim(), description: descriptionDraft.trim(),
+                  writeScopes: nextScopes, blockedBy: nextBlockers,
+                }, () => setEditing(false))}>
+                {text("保存修改", "Save changes")}
+              </VButton>
+            </div>
+          </div>
+          </> : <div className={styles.actionSummary}>
+            <div className={styles.attributeRow}><span>{text("状态", "Status")}</span><VChip tone={task.status === "completed" ? "success" : "neutral"}>{lang === "zh" ? status.zh : status.en}</VChip></div>
+            {canPlan && task.status !== "completed" ? <div className={styles.attributeOwner}><span>{text("负责人", "Owner")}</span>
+                <VStringSelect ariaLabel={text(`改派 ${task.id}`, `Assign ${task.id}`)} value={nextOwner} onValueChange={setNextOwner}
+                  options={[
+                    { value: "", label: text("暂不指定", "Unassigned") },
+                    ...members.filter((member) => member.role !== "规划师" || member.memberId === task.ownerMemberId).map((member) => ({
+                      value: member.memberId, label: [member.agentName || member.memberId, member.role].filter(Boolean).join(" · "),
+                    })),
+                  ]} />
+                {nextOwner !== task.ownerMemberId ? <VButton variant="secondary" isDisabled={pending || nextOwner === task.ownerMemberId}
+                  onClick={() => onAction({ taskId: task.id, action: "assign", expectedRevision: task.revision, ownerMemberId: nextOwner }, () => setEditing(false))}>
+                  {text("应用指派", "Apply owner")}
+                </VButton> : null}
+            </div>
+            : <div className={styles.attributeRow}><span>{text("负责人", "Owner")}</span><span>{[owner,task.ownerRole].filter(Boolean).join(" · ") || text("未指定", "Unassigned")}</span></div>}
+            <div className={styles.attributeRow}><span>{text("依赖", "Dependencies")}</span><span>{task.blockedBy.length ? text(`${task.blockedBy.length} 个任务`, `${task.blockedBy.length} tasks`) : text("无依赖", "No dependencies")}</span></div>
+            {canPlan && task.status !== "completed" ? <VButton variant="secondary" onClick={() => {setEditRevision(task.revision);setEditing(true);}} aria-label={text(`编辑 ${task.id}`, `Edit ${task.id}`)}>{text("编辑任务内容", "Edit task contents")}</VButton> : null}
+<div className={styles.actions}>
       {canClaim ? (
         <VNativeButton
           className={styles.primaryButton}
@@ -599,91 +708,9 @@ function TaskCard({
         </>
       ) : null}
 
-      </div> : null}
-      {canPlan && task.status !== "completed" && editing ? (
-        <div className={styles.form}>
-          <VNativeInput
-            className={styles.input}
-            aria-label={text(`修改主题 ${task.id}`, `Edit subject ${task.id}`)}
-            value={subjectDraft}
-            placeholder={text("任务主题", "Task subject")}
-            onChange={(event) => setSubjectDraft(event.target.value)}
-          />
-          <VNativeTextarea
-            className={styles.input}
-            aria-label={text(`修改说明 ${task.id}`, `Edit description ${task.id}`)}
-            value={descriptionDraft}
-            placeholder={text("验收标准和边界", "Acceptance and boundary")}
-            onChange={(event) => setDescriptionDraft(event.target.value)}
-          />
-          <VNativeInput
-            className={styles.input}
-            aria-label={text(`修改写范围 ${task.id}`, `Edit write scopes ${task.id}`)}
-            value={scopeDraft}
-            placeholder={text("写范围，例如 web/src/routes/login", "Write scopes, for example web/src/routes/login")}
-            onChange={(event) => setScopeDraft(event.target.value)}
-          />
-          <TaskDependencyPicker
-            lang={lang}
-            label={text(`修改依赖 ${task.id}`, `Edit dependencies ${task.id}`)}
-            tasks={tasks}
-            currentTaskId={task.id}
-            value={blockerDraft}
-            onChange={setBlockerDraft}
-          />
-          <VNativeButton
-            className={styles.primaryButton}
-            type="button"
-            disabled={pending || !subjectDraft.trim() || sameEdit}
-            aria-label={text(`保存修改 ${task.id}`, `Save edits ${task.id}`)}
-            onClick={() => onAction({
-              taskId: task.id,
-              action: "update",
-              expectedRevision: editRevision,
-              subject: subjectDraft.trim(),
-              description: descriptionDraft.trim(),
-              writeScopes: nextScopes,
-              blockedBy: nextBlockers,
-            }, () => setEditing(false))}
-          >
-            {text("保存修改", "Save edits")}
-          </VNativeButton>
-          <VStringSelect
-            ariaLabel={text(`改派 ${task.id}`, `Assign ${task.id}`)}
-            value={nextOwner}
-            onValueChange={setNextOwner}
-            options={[
-              { value: "", label: text("不指定", "Unassigned") },
-              ...members.filter((member) => member.role !== "规划师").map((member) => ({
-                value: member.memberId,
-                label: [member.agentName || member.memberId, member.role].filter(Boolean).join(" · "),
-              })),
-            ]}
-          />
-          <VNativeButton
-            className={styles.button}
-            type="button"
-            disabled={pending}
-            onClick={() => onAction({
-              taskId: task.id,
-              action: "assign",
-              expectedRevision: editRevision,
-              ownerMemberId: nextOwner,
-            }, () => setEditing(false))}
-          >
-            {text("指派", "Assign")}
-          </VNativeButton>
-          <VNativeButton
-            className={styles.button}
-            type="button"
-            disabled={pending}
-            onClick={() => onAction({ taskId: task.id, action: "delete", expectedRevision: task.revision })}
-          >
-            {text("删除", "Delete")}
-          </VNativeButton>
-        </div>
-      ) : null}
-    </article>
+      </div>
+          </div>}
+        </section>
   );
 }
 

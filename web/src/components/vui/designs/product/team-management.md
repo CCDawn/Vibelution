@@ -438,6 +438,8 @@
 ## TeamHomeSurface
 
 ### 功能
+已确认的三栏分工：左栏选择团队/人物，中间展示讨论、任务、记录和只读画布，右栏统一轮次、任务、人物与广播操作。右栏保持一个区域，不新增标签页；任务与成员表单按需在栏内展开，编辑字段独立滚动，保存/取消保持可达。窄屏复用 VCanvasWorkbenchPage 的左右侧抽屉，桌面三栏继续使用 WORKBENCH_LAYOUT_IDS.teams 的共享宽度记忆。
+
 普通团队的任务首页：突出当前任务、该轮结论与近期发言，并提供启动/停止、群聊跳转和组织结构入口。
 
 ### 适用范围
@@ -447,7 +449,7 @@
 | 场景 | 选择 |
 | --- | --- |
 | 普通团队进入工作台 | 默认显示 `TeamHomeSurface` |
-| 查看/编辑成员组织关系 | 从首页进入 `TeamOrganizationCanvasSurface`，可返回任务首页 |
+| 查看成员组织关系 | 中间画布只读展示；成员绑定使用右栏人物操作，复用团队设置模型与 mutation |
 | 查找完整群聊历史 | 用「打开群聊」进入关联房间 |
 
 ### 使用方式
@@ -491,3 +493,9 @@
 - 画布在数据加载后挂载或重新挂载时重新测量可视区；节点名称与 Agent 名称相同、职责与目的相同时，各只展示一次。机器生成的节点名称优先投影为已关联成员名称。
 - 成员详情采用标签与内容分列、长文本换行；滚动详情中的区块保持自然高度。阶段与节点标题限制在自身列内，状态保留独立宽度。
 - 科研状态读取失败时展示错误状态，不继续显示加载提示；封存模式只读取已有 Ledger，不启动研究任务或开放写入。
+
+## Generic workflow workspace
+
+The approved workspace composes existing VUI APIs rather than defining another design system: `VCanvasWorkbenchPage` with `WORKBENCH_LAYOUT_IDS.teams`, `VTabs`, `VButton`, VUI form controls and dialogs. White panels, subdued green accent, a dotted sequential canvas and connected node cards retain the approved preview composition. At narrow widths, the rail and inspector become existing recipe drawers; the title and toolbar wrap, and the canvas scrolls independently. No business topic is mandatory.
+
+Owner: `routes/teams/generic/`; adjacent component `.styles.ts` files own visual utilities. Definition edits are explicit drafts until save. Runs use server snapshots and show only canonical execution status, lifecycle records and native result projections. Stop remains “正在停止” until the server confirms termination. Errors stay visible; deletion requires confirmation; dialog text is rendered as plain text. Existing team conversations and historical research records remain accessible.

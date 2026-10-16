@@ -44,13 +44,29 @@ def restarter_script(project_root):
 
 @pytest.fixture(autouse=True)
 def no_real_restart(monkeypatch):
-    """测试中不启动真实 restarter 进程。"""
+    """Keep every restart test away from live processes, queues and memory."""
+    effects = {"spawns": [], "snapshots": []}
     monkeypatch.setattr(
         rebirth_tools_module,
         "spawn_detached_process",
-        lambda command, env=None: 424242,
+        lambda command, env=None: effects["spawns"].append(command) or 424242,
     )
     monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: False)
+    monkeypatch.setattr("tools.memory_tools.get_core_context", lambda: "isolated context")
+    monkeypatch.setattr("tools.memory_tools.get_current_goal", lambda: "isolated goal")
+    monkeypatch.setattr(
+        "tools.memory_tools.force_save_current_state",
+        lambda **kwargs: effects["snapshots"].append(kwargs) or "isolated snapshot",
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.command_queue.submit_command",
+        lambda *_args, **_kwargs: pytest.fail("unexpected live command queue access"),
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.command_queue.wait_for_result",
+        lambda *_args, **_kwargs: pytest.fail("unexpected live command result access"),
+    )
+    return effects
 
 
 @pytest.fixture
@@ -216,11 +232,136 @@ class TestTriggerSelfRestart:
             resumeMessage="continue",
         )
 
-        assert "前后端热重启事务已交给 Runtime Manager" in result
+        receipt = json.loads(result)
+        assert receipt["ok"] is True and receipt["status"] == "accepted"
+        assert receipt["accepted"] is True and receipt["completed"] is False
+        assert receipt["commandId"] == "cmd-hot"
+        assert rebirth_tools_module._restart_trigger_succeeded(result) is True
         assert calls[0][0] == "hot_restart_workbench"
         assert calls[0][1]["allowActiveSessionId"] == "session-live"
         assert calls[0][1]["allowActiveRunId"] == "turn-live"
         assert calls[0][1]["hotRestart"]["resumeMessage"] == "continue"
+
+    @pytest.mark.parametrize("session_arg", ["sessionId", "session_id"])
+    def test_session_restart_without_manager_never_spawns_or_saves_global_memory(
+        self, no_real_restart, session_arg
+    ):
+        result = trigger_self_restart_tool(reason="用户要求重启", **{session_arg: "session-live"})
+
+        assert no_real_restart == {"spawns": [], "snapshots": []}
+        receipt = json.loads(result)
+        assert receipt["ok"] is False and receipt["status"] == "blocked"
+        assert receipt["error"] == "runtime_manager_unavailable"
+        assert receipt["accepted"] is False and receipt["completed"] is False
+        assert rebirth_tools_module._restart_trigger_succeeded(result) is False
+
+    @pytest.mark.parametrize(
+        "outcome",
+        [
+            {"ok": False, "completed": True, "errorType": "ActiveWorkBlocked", "message": "任务运行中"},
+            {"ok": False, "completed": True, "errorType": "ActiveWorkProbeFailed", "message": "状态不可用"},
+        ],
+    )
+    def test_session_restart_manager_rejection_never_falls_back(
+        self, monkeypatch, no_real_restart, outcome
+    ):
+        monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: True)
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.submit_command",
+            lambda *_args, **_kwargs: {"commandId": "cmd-rejected"},
+        )
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.wait_for_result", lambda *_args, **_kwargs: outcome
+        )
+
+        result = trigger_self_restart_tool(sessionId="session-live")
+
+        assert no_real_restart == {"spawns": [], "snapshots": []}
+        receipt = json.loads(result)
+        assert receipt["ok"] is False and receipt["status"] == "blocked"
+        assert receipt["error"] == outcome["errorType"]
+        assert receipt["message"] == outcome["message"]
+        assert receipt["commandId"] == "cmd-rejected"
+        assert rebirth_tools_module._restart_trigger_succeeded(result) is False
+
+    @pytest.mark.parametrize("stage", ["submit", "wait"])
+    @pytest.mark.parametrize("error_type", [RuntimeError, TimeoutError])
+    def test_session_restart_queue_errors_never_spawn_or_claim_completion(
+        self, monkeypatch, no_real_restart, stage, error_type
+    ):
+        monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: True)
+
+        def fail(*_args, **_kwargs):
+            raise error_type("queue unavailable")
+
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.submit_command",
+            fail if stage == "submit" else lambda *_args, **_kwargs: {"commandId": "cmd-pending"},
+        )
+        monkeypatch.setattr("core.runtime_manager.command_queue.wait_for_result", fail)
+
+        result = trigger_self_restart_tool(sessionId="session-live")
+
+        assert no_real_restart == {"spawns": [], "snapshots": []}
+        receipt = json.loads(result)
+        assert receipt["completed"] is False
+        assert receipt["accepted"] is (stage == "wait")
+        if stage == "submit":
+            assert receipt["ok"] is False and receipt["status"] == "blocked"
+        elif error_type is TimeoutError:
+            assert receipt["ok"] is True and receipt["status"] == "accepted"
+        else:
+            assert receipt["ok"] is False and receipt["status"] == "unknown"
+        assert rebirth_tools_module._restart_trigger_succeeded(result) is receipt["ok"]
+
+    @pytest.mark.parametrize("result", [None, {}, {"ok": "true"}])
+    def test_session_restart_invalid_receipt_never_reports_success(
+        self, monkeypatch, no_real_restart, result
+    ):
+        monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: True)
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.submit_command",
+            lambda *_args, **_kwargs: {"commandId": "cmd-invalid"},
+        )
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.wait_for_result", lambda *_args, **_kwargs: result
+        )
+
+        raw = trigger_self_restart_tool(sessionId="session-live")
+
+        assert no_real_restart == {"spawns": [], "snapshots": []}
+        receipt = json.loads(raw)
+        assert receipt["ok"] is False and receipt["status"] == "unknown"
+        assert receipt["accepted"] is True and receipt["completed"] is False
+        assert receipt["error"] == "runtime_manager_invalid_result"
+        assert rebirth_tools_module._restart_trigger_succeeded(raw) is False
+
+    @pytest.mark.parametrize("completed", [True, False, None])
+    def test_session_restart_reports_only_confirmed_completion(
+        self, monkeypatch, no_real_restart, completed
+    ):
+        monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: True)
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.submit_command",
+            lambda *_args, **_kwargs: {"commandId": "cmd-result"},
+        )
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.wait_for_result",
+            lambda *_args, **_kwargs: {"ok": True, "completed": completed},
+        )
+
+        receipt = json.loads(trigger_self_restart_tool(sessionId="session-live"))
+
+        assert no_real_restart == {"spawns": [], "snapshots": []}
+        assert receipt["ok"] is True and receipt["accepted"] is True
+        assert receipt["completed"] is (completed is True)
+        assert receipt["status"] == ("completed" if completed is True else "accepted")
+
+    def test_cli_restart_keeps_legacy_spawn_and_snapshot(self, no_real_restart):
+        result = trigger_self_restart_tool(reason="manual")
+
+        assert "重启进程已触发" in result
+        assert len(no_real_restart["spawns"]) == len(no_real_restart["snapshots"]) == 1
 
     def test_trigger_restart_returns_string(self):
         """测试重启返回字符串结果"""

@@ -1,13 +1,13 @@
 import styles from "./PlatformKnowledgeGraphWorkbench.styles";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ArrowLeft, FileText, Globe2, Network, Search, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, FileText, Globe2, Maximize2, Network, Search, ShieldCheck, X } from "lucide-react";
 import { fetchPlatformKnowledgeGraph, fetchPlatformKnowledgeGraphNodeDetail, platformKnowledgeGraphKeys } from "../../api/memory";
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode } from "../../api/types";
 import { VButton, VCanvasWorkbenchPage, VMemoryGraphCanvas, VNativeInput, VSurface, VTabs } from "../../components/vui";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { MemoryGraphRelationInspector } from "../MemoryGraphRelationInspector";
-import { isAdministrativeRelation, isContentRelation, platformLayerLabels, platformTopicOverview, platformTopicSlice, relationLayer, topicBasisLabels, type PlatformRelationLayer } from "./platformKnowledgeGraphModel";
+import { isAdministrativeRelation, isContentRelation, platformLayerLabels, platformSpatialOverview, platformTopicOverview, platformTopicSlice, relationLayer, topicBasisLabels, type PlatformRelationLayer } from "./platformKnowledgeGraphModel";
 
 export function PlatformKnowledgeGraphWorkbench({ onAgentView }: { onAgentView: () => void }) {
   const [limit, setLimit] = useState(800);
@@ -21,14 +21,20 @@ export function PlatformKnowledgeGraphWorkbench({ onAgentView }: { onAgentView: 
   const [edgeId, setEdgeId] = useState("");
   const [detailRecords, setDetailRecords] = useState<{ nodes: MemoryKnowledgeGraphNode[]; edges: MemoryKnowledgeGraphEdge[] }>({ nodes: [], edges: [] });
   const [detailOpen, setDetailOpen] = useState(false);
+  const [spatial, setSpatial] = useState(true);
+  const [showSources, setShowSources] = useState(true);
+  const [focusToken, setFocusToken] = useState(0);
   const graph = useQuery({ queryKey: platformKnowledgeGraphKeys.overview(limit), queryFn: ({ signal }) => fetchPlatformKnowledgeGraph({ limit, signal }), staleTime: 60_000 });
   const payload = graph.data;
   const detail = useQuery({ queryKey: platformKnowledgeGraphKeys.detail(nodeId), queryFn: ({ signal }) => fetchPlatformKnowledgeGraphNodeDetail(nodeId, { signal }), enabled: Boolean(nodeId), staleTime: 60_000 });
   const search = query.trim().toLocaleLowerCase();
   const matches = useMemo(() => search ? (payload?.nodes ?? []).filter(node => `${node.label} ${node.summary}`.toLocaleLowerCase().includes(search)) : [], [payload, search]);
-  const eligible = useMemo(() => (payload?.edges ?? []).filter(edge => relationLayer(edge) === layer && edge.type !== "topic_has_item" && (administrative || !isAdministrativeRelation(edge)) && (candidates || edge.metadata.status !== "candidate") && (!relationType || edge.label === relationType)), [payload, layer, candidates, relationType, administrative]);
+  const eligible = useMemo(() => (payload?.edges ?? []).filter(edge => (relationLayer(edge) === layer || (spatial && layer === "knowledge" && showSources && relationLayer(edge) === "evidence")) && edge.type !== "topic_has_item" && (administrative || !isAdministrativeRelation(edge)) && (candidates || edge.metadata.status !== "candidate") && (!relationType || edge.label === relationType)), [payload, layer, candidates, relationType, administrative, spatial, showSources]);
   const overview = useMemo(() => payload ? platformTopicOverview(payload, eligible) : { nodes: [], edges: [] }, [payload, eligible]);
-  const slice = useMemo(() => payload ? platformTopicSlice(payload, topicId, eligible, nodeId) : { nodes: [], edges: [] }, [payload, topicId, eligible, nodeId]);
+  const selectedSliceId = spatial ? "" : nodeId;
+  const slice = useMemo(() => payload ? platformTopicSlice(payload, topicId, eligible, selectedSliceId) : { nodes: [], edges: [] }, [payload, topicId, eligible, selectedSliceId]);
+  const spatialOverview = useMemo(() => payload ? platformSpatialOverview(payload, eligible) : { nodes: [], edges: [] }, [payload, eligible]);
+  const spatialTopic = useMemo(() => payload ? platformSpatialOverview({ ...payload, nodes: slice.nodes, topics: payload.topics.filter(item => item.id === topicId) }, slice.edges) : { nodes: [], edges: [] }, [payload, slice, topicId]);
   const topic = payload?.topics.find(item => item.id === topicId);
   const knownNodes = [...(payload?.nodes ?? []), ...detailRecords.nodes];
   const selectedEdge = payload?.edges.find(edge => edge.id === edgeId) ?? detailRecords.edges.find(edge => edge.id === edgeId);
@@ -38,26 +44,28 @@ export function PlatformKnowledgeGraphWorkbench({ onAgentView }: { onAgentView: 
   const legend = [...new Set((payload?.edges ?? []).filter(edge => relationLayer(edge) === layer && edge.type !== "topic_has_item" && (administrative || !isAdministrativeRelation(edge)) && (candidates || edge.metadata.status !== "candidate")).map(edge => edge.label))];
   const hasContentRelations = (payload?.edges ?? []).some(isContentRelation);
   const resetSelection = () => { setNodeId(""); setEdgeId(""); setDetailOpen(false); };
-  const reset = () => { setTopicId(""); setQuery(""); setRelationType(""); setDetailRecords({ nodes: [], edges: [] }); resetSelection(); };
-  const openTopic = (id: string) => { setTopicId(id); setQuery(""); setRelationType(""); resetSelection(); };
+  const reset = () => { setTopicId(""); setQuery(""); setRelationType(""); setDetailRecords({ nodes: [], edges: [] }); resetSelection(); setFocusToken(value => value + 1); };
+  const openTopic = (id: string) => { setTopicId(id); setQuery(""); setRelationType(""); resetSelection(); setFocusToken(value => value + 1); };
   const openNode = (id: string) => {
     const node = knownNodes.find(item => item.id === id);
     if (!node) return;
     const memberships = Array.isArray(node.metadata.topicIds) ? node.metadata.topicIds.filter((id): id is string => typeof id === "string") : [];
     const targetTopic = memberships.includes(topicId) ? topicId : String(node.metadata.topicId ?? memberships[0] ?? "");
-    if (targetTopic) setTopicId(targetTopic);
-    setNodeId(id); setEdgeId(""); setQuery(""); setDetailOpen(true);
+    if (targetTopic && !spatial) setTopicId(targetTopic);
+    setNodeId(id); setEdgeId(""); setQuery(""); setDetailOpen(true); setFocusToken(value => value + 1);
   };
   const openEdge = (edge: MemoryKnowledgeGraphEdge) => {
     if (currentDetail) setDetailRecords({ nodes: [currentDetail.node, ...currentDetail.relatedNodes], edges: currentDetail.edges });
     const from = knownNodes.find(node => node.id === edge.source) ?? currentDetail?.relatedNodes.find(node => node.id === edge.source);
     const to = knownNodes.find(node => node.id === edge.target) ?? currentDetail?.relatedNodes.find(node => node.id === edge.target);
-    setTopicId(String(from?.metadata.topicId ?? to?.metadata.topicId ?? topicId));
-    setLayer(relationLayer(edge)); setRelationType(""); setNodeId(""); setEdgeId(edge.id); setDetailOpen(true);
+    if (!spatial) { setTopicId(String(from?.metadata.topicId ?? to?.metadata.topicId ?? topicId)); setLayer(relationLayer(edge)); }
+    setRelationType(""); setNodeId(""); setEdgeId(edge.id); setDetailOpen(true);
   };
   const matchingTopics = new Set(matches.map(node => String(node.metadata.topicId ?? node.id)));
-  const canvasNodes = search ? overview.nodes.filter(node => matchingTopics.has(node.id) || node.label.toLocaleLowerCase().includes(search)) : overview.nodes;
+  const overviewRecords = spatial ? spatialOverview : overview;
+  const canvasNodes = useMemo(() => search ? overviewRecords.nodes.filter(node => matchingTopics.has(node.id) || matchingTopics.has(String(node.metadata.topicId)) || node.label.toLocaleLowerCase().includes(search)) : overviewRecords.nodes, [overviewRecords, search, payload]);
   const canvasNodeIds = new Set(canvasNodes.map(node => node.id));
+  const visibleEdges = useMemo(() => topicId ? (spatial ? spatialTopic.edges : slice.edges) : overviewRecords.edges.filter(edge => canvasNodeIds.has(edge.source) && canvasNodeIds.has(edge.target)), [topicId, spatial, spatialTopic, slice, overviewRecords, canvasNodes]);
   const sourceLocation = (node: MemoryKnowledgeGraphNode) => {
     const source = node.metadata.sourceRef;
     const names: Record<string, string> = { url: "链接", pageRange: "页码", page: "页码", fileName: "文件", path: "文件位置", title: "标题", lineStart: "起始行", lineEnd: "结束行" };
@@ -89,12 +97,17 @@ export function PlatformKnowledgeGraphWorkbench({ onAgentView }: { onAgentView: 
         <label className={styles.candidateToggle}><VNativeInput type="checkbox" checked={candidates} onChange={event => { setCandidates(event.target.checked); resetSelection(); }} />包含待确认关系</label>{layer === "evidence" && <label className={styles.candidateToggle}><VNativeInput type="checkbox" checked={administrative} onChange={event => { setAdministrative(event.target.checked); resetSelection(); }} />显示入库审核记录</label>}<VButton className={styles.agentButton} variant="ghost" onClick={onAgentView}>Agent 权限视图</VButton>
       </div><p className={styles.accessNote}><ShieldCheck size={14} className={styles.icon} />本机管理员 · 正式知识只读<br />不改变 Agent 可读范围</p></VSurface>}
     canvas={<div className={styles.canvas}><div className={styles.heading}>{topicId && <VButton variant="ghost" icon={<ArrowLeft size={14} />} onClick={reset}>返回全景</VButton>}<strong>{topic?.label ?? "平台知识全景"}</strong><span className={styles.groupingHint}>{topic ? topicBasisLabels[topic.groupingBasis] : `${payload?.topics.length ?? 0} 个已加载主题`}</span></div>
-      <div className={styles.tabs}><VTabs value={layer} onValueChange={value => { setLayer(value as PlatformRelationLayer); setRelationType(""); resetSelection(); }} items={Object.entries(platformLayerLabels).map(([id, label]) => ({ id, label }))} aria-label="关系视图" /></div>
+      <div className={styles.tabs}><VTabs value={layer} onValueChange={value => { setLayer(value as PlatformRelationLayer); setRelationType(""); resetSelection(); }} items={Object.entries(platformLayerLabels).map(([id, label]) => ({ id, label }))} aria-label="关系视图" />
+        <div className={styles.viewControls}>{spatial && layer === "knowledge" && <label className={styles.sourceToggle}><VNativeInput type="checkbox" checked={showSources} onChange={event => { setShowSources(event.target.checked); resetSelection(); }} />来源连线</label>}
+          <VButton variant="ghost" aria-pressed={spatial} onClick={() => { setSpatial(true); resetSelection(); }}>3D 空间</VButton><VButton variant="ghost" aria-pressed={!spatial} onClick={() => { setSpatial(false); resetSelection(); }}>关系图</VButton>
+        </div>
+      </div>
       {payload && layer === "knowledge" && !(topicId ? slice.edges.some(isContentRelation) : hasContentRelations) && <p role="status" className={styles.relationStatus}>{topicId ? "本主题尚未记录支持、反驳或引用等内容关系。下面展示已收录的知识，可切换“证据关系”查看来源。" : "当前数据主要记录知识收录和来源，内容关系尚未建立。星域表示内容分组，不代表主题互相支持。"}</p>}
       <div className={styles.stage}>
-        {!payload && graph.isPending ? <div role="status" className={styles.loading}>正在读取平台知识…</div> : !payload && graph.error ? <div role="alert" className={styles.empty}><strong>平台图谱加载失败</strong><p className={styles.errorMessage}>{graph.error.message}</p><VButton onClick={() => void graph.refetch()}>重试</VButton><VButton variant="ghost" onClick={onAgentView}>查看 Agent 权限范围</VButton></div> : payload && (topicId ? slice.nodes.length : canvasNodes.length) ? <VMemoryGraphCanvas nodes={topicId ? slice.nodes : canvasNodes} edges={topicId ? slice.edges : overview.edges.filter(edge => canvasNodeIds.has(edge.source) && canvasNodeIds.has(edge.target))} selectedNodeId={nodeId} selectedEdgeId={edgeId} mode={topicId ? "relations" : "galaxy"} groupByTopic={!topicId} onSelectNode={topicId ? openNode : openTopic} onSelectEdge={id => { const edge = topicId ? eligible.find(edge => edge.id === id) : payload.edges.find(edge => (overview.edges.find(item => item.id === id)?.metadata.relationIds as string[] | undefined)?.includes(edge.id)); if (edge) openEdge(edge); }} fallbackText="当前浏览器无法显示星系，可使用主题列表浏览。" /> : <div role="status" className={styles.empty}><FileText className={styles.emptyIcon} /><strong>{search ? "没有找到相关内容" : "当前范围还没有正式知识"}</strong><p className={styles.emptyMessage}>{search ? "可更换关键词或清空搜索。" : "审核收录后的有效知识会显示在这里。"}</p>{search && <VButton onClick={reset}>清空搜索</VButton>}</div>}
+        {!payload && graph.isPending ? <div role="status" className={styles.loading}>正在读取平台知识…</div> : !payload && graph.error ? <div role="alert" className={styles.empty}><strong>平台图谱加载失败</strong><p className={styles.errorMessage}>{graph.error.message}</p><VButton onClick={() => void graph.refetch()}>重试</VButton><VButton variant="ghost" onClick={onAgentView}>查看 Agent 权限范围</VButton></div> : payload && (topicId ? slice.nodes.length : canvasNodes.length) ? <VMemoryGraphCanvas nodes={topicId ? (spatial ? spatialTopic.nodes : slice.nodes) : canvasNodes} edges={visibleEdges} selectedNodeId={nodeId || (spatial && !edgeId ? topicId : "")} selectedEdgeId={edgeId} mode={spatial ? "galaxy" : "relations"} appearance={spatial ? "cosmos" : undefined} groupByTopic={spatial || !topicId} focusToken={focusToken} onSelectNode={id => { if (overview.nodes.some(node => node.id === id)) openTopic(id); else openNode(id); }} onSelectEdge={id => { const edge = eligible.find(edge => edge.id === id) ?? payload.edges.find(edge => (overview.edges.find(item => item.id === id)?.metadata.relationIds as string[] | undefined)?.includes(edge.id)); if (edge) openEdge(edge); }} fallbackText="当前浏览器无法显示三维空间，可使用主题列表或关系图浏览。" /> : <div role="status" className={styles.empty}><FileText className={styles.emptyIcon} /><strong>{search ? "没有找到相关内容" : "当前范围还没有正式知识"}</strong><p className={styles.emptyMessage}>{search ? "可更换关键词或清空搜索。" : "审核收录后的有效知识会显示在这里。"}</p>{search && <VButton onClick={reset}>清空搜索</VButton>}</div>}
+        {spatial && canvasNodes.length > 0 && <><p className={styles.spatialLegend}>三维知识空间<span>知识与来源为可选节点 · 连线为已记录关系</span></p><VButton variant="ghost" className={styles.fit} aria-label="适配当前三维图谱" icon={<Maximize2 size={16} />} onClick={() => { resetSelection(); setFocusToken(value => value + 1); }} /></>}
       </div>{payload?.summary.truncated && <div role="status" className={styles.truncation}><span>已加载 {payload.summary.nodeCount} / {payload.summary.totalNodeCount} 个节点，当前画面不是全量。</span>{limit < 5000 && <VButton variant="secondary" onClick={() => { setLimit(5000); resetSelection(); }}>加载更多（最多 5000）</VButton>}</div>}
       {payload && graph.error && <p role="alert" className={styles.refreshError}>刷新失败，保留上次加载的数据。<VButton variant="ghost" onClick={() => void graph.refetch()}>重试</VButton></p>}
-      <div className={styles.footer}><span>{topicId ? `${topic?.nodeIds.length ?? 0} 条知识 · ${slice.edges.length} 条${platformLayerLabels[layer]}` : `${payload?.nodes.filter(node => node.type === "knowledge_item").length ?? 0} 条正式知识 · ${payload?.topics.length ?? 0} 个主题`}</span><span>{topicId ? "箭头表示关系方向 · 点选可看依据" : "主题星系 · 拖动环绕 · 滚轮缩放"}</span></div>
-    </div>} inspector={inspector} />;
+      <div className={styles.footer}><span>{topicId ? `${topic?.nodeIds.length ?? 0} 条知识 · ${visibleEdges.length} 条关系` : `${payload?.nodes.filter(node => node.type === "knowledge_item").length ?? 0} 条正式知识 · ${payload?.topics.length ?? 0} 个主题 · ${visibleEdges.length} 条关系`}</span><span>{spatial ? "拖动旋转 · 右拖平移 · 滚轮缩放" : "箭头表示关系方向 · 点选可看依据"}</span></div>
+    </div>} inspector={selectedNode || selectedEdge ? inspector : undefined} />;
 }

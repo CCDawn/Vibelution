@@ -513,6 +513,7 @@ def _fake_launcher_service_module():
     launcher_module.get_launcher_status = record("status")
     launcher_module.get_launcher_freshness = record("freshness")
     launcher_module.list_launcher_branch_instances = record("branch_instances")
+    launcher_module.lookup_launcher_cleanup_merge = record("cleanup_merge")
     launcher_module.cleanup_launcher_branch_instances = record("branch_cleanup")
     return launcher_module
 
@@ -596,6 +597,16 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
     assert annotated_payload["ok"] is True
     assert seen[0]["kwargs"] == {}
     assert seen[1]["kwargs"] == {"include_cleanup_metadata": True}
+
+    merge_payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="branch-instances/cleanup-metadata",
+            launcher_api_method="POST",
+            launcher_api_body=json.dumps({"items": [{"id": "worktree:task", "head": "abc1234"}]}),
+        )
+    )
+    assert merge_payload["ok"] is True
+    assert merge_payload["payload"]["marker"] == "cleanup_merge"
 
 
 def test_launcher_api_bridge_rejects_unknown_paths(monkeypatch):

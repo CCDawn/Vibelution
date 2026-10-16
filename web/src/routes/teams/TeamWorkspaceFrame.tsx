@@ -10,18 +10,19 @@ type TeamWorkspacePanelProps = {
   children: ReactNode;
   actions?: ReactNode;
   scroll?: boolean;
+  headerHidden?: boolean;
   region: "navigation" | "content" | "inspector";
 };
 
-function TeamWorkspacePanel({ title, label, children, actions, scroll = true, region }: TeamWorkspacePanelProps) {
+function TeamWorkspacePanel({ title, label, children, actions, scroll = true, region, headerHidden = false }: TeamWorkspacePanelProps) {
   const surfaceClassName = region === "content"
     ? styles.contentPanel
     : `${vuiRailFillClass} ${styles.railPanel}`;
 
   return <VPanel ariaLabel={label} className={`${styles.panel} ${surfaceClassName}`} data-team-panel={region}>
-    <VPanelHeader title={title} headingLevel={region === "navigation" ? null : 2} actions={actions}
+    {headerHidden ? null : <VPanelHeader title={title} headingLevel={region === "navigation" ? null : 2} actions={actions}
       data-vui="team-workspace-panel-header"
-      className={styles.header} />
+      className={styles.header} />}
     <div data-vui="team-workspace-panel-body" className={`${styles.body} ${scroll ? styles.bodyScroll : styles.bodyFixed}`}>
       {children}
     </div>
@@ -35,16 +36,18 @@ export type TeamWorkspaceFrameProps = VCanvasWorkbenchPageProps & {
   inspectorTitle?: string;
   inspectorActions?: ReactNode;
   mainScroll?: boolean;
+  inspectorScroll?: boolean;
+  inspectorHeaderHidden?: boolean;
 };
 
 export function TeamWorkspaceFrame({ title, toolbar, rail, railTitle, railLabel = "团队导航", canvas,
-  inspector, inspectorTitle = "详情", inspectorActions, mainScroll = false, className, workspaceClassName, ...props }: TeamWorkspaceFrameProps) {
+  inspector, inspectorTitle = "详情", inspectorActions, mainScroll = false, inspectorScroll = true, inspectorHeaderHidden = false, className, workspaceClassName, ...props }: TeamWorkspaceFrameProps) {
   return <VCanvasWorkbenchPage {...props} hideHeader chrome="embedded" title={title}
     className={`${styles.page} ${vuiRailFillClass} ${className ?? ""}`}
     workspaceClassName={`${styles.workspace} ${workspaceClassName ?? ""}`}
     railClassName={styles.barePane} canvasClassName={styles.barePane} inspectorClassName={styles.barePane}
     rail={rail || railTitle ? <TeamWorkspacePanel title={railTitle ?? railLabel} label={railLabel} region="navigation">{rail}</TeamWorkspacePanel> : undefined}
     canvas={<TeamWorkspacePanel title={title} label={typeof title === "string" ? title : "团队内容"} region="content" actions={toolbar} scroll={mainScroll}>{canvas}</TeamWorkspacePanel>}
-    inspector={inspector ? <TeamWorkspacePanel title={inspectorTitle} label={inspectorTitle} actions={inspectorActions} region="inspector">{inspector}</TeamWorkspacePanel> : undefined}
+    inspector={inspector ? <TeamWorkspacePanel title={inspectorTitle} label={inspectorTitle} actions={inspectorActions} region="inspector" scroll={inspectorScroll} headerHidden={inspectorHeaderHidden}>{inspector}</TeamWorkspacePanel> : undefined}
   />;
 }
