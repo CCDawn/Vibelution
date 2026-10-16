@@ -661,6 +661,29 @@ export function restartLauncherBundle(trigger?: string) {
   });
 }
 
+type WorkbenchShellUpdateVerb = () => Promise<LauncherIpcInvokeResult>;
+
+function workbenchShellUpdateVerb(): WorkbenchShellUpdateVerb | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const candidate = (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher;
+  if (typeof candidate !== "object" || candidate === null) {
+    return null;
+  }
+  const verb = (candidate as { requestWorkbenchShellUpdate?: unknown }).requestWorkbenchShellUpdate;
+  return typeof verb === "function" ? (verb as WorkbenchShellUpdateVerb) : null;
+}
+
+/** Explicit workbench request to replace a stale desktop shell. */
+export function requestWorkbenchShellUpdate() {
+  const verb = workbenchShellUpdateVerb();
+  if (verb !== null) {
+    return verb().then((result) => unwrapLauncherIpcInvokeResult<LauncherControlResponse>(result));
+  }
+  return restartLatestLauncher();
+}
+
 export function cancelRuntimeLifecycleCommand(request: RuntimeLifecycleCancelRequest) {
   return fetchJson<RuntimeLifecycleCancelResponse>("/api/runtime/lifecycle-command/cancel", {
     method: "POST",

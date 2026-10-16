@@ -53,6 +53,17 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain("startPeriodicShellFreshnessWatch");
   });
 
+  it("inspects shell freshness before deciding the periodic refresh", () => {
+    const watchStart = mainSource.indexOf("function startPeriodicShellFreshnessWatch");
+    const watchEnd = mainSource.indexOf("async function runTrayBranchInstance", watchStart);
+    const watch = mainSource.slice(watchStart, watchEnd);
+    expect(watchStart).toBeGreaterThan(-1);
+    expect(watch).toContain("shouldProbePeriodicDesktopShell");
+    expect(watch).not.toContain("stale: false");
+    expect(watch.indexOf("shouldProbePeriodicDesktopShell")).toBeLessThan(watch.indexOf("inspectCurrentDesktopShell"));
+    expect(watch).toContain("stale: status.stale");
+  });
+
   it("refreshes a stale launcher control token before denying tray quit", () => {
     const quitStart = mainSource.indexOf("async function requestDesktopShellExit");
     const quitEnd = mainSource.indexOf("function notifyDesktopTray", quitStart);

@@ -1667,6 +1667,7 @@ describe("IPC channels", () => {
       "requestDesktopShellExit",
       "requestWindowClose",
       "requestWorkbenchRestart",
+      "requestWorkbenchShellUpdate",
       "setDesktopPetExpanded",
       "showItemInFolder",
       "showLauncherWindow"

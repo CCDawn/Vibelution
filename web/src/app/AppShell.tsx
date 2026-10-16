@@ -44,6 +44,7 @@ import {
   getLauncherFreshness,
   hasLauncherFreshnessBridge,
   isLauncherControlPlaneNotReady,
+  requestWorkbenchShellUpdate,
   requestWorkbenchWindowCloseOnPageHide,
 } from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
@@ -71,6 +72,7 @@ import {
   storeUpdateBannerDismissedHead,
   updateBannerCopy,
   updateBannerDismissLabel,
+  updateBannerRestartHoldsForShellExit,
   updateBannerRestartLabel,
   updateBannerRestartReloadsDocument,
 } from "./updateBanner";
@@ -1508,10 +1510,11 @@ export function AppShell() {
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
   // Workbench and Launcher versions share the delayed 120s polling cadence.
-  // Either kind of update restarts this window. The banner does not send the
-  // user to Launcher to find a second button.
+  // Code staleness restarts this window. A stale desktop shell replaces the
+  // shell; a window reload cannot clear that banner.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
   const launcherUpdateAvailable = isLauncherUpdateAvailable(launcherFreshnessQuery.data);
+  const launcherShellUpdate = !isUpdateBannerVerdict(updateBannerVerdict) && launcherUpdateAvailable;
   const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
   const updateBannerVisible = shouldShowUpdateBanner({
     verdict: updateBannerVerdict,
@@ -1903,7 +1906,7 @@ export function AppShell() {
     shutdownErrorBody,
   ]);
 
-  const beginRestart = useCallback(() => {
+  const beginRestart = useCallback((mode: "shell" | "workbench" = "workbench") => {
     if (shutdownPromiseRef.current || shutdownRequested) {
       return shutdownPromiseRef.current ?? Promise.resolve();
     }
@@ -1928,7 +1931,9 @@ export function AppShell() {
       setShutdownDetail(restartDetailWithActiveWorkNotice(restartBody, activeWorkRestartNotice));
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await requestLifecycle("restart");
+      const payload = mode === "shell"
+        ? await requestWorkbenchShellUpdate()
+        : await requestLifecycle("restart");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         restartWaitsForDocumentReloadRef.current = false;
         if (payload.commandId) {
@@ -1937,7 +1942,13 @@ export function AppShell() {
         return;
       }
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
-      if (!updateBannerRestartReloadsDocument(payload.code, payload.accepted)) {
+      if (updateBannerRestartHoldsForShellExit(payload.operation, payload.accepted)) {
+        if (payload.message) {
+          setShutdownDetail(payload.message);
+        }
+        return;
+      }
+      if (!updateBannerRestartReloadsDocument(payload.code, payload.accepted, payload.operation)) {
         restartWaitsForDocumentReloadRef.current = false;
         setRestartRequested(false);
         setShutdownRequested(false);
@@ -3004,7 +3015,7 @@ export function AppShell() {
               <div className={styles.updateBannerActions}>
                 <VButton type="button" variant="secondary"
                   className={styles.updateBannerRestartButton}
-                  onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
+                  onPress={() => { void beginRestart(launcherShellUpdate ? "shell" : "workbench"); }} isDisabled={updateBannerRestartDisabled}
                   title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
                 </VButton>

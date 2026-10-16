@@ -116,6 +116,26 @@ export function decidePeriodicDesktopShellRefresh(input: {
   });
 }
 
+/**
+ * Cheap gate before a shell inspection. Staleness is unknown until inspect,
+ * so this must not treat "not yet read" as "current".
+ */
+export function shouldProbePeriodicDesktopShell(input: {
+  isPackaged: boolean;
+  smoke: boolean;
+  workbenchCloseCanary?: boolean;
+  refreshInFlight: boolean;
+  shutdownApproved: boolean;
+}): boolean {
+  if (input.refreshInFlight || input.shutdownApproved) {
+    return false;
+  }
+  if (!input.isPackaged || input.smoke || input.workbenchCloseCanary) {
+    return false;
+  }
+  return true;
+}
+
 export function decideLauncherShellRestart(input: {
   isPackaged: boolean;
   launchBlocking: boolean;

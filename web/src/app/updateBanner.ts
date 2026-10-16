@@ -45,8 +45,8 @@ export function shouldShowUpdateBanner({
 
 export function launcherUpdateBannerCopy(lang: string): { title: string; detail: string } {
   return lang === "en"
-    ? { title: "Update ready — restart to apply", detail: "Restart loads the latest interface in this window." }
-    : { title: "有更新，重启后生效", detail: "重启会在当前窗口加载最新界面。" };
+    ? { title: "Update ready — restart to apply", detail: "Restart closes this window, replaces the desktop shell, and reopens it." }
+    : { title: "有更新，重启后生效", detail: "重启会关闭当前窗口，换上最新桌面壳后重新打开。" };
 }
 
 export function frontendUpdateBannerCopy(lang: string): { title: string; detail: string } {
@@ -127,11 +127,27 @@ export function updateBannerRestartLabel(lang: string): string {
 export function updateBannerRestartReloadsDocument(
   code: string | null | undefined,
   accepted?: boolean | null,
+  operation?: string | null,
 ): boolean {
   if (accepted === false) {
     return false;
   }
+  // Shell replacement exits this process. Reloading would land on the same shell.
+  if (String(operation ?? "").trim() === "restart-latest-shell") {
+    return false;
+  }
   return String(code ?? "").trim() !== "restart_queued";
+}
+
+/** Accepted shell replacement is leaving; keep the restart overlay until the window is gone. */
+export function updateBannerRestartHoldsForShellExit(
+  operation: string | null | undefined,
+  accepted?: boolean | null,
+): boolean {
+  if (accepted === false) {
+    return false;
+  }
+  return String(operation ?? "").trim() === "restart-latest-shell";
 }
 
 export function updateBannerDismissLabel(lang: string): string {

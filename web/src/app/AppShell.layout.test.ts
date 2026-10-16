@@ -674,15 +674,19 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("browser.user_action.force_shutdown_requested");
     expect(shellSource).toContain("browser.user_action.force_shutdown_unconfirmed");
     expect(shellSource).not.toContain("lifecycleMenuRef");
-    // The update banner restart rides the same dormant shell lifecycle path
-    // (beginRestart -> requestLifecycle) — never a direct restart API call.
-    expect(shellSource).toContain("onPress={beginRestart}");
+    // Code staleness still restarts the workbench. A stale desktop shell uses
+    // the narrow shell-replacement verb instead of reloading the same window.
+    expect(shellSource).toContain('beginRestart(launcherShellUpdate ? "shell" : "workbench")');
     const restartRegion = shellSource.slice(
       shellSource.indexOf("const beginRestart"),
       shellSource.indexOf("const cancelLifecycleWait"),
     );
     expect(restartRegion).toContain("restartWaitsForDocumentReloadRef.current = true");
-    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code, payload.accepted)");
+    expect(restartRegion).toContain('mode === "shell"');
+    expect(restartRegion).toContain("requestWorkbenchShellUpdate()");
+    expect(restartRegion).toContain('requestLifecycle("restart")');
+    expect(restartRegion).toContain("updateBannerRestartHoldsForShellExit(payload.operation, payload.accepted)");
+    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code, payload.accepted, payload.operation)");
     expect(restartRegion).toContain('payload.code === "user_restart_pause_failed"');
     expect(restartRegion).toContain("重启前未能保存任务状态，已有记录仍保留");
     expect(restartRegion).toContain("window.location.reload()");
@@ -713,7 +717,7 @@ describe("AppShell layout contract", () => {
     expect(bannerRegion).not.toContain("defaultOpen");
     expect(bannerRegion).toContain('role="status"');
     expect(bannerRegion).toContain("updateBannerVisible ?");
-    expect(bannerRegion).toContain("onPress={beginRestart}");
+    expect(bannerRegion).toContain('beginRestart(launcherShellUpdate ? "shell" : "workbench")');
     expect(bannerRegion).toContain("isDisabled={updateBannerRestartDisabled}");
     expect(bannerRegion).toContain("{updateBannerRestartNotice}");
     expect(bannerRegion).toContain("title={updateBannerRestartNotice || updateBannerRestartActionLabel}");

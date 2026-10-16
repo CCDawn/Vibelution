@@ -5,6 +5,7 @@ import {
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
   decidePeriodicDesktopShellRefresh,
+  shouldProbePeriodicDesktopShell,
   formatTrayLauncherFreshness,
   inspectDesktopShell,
   parseDesktopShellStatus,
@@ -133,6 +134,46 @@ describe("desktop shell freshness", () => {
     expect(shouldRefreshBeforeLifecycle("restart", { isPackaged: false, launchBlocking: true })).toBe(false);
     expect(shouldRefreshBeforeLifecycle("open", { isPackaged: false, launchBlocking: false })).toBe(false);
     expect(shouldRefreshBeforeLifecycle("", { isPackaged: false, launchBlocking: true })).toBe(false);
+  });
+
+  it("probes a resident packaged shell before it knows whether the snapshot is stale", () => {
+    expect(shouldProbePeriodicDesktopShell({
+      isPackaged: true,
+      smoke: false,
+      refreshInFlight: false,
+      shutdownApproved: false,
+    })).toBe(true);
+    expect(shouldProbePeriodicDesktopShell({
+      isPackaged: false,
+      smoke: false,
+      refreshInFlight: false,
+      shutdownApproved: false,
+    })).toBe(false);
+    expect(shouldProbePeriodicDesktopShell({
+      isPackaged: true,
+      smoke: true,
+      refreshInFlight: false,
+      shutdownApproved: false,
+    })).toBe(false);
+    expect(shouldProbePeriodicDesktopShell({
+      isPackaged: true,
+      smoke: false,
+      workbenchCloseCanary: true,
+      refreshInFlight: false,
+      shutdownApproved: false,
+    })).toBe(false);
+    expect(shouldProbePeriodicDesktopShell({
+      isPackaged: true,
+      smoke: false,
+      refreshInFlight: true,
+      shutdownApproved: false,
+    })).toBe(false);
+    expect(shouldProbePeriodicDesktopShell({
+      isPackaged: true,
+      smoke: false,
+      refreshInFlight: false,
+      shutdownApproved: true,
+    })).toBe(false);
   });
 
   it("keeps periodic refresh observing full stale so frontend-only staleness still converges", () => {

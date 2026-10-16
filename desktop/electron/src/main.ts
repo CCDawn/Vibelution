@@ -167,6 +167,7 @@ import {
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
   decidePeriodicDesktopShellRefresh,
+  shouldProbePeriodicDesktopShell,
   inspectDesktopShell,
   inspectUnpackagedShell,
   scheduleDesktopShellRefresh,
@@ -3157,14 +3158,13 @@ function startPeriodicShellFreshnessWatch(): void {
   periodicShellFreshnessTimer = setInterval(() => {
     void (async () => {
       if (
-        decidePeriodicDesktopShellRefresh({
+        !shouldProbePeriodicDesktopShell({
           isPackaged: app.isPackaged,
           smoke: desktopCliArgs.smoke,
           workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
-          stale: false,
           refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
           shutdownApproved
-        }) !== "refresh"
+        })
       ) {
         return;
       }
@@ -4945,6 +4945,18 @@ ipcMain.handle(IPC_CHANNELS.requestWorkbenchRestart, async (event, trigger?: str
       method: "POST",
       ...(normalizedTrigger ? { headers: { "X-Vibelution-Launcher-Trigger": normalizedTrigger } } : {})
     }
+  });
+});
+
+// Advisory shell staleness (frontend snapshot behind, window still usable)
+// is not a workbench restart. This verb is the update banner's explicit
+// request to replace the resident shell.
+ipcMain.handle(IPC_CHANNELS.requestWorkbenchShellUpdate, async (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return await resolveLauncherIpcHost().invoke({
+    schemaVersion: 1,
+    path: "restart-latest-shell",
+    init: { method: "POST" }
   });
 });
 

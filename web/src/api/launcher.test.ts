@@ -20,6 +20,7 @@ import {
   LauncherControlPlaneNotReadyError,
   reattachLauncherSupervisor,
   restartLauncherBundle,
+  requestWorkbenchShellUpdate,
   requestWorkbenchWindowCloseOnPageHide,
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
@@ -478,6 +479,28 @@ describe("launcher api helpers", () => {
     vi.stubGlobal("vibelutionLauncher", { requestWorkbenchRestart: proxyRejected });
 
     await expect(restartLauncherBundle()).rejects.toThrow("active work blocks restart");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the narrow workbench verb to replace a stale desktop shell", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const shellVerb = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "restart-latest-shell", message: "replacing" },
+    });
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    vi.stubGlobal("vibelutionLauncher", { requestWorkbenchShellUpdate: shellVerb });
+
+    const payload = await requestWorkbenchShellUpdate();
+
+    expect(payload.operation).toBe("restart-latest-shell");
+    expect(shellVerb).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

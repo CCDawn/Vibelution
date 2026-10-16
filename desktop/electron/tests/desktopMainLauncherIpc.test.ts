@@ -599,15 +599,32 @@ describe("Electron main Launcher IPC facade", () => {
     expect(workbenchBranch).toContain(
       "requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger)"
     );
+    expect(workbenchBranch).toContain(
+      "requestWorkbenchShellUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchShellUpdate)"
+    );
 
     const controlBranchStart = preloadSource.indexOf("...(isLauncherControlWindow");
     const controlBranchEnd = preloadSource.indexOf("} : {})", controlBranchStart);
     const controlBranch = preloadSource.slice(controlBranchStart, controlBranchEnd);
     expect(controlBranch).toContain("launcherInvoke");
     expect(controlBranch).not.toContain("requestWorkbenchRestart");
+    expect(controlBranch).not.toContain("requestWorkbenchShellUpdate");
 
     const petBranchStart = preloadSource.indexOf("...(isDesktopPetWindow");
     const petBranchEnd = preloadSource.indexOf("} : {})", petBranchStart);
     expect(preloadSource.slice(petBranchStart, petBranchEnd)).not.toContain("requestWorkbenchRestart");
+    expect(preloadSource.slice(petBranchStart, petBranchEnd)).not.toContain("requestWorkbenchShellUpdate");
+  });
+
+  it("routes the workbench update banner to shell replacement", () => {
+    const ipcSource = readFileSync(fileURLToPath(new URL("../src/ipc.ts", import.meta.url)), "utf8");
+    expect(ipcSource).toContain('requestWorkbenchShellUpdate: "launcher:request-workbench-shell-update"');
+    const start = mainSource.indexOf("IPC_CHANNELS.requestWorkbenchShellUpdate");
+    const end = mainSource.indexOf("});", start);
+    const handler = mainSource.slice(start, end);
+    expect(handler).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
+    expect(handler).not.toContain("launcherIpcTrustedOrigins()");
+    expect(handler).toContain('path: "restart-latest-shell"');
+    expect(handler).toContain('method: "POST"');
   });
 });

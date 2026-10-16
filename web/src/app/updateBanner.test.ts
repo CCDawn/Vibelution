@@ -11,6 +11,7 @@ import {
   storeUpdateBannerDismissedHead,
   updateBannerCopy,
   updateBannerHeadToken,
+  updateBannerRestartHoldsForShellExit,
   updateBannerRestartLabel,
   updateBannerRestartReloadsDocument,
 } from "./updateBanner";
@@ -45,8 +46,9 @@ describe("shouldShowUpdateBanner", () => {
     expect(shouldShowUpdateBanner({ verdict: "current", diskHead: "new-head", dismissedHead: "new-head", launcherFreshness })).toBe(false);
     expect(isLauncherUpdateAvailable({ current: null, label: "unknown" })).toBe(false);
     expect(isLauncherUpdateAvailable({ current: true, label: "current" })).toBe(false);
-    expect(launcherUpdateBannerCopy("zh").detail).toContain("重启");
+    expect(launcherUpdateBannerCopy("zh").detail).toContain("换上最新桌面壳");
     expect(launcherUpdateBannerCopy("zh").detail).not.toContain("打开启动管理");
+    expect(launcherUpdateBannerCopy("en").detail).toContain("desktop shell");
     expect(frontendUpdateBannerCopy("zh").title).toContain("前端有更新");
     expect(updateBannerRestartLabel("zh")).toBe("重启更新");
   });
@@ -163,6 +165,13 @@ describe("updateBannerRestartReloadsDocument", () => {
   it("leaves the current document in place when the Launcher rejects the restart", () => {
     expect(updateBannerRestartReloadsDocument("user_restart_pause_failed", false)).toBe(false);
     expect(updateBannerRestartReloadsDocument("unexpected_rejection", false)).toBe(false);
+  });
+
+  it("keeps the overlay and does not reload when the desktop shell is being replaced", () => {
+    expect(updateBannerRestartReloadsDocument("restart_accepted", true, "restart-latest-shell")).toBe(false);
+    expect(updateBannerRestartHoldsForShellExit("restart-latest-shell", true)).toBe(true);
+    expect(updateBannerRestartHoldsForShellExit("restart-latest-shell", false)).toBe(false);
+    expect(updateBannerRestartHoldsForShellExit("restart", true)).toBe(false);
   });
 });
 
