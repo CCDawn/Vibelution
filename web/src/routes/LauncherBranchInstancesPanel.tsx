@@ -1,4 +1,4 @@
-import { GitBranch, Ellipsis, LoaderCircle, Search } from "lucide-react";
+import { GitBranch, Ellipsis, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -164,7 +164,7 @@ export function LauncherBranchInstancesPanel({
         cleanupMetadataError: "读取分支实例失败，无法确认合入状态。",
         retryMetadata: "重试读取",
         buildingHint: "前端代码有更新，正在构建新版本，约需几分钟。",
-        cancelStartHint: "再按一次停止这次启动。",
+        cancelStartHint: "停止这次尚未完成的启动。",
       }
     : {
         all: "All",
@@ -231,7 +231,7 @@ export function LauncherBranchInstancesPanel({
         cleanupMetadataError: "Could not read branch instances to confirm merge status.",
         retryMetadata: "Retry",
         buildingHint: "The frontend has updates and a new build is running. This takes a few minutes.",
-        cancelStartHint: "Press again to stop this start.",
+        cancelStartHint: "Stop this start before it finishes.",
       };
 
   const [activeTab, setActiveTab] = useState<BranchTableTab>("all");
@@ -376,8 +376,8 @@ export function LauncherBranchInstancesPanel({
     const building = state === "building";
     const startingOrRestarting = state === "starting" || state === "restarting";
     const inFlightStart = building || startingOrRestarting;
-    // Start, build, restart, and stop stay on the original button. A second
-    // stop button appears only after that in-flight state has finished.
+    // While a start is in flight the one button says Stop, because that is
+    // what the press does. A second stop button appears only after it finishes.
     const singleLifecycleButton = inFlightStart || stopBusy;
     const openAction = workbenchOpenAction(item, state);
     const openLabel = {
@@ -436,17 +436,16 @@ export function LauncherBranchInstancesPanel({
         {inFlightStart ? (
           <VButton
             type="button"
-            variant={detailId === item.id ? "primary" : "secondary"}
+            variant="secondary"
             density="compact"
             isDisabled={!stoppable}
             isPending={!stoppable}
-            icon={stoppable ? <LoaderCircle size={14} strokeWidth={2.25} className={styles.pendingIcon} aria-hidden="true" /> : undefined}
             title={building
               ? (stoppable ? `${labels.buildingHint} ${labels.cancelStartHint}` : labels.buildingHint)
               : (stoppable ? labels.cancelStartHint : undefined)}
             onPress={() => askBatchStop([item.id], "stop")}
           >
-            {openLabel}
+            {labels.stop}
           </VButton>
         ) : null}
         {stopBusy ? (
@@ -478,7 +477,7 @@ export function LauncherBranchInstancesPanel({
         {showOpen && !building && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
         ) : null}
-        {/* A running row keeps Stop beside Open. In-flight start and stop stay on the one primary button. */}
+        {/* A running row keeps Stop beside Open. An in-flight start already uses its one button for Stop. */}
         {showRowStop ? (
           <VButton
             type="button"
