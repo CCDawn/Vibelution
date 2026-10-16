@@ -136,7 +136,12 @@ describe("DevTeamTaskBoard", () => {
       action: "claim",
       expectedRevision: 1,
     });
-    expect(host?.textContent).not.toContain("工作区");
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.textContent).toContain("0 个任务");
+        expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeNull();
+      });
+    });
     expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
   });
 

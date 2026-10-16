@@ -27,7 +27,8 @@ describe("organization inspector composition", () => {
     expect(html).toContain("节点身份");
     expect(html).toContain("成员绑定");
     expect(html).toContain("现有范围");
-    expect(html).toContain('data-team-inspector-section="tasks"');
+    expect(html).toContain('data-team-inspector-section="members"');
+    expect(html).not.toContain('data-team-inspector-section="tasks"');
     expect(html).toContain('data-team-inspector-section="records"');
   });
 
