@@ -622,7 +622,7 @@ export function ChallengeRealBatchControlPanel({
 
   return (
     <VEmbeddedPanel
-      ariaLabel={zh ? "挑战杯真实批次控制" : "Challenge Cup real batch controls"}
+      ariaLabel={zh ? "科研真实批次控制" : "Research real batch controls"}
       className={styles.root}
       data-testid="challenge-real-batch-control"
     >

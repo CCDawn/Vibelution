@@ -73,7 +73,7 @@ def test_plan_derived_engineering_proxy_hypothesis_is_idempotent_and_review_gate
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     source = _draft_complete_proxy_plan(team["teamId"])
     source_plan = source["plan"]
     request = {
@@ -200,7 +200,7 @@ def test_unreviewed_complete_hypothesis_cannot_be_selected_for_new_plan(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     source = _draft_complete_proxy_plan(team["teamId"])
     materialized = team_workflow_orchestration_service.materialize_experiment_proxy_hypothesis(
         team["teamId"],
@@ -235,7 +235,7 @@ def test_scientific_hypothesis_completion_is_append_only_review_gated_and_drives
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     source = _draft_complete_proxy_plan(team["teamId"])
     source_plan = source["plan"]
     scientific = team_workflow_orchestration_service.record_local_research_model_output(
@@ -390,7 +390,7 @@ def test_scientific_hypothesis_completion_is_append_only_review_gated_and_drives
 
 def test_decide_research_review_reads_local_model_output_experiment_plan(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     hypothesis = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
         {
@@ -434,7 +434,7 @@ def test_decide_research_review_reads_local_model_output_experiment_plan(tmp_pat
 def test_run_experiment_smoke_run_executes_records_and_reproducible(tmp_path, monkeypatch):
     """N-11：对 plan 执行 V1 smoke runner，落账并复现（同 seed → artifactHash 一致）。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_experiment_plan(team["teamId"])
     res = team_workflow_orchestration_service.run_experiment_smoke_run(team["teamId"], plan_id, {"seed": 42})
@@ -447,7 +447,7 @@ def test_run_experiment_smoke_run_executes_records_and_reproducible(tmp_path, mo
 
 def test_run_experiment_proxy_smoke_cannot_promote_plan_to_passed(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_experiment_plan(team["teamId"], plan_id="exp_reconstruction_proxy")
 
@@ -466,14 +466,14 @@ def test_run_experiment_proxy_smoke_cannot_promote_plan_to_passed(tmp_path, monk
 
 def test_run_experiment_smoke_run_blocks_missing_baseline(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_id = _seed_experiment_plan(team["teamId"], plan_id="exp_no_baseline", baseline=False)
     with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
         team_workflow_orchestration_service.run_experiment_smoke_run(team["teamId"], plan_id, {})
 
 def test_run_experiment_smoke_run_accepts_api_plan_nested_contract(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
     plan_store["plans"] = [
         {
@@ -509,7 +509,7 @@ def test_run_experiment_smoke_run_honors_legacy_declared_adapter_and_rejects_mis
     tmp_path, monkeypatch
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
         team["teamId"]
     )
@@ -568,7 +568,7 @@ def test_run_experiment_smoke_run_rejects_unavailable_declared_adapter_before_pa
     tmp_path, monkeypatch
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
         team["teamId"]
     )
@@ -617,7 +617,7 @@ def test_run_experiment_smoke_run_ignores_formal_fashionmnist_and_uses_v1_cpu(
     )
 
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     bound = bind_frozen_protocol_to_experiment_plan(
         team["teamId"],
         {
@@ -677,7 +677,7 @@ def test_execute_experiment_full_run_uses_env_execution_config(tmp_path, monkeyp
     from core.web.services.team_workflow.experiment_api import full_run as full_run_api
 
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
     captured: dict[str, object] = {}
@@ -773,7 +773,7 @@ def test_formal_execution_config_overlays_partial_payload_on_stored_preparation(
 
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
     plan_store["plans"] = [
         {
@@ -843,7 +843,7 @@ def test_iteration_design_freeze_requires_explicit_variable_governance(
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
         team["teamId"]
     )
@@ -895,7 +895,7 @@ def test_existing_frozen_plan_projects_bounded_smoke_readiness_without_rewriting
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
         team["teamId"]
     )
@@ -948,7 +948,7 @@ def test_existing_frozen_plan_projects_bounded_smoke_readiness_without_rewriting
 
 def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     plan_id = _seed_experiment_plan(team["teamId"], plan_id="exp_bad_adapter")
     with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
         team_workflow_orchestration_service.run_experiment_smoke_run(
@@ -957,7 +957,7 @@ def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monk
 
 def test_prepare_experiment_full_run_records_preflight_without_starting_execution(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
     output_root = (tmp_path / "experiments" / "prepared").resolve()
@@ -993,7 +993,7 @@ def test_prepare_experiment_full_run_records_preflight_without_starting_executio
 
 def test_execute_experiment_full_run_stores_review_only_artifacts_without_auto_promotion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
     output_root = (tmp_path / "experiments" / "review-only").resolve()
@@ -1037,7 +1037,7 @@ def test_formal_full_run_pass_rejects_manual_payload_without_canonical_runner_re
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
     smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
         team["teamId"],
@@ -1070,7 +1070,7 @@ def test_external_manual_full_run_is_explicit_and_does_not_unlock_knowledge_read
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
     smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
         team["teamId"],
@@ -1108,7 +1108,7 @@ def test_canonical_runner_receipt_overrides_manual_fields_and_replays_idempotent
     from core.research import formal_runner
 
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     plan_id = _seed_formal_full_run_plan(team["teamId"])
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
@@ -1360,7 +1360,7 @@ def test_canonical_runner_receipt_rejects_seed_or_artifact_binding_tampering(
     tmp_path, monkeypatch, mutation
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
     smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
         team["teamId"],
@@ -1381,7 +1381,7 @@ def test_canonical_runner_receipt_rejects_seed_or_artifact_binding_tampering(
 
 def test_canonical_receipt_replays_after_external_manual_history_window(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
     smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
         team["teamId"],
@@ -2383,7 +2383,7 @@ def test_active_research_loop_projection_uses_current_project_loop_from_team_led
     from core.web.services import research_loop_service
 
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     project_a = team_workflow_orchestration_service.create_research_project(
         team["teamId"],
         {"name": "Project A"},
@@ -2777,7 +2777,7 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
         {
             "requestedByAgent": requester["agentId"],
             "knowledgeBaseId": "research-team-experiment-kb",
-            "targetDomain": "挑战杯实验结果",
+            "targetDomain": "科研实验结果",
         },
     )
     inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, status="pending")
@@ -2889,7 +2889,7 @@ def test_direct_experiment_ingestion_reconciles_plan_ledger_once(tmp_path, monke
             "requestedByAgent": requester["agentId"],
             "stewardAgentId": steward["agentId"],
             "knowledgeBaseId": knowledge_base_ref,
-            "targetDomain": "挑战杯实验结果",
+            "targetDomain": "科研实验结果",
         },
     )
     inbox_source_id = requested["knowledgeStewardActivation"]["inboxSourceId"]
@@ -3012,7 +3012,7 @@ def test_experiment_ingestion_reconciliation_rejects_partial_evidence(tmp_path, 
 
 def test_algorithm_hypothesis_requires_complete_experiment_plan(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],

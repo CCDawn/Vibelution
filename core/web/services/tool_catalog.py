@@ -1159,7 +1159,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "bundleId": "source_collection_stage",
         "label": "资料搜集阶段包",
-        "description": "适合挑战杯资料搜集阶段私聊任务：读取阶段上下文并回写阶段任务结果，不等同正式知识入库。",
+        "description": "适合科研资料搜集阶段私聊任务：读取阶段上下文并回写阶段任务结果，不等同正式知识入库。",
         "category": "research",
         "toolNames": [
             "task_list_tool",
@@ -1190,8 +1190,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "bundleId": "challenge_cup_experiment",
-        "label": "挑战杯实验账本包",
-        "description": "适合挑战杯实验规划和证据登记：读写实验计划、baseline、smoke/full-run 结果和入库申请，不执行训练。",
+        "label": "科研实验账本包",
+        "description": "适合科研实验规划和证据登记：读写实验计划、baseline、smoke/full-run 结果和入库申请，不执行训练。",
         "category": "research",
         "toolNames": [
             "challenge_cup_experiment_context_tool",
@@ -1208,8 +1208,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "bundleId": "challenge_cup_iteration",
-        "label": "挑战杯迭代账本包",
-        "description": "适合挑战杯实验迭代与候选版本治理：读写 Research Loop、证据决策、版本历史和拒绝归档，不自动 apply。",
+        "label": "科研迭代账本包",
+        "description": "适合科研实验迭代与候选版本治理：读写 Research Loop、证据决策、版本历史和拒绝归档，不自动 apply。",
         "category": "research",
         "toolNames": [
             "challenge_cup_iteration_context_tool",

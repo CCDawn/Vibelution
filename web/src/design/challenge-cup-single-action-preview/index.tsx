@@ -56,7 +56,7 @@ function Toolbar({ scene }: { scene: ActionScene }) {
   return (
     <header className={styles.toolbar} data-testid="product-toolbar">
       <div className={styles.toolbarIdentity}>
-        <strong>挑战杯 AI 科研团队</strong>
+        <strong>AI科研团队</strong>
         <span>SCI-002 · Navier–Stokes</span>
       </div>
       <div className={styles.toolbarContext}>
@@ -512,7 +512,7 @@ export function ChallengeCupSingleActionPreviewApp({
         data-testid="single-action-preview-frame"
       >
         <VCanvasWorkbenchPage
-          ariaLabel="挑战杯科研流程单一操作预览"
+          ariaLabel="AI科研流程单一操作预览"
           title="科研流程"
           hideHeader
           toolbar={toolbar}

@@ -90,7 +90,7 @@ describe("challenge cup team canvas preview", () => {
       current?.click();
     });
     expect(host.querySelector('[data-testid="layout-current"]')).toBeTruthy();
-    expect(host.querySelector('[data-testid="current-team-rail"]')?.textContent).toContain("挑战杯ai科研团队");
+    expect(host.querySelector('[data-testid="current-team-rail"]')?.textContent).toContain("AI科研团队");
     expect(host.querySelector('[data-testid="current-team-rail"]')?.textContent).toContain("AI 搜索范围团队");
     expect(host.querySelector('[aria-label="切换团队"]')).toBeNull();
     expect(host.querySelector('[data-testid="layout-current"]')?.textContent).toContain("检查器默认隐藏");

@@ -1,5 +1,6 @@
 import json
 
+from core.research.workflow.contracts import CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
 from core.web.services import (
     agent_directory_service,
     research_loop_service,
@@ -29,7 +30,12 @@ def _canonical_agent_runtime(role_key: str) -> dict:
             "roleKey": role_key,
             "metadata": {
                 "challengeCupTeamId": "research-team",
-                "challengeCupTeamManagedVersion": 2,
+                # Canonical writeback requires the managed version to equal
+                # the active contract version, so the fixture derives it
+                # instead of pinning a literal that drifts on every bump.
+                "challengeCupTeamManagedVersion": (
+                    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.team_role_contract_version
+                ),
                 "challengeCupTeamRole": role_key,
                 "challengeCupTeamRoleKey": role_key,
             },

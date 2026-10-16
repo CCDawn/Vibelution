@@ -792,7 +792,7 @@ def _navigation_anchor(
 ) -> dict[str, Any]:
     meeting_id = str(meeting.get("meetingRoundId") or "").strip() or None
     room_id = str(meeting.get("linkedChatRoomId") or "").strip() or None
-    return_label = "返回挑战杯流程"
+    return_label = "返回科研流程"
     if room_id:
         deep_link = "/chat?" + urlencode(
             {
@@ -4857,7 +4857,7 @@ def _scope_records(
         if normalized_workflow_run_id and not formal_runs:
             raise HypothesisFirstStateScopeError(
                 "workflow_run_scope_mismatch",
-                "runId 不属于当前团队、赛题或挑战杯工作流",
+                "runId 不属于当前团队、赛题或科研工作流",
                 status_code=404,
             )
         formal_snapshots: dict[str, dict[str, Any]] = {}
@@ -4929,7 +4929,7 @@ def _scope_records(
             source_error_type=type(exc).__name__,
         )
         raise HypothesisFirstStateSourceError(
-            f"无法读取挑战杯流程权威状态：{type(exc).__name__}"
+            f"无法读取科研流程权威状态：{type(exc).__name__}"
         ) from exc
 
     return {
@@ -5010,7 +5010,7 @@ def project_hypothesis_first_state_v2(
     if not is_official_question_id(normalized_question_id):
         raise HypothesisFirstStateScopeError(
             "catalog_question_unknown",
-            "题号不在官方挑战杯目录中",
+            "题号不在官方科研目录中",
             status_code=404,
         )
     normalized_workflow_run_id = str(workflow_run_id or "").strip()

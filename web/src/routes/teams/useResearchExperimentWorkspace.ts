@@ -61,7 +61,7 @@ const EMPTY_FULL_RUN_RESULT_DRAFT: ExperimentFullRunResultDraft = {
 
 const EMPTY_KNOWLEDGE_INGESTION_DRAFT: ExperimentKnowledgeIngestionDraft = {
   knowledgeBaseId: "research-team-experiment-kb",
-  targetDomain: "挑战杯实验结果",
+  targetDomain: "科研实验结果",
   title: "",
   summary: "",
   notes: "",

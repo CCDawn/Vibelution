@@ -207,8 +207,8 @@ function pageHeader(detail: ChallengeQuestionRunDetailPayload, lang: QuestionArc
   ].map((line) => `<span>${escapeHtml(line)}</span>`).join("");
   return `<header class="page-header"><p class="eyebrow">${bilingual(
     lang,
-    "挑战杯题目档案 · 科研链路产物快照",
-    "Challenge Cup question archive · research-chain artifact snapshot",
+    "科研题目档案 · 科研链路产物快照",
+    "Research question archive · research-chain artifact snapshot",
   )}</p><h1>${escapeHtml(output.question_en)}</h1>${output.question_zh ? `<p class="question-zh">${escapeHtml(output.question_zh)}</p>` : ""}<div class="meta">${meta}</div></header>`;
 }
 
@@ -632,7 +632,7 @@ export function buildQuestionArchiveHtml(
   const lang: QuestionArchiveLang = options.lang ?? "zh";
   const at = options.generatedAt ?? new Date();
   const { output } = detail;
-  const title = `挑战杯题目档案 ${detail.questionId}`;
+  const title = `科研题目档案 ${detail.questionId}`;
   const sections = [
     understandingSection(output, lang),
     evidenceSection(output, options, lang),

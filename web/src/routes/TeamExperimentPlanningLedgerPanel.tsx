@@ -274,7 +274,7 @@ const FALLBACK_FULL_RUN_RESULT_DRAFT: ExperimentFullRunResultDraft = {
 };
 const FALLBACK_KNOWLEDGE_INGESTION_DRAFT: ExperimentKnowledgeIngestionDraft = {
   knowledgeBaseId: "research-team-experiment-kb",
-  targetDomain: "挑战杯实验结果",
+  targetDomain: "科研实验结果",
   title: "",
   summary: "",
   notes: "",
@@ -1175,7 +1175,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                           <VNativeInput
                             value={experimentKnowledgeIngestionDraft.targetDomain}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, targetDomain: event.target.value }))}
-                            placeholder={lang === "zh" ? "挑战杯实验结果" : "Challenge Cup experiment results"}
+                            placeholder={lang === "zh" ? "科研实验结果" : "Research experiment results"}
                           />
                         </label>
                         <label>

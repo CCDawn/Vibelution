@@ -218,7 +218,7 @@ def test_anomaly_inbox_route_maps_scope_errors(monkeypatch) -> None:
     def raise_unknown(team_id: str, question_id: str, **kwargs: Any) -> None:
         raise HypothesisFirstStateScopeError(
             "catalog_question_unknown",
-            "题号不在官方挑战杯目录中",
+            "题号不在官方科研目录中",
             status_code=404,
         )
 

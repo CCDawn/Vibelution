@@ -46,7 +46,7 @@ const baseBoardProps: TeamsWorkbenchBoardPageProps = {
     sidebar: { id: "rail", defaultWidth: 280, minWidth: 240, maxWidth: 360 },
     aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
   },
-  selectedTeamContextTitle: "挑战杯科研团队",
+  selectedTeamContextTitle: "AI科研团队",
   teamShellRail: <aside data-testid="team-shell-rail" />,
   teamShellToolbar: <div data-testid="team-shell-toolbar" />,
   boardPrimaryMode: "overview",

@@ -262,7 +262,7 @@ describe("AgentConversationDirectory", () => {
       agents: [personalAgent, teamMember],
       teams: [{
         teamId: "research-team",
-        name: "挑战杯团队",
+        name: "科研团队",
         description: "",
         purpose: "",
         status: "active",

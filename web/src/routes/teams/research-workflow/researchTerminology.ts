@@ -25,3 +25,24 @@ export function researchStageTermZh(stageId: string): string {
   const term = RESEARCH_STAGE_TERMS[stageId as ResearchStageTermId];
   return term ? term.zh : "流程阶段";
 }
+
+/**
+ * Display-layer mapping for workflow definition labels.
+ *
+ * The server definition labels still carry the legacy "挑战杯" prefix and
+ * participate in the definition structureHash, so they cannot be renamed in
+ * place. Surfaces that render a definition-derived label must pass it through
+ * this mapping so users only ever see the renamed flow. Unknown labels pass
+ * through unchanged; no logic may branch on the legacy literals.
+ */
+const LEGACY_WORKFLOW_LABEL_DISPLAY: Record<string, string> = {
+  挑战杯科研流程: "AI科研流程",
+  挑战杯第一阶段科研流程: "AI科研第一阶段流程",
+  挑战杯知识搜集子流程: "科研知识搜集子流程",
+};
+
+export function displayWorkflowLabel(label: string | null | undefined): string {
+  const trimmed = String(label ?? "").trim();
+  if (!trimmed) return "";
+  return LEGACY_WORKFLOW_LABEL_DISPLAY[trimmed] ?? trimmed;
+}

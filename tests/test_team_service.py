@@ -206,7 +206,7 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
 
     assert first["teamId"] == "research-team"
     assert second["teamId"] == "research-team"
-    assert second["name"] == "挑战杯ai科研团队"
+    assert second["name"] == "AI科研团队"
     assert second["teamKind"] == "research"
     assert second["teamCategory"] == "科研组织团队"
     assert second["teamSource"] == "research_organization"
@@ -416,7 +416,7 @@ def test_research_team_read_repair_cannot_override_agent_instance_configuration(
     _use_tmp_project_root(tmp_path, monkeypatch)
     finder = agent_directory_service.create_agent_instance(display_name="Finder", direct_session_id="session-finder")
     team_service.create_team(
-        name="挑战杯ai科研团队",
+        name="AI科研团队",
         purpose="科研协作",
         members=[
             {
@@ -859,8 +859,8 @@ def test_research_team_sync_restores_missing_historical_team_chat_room_id(tmp_pa
     assert repaired["linkedChatRoomId"] == historical_room_id
     assert room is not None
     assert room["purpose"] == "research_coordination"
-    assert room["title"] == "挑战杯ai科研团队 团队群聊"
-    assert room["config"]["teamName"] == "挑战杯ai科研团队"
+    assert room["title"] == "AI科研团队 团队群聊"
+    assert room["config"]["teamName"] == "AI科研团队"
     # Participants project Team.members, which the org sync keeps empty.
     assert [participant["agentId"] for participant in room["participants"]] == []
 
@@ -916,8 +916,8 @@ def test_research_team_sync_preserves_current_room_and_restores_historical_room_
     assert reloaded["linkedChatRoomId"] == current_room_id
     assert restored_room is not None
     assert restored_room["config"]["historicalTeamRoom"] is True
-    assert restored_room["title"] == "挑战杯ai科研团队 团队群聊（历史）"
-    assert restored_room["config"]["teamName"] == "挑战杯ai科研团队"
+    assert restored_room["title"] == "AI科研团队 团队群聊（历史）"
+    assert restored_room["config"]["teamName"] == "AI科研团队"
     assert restored_room["config"]["currentLinkedChatRoomId"] == current_room_id
     assert chat_room_service.get_chat_room_detail(historical_room_id) is not None
     assert {room["roomId"] for room in chat_room_service.list_chat_rooms()} == {current_room_id, historical_room_id}
@@ -970,9 +970,9 @@ def test_research_team_sync_updates_existing_historical_room_metadata(tmp_path, 
     team_service.get_team("research-team")
     room = chat_room_service.get_chat_room_detail(historical_room_id)
 
-    assert room["title"] == "挑战杯ai科研团队 团队群聊（历史）"
+    assert room["title"] == "AI科研团队 团队群聊（历史）"
     assert room["purpose"] == "research_coordination"
-    assert room["config"]["teamName"] == "挑战杯ai科研团队"
+    assert room["config"]["teamName"] == "AI科研团队"
     assert room["config"]["currentLinkedChatRoomId"] == current_room_id
     assert room["config"]["customFlag"] == "keep"
     # Participants project Team.members, which the org sync keeps empty.

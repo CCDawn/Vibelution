@@ -313,7 +313,7 @@ def test_review_aggregate_must_match_candidate_states() -> None:
                         "candidateId": "candidate-1",
                         "deepLink": "/chat?room=room-1",
                         "returnTo": "/teams/team-1/research?question=SCI-001",
-                        "returnLabel": "返回挑战杯流程",
+                        "returnLabel": "返回科研流程",
                     },
                     "discussion": _phase(
                         lifecycle="completed",
@@ -359,7 +359,7 @@ def test_navigation_action_has_return_route_but_no_cas_fields() -> None:
                 "candidateId": "candidate-1",
                 "deepLink": "/chat?room=room-1",
                 "returnTo": "/teams/team-1/research?question=SCI-001",
-                "returnLabel": "返回挑战杯流程",
+                "returnLabel": "返回科研流程",
             },
         }
     ]

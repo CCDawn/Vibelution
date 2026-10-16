@@ -851,11 +851,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         )}
         {challengeProgramLoading ? (
           <div className={styles.researchStageDegradedNotice} role="status">
-            <span>{lang === "zh" ? "正在读取挑战杯 MVP 状态，不会显示旧科研流程。" : "Loading the Challenge Cup MVP state without falling back to the legacy workflow."}</span>
+            <span>{lang === "zh" ? "正在读取科研 MVP 状态，不会显示旧科研流程。" : "Loading the research MVP state without falling back to the legacy workflow."}</span>
           </div>
         ) : challengeProgramUnavailable ? (
           <div className={styles.researchStageDegradedNotice} role="alert">
-            <span>{lang === "zh" ? "挑战杯 MVP 状态暂不可用；旧科研流程已保持隐藏，避免产生错误操作。" : "The Challenge Cup MVP state is unavailable; the legacy workflow remains hidden to prevent incorrect actions."}</span>
+            <span>{lang === "zh" ? "科研 MVP 状态暂不可用；旧科研流程已保持隐藏，避免产生错误操作。" : "The research MVP state is unavailable; the legacy workflow remains hidden to prevent incorrect actions."}</span>
             <VNativeButton type="button" onClick={() => void experimentPlanningStatusQuery.refetch()} disabled={experimentPlanningStatusQuery.isFetching}>
               <RefreshCw size={13} />
               {lang === "zh" ? "重试" : "Retry"}

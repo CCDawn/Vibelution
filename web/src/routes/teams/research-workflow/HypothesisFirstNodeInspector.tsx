@@ -1016,7 +1016,7 @@ function InspectorBody(props: {
       return (
         <div className={styles.task} data-testid="challenge-cup-workflow-completed">
           <VStateRow tone="success">
-            {isZh ? "挑战杯研究流程已闭环" : "Challenge Cup research workflow completed"}
+            {isZh ? "AI科研流程已闭环" : "Research workflow completed"}
           </VStateRow>
           <p className={styles.status}>
             {isZh

@@ -79,7 +79,7 @@ def _dataset_ref(
 def _knowledge_content(manifest: dict[str, Any]) -> str:
     refs = [item for item in manifest.get("resultRefs") or [] if isinstance(item, dict)]
     lines = [
-        "挑战杯第一阶段 125 题结果整包索引。",
+        "科研第一阶段 125 题结果整包索引。",
         f"manifestSha256: {_text(manifest.get('manifestSha256'))}",
         f"contentSha256: {_text(manifest.get('contentSha256'))}",
         f"questionCount: {int(manifest.get('questionCount') or 0)}",
@@ -132,7 +132,7 @@ def _publish_approved_phase_one_to_team_knowledge(
     resolved = knowledge_service.get_or_create_team_knowledge_base(
         team_id,
         name=KNOWLEDGE_BASE_NAME,
-        description="挑战杯团队正式知识库",
+        description="科研团队正式知识库",
         actor_agent_id=proposer_id,
     )
     knowledge_base = resolved.get("knowledgeBase") or {}
@@ -162,7 +162,7 @@ def _publish_approved_phase_one_to_team_knowledge(
             original_filename=f"challenge-phase-one-{manifest['manifestSha256']}.json",
             captured_by=proposer_id,
             source_hash=manifest["manifestSha256"],
-            title="挑战杯第一阶段 125 题结果整包",
+                title="科研第一阶段 125 题结果整包",
             summary="经真实操作者整包批准的第一阶段结果索引与不可变内容哈希。",
             actor_agent_id=proposer_id,
         )
@@ -175,7 +175,7 @@ def _publish_approved_phase_one_to_team_knowledge(
             resolution_note="Apply the operator-approved phase-one package without a second human gate.",
             ingest_on_accept=True,
             knowledge_base_id=knowledge_base_id,
-            knowledge_title="挑战杯第一阶段 125 题结果包",
+            knowledge_title="科研第一阶段 125 题结果包",
             knowledge_summary="125 题内容已整包批准；本条目绑定精确 manifest 与内容哈希。",
             knowledge_content=_knowledge_content(manifest),
             tags=["challenge-cup", "phase-one", manifest_tag],

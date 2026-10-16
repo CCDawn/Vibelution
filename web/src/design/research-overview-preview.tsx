@@ -600,7 +600,7 @@ function ResearchOverviewPreviewApp() {
           <div className="rail-block">
             <div className="rail-label">团队</div>
             <button type="button" className="rail-item" data-active="true">
-              挑战杯科研
+              科研
               <small>活跃</small>
             </button>
             <button type="button" className="rail-item">

@@ -639,7 +639,7 @@ def _submit_steward_pack_through_source_review_route(
 def test_team_workflow_routes_run_candidate_transfer_slice(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     workflow_response = client.put(
         f"/api/teams/{team['teamId']}/workflow-orchestration",
@@ -676,7 +676,7 @@ def test_team_workflow_routes_run_candidate_transfer_slice(tmp_path, monkeypatch
 def test_team_workflow_route_imports_data_record_as_source_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     project = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects",
         json={"name": "Imported source research", "topic": "Imported source evidence"},
@@ -736,7 +736,7 @@ def test_team_workflow_route_imports_data_record_as_source_candidate(tmp_path, m
 def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
@@ -1284,7 +1284,7 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
     direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = client.post(
         "/api/teams",
-        json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
+        json={"name": "AI科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
     workflow_run_id = "workflow-route-agent-session-context"
     start_response = client.post(
@@ -1352,7 +1352,7 @@ def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_pat
     direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = client.post(
         "/api/teams",
-        json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
+        json={"name": "AI科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
     workflow_run_id = "workflow-route-stage-session-task"
     start_response = client.post(
@@ -1453,7 +1453,7 @@ def test_team_workflow_route_returns_source_collection_summary(tmp_path, monkeyp
     # its service symbol in the focused source-collection route module.
     monkeypatch.setattr(team_workflow_source_collection_routes, "get_source_collection_summary", fake_summary)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.get(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection/summary",
@@ -1475,7 +1475,7 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
     session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = client.post(
         "/api/teams",
-        json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
+        json={"name": "AI科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
     workflow_run_id = "workflow-route-stage-task-writeback"
     stage_response = client.post(
@@ -1806,7 +1806,7 @@ def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_p
         lambda: _fake_local_research_public_config(prompt_cache_mode="unsupported"),
     )
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
@@ -1936,7 +1936,7 @@ def test_team_workflow_routes_govern_engineering_proxy_hypothesis_revision(
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     stage = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
         json={
@@ -2464,7 +2464,7 @@ def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monk
 def test_team_workflow_routes_delegate_explicit_formal_run_prepare_and_execute(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     calls = []
 
     def fake_prepare(team_id, plan_id, payload):
@@ -2592,7 +2592,7 @@ def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_
             "requestedByAgent": requester["agentId"],
             "stewardAgentId": steward["agentId"],
             "knowledgeBaseId": "research-team-experiment-kb",
-            "targetDomain": "挑战杯实验结果",
+            "targetDomain": "科研实验结果",
         },
     )
 
@@ -2705,7 +2705,7 @@ def test_team_workflow_route_retries_research_stage_coordination(tmp_path, monke
 def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     client.put(
         f"/api/teams/{team['teamId']}/workflow-orchestration",
         json={"workflowKind": "challenge_cup_research", "ownerAgentId": "Research Coordination Agent"},
@@ -2736,7 +2736,7 @@ def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkey
 def test_team_workflow_route_rejected_transfer_archives_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     client.put(
         f"/api/teams/{team['teamId']}/workflow-orchestration",
         json={"workflowKind": "challenge_cup_research", "ownerAgentId": "Research Coordination Agent"},
@@ -2785,7 +2785,7 @@ def test_team_workflow_route_rejected_transfer_archives_candidate(tmp_path, monk
 def test_team_workflow_routes_build_and_record_local_research_model_output(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     task_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/tasks",
@@ -2836,7 +2836,7 @@ def test_team_workflow_routes_build_and_record_local_research_model_output(tmp_p
 def test_team_workflow_routes_list_and_validate_candidate_store(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     candidate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
@@ -2868,7 +2868,7 @@ def test_team_workflow_routes_list_and_validate_candidate_store(tmp_path, monkey
 def test_team_workflow_candidate_list_store_payload_is_opt_in(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     candidate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
@@ -2926,7 +2926,7 @@ def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkey
 
     monkeypatch.setattr(team_workflow_knowledge_routes, "get_knowledge_ingestion_status", fake_status)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-ingestion/status")
 
@@ -2970,7 +2970,7 @@ def test_team_workflow_route_runs_knowledge_ingestion_precheck(tmp_path, monkeyp
 
     monkeypatch.setattr(team_workflow_knowledge_routes, "run_knowledge_ingestion_precheck", fake_precheck)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-ingestion/precheck",
@@ -3038,7 +3038,7 @@ def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
 
     monkeypatch.setattr(team_workflow_knowledge_routes, "get_team_workflow_coordination_status", fake_status)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/coordination/status")
 
@@ -3066,7 +3066,7 @@ def test_team_workflow_routes_extract_candidate_source_pages(tmp_path, monkeypat
         return [{"type": "pdf_page", "id": "neuro-p2", "label": "p. 2", "page": 2, "text": "Route extracted page text."}]
 
     monkeypatch.setattr(team_workflow_orchestration_service, "_extract_pdf_page_anchors", fake_extract)
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     candidate = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
         json={
@@ -3101,7 +3101,7 @@ def test_team_workflow_routes_extract_candidate_source_pages(tmp_path, monkeypat
 def test_team_workflow_routes_reject_paper_note_without_citation_anchor(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
@@ -3139,7 +3139,7 @@ def test_team_workflow_routes_reject_paper_note_without_citation_anchor(tmp_path
 def test_team_workflow_routes_reject_neuro_mechanism_uncertain_terms_without_flag(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
@@ -3177,7 +3177,7 @@ def test_team_workflow_routes_reject_neuro_mechanism_uncertain_terms_without_fla
 def test_team_workflow_routes_record_mechanism_mapping_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
@@ -3214,7 +3214,7 @@ def test_team_workflow_routes_record_mechanism_mapping_candidate(tmp_path, monke
 def test_team_workflow_routes_record_algorithm_hypothesis_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
@@ -3256,7 +3256,7 @@ def test_team_workflow_routes_record_algorithm_hypothesis_candidate(tmp_path, mo
 def test_team_workflow_routes_build_candidate_graph(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
     client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
         json={
@@ -3306,7 +3306,7 @@ def test_team_workflow_routes_build_candidate_graph(tmp_path, monkeypatch):
 def test_team_workflow_routes_record_review_prefilter(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
@@ -3343,7 +3343,7 @@ def test_team_workflow_routes_record_review_prefilter(tmp_path, monkeypatch):
 def test_team_workflow_routes_record_steward_pack_draft(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
@@ -3386,7 +3386,7 @@ def test_team_workflow_routes_submit_steward_pack_to_knowledge_ingestion(tmp_pat
     team = client.post(
         "/api/teams",
         json={
-            "name": "挑战杯科研团队",
+            "name": "AI科研团队",
             "members": [
                 {"agentId": steward["agentId"], "role": "steward"},
                 {"agentId": reviewer["agentId"], "role": "coordinator"},
@@ -3454,7 +3454,7 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
     team = client.post(
         "/api/teams",
         json={
-            "name": "挑战杯科研团队",
+            "name": "AI科研团队",
             "members": [
                 {"agentId": steward["agentId"], "role": "steward"},
                 {"agentId": reviewer["agentId"], "role": "coordinator"},
@@ -3627,7 +3627,7 @@ def test_team_workflow_route_completes_knowledge_collection_in_background(tmp_pa
         }
 
     monkeypatch.setattr(team_workflow_knowledge_routes, "start_knowledge_collection_completion_background", fake_start_completion)
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-collection/complete",
@@ -3711,7 +3711,7 @@ def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch)
 
     monkeypatch.setattr(team_workflow_research_ops_routes, "invoke_local_research_model", fake_invoke)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/invoke",
@@ -3744,7 +3744,7 @@ def test_team_workflow_route_autodrafts_paper_note_from_source_candidate(tmp_pat
 
     monkeypatch.setattr(team_workflow_knowledge_routes, "draft_paper_note_from_source_candidate", fake_autodraft)
     client = _client()
-    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    team = client.post("/api/teams", json={"name": "AI科研团队"}).json()
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source-1/paper-note-draft",

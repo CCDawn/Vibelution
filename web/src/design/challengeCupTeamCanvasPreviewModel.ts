@@ -62,7 +62,7 @@ export const SCENE_LABEL: Record<SceneId, string> = {
 export const TEAMS: PreviewTeam[] = [
   {
     id: "challenge",
-    name: "挑战杯ai科研团队",
+    name: "AI科研团队",
     purpose: "组织关系图 · 科研主页",
     kind: "科研工作流",
     nextTitle: "继续知识搜集",
@@ -74,7 +74,7 @@ export const TEAMS: PreviewTeam[] = [
       { label: "阻塞", value: "0" },
     ],
     stages: [
-      { id: "collect", title: "资料寻找", status: "进行中", tone: "active" },
+      { id: "collect", title: "问题理解", status: "进行中", tone: "active" },
       { id: "experiment", title: "实验设计", status: "未开始", tone: "idle" },
       { id: "iterate", title: "执行迭代", status: "未开始", tone: "idle" },
     ],

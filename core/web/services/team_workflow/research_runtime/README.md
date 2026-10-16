@@ -1,6 +1,6 @@
 # `research_runtime` — Workflow Ledger 正式运行时（T3–T5 集成收口）
 
-本目录实现挑战杯科研工作流**正式运行时**：命令受理 → LangGraph interrupt/resume →
+本目录实现科研工作流**正式运行时**：命令受理 → LangGraph interrupt/resume →
 Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Readiness 的完整链路。
 挑战杯规划规范不进入 GitHub，本地副本见桌面 `挑战杯/03-工程合同/`；仓内实现合同以本 README、Workflow Ledger 代码与对应测试为准。
 
@@ -109,7 +109,7 @@ Command transaction (WorkflowCommandService)
 `tests/test_research_workflow_integration_chain.py`（无 Fake：Command→Graph→Adapter→
 read-back→Receipt→Handoff→下一节点 Readiness）。
 
-## 封存模式（挑战杯批次归档）
+## 封存模式（科研批次归档）
 
 批次封存 = 停掉空转活性、只读可看：不再自动推进/改写任何 research workflow
 状态，投影与 UI 查看不受影响。总开关读取集中在 `archive_mode.py`

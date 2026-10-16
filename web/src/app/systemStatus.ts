@@ -926,7 +926,7 @@ function activeWorkSummary(
     if (topic && summary) {
       return lang === "en" ? `${topic}: ${summary}` : `${topic}：${summary}`;
     }
-    return summary || topic || (lang === "en" ? "Research team is collecting sources" : "AI 科研团队正在搜集资料");
+    return summary || topic || (lang === "en" ? "Research team is collecting sources" : "AI科研团队正在搜集资料");
   }
 
   const lastToolError = recordTextValue(run["lastToolError"], ["summary", "errorPreview", "toolName"]);

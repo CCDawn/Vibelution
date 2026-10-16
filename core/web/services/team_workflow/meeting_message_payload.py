@@ -98,7 +98,7 @@ def meeting_message_structured_output_contract():
 def meeting_message_output_contract() -> str:
     """Prompt fragment for one machine-validated meeting response object."""
 
-    return """挑战杯会议结构化输出合同：
+    return """科研会议结构化输出合同：
 只输出一个 JSON 对象，不要使用 Markdown 代码围栏，也不要在对象前后添加说明。
 对象必须符合以下结构：
 {

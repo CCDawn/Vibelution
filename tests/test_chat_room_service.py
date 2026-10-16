@@ -610,7 +610,7 @@ def test_create_chat_room_resolves_explicit_hidden_team_agent_session(tmp_path, 
     monkeypatch.setattr(session_service, "list_sessions", lambda *args, **kwargs: [])
 
     room = chat_room_service.create_chat_room(
-        title="挑战杯团队群聊",
+        title="科研团队群聊",
         participant_session_ids=["session-hidden-team-agent"],
     )
 
@@ -3443,7 +3443,7 @@ def test_formal_challenge_room_uses_structured_message_contract_without_changing
     captured_prompts = []
 
     formal_room = chat_room_service.create_chat_room(
-        title="正式挑战杯讨论",
+        title="正式科研讨论",
         participant_session_ids=["session-beta"],
         purpose="meeting",
         config={
@@ -3486,7 +3486,7 @@ def test_formal_challenge_room_uses_structured_message_contract_without_changing
     )
 
     formal_message = formal_detail["rounds"][-1]["messages"][0]
-    assert "挑战杯会议结构化输出合同" not in captured_prompts[0]
+    assert "科研会议结构化输出合同" not in captured_prompts[0]
     assert "遵循 system 区中的群聊结构化输出合同" in captured_prompts[0]
     assert formal_message["content"].startswith("当前证据不足，暂不升级候选。")
     assert formal_message["messagePayload"]["audit"]["parseStatus"] == "structured"
@@ -3510,7 +3510,7 @@ def test_formal_challenge_room_uses_structured_message_contract_without_changing
         agent_runner=normal_runner,
     )
     normal_message = normal_detail["rounds"][-1]["messages"][0]
-    assert "挑战杯会议结构化输出合同" not in normal_prompts[0]
+    assert "科研会议结构化输出合同" not in normal_prompts[0]
     assert normal_message["content"] == "普通会议文本保持不变。"
     assert "messagePayload" not in normal_message
 
@@ -3941,7 +3941,7 @@ def test_candidate_generation_uses_trusted_short_answer_contract():
         },
         prior_messages=[],
     )
-    assert "挑战杯会议结构化输出合同" not in grounded_prompt
+    assert "科研会议结构化输出合同" not in grounded_prompt
     assert "遵循 system 区中的群聊结构化输出合同" in grounded_prompt
     assert "只输出一条 CANDIDATE 标记" not in grounded_prompt
 

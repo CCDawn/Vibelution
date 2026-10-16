@@ -277,7 +277,7 @@ export function createSourceCollectionController(ctx: SourceCollectionController
           unavailableTitle={
             chrome.showTeamDetailUnavailableSurface
               ? chrome.teamWorkspaceUnavailableTitle
-              : (lang === "zh" ? "正在读取 挑战杯ai科研团队" : "Loading Challenge Cup AI research team")
+              : (lang === "zh" ? "正在读取 AI科研团队" : "Loading the AI research team")
           }
           unavailableDetail={
             chrome.showTeamDetailUnavailableSurface

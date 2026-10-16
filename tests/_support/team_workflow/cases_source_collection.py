@@ -37,7 +37,7 @@ def _create_owned_source_collection_processing_run(team, *, title):
 def test_source_collection_summary_reuses_processing_status_for_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -70,7 +70,7 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     workflow_run_id = "workflow-stage-summary-needs-continue"
@@ -161,7 +161,7 @@ def test_source_collection_run_start_preserves_previous_stage_agent_session_reco
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     old_session_id = agent_directory_service.get_agent(discovery["agentId"])["directSessionId"]
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     first_run = team_workflow_orchestration_service.start_source_collection_run(
@@ -215,7 +215,7 @@ def test_source_collection_run_start_preserves_previous_stage_agent_session_reco
 def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     first_run = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -257,7 +257,7 @@ def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path,
 def test_source_collection_summary_never_selects_a_round_from_another_research_project(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     old_run = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -376,7 +376,7 @@ def test_source_collection_stage_turn_failure_uses_terminal_snapshot(tmp_path, m
 def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempotent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     project = team_workflow_orchestration_service.create_research_project(
         team["teamId"],
         {"name": "Neurology research", "topic": "Neural predictive coding"},
@@ -442,7 +442,7 @@ def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempoten
 
 def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run = data_processing_service.create_processing_run(title="Source collection")
 
     try:
@@ -455,7 +455,7 @@ def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path,
 def test_extract_source_collection_candidates_imports_records_and_closes_extraction_assignment(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     project = team_workflow_orchestration_service.create_research_project(
         team["teamId"],
         {"name": "Neural source extraction", "topic": "Neural predictive coding"},
@@ -549,7 +549,7 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
 
 def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_is_partial(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     project = team_workflow_orchestration_service.create_research_project(
         team["teamId"],
         {"name": "Partial source extraction", "topic": "Neural predictive coding"},
@@ -601,7 +601,7 @@ def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_i
 def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -662,7 +662,7 @@ def test_unregistered_source_collection_stage_tasks_are_rejected(tmp_path, monke
     agent = agent_directory_service.create_agent_instance(display_name="旧资料质检")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="旧资料质检")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "unsupported_source_role", "agentName": "未注册资料角色"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
@@ -741,7 +741,7 @@ def test_start_source_collection_run_blocks_without_required_prompt_cache(tmp_pa
         "load_public_config",
         lambda: _fake_local_research_public_config(prompt_cache_mode="unsupported"),
     )
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     try:
         team_workflow_orchestration_service.start_source_collection_run(
@@ -807,7 +807,7 @@ def test_source_collection_prompt_cache_resolves_provider_first_schema_v2(monkey
 def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -826,7 +826,7 @@ def test_start_source_collection_run_maps_roles_to_team_members(tmp_path, monkey
     finder = agent_directory_service.create_agent_instance(display_name="Source Finder", direct_session_id="session-finder-mapping")
     extractor = agent_directory_service.create_agent_instance(display_name="Source Extractor", direct_session_id="session-extractor-mapping")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": coordinator["agentId"], "role": "ceo", "agentName": "Coordinator"},
             {"agentId": other_research_agent["agentId"], "role": "other_research_role", "agentName": "Other Research Agent"},
@@ -879,17 +879,17 @@ def test_start_source_collection_run_owner_derives_from_contract_roles(tmp_path,
     # v2 bootstrap shape: members carry canonical contract product role ids and
     # no coordinator member exists at all.
     v2_team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[_member(search, "challenge_cup_search"), _member(extractor, "challenge_cup_extractor")],
     )
     # Legacy read-mode shape: member rows may still carry contract aliases.
     legacy_alias_team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[_member(legacy_finder, "source_finder")],
     )
     # Legacy coordination rows still outrank contract roles.
     legacy_coordinator_team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             _member(legacy_coordinator, "research_coordination"),
             _member(coordinator_team_search, "challenge_cup_search"),
@@ -922,7 +922,7 @@ def test_start_source_collection_run_owner_derives_from_contract_roles(tmp_path,
 def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -973,7 +973,7 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_project
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
 
@@ -1055,7 +1055,7 @@ def test_start_source_collection_stage_session_task_submits_project_session_task
     finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
     direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -1210,7 +1210,7 @@ def test_formal_run_stage_sessions_do_not_inherit_other_runs(tmp_path, monkeypat
     finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
 
@@ -1320,7 +1320,7 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
     ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
     ingestor_session = session_service.ensure_agent_direct_session(agent_id=ingestor["agentId"], title="资料入库")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料发现"},
             {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
@@ -1409,7 +1409,7 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
 def test_source_collection_stage_task_context_returns_bounded_records_for_extraction(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -1486,7 +1486,7 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
 def test_source_collection_stage_task_context_pages_raw_records_when_candidates_absent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -1553,7 +1553,7 @@ def test_source_collection_stage_task_context_pages_raw_records_when_candidates_
 def test_source_collection_stage_task_context_uses_lightweight_team_existence(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -1612,7 +1612,7 @@ def test_source_collection_stage_task_context_uses_lightweight_team_existence(tm
 def test_source_collection_stage_task_context_uses_source_ingestor_boundaries(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -1659,7 +1659,7 @@ def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, 
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -1737,7 +1737,7 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -1808,7 +1808,7 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -1944,7 +1944,7 @@ def test_source_collection_stage_session_task_writeback_materializes_source_reco
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -2033,7 +2033,7 @@ def test_source_collection_stage_session_task_writeback_rejects_leads_without_id
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -2443,7 +2443,7 @@ def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -2548,7 +2548,7 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
     extraction = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -2634,7 +2634,7 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
 
 def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifacts(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     project = team_workflow_orchestration_service.create_research_project(
         team["teamId"],
         {"name": "Scoped source rounds", "topic": "Neural evidence rounds"},
@@ -2741,7 +2741,7 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
     _use_tmp_project_root(tmp_path, monkeypatch)
     current_agent = agent_directory_service.create_agent_instance(display_name="当前资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": current_agent["agentId"], "role": "source_extractor", "agentName": "当前资料提炼"}],
     )
     run = _create_owned_source_collection_processing_run(
@@ -2795,7 +2795,7 @@ def test_source_collection_stage_card_projection_closes_finding_with_downstream_
     finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
     extractor = agent_directory_service.create_agent_instance(display_name="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"},
             {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "资料提炼"},
@@ -2933,7 +2933,7 @@ def test_source_collection_stage_card_projection_suppresses_interrupted_task_aft
     )
     finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run = _create_owned_source_collection_processing_run(
@@ -3180,7 +3180,7 @@ def test_source_collection_stage_card_projection_marks_stale_success_as_partial_
 
 def test_source_collection_stage_card_projection_counts_approved_sources_pending_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队", members=[])
+    team = team_service.create_team(name="AI科研团队", members=[])
     run = _create_owned_source_collection_processing_run(
         team,
         title="Knowledge collection current round",
@@ -3221,7 +3221,7 @@ def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_p
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -3290,7 +3290,7 @@ def test_research_stage_status_reconciles_interrupted_stage_task_turn_journal(tm
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -3367,7 +3367,7 @@ def test_research_stage_status_reconciles_terminal_stage_task_snapshot_as_interr
     extraction = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
@@ -3432,7 +3432,7 @@ def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_pat
     extraction = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
@@ -3506,7 +3506,7 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -3592,7 +3592,7 @@ def test_source_collection_context_reports_actual_candidate_page(tmp_path, monke
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -3657,7 +3657,7 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -3736,7 +3736,7 @@ def test_source_collection_context_retry_missing_returns_only_uncovered_candidat
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -3845,7 +3845,7 @@ def test_source_collection_context_evidence_mode_returns_bounded_summary_and_sou
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -3912,7 +3912,7 @@ def test_source_collection_context_evidence_mode_returns_bounded_summary_and_sou
 def test_source_collection_context_evidence_mode_anchors_raw_records_when_candidates_are_absent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -3968,7 +3968,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -4254,7 +4254,7 @@ def test_source_collection_extraction_resume_after_interrupted_reading_prioritiz
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -4351,7 +4351,7 @@ def test_source_collection_context_minimal_strips_stale_candidate_artifacts(tmp_
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -4423,7 +4423,7 @@ def test_source_quality_stage_writeback_materializes_candidate_extraction_decisi
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -4552,7 +4552,7 @@ def test_source_quality_stage_writeback_materializes_candidate_extraction_decisi
 
 def test_source_quality_batch_skips_superseded_source_versions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     version_candidates = [
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -4599,7 +4599,7 @@ def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_
     session_service.ensure_agent_direct_session(agent_id=extractor["agentId"], title="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=ingestor["agentId"], title="资料入库")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "资料提炼"},
             {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
@@ -4611,13 +4611,13 @@ def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_
     )
     target_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
-        name="挑战杯科研知识库",
+        name="科研知识库",
         description="Target team base",
         actor_agent_id=ingestor["agentId"],
     )
     duplicate_base = team_knowledge_service.create_knowledge_base(
         other_team["teamId"],
-        name="挑战杯科研知识库",
+        name="科研知识库",
         description="Duplicate raw id under another owner",
         actor_agent_id=duplicate_ingestor["agentId"],
     )
@@ -4748,7 +4748,7 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -4856,7 +4856,7 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -4985,7 +4985,7 @@ def test_source_collection_context_reconciles_checklist_updates_after_writeback(
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -5075,7 +5075,7 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
     )
     direct_session = session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -5163,7 +5163,7 @@ def test_source_collection_stage_turn_feedback_checklist_cannot_bypass_knowledge
     direct_session = session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料入库")
     coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"},
             {"agentId": agent["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
@@ -5171,7 +5171,7 @@ def test_source_collection_stage_turn_feedback_checklist_cannot_bypass_knowledge
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
-        name="挑战杯科研知识库",
+        name="科研知识库",
         actor_agent_id=coordinator["agentId"],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -5283,7 +5283,7 @@ def test_source_collection_ingestion_reconciles_nested_approve_all_decision_afte
         llm_bindings={"dialogue": {"modelId": "houmo_qwen35_9b_agent"}},
     )
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -5392,7 +5392,7 @@ def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_s
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -5536,7 +5536,7 @@ def test_source_collection_stage_task_after_turn_rejects_unrelated_new_turn(tmp_
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -5603,7 +5603,7 @@ def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tm
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -5776,7 +5776,7 @@ def test_content_extraction_writeback_materializes_record_extractions_and_report
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -5875,7 +5875,7 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -5997,7 +5997,7 @@ def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valu
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6109,7 +6109,7 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     first_run = team_workflow_orchestration_service.start_source_collection_run(
@@ -6204,7 +6204,7 @@ def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_i
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6276,7 +6276,7 @@ def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, 
     agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6379,7 +6379,7 @@ def test_candidate_graph_stage_writeback_materializes_agent_relation_edges(tmp_p
     agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6532,7 +6532,7 @@ def test_candidate_graph_stage_writeback_requires_materialized_relation_edges(tm
     agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6665,7 +6665,7 @@ def test_candidate_graph_dangling_edges_block_closure_until_rebound(tmp_path, mo
     agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6825,7 +6825,7 @@ def test_candidate_graph_dangling_edges_block_closure_until_rebound(tmp_path, mo
 def test_candidate_graph_stage_writeback_materializes_root_graph_payload_on_reuse(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run = _create_owned_source_collection_processing_run(
         team,
         title="Root relation graph",
@@ -6921,7 +6921,7 @@ def test_unregistered_quality_stage_task_is_rejected(tmp_path, monkeypatch):
     agent = agent_directory_service.create_agent_instance(display_name="资料审查")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "unsupported_source_role", "agentName": "资料审查"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
@@ -6951,7 +6951,7 @@ def test_unregistered_candidate_graph_stage_task_is_rejected(tmp_path, monkeypat
     agent = agent_directory_service.create_agent_instance(display_name="候选图谱")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="候选图谱")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "unsupported_relation_role", "agentName": "候选图谱"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
@@ -8820,7 +8820,7 @@ def test_experiment_plan_requires_experiment_stage_round(tmp_path, monkeypatch):
 def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -8864,7 +8864,7 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
 def test_source_collection_summary_exposes_run_scoped_phase_close_gate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -8939,7 +8939,7 @@ def test_source_collection_phase_close_gate_waits_for_stage_round_reconciliation
 
 def test_research_stage_round_status_uses_lightweight_team_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
 
     def fail_full_team_read(team_id):
@@ -8960,7 +8960,7 @@ def test_research_stage_round_status_uses_lightweight_team_snapshot(tmp_path, mo
 def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
         {
@@ -9003,7 +9003,7 @@ def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tm
 
 def test_source_collection_stage_card_projection_resolves_current_stage_agents_once(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run = _create_owned_source_collection_processing_run(
         team,
         title="Stage card projection fast path",
@@ -9060,7 +9060,7 @@ def test_source_collection_stage_card_projection_resolves_current_stage_agents_o
 def test_source_collection_summary_records_slow_runtime_event(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -9326,7 +9326,7 @@ def test_source_collection_stage_card_projection_exposes_structured_knowledge_in
 def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -9368,7 +9368,7 @@ def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(t
 
 def test_load_source_collection_work_run_summary_marks_missing_data_run_stale(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -9443,7 +9443,7 @@ def _seed_invalid_source_collection_active_work_run(
 def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -9473,7 +9473,7 @@ def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path
 def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -9532,7 +9532,7 @@ def test_challenge_stage_task_uses_configured_agent_model_without_official_evide
         llm_bindings={"dialogue": {"modelId": "relay_openai/gpt-5.6-luna"}},
     )
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -9616,7 +9616,7 @@ def test_challenge_source_run_derives_required_policy_from_official_prompt_cache
             }
         },
     )
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -9672,7 +9672,7 @@ def test_legacy_challenge_stage_task_recovers_policy_from_prompt_cache_snapshot(
         llm_bindings={"dialogue": {"modelId": "dashscope_main/qwen3.6-plus"}},
     )
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -9755,7 +9755,7 @@ def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, 
         llm_bindings={"dialogue": {"modelId": "dashscope_main/qwen3.6-plus"}},
     )
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = _start_source_collection_run_with_problem_understanding(
@@ -9864,7 +9864,7 @@ def _finding_close_first_step_task(
     agent = agent_directory_service.create_agent_instance(display_name=role_label)
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title=role_label)
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": role, "agentName": role_label}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -10248,7 +10248,7 @@ def test_extraction_stage_pagination_and_invite_regression_unchanged(tmp_path, m
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -10396,7 +10396,7 @@ def test_relations_graph_materialization_and_precheck_follow_run_owner_store(tmp
     agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -10685,7 +10685,7 @@ class _InstantSourceCollectionThread:
 def test_source_collection_search_background_worker_exception_marks_run_and_snapshot_failed(tmp_path, monkeypatch, capsys):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = _create_source_collection_run_for_background_tests(team, topic="predictive coding")
     run_id = run_response["run"]["runId"]
     events = _capture_workflow_events(monkeypatch)
@@ -10725,7 +10725,7 @@ def test_source_collection_search_background_worker_exception_marks_run_and_snap
 def test_source_collection_search_background_reclaims_stale_active_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = _create_source_collection_run_for_background_tests(team, topic="stale snapshot reclaim")
     run_id = run_response["run"]["runId"]
     store = team_workflow_orchestration_service._source_collection_work_run_store()
@@ -10781,7 +10781,7 @@ def test_source_collection_search_background_reclaims_stale_active_snapshot(tmp_
 def test_source_collection_search_background_still_short_circuits_on_fresh_active_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = _create_source_collection_run_for_background_tests(team, topic="fresh snapshot guard")
     run_id = run_response["run"]["runId"]
     store = team_workflow_orchestration_service._source_collection_work_run_store()
@@ -10891,7 +10891,7 @@ def test_source_collection_heartbeat_touch_records_checkpoint_and_gates_liveness
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     service = team_workflow_orchestration_service
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = _create_source_collection_run_for_background_tests(team, topic="heartbeat checkpoint")
     run_id = run_response["run"]["runId"]
     kind = service.SOURCE_COLLECTION_WORK_RUN_KIND
@@ -10972,7 +10972,7 @@ def test_source_collection_search_background_reclaims_heartbeat_stale_snapshot_w
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     service = team_workflow_orchestration_service
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = _create_source_collection_run_for_background_tests(team, topic="heartbeat reclaim")
     run_id = run_response["run"]["runId"]
     kind = service.SOURCE_COLLECTION_WORK_RUN_KIND

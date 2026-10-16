@@ -608,7 +608,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
           requestedByAgent: options.sourceCollectionOwnerAgentId,
           stewardAgentId: options.sourceCollectionIngestorAgentId,
           knowledgeBaseId: payload.draft.knowledgeBaseId.trim() || `${payload.teamId}-challenge-cup-experiments`,
-          targetDomain: payload.draft.targetDomain.trim() || "挑战杯实验结果",
+          targetDomain: payload.draft.targetDomain.trim() || "科研实验结果",
           wakeStewardAgent: payload.draft.wakeStewardAgent,
           title: payload.draft.title.trim() || payload.plan.title || "",
           summary: payload.draft.summary.trim(),

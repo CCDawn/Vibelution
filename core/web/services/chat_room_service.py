@@ -5969,7 +5969,7 @@ def _build_participant_prompt(
     )
     challenge_short_answer_lines = (
         [
-            "挑战杯会议短答合同：只给 1 个新增判断和 1 个依据，正文不超过 180 个中文字符。",
+            "科研会议短答合同：只给 1 个新增判断和 1 个依据，正文不超过 180 个中文字符。",
             "不要复述题目、其他 Agent 发言或自己的角色；候选生成时只输出一条 CANDIDATE 标记。",
         ]
         if isinstance(round_payload.get("config"), Mapping)

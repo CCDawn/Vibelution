@@ -2225,7 +2225,7 @@ def test_agent_config_workspace_hides_empty_teams_from_team_indexes(tmp_path, mo
             "teams": [
                 {
                     "teamId": "empty-challenge-cup-team",
-                    "name": "挑战杯科研团队",
+                    "name": "科研团队",
                     "status": "active",
                     "teamKind": "research",
                     "teamSource": "research_organization",
@@ -2233,7 +2233,7 @@ def test_agent_config_workspace_hides_empty_teams_from_team_indexes(tmp_path, mo
                 },
                 {
                     "teamId": "challenge-cup-ai-research-team",
-                    "name": "挑战杯ai科研团队",
+                    "name": "AI科研团队",
                     "status": "active",
                     "teamKind": "research",
                     "teamSource": "research_organization",

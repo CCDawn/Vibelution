@@ -73,7 +73,7 @@ const SCENES: Scene[] = [
   {
     id: "running",
     label: "进行中 · 截图同款",
-    teamName: "挑战杯ai科研团队",
+    teamName: "AI科研团队",
     questionId: "SCI-002",
     title: SCI_TITLE,
     hypothesis: "假说待生成",
@@ -87,7 +87,7 @@ const SCENES: Scene[] = [
   {
     id: "waiting",
     label: "等待确认",
-    teamName: "挑战杯ai科研团队",
+    teamName: "AI科研团队",
     questionId: "SCI-096",
     title: "What are the coding principles embedded in neuronal spike trains?",
     hypothesis: "假说 hyp-a",
@@ -101,7 +101,7 @@ const SCENES: Scene[] = [
   {
     id: "longHypothesis",
     label: "超长假说",
-    teamName: "挑战杯ai科研团队",
+    teamName: "AI科研团队",
     questionId: "SCI-002",
     title: SCI_TITLE,
     hypothesis: LONG_HYPOTHESIS,
@@ -124,7 +124,7 @@ const SCENES: Scene[] = [
   {
     id: "empty",
     label: "尚未选择实验",
-    teamName: "挑战杯ai科研团队",
+    teamName: "AI科研团队",
     questionId: null,
     title: "",
     hypothesis: "",

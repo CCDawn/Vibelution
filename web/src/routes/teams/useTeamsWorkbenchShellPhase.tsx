@@ -607,7 +607,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ].filter(Boolean).join("\n")
     : teamListInitialLoading
       ? (lang === "zh" ? "正在读取团队索引。" : "Loading the team index.")
-      : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
+      : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和AI科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
 
   // P5/F1: SC full-page workbench via domain controller (no team rail).
   if (sourceCollectionStandalone) {

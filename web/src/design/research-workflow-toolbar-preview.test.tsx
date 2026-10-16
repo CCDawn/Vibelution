@@ -25,7 +25,7 @@ describe("research workflow toolbar preview", () => {
     expect(proposedToolbar).toContain('data-testid="proposed-status"');
     expect(proposedToolbar).toContain("准备中");
     expect(proposedToolbar).not.toContain("rwt-proposed-identity");
-    expect(proposedToolbar).not.toContain("挑战杯ai科研团队");
+    expect(proposedToolbar).not.toContain("AI科研团队");
     expect(proposedToolbar).not.toContain("下一步：资料寻找");
     expect(proposedToolbar).not.toContain("资料寻找 · 0/16");
     expect(markup).toContain('data-testid="proposed-hypothesis"');

@@ -66,8 +66,8 @@ export function TeamResearchWorkflowPanelHost({
       ) : (
         <div className={styles.empty}>
           {lang === "zh"
-            ? "选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。"
-            : "Select research-team to view the Challenge Cup workflow."}
+            ? "选择 research-team / AI科研团队 后显示AI科研流程。"
+            : "Select research-team to view the AI research workflow."}
         </div>
       )}
       {workflowErrorMessage ? (

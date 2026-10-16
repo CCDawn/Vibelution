@@ -295,7 +295,7 @@ def test_facade_reexports_system_teams_materialize() -> None:
     assert facade._system_members_from_agents is system_teams._system_members_from_agents
 
 
-def test_challenge_cup_team_constants_project_the_v2_role_contract() -> None:
+def test_challenge_cup_team_constants_project_the_v3_role_contract() -> None:
     expected_roles = tuple(
         item["productRoleId"]
         for item in facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT["productAgents"]
@@ -305,7 +305,7 @@ def test_challenge_cup_team_constants_project_the_v2_role_contract() -> None:
         item["role"] for item in facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLES
     )
     assert len(expected_roles) == 6
-    assert facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION == 2
+    assert facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION == 3
     assert facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT == (
         facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT[
             "roleContractFingerprint"

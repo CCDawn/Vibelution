@@ -4,7 +4,7 @@
 
 ### 功能
 
-在挑战杯 Program 总览中提供 GitHub Checks 式 125 题批次列表：一屏看总进度与失败项，失败行展开显示服务端 blocker 文案，单行继续/重试只调用已有 DEV fixture 命令。
+在科研 Program 总览中提供 GitHub Checks 式 125 题批次列表：一屏看总进度与失败项，失败行展开显示服务端 blocker 文案，单行继续/重试只调用已有 DEV fixture 命令。
 
 ### 适用范围
 

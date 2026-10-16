@@ -204,7 +204,7 @@ def _envelope_schema() -> dict[str, Any]:
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "universal_candidate_envelope.schema.json",
         "title": "UniversalCandidateEnvelope",
-        "description": "挑战杯科研候选统一信封；所有 Agent 写 CandidateStore 前的最外层契约。",
+        "description": "科研候选统一信封；所有 Agent 写 CandidateStore 前的最外层契约。",
         "type": "object",
         "required": list(ENVELOPE_REQUIRED_FIELDS),
         "properties": {

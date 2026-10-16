@@ -69,7 +69,7 @@ function member(overrides: Partial<TeamMember> = {}): TeamMember {
 function team(overrides: Partial<Team> = {}): Team {
   return {
     teamId: "team-1",
-    name: "挑战杯团队",
+    name: "科研团队",
     description: "",
     purpose: "科研",
     status: "active",
@@ -81,7 +81,7 @@ function team(overrides: Partial<Team> = {}): Team {
     linkedChatRoomId: "room-1",
     linkedChatRoom: {
       roomId: "room-1",
-      title: "挑战杯群聊",
+      title: "科研群聊",
       status: "active",
       mode: "group",
       purpose: "team",
@@ -363,7 +363,7 @@ function room(overrides: Partial<ConversationSummary> = {}): ConversationSummary
 describe("buildAgentDirectoryTeamRoomHistoryGroups", () => {
   it("folds extra rooms by SCI topic with newest activity first and other last", () => {
     const groups = buildAgentDirectoryTeamRoomHistoryGroups([
-      room({ roomId: "room-linked", title: "挑战杯ai科研团队 团队群聊", updatedAt: "2026-09-11T09:00:00Z" }),
+      room({ roomId: "room-linked", title: "AI科研团队 团队群聊", updatedAt: "2026-09-11T09:00:00Z" }),
       room({ roomId: "room-sci9-b", title: "SCI-009 | 候选生成 | sci-009-b", updatedAt: "2026-09-10T10:00:00Z" }),
       room({ roomId: "room-sci9-a", title: "SCI-009 | 候选评审 | sci-009-a", updatedAt: "2026-09-11T08:00:00Z" }),
       room({ roomId: "room-sci56", title: "SCI-056 | 候选评审 | sci-056-a", updatedAt: "2026-09-10T20:00:00Z" }),

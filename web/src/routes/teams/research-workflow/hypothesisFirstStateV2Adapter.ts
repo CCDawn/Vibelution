@@ -457,7 +457,7 @@ function defaultStatus(
       }
       return zh ? "正式研究结果正在交付" : "The formal research output is being delivered";
     }
-    case "completed": return "挑战杯研究流程已闭环";
+    case "completed": return "AI科研流程已闭环";
   }
 }
 

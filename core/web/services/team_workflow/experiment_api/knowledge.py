@@ -24,7 +24,7 @@ def request_experiment_result_knowledge_ingestion(team_id: str, plan_id: str, pa
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     steward_agent_id = s._trim_text(request_payload.get("stewardAgentId"), max_length=160) or s.agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     knowledge_base_id = s._trim_text(request_payload.get("knowledgeBaseId"), max_length=160) or f"{normalized_team_id}-challenge-cup-experiments"
-    target_domain = s._trim_text(request_payload.get("targetDomain"), max_length=240) or "挑战杯实验结果"
+    target_domain = s._trim_text(request_payload.get("targetDomain"), max_length=240) or "科研实验结果"
     wake_steward_agent = bool(request_payload.get("wakeStewardAgent", True))
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)

@@ -65,7 +65,7 @@ export function buildTeamsShellSurfaceModel(input: TeamsShellSurfaceModelInput) 
       ? "当前前端没有拿到团队列表。请刷新团队数据，或通过 Launcher 恢复后端 API。"
       : "The frontend cannot read the team list. Refresh teams or restore the backend API from Launcher.")
     : (lang === "zh"
-      ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和挑战杯ai科研团队已初始化。"
+      ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和AI科研团队已初始化。"
       : "No visible teams are available. Confirm the AI search, knowledge expansion, and research teams are initialized.");
   const teamUnavailableDetail = teamsErrorMessage;
   const teamWorkspaceLoadingTitle = lang === "zh" ? "正在读取团队详情" : "Loading team details";

@@ -33,7 +33,7 @@ SCHEMA_VERSION = 1
 REGISTRY_FILE_NAME = "preformal_review_roots.json"
 SESSION_SOURCE = "challenge_preformal_review_session"
 SPLIT_REASON = "preformal_candidate_review_scope_v1"
-ROOT_TITLE_PREFIX = "挑战杯｜候选预评审"
+ROOT_TITLE_PREFIX = "科研｜候选预评审"
 _REGISTRY_LOCK = threading.RLock()
 
 

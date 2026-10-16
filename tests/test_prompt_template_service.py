@@ -591,31 +591,37 @@ def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_rol
             "challenge_cup_experiment_context_tool",
             "challenge_cup_experiment_writeback_tool",
             "不自动执行训练",
+            "# 科研实验规划 Agent",
         ),
         "prompt-challenge-cup-experiment-ledger": (
             "challenge_cup_experiment_ledger",
             "challenge_cup_experiment_context_tool",
             "challenge_cup_experiment_writeback_tool",
             "只登记证据账本",
+            "# 科研实验证据 Agent",
         ),
         "prompt-challenge-cup-iteration-planner": (
             "challenge_cup_iteration_planner",
             "challenge_cup_iteration_context_tool",
             "challenge_cup_iteration_writeback_tool",
             "Research Loop",
+            "# 科研迭代决策 Agent",
         ),
         "prompt-challenge-cup-versioning": (
             "challenge_cup_versioning",
             "challenge_cup_versioning_context_tool",
             "challenge_cup_versioning_writeback_tool",
             "versionHistory",
+            "# 科研版本治理 Agent",
         ),
     }
-    for template_id, (role_key, read_tool, write_tool, required_text) in cases.items():
+    for template_id, (role_key, read_tool, write_tool, required_text, renamed_title) in cases.items():
         detail = prompt_template_service.get_prompt_template(template_id)
         assert detail is not None
         assert detail["category"] == "research"
         assert detail["metadata"]["roleKey"] == role_key
+        assert renamed_title in detail["content"]
+        assert "挑战杯" not in detail["content"]
         if template_id == "prompt-challenge-cup-iteration-planner":
             assert "writebackContract" in detail["content"]
             assert "evidenceType" in detail["content"]
@@ -643,10 +649,28 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
 
+    three_stage_framework = (
+        "你所在的 AI 科研团队按三阶段组织科研闭环：问题理解（问题拆解与知识整合）、"
+        "实验设计（假说生成、协议设计与冻结）、执行迭代（受控运行、结果评估与修订）。"
+    )
+
     cases = {
+        "prompt-challenge-cup-coordinator": (
+            "challenge_cup_coordinator",
+            "# 科研协调 Agent",
+            (
+                "agent_message_tool",
+                "source_collection_context_tool",
+                "challenge_cup_experiment_context_tool",
+                "challenge_cup_iteration_context_tool",
+                "challenge_cup_versioning_context_tool",
+            ),
+            ("不直接执行公开搜索",),
+            "全程三阶段的调度协调",
+        ),
         "prompt-challenge-cup-search": (
             "challenge_cup_search",
-            "搜索 Agent",
+            "# 科研搜索 Agent",
             (
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
@@ -654,10 +678,11 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
                 "challenge_cup_experiment_writeback_tool",
             ),
             ("problemUnderstandingInput", "不写正式知识", "不运行 Shell"),
+            "问题理解阶段",
         ),
         "prompt-challenge-cup-extractor": (
             "challenge_cup_extractor",
-            "提炼 Agent",
+            "# 科研提炼 Agent",
             (
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
@@ -671,52 +696,57 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
                 "evidenceFetchAttempts[]",
                 "不写正式知识",
             ),
+            "问题理解阶段",
         ),
         "prompt-challenge-cup-knowledge-manager": (
             "challenge_cup_knowledge_manager",
-            "知识管理 Agent",
+            "# 科研知识管理 Agent",
             (
                 "source_collection_context_tool",
                 "knowledge_proposal_tool",
                 "knowledge_ingestion_tool",
             ),
             ("不联网搜索", "不运行 Shell"),
+            "问题理解与实验设计阶段",
         ),
         "prompt-challenge-cup-execution-steward": (
             "challenge_cup_execution_steward",
-            "执行 Agent",
+            "# 科研执行 Agent",
             (
                 "challenge_cup_experiment_context_tool",
                 "challenge_cup_experiment_writeback_tool",
             ),
             ("不调用 formal runner", "不运行 Shell"),
+            "执行迭代阶段",
         ),
         "prompt-challenge-cup-experiment-revision": (
             "challenge_cup_experiment_revision",
-            "实验修订 Agent",
+            "# 科研实验修订 Agent",
             (
                 "challenge_cup_experiment_context_tool",
                 "challenge_cup_iteration_writeback_tool",
                 "research_knowledge_request_tool",
             ),
             ("不执行训练", "不写正式知识"),
+            "实验设计与执行迭代阶段",
         ),
         "prompt-challenge-cup-evaluator": (
             "challenge_cup_evaluator",
-            "评估 Agent",
+            "# 科研评估 Agent",
             (
                 "challenge_cup_experiment_context_tool",
                 "challenge_cup_iteration_writeback_tool",
             ),
             ("不联网搜索", "不改写候选版本"),
+            "实验设计与执行迭代阶段",
         ),
     }
 
-    for template_id, (role_key, responsibility, allowed_tools, denied_behaviors) in cases.items():
+    for template_id, (role_key, responsibility, allowed_tools, denied_behaviors, served_stage) in cases.items():
         detail = prompt_template_service.get_prompt_template(template_id)
         assert detail is not None, template_id
         assert detail["status"] == "active"
-        assert detail["category"] == "research"
+        assert detail["category"] == ("chat" if template_id == "prompt-challenge-cup-coordinator" else "research")
         assert detail["metadata"]["builtin"] is True
         assert detail["metadata"]["roleKey"] == role_key
         expected_version = (
@@ -726,6 +756,9 @@ def test_prompt_template_registry_repairs_six_canonical_challenge_cup_role_promp
         )
         assert detail["metadata"]["builtinContentVersion"] == expected_version, template_id
         assert responsibility in detail["content"]
+        assert three_stage_framework in detail["content"], template_id
+        assert f"{three_stage_framework}你的职责主要服务于{served_stage}。" in detail["content"], template_id
+        assert "挑战杯" not in detail["content"], template_id
         for tool_name in allowed_tools:
             assert _contains_tool_name(detail["content"], tool_name), (template_id, tool_name)
         for denied_behavior in denied_behaviors:

@@ -31,6 +31,7 @@ import {
 import type { HypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { researchStageLabel } from "./researchNodePresentation";
+import { displayWorkflowLabel } from "./researchTerminology";
 
 function asActorKind(value: string | undefined | null): ActorKind {
   if (value === "human" || value === "system" || value === "agent") return value;
@@ -109,7 +110,7 @@ function mapNodes(
     return {
       nodeId: node.nodeId,
       stageId: node.stageId,
-      label: getNodeAdapter(node.nodeId)?.label ?? node.label,
+      label: getNodeAdapter(node.nodeId)?.label ?? displayWorkflowLabel(node.label),
       actorKind,
       visualKind,
       description: node.description,

@@ -250,7 +250,7 @@ function OverviewView({ agent }: { agent: Agent }) {
             </div>
             <div className={styles.overviewRow}>
               <dt className={styles.overviewRowLabel}>团队</dt>
-              <dd className={styles.overviewRowValue}>挑战杯科研</dd>
+              <dd className={styles.overviewRowValue}>科研</dd>
             </div>
             <div className={styles.overviewRow}>
               <dt className={styles.overviewRowLabel}>主管</dt>
@@ -719,7 +719,7 @@ export function AgentManagementFocusPreviewApp() {
         columnsClassName=""
         ariaLabel="Agent 配置信息架构预览"
         title={selectedAgent.name}
-        meta={`${selectedAgent.role} · 挑战杯科研`}
+        meta={`${selectedAgent.role} · 科研`}
         actions={headerActions}
         list={list}
         detail={detail}

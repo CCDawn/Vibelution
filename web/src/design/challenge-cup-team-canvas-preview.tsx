@@ -378,7 +378,7 @@ function ProposedShell(props: {
       domainRecipe="teams-organization-workbench"
       shellTestId="team-shell-workspace"
       shellMode="canvas"
-      ariaLabel="挑战杯团队画布建议布局"
+      ariaLabel="科研团队画布建议布局"
       title={team.name}
       data-testid="layout-proposed"
       toolbar={(
@@ -474,7 +474,7 @@ export function ChallengeCupTeamCanvasPreviewApp() {
     <main className={styles.page} data-testid="preview-app">
       <header className={styles.header}>
         <p className={styles.eyebrow}>CHALLENGE CUP · TEAM CANVAS</p>
-        <h1>挑战杯团队画布</h1>
+        <h1>科研团队画布</h1>
         <p className={styles.subtitle}>
           这是组织关系图画布的隔离预览，不是科研流程步骤页。建议：顶栏切团队，左栏放状态，中间画布做事，右侧只出节点详情。
         </p>

@@ -19,7 +19,7 @@ from .kind_helpers import (
 
 SCHEMA_VERSION = 1
 CANVAS_KIND = "team_organization_canvas"
-RESEARCH_TEAM_DISPLAY_NAME = "挑战杯ai科研团队"
+RESEARCH_TEAM_DISPLAY_NAME = "AI科研团队"
 AI_SEARCH_TEAM_DISPLAY_NAME = "AI 搜索范围团队"
 KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME = "知识库内容扩充团队"
 DEFAULT_TEAM_STATUS = "active"
@@ -97,12 +97,12 @@ CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_READ_MODE = str(
 )
 
 _CHALLENGE_CUP_ROLE_RESPONSIBILITIES: dict[str, list[str]] = {
-    "challenge_cup_search": ["把知识缺口转为检索问题", "登记有效与无效来源", "保持来源可追溯"],
-    "challenge_cup_extractor": ["提取证据与反证", "标注引用和限制", "拒绝不可定位内容"],
-    "challenge_cup_knowledge_manager": ["治理证据关系与作用域", "维护 lineage", "控制知识候选提升边界"],
-    "challenge_cup_execution_steward": ["提交冻结协议", "观察受控运行", "登记不可变 artifact locator"],
-    "challenge_cup_experiment_revision": ["生成和修订假说", "修订实验协议", "提出迭代与停止建议"],
-    "challenge_cup_evaluator": ["独立审查指标与稳健性", "登记负结果", "约束主张边界"],
+    "challenge_cup_search": ["服务问题理解阶段：把知识缺口转为检索问题", "登记有效与无效来源", "保持来源可追溯"],
+    "challenge_cup_extractor": ["服务问题理解阶段：提取证据与反证", "标注引用和限制", "拒绝不可定位内容"],
+    "challenge_cup_knowledge_manager": ["贯通问题理解与实验设计：治理证据关系与作用域", "维护 lineage", "控制知识候选提升边界"],
+    "challenge_cup_execution_steward": ["服务执行迭代阶段：提交冻结协议", "观察受控运行", "登记不可变 artifact locator"],
+    "challenge_cup_experiment_revision": ["服务实验设计与执行迭代：生成和修订假说", "修订实验协议", "提出迭代与停止建议"],
+    "challenge_cup_evaluator": ["服务实验设计与执行迭代：独立审查指标与稳健性", "登记负结果", "约束主张边界"],
 }
 
 CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = tuple(

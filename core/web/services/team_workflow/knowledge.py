@@ -3585,8 +3585,8 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         # 单临界区 get-or-create：先只查不建，维持“有任何 active 库就复用、
         # 无库且允许自动建库才创建”的原语义，同时消除查重与建库之间的锁间隙竞态。
         get_or_create_kwargs = {
-            "name": "挑战杯科研知识库",
-            "description": "由 ai科学研究团队第一阶段一键入库流程创建。",
+            "name": "科研知识库",
+            "description": "由 AI科研团队第一阶段一键入库流程创建。",
             "actor_agent_id": steward_agent_id,
             "reuse_any_existing": True,
         }

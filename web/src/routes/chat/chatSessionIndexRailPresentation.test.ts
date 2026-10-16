@@ -33,7 +33,7 @@ describe("chatSessionIndexRailPresentation", () => {
     const groups: ConversationIndexGroup[] = [
       {
         groupKey: "team:research-team",
-        label: "挑战杯ai科研团队",
+        label: "AI科研团队",
         groupKind: "team",
         teamId: "research-team",
         items: [{ conversationId: "r1", roomId: "room-1", type: "group_room", title: "SCI-009" } as never],

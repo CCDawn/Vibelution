@@ -2985,7 +2985,7 @@ def _notify_knowledge_steward_for_experiment_result(
     activation["metadata"]["requiredTool"] = "knowledge_ingestion_tool"
     content = "\n".join(
         [
-            "[挑战杯实验结果入库请求]",
+            "[科研实验结果入库请求]",
             f"团队: {team_id}",
             f"实验计划: {plan_id}",
             f"实验结果包: {pack_id}",
@@ -3031,7 +3031,7 @@ def _notify_knowledge_steward_for_experiment_result(
         ]
     )
     thread_id = f"challenge-cup-experiment-ingestion:{team_id}:{pack_id}"
-    message_summary = f"挑战杯实验结果包 {pack_id} 请求最终入库。"
+    message_summary = f"科研实验结果包 {pack_id} 请求最终入库。"
     try:
         message, delivery, kernel_result = s._submit_team_workflow_inbox_via_kernel(
             target_agent_id=steward_agent_id,

@@ -73,8 +73,8 @@ export function TeamNodeBindingPanel({
       <section className={`${s.section} ${s.placeholder}`}>
         <div className={s.empty}>
           {lang === "zh"
-            ? "暂无可用团队。请确认 AI 搜索范围团队和 挑战杯ai科研团队 已初始化。"
-            : "No available team. Confirm the AI search scope team and Challenge Cup AI research team are initialized."}
+            ? "暂无可用团队。请确认 AI 搜索范围团队和 AI科研团队 已初始化。"
+            : "No available team. Confirm the AI search scope team and the AI research team are initialized."}
         </div>
       </section>
     );

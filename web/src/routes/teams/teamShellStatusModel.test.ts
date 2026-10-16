@@ -71,7 +71,7 @@ describe("teamShellStatusModel", () => {
   it("labels known team kinds", () => {
     expect(teamShellKindLabel({
       teamId: "research-team",
-      name: "挑战杯",
+      name: "科研",
       teamKind: "research",
     } as never, "zh")).toBe("科研工作流");
   });

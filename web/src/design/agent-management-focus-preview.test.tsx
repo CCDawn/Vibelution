@@ -150,7 +150,7 @@ describe("agent management focus preview", () => {
     const header = host.querySelector('[data-vui="route-header"]');
     expect(header?.querySelector("h1")?.textContent).toBe("白望舒");
     expect(header?.textContent).toContain("source_finder");
-    expect(header?.textContent).toContain("挑战杯科研");
+    expect(header?.textContent).toContain("source_finder · 科研");
     expect(host.textContent).not.toContain("Agent 管理 · 预览");
     expect(host.textContent).toContain("deepseek-v3");
     expect(host.querySelector('[data-testid="unsaved-bar"]')).toBeNull();

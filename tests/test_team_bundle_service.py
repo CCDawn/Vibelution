@@ -125,7 +125,7 @@ def test_import_creates_team_agents_and_members(tmp_path, monkeypatch):
         "kind": BUNDLE_KIND,
         "schemaVersion": 1,
         "team": {
-            "name": "导入挑战杯团队",
+            "name": "导入科研团队",
             "description": "from bundle",
             "purpose": "reproduce",
             "members": [
@@ -157,7 +157,7 @@ def test_import_creates_team_agents_and_members(tmp_path, monkeypatch):
     result = import_team_bundle(bundle, dry_run=False)
     assert result["status"] == "completed"
     imported = team_service.get_team(str(result["result"]["teamId"]))
-    assert imported["name"] == "导入挑战杯团队"
+    assert imported["name"] == "导入科研团队"
     assert len(imported["members"]) == 2
     member_roles = sorted(member["role"] for member in imported["members"])
     assert member_roles == ["搜索", "评估"]

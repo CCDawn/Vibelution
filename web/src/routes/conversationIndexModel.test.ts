@@ -151,7 +151,7 @@ describe("conversationIndexModel", () => {
       conversationIndexVisibility: "team_private",
     }) as SessionSummary & { teamId: string; teamName: string };
     teamSession.teamId = "research-team";
-    teamSession.teamName = "挑战杯ai科研团队";
+    teamSession.teamName = "AI科研团队";
 
     const summary = sessionToConversationSummary(teamSession) as ConversationSummary & {
       teamId?: string;
@@ -159,7 +159,7 @@ describe("conversationIndexModel", () => {
     };
 
     expect(summary.teamId).toBe("research-team");
-    expect(summary.teamName).toBe("挑战杯ai科研团队");
+    expect(summary.teamName).toBe("AI科研团队");
   });
 
   it("groups legacy team Agents by metadata team id even when they are no longer current team members", () => {
@@ -189,7 +189,7 @@ describe("conversationIndexModel", () => {
       sessionFilter: "",
       sessionsById: new Map(),
       teams: [
-        team({ teamId: "research-team", name: "挑战杯ai科研团队", members: [], memberCount: 0 }),
+        team({ teamId: "research-team", name: "AI科研团队", members: [], memberCount: 0 }),
         team({ teamId: "knowledge-expansion-team", name: "知识库内容扩充团队", members: [], memberCount: 0 }),
       ],
     });
@@ -211,7 +211,7 @@ describe("conversationIndexModel", () => {
           metadata: {
             conversationIndexKind: "team_agent",
             challengeCupTeamId: "research-team",
-            challengeCupTeamName: "挑战杯ai科研团队",
+            challengeCupTeamName: "AI科研团队",
             challengeCupTeamRole: "research_member",
           },
         }),
@@ -228,7 +228,7 @@ describe("conversationIndexModel", () => {
 
     expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["team:research-team"]);
     expect(model.groupedConversations[0]).toMatchObject({
-      label: "挑战杯ai科研团队",
+      label: "AI科研团队",
       teamId: "research-team",
       groupKind: "team",
     });
@@ -432,7 +432,7 @@ describe("conversationIndexModel", () => {
         agent({
           agentId: "agent-team-private",
           directSessionId: "session-team-private",
-          displayName: "挑战杯资料发现",
+          displayName: "科研资料发现",
           createdBy: "challenge_cup_team",
           conversationIndexKind: "hidden",
           metadata: { challengeCupTeamId: "research-team" },
@@ -661,9 +661,9 @@ describe("conversationIndexModel", () => {
 
   it("deduplicates same-name empty Teams before they reach the chat index", () => {
     const teams = normalizeConversationIndexTeams([
-      team({ teamId: "team", name: "挑战杯科研团队", memberCount: 0, members: [], linkedChatRoomId: "room-team" }),
-      team({ teamId: "team-2", name: "挑战杯科研团队", memberCount: 0, members: [], linkedChatRoomId: "room-team-2" }),
-      team({ teamId: "research-team", name: "挑战杯ai科研团队", teamSource: "research_organization", memberCount: 4 }),
+      team({ teamId: "team", name: "AI科研团队", memberCount: 0, members: [], linkedChatRoomId: "room-team" }),
+      team({ teamId: "team-2", name: "AI科研团队", memberCount: 0, members: [], linkedChatRoomId: "room-team-2" }),
+      team({ teamId: "research-team", name: "AI科研团队", teamSource: "research_organization", memberCount: 4 }),
     ]);
 
     expect(teams.map((item) => item.teamId)).toEqual(["team", "research-team"]);

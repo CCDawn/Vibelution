@@ -155,7 +155,7 @@ const ITEMS: Record<TabId, GovernanceItem[]> = {
   research: [
     {
       id: "current",
-      title: "挑战杯研究 · 文献筛选与研究假设评审",
+      title: "科研项目 · 文献筛选与研究假设评审",
       summary: "文献筛选已完成，等待确认下一阶段的研究假设。",
       status: "进行中",
       tone: "accent",

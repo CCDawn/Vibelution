@@ -14,7 +14,7 @@ const sampleReport: TeamBundleImportReport = {
   bundleSchemaVersion: 1,
   status: "ready",
   dryRun: true,
-  team: { name: "挑战杯团队", action: "create" },
+  team: { name: "科研团队", action: "create" },
   agents: { create: ["搜索", "评估"], overwrite: [] },
   dependencies: {
     missingProviders: ["dashscope_main"],

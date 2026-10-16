@@ -76,11 +76,15 @@ def _challenge_cup_research_team_placeholder(now: str) -> dict[str, Any]:
 # text.  Operator-customized copies are never overwritten.  (The separate
 # agent-level ``challengeCupTeamManagedVersion`` tracks agent materialization
 # lineage and is unrelated to the Team record copy.)
-CHALLENGE_CUP_TEAM_COPY_VERSION = 3
+CHALLENGE_CUP_TEAM_COPY_VERSION = 4
 _CHALLENGE_CUP_TEAM_COPY_HISTORY: dict[int, dict[str, str]] = {
     2: {
         "description": "挑战杯 125 题假说与研究计划的六 Agent 系统团队。",
         "purpose": "组织搜索、提炼、知识治理、执行、实验修订与独立评估。",
+    },
+    3: {
+        "description": "挑战杯 125 题科学假设与研究计划优先（阶段二叠加两个深实验）的六 Agent 系统团队。",
+        "purpose": "先以六环节闭环完成 125 题假说任务：问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正；125 题结果包全部通过后，再叠加 SCI-091 与 SCI-096 两个深实验的规划与反馈迭代。",
     },
 }
 
@@ -89,8 +93,8 @@ def _challenge_cup_research_team_copy_fields() -> dict[str, str]:
     """Return the canonical phased description/purpose for the team."""
 
     return {
-        "description": "挑战杯 125 题科学假设与研究计划优先（阶段二叠加两个深实验）的六 Agent 系统团队。",
-        "purpose": "先以六环节闭环完成 125 题假说任务：问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正；125 题结果包全部通过后，再叠加 SCI-091 与 SCI-096 两个深实验的规划与反馈迭代。",
+        "description": "以问题理解、实验设计、执行迭代三阶段组织科研闭环的六 Agent 系统团队。",
+        "purpose": "围绕三阶段推进科研任务：问题理解阶段完成问题拆解与知识整合；实验设计阶段生成候选假说、设计并冻结实验协议；执行迭代阶段受控运行、评估结果并驱动修订，直至产出可交付的研究结论。",
     }
 
 
@@ -993,7 +997,7 @@ def _challenge_cup_research_team_role_metadata(
         "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
         "directSessionVisibility": "active_session",
         "challengeCupTeamId": s.CHALLENGE_CUP_RESEARCH_TEAM_ID,
-        "challengeCupTeamManagedVersion": 2,
+        "challengeCupTeamManagedVersion": s.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION,
         "challengeCupTeamContractVersion": s.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION,
         "challengeCupTeamRoleContractFingerprint": s.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT,
         "challengeCupTeamParticipantPolicyVersion": s.CHALLENGE_CUP_RESEARCH_TEAM_PARTICIPANT_POLICY_VERSION,

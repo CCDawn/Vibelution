@@ -133,7 +133,7 @@ def test_source_collection_writeback_contract_uses_facade_schema_version(monkeyp
 def test_memory_steward_context_returns_approved_candidate_action_packet_without_pending_body(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -255,7 +255,7 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = _start_research_stage_round_with_problem_understanding(
@@ -319,7 +319,7 @@ def test_source_collection_writeback_recovers_fenced_structured_result_text(tmp_
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -405,7 +405,7 @@ def test_knowledge_steward_memory_writeback_leaves_real_steward_pack_pending_for
     coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
     session_service.ensure_agent_direct_session(agent_id=coordinator["agentId"], title="科研协调")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": coordinator["agentId"], "role": "coordinator", "agentName": "科研协调"},
             {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
@@ -413,7 +413,7 @@ def test_knowledge_steward_memory_writeback_leaves_real_steward_pack_pending_for
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
-        name="挑战杯科研知识库",
+        name="科研知识库",
         actor_agent_id=coordinator["agentId"],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -485,7 +485,7 @@ def test_knowledge_steward_memory_writeback_leaves_real_steward_pack_pending_for
                                     "title": source["title"],
                                     "overall_score": 72,
                                     "relevance_score": 98,
-                                    "assessment_notes": "来源可追踪且与挑战杯神经算法方向高度相关。",
+                                    "assessment_notes": "来源可追踪且与科研神经算法方向高度相关。",
                                 }
                             ],
                         }
@@ -628,7 +628,7 @@ def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_pa
 
 def test_steward_pack_draft_records_ingestion_pack_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
@@ -674,7 +674,7 @@ def test_steward_pack_draft_records_ingestion_pack_candidate(tmp_path, monkeypat
 
 def test_steward_pack_requires_approval_gate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
@@ -713,7 +713,7 @@ def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
     reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": steward["agentId"], "role": "steward"},
             {"agentId": reviewer["agentId"], "role": "coordinator"},
@@ -813,7 +813,7 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
     reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": steward["agentId"], "role": "steward"},
             {"agentId": reviewer["agentId"], "role": "coordinator"},
@@ -925,7 +925,7 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
     reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[
             {"agentId": steward["agentId"], "role": "steward"},
             {"agentId": reviewer["agentId"], "role": "coordinator"},
@@ -1009,7 +1009,7 @@ def test_steward_pack_approval_gate_rejects_unsubmitted_candidate(tmp_path, monk
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": steward["agentId"], "role": "steward"}],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
@@ -1061,7 +1061,7 @@ def test_steward_pack_submission_rejects_non_steward_pack_candidate(tmp_path, mo
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": steward["agentId"], "role": "steward"}],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(

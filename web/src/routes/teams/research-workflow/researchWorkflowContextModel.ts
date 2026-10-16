@@ -466,7 +466,7 @@ function presentationFor(action: HypothesisFirstNextAction): TaskPresentation {
         stage: "hypothesis_first",
         step: "formal_runtime",
         status: "completed",
-        title: "挑战杯研究流程已闭环",
+        title: "AI科研流程已闭环",
         detail: action.statusMessage || "正式研究结果和 H1–H4 审核均已完成。",
         authority: "hypothesis_first",
       };

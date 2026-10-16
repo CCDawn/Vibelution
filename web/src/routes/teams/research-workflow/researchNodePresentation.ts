@@ -1,5 +1,5 @@
 import type { ActorKind, WorkflowStageId } from "../../../api/types/researchWorkflow";
-import { RESEARCH_STAGE_TERMS } from "./researchTerminology";
+import { RESEARCH_STAGE_TERMS, displayWorkflowLabel } from "./researchTerminology";
 
 const STAGE_LABELS: Record<WorkflowStageId, string> = {
   problem_understanding: RESEARCH_STAGE_TERMS.problem_understanding.zh,
@@ -16,7 +16,7 @@ const ACTOR_LABELS: Record<ActorKind, string> = {
 
 export function researchStageLabel(stageId: string, definitionLabel?: string): string {
   if (stageId === "knowledge_collection") return STAGE_LABELS.knowledge_collection;
-  return definitionLabel || STAGE_LABELS[stageId as WorkflowStageId] || "流程阶段";
+  return displayWorkflowLabel(definitionLabel) || STAGE_LABELS[stageId as WorkflowStageId] || "流程阶段";
 }
 
 export function researchActorLabel(actorKind: string): string {

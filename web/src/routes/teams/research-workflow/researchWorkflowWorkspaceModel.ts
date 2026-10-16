@@ -181,7 +181,7 @@ const HYPOTHESIS_STAGE_LABELS: Record<string, string> = {
   handoff_pending: "等待自动交接",
   budget_exhausted: "需要人工裁决",
   program_delivery: "正式结果交付与审核",
-  completed: "挑战杯流程已闭环",
+  completed: "AI科研流程已闭环",
   rejected: "本轮已结束，假说未收敛",
   converged: "假说阶段完成",
   blocked: "当前流程需要处理",

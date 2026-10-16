@@ -14,8 +14,8 @@ from ._canonical import sha256_hex
 from ._validation import ContractValidationError
 
 RESEARCH_TEAM_ROLE_CONTRACT_ID = "challenge-cup-research-team"
-RESEARCH_TEAM_ROLE_CONTRACT_VERSION = 2
-RESEARCH_TEAM_ROLE_SEMANTIC_VERSION = "2.0.0"
+RESEARCH_TEAM_ROLE_CONTRACT_VERSION = 3
+RESEARCH_TEAM_ROLE_SEMANTIC_VERSION = "3.0.0"
 RESEARCH_PARTICIPANT_POLICY_VERSION = 2
 LEGACY_READ_MODE = "dual_read_append_only_history"
 
@@ -278,19 +278,19 @@ CURRENT_RESEARCH_TEAM_ROLE_CONTRACT = ResearchTeamRoleContract(
         ProductAgentRole(
             product_role_id="challenge_cup_search",
             label="搜索 Agent",
-            purpose="将知识缺口转为可追溯检索计划并登记有效与无效来源。",
+            purpose="服务问题理解阶段：把知识缺口转化为可追溯检索计划，并登记有效与无效来源。",
             legacy_role_aliases=("source_finder",),
         ),
         ProductAgentRole(
             product_role_id="challenge_cup_extractor",
             label="提炼 Agent",
-            purpose="从候选来源提取证据、限制、反证与可定位引用。",
+            purpose="服务问题理解阶段：从候选来源提取证据、限制、反证与可定位引用。",
             legacy_role_aliases=("source_extractor",),
         ),
         ProductAgentRole(
             product_role_id="challenge_cup_knowledge_manager",
             label="知识管理 Agent",
-            purpose="治理证据关系、作用域、lineage 与知识候选提升边界。",
+            purpose="贯通问题理解与实验设计：治理证据关系、作用域与 lineage，支撑知识候选提升。",
             legacy_role_aliases=(
                 "source_relation_mapper",
                 "source_ingestor",
@@ -300,13 +300,13 @@ CURRENT_RESEARCH_TEAM_ROLE_CONTRACT = ResearchTeamRoleContract(
         ProductAgentRole(
             product_role_id="challenge_cup_execution_steward",
             label="执行 Agent",
-            purpose="提交冻结协议并观察受控运行，交付不可变 artifact locator。",
+            purpose="服务执行迭代阶段：提交冻结协议、观察受控运行并登记不可变 artifact locator。",
             legacy_role_aliases=("execution_steward",),
         ),
         ProductAgentRole(
             product_role_id="challenge_cup_experiment_revision",
             label="实验修订 Agent",
-            purpose="生成与修订假说、协议、迭代提案和停止建议。",
+            purpose="服务实验设计与执行迭代：生成与修订假说、协议、迭代提案和停止建议。",
             legacy_role_aliases=(
                 "challenge_cup_experiment_planner",
                 "experiment_planner",
@@ -317,7 +317,7 @@ CURRENT_RESEARCH_TEAM_ROLE_CONTRACT = ResearchTeamRoleContract(
         ProductAgentRole(
             product_role_id="challenge_cup_evaluator",
             label="评估 Agent",
-            purpose="独立审查协议、指标、稳健性、负结果和主张边界。",
+            purpose="服务实验设计与执行迭代：独立审查协议、指标、稳健性与负结果，约束主张边界。",
             legacy_role_aliases=(
                 "challenge_cup_experiment_ledger",
                 "experiment_ledger",
@@ -369,6 +369,6 @@ CURRENT_RESEARCH_TEAM_ROLE_CONTRACT = ResearchTeamRoleContract(
 
 
 def current_research_team_role_contract_snapshot() -> dict[str, Any]:
-    """Return the deterministic v2 contract snapshot for downstream projections."""
+    """Return the deterministic v3 contract snapshot for downstream projections."""
 
     return CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.to_dict()

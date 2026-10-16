@@ -41,7 +41,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 #### 可延展蛇形模式
 
-挑战杯科研流程正式工作台使用 `layoutMode="serpentine"`：阶段区域纵向堆叠，阶段内部任务横向铺开并逐阶段反向折返；它仍共享一个 React Flow viewport、同一运行投影和同一节点选择事实源。该模式可配合 `showMiniMap` 提供大型流程定位，但小地图只承担导航，不成为第二张流程图或第二状态写入者。
+AI科研流程正式工作台使用 `layoutMode="serpentine"`：阶段区域纵向堆叠，阶段内部任务横向铺开并逐阶段反向折返；它仍共享一个 React Flow viewport、同一运行投影和同一节点选择事实源。该模式可配合 `showMiniMap` 提供大型流程定位，但小地图只承担导航，不成为第二张流程图或第二状态写入者。
 
 `stage-columns` 保留为默认兼容模式；调用方不得自行复制 renderer 或直接引入 `@xyflow/react` 来实现另一套几何。
 
@@ -124,7 +124,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
 - 选中卡片时点亮其入边和出边：描边加粗/提亮（idle 主路径改用 `--accent-cool`），箭头颜色跟描边；不抬 `zIndex`，也不因此展开标签
 - 状态栏、Inspector 或 URL `node=` 选中时，等首次 fit 结束后把该卡平移进视口（保持当前缩放）；画布上点击同一张卡不平移；卡片位置在拖动中变化时不再重复平移
-- 控件：放大、缩小、适应全部、定位当前工作。`compactControls` 只常驻这四项，把自动整理、撤销布局和锁定/解锁收进同一个 Radix 布局菜单；挑战杯正式工作台使用该模式，避免画布工具与流程主操作竞争注意力。
+- 控件：放大、缩小、适应全部、定位当前工作。`compactControls` 只常驻这四项，把自动整理、撤销布局和锁定/解锁收进同一个 Radix 布局菜单；科研正式工作台使用该模式，避免画布工具与流程主操作竞争注意力。
 - 数据 loading：由调用方 `VStateSurface` 处理；已有 graph 时首帧即显示 topology-derived fallback，ELK pending 不清空业务节点，也不让 canvas 长期只剩“正在整理流程布局…”；graph 确认无任务时显示明确 empty
 - 布局失败：保留同 scope 的 last-good 几何，否则使用稳定 fallback；约 3 秒超时、reject、坏/非有限几何均显示有限的 `workflow-degraded` 诊断，不得静默清空节点
 - **页面壳**：`VCanvasWorkbenchPage`，`layoutId` = `WORKBENCH_LAYOUT_IDS.researchFlow`

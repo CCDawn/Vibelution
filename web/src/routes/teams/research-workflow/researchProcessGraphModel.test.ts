@@ -12,11 +12,15 @@ import {
   mergeSelectionAndRuntime,
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
+import { researchStageLabel } from "./researchNodePresentation";
+import { displayWorkflowLabel } from "./researchTerminology";
 
 const definition: WorkflowDefinition = {
   workflowId: "challenge-cup-research",
   schemaVersion: "1",
-  label: "挑战杯",
+  // The server definition keeps the legacy label (it feeds structureHash);
+  // the display layer maps it via displayWorkflowLabel.
+  label: "挑战杯科研流程",
   structureHash: "h",
   stages: [
     {
@@ -286,6 +290,40 @@ describe("researchProcessGraphModel", () => {
     expect(merged.selectedNodeId).toBe("hypothesis_design");
     expect(merged.runtimeCurrentNodeIds).toEqual(["knowledge_handoff"]);
     expect(merged.selectedNodeId).not.toBe(merged.runtimeCurrentNodeIds[0]);
+  });
+});
+
+describe("workflow definition label display mapping", () => {
+  it("maps legacy definition labels at the display layer only", () => {
+    expect(displayWorkflowLabel("挑战杯科研流程")).toBe("AI科研流程");
+    expect(displayWorkflowLabel("挑战杯第一阶段科研流程")).toBe("AI科研第一阶段流程");
+    expect(displayWorkflowLabel("挑战杯知识搜集子流程")).toBe("科研知识搜集子流程");
+    // Unknown and neutral labels pass through untouched.
+    expect(displayWorkflowLabel("问题理解")).toBe("问题理解");
+    expect(displayWorkflowLabel("")).toBe("");
+    expect(displayWorkflowLabel(null)).toBe("");
+  });
+
+  it("maps definition stage labels through researchStageLabel", () => {
+    expect(researchStageLabel("experiment_design", "挑战杯第一阶段科研流程")).toBe("AI科研第一阶段流程");
+    expect(researchStageLabel("execution_iteration", "结果核验")).toBe("结果核验");
+  });
+
+  it("maps unknown-node fallback labels instead of leaking the legacy name", () => {
+    const graph = definitionToCanvasGraph({
+      ...definition,
+      nodes: [
+        ...definition.nodes,
+        {
+          nodeId: "legacy_unmapped_node",
+          stageId: "experiment_design",
+          label: "挑战杯知识搜集子流程",
+          actorKind: "agent",
+          primaryRoleKey: "finder",
+        },
+      ],
+    });
+    expect(graph.nodes.find((node) => node.nodeId === "legacy_unmapped_node")?.label).toBe("科研知识搜集子流程");
   });
 });
 

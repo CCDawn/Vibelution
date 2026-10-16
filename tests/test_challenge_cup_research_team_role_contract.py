@@ -29,13 +29,13 @@ EXPECTED_HYPOTHESIS_PARTICIPANTS = (
 )
 
 
-def test_v2_contract_exposes_exact_six_product_roles_and_system_capabilities():
+def test_v3_contract_exposes_exact_six_product_roles_and_system_capabilities():
     contract = CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
     snapshot = contract.to_dict()
 
     assert contract.team_role_contract_id == "challenge-cup-research-team"
-    assert contract.team_role_contract_version == 2
-    assert contract.semantic_version == "2.0.0"
+    assert contract.team_role_contract_version == 3
+    assert contract.semantic_version == "3.0.0"
     assert contract.participant_policy_version == 2
     assert contract.product_role_ids == EXPECTED_PRODUCT_ROLE_IDS
     assert snapshot["productAgentCount"] == 6
@@ -112,10 +112,10 @@ def test_contract_serialization_and_fingerprint_are_deterministic():
     assert contract.to_dict() == contract.to_dict()
     assert contract.fingerprint() == contract.fingerprint()
     assert contract.fingerprint() == (
-        "9081c540cc1f66fa6e5bed99b48a099e0611e53b76550c2e24c093a4e015e59c"
+        "4afbca540b4f77ff606daa16f19d3af81ccdadebe602dc911cdb9933a8b06ea5"
     )
 
-    changed = replace(contract, semantic_version="2.0.1")
+    changed = replace(contract, semantic_version="3.0.1")
     assert changed.fingerprint() != contract.fingerprint()
 
 

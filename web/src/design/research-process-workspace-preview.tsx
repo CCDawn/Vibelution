@@ -336,7 +336,7 @@ export function ResearchProcessWorkspacePreviewApp({
   const toolbar = (
     <div className={styles.toolbar} data-testid="workspace-toolbar">
       <div className={styles.toolbarIdentity}>
-        <strong>挑战杯 AI 科研团队</strong>
+        <strong>AI科研团队</strong>
         <span>SCI-004 · 异常扩散机理</span>
       </div>
       <div className={styles.toolbarState}>

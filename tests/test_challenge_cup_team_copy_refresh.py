@@ -1,8 +1,8 @@
 """Version-gated managed copy refresh for the materialized Challenge Cup Team.
 
 Pins the ``challengeCupTeamCopyVersion`` contract: a materialized team record
-whose description/purpose exactly match the previous managed copy (v2) is
-refreshed to the canonical phased (a_then_b) copy and stamped with the current
+whose description/purpose exactly match the previous managed copy (v3) is
+refreshed to the canonical three-phase copy and stamped with the current
 version; customized copies are never overwritten; bootstrap surfaces the
 refresh as a required step only while the copy is outdated.
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 from core.web.services import agent_directory_service, team_service
 from core.web.services.team import system_bootstrap, system_teams
 
-_V2_COPY = system_teams._CHALLENGE_CUP_TEAM_COPY_HISTORY[2]
-_V3_COPY = system_teams._challenge_cup_research_team_copy_fields()
+_V3_COPY = system_teams._CHALLENGE_CUP_TEAM_COPY_HISTORY[3]
+_V4_COPY = system_teams._challenge_cup_research_team_copy_fields()
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch) -> None:
@@ -53,18 +53,18 @@ def _stored_team() -> dict:
 def test_placeholder_carries_phased_copy_and_version() -> None:
     placeholder = system_teams._challenge_cup_research_team_placeholder("2026-01-01T00:00:00Z")
 
-    assert placeholder["description"] == _V3_COPY["description"]
-    assert placeholder["purpose"] == _V3_COPY["purpose"]
+    assert placeholder["description"] == _V4_COPY["description"]
+    assert placeholder["purpose"] == _V4_COPY["purpose"]
     assert placeholder["challengeCupTeamCopyVersion"] == system_teams.CHALLENGE_CUP_TEAM_COPY_VERSION
-    # The phased copy keeps the six-loop order and stacks experiments behind it.
-    assert "125 题" in placeholder["purpose"]
-    assert "反馈修正" in placeholder["purpose"]
-    assert "深实验" in placeholder["purpose"]
+    # The canonical copy organizes the six Agents around the three phases.
+    assert "问题理解" in placeholder["purpose"]
+    assert "实验设计" in placeholder["purpose"]
+    assert "执行迭代" in placeholder["purpose"]
 
 
-def test_materialized_v2_team_copy_is_refreshed(tmp_path, monkeypatch) -> None:
+def test_materialized_v3_team_copy_is_refreshed(tmp_path, monkeypatch) -> None:
     _use_tmp_project_root(tmp_path, monkeypatch)
-    _seed_team_record(_V2_COPY)
+    _seed_team_record(_V3_COPY)
 
     assert system_teams.challenge_cup_research_team_copy_outdated() is True
     assert "challenge_cup_team_copy_refresh" in system_bootstrap._system_team_bootstrap_required_steps()
@@ -74,8 +74,8 @@ def test_materialized_v2_team_copy_is_refreshed(tmp_path, monkeypatch) -> None:
     assert result["skippedCustom"] is False
 
     stored = _stored_team()
-    assert stored["description"] == _V3_COPY["description"]
-    assert stored["purpose"] == _V3_COPY["purpose"]
+    assert stored["description"] == _V4_COPY["description"]
+    assert stored["purpose"] == _V4_COPY["purpose"]
     assert stored["challengeCupTeamCopyVersion"] == system_teams.CHALLENGE_CUP_TEAM_COPY_VERSION
     assert system_teams.challenge_cup_research_team_copy_outdated() is False
     assert "challenge_cup_team_copy_refresh" not in (
@@ -101,7 +101,7 @@ def test_custom_team_copy_is_never_overwritten(tmp_path, monkeypatch) -> None:
 
 def test_current_team_copy_refresh_is_a_noop(tmp_path, monkeypatch) -> None:
     _use_tmp_project_root(tmp_path, monkeypatch)
-    _seed_team_record(_V3_COPY, version=system_teams.CHALLENGE_CUP_TEAM_COPY_VERSION)
+    _seed_team_record(_V4_COPY, version=system_teams.CHALLENGE_CUP_TEAM_COPY_VERSION)
 
     assert system_teams.challenge_cup_research_team_copy_outdated() is False
     result = system_teams.apply_challenge_cup_research_team_copy_refresh(reason="test")

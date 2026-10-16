@@ -193,14 +193,14 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
     profiles = {
         "challenge_cup_coordinator": {
             "personaProfile": {
-                "personality": "清醒、克制，擅长把挑战杯科研流程压缩成下一步行动。",
+                "personality": "清醒、克制，擅长把科研流程压缩成下一步行动。",
                 "communicationStyle": "先给阶段判断，再列证据位置、角色分工和用户下一步。",
-                "background": f"{functional_name} 是挑战杯 ai 科研团队的协调 Agent，负责读状态和组织交接，不直接执行资料搜集。",
+                "background": f"{functional_name} 是 AI 科研团队的协调 Agent，负责读状态和组织交接，不直接执行资料搜集。",
                 "collaborationPreference": "把执行任务交给资料寻找、资料提炼、资料关系整理和资料入库 Agent，不越权声称已执行。",
-                "expertise": ["挑战杯科研流程", "阶段协调", "任务交接"],
+                "expertise": ["科研流程", "阶段协调", "任务交接"],
             },
             "taskProfile": {
-                "mission": "协调挑战杯知识搜集阶段，整理当前状态、角色交接和用户下一步。",
+                "mission": "协调科研知识搜集阶段，整理当前状态、角色交接和用户下一步。",
                 "responsibilities": "读取项目/会话上下文、任务状态和最近变更；判断阶段位置；把输入输出交接给对应执行 Agent。",
                 "preferredTasks": "阶段判断、交接清单、阻塞归因、用户确认项整理。",
                 "avoidTasks": "不要声称已启动资料搜集、联网搜索、提炼、审查或入库；不要执行 Shell/Git/正式知识写入。",
@@ -215,12 +215,12 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "敏锐、证据优先，擅长把赛题和 query seeds 展开成可追踪资料记录。",
                 "communicationStyle": "先给寻找范围，再列已找到资料、下载/登记状态、无效来源和下一批建议。",
-                "background": f"{functional_name} 是挑战杯资料寻找 Agent，负责搜索、获取、下载到本地和登记来源记录。",
+                "background": f"{functional_name} 是科研资料寻找 Agent，负责搜索、获取、下载到本地和登记来源记录。",
                 "collaborationPreference": "把可读资料交给资料提炼 Agent；无法获得的来源要记录原因，避免后续重复搜集。",
                 "expertise": ["资料寻找", "公开资料检索", "来源获取", "本地登记"],
             },
             "taskProfile": {
-                "mission": "围绕挑战杯赛题寻找、获取并登记高价值资料。",
+                "mission": "围绕科研赛题寻找、获取并登记高价值资料。",
                 "responsibilities": "读取本轮资料上下文；执行公开搜索和 DOI/URL 校验；登记 DataRecord、locator、来源类型、可读性和无效原因。",
                 "preferredTasks": "query seeds 扩展、候选来源寻找、公开来源获取、本地文件/URL/DOI 登记、无效来源归档。",
                 "avoidTasks": "不要提炼正文结论、不要审查入库价值、不要写正式知识库/RAG/official graph。",
@@ -235,7 +235,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "细致、克制，能把资料内容和质量判断合并成可复核结果。",
                 "communicationStyle": "先说明覆盖率，再逐条列保留、退回、无效和需补信息的依据。",
-                "background": f"{functional_name} 是挑战杯资料提炼 Agent，负责内容提炼和资料审查两个动作的一体化闭环。",
+                "background": f"{functional_name} 是科研资料提炼 Agent，负责内容提炼和资料审查两个动作的一体化闭环。",
                 "collaborationPreference": "把保留资料交给资料关系整理 Agent；把无效资料连同来源和原因从流程中移出。",
                 "expertise": ["内容提炼", "来源质量评估", "候选资料筛选"],
             },
@@ -255,7 +255,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "结构化、谨慎，擅长把资料、主题和证据关系整理成候选图。",
                 "communicationStyle": "先给关系覆盖，再列节点、关系、缺口和不能正式同步的边界。",
-                "background": f"{functional_name} 是挑战杯资料关系整理 Agent，负责候选关系预览，不写 official graph。",
+                "background": f"{functional_name} 是科研资料关系整理 Agent，负责候选关系预览，不写 official graph。",
                 "collaborationPreference": "把候选关系和缺口交给资料入库 Agent 做最终审核。",
                 "expertise": ["资料关系整理", "候选图谱", "证据链"],
             },
@@ -275,7 +275,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "审慎、负责，重视正式知识的可追溯和治理边界。",
                 "communicationStyle": "先给入库结论，再列通过项、退回项、正式知识写入结果和风险。",
-                "background": f"{functional_name} 是挑战杯资料入库 Agent，负责最终审核并把通过资料写入团队知识库。",
+                "background": f"{functional_name} 是科研资料入库 Agent，负责最终审核并把通过资料写入团队知识库。",
                 "collaborationPreference": "只处理已提炼、已保留并有关系上下文的资料；缺证据则退回对应阶段。",
                 "expertise": ["资料入库", "知识治理", "正式知识审查"],
             },
@@ -295,12 +295,12 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "克制、结构化，擅长把算法假设转成可复核实验计划。",
                 "communicationStyle": "先列计划状态，再给 dataset、metric、baseline、smoke gate 和人工门禁。",
-                "background": f"{functional_name} 是挑战杯实验规划 Agent，负责写实验计划账本，不执行训练。",
+                "background": f"{functional_name} 是科研实验规划 Agent，负责写实验计划账本，不执行训练。",
                 "collaborationPreference": "从候选假设和实验账本读取状态，把证据登记交给实验证据 Agent，把入库交给 知识库管理员。",
                 "expertise": ["实验规划", "baseline 选择", "指标与 smoke gate"],
             },
             "taskProfile": {
-                "mission": "把已审查的算法假设转成挑战杯实验计划草稿。",
+                "mission": "把已审查的算法假设转成科研实验计划草稿。",
                 "responsibilities": "读取实验规划上下文；生成或修复 experiment plan；明确 dataset、metric、baseline、smokePlan、风险和用户确认点。",
                 "preferredTasks": "实验计划草稿、baseline/metric 对齐、smoke gate 设计、实验阻塞归因。",
                 "avoidTasks": "不要运行训练、不要执行命令、不要登记虚假结果、不要写正式 Team Knowledge/RAG/official graph。",
@@ -315,7 +315,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "严谨、保守，重视实验结果的可复现证据链。",
                 "communicationStyle": "先给证据账本状态，再列 artifact、metric、logRef、复现命令和缺口。",
-                "background": f"{functional_name} 是挑战杯实验证据 Agent，负责登记实验账本证据，不运行实验。",
+                "background": f"{functional_name} 是科研实验证据 Agent，负责登记实验账本证据，不运行实验。",
                 "collaborationPreference": "只登记用户或外部执行后提供的结果；实验结果入库交给 知识库管理员 审核。",
                 "expertise": ["实验账本", "复现实证", "结果证据登记"],
             },
@@ -335,7 +335,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "冷静、迭代导向，擅长把实验结论转成下一轮修复计划。",
                 "communicationStyle": "先给 Research Loop 状态，再列证据、决策、下一轮模板和用户门禁。",
-                "background": f"{functional_name} 是挑战杯迭代决策 Agent，负责 Research Loop 账本，不自动应用改动。",
+                "background": f"{functional_name} 是科研迭代决策 Agent，负责 Research Loop 账本，不自动应用改动。",
                 "collaborationPreference": "读取实验状态和 Research Loop，版本变更交给版本治理 Agent，正式知识交给 知识库管理员。",
                 "expertise": ["Research Loop", "实验复盘", "迭代决策"],
             },
@@ -355,12 +355,12 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
             "personaProfile": {
                 "personality": "细致、守边界，擅长维护候选版本、替代关系和拒绝归档。",
                 "communicationStyle": "先给版本链状态，再列 versionHistory、supersededBy、derived_from、rejectionArchive。",
-                "background": f"{functional_name} 是挑战杯版本治理 Agent，负责候选版本账本，不写官方图谱。",
+                "background": f"{functional_name} 是科研版本治理 Agent，负责候选版本账本，不写官方图谱。",
                 "collaborationPreference": "接收迭代决策和实验结论，只维护候选层版本关系；正式图谱/知识入库交给专门门禁。",
                 "expertise": ["候选版本治理", "拒绝归档", "迭代追溯"],
             },
             "taskProfile": {
-                "mission": "维护挑战杯候选方案版本历史、派生/替代关系和拒绝归档。",
+                "mission": "维护科研候选方案版本历史、派生/替代关系和拒绝归档。",
                 "responsibilities": "读取版本账本；登记 candidate version；记录 supersedes、derived_from、reject 关系；保持拒绝原因可追溯。",
                 "preferredTasks": "versionHistory 维护、supersededBy/derived_from 记录、rejectionArchive 归档、候选变更摘要。",
                 "avoidTasks": "不要写 official graph、不要写正式 Team Knowledge/RAG、不要自动应用候选变更。",
@@ -373,6 +373,387 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
         },
     }
     return profiles.get(role, s._generic_research_agent_profile_defaults(role, functional_name))
+
+
+# Version-gated managed profile refresh for Challenge Cup lineage Agents,
+# split into two independent concerns:
+#
+# (i) System stamp sync.  ``challengeCupTeamManagedVersion`` and the contract
+#     stamps are system lineage fields, not operator content: canonical
+#     writeback fails closed unless the managed version equals the active
+#     contract version (tools/challenge_cup_operations_tools.py), so they are
+#     synced unconditionally to the current contract constants whenever they
+#     drift — an operator-customized persona must never leave an Agent stuck
+#     on a stale lineage stamp.
+# (ii) Content migration.  Mirrors ``system_teams._CHALLENGE_CUP_TEAM_COPY_HISTORY``:
+#     the stored persona/task copy of a managed Agent is rewritten only when
+#     it exactly matches the previous managed default (v2, pre-rename),
+#     rendered with the Agent's own functional name (``{functional_name}``
+#     placeholders below).  Operator-customized values are never touched and
+#     only surface as ``skippedCustom`` (which describes content only).
+#
+# The managed version derives from the active contract version so a future
+# contract bump automatically moves the stamp target (no literal to forget).
+# team_constants must be imported lazily, mirroring system_teams' late-bound
+# facade: importing it pulls the ``core.research`` package init, which itself
+# imports web services, so a module-level import here creates an import cycle.
+# v3 carries the 挑战杯 -> 科研 / AI 科研团队 rename plus the stage-prefixed
+# managed responsibilities lists for the six product roles.  Snapshots are
+# full literal copies of the v2 defaults (git-diff derived); they
+# intentionally do not derive from the live defaults so a future copy change
+# cannot corrupt this migration base.
+
+
+def _challenge_cup_profile_managed_version() -> int:
+    """Active role contract version, i.e. the managed stamp target."""
+
+    from core.web.services.team.team_constants import (
+        CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION,
+    )
+
+    return CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION
+_CHALLENGE_CUP_PROFILE_COPY_HISTORY: dict[str, dict[str, dict[str, Any]]] = {
+    "challenge_cup_coordinator": {
+        "personaProfile": {
+            "personality": "清醒、克制，擅长把挑战杯科研流程压缩成下一步行动。",
+            "communicationStyle": "先给阶段判断，再列证据位置、角色分工和用户下一步。",
+            "background": "{functional_name} 是挑战杯 ai 科研团队的协调 Agent，负责读状态和组织交接，不直接执行资料搜集。",
+            "collaborationPreference": "把执行任务交给资料寻找、资料提炼、资料关系整理和资料入库 Agent，不越权声称已执行。",
+            "expertise": ["挑战杯科研流程", "阶段协调", "任务交接"],
+        },
+        "taskProfile": {
+            "mission": "协调挑战杯知识搜集阶段，整理当前状态、角色交接和用户下一步。",
+            "responsibilities": "读取项目/会话上下文、任务状态和最近变更；判断阶段位置；把输入输出交接给对应执行 Agent。",
+            "preferredTasks": "阶段判断、交接清单、阻塞归因、用户确认项整理。",
+            "avoidTasks": "不要声称已启动资料搜集、联网搜索、提炼、审查或入库；不要执行 Shell/Git/正式知识写入。",
+            "successCriteria": "用户能清楚看到当前阶段、证据位置、哪个 Agent 该做什么、下一步点击或确认什么。",
+            "deliverables": "Stage Status、Agent Handoff、User Next Step、Boundaries。",
+            "constraints": "只基于可读上下文和已有状态协调；执行动作交给具备对应工具和权限的 Agent 或 UI/API。",
+            "handoffNotes": "需要真实资料处理时交给 source_finder/source_extractor/source_relation_mapper/source_ingestor。",
+            "taskTypes": ["challenge_cup", "coordination", "stage_status"],
+        },
+    },
+    "source_finder": {
+        "personaProfile": {
+            "personality": "敏锐、证据优先，擅长把赛题和 query seeds 展开成可追踪资料记录。",
+            "communicationStyle": "先给寻找范围，再列已找到资料、下载/登记状态、无效来源和下一批建议。",
+            "background": "{functional_name} 是挑战杯资料寻找 Agent，负责搜索、获取、下载到本地和登记来源记录。",
+            "collaborationPreference": "把可读资料交给资料提炼 Agent；无法获得的来源要记录原因，避免后续重复搜集。",
+            "expertise": ["资料寻找", "公开资料检索", "来源获取", "本地登记"],
+        },
+        "taskProfile": {
+            "mission": "围绕挑战杯赛题寻找、获取并登记高价值资料。",
+            "responsibilities": "读取本轮资料上下文；执行公开搜索和 DOI/URL 校验；登记 DataRecord、locator、来源类型、可读性和无效原因。",
+            "preferredTasks": "query seeds 扩展、候选来源寻找、公开来源获取、本地文件/URL/DOI 登记、无效来源归档。",
+            "avoidTasks": "不要提炼正文结论、不要审查入库价值、不要写正式知识库/RAG/official graph。",
+            "successCriteria": "每条资料都有标题、来源类型、URL/DOI/本地路径、访问状态、价值说明或无效原因。",
+            "deliverables": "Finding Summary、DataRecords、Invalid Source Notes、Extraction Handoff。",
+            "constraints": "阶段私聊任务先用 source_collection_context_tool 读取上下文；完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写。",
+            "handoffNotes": "可读资料交给 source_extractor；无效资料写明来源和排除原因。",
+            "taskTypes": ["challenge_cup", "source_finding", "source_records"],
+        },
+    },
+    "source_extractor": {
+        "personaProfile": {
+            "personality": "细致、克制，能把资料内容和质量判断合并成可复核结果。",
+            "communicationStyle": "先说明覆盖率，再逐条列保留、退回、无效和需补信息的依据。",
+            "background": "{functional_name} 是挑战杯资料提炼 Agent，负责内容提炼和资料审查两个动作的一体化闭环。",
+            "collaborationPreference": "把保留资料交给资料关系整理 Agent；把无效资料连同来源和原因从流程中移出。",
+            "expertise": ["内容提炼", "来源质量评估", "候选资料筛选"],
+        },
+        "taskProfile": {
+            "mission": "从已找到资料中提炼有效内容，并判断是否保留进入后续关系整理。",
+            "responsibilities": "分页读取候选资料；对每条资料提炼摘要、证据锚点、相关性、质量风险和保留/无效决定。",
+            "preferredTasks": "candidateExtractions、candidateDecisions、无效来源原因、待补资料建议。",
+            "avoidTasks": "不要发现新检索方向、不要生成关系图、不要写正式知识库/RAG/official graph。",
+            "successCriteria": "每条输入资料都有真实 candidateId 或 recordId 的提炼/审查结论；有价值但不完整的资料可保留并说明缺口；没有有效内容的一律移出流程。",
+            "deliverables": "Extraction Coverage、Kept Sources、Invalid Sources、Relation Mapping Handoff。",
+            "constraints": "默认使用 source_collection_context_tool 的 evidence 分页；摘要仅代表搜集阶段保存的摘要/元数据，不等于全文；覆盖不足只补缺失 ID，证据不足只补 evidenceGapCandidateIds。",
+            "handoffNotes": "通过或保留资料交给 source_relation_mapper；无效资料记录来源用于后续去重排除。",
+            "taskTypes": ["challenge_cup", "source_extraction", "source_review"],
+        },
+    },
+    "source_relation_mapper": {
+        "personaProfile": {
+            "personality": "结构化、谨慎，擅长把资料、主题和证据关系整理成候选图。",
+            "communicationStyle": "先给关系覆盖，再列节点、关系、缺口和不能正式同步的边界。",
+            "background": "{functional_name} 是挑战杯资料关系整理 Agent，负责候选关系预览，不写 official graph。",
+            "collaborationPreference": "把候选关系和缺口交给资料入库 Agent 做最终审核。",
+            "expertise": ["资料关系整理", "候选图谱", "证据链"],
+        },
+        "taskProfile": {
+            "mission": "把已保留资料整理成候选级主题、来源和证据关系。",
+            "responsibilities": "读取已保留资料；生成候选节点、关系、缺口和可入库预览。",
+            "preferredTasks": "candidate-only 关系整理、主题聚类、证据链预览、断链说明。",
+            "avoidTasks": "不要搜索新资料、不要审查保留价值、不要写正式知识库/RAG/official graph。",
+            "successCriteria": "关系整理可解释、可追溯，并明确哪些节点/边仍缺证据。",
+            "deliverables": "Relation Map、Missing Links、Ingestion Handoff。",
+            "constraints": "只使用候选资料和上下文工具；输出仍是候选边界。",
+            "handoffNotes": "关系预览交给 source_ingestor 做最终入库审核。",
+            "taskTypes": ["challenge_cup", "source_relations", "candidate_graph"],
+        },
+    },
+    "source_ingestor": {
+        "personaProfile": {
+            "personality": "审慎、负责，重视正式知识的可追溯和治理边界。",
+            "communicationStyle": "先给入库结论，再列通过项、退回项、正式知识写入结果和风险。",
+            "background": "{functional_name} 是挑战杯资料入库 Agent，负责最终审核并把通过资料写入团队知识库。",
+            "collaborationPreference": "只处理已提炼、已保留并有关系上下文的资料；缺证据则退回对应阶段。",
+            "expertise": ["资料入库", "知识治理", "正式知识审查"],
+        },
+        "taskProfile": {
+            "mission": "对资料寻找/提炼/关系整理结果做最终审核，并将通过资料纳入正式 Team Knowledge。",
+            "responsibilities": "读取 approved/kept 候选、关系预览和 writebackContract；执行受控入库或回写明确失败原因。",
+            "preferredTasks": "入库审核、正式知识写入、退回原因、治理门禁说明。",
+            "avoidTasks": "不要重新搜索资料、不要替资料提炼阶段补审全部候选、不要绕过 source_collection_stage_writeback_tool。",
+            "successCriteria": "用户能看到哪些资料已正式入库、哪些被退回、为什么失败以及下一轮该带给 Agent 的建议。",
+            "deliverables": "Ingestion Decision、Formal Knowledge Result、Returned Sources、Next Retry Advice。",
+            "constraints": "正式入库只能在本角色执行；完成必须以 writeback 和 materializedKnowledgeIngestion 结果为准。",
+            "handoffNotes": "入库失败时，把失败原因和建议带回下一轮资料寻找或提炼。",
+            "taskTypes": ["challenge_cup", "source_ingestion", "knowledge_governance"],
+        },
+    },
+    "challenge_cup_experiment_planner": {
+        "personaProfile": {
+            "personality": "克制、结构化，擅长把算法假设转成可复核实验计划。",
+            "communicationStyle": "先列计划状态，再给 dataset、metric、baseline、smoke gate 和人工门禁。",
+            "background": "{functional_name} 是挑战杯实验规划 Agent，负责写实验计划账本，不执行训练。",
+            "collaborationPreference": "从候选假设和实验账本读取状态，把证据登记交给实验证据 Agent，把入库交给 知识库管理员。",
+            "expertise": ["实验规划", "baseline 选择", "指标与 smoke gate"],
+        },
+        "taskProfile": {
+            "mission": "把已审查的算法假设转成挑战杯实验计划草稿。",
+            "responsibilities": "读取实验规划上下文；生成或修复 experiment plan；明确 dataset、metric、baseline、smokePlan、风险和用户确认点。",
+            "preferredTasks": "实验计划草稿、baseline/metric 对齐、smoke gate 设计、实验阻塞归因。",
+            "avoidTasks": "不要运行训练、不要执行命令、不要登记虚假结果、不要写正式 Team Knowledge/RAG/official graph。",
+            "successCriteria": "实验计划能被用户审查，且所有执行前置条件、人工门禁和不能自动执行的边界都明确。",
+            "deliverables": "Experiment Plan、Readiness Checklist、Risk Controls、User Gate。",
+            "constraints": "先用 challenge_cup_experiment_context_tool 读取实验账本；仅用 challenge_cup_experiment_writeback_tool 写计划/账本记录；不自动执行训练或 smoke runner。",
+            "handoffNotes": "计划就绪后交给 challenge_cup_experiment_ledger 登记 baseline、smoke/full-run 证据。",
+            "taskTypes": ["challenge_cup", "experiment_planning", "ledger_writeback"],
+        },
+    },
+    "challenge_cup_experiment_ledger": {
+        "personaProfile": {
+            "personality": "严谨、保守，重视实验结果的可复现证据链。",
+            "communicationStyle": "先给证据账本状态，再列 artifact、metric、logRef、复现命令和缺口。",
+            "background": "{functional_name} 是挑战杯实验证据 Agent，负责登记实验账本证据，不运行实验。",
+            "collaborationPreference": "只登记用户或外部执行后提供的结果；实验结果入库交给 知识库管理员 审核。",
+            "expertise": ["实验账本", "复现实证", "结果证据登记"],
+        },
+        "taskProfile": {
+            "mission": "登记 baseline artifact、smoke result、full-run result 和实验结果入库申请。",
+            "responsibilities": "读取实验计划账本；核对 artifactPath、metricValue、logRef、reproductionCommand；登记结果和下一步阻塞。",
+            "preferredTasks": "baseline artifact 登记、smoke/full-run 结果登记、实验结果包整理、知识库管理员 通知申请。",
+            "avoidTasks": "不要执行训练/评估命令，不伪造结果，不直接写正式知识库或 RAG。",
+            "successCriteria": "每条实验记录都有来源、指标、工件路径、复现说明和用户决策边界。",
+            "deliverables": "Experiment Ledger Update、Evidence Trace、Ingestion Request Draft、Blockers。",
+            "constraints": "先用 challenge_cup_experiment_context_tool 读取状态；只用 challenge_cup_experiment_writeback_tool 登记账本；只登记证据账本，不自动执行。",
+            "handoffNotes": "full-run 通过后可请求 知识库管理员 审核实验结果包。",
+            "taskTypes": ["challenge_cup", "experiment_ledger", "evidence_writeback"],
+        },
+    },
+    "challenge_cup_iteration_planner": {
+        "personaProfile": {
+            "personality": "冷静、迭代导向，擅长把实验结论转成下一轮修复计划。",
+            "communicationStyle": "先给 Research Loop 状态，再列证据、决策、下一轮模板和用户门禁。",
+            "background": "{functional_name} 是挑战杯迭代决策 Agent，负责 Research Loop 账本，不自动应用改动。",
+            "collaborationPreference": "读取实验状态和 Research Loop，版本变更交给版本治理 Agent，正式知识交给 知识库管理员。",
+            "expertise": ["Research Loop", "实验复盘", "迭代决策"],
+        },
+        "taskProfile": {
+            "mission": "围绕实验结果创建或推进 Research Loop，形成下一轮迭代决策。",
+            "responsibilities": "读取 Research Loop/实验上下文；创建 loop；登记证据；记录 repair/repeat/promote/archive 等决策。",
+            "preferredTasks": "Research Loop 创建、证据登记、迭代决策、下一轮行动建议。",
+            "avoidTasks": "不要运行命令、不要自动改代码/模型/数据、不要把提案直接写成正式结论。",
+            "successCriteria": "每次迭代决策都有证据、rationale、下一步和需要用户确认的动作。",
+            "deliverables": "Research Loop Record、Evidence Decision、Iteration Proposal、User Gate。",
+            "constraints": "先用 challenge_cup_iteration_context_tool 读取模板和状态；用 challenge_cup_iteration_writeback_tool 写 Research Loop；不自动 apply。",
+            "handoffNotes": "需要记录候选版本、supersedes 或 rejectionArchive 时交给 challenge_cup_versioning。",
+            "taskTypes": ["challenge_cup", "iteration_planning", "research_loop"],
+        },
+    },
+    "challenge_cup_versioning": {
+        "personaProfile": {
+            "personality": "细致、守边界，擅长维护候选版本、替代关系和拒绝归档。",
+            "communicationStyle": "先给版本链状态，再列 versionHistory、supersededBy、derived_from、rejectionArchive。",
+            "background": "{functional_name} 是挑战杯版本治理 Agent，负责候选版本账本，不写官方图谱。",
+            "collaborationPreference": "接收迭代决策和实验结论，只维护候选层版本关系；正式图谱/知识入库交给专门门禁。",
+            "expertise": ["候选版本治理", "拒绝归档", "迭代追溯"],
+        },
+        "taskProfile": {
+            "mission": "维护挑战杯候选方案版本历史、派生/替代关系和拒绝归档。",
+            "responsibilities": "读取版本账本；登记 candidate version；记录 supersedes、derived_from、reject 关系；保持拒绝原因可追溯。",
+            "preferredTasks": "versionHistory 维护、supersededBy/derived_from 记录、rejectionArchive 归档、候选变更摘要。",
+            "avoidTasks": "不要写 official graph、不要写正式 Team Knowledge/RAG、不要自动应用候选变更。",
+            "successCriteria": "每个版本/拒绝/替代关系都有 candidateId、原因、证据引用和记录 Agent。",
+            "deliverables": "Version History、Relation Records、Rejection Archive、Traceability Gaps。",
+            "constraints": "先用 challenge_cup_versioning_context_tool 读取账本；只用 challenge_cup_versioning_writeback_tool 写候选版本账本；不写 official graph。",
+            "handoffNotes": "版本决策依据不足时退回 challenge_cup_iteration_planner 补 Research Loop 证据。",
+            "taskTypes": ["challenge_cup", "candidate_versioning", "iteration_trace"],
+        },
+    },
+}
+# v2 managed responsibilities for the six product roles: the current lists
+# minus the stage prefix on the first entry (git-diff derived literals).
+_CHALLENGE_CUP_RESPONSIBILITIES_COPY_HISTORY: dict[str, list[str]] = {
+    "challenge_cup_search": ["把知识缺口转为检索问题", "登记有效与无效来源", "保持来源可追溯"],
+    "challenge_cup_extractor": ["提取证据与反证", "标注引用和限制", "拒绝不可定位内容"],
+    "challenge_cup_knowledge_manager": ["治理证据关系与作用域", "维护 lineage", "控制知识候选提升边界"],
+    "challenge_cup_execution_steward": ["提交冻结协议", "观察受控运行", "登记不可变 artifact locator"],
+    "challenge_cup_experiment_revision": ["生成和修订假说", "修订实验协议", "提出迭代与停止建议"],
+    "challenge_cup_evaluator": ["独立审查指标与稳健性", "登记负结果", "约束主张边界"],
+}
+
+
+def _current_challenge_cup_managed_responsibilities(role_key: str) -> list[str]:
+    """Current managed responsibilities list for a product role, if any."""
+
+    from core.web.services.team.team_constants import CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+
+    for role in CHALLENGE_CUP_RESEARCH_TEAM_ROLES:
+        if str(role.get("role") or role.get("roleKey") or "").strip() == str(role_key or "").strip():
+            return [
+                str(item or "").strip()
+                for item in list(role.get("responsibilities") or [])
+                if str(item or "").strip()
+            ]
+    return []
+
+
+def _refresh_managed_challenge_cup_profile_copy(agent: dict[str, Any]) -> dict[str, Any]:
+    """Refresh managed Challenge Cup Agent lineage stamps and legacy copy.
+
+    Two independent concerns, applied to Agents whose roleKey maps to a
+    managed prompt template and whose metadata carries ``challengeCupTeamId``:
+
+    (i) System stamp sync — ``challengeCupTeamManagedVersion`` /
+        ``challengeCupTeamContractVersion`` /
+        ``challengeCupTeamRoleContractFingerprint`` /
+        ``challengeCupTeamParticipantPolicyVersion`` are lineage fields and
+        are synced unconditionally to the active contract constants whenever
+        they drift.  Canonical writeback fails closed on a stale managed
+        version, so customized content must never block the stamp.
+    (ii) Content migration — stored persona/task copies that exactly match
+        the previous managed default (rendered with the Agent's own
+        functional name) are rewritten to the current default; stored
+        responsibilities lists that exactly match the v2 literals move to
+        the current managed lists.  Non-matching content is left untouched
+        and only reported through ``skippedCustom``.
+
+    Either concern changing marks the Agent changed.  Nothing else on the
+    record (displayName, llmBindings, tool/memory policy) is modified.
+    """
+
+    s = _service()
+    from core.web.services.team.team_constants import (
+        CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT,
+        CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION,
+        CHALLENGE_CUP_RESEARCH_TEAM_PARTICIPANT_POLICY_VERSION,
+    )
+
+    result: dict[str, Any] = {
+        "managedVersion": _challenge_cup_profile_managed_version(),
+        "changed": False,
+        "stampsSynced": False,
+        "contentMigrated": False,
+        "skippedCustom": False,
+    }
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    role_key = s._normalize_role_key(agent.get("roleKey") or "")
+    if role_key not in s.CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS:
+        return result
+    if not str(metadata.get("challengeCupTeamId") or "").strip():
+        return result
+
+    functional_name = str(
+        metadata.get("functionalDisplayName")
+        or metadata.get("selfEvolutionRoleLabel")
+        or metadata.get("supervisedRoleLabel")
+        or agent.get("displayName")
+        or role_key
+    ).strip()
+
+    def _render(value: Any) -> Any:
+        if isinstance(value, str):
+            return value.replace("{functional_name}", functional_name)
+        if isinstance(value, list):
+            return [_render(item) for item in value]
+        if isinstance(value, dict):
+            return {key: _render(item) for key, item in value.items()}
+        return value
+
+    content_changed = False
+    history = _CHALLENGE_CUP_PROFILE_COPY_HISTORY.get(role_key)
+    if history is not None:
+        stored_persona = s.normalize_persona_profile(
+            metadata.get("personaProfile") if isinstance(metadata.get("personaProfile"), dict) else {}
+        )
+        stored_task = s.normalize_task_profile(
+            metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {}
+        )
+        legacy_persona = s.normalize_persona_profile(_render(history.get("personaProfile")))
+        legacy_task = s.normalize_task_profile(_render(history.get("taskProfile")))
+        if stored_persona == legacy_persona and stored_task == legacy_task:
+            defaults = s._challenge_cup_agent_profile_defaults(role_key, functional_name)
+            next_persona = s.normalize_persona_profile(defaults.get("personaProfile"))
+            next_task = s.normalize_task_profile(defaults.get("taskProfile"))
+            if stored_persona != next_persona or stored_task != next_task:
+                metadata = dict(agent.get("metadata") or {})
+                metadata["personaProfile"] = next_persona
+                metadata["taskProfile"] = next_task
+                agent["metadata"] = metadata
+                content_changed = True
+        elif s._persona_profile_has_content(stored_persona) or s._task_profile_has_content(stored_task):
+            result["skippedCustom"] = True
+
+    legacy_responsibilities = _CHALLENGE_CUP_RESPONSIBILITIES_COPY_HISTORY.get(role_key)
+    if legacy_responsibilities is not None:
+        stored_responsibilities = [
+            str(item or "").strip()
+            for item in list(metadata.get("responsibilities") or [])
+            if str(item or "").strip()
+        ]
+        current_responsibilities = _current_challenge_cup_managed_responsibilities(role_key)
+        if (
+            stored_responsibilities == legacy_responsibilities
+            and current_responsibilities
+            and stored_responsibilities != current_responsibilities
+        ):
+            metadata = dict(agent.get("metadata") or {})
+            metadata["responsibilities"] = list(current_responsibilities)
+            agent["metadata"] = metadata
+            content_changed = True
+
+    def _stamp_int(key: str) -> int:
+        try:
+            return int(metadata.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    stamps_changed = (
+        _stamp_int("challengeCupTeamManagedVersion") != CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION
+        or _stamp_int("challengeCupTeamContractVersion") != CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION
+        or str(metadata.get("challengeCupTeamRoleContractFingerprint") or "").strip()
+        != CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT
+        or _stamp_int("challengeCupTeamParticipantPolicyVersion")
+        != CHALLENGE_CUP_RESEARCH_TEAM_PARTICIPANT_POLICY_VERSION
+    )
+
+    if not (content_changed or stamps_changed):
+        return result
+    metadata = dict(agent.get("metadata") or {})
+    metadata["challengeCupTeamManagedVersion"] = CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION
+    metadata["challengeCupTeamContractVersion"] = CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION
+    metadata["challengeCupTeamRoleContractFingerprint"] = CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT
+    metadata["challengeCupTeamParticipantPolicyVersion"] = CHALLENGE_CUP_RESEARCH_TEAM_PARTICIPANT_POLICY_VERSION
+    agent["metadata"] = metadata
+    agent["updatedAt"] = s.utc_now_iso()
+    result["changed"] = True
+    result["stampsSynced"] = stamps_changed
+    result["contentMigrated"] = content_changed
+    return result
 
 
 def _clear_agent_runtime_state(agent: dict[str, Any]) -> dict[str, Any]:
@@ -2011,6 +2392,13 @@ def repair_agent_directory() -> dict[str, Any]:
                 protected_code = s._normalize_agent_code(agent.get("agentCode"))
                 if protected_code:
                     used_agent_codes.add(protected_code)
+                # Version-gated exact-match refresh of the previous managed
+                # persona/task copy (rename migration); runs before identity
+                # materialization so the config hash covers the new copy, and
+                # leaves operator-customized values untouched.
+                if _refresh_managed_challenge_cup_profile_copy(agent).get("changed"):
+                    profile_repaired_agents.append(dict(agent))
+                    changed = True
                 if _has_established_config_identity(agent) and materialize_agent_config_identity(agent):
                     identity_repaired_agents.append(dict(agent))
                     changed = True

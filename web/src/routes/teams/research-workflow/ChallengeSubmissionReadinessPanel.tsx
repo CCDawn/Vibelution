@@ -137,7 +137,7 @@ export function ChallengeSubmissionReadinessPanel({
     );
   }
   return (
-    <section className={styles.submissionReadiness} aria-label={zh ? "挑战杯提交包就绪状态" : "Challenge Cup submission readiness"} data-vui="challenge-submission-readiness">
+    <section className={styles.submissionReadiness} aria-label={zh ? "科研提交包就绪状态" : "Research submission readiness"} data-vui="challenge-submission-readiness">
       <div className={styles.sectionHeader}>
         <div>
           <strong>{zh ? "提交包" : "Submission package"}</strong>

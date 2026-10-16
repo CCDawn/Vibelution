@@ -521,7 +521,7 @@ def _notify_knowledge_steward_for_ingestion(
     source_agent_id = requester_agent_id if requester_agent_id and s.agent_directory_service.get_agent(requester_agent_id, include_archived=True) else ""
     content = "\n".join(
         [
-            "[挑战杯团队知识入库请求]",
+            "[科研团队知识入库请求]",
             f"团队: {team_id}",
             f"待入库知识包: {steward_candidate_id}",
             f"目标知识库: {knowledge_base_id}",
@@ -536,7 +536,7 @@ def _notify_knowledge_steward_for_ingestion(
         ]
     )
     thread_id = f"challenge-cup-knowledge-ingestion:{team_id}:{steward_candidate_id}"
-    message_summary = f"挑战杯团队待入库知识包 {steward_candidate_id} 请求最终入库。"
+    message_summary = f"科研团队待入库知识包 {steward_candidate_id} 请求最终入库。"
     try:
         message, delivery, kernel_result = s._submit_team_workflow_inbox_via_kernel(
             target_agent_id=steward_agent_id,

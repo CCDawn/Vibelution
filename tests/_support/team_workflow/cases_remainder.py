@@ -38,7 +38,7 @@ def test_source_relation_task_keeps_extraction_evidence_when_model_requests_mini
     agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -116,7 +116,7 @@ def test_content_extraction_writeback_downgrades_unanchored_evidence_ledger(tmp_
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -308,7 +308,7 @@ def test_content_extraction_writeback_reports_no_effect_closure_for_invalid_raw_
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
-        name="挑战杯科研团队",
+        name="AI科研团队",
         members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -388,7 +388,7 @@ def test_stage_writeback_result_metadata_preserves_relation_edge_batches():
 
 def test_source_extraction_updates_pdf_manifest_with_page_anchors(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     source_path = tmp_path / "sources" / "neuro.pdf"
     source_path.parent.mkdir(parents=True)
     source_path.write_bytes(b"%PDF-1.4\nfake local pdf bytes\n")
@@ -440,7 +440,7 @@ def test_source_extraction_updates_pdf_manifest_with_page_anchors(tmp_path, monk
 
 def test_source_extraction_failure_keeps_manifest_needing_confirmation(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     missing_path = tmp_path / "missing.pdf"
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
@@ -469,7 +469,7 @@ def test_source_extraction_failure_keeps_manifest_needing_confirmation(tmp_path,
 
 def test_workflow_overview_uses_lightweight_team_existence(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
 
     def fail_full_team_read(team_id):
@@ -484,7 +484,7 @@ def test_workflow_overview_uses_lightweight_team_existence(tmp_path, monkeypatch
 
 def test_workflow_overview_does_not_rewrite_existing_workflow(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
     team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
     workflow_path = team_workflow_orchestration_service._workflow_path(team["teamId"]).resolve()
     real_write_json = team_workflow_orchestration_service._write_json
@@ -504,7 +504,7 @@ def test_workflow_overview_does_not_rewrite_existing_workflow(tmp_path, monkeypa
 def test_team_aggregate_status_views_declare_non_gate_scope(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     payloads = [
         team_workflow_orchestration_service.get_source_quality_status(team["teamId"]),
@@ -523,7 +523,7 @@ def test_team_aggregate_status_views_declare_non_gate_scope(tmp_path, monkeypatc
 
 def test_mechanism_mapping_requires_over_analogy_risk_flag(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
@@ -555,7 +555,7 @@ def test_mechanism_mapping_requires_over_analogy_risk_flag(tmp_path, monkeypatch
 
 def test_review_prefilter_rejects_final_decision(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
+    team = team_service.create_team(name="AI科研团队")
 
     response = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
