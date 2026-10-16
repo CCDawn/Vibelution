@@ -254,3 +254,11 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 2. Do not change React Query key shapes in drive-by refactors.
 3. Keep pure builders free of React / DOM.
 4. Font tokens: `[font-size:var(--vui-font-*)]`, never `text-[var(--vui-font-*)]` as size.
+
+## User-defined workflow workspace
+
+`generic/GenericTeamWorkspaceRoute` is the default research-team overview/workflow entry. The approved layout uses a flow/member rail, sequential editor and direct node inspector. Other teams retain their native home unless explicitly opened with `teamWorkspace=flows`. Explicit conversations, tasks, source-collection views and run/question deep links retain their existing routes; “已有记录” opens retained research history.
+
+`generic/useWorkflowWorkspace` owns saved-definition/run queries, independent drafts, CAS errors and cache convergence. Transport and DTOs live in `api/genericTeamWorkflows.ts` and `types/genericTeamWorkflow.ts`. Input labels, types and requirements belong to the selected flow; templates are optional and bind to the team's actual members. `WorkflowArtifactDialog` renders plain-text projections from canonical Session results without storing transcript copies. Production progress has no UI timer or simulated scene selector.
+
+Layout uses VUI `VCanvasWorkbenchPage`, `WORKBENCH_LAYOUT_IDS.teams` and shared pane persistence. Each component has an adjacent `.styles.ts`; `workspace.css` only scopes the approved accent and narrow-screen touch sizes.

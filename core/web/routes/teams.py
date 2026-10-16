@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from core.web.routes.dev_team_tasks import register_dev_team_task_routes
+from core.web.routes.generic_team_workflows import register_generic_team_workflow_routes
 from core.web.routes.teams_catalog_models import (
     TeamAiSearchRunListResponse,
     TeamCanvasResponse,
@@ -47,6 +48,7 @@ from core.web.services.team_service import (
 
 router = APIRouter(tags=["teams"])
 register_dev_team_task_routes(router)
+register_generic_team_workflow_routes(router)
 
 
 class TeamMemberPayload(BaseModel):

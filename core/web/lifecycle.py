@@ -585,6 +585,10 @@ async def web_workbench_lifespan(app: FastAPI | None):
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
     startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs)
+    startup_generic_workflow_task = startup_jobs.start_async(
+        "startup-generic-workflows",
+        _start_generic_workflows_after_session_recovery(startup_session_recovery_task, startup_jobs),
+    )
     from .services.virtual_human_life_service import run_virtual_human_life_runtime
 
     startup_virtual_human_life_task = startup_jobs.start_async(
@@ -668,6 +672,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Session startup recovery sweep failed during startup."
         )
     )
+    startup_generic_workflow_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="User workflow recovery failed during startup.")
+    )
     startup_challenge_fence_validation_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task,
@@ -727,6 +734,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                     "chat_room_round_recovery",
                     "command_attempt_recovery",
                     "session_recovery_sweep",
+                    "generic_team_workflows",
                     "challenge_fence_config_validation",
                     "external_agent_task_reconcile",
                     "virtual_human_life",
@@ -970,6 +978,12 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
         from .services.team_workflow.research_runtime.hypothesis_command_attempts import shutdown_hypothesis_command_executor
         return shutdown_hypothesis_command_executor(deadline=deadline)
 
+    def _stop_generic_workflows() -> Any:
+        module = sys.modules.get("core.web.services.generic_team_workflow_service")
+        if module is None:
+            return {"closed": True, "present": False}
+        return module.shutdown_generic_workflow_executor(deadline=deadline)
+
     owners = (
         ("agent-perception", _stop_perception, {}),
         ("background-tasks", _stop_background_tasks, {}),
@@ -1000,13 +1014,15 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
             return False
         return True
 
+    # Fence workflow producers before closing their canonical Session workers.
+    generic_closed = await _shutdown_owner("generic-team-workflows", _stop_generic_workflows, {})
     results = await asyncio.gather(
         *(_shutdown_owner(name, callback, kwargs) for name, callback, kwargs in owners),
         return_exceptions=True,
     )
     return {
-        "closed": all(result is True for result in results),
-        "owners": [name for name, _, _ in owners],
+        "closed": generic_closed and all(result is True for result in results),
+        "owners": ["generic-team-workflows", *[name for name, _, _ in owners]],
     }
 
 
@@ -1019,11 +1035,32 @@ def _start_research_workflow_runtime() -> str:
     return start_production_workflow_runtime()
 
 
+def _begin_generic_workflow_runtime(*, should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
+    from .services.generic_team_workflow_service import begin_generic_workflow_lifecycle
+
+    result = begin_generic_workflow_lifecycle(should_stop=should_stop)
+    if result.get("opened") is False and result.get("skipped") != "lifespan_stopping":
+        raise RuntimeError("User workflow executor could not reopen safely.")
+    return result
+
+
+async def _start_generic_workflows_after_session_recovery(
+    session_recovery: asyncio.Task[Any], startup_jobs: StartupJobGroup,
+) -> dict[str, Any]:
+    # Native recovery may replace a Turn with a verified resume child. Wait for
+    # that sweep before judging old workflow attempts or accepting new runs.
+    await asyncio.shield(session_recovery)
+    return await startup_jobs.run_sync(
+        "startup-generic-workflow-owner", _begin_generic_workflow_runtime, stop_keyword="should_stop",
+    )
+
+
 def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
     """Initialize formal reads even when archive mode disables workflow workers.
 
     The startup job finishes after configuring reader connections in archive
-    mode; no writer, outbox pump or resident workflow threads are started.
+    mode; no research writer, outbox pump or research worker is started.
+    The independent user-workflow owner may recover its own saved runs.
     """
 
     return startup_jobs.start_thread(

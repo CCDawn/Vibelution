@@ -1,0 +1,21 @@
+/* The approved workflow workspace uses one accent without changing global tokens. */
+.generic-team-workspace [data-vui="checkbox"] { --accent-cool: #256c58; }
+@media (max-width: 639px) {
+  .generic-team-workspace [data-vui="canvas-workbench-responsive-controls"] {
+    border: 0;
+    background: transparent;
+    padding: 8px 4px 0;
+    gap: 8px;
+  }
+  .generic-team-workspace [data-vui="canvas-workbench-responsive-controls"] button {
+    min-height: 44px;
+    border-color: #d7e3da;
+    background: #fff;
+    padding-inline: 12px;
+    color: #456653;
+  }
+  .generic-team-workspace [data-vui="button"], .generic-team-workspace [role="tab"], .generic-team-workspace [role="combobox"], .generic-team-workspace [data-vui="checkbox"] {
+    min-height: 44px;
+  }
+  .generic-team-workspace [data-vui="input"], .generic-team-workspace [data-vui="textarea"] { font-size: 16px !important; }
+}

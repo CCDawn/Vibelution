@@ -194,3 +194,7 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 |------|------|------|
 | `facade_helpers.py` | ~0.9k | remaining workflow/stage/json helpers |
 | facade after Phase 18 | ~1.2k | re-exports only (0 residual function defs) |
+
+## User-defined team workflows
+
+`generic/` owns sequential user-authored flow definitions, frozen run snapshots and their native Session orchestration. Public facade: `../generic_team_workflow_service.py`; thin HTTP registration: `core/web/routes/generic_team_workflows.py` on the existing Teams router. It does not reuse or rewrite research question input contracts, historical workflow definitions, ordinary Session admission or transcript authority. Details: [`generic/README.md`](generic/README.md).

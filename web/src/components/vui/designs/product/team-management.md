@@ -493,3 +493,9 @@
 - 画布在数据加载后挂载或重新挂载时重新测量可视区；节点名称与 Agent 名称相同、职责与目的相同时，各只展示一次。机器生成的节点名称优先投影为已关联成员名称。
 - 成员详情采用标签与内容分列、长文本换行；滚动详情中的区块保持自然高度。阶段与节点标题限制在自身列内，状态保留独立宽度。
 - 科研状态读取失败时展示错误状态，不继续显示加载提示；封存模式只读取已有 Ledger，不启动研究任务或开放写入。
+
+## Generic workflow workspace
+
+The approved workspace composes existing VUI APIs rather than defining another design system: `VCanvasWorkbenchPage` with `WORKBENCH_LAYOUT_IDS.teams`, `VTabs`, `VButton`, VUI form controls and dialogs. White panels, subdued green accent, a dotted sequential canvas and connected node cards retain the approved preview composition. At narrow widths, the rail and inspector become existing recipe drawers; the title and toolbar wrap, and the canvas scrolls independently. No business topic is mandatory.
+
+Owner: `routes/teams/generic/`; adjacent component `.styles.ts` files own visual utilities. Definition edits are explicit drafts until save. Runs use server snapshots and show only canonical execution status, lifecycle records and native result projections. Stop remains “正在停止” until the server confirms termination. Errors stay visible; deletion requires confirmation; dialog text is rendered as plain text. Existing team conversations and historical research records remain accessible.

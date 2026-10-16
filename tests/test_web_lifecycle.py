@@ -311,6 +311,49 @@ def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkey
     assert called == ["background", "terminal"]
 
 
+def test_generic_workflow_owner_does_not_start_before_session_recovery(monkeypatch):
+    called = []
+    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(modules={
+        "core.web.services.generic_team_workflow_service": SimpleNamespace(
+            begin_generic_workflow_lifecycle=lambda: called.append("generic") or {"opened": True}
+        ),
+    }))
+    lifecycle._begin_owned_runtime_lifecycle()
+    assert called == []
+
+
+def test_generic_workflow_recovers_independently_of_research_archive(monkeypatch):
+    called = []
+    monkeypatch.setattr(lifecycle, "_begin_generic_workflow_runtime", lambda **_kwargs: called.append("generic") or {"opened": True})
+
+    async def exercise():
+        jobs = StartupJobGroup()
+        recovered = asyncio.get_running_loop().create_future()
+        task = asyncio.create_task(lifecycle._start_generic_workflows_after_session_recovery(recovered, jobs))
+        await asyncio.sleep(0)
+        assert called == []
+        recovered.set_result({"resumedCount": 1})
+        assert (await task)["opened"] is True
+        await jobs.shutdown(deadline=time.monotonic() + 1)
+
+    asyncio.run(exercise())
+    assert called == ["generic"]
+
+
+def test_generic_workflow_producer_is_fenced_before_session_shutdown(monkeypatch):
+    called = []
+
+    async def bounded(_callback, *, name, **_kwargs):
+        called.append(name)
+        return True, {"closed": True}
+
+    monkeypatch.setattr(lifecycle, "run_sync_bounded", bounded)
+    result = asyncio.run(lifecycle._shutdown_owned_runtime_resources(deadline=time.monotonic() + 1))
+    assert result["closed"] is True
+    assert called[0] == "shutdown-generic-team-workflows"
+    assert "shutdown-session-executors" in called[1:]
+
+
 def test_gated_prewarm_stops_before_route_readiness_without_starting_worker(monkeypatch):
     monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0")
     called = []
