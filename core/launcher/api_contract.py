@@ -64,6 +64,25 @@ class BranchInstanceCleanupPayload(BaseModel):
     confirm: bool = False
 
 
+class BranchInstanceCleanupMergeEntry(BaseModel):
+    id: str
+    head: str = ""
+
+
+class BranchInstanceCleanupMergePayload(BaseModel):
+    items: list[BranchInstanceCleanupMergeEntry] = Field(default_factory=list)
+
+
+class LauncherCleanupMergeItem(BaseModel):
+    id: str
+    mergedToMain: bool
+
+
+class LauncherCleanupMergeResponse(BaseModel):
+    schemaVersion: int = 1
+    items: list[LauncherCleanupMergeItem] = Field(default_factory=list)
+
+
 class WorkbenchCloseTransactionPayload(BaseModel):
     desktopSessionId: str
     idempotencyKey: str

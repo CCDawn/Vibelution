@@ -60,6 +60,38 @@ def _item(**overrides):
     return item
 
 
+def test_cleanup_merge_lookup_checks_only_the_given_commits(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path / "repo")
+    main_head = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-b", "codex/topic")
+    (root / "README.md").write_text("topic\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "topic")
+    topic_head = _git(root, "rev-parse", "HEAD")
+    calls: list[tuple[str, ...]] = []
+    real = cleanup._run_git
+
+    def wrapped(git_root, *args, **kwargs):
+        calls.append(args)
+        return real(git_root, *args, **kwargs)
+
+    monkeypatch.setattr(cleanup, "_run_git", wrapped)
+
+    payload = cleanup.lookup_cleanup_merge_status(
+        [
+            {"id": "main", "head": main_head},
+            {"id": "topic", "head": topic_head},
+            {"id": "bad", "head": "--upload-pack=evil"},
+            {"id": "", "head": main_head},
+        ],
+        integration_root=root,
+    )
+
+    by_id = {item["id"]: item["mergedToMain"] for item in payload["items"]}
+    assert by_id == {"main": True, "topic": False, "bad": False}
+    assert [args for args in calls if args and args[0] in {"status", "worktree"}] == []
+
+
 def test_annotate_marks_main_protected_and_lists_risks():
     payload = {
         "integrationRoot": ".",

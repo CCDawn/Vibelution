@@ -24,10 +24,7 @@ export function isCleanupEligible(item: LauncherBranchInstance): boolean {
   return item.kind !== "main" && !item.current && item.branch !== "main" && item.id !== "main";
 }
 
-export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
-  if (item.cleanupRisks && item.cleanupRisks.length > 0) {
-    return item.cleanupRisks;
-  }
+export function deriveCleanupRisks(item: LauncherBranchInstance): string[] {
   const risks: string[] = [];
   if (item.dirty) {
     risks.push("discard_dirty");
@@ -35,10 +32,18 @@ export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
   if (item.alive) {
     risks.push("stop_then_remove");
   }
-  if (item.mergedToMain === false) {
+  const hasLocalCommits = Boolean(String(item.head || "").trim() || String(item.branch || "").trim());
+  if (hasLocalCommits && item.mergedToMain === false && item.kind !== "retired") {
     risks.push("delete_unmerged");
   }
   return risks;
+}
+
+export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
+  if (item.cleanupRisks && item.cleanupRisks.length > 0) {
+    return item.cleanupRisks;
+  }
+  return deriveCleanupRisks(item);
 }
 
 export function cleanupRiskLabels(item: LauncherBranchInstance, isZh: boolean): string[] {
@@ -291,6 +296,23 @@ export type InstanceListFilters = {
   dirty?: boolean;
   unmerged?: boolean;
 };
+
+export function overlayCleanupMergeStatus(
+  items: readonly LauncherBranchInstance[],
+  flags?: readonly { id: string; mergedToMain?: boolean }[] | null,
+): LauncherBranchInstance[] {
+  if (!flags?.length) {
+    return [...items];
+  }
+  const byId = new Map(flags.map((flag) => [flag.id, flag.mergedToMain]));
+  return items.map((item) => {
+    if (!byId.has(item.id)) {
+      return item;
+    }
+    const next = { ...item, mergedToMain: Boolean(byId.get(item.id)) };
+    return { ...next, cleanupRisks: deriveCleanupRisks(next) };
+  });
+}
 
 export function overlayCleanupMetadata(
   items: readonly LauncherBranchInstance[],

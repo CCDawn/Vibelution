@@ -5,6 +5,7 @@ import {
   cancelRuntimeLifecycleCommand,
   forceStopLauncherBundle,
   getLauncherBranchInstances,
+  getLauncherCleanupMergeStatus,
   requestBranchInstanceCleanup,
   requestBranchInstanceLifecycle,
   getLauncherStatus,
@@ -913,6 +914,42 @@ describe("launcher api IPC transport", () => {
 
     const request = invoke.mock.calls[0][0] as { path: string };
     expect(request.path).toBe("branch-instances?cleanupMetadata=1");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("asks only for merge status of the heads already on screen", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { schemaVersion: 1, items: [{ id: "worktree:task", mergedToMain: false }] },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    const payload = await getLauncherCleanupMergeStatus([
+      { id: "worktree:task", head: "abc1234" },
+      { id: "worktree:empty" },
+    ]);
+
+    expect(payload.items[0]).toEqual({ id: "worktree:task", mergedToMain: false });
+    const request = invoke.mock.calls[0][0] as {
+      path: string;
+      init: { method: string; body: unknown };
+    };
+    expect(request.path).toBe("branch-instances/cleanup-metadata");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.body).toEqual({
+      items: [
+        { id: "worktree:task", head: "abc1234" },
+        { id: "worktree:empty", head: "" },
+      ],
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

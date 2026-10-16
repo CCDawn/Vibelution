@@ -2,8 +2,7 @@ import { GitBranch, Ellipsis, LoaderCircle, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getLauncherBranchInstances, requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
-import { queryKeys } from "../api/queryKeys";
+import { getLauncherCleanupMergeStatus, requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { VActionGroup, VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStringSelect, VDropdownMenu, VTooltip, type VDenseTableColumn } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
 import { LauncherBranchStatusHelp } from "./LauncherBranchStatusHelp";
@@ -24,7 +23,7 @@ import {
   instanceWindowOpen,
   isAdmissionBlocked,
   isCleanupEligible,
-  overlayCleanupMetadata,
+  overlayCleanupMergeStatus,
   lifecycleIntentRejectMessage,
   summarizeLifecycleFeedback,
   shouldHoldOpenClickGuard,
@@ -161,8 +160,9 @@ export function LauncherBranchInstancesPanel({
         pending: "正在清理所选实例…",
         done: "清理完成",
         failed: "部分实例未能清理",
-        cleanupMetadataError: "读取分支实例失败，无法确认合入状态。",
-        retryMetadata: "重试读取",
+        cleanupMetadataError: "暂时无法确认是否已合入 main。",
+        cleanupMergeChecking: "正在确认是否已合入 main",
+        retryMetadata: "重新确认",
         buildingHint: "前端代码有更新，正在构建新版本，约需几分钟。",
         cancelStartHint: "停止这次尚未完成的启动。",
       }
@@ -228,8 +228,9 @@ export function LauncherBranchInstancesPanel({
         pending: "Cleaning selected instances…",
         done: "Cleanup finished",
         failed: "Some instances could not be cleaned",
-        cleanupMetadataError: "Could not read branch instances to confirm merge status.",
-        retryMetadata: "Retry",
+        cleanupMetadataError: "Could not check whether these commits are in main.",
+        cleanupMergeChecking: "Checking whether these commits are in main",
+        retryMetadata: "Check again",
         buildingHint: "The frontend has updates and a new build is running. This takes a few minutes.",
         cancelStartHint: "Stop this start before it finishes.",
       };
@@ -247,21 +248,37 @@ export function LauncherBranchInstancesPanel({
   const [noticeTone, setNoticeTone] = useState<"neutral" | "error">("neutral");
   const [openReject, setOpenReject] = useState<{ id: string; reason: "duplicate" | "blocked" } | null>(null);
   const openClickGuardsRef = useRef(new Set<string>());
-  const needsCleanupMetadata = Boolean(filters.unmerged || (pendingIds && pendingIds.length > 0));
+  const metadataTargets = useMemo(() => {
+    const wanted = new Set<string>();
+    if (filters.unmerged) {
+      for (const item of items) {
+        wanted.add(item.id);
+      }
+    }
+    for (const id of pendingIds ?? []) {
+      wanted.add(id);
+    }
+    if (wanted.size === 0) {
+      return [];
+    }
+    return items
+      .filter((item) => wanted.has(item.id))
+      .map((item) => ({ id: item.id, head: item.head || "" }));
+  }, [filters.unmerged, items, pendingIds]);
   const cleanupMetadataQuery = useQuery({
-    queryKey: queryKeys.launcherBranchInstances(true),
-    queryFn: () => getLauncherBranchInstances({ cleanupMetadata: true }),
-    enabled: needsCleanupMetadata,
+    queryKey: ["launcher", "branch-cleanup-merge", metadataTargets.map((item) => `${item.id}:${item.head}`).join("\n")],
+    queryFn: () => getLauncherCleanupMergeStatus(metadataTargets),
+    enabled: metadataTargets.length > 0,
     staleTime: 30_000,
   });
   const waitingUnmergedMetadata = Boolean(filters.unmerged) && cleanupMetadataQuery.isPending;
-  const waitingCleanupConfirmMetadata = Boolean(pendingIds?.length) && !cleanupMetadataQuery.isSuccess;
+  const waitingCleanupConfirmMetadata = Boolean(pendingIds?.length) && metadataTargets.length > 0 && !cleanupMetadataQuery.isSuccess;
   // Merge status is the only warning layer before deleting an unmerged
   // branch, so a failed metadata read keeps confirm disabled — but it must
   // surface an error with a retry instead of spinning forever.
   const cleanupConfirmMetadataFailed = Boolean(pendingIds?.length) && cleanupMetadataQuery.isError;
   const annotatedItems = useMemo(
-    () => overlayCleanupMetadata(items, cleanupMetadataQuery.data?.items),
+    () => overlayCleanupMergeStatus(items, cleanupMetadataQuery.data?.items),
     [cleanupMetadataQuery.data?.items, items],
   );
 
@@ -696,25 +713,31 @@ export function LauncherBranchInstancesPanel({
                 {labels.retryMetadata}
               </VButton>
             </li>
-          ) : waitingCleanupConfirmMetadata ? (
-            <li className={styles.confirmItem}>
-              <p className={styles.confirmName}>{labels.listLoadingTitle}</p>
-            </li>
           ) : (
-            pendingItems.map((item) => {
-            const risks = cleanupRiskLabels(item, zh);
-            return (
-              <li key={item.id} className={styles.confirmItem}>
-                <p className={styles.confirmName}>{launcherBranchDisplayName(item)}</p>
-                <p className={styles.confirmPath}>{item.path || item.displayPath || item.branch || item.id}</p>
-                <ul className={styles.confirmRisks}>
-                  {(risks.length > 0 ? risks : [labels.noRisk]).map((risk) => (
-                    <li key={risk}>{risk}</li>
-                  ))}
-                </ul>
-              </li>
-            );
-          })
+            <>
+              {waitingCleanupConfirmMetadata ? (
+                <li className={styles.confirmItem}>
+                  <p className={styles.confirmName}>{labels.cleanupMergeChecking}</p>
+                </li>
+              ) : null}
+              {pendingItems.map((item) => {
+                const risks = cleanupRiskLabels(item, zh);
+                const shownRisks = waitingCleanupConfirmMetadata ? risks : (risks.length > 0 ? risks : [labels.noRisk]);
+                return (
+                  <li key={item.id} className={styles.confirmItem}>
+                    <p className={styles.confirmName}>{launcherBranchDisplayName(item)}</p>
+                    <p className={styles.confirmPath}>{item.path || item.displayPath || item.branch || item.id}</p>
+                    {shownRisks.length > 0 ? (
+                      <ul className={styles.confirmRisks}>
+                        {shownRisks.map((risk) => (
+                          <li key={risk}>{risk}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </>
           )}
         </ul>
       </VConfirmDialog>
