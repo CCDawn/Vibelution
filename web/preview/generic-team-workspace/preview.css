@@ -1,0 +1,31 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+@import "../../src/design/workbench-frame.css";
+@source "./*.tsx";
+@source "./*.ts";
+html, body, #root { height: 100%; margin: 0; }
+
+/* This stylesheet belongs to the standalone preview entry. */
+[data-vui="checkbox"] { --accent-cool: #256c58; }
+@media (max-width: 639px) {
+  [data-vui="canvas-workbench-responsive-controls"] {
+    border: 0;
+    background: transparent;
+    padding: 8px 4px 0;
+    gap: 8px;
+  }
+  [data-vui="canvas-workbench-responsive-controls"] button {
+    min-height: 44px;
+    border-color: #d7e3da;
+    background: #fff;
+    padding-inline: 12px;
+    color: #456653;
+  }
+  [data-vui="button"], [role="tab"], [role="combobox"], [data-vui="checkbox"] {
+    min-height: 44px;
+  }
+  [data-vui="input"], [data-vui="textarea"] { font-size: 16px !important; }
+}

@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.app.json","compilerOptions":{"composite":false,"incremental":false},"include":["./*.tsx","./fixtures.ts","../../src/vite-env.d.ts"],"exclude":[]}
