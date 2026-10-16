@@ -23,8 +23,8 @@ export function PersonalAssistantRoute() {
     try {
       const result = await controlDesktopAssistant(true);
       if (result.busyElsewhere) setDesktopError("桌面窗口正在另一个工作台使用，请先在那个工作台关闭窗口。");
-      else if (!result.open || result.mode !== "assistant") setDesktopError("桌面助理未能打开，请稍后重试。");
-    } catch (error) { setDesktopError(error instanceof Error ? error.message : "桌面助理未能打开。"); }
+      else if (!result.open || result.mode !== "assistant") setDesktopError("个人助理窗口未能打开，请稍后重试。");
+    } catch (error) { setDesktopError(error instanceof Error ? error.message : "个人助理窗口未能打开。"); }
     finally { setDesktopPending(false); }
   }
   return <div className={styles.root} data-vui-domain-recipe="personal-assistant">

@@ -36,7 +36,7 @@ function XiaoLuoCharacter({ animationState, name, tone }: XiaoLuoCharacterProps)
   }, []);
   useEffect(() => { controllerRef.current?.setState(animationState); }, [animationState]);
   const message = status === "error"
-    ? (lang === "zh" ? "Live2D 加载失败，请重新打开桌宠" : "Live2D failed to load. Reopen the pet.")
+    ? (lang === "zh" ? "Live2D 加载失败，请重新打开个人助理窗口" : "Live2D failed to load. Reopen the personal assistant.")
     : (lang === "zh" ? "正在加载 Live2D…" : "Loading Live2D…");
   return (
     <span
@@ -47,7 +47,7 @@ function XiaoLuoCharacter({ animationState, name, tone }: XiaoLuoCharacterProps)
       data-renderer-status={status}
     >
       <span className={styles.halo} aria-hidden="true" />
-      <canvas ref={canvasRef} className={styles.canvas} aria-label={`${name} Live2D 桌面伙伴`} />
+      <canvas ref={canvasRef} className={styles.canvas} aria-label={`${name} Live2D 个人助理`} />
       {status !== "ready" ? <span className={styles.message} role="status">{message}</span> : null}
       <span className={styles.credit} title="小洛模型：火爆鸡王；洛天依：上海禾念。用户已确认取得使用许可。">小洛 · 火爆鸡王</span>
     </span>

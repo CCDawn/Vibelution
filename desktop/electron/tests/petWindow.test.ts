@@ -28,9 +28,10 @@ import { createPetWindow, desktopPetWindowUrl, isDesktopPetWindowUrl } from "../
 import type { DesktopPaths } from "../src/paths.js";
 
 describe("desktop companion window", () => {
-  it("recognizes only the two exact companion paths and preserves the explicit assistant target", () => {
+  it("converges every mode request on the unified assistant path and still recognizes the legacy pet path", () => {
     expect(desktopPetWindowUrl("http://127.0.0.1:8001/desktop-assistant?session=private#x")).toBe("http://127.0.0.1:8001/desktop-assistant");
-    expect(desktopPetWindowUrl("http://127.0.0.1:8001/chat?session=x")).toBe("http://127.0.0.1:8001/desktop-pet");
+    expect(desktopPetWindowUrl("http://127.0.0.1:8001/desktop-pet")).toBe("http://127.0.0.1:8001/desktop-assistant");
+    expect(desktopPetWindowUrl("http://127.0.0.1:8001/chat?session=x")).toBe("http://127.0.0.1:8001/desktop-assistant");
     for (const path of ["/desktop-pet", "/desktop-assistant"]) expect(isDesktopPetWindowUrl(`http://127.0.0.1:8001${path}`)).toBe(true);
     for (const path of ["/desktop-assistant/nested", "/desktop-assistant/", "/chat", "/desktop-pet-evil"]) expect(isDesktopPetWindowUrl(`http://127.0.0.1:8001${path}`)).toBe(false);
     expect(isDesktopPetWindowUrl("broken")).toBe(false);

@@ -1,6 +1,6 @@
 import { isValidElement, type ComponentType, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { RouteObject } from "react-router-dom";
+import { Navigate, type RouteObject } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createBrowserRouterMock = vi.hoisted(() => vi.fn((routes: RouteObject[]) => ({ routes })));
@@ -99,12 +99,16 @@ describe("router route contracts", () => {
     expect(workbench.children?.find((item) => item.index)).toBeTruthy();
   });
 
-  it("keeps the transparent desktop pet outside the workbench shell", () => {
-    const pet = findTopRoute("/desktop-pet");
-    expectRouteErrorSurface(pet, "workbench");
-    expectLazyFallback(pet, "正在打开工作台", "workbench");
+  it("keeps the transparent assistant window outside the workbench shell and redirects the legacy pet URL", () => {
+    const legacyPet = findTopRoute("/desktop-pet");
+    expect(legacyPet?.element).toBeTruthy();
+    expect(legacyPet?.element?.type).toBe(Navigate);
+    expect((legacyPet?.element?.props as { to: string }).to).toBe("/desktop-assistant");
+    const assistant = findTopRoute("/desktop-assistant");
+    expectRouteErrorSurface(assistant, "workbench");
+    expectLazyFallback(assistant, "正在打开工作台", "workbench");
     expect(findWorkbenchRoute("pet")).toBeTruthy();
-    expect(findTopRoute("/desktop-assistant").children).toBeUndefined();
+    expect(assistant.children).toBeUndefined();
     expect(findWorkbenchRoute("personal-assistant")).toBeTruthy();
   });
 
@@ -262,7 +266,7 @@ describe("router route contracts", () => {
     const launcherTools = launcher.children?.find((item) => item.path === "tools") as RouteObject;
     expect(lazyFallbackMarkup(launcherIndex)).toContain('data-loading-region="launcher-workspace"');
     expect(lazyFallbackMarkup(launcherTools)).toContain('data-loading-region="launcher-tools-workspace"');
-    expect(lazyFallbackMarkup(findTopRoute("/desktop-pet"))).not.toContain('data-loading-region="pet-workspace"');
+    expect(findTopRoute("/desktop-pet")?.element?.type).toBe(Navigate);
 
     const companions = lazyFallbackMarkup(findWorkbenchRoute("companions"));
     expect(companions).toContain("min-h-[min(590px,calc(100dvh-250px))]");

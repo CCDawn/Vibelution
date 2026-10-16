@@ -22,6 +22,7 @@ vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../ChatCodingRoute", () => ({ ChatCodingRoute: () => <div data-native-session-chat="true" /> }));
 vi.mock("./PersonalAssistantOverview", () => ({ PersonalAssistantOverview: () => <div>真实概览入口</div> }));
 vi.mock("../desktopPet/WhaleRigCharacter", () => ({ WhaleRigCharacter: ({ tone, animationState }: { tone: string; animationState: string }) => <span data-whale-tone={tone} data-whale-animation={animationState}>大肥鲸</span> }));
+vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const assistant: PersonalAssistant = { agentId: "assistant-agent", directSessionId: "assistant-session", displayName: "个人助理",
   status: "active", setupStatus: "ready", profile: "personal_assistant_v1", renderer: "whale" };

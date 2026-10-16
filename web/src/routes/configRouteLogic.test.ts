@@ -1027,9 +1027,9 @@ describe("config route copy", () => {
   });
 
   it("distinguishes terminal avatar settings from the Web user avatar", () => {
-    expect(CONFIG_COPY.zh.groupAvatarPetTitle).toBe("个人资料与桌宠");
+    expect(CONFIG_COPY.zh.groupAvatarPetTitle).toBe("个人资料与个人助理");
     expect(CONFIG_COPY.zh.groupAvatarPetSummary).toContain("Web 用户头像在用户信息里维护");
-    expect(CONFIG_COPY.en.groupAvatarPetTitle).toBe("Profile & desktop pet");
+    expect(CONFIG_COPY.en.groupAvatarPetTitle).toBe("Profile & personal assistant");
     expect(CONFIG_COPY.en.groupAvatarPetSummary).toContain("Web user avatar lives under User Info");
   });
 

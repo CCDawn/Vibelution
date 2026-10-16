@@ -6,17 +6,14 @@ const styles = {
   status: "desktop-pet-status",
   statusDot: "desktop-pet-status__dot",
   close: "desktop-pet-close",
-  switchCharacter: "desktop-pet-switch-character",
+  switchAppearance: "desktop-pet-switch-character",
   hud: "desktop-pet-hud",
   hudHeader: "desktop-pet-hud__header",
   hudList: "desktop-pet-hud__list",
   hudEmpty: "desktop-pet-hud__empty",
   settingsLabel: "text-[var(--vui-pet-fg-bright)]",
-  session: "desktop-pet-session",
-  sessionMarker: "desktop-pet-session__marker",
-  sessionCopy: "desktop-pet-session__copy",
   characterButton: "desktop-pet-character-button",
-  expandCue: "desktop-pet-expand-cue",
+  chatCue: "desktop-assistant-chat-cue",
 } as const;
 
 export default styles;

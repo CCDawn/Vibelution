@@ -23,7 +23,7 @@ export function ConfigDesktopPetSettings({ language, compact = false }: { langua
         const next = await controlDesktopPet();
         if (active && id === requestId.current) { setState(next); setError(""); }
       } catch {
-        if (active && id === requestId.current) { setState(null); setError(zh ? "无法读取桌宠状态，请重试" : "Pet status unavailable. Try again."); }
+        if (active && id === requestId.current) { setState(null); setError(zh ? "无法读取个人助理状态，请重试" : "Assistant status unavailable. Try again."); }
       }
     };
     void refresh();
@@ -36,7 +36,7 @@ export function ConfigDesktopPetSettings({ language, compact = false }: { langua
     changing.current = true; ++requestId.current;
     setBusy(true); setError("");
     try { setState(await controlDesktopPet(!state.open)); }
-    catch { setError(zh ? "操作失败，请重试" : "Could not change pet state. Try again."); }
+    catch { setError(zh ? "操作失败，请重试" : "Could not change the assistant state. Try again."); }
     finally { changing.current = false; setBusy(false); }
   }
   const label = !available ? (zh ? "需要桌面版更新" : "Desktop update required")
@@ -45,26 +45,26 @@ export function ConfigDesktopPetSettings({ language, compact = false }: { langua
     : state ? (state.open ? (zh ? "已开启" : "On") : (zh ? "已关闭" : "Off")) : (zh ? "状态待确认" : "Checking status");
   if (compact) return <div data-testid="desktop-pet-settings-compact">
     <div className={styles.compactRow} title={label}>
-      <Cat size={16} aria-hidden="true" /><span className={styles.compactLabel}>{zh ? "桌面宠物" : "Desktop pet"}</span>
+      <Cat size={16} aria-hidden="true" /><span className={styles.compactLabel}>{zh ? "个人助理" : "Personal assistant"}</span>
       <span className={styles.compactStatus} role="status">{!available ? (zh ? "仅桌面版" : "Desktop only") : label}</span>
-      <VSwitch aria-label={zh ? "桌面宠物" : "Desktop pet"} isSelected={state?.open ?? false} isDisabled={!available || !state || busy || state.busyElsewhere} onChange={() => void toggle()} />
+      <VSwitch aria-label={zh ? "个人助理" : "Personal assistant"} isSelected={state?.open ?? false} isDisabled={!available || !state || busy || state.busyElsewhere} onChange={() => void toggle()} />
     </div>
     {error ? <p className={styles.error} role="alert">{error}</p> : null}
   </div>;
   return <VSettingsRow
     testId="desktop-pet-settings"
-    label={zh ? "桌面宠物" : "Desktop pet"}
+    label={zh ? "个人助理" : "Personal assistant"}
     description={available
       ? (zh ? "程序启动时默认关闭，可随时在这里重新开启。" : "Off on startup. Reopen here at any time.")
       : (zh ? "请在支持此功能的桌面版中打开设置。" : "Open settings in an updated desktop app.")}
     control={<VButton
-      aria-label={zh ? "桌面宠物" : "Desktop pet"}
+      aria-label={zh ? "个人助理" : "Personal assistant"}
       aria-pressed={state?.open ?? false}
       isDisabled={!available || !state || busy || state.busyElsewhere}
       isPending={busy}
       variant="secondary"
       onPress={() => void toggle()}
-    >{state?.open ? (zh ? "关闭桌宠" : "Close pet") : (zh ? "启动桌宠" : "Open pet")}</VButton>}
+    >{state?.open ? (zh ? "关闭个人助理" : "Close assistant") : (zh ? "打开个人助理" : "Open assistant")}</VButton>}
     status={<span className={styles.status} role="status">{label}</span>}
     footer={error ? <p className={styles.error} role="alert">{error}</p> : undefined}
   />;

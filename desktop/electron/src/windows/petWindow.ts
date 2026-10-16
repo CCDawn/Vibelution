@@ -14,8 +14,10 @@ import {
 const PET_BOUNDS_FILE = "desktop-pet-window.json";
 
 export function desktopPetWindowUrl(workbenchUrl: string): string {
+  // The pet and the personal assistant are one surface: every mode request
+  // (legacy "pet" included) loads the unified /desktop-assistant window.
   const url = new URL(workbenchUrl);
-  url.pathname = url.pathname === "/desktop-assistant" ? "/desktop-assistant" : "/desktop-pet";
+  url.pathname = "/desktop-assistant";
   url.search = "";
   url.hash = "";
   return url.toString();

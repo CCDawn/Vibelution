@@ -105,7 +105,7 @@ export function WhaleRigCharacter({ animationState, name, tone }: WhaleRigCharac
   }
 
   const message = status === "error"
-    ? (lang === "zh" ? "大肥鲸加载失败，请重新打开桌宠" : "The whale failed to load. Reopen the pet.")
+    ? (lang === "zh" ? "大肥鲸加载失败，请重新打开个人助理窗口" : "The whale failed to load. Reopen the personal assistant.")
     : (lang === "zh" ? "正在加载大肥鲸…" : "Loading the whale…");
 
   return (
@@ -124,7 +124,7 @@ export function WhaleRigCharacter({ animationState, name, tone }: WhaleRigCharac
         ref={frameRef}
         className={styles.frame}
         src={WHALE_RIG_URL}
-        title={`${name} 2.5D 桌面伙伴`}
+        title={`${name} 2.5D 个人助理`}
         sandbox="allow-scripts allow-same-origin"
         tabIndex={-1}
       />

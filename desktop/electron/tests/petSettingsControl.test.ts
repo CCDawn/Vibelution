@@ -18,22 +18,23 @@ describe("pet settings control", () => {
     let pet = closedWindowState("pet");
     const owner = {
       snapshot: () => ({ pet }),
-      openPet: vi.fn(async (url: string) => pet = { ...pet, open: true, url: `${url}/desktop-pet` }),
+      openPet: vi.fn(async (url: string) => pet = { ...pet, open: true, url: `${url}/desktop-assistant` }),
       closePet: vi.fn(async () => pet = closedWindowState("pet")),
     };
     const control = createPetSettingsControl(() => owner);
     expect(await control("http://127.0.0.1:8001", undefined)).toEqual({open:false,busyElsewhere:false,mode:null,supportedModes:["pet","assistant"]});
     expect(owner.openPet).not.toHaveBeenCalled();
-    expect(await control("http://127.0.0.1:8001", true)).toMatchObject({open:true,busyElsewhere:false,mode:"pet"});
+    expect(await control("http://127.0.0.1:8001", true)).toMatchObject({open:true,busyElsewhere:false,mode:"assistant"});
     expect(owner.openPet).toHaveBeenCalledWith("http://127.0.0.1:8001");
-    expect(await control("http://127.0.0.1:8000", false)).toMatchObject({open:false,busyElsewhere:true,mode:"pet"});
+    expect(await control("http://127.0.0.1:8000", false)).toMatchObject({open:false,busyElsewhere:true,mode:"assistant"});
     expect(owner.closePet).not.toHaveBeenCalled();
+    expect(await control("http://127.0.0.1:8000", true)).toMatchObject({open:false,busyElsewhere:true,mode:"assistant"});
     expect(await control("http://127.0.0.1:8001", false)).toMatchObject({open:false,busyElsewhere:false,mode:null});
-    expect(await control("http://127.0.0.1:8001", true)).toMatchObject({open:true,busyElsewhere:false,mode:"pet"});
+    expect(await control("http://127.0.0.1:8001", true)).toMatchObject({open:true,busyElsewhere:false,mode:"assistant"});
   });
   it("switches modes on the same owner and never takes over another workspace", async () => {
     let pet = closedWindowState("pet");
-    const openPet = vi.fn(async (url: string) => pet = { ...pet, open: true, url: new URL(url).pathname === "/desktop-assistant" ? url : `${url}/desktop-pet` });
+    const openPet = vi.fn(async (url: string) => pet = { ...pet, open: true, url: new URL(url).pathname === "/desktop-assistant" ? url : `${url}/desktop-assistant` });
     const closePet = vi.fn(async () => pet = closedWindowState("pet"));
     const control = createPetSettingsControl(() => ({ snapshot: () => ({ pet }), openPet, closePet }));
     expect(await control("http://127.0.0.1:8000", true, "assistant")).toMatchObject({ open: true, mode: "assistant" });
@@ -42,7 +43,7 @@ describe("pet settings control", () => {
     expect(openPet).toHaveBeenCalledTimes(1);
     expect(await control("http://127.0.0.1:8001", false, "assistant")).toMatchObject({ busyElsewhere: true });
     expect(closePet).not.toHaveBeenCalled();
-    expect(await control("http://127.0.0.1:8000", true)).toMatchObject({ mode: "pet" });
+    expect(await control("http://127.0.0.1:8000", true)).toMatchObject({ mode: "assistant" });
     expect(openPet).toHaveBeenLastCalledWith("http://127.0.0.1:8000");
     await expect(control("http://127.0.0.1:8000", true, "arbitrary")).rejects.toThrow("Invalid pet mode");
   });
@@ -50,7 +51,7 @@ describe("pet settings control", () => {
     let pet = closedWindowState("pet");
     const control = createPetSettingsControl(() => ({
       snapshot: () => ({pet}),
-      openPet: async url => pet = {...pet,open:true,url:`${url}/desktop-pet`},
+      openPet: async url => pet = {...pet,open:true,url:`${url}/desktop-assistant`},
       closePet: async () => pet = closedWindowState("pet"),
     }));
     await expect(control("http://127.0.0.1:8000", "true")).rejects.toThrow("Invalid");

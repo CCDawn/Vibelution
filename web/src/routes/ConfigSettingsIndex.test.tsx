@@ -38,48 +38,48 @@ it("keeps usage statistics as its own settings row linking to the existing usage
 it("uses actual pet state and can reopen after a close", async()=>{
   expect(host.textContent).toContain("已关闭");
   control.mockResolvedValue({open:true,busyElsewhere:false});
-  await act(async()=>button("桌面宠物").click());
+  await act(async()=>button("个人助理").click());
   expect(control).toHaveBeenLastCalledWith(true);
   expect(host.textContent).toContain("已开启");
   control.mockResolvedValue({open:false,busyElsewhere:false});
-  await act(async()=>button("桌面宠物").click());
+  await act(async()=>button("个人助理").click());
   expect(control).toHaveBeenLastCalledWith(false);
   expect(host.textContent).toContain("已关闭");
 });
 it("reports failure without falsely changing the toggle", async()=>{
   control.mockRejectedValue(new Error("unavailable"));
-  await act(async()=>button("桌面宠物").click());
+  await act(async()=>button("个人助理").click());
   expect(host.textContent).toContain("操作失败");
-  expect(button("桌面宠物").getAttribute("aria-pressed")).toBe("false");
+  expect(button("个人助理").getAttribute("aria-pressed")).toBe("false");
 });
 it("does not close another workspace's pet", async()=>{
   control.mockResolvedValue({open:false,busyElsewhere:true});
   await act(async()=>window.dispatchEvent(new Event("focus")));
-  expect(button("桌面宠物").disabled).toBe(true);
+  expect(button("个人助理").disabled).toBe(true);
   expect(host.textContent).toContain("其他工作区使用中");
 });
 it("uses the same working control when mounted directly in the category", async()=>{
   await act(async()=>root.render(<ConfigDesktopPetSettings language="zh"/>));
   expect(host.querySelector('[data-vui="settings-row"]')).not.toBeNull();
-  expect(button("桌面宠物").textContent).toContain("启动桌宠");
+  expect(button("个人助理").textContent).toContain("打开个人助理");
   control.mockResolvedValue({open:true,busyElsewhere:false});
-  await act(async()=>button("桌面宠物").click());
+  await act(async()=>button("个人助理").click());
   expect(control).toHaveBeenLastCalledWith(true);
-  expect(button("桌面宠物").textContent).toContain("关闭桌宠");
+  expect(button("个人助理").textContent).toContain("关闭个人助理");
 });
 it("disables the control without a desktop bridge", async()=>{
   vi.stubGlobal("vibelutionLauncher", undefined);
   await act(async()=>root.render(<ConfigDesktopPetSettings language="zh"/>));
-  expect(button("桌面宠物").disabled).toBe(true);
+  expect(button("个人助理").disabled).toBe(true);
   expect(host.textContent).toContain("请在支持此功能的桌面版中打开设置");
 });
 it("prevents double toggles while waiting for the desktop shell", async()=>{
   let resolve!: (state: {open:boolean;busyElsewhere:boolean})=>void;
   control.mockReturnValue(new Promise(r=>{resolve=r;}));
   const before=control.mock.calls.length;
-  await act(async()=>{button("桌面宠物").click();button("桌面宠物").click();});
+  await act(async()=>{button("个人助理").click();button("个人助理").click();});
   expect(control.mock.calls.length).toBe(before+1);
-  expect(button("桌面宠物").disabled).toBe(true);
+  expect(button("个人助理").disabled).toBe(true);
   await act(async()=>resolve({open:true,busyElsewhere:false}));
-  expect(button("桌面宠物").getAttribute("aria-pressed")).toBe("true");
+  expect(button("个人助理").getAttribute("aria-pressed")).toBe("true");
 });

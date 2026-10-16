@@ -33,15 +33,15 @@ export async function controlDesktopPet(open?: boolean): Promise<DesktopPetState
 
 export async function controlDesktopAssistant(open?: boolean): Promise<DesktopPetState> {
   const bridge = desktopPetControlBridge();
-  if (!bridge) throw new Error("桌面助理需要更新桌面壳，请通过 Launcher 重建后重启。");
+  if (!bridge) throw new Error("个人助理需要更新桌面壳，请通过 Launcher 重建后重启。");
   const current = validDesktopPetState(await bridge.controlDesktopPet());
   if (!current.supportedModes?.includes("assistant")) {
-    throw new Error("桌面助理需要更新桌面壳，请通过 Launcher 重建后重启。");
+    throw new Error("个人助理需要更新桌面壳，请通过 Launcher 重建后重启。");
   }
   if (open === undefined || current.busyElsewhere) return current;
   const next = validDesktopPetState(await bridge.controlDesktopPet(open, "assistant"));
   if (open && next.open && !next.busyElsewhere && next.mode !== "assistant") {
-    throw new Error("桌面壳未能打开助理模式，请更新桌面壳。");
+    throw new Error("桌面壳未能打开个人助理窗口，请更新桌面壳。");
   }
   return next;
 }
@@ -49,7 +49,7 @@ export async function controlDesktopAssistant(open?: boolean): Promise<DesktopPe
 /** Available only inside the registered floating window, with fixed size presets. */
 export async function setDesktopPetExpanded(expanded: boolean): Promise<DesktopPetExpandedState> {
   const bridge = (globalThis as { vibelutionLauncher?: Partial<PetExpandedBridge> }).vibelutionLauncher;
-  if (typeof bridge?.setDesktopPetExpanded !== "function") throw new Error("桌面助理展开需要更新桌面壳。");
+  if (typeof bridge?.setDesktopPetExpanded !== "function") throw new Error("个人助理展开需要更新桌面壳。");
   const state = await bridge.setDesktopPetExpanded(expanded);
   if (state?.expanded !== expanded || !Number.isFinite(state.width) || state.width <= 0
     || !Number.isFinite(state.height) || state.height <= 0) throw new Error("Invalid desktop pet expanded state");
@@ -59,7 +59,7 @@ export async function setDesktopPetExpanded(expanded: boolean): Promise<DesktopP
 /** Native main-frame identity, unavailable to a plain browser route. */
 export async function getDesktopAssistantContext(): Promise<DesktopAssistantContext> {
   const bridge = (globalThis as { vibelutionLauncher?: Partial<AssistantContextBridge> }).vibelutionLauncher;
-  if (typeof bridge?.getDesktopAssistantContext !== "function") throw new Error("此页面需要在桌面助理窗口中打开。");
+  if (typeof bridge?.getDesktopAssistantContext !== "function") throw new Error("此页面需要在个人助理窗口中打开。");
   const context = await bridge.getDesktopAssistantContext();
   if (context?.role !== "desktop-assistant" || context?.mode !== "assistant") throw new Error("Invalid desktop assistant context");
   return context;

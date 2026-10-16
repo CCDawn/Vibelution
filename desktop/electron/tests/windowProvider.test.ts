@@ -280,7 +280,7 @@ describe("Electron window provider state", () => {
       role: "pet",
       open: true,
       focused: false,
-      url: "http://127.0.0.1:8000/desktop-pet",
+      url: "http://127.0.0.1:8000/desktop-assistant",
     });
     expect(provider.snapshot().workbench.open).toBe(false);
   });

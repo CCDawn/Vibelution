@@ -9,8 +9,10 @@ export type DesktopPetPreferences = {
 };
 
 const KEY = "vibelution.desktop-pet.preferences.v1";
+// The unified assistant body defaults to the whale rig; Xiao Luo Live2D stays
+// a selectable appearance. Stored preferences (including xiaoluo) are honored.
 export const DEFAULT_PET_PREFERENCES: DesktopPetPreferences = {
-  characterId: "xiaoluo", showStatus: true, showTitles: true,
+  characterId: "dafeiyu", showStatus: true, showTitles: true,
   showCompletion: true, idleMessage: "",
 };
 
@@ -18,7 +20,7 @@ export function readPetPreferences(storage?: Pick<Storage, "getItem">): DesktopP
   try {
     const value = JSON.parse((storage ?? localStorage).getItem(KEY) ?? "null") as Partial<DesktopPetPreferences> | null;
     return {
-      characterId: value?.characterId === "dafeiyu" ? "dafeiyu" : "xiaoluo",
+      characterId: value?.characterId === "xiaoluo" ? "xiaoluo" : "dafeiyu",
       showStatus: value?.showStatus !== false,
       showTitles: value?.showTitles !== false,
       showCompletion: value?.showCompletion !== false,

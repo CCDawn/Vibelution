@@ -6,7 +6,7 @@ const capable = { open: false, busyElsewhere: false, mode: null, supportedModes:
 
 describe("desktop companion controls", () => {
   it("requires native assistant context and validates the fixed identity", async () => {
-    await expect(getDesktopAssistantContext()).rejects.toThrow("桌面助理窗口");
+    await expect(getDesktopAssistantContext()).rejects.toThrow("个人助理窗口");
     const context = vi.fn().mockResolvedValueOnce({ role: "desktop-assistant", mode: "assistant" })
       .mockResolvedValueOnce({ role: "main-workbench", mode: "assistant" });
     vi.stubGlobal("vibelutionLauncher", { getDesktopAssistantContext: context });
@@ -45,7 +45,7 @@ describe("desktop companion controls", () => {
       .mockResolvedValueOnce(capable).mockResolvedValueOnce({ ...capable, open: true, mode: "pet" });
     vi.stubGlobal("vibelutionLauncher", { controlDesktopPet: control });
     await expect(controlDesktopPet()).rejects.toThrow("Invalid desktop pet state");
-    await expect(controlDesktopAssistant(true)).rejects.toThrow("未能打开助理模式");
+    await expect(controlDesktopAssistant(true)).rejects.toThrow("未能打开个人助理窗口");
   });
   it("uses only a boolean resize preset and checks its acknowledgement", async () => {
     const resize = vi.fn().mockResolvedValueOnce({ expanded: true, width: 760, height: 600 })

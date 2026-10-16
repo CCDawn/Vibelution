@@ -8,6 +8,7 @@ import tabSource from "../chat/ChatCodingCenterTabs.tsx?raw";
 import conversationSurfaceSource from "../chat/useChatConversationSurfaceModel.tsx?raw";
 import desktopSource from "../desktopPet/DesktopAssistantRoute.tsx?raw";
 import routeSource from "../PersonalAssistantRoute.tsx?raw";
+import routerSource from "../../app/router.tsx?raw";
 import shellSource from "../../app/AppShell.tsx?raw";
 import returnSource from "./DesktopAssistantReturnNotice.tsx?raw";
 const styleSource = readFileSync(new URL("./personal-assistant.tailwind.css", import.meta.url), "utf8");
@@ -51,5 +52,25 @@ describe("personal assistant native identity and presentation", () => {
     expect(shellSource).toContain("<DesktopAssistantReturnNotice />");
     expect(returnSource).toContain("subscribeDesktopAssistantOpened(browserDesktopNotificationBridge()");
     expect(returnSource).toContain("navigate(personalAssistantReturnTarget(sessionId))");
+  });
+  it("unifies the floating pet window and the personal assistant into one surface with one identity", () => {
+    expect(routerSource).toContain('path: "/desktop-assistant"');
+    expect(routerSource).toContain('path: "/desktop-pet"');
+    expect(routerSource).toContain('<Navigate to="/desktop-assistant" replace />');
+    expect(routerSource).not.toContain("DesktopPetRoute");
+    // One identity: the collapsed body is the same assistant (one Agent, one Session);
+    // the visible character is an appearance preference, not a second companion.
+    expect(desktopSource).toContain("DesktopPetCharacter");
+    expect(desktopSource).toContain("readPetPreferences");
+    expect(desktopSource).toContain("nextDesktopPetCharacter");
+    expect(desktopSource).not.toContain("WhaleRigCharacter");
+    // The legacy pet interactions stay: IPC window drag, privacy switches, live sessions.
+    expect(desktopSource).toContain("desktopPetWindowDragBridge");
+    expect(desktopSource).toContain("savePetPreferences");
+    expect(desktopSource).toContain("openSessionFromDesktopPet");
+    expect(desktopSource).toContain('aria-label={copy.sessions}');
+    expect(desktopSource).toContain("petActivityRefetchInterval");
+    expect(desktopSource).toContain('data-vui-domain-recipe="desktop-assistant"');
+    expect(desktopSource).not.toContain('data-vui-domain-recipe="desktop-pet"');
   });
 });
