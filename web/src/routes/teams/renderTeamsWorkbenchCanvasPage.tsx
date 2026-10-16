@@ -1,7 +1,7 @@
 /**
  * Canvas-mode shell return for Teams workbench (R2-q extract).
  */
-import { type Ref, type ReactNode } from "react";
+import { useState, type Ref, type ReactNode } from "react";
 import type { CanvasFrameSize, CanvasViewportStyle } from "./canvasGeometry";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
@@ -90,6 +90,7 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
 }
 
 function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const organizationCanvas = <TeamOrganizationCanvasSurface
           lang={p.lang}
           selectedTeam={p.selectedTeam}
@@ -139,7 +140,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
           completionFlowSlot={p.researchCanvasReadOnly ? null : p.completionFlowSlot}
           teamWorkspaceRoute={teamWorkspaceRoute}
           teamChatRoomRoute={teamChatRoomRoute}
-          onSelectNode={p.onSelectNode}
+          onSelectNode={(id) => { p.onSelectNode(id); setSelectionRevision((revision) => revision + 1); }}
           onLayoutModeChange={p.onLayoutModeChange}
           onToggleCommunicationEdges={p.onToggleCommunicationEdges}
           onAddNode={p.onAddNode}
@@ -154,7 +155,7 @@ function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
   if (p.teamHome) {
     return <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => undefined}
       workspace={{ navigation: p.teamShellRail, teamSwitcher: p.teamSwitcher, toolbar: p.teamShellToolbar,
-        canvas: organizationCanvas, inspector: p.inspectorBody, resize: p.teamsRailResize }} />;
+        canvas: organizationCanvas, selectionRevision, inspector: p.inspectorBody, resize: p.teamsRailResize }} />;
   }
   return <TeamsCanvasComposer className={p.styles.route} layoutId={TEAMS_LAYOUT_ID} resize={p.teamsRailResize}
     ariaLabel={p.selectedTeamContextTitle} title={p.lang === "zh" ? "组织画布" : "Organization canvas"}

@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TeamMember } from "../../api/types";
+import type { DevTeamTaskList } from "../../api/devTeamTasks";
 import { DevTeamTaskBoard, speakingTeamMemberId, speakingTeamMemberIdFromRoom } from "./DevTeamTaskBoard";
 
 const listDevTeamTasks = vi.fn();
@@ -57,6 +58,12 @@ function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSe
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 function boardElement(speakingMemberId = "") {
   if (!client) {
     throw new Error("query client missing");
@@ -84,6 +91,13 @@ async function renderBoard(speakingMemberId = "") {
 async function setSpeaker(speakingMemberId: string) {
   await act(async () => {
     root?.render(boardElement(speakingMemberId));
+  });
+}
+
+async function openEditor(taskId = "task-1") {
+  await act(async () => {
+    await vi.waitFor(() => expect(host?.querySelector(`button[aria-label="编辑 ${taskId}"]`)).toBeTruthy());
+    host?.querySelector<HTMLButtonElement>(`button[aria-label="编辑 ${taskId}"]`)?.click();
   });
 }
 
@@ -122,7 +136,12 @@ describe("DevTeamTaskBoard", () => {
       action: "claim",
       expectedRevision: 1,
     });
-    expect(host?.textContent).not.toContain("工作区");
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.textContent).toContain("0 个任务");
+        expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeNull();
+      });
+    });
     expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
   });
 
@@ -170,6 +189,7 @@ describe("DevTeamTaskBoard", () => {
     listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
     mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
     await renderBoard();
+    await openEditor();
     await act(async () => {
       await vi.waitFor(() => {
         expect(host?.querySelector('input[aria-label="修改主题 task-1"]')).toBeTruthy();
@@ -207,6 +227,7 @@ describe("DevTeamTaskBoard", () => {
     listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
     mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
     await renderBoard();
+    await openEditor();
     await act(async () => {
       await vi.waitFor(() => {
         expect(host?.querySelector('textarea[aria-label="修改说明 task-1"]')).toBeTruthy();
@@ -262,6 +283,10 @@ describe("DevTeamTaskBoard", () => {
     createDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
     await renderBoard();
 
+    expect(host?.querySelector('input[aria-label="任务主题"]')).toBeNull();
+    await act(async () => {
+      Array.from(host?.querySelectorAll("button") ?? []).find((button) => button.textContent === "新建任务")?.click();
+    });
     const subject = host?.querySelector<HTMLInputElement>('input[aria-label="任务主题"]');
     expect(subject).toBeTruthy();
     await act(async () => {
@@ -278,6 +303,130 @@ describe("DevTeamTaskBoard", () => {
       actorMemberId: "m-plan",
       subject: "补任务板",
     }));
+    await act(async () => {
+      await vi.waitFor(() => expect(host?.querySelector('input[aria-label="任务主题"]')).toBeNull());
+    });
+  });
+
+  it("keeps planning forms folded and shows owner, dependencies, next step and output", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [
+      { ...readyTask, ownerMemberId: "m-a", ownerName: "工程师A", ownerRole: "开发工程师 A", blockedBy: ["task-2"], ready: false },
+      { ...readyTask, id: "task-2", subject: "准备接口", status: "completed", workspaceBranch: "codex/api", ready: false },
+    ], updatedAt: "" });
+    await renderBoard();
+    await act(async () => {
+      await vi.waitFor(() => expect(host?.textContent).toContain("task-2 · 准备接口 (完成)"));
+    });
+    expect(host?.querySelector('input[aria-label="修改主题 task-1"]')).toBeNull();
+    expect(host?.querySelector('input[aria-label="任务主题"]')).toBeNull();
+    expect(host?.querySelector('[aria-label="任务概览"]')?.textContent).toContain("完成 1");
+    expect(host?.textContent).toContain("工程师A · 开发工程师 A");
+    expect(host?.textContent).toContain("检查依赖与写范围，满足条件后再认领");
+    expect(host?.textContent).toContain("工作区 codex/api");
+    expect(listDevTeamTaskChanges).not.toHaveBeenCalled();
+  });
+
+  it("preserves a draft and its original revision when tasks refresh, and keeps it after a conflict", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
+    mutateDevTeamTask.mockRejectedValue(new Error("任务已更新，请重新读取"));
+    await renderBoard();
+    await openEditor();
+    const subject = host?.querySelector<HTMLInputElement>('input[aria-label="修改主题 task-1"]');
+    await act(async () => { if (subject) setNativeValue(subject, "本地草稿"); });
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [{ ...readyTask, revision: 2, subject: "远端新主题" }], updatedAt: "" });
+    await act(async () => { await client?.refetchQueries({ queryKey: ["teams", "team-1", "dev-tasks"], exact: true }); });
+    expect(subject?.value).toBe("本地草稿");
+    await act(async () => { host?.querySelector<HTMLButtonElement>('button[aria-label="保存修改 task-1"]')?.click(); });
+    expect(mutateDevTeamTask).toHaveBeenCalledWith("team-1", "task-1", expect.objectContaining({ expectedRevision: 1, subject: "本地草稿" }));
+    await act(async () => { await vi.waitFor(() => expect(host?.querySelector('[role="alert"]')?.textContent).toContain("任务已更新，请重新读取")); });
+    expect(subject?.value).toBe("本地草稿");
+  });
+
+  it.each(["claim", "create"] as const)("cancels reads before and during %s so late GETs cannot replace the mutation result", async (action) => {
+    const original: DevTeamTaskList = { schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" };
+    const authoritative: DevTeamTaskList = {
+      ...original,
+      tasks: action === "claim"
+        ? [{ ...readyTask, revision: 2, status: "in_progress", ready: false, ownerMemberId: "m-a", ownerRole: "开发工程师 A" }]
+        : [readyTask, { ...readyTask, id: "task-created", subject: "新任务" }],
+    };
+    const readBeforeWrite = deferred<DevTeamTaskList>();
+    const readDuringWrite = deferred<DevTeamTaskList>();
+    const write = deferred<DevTeamTaskList>();
+    const signals: AbortSignal[] = [];
+    listDevTeamTasks.mockResolvedValueOnce(original)
+      .mockImplementationOnce((_teamId: string, init: RequestInit) => {
+        signals.push(init.signal as AbortSignal);
+        return readBeforeWrite.promise;
+      })
+      .mockImplementationOnce((_teamId: string, init: RequestInit) => {
+        signals.push(init.signal as AbortSignal);
+        return readDuringWrite.promise;
+      });
+    mutateDevTeamTask.mockReturnValue(write.promise);
+    createDevTeamTask.mockReturnValue(write.promise);
+    await renderBoard(action === "claim" ? "m-a" : "m-plan");
+    await act(async () => {
+      await vi.waitFor(() => expect(host?.querySelector('article[aria-label="补任务板"]')).toBeTruthy());
+    });
+    if (action === "create") {
+      await act(async () => {
+        Array.from(host?.querySelectorAll("button") ?? []).find((button) => button.textContent === "新建任务")?.click();
+      });
+      await act(async () => {
+        const subject = host?.querySelector<HTMLInputElement>('input[aria-label="任务主题"]');
+        if (subject) setNativeValue(subject, "新任务");
+      });
+    }
+    const key = { queryKey: ["teams", "team-1", "dev-tasks"], exact: true };
+    let beforeRefetch: Promise<void> | undefined;
+    let duringRefetch: Promise<void> | undefined;
+    await act(async () => { beforeRefetch = client?.refetchQueries(key); });
+    expect(signals[0]?.aborted).toBe(false);
+    await act(async () => {
+      if (action === "claim") host?.querySelector<HTMLButtonElement>('button[aria-label="认领 task-1"]')?.click();
+      else host?.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(action === "claim" ? mutateDevTeamTask : createDevTeamTask).toHaveBeenCalledOnce());
+    });
+    expect(signals[0]?.aborted).toBe(true);
+    // A polling read can also start while the POST is still pending.
+    await act(async () => { duringRefetch = client?.refetchQueries(key); });
+    expect(signals[1]?.aborted).toBe(false);
+    await act(async () => { write.resolve(authoritative); });
+    await act(async () => {
+      await vi.waitFor(() => expect(client?.getQueryData(key.queryKey)).toEqual(authoritative));
+    });
+    expect(signals[1]?.aborted).toBe(true);
+    // Ignore the abort in the mocked transport and deliver both stale responses late.
+    await act(async () => {
+      readBeforeWrite.resolve(original);
+      readDuringWrite.resolve(original);
+      await Promise.all([beforeRefetch, duringRefetch]);
+    });
+    expect(client?.getQueryData(key.queryKey)).toEqual(authoritative);
+    await act(async () => {
+      await vi.waitFor(() => {
+        if (action === "claim") expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeNull();
+        else expect(host?.querySelector('article[aria-label="新任务"]')).toBeTruthy();
+      });
+    });
+  });
+
+  it("uses the current revision and review note when a reviewer sends work back", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [{ ...readyTask, status: "in_progress", revision: 7 }], updatedAt: "" });
+    listDevTeamTaskChanges.mockResolvedValue({ available: true, workspace: false, truncated: 0, changes: [] });
+    mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
+    await renderBoard("m-rev");
+    await act(async () => {
+      await vi.waitFor(() => expect(host?.querySelector('input[aria-label="退回说明 task-1"]')).toBeTruthy());
+      const note = host?.querySelector<HTMLInputElement>('input[aria-label="退回说明 task-1"]');
+      if (note) setNativeValue(note, "补齐验收结果");
+    });
+    await act(async () => { Array.from(host?.querySelectorAll("button") ?? []).find((button) => button.textContent === "退回")?.click(); });
+    expect(mutateDevTeamTask).toHaveBeenCalledWith("team-1", "task-1", expect.objectContaining({ actorMemberId: "m-rev", action: "rework", expectedRevision: 7, reviewNote: "补齐验收结果" }));
+    expect(host?.querySelector('button[aria-label="编辑 task-1"]')).toBeNull();
   });
 
   it("follows the speaking member and keeps that identity when speaking stops", async () => {

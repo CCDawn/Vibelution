@@ -9,7 +9,7 @@ export type TeamInspectorTabsProps = {
   /** Optional selection event token, including selecting the same node again. */
   selectionRevision?: number;
   members: ReactNode;
-  tasks: ReactNode;
+  tasks?: ReactNode;
   records: ReactNode;
 };
 
@@ -30,7 +30,7 @@ export function TeamInspectorTabs({
 
   const sections = [
     { id: "members", label: lang === "zh" ? "成员" : "Members", content: members },
-    { id: "tasks", label: lang === "zh" ? "任务" : "Tasks", content: tasks },
+    ...(tasks ? [{ id: "tasks", label: lang === "zh" ? "任务" : "Tasks", content: tasks }] : []),
     { id: "records", label: lang === "zh" ? "记录" : "Records", content: records },
   ];
 

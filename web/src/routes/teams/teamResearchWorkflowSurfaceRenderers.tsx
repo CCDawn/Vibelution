@@ -349,7 +349,6 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
           {renderTeamNodeBindingPanel()}
           {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
         </>}
-        tasks={renderTeamCommunicationPanel("tasks")}
         records={renderTeamCommunicationPanel("records")}
       />;
     }

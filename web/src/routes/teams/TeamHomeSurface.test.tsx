@@ -12,7 +12,7 @@ import type { ChatRoomDetail, ChatRoomRound, Team } from "../../api/types";
 import { TeamHomeSurface, type TeamHomeSurfaceProps } from "./TeamHomeSurface";
 
 const timelineProjection = vi.hoisted(() => ({ items: null as never[] | null }));
-vi.mock("./TeamNativeConversation", () => ({ TeamNativeConversation: () => <div data-testid="native-team-chat">原生群聊</div> }));
+vi.mock("./TeamNativeConversation", () => ({ TeamNativeConversation: () => <div data-testid="native-team-chat">原生群聊<textarea aria-label="会话草稿" defaultValue="" /></div> }));
 
 function LocationProbe() { return <output data-testid="location">{useLocation().search}</output>; }
 
@@ -158,16 +158,22 @@ describe("TeamHomeSurface", () => {
     const click = async (label: string) => {
       const button = [...host!.querySelectorAll("button")].find((item) => item.textContent?.trim() === label);
       expect(button).toBeTruthy();
-      await act(async () => { button?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+      await act(async () => { button?.dispatchEvent(new MouseEvent(button?.getAttribute("role") === "tab" ? "mousedown" : "click", { bubbles: true, button: 0 })); });
     };
+    const draft = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="会话草稿"]')!;
+    draft.value = "尚未发送的讨论";
+    await click("任务");
+    expect(host.querySelector('[role="tabpanel"][data-state="active"]')?.textContent).toContain("完成首页设计");
     await click("画布");
     expect(host.querySelector('[data-testid="organization-canvas"]')).toBeTruthy();
-    expect(host.querySelector('[data-testid="native-team-chat"]')).toBeNull();
-    expect(host.querySelector("output")?.textContent).toContain("teamConversation=canvas");
-    expect(host.querySelector("output")?.textContent).not.toContain("room=");
-    await click("成员发言");
+    expect(host.querySelector('[data-testid="native-team-chat"]')?.closest('[role="tabpanel"]')?.getAttribute("data-state")).toBe("inactive");
+    expect(host.querySelector("output")?.textContent).toContain("teamView=canvas");
+    expect(host.querySelector("output")?.textContent).toContain("room=room-1");
+    await click("讨论");
     expect(host.querySelector('[data-testid="native-team-chat"]')).toBeTruthy();
     expect(host.querySelector("output")?.textContent).toContain("room=room-1");
+    expect(host.querySelector('textarea[aria-label="会话草稿"]')).toBe(draft);
+    expect(draft.value).toBe("尚未发送的讨论");
   });
 
   it("shows recent round messages through the shared group renderer and links to the room", () => {

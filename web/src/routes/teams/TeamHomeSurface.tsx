@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Activity, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { ArrowUpRight, GitBranch, MessageSquare, Play, Square } from "lucide-react";
+import { ArrowUpRight, GitBranch, ListTodo, MessageSquare, MoreHorizontal, PanelRight, Play, Square, X } from "lucide-react";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { AgentInstance, ChatRoomDetail, ChatRoomMessage, ChatRoomRound, Team } from "../../api/types";
 import {
   VButton,
   VConfirmDialog,
+  VDialog,
+  VPopover,
+  VTabs,
   VRouteLinkButton,
   VStateSurface,
   VStatusChip,
@@ -58,10 +61,11 @@ export type TeamHomeSurfaceProps = {
   onOpenOrganization: () => void;
   conversationRequested?: boolean;
   agentsById?: ReadonlyMap<string, Partial<AgentInstance>>;
-  workspace?: { navigation: ReactNode; teamSwitcher: ReactNode; toolbar: ReactNode; canvas: ReactNode; inspector: ReactNode; resize: TeamWorkspaceFrameProps["resize"] };
+  workspace?: { navigation: ReactNode; teamSwitcher: ReactNode; toolbar: ReactNode; canvas: ReactNode; inspector: ReactNode; selectionRevision?: number; resize: TeamWorkspaceFrameProps["resize"] };
 };
 
 const roundStateCopy: Record<string, { zh: string; en: string; tone: "neutral" | "accent" | "success" | "warning" | "danger" }> = {
+  idle: { zh: "尚未开始", en: "Not started", tone: "neutral" },
   running: { zh: "进行中", en: "Running", tone: "accent" },
   stopping: { zh: "停止中", en: "Stopping", tone: "warning" },
   completed: { zh: "已完成", en: "Completed", tone: "success" },
@@ -208,35 +212,53 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
-  const [homeView, setHomeView] = useState<"canvas" | "conversation">(props.workspace ? "canvas" : "conversation");
-  const nativeConversationOpen = Boolean(props.workspace && props.conversationRequested
-    && searchParams.get("teamConversationTeamId") === teamId
-    && ["group", "member"].includes(searchParams.get("teamConversation") || ""));
-  const memberConversation = nativeConversationOpen && searchParams.get("teamConversation") === "member";
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [roundActionsOpen, setRoundActionsOpen] = useState(false);
+  const ownedSelection = searchParams.get("teamConversationTeamId") === teamId;
+  const requestedView = ownedSelection ? searchParams.get("teamView") : null;
+  const homeView = requestedView === "tasks" || requestedView === "canvas" ? requestedView
+    : requestedView === "discussion" ? "discussion"
+      : ownedSelection && searchParams.get("teamConversation") === "canvas" ? "canvas" : "discussion";
+  const memberConversation = ownedSelection && searchParams.get("teamConversation") === "member";
   const selectedMember = memberConversation ? selectedTeam?.members.find((member) => member.memberId === searchParams.get("teamMember")) : undefined;
   const selectedMemberSessionId = selectedMember ? teamMemberSessionId(selectedMember, linkedRoomDetail) : "";
   const selectedMemberDisplay = selectedMember ? teamMemberDisplay(selectedMember, props.agentsById, lang) : null;
   const nativeSelectionReady = memberConversation
     ? Boolean(selectedMemberSessionId && !searchParams.get("room") && searchParams.get("session") === selectedMemberSessionId && selectedMember?.agentStatus !== "stale")
     : Boolean(linkedChatRoomId && !searchParams.get("session") && searchParams.get("room") === linkedChatRoomId);
-  function openHomeView(nextView: "canvas" | "conversation") {
-    setHomeView(nextView);
+  function openHomeView(nextView: string) {
     const next = new URLSearchParams(searchParams);
-    next.delete("session"); next.delete("room"); next.delete("teamMember");
-    if (nextView === "conversation") {
-      next.set("teamConversationTeamId", teamId); next.set("teamConversation", "group");
+    next.set("teamConversationTeamId", teamId);
+    next.set("teamView", nextView);
+    // Keep the selected native conversation mounted and addressed across views.
+    // Native Chat continues to own its draft, streaming and admission state.
+    if (!memberConversation) {
+      next.set("teamConversation", "group");
+      next.delete("session"); next.delete("teamMember");
       if (linkedChatRoomId) next.set("room", linkedChatRoomId);
-    } else {
-      next.set("teamConversationTeamId", teamId); next.set("teamConversation", "canvas");
-      next.delete("returnTo"); next.delete("returnLabel");
     }
     setSearchParams(next);
+    if (nextView === "canvas") onOpenOrganization();
   }
   useEffect(() => {
-    if (!nativeConversationOpen || memberConversation || !linkedChatRoomId || searchParams.get("room") === linkedChatRoomId) return;
-    const next = new URLSearchParams(searchParams); next.set("room", linkedChatRoomId); next.delete("session");
+    if (!props.workspace || !teamId || memberConversation || !linkedChatRoomId
+      || (searchParams.get("teamId") && searchParams.get("teamId") !== teamId)
+      || (ownedSelection && searchParams.get("room") === linkedChatRoomId && !searchParams.get("session"))) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("teamConversationTeamId", teamId);
+    next.set("teamConversation", "group");
+    next.set("teamView", homeView);
+    next.set("room", linkedChatRoomId); next.delete("session"); next.delete("teamMember"); next.delete("companion");
     setSearchParams(next, { replace: true });
-  }, [linkedChatRoomId, memberConversation, nativeConversationOpen, searchParams, setSearchParams]);
+  }, [props.workspace, teamId, memberConversation, linkedChatRoomId, ownedSelection, searchParams, setSearchParams, homeView]);
+  useEffect(() => {
+    if (props.workspace?.selectionRevision) setInspectorOpen(true);
+  }, [props.workspace?.selectionRevision]);
+  useEffect(() => {
+    if (linkedRoomBusy) setRoundActionsOpen(false);
+  }, [linkedRoomBusy]);
+  useEffect(() => { setNavigationOpen(false); }, [searchParams]);
   const stopTriggerRef = useRef<HTMLButtonElement | null>(null);
   const lastRoomRevisionRef = useRef<{ roomId: string; revision: string } | null>(null);
   const groupTimeline = useGroupRoomTimeline({
@@ -278,14 +300,17 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   const roomLink = linkedChatRoomId && teamId
     ? teamChatRoomRoute(linkedChatRoomId, teamWorkspaceRoute(teamId), lang === "zh" ? "返回团队页面" : "Back to team")
     : undefined;
-  const currentStatus = currentTeamRound?.status || (linkedRoomBusy ? "running" : "queued");
+  const currentStatus = linkedRoomBusy
+    ? linkedRoomDetail?.status === "stopping" ? "stopping"
+      : currentTeamRound?.status === "queued" ? "queued" : "running"
+    : currentTeamRound?.status || "idle";
   const currentTitle = currentTeamRound?.topic?.trim() || (lang === "zh" ? "还没有团队任务" : "No team task yet");
   const currentSummary = transcriptRound?.summary?.trim();
   const deliveryOnlySummary = currentSummary ? isDeliverySummary(currentSummary) : false;
 
   const startRound = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedTeam || !linkedChatRoomId || !teamTaskTopic.trim() || !canStartTeamRound) return;
+    if (!selectedTeam || !linkedChatRoomId || !teamTaskTopic.trim() || !canStartTeamRound || startRoundPending || linkedRoomBusy) return;
     onStartTeamRound({
       roomId: linkedChatRoomId,
       teamId: selectedTeam.teamId,
@@ -318,7 +343,7 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
           </div>
         </div></header>
     <div className={styles.transcript}>
-          {selectedTeam?.teamTemplateId === "dev-team" && selectedTeam.teamId ? (
+          {!props.workspace && selectedTeam?.teamTemplateId === "dev-team" && selectedTeam.teamId ? (
             <section className={styles.taskBoard} aria-label={lang === "zh" ? "共享任务板" : "Shared task board"}>
               <DevTeamTaskBoard
                 lang={lang}
@@ -434,31 +459,60 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
             {stopRoundError ? <p className={styles.error} role="alert">{stopRoundError.message}</p> : null}
           </section>
         </aside>;
-  const canvasOpen = Boolean(props.workspace && homeView === "canvas" && !nativeConversationOpen);
-  const nativeInspector = memberConversation && selectedMember ? <section className={styles.memberInspector}>
-    <h3 className={styles.inspectorHeading}>{selectedMemberDisplay?.name}</h3><p>{selectedMemberDisplay?.role}</p><p className={styles.inspectorQuiet}>{selectedMember.purpose}</p>
-  </section> : <div className={styles.nativeInspector}>
-    <section><h3 className={styles.inspectorHeading}>{lang === "zh" ? "当前任务" : "Current task"}</h3><p className={styles.inspectorCopy}>{currentTitle}</p><RoundStatus status={currentStatus} lang={lang} /></section>
-    {currentSummary ? <section><h3 className={styles.inspectorHeading}>{lang === "zh" ? "上轮结果" : "Previous result"}</h3><p className={styles.inspectorCopy}>{currentSummary}</p></section> : null}
-    {selectedTeam?.teamTemplateId === "dev-team" ? <DevTeamTaskBoard lang={lang} teamId={teamId} members={selectedTeam.members} speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members, linkedRoomDetail)} /> : null}
-  </div>;
   const nativeBody = nativeSelectionReady ? <TeamNativeConversation lang={lang} />
     : linkedChatRoomPending ? <VStateSurface tone="loading" title={lang === "zh" ? "正在读取关联会话" : "Loading linked conversation"} skeletonLines={3} />
-      : memberConversation ? <VStateSurface tone="error" title={lang === "zh" ? "成员会话尚不可用" : "Member session unavailable"}>{lang === "zh" ? "请刷新团队或同步群聊后再打开。" : "Refresh the team or sync its room."}</VStateSurface> : conversation;
+      : memberConversation ? <VStateSurface tone="error" title={lang === "zh" ? "成员会话尚不可用" : "Member session unavailable"}>{lang === "zh" ? "请刷新团队或同步群聊后再打开。" : "Refresh the team or sync its room."}</VStateSurface>
+        : <div className={styles.viewScroll}>{conversation}</div>;
+  const taskBody = selectedTeam?.teamTemplateId === "dev-team" ? <DevTeamTaskBoard
+    lang={lang} teamId={teamId} members={selectedTeam.members}
+    speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members, linkedRoomDetail)} />
+    : <section className={styles.roundTask} aria-label={lang === "zh" ? "本轮任务" : "Round task"}>
+      <h3 className={styles.sectionTitle}>{currentTitle}</h3>
+      <RoundStatus status={currentStatus} lang={lang} />
+      <p className={styles.actionCopy}>{currentSummary || (lang === "zh" ? "在讨论中跟进成员输出；团队轮次状态与任务完成情况分别记录。" : "Follow member output in Discussion; round status and task completion are tracked separately.")}</p>
+      <VButton variant="secondary" onClick={() => openHomeView("discussion")}>{lang === "zh" ? "查看团队讨论" : "View discussion"}</VButton>
+    </section>;
+  const selectedMemberDetails = memberConversation && selectedMember && homeView === "discussion" ? <section className={styles.memberInspector}>
+    <h3 className={styles.inspectorHeading}>{selectedMemberDisplay?.name}</h3><p>{selectedMemberDisplay?.role}</p><p className={styles.inspectorQuiet}>{selectedMember.purpose}</p>
+  </section> : null;
+  const workspaceBody = <div className={styles.workspaceBody}>
+    <section className={styles.roundBanner} aria-label={lang === "zh" ? "当前轮次" : "Current round"}>
+      <div className={styles.bannerCopy}><p className={styles.eyebrow}>{lang === "zh" ? "本轮目标" : "Round goal"}</p><h3 className={styles.bannerTitle}>{currentTitle}</h3></div>
+      <div className={styles.bannerActions}><RoundStatus status={currentStatus} lang={lang} />
+        {linkedRoomBusy ? <VButton ref={stopTriggerRef} variant="secondary" density="compact" icon={<Square size={14} aria-hidden="true" />}
+          aria-label={lang === "zh" ? "停止当前团队讨论" : "Stop current team round"}
+          isPending={stopRoundPending} isDisabled={stopRoundPending || linkedRoomDetail?.status === "stopping"} onPress={stopRound}>
+          {lang === "zh" ? "停止本轮" : "Stop round"}</VButton>
+          : <VButton density="compact" icon={<Play size={14} aria-hidden="true" />} onClick={() => setRoundActionsOpen(true)} isPending={startRoundPending}>
+            {lang === "zh" ? linkedChatRoomId ? "开始新一轮" : "同步群聊" : linkedChatRoomId ? "Start round" : "Sync room"}</VButton>}
+      </div>
+    </section>
+    {stopRoundError ? <p role="alert" className={styles.bannerError}>{stopRoundError.message}</p> : null}
+    <VTabs aria-label={lang === "zh" ? "团队工作视图" : "Team workspace views"} value={homeView} onValueChange={openHomeView} keepPanelsMounted
+      className={styles.mainTabs} listClassName={styles.mainTabList} triggerClassName={styles.mainTabTrigger} contentClassName={styles.mainTabContent}
+      items={[
+        { id: "discussion", label: <><MessageSquare size={15} aria-hidden="true" />{lang === "zh" ? "讨论" : "Discussion"}</>, content: <Activity mode={homeView === "discussion" ? "visible" : "hidden"}>{nativeBody}</Activity> },
+        { id: "tasks", label: <><ListTodo size={15} aria-hidden="true" />{lang === "zh" ? "任务" : "Tasks"}</>, content: <div className={styles.viewScroll}>{taskBody}</div> },
+        { id: "canvas", label: <><GitBranch size={15} aria-hidden="true" />{lang === "zh" ? "画布" : "Canvas"}</>, content: props.workspace?.canvas },
+      ]} />
+  </div>;
   return <div className={styles.frame} data-testid="team-home-surface" data-vui-region="team-home-surface">
-    <TeamWorkspaceFrame title={nativeConversationOpen ? selectedMember ? `${selectedMemberDisplay?.name} · ${lang === "zh" ? "对话" : "Conversation"}` : lang === "zh" ? "团队讨论" : "Team discussion" : lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
+    <TeamWorkspaceFrame title={props.workspace ? homeView === "discussion" ? selectedMember ? `${selectedMemberDisplay?.name} · ${lang === "zh" ? "对话" : "Conversation"}` : lang === "zh" ? "团队讨论" : "Team discussion" : selectedTeam?.name || (lang === "zh" ? "团队工作台" : "Team workspace") : lang === "zh" ? "团队主页" : "Team home"} domainRecipe="teams-organization-workbench"
       layoutId={WORKBENCH_LAYOUT_IDS.teams} resize={props.workspace?.resize}
-      responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation" }, inspector: { label: lang === "zh" ? "团队详情" : "Team details", narrowPlacement: "bottom" } }}
+      responsive={{ enabled: Boolean(props.workspace), rail: { label: lang === "zh" ? "团队导航" : "Team navigation", open: navigationOpen, onOpenChange: setNavigationOpen }, inspector: { label: lang === "zh" ? "成员与记录" : "Members and records", narrowPlacement: "bottom", open: inspectorOpen, onOpenChange: setInspectorOpen } }}
       ariaLabel={selectedTeam?.name || (lang === "zh" ? "团队主页" : "Team home")}
       railTitle={props.workspace?.teamSwitcher} rail={props.workspace?.navigation}
-      inspectorTitle={canvasOpen ? (lang === "zh" ? "团队详情" : "Team details") : memberConversation ? (lang === "zh" ? "成员详情" : "Member details") : (lang === "zh" ? "本轮操作" : "Round actions")}
-      mainScroll={!canvasOpen && !nativeConversationOpen} canvas={canvasOpen ? props.workspace?.canvas : nativeConversationOpen ? nativeBody : conversation}
-      inspector={canvasOpen ? props.workspace?.inspector : nativeConversationOpen && nativeSelectionReady ? nativeInspector : roundActions}
-      toolbar={<><VButton density="compact" variant={canvasOpen ? "primary" : "ghost"} aria-pressed={canvasOpen}
-        icon={<GitBranch size={14} aria-hidden="true" />} onClick={() => { openHomeView("canvas"); onOpenOrganization(); }}>{lang === "zh" ? "画布" : "Canvas"}</VButton>
-        <VButton density="compact" variant={!canvasOpen ? "primary" : "ghost"} aria-pressed={!canvasOpen} onClick={() => props.workspace ? openHomeView("conversation") : setHomeView("conversation")}>{lang === "zh" ? "成员发言" : "Messages"}</VButton>
-        {roomLink ? <VRouteLinkButton density="compact" to={roomLink} variant="secondary" icon={<MessageSquare size={14} aria-hidden="true" />}>{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null}
-        {props.workspace?.toolbar}</>} />
+      inspectorTitle={props.workspace ? selectedMemberDetails ? lang === "zh" ? "成员详情" : "Member details" : lang === "zh" ? "成员与记录" : "Members and records" : lang === "zh" ? "本轮操作" : "Round actions"}
+      inspectorActions={props.workspace ? <VButton density="compact" variant="ghost" aria-label={lang === "zh" ? "关闭详情" : "Close details"} icon={<X size={15} />} onClick={() => setInspectorOpen(false)} /> : undefined}
+      mainScroll={!props.workspace} canvas={props.workspace ? workspaceBody : conversation}
+      inspector={props.workspace ? inspectorOpen ? selectedMemberDetails ?? props.workspace.inspector : undefined : roundActions}
+      toolbar={props.workspace ? <>
+        <VButton density="compact" variant="ghost" icon={<PanelRight size={15} aria-hidden="true" />} aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{lang === "zh" ? "详情" : "Details"}</VButton>
+        <VPopover aria-label={lang === "zh" ? "团队操作" : "Team actions"} align="end" trigger={<VButton density="compact" variant="ghost" aria-label={lang === "zh" ? "更多团队操作" : "More team actions"} icon={<MoreHorizontal size={16} />} />}>
+          <div className={styles.moreActions}>{roomLink ? <VRouteLinkButton to={roomLink} variant="ghost">{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null}{props.workspace.toolbar}</div>
+        </VPopover>
+      </> : roomLink ? <VRouteLinkButton to={roomLink} variant="secondary">{lang === "zh" ? "打开群聊" : "Open room"}</VRouteLinkButton> : null} />
+    <VDialog open={roundActionsOpen} onOpenChange={setRoundActionsOpen} title={lang === "zh" ? "团队轮次" : "Team round"}>{roundActions}</VDialog>
     <VConfirmDialog
         open={confirmStopOpen}
         onOpenChange={setConfirmStopOpen}
