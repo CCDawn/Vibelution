@@ -825,6 +825,7 @@ export function ResearchProcessWorkspace({
         railTitle={toolbarLeading ?? teamName}
         railLabel={isZh ? "团队与研究阶段" : "Team and research stages"}
         inspectorTitle={isZh ? "当前任务" : "Current task"}
+        inspectorScroll={false}
         toolbarClassName={styles.toolbar}
         toolbar={(
           <ResearchWorkflowToolbar

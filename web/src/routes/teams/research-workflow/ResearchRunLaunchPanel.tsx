@@ -266,6 +266,8 @@ function launchErrorText(rawMessage: string, lang: Language): string {
 
 export function ResearchRunLaunchPanel(props: {
   lang?: Language;
+  /** Embedded task inspectors already own the heading, padding, and scroll area. */
+  presentation?: "panel" | "inline";
   teamId: string;
   busy: boolean;
   initialQuestionId?: string;
@@ -285,6 +287,7 @@ export function ResearchRunLaunchPanel(props: {
     onContinueRun,
   } = props;
   const lang = props.lang ?? "zh";
+  const inline = props.presentation === "inline";
   const isZh = lang === "zh";
   // Per-team session draft restores the form after panel switches; an explicit
   // deep-link questionId always wins over the remembered draft.
@@ -425,10 +428,10 @@ export function ResearchRunLaunchPanel(props: {
   };
 
   return (
-    <VSurface tone="panel" className={styles.root}>
-      <VPanelHeader title={onStartHypothesis
+    <VSurface tone="panel" padding={inline ? "none" : "compact"} className={inline ? styles.inlineRoot : styles.root}>
+      {inline ? null : <VPanelHeader title={onStartHypothesis
         ? (isZh ? "选择题目并开始假说研究" : "Choose a question and start hypothesis research")
-        : (isZh ? "选择题目并开始实验" : "Choose a question and start an experiment")} headingLevel={3} />
+        : (isZh ? "选择题目并开始实验" : "Choose a question and start an experiment")} headingLevel={3} />}
       <VFieldRow label={isZh ? "搜索题目" : "Search questions"} description={isZh ? "题号、英文问题或学科" : "Question ID, English question, or field"}>
         <VInput
           aria-label={isZh ? "搜索 125 题" : "Search 125 questions"}
@@ -535,7 +538,7 @@ export function ResearchRunLaunchPanel(props: {
           </VButton>
         ) : null}
       </details>
-      <div className={styles.actions} data-vui-region="launch-primary-action">
+      <div className={inline ? styles.inlineActions : styles.actions} data-vui-region="launch-primary-action">
         {(!selectedExperiment || selectedExperiment.launchable) && !experimentMatchAmbiguous ? <VButton
           isPending={busy}
           isDisabled={!selectedQuestion || isLaunchBlockedByExperiment(experiments, questionId)}

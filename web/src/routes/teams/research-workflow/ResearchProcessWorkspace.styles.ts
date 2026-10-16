@@ -1,5 +1,5 @@
 export default {
-  detailNavigation: "flex shrink-0 flex-wrap gap-1 border-b border-[var(--vui-border-subtle)] p-2",
+  detailNavigation: "mt-3 flex min-w-0 shrink-0 flex-wrap gap-1",
   host: "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden",
   toolbar: "!flex-nowrap overflow-hidden",
   stageNavigator: "h-full min-h-0",
