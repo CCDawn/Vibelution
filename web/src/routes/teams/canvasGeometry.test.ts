@@ -5,6 +5,10 @@ import {
   autoLayoutResearchCanvasNodes,
   canvasViewStyle,
   canvasStyleScale,
+  CANVAS_MAX_ZOOM,
+  CANVAS_MIN_ZOOM,
+  panCanvasViewport,
+  zoomCanvasViewport,
   edgeLine,
   isCommunicationEdge,
   nextNodeId,
@@ -30,6 +34,28 @@ function node(partial: Partial<TeamCanvasNode> & Pick<TeamCanvasNode, "id">): Te
 }
 
 describe("canvasGeometry", () => {
+  it("pans in screen pixels and zooms around the same world point without changing its input", () => {
+    const view = { "--canvas-offset-x": "-30px", "--canvas-offset-y": "80px", "--canvas-scale": "0.5" };
+    const moved = panCanvasViewport(view, { x: 45, y: -25 });
+    expect(moved).toEqual({ "--canvas-offset-x": "15px", "--canvas-offset-y": "55px", "--canvas-scale": "0.5" });
+    const anchor = { x: 180, y: 120 };
+    const zoomed = zoomCanvasViewport(moved, 0.75, anchor);
+    for (const axis of ["x", "y"] as const) {
+      expect((anchor[axis] - parseFloat(zoomed[`--canvas-offset-${axis}`])) / canvasStyleScale(zoomed))
+        .toBeCloseTo((anchor[axis] - parseFloat(moved[`--canvas-offset-${axis}`])) / canvasStyleScale(moved));
+    }
+    expect(view).toEqual({ "--canvas-offset-x": "-30px", "--canvas-offset-y": "80px", "--canvas-scale": "0.5" });
+  });
+
+  it("bounds manual zoom while preserving fit-all scales below the manual floor", () => {
+    const view = canvasViewStyle([node({ id: "a" })]);
+    expect(canvasStyleScale(zoomCanvasViewport(view, 100, { x: 0, y: 0 }))).toBe(CANVAS_MAX_ZOOM);
+    expect(canvasStyleScale(zoomCanvasViewport(view, 0, { x: 0, y: 0 }))).toBe(CANVAS_MIN_ZOOM);
+    expect(canvasStyleScale(zoomCanvasViewport(view, Number.NaN, { x: 0, y: 0 }))).toBe(1);
+    const tinyFit = { ...view, "--canvas-scale": "0.02" };
+    expect(canvasStyleScale(zoomCanvasViewport(tinyFit, 0.01, { x: 0, y: 0 }))).toBe(0.02);
+    expect(canvasStyleScale(zoomCanvasViewport(tinyFit, 0.024, { x: 0, y: 0 }))).toBe(0.024);
+  });
   it("ranks research canvas roles into stable layers", () => {
     expect(researchCanvasRoleLayer(node({ id: "a", role: "source_finder" }))).toBe(2);
     expect(researchCanvasRoleLayer(node({ id: "b", role: "source_ingestor" }))).toBe(5);

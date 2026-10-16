@@ -1,5 +1,18 @@
 // Placement and typography owned by the team task homepage.
 const styles = {
+  workspaceBody: "flex h-full min-h-0 min-w-0 flex-col",
+  roundBanner: "flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--vui-border-subtle)] px-6 py-4 max-[600px]:px-4 max-[600px]:py-3",
+  bannerCopy: "min-w-0 flex-1 basis-40",
+  bannerTitle: "mt-1 line-clamp-2 break-words text-sm font-medium leading-6",
+  bannerActions: "flex shrink-0 flex-wrap items-center gap-2",
+  bannerError: "px-4 py-2 text-sm text-[var(--state-error)]",
+  mainTabs: "!flex min-h-0 flex-1 flex-col !gap-0",
+  mainTabList: "!shrink-0 !justify-start !rounded-none !border-0 border-b! border-[var(--vui-border-subtle)]! !bg-transparent !px-5 !py-0 max-[600px]:!px-3",
+  mainTabTrigger: "!min-h-11 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-4 !shadow-none data-[state=active]:!border-[var(--accent-cool)] data-[state=active]:!text-[var(--accent-cool)]",
+  mainTabContent: "min-h-0 flex-1 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col",
+  viewScroll: "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6 max-[600px]:p-4",
+  roundTask: "flex max-w-3xl flex-col items-start gap-4",
+  moreActions: "flex max-w-[min(28rem,80vw)] flex-wrap items-center gap-2",
   conversation: "flex min-h-0 min-w-0 flex-col gap-4",
   status: "shrink-0",
   emptyMessages: "py-4 text-sm text-[var(--fg-tertiary)]",
@@ -11,7 +24,7 @@ const styles = {
   messageBody: "mt-1 min-w-0 break-words text-[15px] leading-6 text-[var(--fg-secondary)]",
   earlierLink: "mt-2 !min-h-11 !px-0 text-sm",
   // TeamWorkspaceFrame owns the shared panel boundary.
-  frame: "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+  frame: "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-[600px]:[&_button]:min-h-11!",
   header: "shrink-0 border-b border-[var(--vui-border-subtle)] p-2",
   headerCopy: "min-w-0 flex-1",
   eyebrow: "text-sm font-medium text-[var(--fg-tertiary)]",

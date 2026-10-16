@@ -3,6 +3,7 @@ import {
   Bot,
   Check,
   Link2,
+  Minus,
   Pencil,
   Plus,
   RefreshCw,
@@ -10,7 +11,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { Link } from "react-router-dom";
 
 import type {
@@ -29,7 +30,7 @@ import {
   VSurface,
   VTooltip,
 } from "../../components/vui";
-import { canvasStyleScale, canvasViewStyle, edgeLine, isCommunicationEdge, teamCanvasNodeStyle, type CanvasFrameSize, type CanvasViewportStyle } from "./canvasGeometry";
+import { CANVAS_MAX_ZOOM, CANVAS_MIN_ZOOM, canvasStyleScale, canvasViewStyle, edgeLine, isCommunicationEdge, panCanvasViewport, resolveCanvasFrameSize, teamCanvasNodeStyle, zoomCanvasViewport, type CanvasFrameSize, type CanvasViewportStyle } from "./canvasGeometry";
 import { canvasNodeAgentLine, canvasNodeSecondaryLines, canvasNodeTitle } from "./teamCanvasNodePresentation";
 import nodeStyles from "./TeamOrganizationCanvasSurface.styles";
 import { teamNodeFunctionLabel } from "./teamRouteShellModel";
@@ -197,6 +198,44 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
   const renamingNode = authoring
     ? displayCanvasNodes.find((node) => node.id === authoring.renamingNodeId)
     : undefined;
+  const localFrameRef = useRef<HTMLDivElement | null>(null);
+  const panRef = useRef<{ pointerId: number; x: number; y: number; style: CanvasViewportStyle } | null>(null);
+  const [panning, setPanning] = useState(false);
+  const setFrameRef = useCallback((frame: HTMLDivElement | null) => {
+    localFrameRef.current = frame;
+    if (typeof canvasFrameRef === "function") canvasFrameRef(frame);
+    else if (canvasFrameRef) canvasFrameRef.current = frame;
+  }, [canvasFrameRef]);
+  // Narrow canvas event boundary: background gestures only; nodes, SVG edges and authoring controls keep their own handlers.
+  const isInteractiveTarget = (target: EventTarget | null) => target instanceof Element
+    && Boolean(target.closest('button, a, input, textarea, select, [role="button"], [contenteditable="true"], [data-composer], [data-testid="team-canvas-view-controls"]'));
+  useEffect(() => {
+    const frame = localFrameRef.current;
+    if (!frame || !canvas || !onCanvasViewportChange) return;
+    // React delegates wheel listeners as passive; the canvas must consume wheel without scrolling/zooming the page.
+    const onWheel = (event: WheelEvent) => {
+      if (isInteractiveTarget(event.target) || panRef.current) return;
+      event.preventDefault();
+      const rect = frame.getBoundingClientRect();
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1);
+      onCanvasViewportChange(zoomCanvasViewport(canvasViewportStyle, canvasStyleScale(canvasViewportStyle) * Math.exp(-Math.max(-240, Math.min(240, delta)) * 0.002), {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      }));
+    };
+    frame.addEventListener("wheel", onWheel, { passive: false });
+    return () => frame.removeEventListener("wheel", onWheel);
+  }, [canvas, canvasViewportStyle, onCanvasViewportChange]);
+  function zoomFromCenter(factor: number) {
+    const size = resolveCanvasFrameSize(canvasFrameSize);
+    onCanvasViewportChange?.(zoomCanvasViewport(canvasViewportStyle, canvasStyleScale(canvasViewportStyle) * factor, { x: size.width / 2, y: size.height / 2 }));
+  }
+  function finishPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (panRef.current?.pointerId !== event.pointerId) return;
+    panRef.current = null;
+    setPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
 
   return (
     <VSurface
@@ -222,15 +261,15 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
               <span className={styles.saveState}>{saveLabel}</span>
             ) : null}
             <VTooltip content={communicationEdgeHint}>
-              <VNativeButton
+              <VButton
                 type="button"
                 className={showCommunicationEdges ? styles.layerButtonActive : ""}
                 onClick={onToggleCommunicationEdges}
-                disabled={!canvas || communicationEdgeCount === 0}
+                isDisabled={!canvas || communicationEdgeCount === 0}
               >
                 <Link2 size={14} />
                 {communicationEdgeButtonLabel}
-              </VNativeButton>
+              </VButton>
             </VTooltip>
             {linkedChatRoomId ? (
               <Link
@@ -247,21 +286,21 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
             {researchCanvasReadOnly ? null : (
               <>
                 {linkedChatRoomId ? null : (
-                  <VNativeButton
+                  <VButton
                     type="button"
                     onClick={onSyncRoom}
-                    disabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
+                    isDisabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
                   >
                     <Link2 size={14} />
                     {teamSyncPending
                       ? (lang === "zh" ? "同步中" : "Syncing")
                       : (lang === "zh" ? "同步群聊" : "Sync room")}
-                  </VNativeButton>
+                  </VButton>
                 )}
-                <VNativeButton type="button" onClick={onAddNode} disabled={!hasWritableCanvas}>
+                <VButton type="button" onClick={onAddNode} isDisabled={!hasWritableCanvas}>
                   <Plus size={14} />
                   {lang === "zh" ? "节点" : "Node"}
-                </VNativeButton>
+                </VButton>
                 {authoring ? (
                   <>
                     <VTooltip
@@ -273,43 +312,43 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                           : (lang === "zh" ? "从选中节点出发连接任意节点" : "Link the selected node to any node")
                       }
                     >
-                      <VNativeButton
+                      <VButton
                         type="button"
                         className={authoring.connectSourceNodeId ? styles.layerButtonActive : ""}
                         onClick={authoring.connectSourceNodeId ? authoring.onCancelConnect : authoring.onBeginConnect}
-                        disabled={!authoringEditable || !selectedNodeId || displayCanvasNodes.length < 2}
+                        isDisabled={!authoringEditable || !selectedNodeId || displayCanvasNodes.length < 2}
                         data-testid="team-canvas-connect-toggle"
                       >
                         <Spline size={14} />
                         {authoring.connectSourceNodeId
                           ? (lang === "zh" ? "取消连线" : "Cancel link")
                           : (lang === "zh" ? "连线" : "Link")}
-                      </VNativeButton>
+                      </VButton>
                     </VTooltip>
-                    <VNativeButton
+                    <VButton
                       type="button"
                       className={authoring.renamingNodeId ? styles.layerButtonActive : ""}
                       onClick={authoring.onBeginNodeRename}
-                      disabled={!authoringEditable || !selectedNodeId}
+                      isDisabled={!authoringEditable || !selectedNodeId}
                       data-testid="team-canvas-rename-toggle"
                     >
                       <Pencil size={14} />
                       {authoring.renamingNodeId
                         ? (lang === "zh" ? "改名中" : "Renaming")
                         : (lang === "zh" ? "改名" : "Rename")}
-                    </VNativeButton>
+                    </VButton>
                   </>
                 ) : null}
-                <VNativeButton
+                <VButton
                   type="button"
                   className={styles.dangerButton}
                   onClick={onArchiveTeam}
-                  disabled={!selectedTeam || teamArchivePending || Boolean(teamArchiveDisabledReason)}
+                  isDisabled={!selectedTeam || teamArchivePending || Boolean(teamArchiveDisabledReason)}
                   title={teamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
                 >
                   <Archive size={14} />
                   {lang === "zh" ? "归档" : "Archive"}
-                </VNativeButton>
+                </VButton>
               </>
             )}
           </VActionGroup>
@@ -334,7 +373,42 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
       ) : null}
       {completionFlowSlot}
       {canvas ? (
-        <div className={styles.canvas} ref={canvasFrameRef} data-testid="team-canvas-frame">
+        <div
+          className={[styles.canvas, onCanvasViewportChange ? nodeStyles.interactiveFrame : "", panning ? nodeStyles.panningFrame : ""].filter(Boolean).join(" ")}
+          ref={setFrameRef}
+          data-testid="team-canvas-frame"
+          role="region"
+          aria-label={lang === "zh" ? "组织画布：拖动空白处平移，滚轮缩放；方向键平移，加减键缩放，Home 适应全部" : "Organization canvas: drag background to pan, wheel to zoom; arrow keys pan, plus/minus zoom, Home fits all"}
+          tabIndex={onCanvasViewportChange ? 0 : undefined}
+          onPointerDown={(event) => {
+            if (!onCanvasViewportChange || event.button !== 0 || event.isPrimary === false || isInteractiveTarget(event.target)) return;
+            event.preventDefault();
+            event.currentTarget.focus({ preventScroll: true });
+            event.currentTarget.setPointerCapture(event.pointerId);
+            panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, style: canvasViewportStyle };
+            setPanning(true);
+          }}
+          onPointerMove={(event) => {
+            const pan = panRef.current;
+            if (!pan || pan.pointerId !== event.pointerId) return;
+            onCanvasViewportChange?.(panCanvasViewport(pan.style, { x: event.clientX - pan.x, y: event.clientY - pan.y }));
+          }}
+          onPointerUp={finishPan}
+          onPointerCancel={finishPan}
+          onLostPointerCapture={finishPan}
+          onKeyDown={(event) => {
+            if (!onCanvasViewportChange || event.target !== event.currentTarget || event.ctrlKey || event.metaKey || event.altKey) return;
+            const step = event.shiftKey ? 120 : 40;
+            const directions: Record<string, { x: number; y: number }> = { ArrowLeft: { x: step, y: 0 }, ArrowRight: { x: -step, y: 0 }, ArrowUp: { x: 0, y: step }, ArrowDown: { x: 0, y: -step } };
+            const delta = directions[event.key];
+            if (delta) onCanvasViewportChange(panCanvasViewport(canvasViewportStyle, delta));
+            else if (event.key === "+" || event.key === "=") zoomFromCenter(1.2);
+            else if (event.key === "-") zoomFromCenter(1 / 1.2);
+            else if (event.key === "Home") onCanvasViewportChange(null);
+            else return;
+            event.preventDefault();
+          }}
+        >
           <div className={styles.canvasViewport} style={canvasViewportStyle} data-testid="team-canvas-world">
             <svg className={styles.edges} width="100%" height="100%" data-testid="team-canvas-edges">
               <defs>
@@ -504,15 +578,15 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                     className="w-36"
                     data-testid="team-canvas-edge-label-input"
                   />
-                  <VNativeButton
+                  <VButton
                     type="button"
                     onClick={authoring.onCommitEdgeLabel}
                     data-testid="team-canvas-edge-label-save"
                   >
                     <Check size={14} />
                     {lang === "zh" ? "保存" : "Save"}
-                  </VNativeButton>
-                  <VNativeButton
+                  </VButton>
+                  <VButton
                     type="button"
                     className={styles.dangerButton}
                     onClick={() => authoring.onDeleteEdge(selectedAuthoringEdge.id)}
@@ -520,7 +594,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                   >
                     <Trash2 size={14} />
                     {lang === "zh" ? "删线" : "Delete"}
-                  </VNativeButton>
+                  </VButton>
                 </div>
               ) : null}
               {authoringEditable && authoring && renamingNode ? (
@@ -551,19 +625,25 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                     className="w-40"
                     data-testid="team-canvas-node-rename-input"
                   />
-                  <VNativeButton
+                  <VButton
                     type="button"
                     onClick={authoring.onCommitNodeRename}
                     data-testid="team-canvas-node-rename-save"
                   >
                     <Check size={14} />
                     {lang === "zh" ? "保存" : "Save"}
-                  </VNativeButton>
+                  </VButton>
                 </div>
               ) : null}
           </div>
           {onCanvasViewportChange ? (
-            <VActionGroup className={nodeStyles.viewControls} ariaLabel={lang === "zh" ? "画布视图" : "Canvas view"}>
+            <VActionGroup className={nodeStyles.viewControls} ariaLabel={lang === "zh" ? "画布视图" : "Canvas view"} data-testid="team-canvas-view-controls">
+              <VButton density="compact" variant="secondary" onClick={() => zoomFromCenter(1 / 1.2)} isDisabled={canvasStyleScale(canvasViewportStyle) <= CANVAS_MIN_ZOOM} aria-label={lang === "zh" ? "缩小画布" : "Zoom out"} title={lang === "zh" ? "缩小画布" : "Zoom out"}>
+                <Minus size={14} />
+              </VButton>
+              <VButton density="compact" variant="secondary" onClick={() => zoomFromCenter(1.2)} isDisabled={canvasStyleScale(canvasViewportStyle) >= CANVAS_MAX_ZOOM} aria-label={lang === "zh" ? "放大画布" : "Zoom in"} title={lang === "zh" ? "放大画布" : "Zoom in"}>
+                <Plus size={14} />
+              </VButton>
               <VButton density="compact" variant="secondary" onClick={() => onCanvasViewportChange(null)} isDisabled={!displayCanvasNodes.length}>
                 {lang === "zh" ? "适应全部" : "Fit all"}
               </VButton>

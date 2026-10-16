@@ -64,7 +64,9 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Organization canvas surface | `TeamOrganizationCanvasSurface.tsx` | inlining graph/drag chrome in TeamsRoute |
 | Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |
 | Read-only canvas inspector | `TeamCanvasReadOnlyInspector.tsx` | ad-hoc read-only blocks in route |
-| Organization inspector sections | `TeamInspectorTabs.tsx` | one mounted member/task/record panel per section; use VTabs retained panels to preserve drafts |
+| Team home views | `TeamHomeSurface.tsx` | Discussion is the default; `teamView=discussion/tasks/canvas` selects the main pane while `teamConversation` / `room` / `session` retain native conversation identity. Retained VTabs panels preserve drafts; React Activity suspends native Chat effects while hidden. Round controls use existing start/stop callbacks; round status is not task completion. |
+| Development tasks | `DevTeamTaskBoard.tsx` | Full-width main task view; real pending/in_progress/rework/completed states, role permissions and expectedRevision stay authoritative. Creation/edit forms disclose on demand; polling does not replace dirty edits. |
+| Organization inspector sections | `TeamInspectorTabs.tsx` | Member and record panels open on demand in ordinary home; tasks live in the main view. Optional task slot remains available to other consumers. VTabs retain section drafts. |
 | Team discussion + broadcast | `TeamCommunicationPanel.tsx` | duplicating task/broadcast JSX in board/canvas shells |
 | Research workflow stage host | `TeamResearchWorkflowPanelHost.tsx` + `renderResearchWorkflowModules` in `TeamsRoute` | inlining workflow section chrome / stage modules twice in board+canvas |
 | Board primary overview/launcher | `TeamResearchBoardPrimarySurface.tsx` | board fill loading/empty/ready + launcher branch buried in route return |

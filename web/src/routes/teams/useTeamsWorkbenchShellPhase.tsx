@@ -697,6 +697,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     next.set("teamId", selectedTeam.teamId);
     next.set("teamConversationTeamId", selectedTeam.teamId);
     next.set("teamConversation", memberId ? "member" : "group");
+    next.set("teamView", "discussion");
     next.set("teamMode", "canvas");
     next.set("returnTo", `/teams?teamId=${encodeURIComponent(selectedTeam.teamId)}&teamMode=canvas`);
     next.set("returnLabel", lang === "zh" ? "返回团队" : "Back to team");

@@ -141,15 +141,15 @@ describe("Teams clarity composers (① shell + F1/F4 controllers)", () => {
     expect(archive).toBeGreaterThan(editGate);
   });
 
-  it("keeps ordinary home canvas and messages inside one shared frame", () => {
+  it("keeps ordinary home views inside one shared frame with native conversation ownership", () => {
     const homeSource = readFileSync(new URL("./TeamHomeSurface.tsx", import.meta.url), "utf8");
     expect(canvasPageSource).toContain('key={props.effectiveTeamId || "no-team"}');
     expect(canvasPageSource).toContain("<TeamHomeSurface {...p.teamHome}");
     expect(canvasPageSource).toContain("canvas: organizationCanvas");
     expect(canvasPageSource).toContain("navigation: p.teamShellRail");
     expect(homeSource).toContain("TeamWorkspaceFrame");
-    expect(homeSource).toContain('props.workspace ? "canvas" : "conversation"');
-    expect(homeSource).toContain('setHomeView("conversation")');
+    expect(homeSource).toContain("<TeamNativeConversation");
+    expect(homeSource).toContain("keepPanelsMounted");
     expect(teamsCanvasComposerSource).toContain("responsive={{");
     expect(teamsCanvasComposerSource).toContain("enabled: true");
     expect(teamsCanvasComposerSource).toContain("rail: { label: responsiveRailLabel }");

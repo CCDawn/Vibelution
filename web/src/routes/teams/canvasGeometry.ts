@@ -4,6 +4,8 @@ import type { TeamCanvasNode } from "../../api/types";
 
 export const NODE_WIDTH = 172;
 export const NODE_HEIGHT = 108;
+export const CANVAS_MIN_ZOOM = 0.05;
+export const CANVAS_MAX_ZOOM = 3;
 // Used only until the mounted frame can be measured.
 export const CANVAS_VIEWPORT_WIDTH = 420;
 export const CANVAS_VIEWPORT_HEIGHT = 360;
@@ -229,6 +231,33 @@ export function teamCanvasNodeStyle(node: Pick<TeamCanvasNode, "x" | "y">): Node
 export function canvasStyleScale(style: CanvasViewportStyle) {
   const parsed = Number(style["--canvas-scale"]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function panCanvasViewport(style: CanvasViewportStyle, delta: { x: number; y: number }): CanvasViewportStyle {
+  return {
+    ...style,
+    "--canvas-offset-x": `${parseFloat(style["--canvas-offset-x"]) + delta.x}px`,
+    "--canvas-offset-y": `${parseFloat(style["--canvas-offset-y"]) + delta.y}px`,
+  };
+}
+
+/** Keep the world point under the pointer fixed; fit-all may legitimately be below the manual zoom floor. */
+export function zoomCanvasViewport(
+  style: CanvasViewportStyle,
+  requestedScale: number,
+  anchor: { x: number; y: number },
+): CanvasViewportStyle {
+  const currentScale = canvasStyleScale(style);
+  const scale = Number.isFinite(requestedScale)
+    ? Math.min(CANVAS_MAX_ZOOM, Math.max(Math.min(CANVAS_MIN_ZOOM, currentScale), requestedScale))
+    : currentScale;
+  const ratio = scale / currentScale;
+  return {
+    ...style,
+    "--canvas-offset-x": `${anchor.x - (anchor.x - parseFloat(style["--canvas-offset-x"])) * ratio}px`,
+    "--canvas-offset-y": `${anchor.y - (anchor.y - parseFloat(style["--canvas-offset-y"])) * ratio}px`,
+    "--canvas-scale": String(scale),
+  };
 }
 
 export function nodeBoundaryPoint(center: { x: number; y: number }, direction: { x: number; y: number }) {
