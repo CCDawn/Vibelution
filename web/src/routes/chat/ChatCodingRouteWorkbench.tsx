@@ -181,6 +181,7 @@ import {
   runtimeMatchesSelectedChatSession,
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
+import centerSurfaceStyles from "./ChatCenterSessionSurface.styles";
 import { ChatSessionBrowser } from "./ChatSessionBrowser";
 import { ChatCodingCenterTabs } from "./ChatCodingCenterTabs";
 import { ChatCodingGroupSurface } from "./ChatCodingGroupSurface";
@@ -3346,7 +3347,7 @@ export function ChatCodingRouteWorkbench() {
                 onRetry={() => { void Promise.allSettled([rawSessionsQuery.refetch(), agentsQuery.refetch()]); }}
               />
             ) : paneDock.showCenterPane ? (
-              <div ref={paneDock.onCenterHostChange} className="flex h-full min-h-0 flex-col overflow-hidden" data-chat-center-dock="" />
+              <div ref={paneDock.onCenterHostChange} className={centerSurfaceStyles.dockHost} data-chat-center-dock="" />
             ) : undefined}
           />
           {paneDock.portalWorkspace && paneDock.parkHost ? createPortal(nativeSessionWorkspace, paneDock.parkHost) : null}
