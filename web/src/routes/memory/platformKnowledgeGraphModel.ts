@@ -24,7 +24,7 @@ export function platformTopicOverview(payload: PlatformKnowledgeGraphPayload, ed
   const nodes: MemoryKnowledgeGraphNode[] = topics.map(topic => ({
     id: topic.id, type: "topic", label: `${topic.label} · ${topic.nodeIds.filter(id => byId.has(id)).length} 条知识`, summary: `${topicBasisLabels[topic.groupingBasis]} · 进入主题查看关系`,
     status: "active", createdAt: "", updatedAt: "", responsibilityQuestion: "这个主题包含哪些正式知识和来源依据？",
-    metadata: { topicId: topic.id, topicLabel: topic.label, memberCount: topic.nodeIds.length, groupingBasis: topic.groupingBasis },
+    metadata: { topicId: topic.id, topicLabel: topic.label, memberCount: topic.nodeIds.filter(id => byId.has(id)).length, groupingBasis: topic.groupingBasis },
     visual: { size: "group" }, childNodeIds: topic.nodeIds, contentItems: [],
   }));
   const aggregate = new Map<string, MemoryKnowledgeGraphEdge>();
@@ -39,6 +39,33 @@ export function platformTopicOverview(payload: PlatformKnowledgeGraphPayload, ed
       metadata: { ...edge.metadata, relationIds: [edge.id] } });
   }
   return { nodes, edges: [...aggregate.values()] };
+}
+
+/** Full spatial projection uses returned records and real relation IDs only. */
+export function platformSpatialOverview(payload: PlatformKnowledgeGraphPayload, edges: MemoryKnowledgeGraphEdge[]) {
+  const roots = platformTopicOverview(payload, []).nodes;
+  const available = new Map(payload.nodes.map(node => [node.id, node]));
+  const validEdges = edges.filter(edge => available.has(edge.source) && available.has(edge.target) && edge.type !== "topic_has_item");
+  const ids = new Set(payload.nodes.filter(node => node.type === "knowledge_item").map(node => node.id));
+  for (const edge of validEdges) { ids.add(edge.source); ids.add(edge.target); }
+  const topicNames = new Map(payload.topics.map(topic => [topic.id, topic.label]));
+  const membership = new Map<string, string>();
+  for (const topic of payload.topics) for (const id of topic.nodeIds) if (!membership.has(id)) membership.set(id, topic.id);
+  // A shared source can have multiple topics. Pick one deterministic display
+  // cluster while retaining its single identity and every actual relation.
+  const linkedTopics = new Map<string, string[]>();
+  for (const edge of validEdges) for (const [from, to] of [[edge.source, edge.target], [edge.target, edge.source]]) {
+    const topic = available.get(to)?.metadata.topicId ?? membership.get(to);
+    if (typeof topic === "string" && topicNames.has(topic)) linkedTopics.set(from, [...(linkedTopics.get(from) ?? []), topic]);
+  }
+  const records = payload.nodes.filter(node => ids.has(node.id) && node.type !== "topic").map(node => {
+    const topicId = typeof node.metadata.topicId === "string" && node.metadata.topicId ? node.metadata.topicId
+      : membership.get(node.id) ?? [...(Array.isArray(node.metadata.topicIds) ? node.metadata.topicIds.filter((id): id is string => typeof id === "string" && topicNames.has(id)) : []), ...(linkedTopics.get(node.id) ?? [])].sort()[0];
+    return topicId ? { ...node, metadata: { ...node.metadata, topicId, topicLabel: topicNames.get(topicId) ?? node.metadata.topicLabel } } : node;
+  });
+  const nodes = [...roots, ...records];
+  const rendered = new Set(nodes.map(node => node.id));
+  return { nodes, edges: validEdges.filter(edge => rendered.has(edge.source) && rendered.has(edge.target)) };
 }
 
 export function platformTopicSlice(payload: PlatformKnowledgeGraphPayload, topicId: string, edges: MemoryKnowledgeGraphEdge[], selectedNodeId = "") {

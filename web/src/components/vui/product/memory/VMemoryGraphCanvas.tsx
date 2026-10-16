@@ -21,6 +21,8 @@ export type VMemoryGraphCanvasProps = {
   mode?: "galaxy" | "relations";
   /** Topic metadata takes priority over type clusters only for opting-in consumers. */
   groupByTopic?: boolean;
+  /** Approved deep-space presentation, scoped to opting-in knowledge views. */
+  appearance?: "cosmos";
 };
 
 const LazyShadcnMemoryGraphCanvas = lazy(async () => {
