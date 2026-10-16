@@ -16,7 +16,7 @@ const styles = {
     "agentRoomHistory grid min-w-0 gap-0.5 pl-1 [&>button]:min-h-8 [&>button]:font-medium [&>button]:[font-size:var(--vui-font-xs)] [&>div]:gap-0.5 [&>div]:pl-0",
   agentRoomHistoryTopic:
     "agentRoomHistoryTopic grid min-w-0 gap-0.5 [&>button]:min-h-7 [&>button]:font-normal [&>button]:[font-size:var(--vui-font-2xs)] [&>div]:gap-0.5 [&>div]:pl-1",
-  // surface-role: hover-fill — the trailing count and activity stay on the row mid-line.
+  // surface-role: hover-fill — the trailing activity stays on the row mid-line.
   agentRow:
     "agentRow !grid !h-auto !min-h-[62px] !w-full min-w-0 max-w-full " +
     "grid-cols-[36px_minmax(0,1fr)_auto] !items-stretch !justify-items-stretch !justify-start " +
@@ -54,8 +54,6 @@ const styles = {
     "agentMeta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 whitespace-normal break-words [font-size:var(--vui-font-micro-11)] font-normal leading-[1.35] [color:var(--fg-secondary)] [overflow-wrap:anywhere]",
   agentMetaItem:
     "agentMetaItem min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]",
-  agentMetaCount:
-    "agentMetaCount shrink-0 rounded bg-[var(--vui-control-muted)] px-1.5 [font-size:var(--vui-font-xs)] tabular-nums [color:var(--fg-secondary)]",
   agentEmpty:
     "agentEmpty rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] px-2.5 py-3 [font-size:var(--vui-font-sm)] [color:var(--fg-secondary)]",
 } as const;

@@ -49,7 +49,18 @@ const styles: Record<string, string> = {
   conversationIndexPanelBody:
     "vui-routes-chatcodingroute conversationIndexPanelBody !overflow-hidden !pr-0 ![scrollbar-gutter:auto]",
   conversationIndexScrollRegion:
-    "vui-routes-chatcodingroute conversationIndexScrollRegion min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute conversationIndexScrollRegion min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable] " +
+    // Important overrides the unlayered native scrollbar reset in base.css, only inside this directory.
+    "[--index-scrollbar-thumb:transparent] [&::-webkit-scrollbar]:!w-[6px] [&::-webkit-scrollbar-track]:!bg-transparent " +
+    "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:!bg-[var(--index-scrollbar-thumb)] " +
+    "[&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb]:duration-150 " +
+    "hover:data-[scroll-active=true]:[--index-scrollbar-thumb:color-mix(in_srgb,var(--fg-secondary)_28%,transparent)] " +
+    "focus-visible:data-[scroll-active=true]:[--index-scrollbar-thumb:color-mix(in_srgb,var(--fg-secondary)_28%,transparent)] " +
+    "data-[scroll-dragging=true]:[--index-scrollbar-thumb:color-mix(in_srgb,var(--fg-secondary)_28%,transparent)] " +
+    "[@media(hover:none)]:data-[scroll-active=true]:[--index-scrollbar-thumb:color-mix(in_srgb,var(--fg-secondary)_28%,transparent)] " +
+    "[@supports_not_selector(::-webkit-scrollbar)]:[scrollbar-width:thin] " +
+    "[@supports_not_selector(::-webkit-scrollbar)]:[scrollbar-color:var(--index-scrollbar-thumb)_transparent] " +
+    "motion-reduce:[&::-webkit-scrollbar-thumb]:transition-none",
   createGroupButton:
     `vui-routes-chatcodingroute createGroupButton min-w-0 ${vuiControlQuietClass}`,
   groupAgentOption:

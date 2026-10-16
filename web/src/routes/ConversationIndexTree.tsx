@@ -142,6 +142,7 @@ export function ConversationIndexTree({
           <ConversationIndexSection
             key={group.groupKey}
             count={group.items.length}
+            countLabel={lang === "zh" ? `${group.items.length} 个会话` : `${group.items.length} conversations`}
             expanded={!collapsed}
             label={group.label}
             onToggle={() => onToggleConversationGroup(group.groupKey)}
@@ -208,6 +209,7 @@ export function ConversationIndexTree({
         <ConversationIndexSection
           className={styles.teamTreeGroup}
           count={setupTeams.length}
+          countLabel={lang === "zh" ? `${setupTeams.length} 个团队` : `${setupTeams.length} teams`}
           expanded={searchHasTerm || !collapsedConversationGroups.setupTeams}
           label={conversationGroupLabel("setupTeams", lang === "zh" ? "zh" : "en")}
           onToggle={() => onToggleConversationGroup("setupTeams")}
@@ -232,6 +234,7 @@ export function ConversationIndexTree({
       {filteredStandaloneGroupConversations.length ? (
         <ConversationIndexSection
           count={filteredStandaloneGroupConversations.length}
+          countLabel={lang === "zh" ? `${filteredStandaloneGroupConversations.length} 个群聊` : `${filteredStandaloneGroupConversations.length} group chats`}
           expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}
           label={conversationGroupLabel("standaloneGroups", lang === "zh" ? "zh" : "en")}
           onToggle={() => onToggleConversationGroup("standaloneGroups")}

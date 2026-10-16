@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { AgentInstance, ConversationSummary, Team } from "../api/types";
 import {
-  agentDirectorySessionCount,
   AgentConversationDirectory,
   agentDirectorySection,
   isSessionMoreRecent,
@@ -84,7 +83,7 @@ function room(overrides: Partial<ConversationSummary> = {}): ConversationSummary
 }
 
 describe("AgentConversationDirectory", () => {
-  it("renders one subtitle, hides single-session counts, and keeps multi-session counts", () => {
+  it("keeps Agent navigation free of session counts, including Agents with multiple sessions", () => {
     const sessions = ["s1", "s2"].map((id) => ({ id, title: id, agentId: "agent-1", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "" }));
     const render = (count: number) => renderToStaticMarkup(<AgentConversationDirectory
       activeAgentId="" agents={[agent({ displayName: "gpt-pix" })]} avatarInitials={() => "G"}
@@ -96,7 +95,8 @@ describe("AgentConversationDirectory", () => {
     expect(single).toContain("GPT-5.6 Luna");
     expect(single).not.toContain("1 个会话");
     expect(single).not.toContain("12:00");
-    expect(render(2)).toContain('aria-label="2 个会话"');
+    expect(render(2)).not.toContain("2 个会话");
+    expect(render(2)).not.toContain("agentMetaCount");
   });
 
   it("reveals searched special Agents even though their section defaults collapsed", () => {
@@ -109,12 +109,12 @@ describe("AgentConversationDirectory", () => {
     expect(render("资料员")).toContain("资料员");
     expect(render("does-not-exist")).toContain("没有匹配的 Agent 或团队");
   });
-  it("renders Agent identity as the left navigation item and keeps session count as metadata", () => {
+  it("renders Agent identity as the left navigation item without session-count metadata", () => {
     expect(directorySource).toContain('aria-label={lang === "zh" ? "Agent 目录" : "Agent directory"}');
     expect(directorySource).toContain("agentDisplayInfo(agent, lang, { resolveModelLabel })");
     expect(directorySource).toContain("display.functionLabel");
     expect(directorySource).toContain("display.modelLabel");
-    expect(directorySource).toContain("sessionCountByAgentId");
+    expect(directorySource).not.toContain("sessionCountByAgentId");
     expect(directorySource).toContain('aria-current={active ? "page" : undefined}');
     expect(directorySource).toContain('data-selected={active ? "true" : undefined}');
     expect(directorySource).toContain("onContextMenu(event, agent, latestSession ?? null)");
@@ -187,20 +187,6 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain("teamRoomsByTeamId");
     expect(directorySource).toContain('lang === "zh" ? "历史群聊" : "Chat history"');
     expect(directorySource).toContain("GroupConversationIndexItem");
-  });
-
-  it("counts an active hidden direct session without double-counting a visible summary", () => {
-    const hiddenDirectAgent = agent({
-      directSessionId: "session-hidden-direct",
-      metadata: {
-        conversationIndexKind: "hidden",
-        directSessionVisibility: "active_session",
-      },
-    });
-
-    expect(agentDirectorySessionCount(hiddenDirectAgent, 0, new Set())).toBe(1);
-    expect(agentDirectorySessionCount(hiddenDirectAgent, 1, new Set(["session-hidden-direct"]))).toBe(1);
-    expect(agentDirectorySessionCount(hiddenDirectAgent, 1, new Set(["session-visible"]))).toBe(2);
   });
 
   it("uses plain multi-line button layout so avatar/title/meta are not crushed into a nowrap label", () => {

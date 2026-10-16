@@ -9,6 +9,7 @@ describe("ConversationIndexSection", () => {
     const markup = renderToStaticMarkup(
       <ConversationIndexSection
         count={3}
+        countLabel="3 个会话"
         expanded
         label="用户会话"
         onToggle={() => undefined}
@@ -24,7 +25,8 @@ describe("ConversationIndexSection", () => {
     expect(markup).toContain('data-vui="native-button"');
     expect(markup).not.toContain('data-vui="button"');
     expect(markup).toContain("用户会话");
-    expect(markup).toContain("<strong>3</strong>");
+    expect(markup).toContain('title="3 个会话">3 个会话</span>');
+    expect(markup).not.toContain("<strong>");
     expect(markup).toContain("会话 A");
   });
 
@@ -32,6 +34,7 @@ describe("ConversationIndexSection", () => {
     const markup = renderToStaticMarkup(
       <ConversationIndexSection
         count={1}
+        countLabel="1 个 Agent"
         expanded={false}
         label="团队"
         onToggle={() => undefined}
@@ -45,5 +48,16 @@ describe("ConversationIndexSection", () => {
     expect(markup).not.toContain('role="group"');
     expect(markup).toContain("团队");
     expect(markup).not.toContain("隐藏内容");
+    expect(markup).not.toContain("1 个 Agent");
+  });
+
+  it("does not add an empty quantity to an expanded section", () => {
+    const markup = renderToStaticMarkup(
+      <ConversationIndexSection count={0} countLabel="0 个会话" expanded label="历史" onToggle={() => undefined}>
+        <span>暂无会话</span>
+      </ConversationIndexSection>,
+    );
+    expect(markup).toContain("暂无会话");
+    expect(markup).not.toContain("0 个会话");
   });
 });

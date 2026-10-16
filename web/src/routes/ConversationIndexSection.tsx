@@ -8,7 +8,7 @@ type ConversationIndexSectionProps = {
   children: ReactNode;
   className?: string;
   count: number;
-  countLabel?: string;
+  countLabel: string;
   activity?: ReactNode;
   expanded: boolean;
   label: string;
@@ -49,8 +49,13 @@ export function ConversationIndexSection({
         aria-controls={listId}
       >
         <ChevronRight size={14} aria-hidden="true" />
-        <span id={headerId} className={styles.conversationGroupIdentity}><span className={styles.conversationGroupLabel}>{label}</span>{activity}</span>
-        <strong title={countLabel}>{count}</strong>
+        <span id={headerId} className={styles.conversationGroupIdentity}>
+          <span className={styles.conversationGroupLabel}>{label}</span>
+          {expanded && count > 0 ? (
+            <span className={styles.conversationGroupCount} title={countLabel}>{countLabel}</span>
+          ) : null}
+          {activity}
+        </span>
       </VNativeButton>
       {expanded ? (
         <div

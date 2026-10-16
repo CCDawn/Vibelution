@@ -382,6 +382,7 @@ export function ChatConversationIndexPanel({
         {pinned.length ? (
           <ConversationIndexSection
             count={pinned.length}
+            countLabel={lang === "zh" ? `${pinned.length} 个会话` : `${pinned.length} sessions`}
             expanded={!railSectionCollapsed.sessionListPinned}
             label={t("sessionListPinnedSection")}
             onToggle={() => toggleRailSection("sessionListPinned")}
@@ -393,6 +394,7 @@ export function ChatConversationIndexPanel({
           <ConversationIndexSection
             key={group.bucket}
             count={group.sessions.length}
+            countLabel={lang === "zh" ? `${group.sessions.length} 个会话` : `${group.sessions.length} sessions`}
             expanded={!railSectionCollapsed[`sessionListTimeline:${group.bucket}`]}
             label={timelineBucketLabel(group.bucket)}
             onToggle={() => toggleRailSection(`sessionListTimeline:${group.bucket}`)}

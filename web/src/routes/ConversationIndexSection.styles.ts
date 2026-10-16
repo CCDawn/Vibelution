@@ -1,11 +1,12 @@
 const styles = {
   conversationGroupIdentity: "flex min-w-0 items-center gap-2",
   conversationGroupLabel: "truncate",
+  conversationGroupCount: "conversationGroupCount shrink-0 [font-size:var(--vui-font-xs)] font-normal tabular-nums text-[var(--fg-tertiary)]",
   conversationGroup:
     "vui-routes-chatcodingroute conversationGroup grid min-w-0 gap-1.5",
   // surface-role: hover-fill — transparent idle; hover uses theme card token (no structure wash)
   conversationGroupHeader:
-    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[var(--vui-control-height-md)] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--radius-control)] !border-0 [border:0] bg-transparent px-1.5 py-0 text-left [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none transition-colors hover:border-transparent hover:!bg-vui-surface-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [&_svg]:text-[var(--fg-tertiary)] [&_svg]:transition-transform [&[aria-expanded=true]_svg]:rotate-90 [&_span]:min-w-0 [&_span]:truncate [&_strong]:min-w-4 [&_strong]:text-right [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[var(--vui-control-height-md)] grid-cols-[14px_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius-control)] !border-0 [border:0] bg-transparent px-1.5 py-0 text-left [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none transition-colors hover:border-transparent hover:!bg-vui-surface-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [&_svg]:text-[var(--fg-tertiary)] [&_svg]:transition-transform [&[aria-expanded=true]_svg]:rotate-90 [&_span]:min-w-0 [&_span]:truncate",
   conversationGroupList:
     "vui-routes-chatcodingroute conversationGroupList grid min-w-0 gap-1.5 pl-1",
 } as const;

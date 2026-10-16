@@ -123,22 +123,6 @@ export function isSessionMoreRecent(
     > String(previous.updatedAt || previous.lastActive || "");
 }
 
-export function agentDirectorySessionCount(
-  agent: AgentInstance,
-  knownSessionCount: number,
-  knownSessionIds: ReadonlySet<string>,
-) {
-  const sessionCount = Math.max(0, knownSessionCount);
-  const directSessionId = String(agent.directSessionId || "").trim();
-  const directSessionVisibility = String(agent.metadata?.directSessionVisibility || "").trim();
-  const hasUnindexedActiveDirectSession = (
-    Boolean(directSessionId)
-    && directSessionVisibility === "active_session"
-    && !knownSessionIds.has(directSessionId)
-  );
-  return sessionCount + (hasUnindexedActiveDirectSession ? 1 : 0);
-}
-
 function agentActivityClass(tone: SessionActivityTone) {
   if (tone === "running") {
     return styles.agentActivityRunning;
@@ -213,8 +197,6 @@ export function AgentConversationDirectory({
   const runtimeSessionIds = new Set(
     runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
   );
-  const sessionCountByAgentId = new Map<string, number>();
-  const sessionIdsByAgentId = new Map<string, Set<string>>();
   const sessionsByAgentId = new Map<string, SessionSummary[]>();
   const latestSessionByAgentId = new Map<string, SessionSummary>();
   for (const session of sessions) {
@@ -222,13 +204,6 @@ export function AgentConversationDirectory({
     if (!agentId) {
       continue;
     }
-    sessionCountByAgentId.set(agentId, (sessionCountByAgentId.get(agentId) || 0) + 1);
-    const sessionIds = sessionIdsByAgentId.get(agentId) || new Set<string>();
-    const sessionId = String(session.id || "").trim();
-    if (sessionId) {
-      sessionIds.add(sessionId);
-    }
-    sessionIdsByAgentId.set(agentId, sessionIds);
     const agentSessions = sessionsByAgentId.get(agentId) || [];
     agentSessions.push(session);
     sessionsByAgentId.set(agentId, agentSessions);
@@ -277,19 +252,13 @@ export function AgentConversationDirectory({
     const agentId = String(agent.agentId || "").trim();
     const latestSession = latestSessionByAgentId.get(agentId);
     const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
-    const sessionCount = agentDirectorySessionCount(
-      agent,
-      sessionCountByAgentId.get(agentId) || 0,
-      sessionIdsByAgentId.get(agentId) || new Set<string>(),
-    );
     const active = agentId === activeAgentId;
     const avatarUrl = String(agent.avatarImageUrl || "").trim();
     const activityTone = activityByAgentId.get(agentId) || "none";
     const activityLabel = sessionActivityLabel(activityTone, lang);
     const modelLabel = display.modelLabel || (lang === "zh" ? "未配置模型" : "No model");
     const subtitle = showRole && display.functionLabel !== display.name ? display.functionLabel : modelLabel;
-    const sessionCountLabel = lang === "zh" ? `${sessionCount} 个会话` : `${sessionCount} sessions`;
-    const details = [display.name, display.functionLabel, modelLabel, sessionCountLabel,
+    const details = [display.name, display.functionLabel, modelLabel,
       latestSession ? formatTime(latestSession.updatedAt || latestSession.lastActive) : "",
       activityTone !== "none" ? activityLabel : "",
     ].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(" · ");
@@ -339,9 +308,8 @@ export function AgentConversationDirectory({
           data-agent-status-slot
           aria-label={activityTone !== "none" ? activityLabel : undefined}
           title={activityTone !== "none" ? activityLabel : undefined}
-          aria-hidden={activityTone === "none" && sessionCount <= 1 ? true : undefined}
+          aria-hidden={activityTone === "none" ? true : undefined}
         >
-          {sessionCount > 1 ? <span className={styles.agentMetaCount} aria-label={sessionCountLabel}>{sessionCount}</span> : null}
           {renderActivity(activityTone)}
         </span>
       </VButton>
