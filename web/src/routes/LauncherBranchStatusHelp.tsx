@@ -6,7 +6,7 @@ import type { InstanceRuntimeState } from "./LauncherBranchInstancesPanel.model"
 import {
   cleanupRecommendation,
   gitStatusExplanation,
-  runtimeStatusExplanation,
+  runtimeProgressExplanation,
 } from "./LauncherBranchStatusHelp.model";
 import styles from "./LauncherBranchStatusHelp.styles";
 
@@ -26,7 +26,7 @@ export function LauncherBranchStatusHelp({
   kind,
 }: LauncherBranchStatusHelpProps) {
   const explanation = kind === "runtime"
-    ? runtimeStatusExplanation(state, isZh)
+    ? runtimeProgressExplanation(item, state, isZh)
     : gitStatusExplanation(item, isZh);
   const recommendation = cleanupRecommendation(item, state, isZh);
   const content = `${explanation} ${recommendation.label}${isZh ? "：" : ": "}${recommendation.reason}`;

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Activity, ArrowLeft, ChevronRight, Copy, Folder, GitBranch, Monitor } from "lucide-react";
 import type { LauncherBranchInstance } from "../api/launcher";
 import { VButton, VChip, VRouteLinkButton, VSurface, VTabs } from "../components/vui";
-import { formatBackendStatus, formatFrontendStatus, formatGitStatus, instanceRuntimeState, instanceVisibleStatusLabel, instanceWindowOpen, type LifecyclePendingInput } from "./LauncherBranchInstancesPanel.model";
+import { formatBackendStatus, formatFrontendStatus, formatGitStatus, instanceProgressLabel, instanceRuntimeState, instanceVisibleStatusLabel, instanceWindowOpen, type LifecyclePendingInput } from "./LauncherBranchInstancesPanel.model";
 import { copyLauncherRegistryDiagnostics } from "./launcherRegistryDiagnostics";
 import styles from "./LauncherBranchDetailPanel.styles";
 
@@ -38,7 +38,7 @@ export function LauncherBranchDetailPanel({ item, zh, pending, actions, onBack }
     <div className={styles.headingRow}>
       <div className={styles.title}><span className={styles.branchIcon}><GitBranch size={20} aria-hidden="true" /></span><div className={styles.titleBody}>
         <h1 className={styles.heading}>{launcherBranchDisplayName(item)}</h1>
-        <div className={styles.metadata}><VChip className={styles.statusChip} tone={state === "running" ? "success" : state === "failed" ? "danger" : state === "partial" ? "warning" : state === "stopped" ? "neutral" : "info"}>{instanceVisibleStatusLabel(item, state, zh)}</VChip><span>{item.current ? (zh ? "主工作区" : "Main workspace") : (zh ? "独立工作区" : "Isolated workspace")}</span></div>
+        <div className={styles.metadata}><VChip className={styles.statusChip} tone={state === "running" ? "success" : state === "failed" ? "danger" : state === "partial" ? "warning" : state === "stopped" ? "neutral" : "info"}>{instanceProgressLabel(item, state, zh)}</VChip><span>{item.current ? (zh ? "主工作区" : "Main workspace") : (zh ? "独立工作区" : "Isolated workspace")}</span></div>
       </div></div>
       <div className={styles.actions}>{actions}</div>
     </div>
@@ -50,7 +50,7 @@ export function LauncherBranchDetailPanel({ item, zh, pending, actions, onBack }
           <h2 className={styles.sectionHeading}><Monitor size={16} aria-hidden="true" />{zh ? "运行情况" : "Runtime"}</h2>
           <p className={styles.hint}>{zh ? "工作台、服务与构建状态" : "Workbench, services and build status"}</p>
           <Facts items={[
-            [zh ? "运行状态" : "Runtime", instanceVisibleStatusLabel(item, state, zh)],
+            [zh ? "运行状态" : "Runtime", instanceProgressLabel(item, state, zh)],
             [zh ? "窗口状态" : "Window", instanceWindowOpen(item) ? (zh ? "已打开" : "Open") : (zh ? "未打开" : "Closed")],
             [zh ? "后端" : "Backend", formatBackendStatus(item, zh)],
             [zh ? "前端" : "Frontend", formatFrontendStatus(item, zh)],

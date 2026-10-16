@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { LauncherBranchInstance } from "../api/launcher";
+import { resetInstanceProgressForTests } from "./LauncherBranchInstancesPanel.model";
 import {
   cleanupRecommendation,
   gitStatusExplanation,
+  runtimeProgressExplanation,
   runtimeStatusExplanation,
 } from "./LauncherBranchStatusHelp.model";
 import helpSource from "./LauncherBranchStatusHelp.tsx?raw";
@@ -80,6 +82,23 @@ describe("Launcher branch status help", () => {
     expect(recommendation.reason).toContain("关闭失败记录");
     expect(recommendation.reason).not.toContain("先停止实例");
     expect(runtimeStatusExplanation("failed", true)).toContain("不必重启");
+  });
+
+  it("does not explain the post-build open as another 正在启动", () => {
+    resetInstanceProgressForTests();
+    const id = "worktree:opening";
+    const building = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "building", phase: "building" },
+    });
+    const starting = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "starting", phase: "opening" },
+    });
+    expect(runtimeProgressExplanation(building, "building", true)).toContain("正在构建");
+    expect(runtimeProgressExplanation(starting, "starting", true)).toBe("前端这一步已经结束，正在打开工作台。");
+    expect(runtimeProgressExplanation(starting, "starting", true)).not.toContain("正在启动");
+    resetInstanceProgressForTests();
   });
 
   it("explains runtime and Git labels in plain language", () => {

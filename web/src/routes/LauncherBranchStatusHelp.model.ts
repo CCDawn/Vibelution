@@ -1,5 +1,5 @@
 import type { LauncherBranchInstance } from "../api/launcher";
-import { instanceHasLiveRuntime, type InstanceRuntimeState } from "./LauncherBranchInstancesPanel.model";
+import { instanceHasLiveRuntime, instanceProgressLabel, type InstanceRuntimeState } from "./LauncherBranchInstancesPanel.model";
 
 export type CleanupRecommendationLevel = "recommended" | "review" | "avoid";
 
@@ -31,6 +31,23 @@ export function runtimeStatusExplanation(state: InstanceRuntimeState, isZh: bool
     stopped: "This instance currently has no running components.",
   };
   return (isZh ? zh : en)[state];
+}
+
+export function runtimeProgressExplanation(
+  item: { id?: string | null; kind?: string | null; runtime?: { lifecycleState?: string | null } | null },
+  state: InstanceRuntimeState,
+  isZh: boolean,
+): string {
+  const label = instanceProgressLabel(item, state, isZh);
+  if (label === (isZh ? "正在打开" : "Opening")) {
+    return isZh
+      ? "前端这一步已经结束，正在打开工作台。"
+      : "That step finished. The workbench is opening.";
+  }
+  if (label === (isZh ? "构建中" : "Building")) {
+    return runtimeStatusExplanation("building", isZh);
+  }
+  return runtimeStatusExplanation(state, isZh);
 }
 
 export function gitStatusExplanation(item: LauncherBranchInstance, isZh: boolean): string {

@@ -23,7 +23,9 @@ import {
   canRequestOpenInstance,
   instanceRuntimeState,
   instanceRuntimeStateLabel,
+  instanceProgressLabel,
   instanceVisibleStatusLabel,
+  resetInstanceProgressForTests,
   instanceStopLabel,
   isCleanupEligible,
   deriveCleanupRisks,
@@ -1107,6 +1109,41 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy");
   });
 
+  it("does not return to 正在启动 after the frontend build step", () => {
+    resetInstanceProgressForTests();
+    const id = "worktree:progress";
+    const closed = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "closed" },
+    });
+    const building = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "building", phase: "building" },
+    });
+    const starting = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "starting", phase: "opening" },
+    });
+    const pending = { instanceId: id, operation: "start" as const };
+    expect(instanceRuntimeState(closed, pending)).toBe("starting");
+    expect(instanceProgressLabel(closed, "starting", true)).toBe("构建中");
+    expect(instanceProgressLabel(building, "building", true)).toBe("构建中");
+    expect(instanceRuntimeState(starting, pending)).toBe("starting");
+    expect(instanceProgressLabel(starting, "starting", true)).toBe("正在打开");
+    expect(instanceProgressLabel(starting, "starting", false)).toBe("Opening");
+    const running = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "running" },
+    });
+    expect(instanceProgressLabel(running, "running", true)).toBe("正常运行");
+    const again = instance({
+      id,
+      runtime: { ...instance().runtime, lifecycleState: "starting", phase: "opening" },
+    });
+    expect(instanceProgressLabel(again, "starting", true)).toBe("正在启动");
+    resetInstanceProgressForTests();
+  });
+
   it("keeps the optimistic starting label for a starting payload with a start intent", () => {
     // Regression: only the building payload overrides the pending intent; a
     // payload that already started keeps the existing optimistic semantics.
@@ -1130,7 +1167,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(instanceVisibleStatusLabel(retired, "stopped", true)).toBe("已退役");
     expect(instanceVisibleStatusLabel(retired, "stopped", false)).toBe("Retired");
     expect(instanceVisibleStatusLabel(instance({ kind: "worktree" }), "stopped", true)).toBe("已停止");
-    expect(panelSource).toContain("instanceVisibleStatusLabel(item, state, zh)");
+    expect(panelSource).toContain("instanceProgressLabel(item, state, zh)");
+    expect(detailSource).toContain("instanceProgressLabel(item, state, zh)");
     expect(detailSource).toContain("instanceVisibleStatusLabel(item, state, zh)");
     expect(detailSource).not.toContain("instanceRuntimeStateLabel(state, zh)");
   });

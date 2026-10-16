@@ -18,7 +18,7 @@ import {
   groupBranchInstances,
   instanceRuntimeState,
   instanceRuntimeStateLabel,
-  instanceVisibleStatusLabel,
+  instanceProgressLabel,
   instanceStopLabel,
   instanceWindowOpen,
   isAdmissionBlocked,
@@ -567,7 +567,7 @@ export function LauncherBranchInstancesPanel({
         const state = instanceRuntimeState(item, pendingOperation);
         return <div className={styles.runtimeStack}>
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
-            <span className={state === "running" ? styles.runtimeRunning : state === "failed" ? styles.runtimeFailed : styles.runtimeOther}>{instanceVisibleStatusLabel(item, state, zh)}</span>
+            <span className={state === "running" ? styles.runtimeRunning : state === "failed" ? styles.runtimeFailed : styles.runtimeOther}>{instanceProgressLabel(item, state, zh)}</span>
           </LauncherBranchStatusHelp>
           {state === "running" && !instanceWindowOpen(item) ? (
             // The window hint only adds information when it contradicts a live

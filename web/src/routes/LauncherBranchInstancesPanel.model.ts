@@ -514,6 +514,51 @@ export function instanceVisibleStatusLabel(
   return instanceRuntimeStateLabel(state, isZh);
 }
 
+const buildSeenByInstance = new Map<string, true>();
+
+export function resetInstanceProgressForTests(): void {
+  buildSeenByInstance.clear();
+}
+
+function sawFrontendBuild(instanceId: string, state: InstanceRuntimeState): boolean {
+  const id = String(instanceId || "");
+  const seen = buildSeenByInstance.has(id);
+  if (state === "building") {
+    if (id) {
+      buildSeenByInstance.set(id, true);
+    }
+    return true;
+  }
+  if (state !== "starting" && state !== "restarting") {
+    buildSeenByInstance.delete(id);
+  }
+  return seen;
+}
+
+/**
+ * One start moves forward. The click lands before the build gate reports, so
+ * that gap stays on 构建中 instead of flashing 正在启动. After the gate has
+ * been seen, the following start/restart does not return to 正在启动.
+ */
+export function instanceProgressLabel(
+  item: { id?: string | null; kind?: string | null; runtime?: { lifecycleState?: string | null } | null },
+  state: InstanceRuntimeState,
+  isZh: boolean,
+): string {
+  const sawBuild = sawFrontendBuild(String(item.id || ""), state);
+  const payload = String(item.runtime?.lifecycleState || "");
+  const beforeReportedStart = (state === "starting" || state === "restarting")
+    && payload !== "starting"
+    && payload !== "restarting";
+  if (state === "building" || beforeReportedStart) {
+    return instanceVisibleStatusLabel(item, "building", isZh);
+  }
+  if (sawBuild && (state === "starting" || state === "restarting")) {
+    return isZh ? "正在打开" : "Opening";
+  }
+  return instanceVisibleStatusLabel(item, state, isZh);
+}
+
 export function isOperableInstance(item: LauncherBranchInstance): boolean {
   return Boolean(item.checkedOut && (item.kind === "main" || item.kind === "worktree"));
 }
