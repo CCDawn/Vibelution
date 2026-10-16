@@ -3,10 +3,10 @@ import { VSplitWorkspace } from "../components/vui/layout/VSplitWorkspace";
 import { VWorkbenchFrame } from "../components/vui/layout/VWorkbenchFrame";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { collapseProjectUtilityRail, openProjectUtilityRail, useProjectUtilityRail } from "./projectUtilityRail";
-import { projectTaskCount } from "./projectTaskCount";
+import { countedRuntimeTasks, projectTaskCount } from "./projectTaskCount";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
   Bell,
@@ -30,7 +30,7 @@ import {
 import { fetchPublicConfig } from "../api/config";
 import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
-import { listRuntimeTasksRevisionAware, type RuntimeTaskListPayload } from "../api/runtimeTasks";
+import { childSessionHref, listRuntimeTasksRevisionAware, type RuntimeTaskCard, type RuntimeTaskListPayload } from "../api/runtimeTasks";
 import {
   agentBroadcastEventTimeMs,
   readStoredAgentBroadcastReadAtMs,
@@ -100,6 +100,7 @@ import {
   pickPrimarySystemStatusCard,
   runtimeControllerTone,
   shouldRenderStartupOverlay,
+  type ActiveWorkIndicatorItem,
   type SystemStatusCard,
   type SystemStatusTone,
 } from "./systemStatus";
@@ -150,6 +151,7 @@ import {
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
 import { useStableBeforeUnload } from "./useStableBeforeUnload";
+import { VStatusChip, type VStatusTone } from "../components/vui/aesthetic/VStatusChip";
 import { VButton } from "../components/vui/primitives/VButton";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { VPopover } from "../components/vui/primitives/VPopover";
@@ -216,11 +218,34 @@ export function isShellPrimaryNavActive(pathname: string, to: string): boolean {
   return path === target || path.startsWith(`${target}/`);
 }
 
+function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
+  if (tone === "running") return "success";
+  if (tone === "caution") return "warning";
+  if (tone === "failed") return "danger";
+  return "neutral";
+}
+
 function systemToneToDotClass(tone: SystemStatusTone): string {
   if (tone === "running") return styles.status_running;
   if (tone === "caution") return styles.status_caution;
   if (tone === "failed") return styles.status_failed;
   return styles.status_muted;
+}
+
+function runtimeTaskMenuItem(task: RuntimeTaskCard): ActiveWorkIndicatorItem {
+  const label = String(task.title || "").trim() || String(task.taskId || "").trim();
+  const summary = String(task.summary || "").trim();
+  return {
+    kind: "chat",
+    label,
+    summary,
+    fullSummary: summary,
+    status: String(task.status || "running"),
+    runId: String(task.taskId || ""),
+    href: childSessionHref(String(task.childSessionId || "")),
+    detail: label,
+    tone: "running",
+  };
 }
 
 function shellPrimaryNavClass(pathname: string, to: string) {
@@ -1073,7 +1098,7 @@ export function shouldTreatShutdownAsLocallyComplete({
 }
 
 export function AppShell() {
-  const { lang, t } = useShellI18n();
+  const { lang, t, statusLabel } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
   // Router context still updates Outlet; shell polling must not recreate its element.
@@ -1103,6 +1128,7 @@ export function AppShell() {
   const projectUtilityFallback = projectUtilities.opened && !projectUtilities.hosted;
   const projectUtilityOverlay = compactProjectUtilities || location.pathname.startsWith("/finance") || location.pathname === "/chat" || location.pathname === "/personal-assistant";
   const [utilityOpen, setUtilityOpen] = useState(false);
+  const [activeWorkOpen, setActiveWorkOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
@@ -1506,6 +1532,10 @@ export function AppShell() {
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const activeWorkUnavailable = !runtimeQuery.data && (backendHealthQuery.isError || configQuery.isError || runtimeQuery.isError);
   const activeWorkLoading = !runtimeQuery.data && !activeWorkUnavailable;
+  const shellRunningTasks = shellAuxTasksQuery.data?.running ?? [];
+  const taskMenuRuntimeTasks = countedRuntimeTasks(activeWorkIndicator, shellRunningTasks);
+  const activeWorkCountDisplay = activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : String(projectTaskCount(activeWorkIndicator, shellRunningTasks));
+  const activeWorkStaleFailures = activeWorkIndicator?.staleFailures ?? [];
   // Human-readable only (no raw session ids). Used for shutdown copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
@@ -1558,9 +1588,32 @@ export function AppShell() {
     setUtilityOpen(false);
     setMobileNavigationOpen(false);
   }, []);
+  const closeActiveWorkMenu = useCallback(() => {
+    setActiveWorkOpen(false);
+  }, []);
   useEffect(() => {
     closeUtilityMenu();
+    setActiveWorkOpen(false);
   }, [location.key, closeUtilityMenu]);
+  // One click switches the task menu and the settings menu, including on touch.
+  // The timer is cleared when either popover's open state changes or the shell
+  // unmounts, so a click elsewhere cannot reopen a menu after the switch was abandoned.
+  const popoverSwitchTimerRef = useRef<number | null>(null);
+  const clearPopoverSwitchTimer = useCallback(() => {
+    if (popoverSwitchTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(popoverSwitchTimerRef.current);
+    popoverSwitchTimerRef.current = null;
+  }, []);
+  useEffect(() => clearPopoverSwitchTimer, [clearPopoverSwitchTimer]);
+  const schedulePopoverSwitch = useCallback((open: () => void) => {
+    clearPopoverSwitchTimer();
+    popoverSwitchTimerRef.current = window.setTimeout(() => {
+      popoverSwitchTimerRef.current = null;
+      open();
+    }, 80);
+  }, [clearPopoverSwitchTimer]);
 
   const frontendStateLabel = {
     connected: t("systemFrontend_connected"),
@@ -2819,6 +2872,34 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.backendHealth() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
   }, [emitBrowserTelemetry, queryClient]);
+  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem, index: number) => {
+    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
+    const detailCopy = (
+      <div className={styles.activeWorkDetailCopy}>
+        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
+        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
+      </div>
+    );
+    return (
+      <li key={`${item.kind}-${item.runId || item.status}-${index}`} className={styles.activeWorkDetailItem}>
+        <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass(item.tone)}`} aria-hidden="true" />
+        {item.href ? (
+          <Link
+            className={styles.activeWorkDetailLink}
+            to={item.href}
+            aria-label={item.staleFailure ? `${detailAria} · ${t("activeWorkStaleFailureHint")}` : detailAria}
+            title={item.staleFailure ? t("activeWorkStaleFailureHint") : undefined}
+            onClick={closeActiveWorkMenu}
+          >
+            {detailCopy}
+          </Link>
+        ) : detailCopy}
+        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
+          {statusLabel(item.status)}
+        </VStatusChip>
+      </li>
+    );
+  };
 
   return (
     <div
@@ -3028,18 +3109,76 @@ export function AppShell() {
           </VPopover>
         ) : null}
         <div className={styles.activeWorkSlot} data-shell-group="active-work">
-          <VButton type="button" variant="ghost" contentLayout="plain" className={styles.activeWorkTrigger}
-            aria-label={lang === "en" ? "Tasks" : "任务"}
-            aria-pressed={projectUtilities.opened && projectUtilities.selected && projectUtilities.model.activeId === "project_tasks"}
-            title={`${activeConversationsLabel} · ${statusSummaryTitle}`}
-            onPress={() => { closeUtilityMenu(); openProjectUtilityRail("project_tasks"); }}>
-            <span className={styles.activeWorkTriggerContent}>
-              <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} aria-hidden="true" />
-              <span>{lang === "en" ? "Tasks" : "任务"}</span>
-              <strong>{activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : projectTaskCount(activeWorkIndicator, shellAuxTasksQuery.data?.running ?? [])}</strong>
-              <ChevronDown size={13} aria-hidden="true" />
-            </span>
-          </VButton>
+          <VPopover
+            open={activeWorkOpen}
+            onOpenChange={(open) => {
+              clearPopoverSwitchTimer();
+              setActiveWorkOpen(open);
+              if (open) closeUtilityMenu();
+            }}
+            align="end"
+            side="bottom"
+            sideOffset={8}
+            aria-label={activeConversationsLabel}
+            contentClassName={styles.activeWorkPopoverContent}
+            trigger={(
+              <VButton
+                type="button"
+                variant="ghost"
+                contentLayout="plain"
+                className={styles.activeWorkTrigger}
+                aria-expanded={activeWorkOpen}
+                aria-label={lang === "en" ? "Tasks" : "任务"}
+                title={`${activeConversationsLabel} · ${statusSummaryTitle}`}
+                onPointerDownCapture={() => {
+                  if (utilityOpen) schedulePopoverSwitch(() => setActiveWorkOpen(true));
+                  closeUtilityMenu();
+                }}
+              >
+                <span className={styles.activeWorkTriggerContent}>
+                  <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} aria-hidden="true" />
+                  <span>{lang === "en" ? "Tasks" : "任务"}</span>
+                  <strong>{activeWorkCountDisplay}</strong>
+                  <ChevronDown size={13} aria-hidden="true" />
+                </span>
+              </VButton>
+            )}
+          >
+            <section className={styles.activeWorkPanel} aria-label={activeConversationsLabel}>
+              <div className={styles.activeWorkDetailHeader}>
+                <strong>{activeConversationsLabel}</strong>
+                <span>{activeWorkUnavailable
+                  ? (lang === "en" ? "Unavailable" : "暂不可用")
+                  : activeWorkLoading
+                    ? (lang === "en" ? "Checking" : "正在检查")
+                    : `${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}`}</span>
+              </div>
+              {activeWorkIndicator?.items.length || taskMenuRuntimeTasks.length ? (
+                <ul className={styles.activeWorkDetailList}>
+                  {activeWorkIndicator?.items.map(renderActiveWorkItem)}
+                  {taskMenuRuntimeTasks.map((task, index) => renderActiveWorkItem(runtimeTaskMenuItem(task), (activeWorkIndicator?.items.length ?? 0) + index))}
+                </ul>
+              ) : null}
+              {activeWorkStaleFailures.length ? (
+                <div className={styles.activeWorkStaleSection}>
+                  <div className={styles.activeWorkStaleHeader}>
+                    <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass("caution")}`} aria-hidden="true" />
+                    <strong>{t("activeWorkStaleFailureSection")}</strong>
+                  </div>
+                  <ul className={styles.activeWorkDetailList}>
+                    {activeWorkStaleFailures.map(renderActiveWorkItem)}
+                  </ul>
+                </div>
+              ) : null}
+              {!activeWorkIndicator?.items.length && !taskMenuRuntimeTasks.length ? <p className={styles.activeWorkEmpty}>{activeWorkUnavailable
+                ? (lang === "en" ? "Unable to read active conversations." : "暂时无法读取进行中的会话。")
+                : activeWorkLoading
+                  ? (lang === "en" ? "Checking active conversations…" : "正在检查进行中的会话…")
+                  : activeWorkIndicator && activeWorkStaleFailures.length
+                    ? t("activeWorkEmptyStaleFailure")
+                    : t("activeWorkEmpty")}</p> : null}
+            </section>
+          </VPopover>
         </div>
       <div className={styles.settingsSlot} data-shell-group="settings">
         <VButton variant="ghost" className={styles.settingsTrigger} aria-label={lang === "en" ? "Changes" : "变更"} title={shellGitTriggerTitle}
@@ -3056,7 +3195,9 @@ export function AppShell() {
         <VPopover
           open={utilityOpen}
           onOpenChange={(open) => {
+            clearPopoverSwitchTimer();
             setUtilityOpen(open);
+            if (open) setActiveWorkOpen(false);
             if (!open) {
               setMobileNavigationOpen(false);
             }
@@ -3078,7 +3219,10 @@ export function AppShell() {
               title={settingsLabel}
               onPointerEnter={() => preloadSettingsSurfaceChunk("pointerenter", "settings-menu", { soft: true })}
               onFocus={() => preloadSettingsSurfaceChunk("focus", "settings-menu", { soft: true })}
-
+              onPointerDownCapture={() => {
+                if (activeWorkOpen) schedulePopoverSwitch(() => setUtilityOpen(true));
+                setActiveWorkOpen(false);
+              }}
             >
               <Settings size={17} aria-hidden="true" />
             </VButton>

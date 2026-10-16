@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RuntimeTaskCard } from "../api/runtimeTasks";
 import type { ActiveWorkIndicator, ActiveWorkIndicatorItem } from "./systemStatus";
-import { projectTaskCount } from "./projectTaskCount";
+import { countedRuntimeTasks, projectTaskCount } from "./projectTaskCount";
 
 function activeItem(overrides: Partial<ActiveWorkIndicatorItem> = {}): ActiveWorkIndicatorItem {
   return {
@@ -64,6 +64,18 @@ describe("projectTaskCount", () => {
       task({ taskId: "duplicate-task", childSessionId: "shared-session" }),
       task({ taskId: "unidentified-child", childSessionId: "", parentSessionId: "shared-session" }),
     ])).toBe(3);
+  });
+
+  it("lists the same extra runtime tasks the badge counts", () => {
+    const active = activeWork([activeItem({ href: "/chat?session=chat-session" })]);
+    const tasks = [
+      task({ taskId: "same-chat", childSessionId: "chat-session" }),
+      task({ taskId: "extra", childSessionId: "other-session", title: "Extra task" }),
+      task({ taskId: "extra", childSessionId: "other-session" }),
+    ];
+
+    expect(countedRuntimeTasks(active, tasks).map((item) => item.taskId)).toEqual(["extra"]);
+    expect(projectTaskCount(active, tasks)).toBe(2);
   });
 
   it("requires an exact /chat path before using a chat session query as deduplication evidence", () => {

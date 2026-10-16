@@ -30,16 +30,16 @@ describe("VPopover contract", () => {
     expect(shell).not.toContain("onMouseEnter={() => setUtilityOpen(true)}");
   });
 
-  it("AppShell routes active-work details through the project task rail", () => {
+  it("AppShell task control uses the title-bar popover", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     const projectUtilityPanel = readFileSync(resolve(vuiRoot, "../../routes/chat/ProjectUtilityPanel.tsx"), "utf8");
     const runtimeTasksPanel = readFileSync(resolve(vuiRoot, "../../routes/auxConversations/RuntimeTasksPanel.tsx"), "utf8");
 
-    expect(shell).toContain('openProjectUtilityRail("project_tasks")');
     expect(shell).toContain('data-shell-group="active-work"');
+    expect(shell).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shell).toContain("styles.activeWorkDetailLink");
+    expect(shell).not.toContain('openProjectUtilityRail("project_tasks")');
     expect(shell).not.toContain('data-vui="active-work-popover"');
-    expect(shell).not.toContain("contentClassName={styles.activeWorkPopoverContent}");
-    expect(shell).not.toContain("activeWorkDetailLink");
     expect(projectUtilityPanel).toContain("activeWork={deriveActiveWorkIndicator(runtime.data, lang)}");
     expect(runtimeTasksPanel).toContain("visibleActiveWork.map((item, index) => (");
     expect(runtimeTasksPanel).toContain("activeWorkSessionIdentity(item)");

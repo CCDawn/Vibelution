@@ -289,8 +289,9 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).not.toContain("filterUtilityFileTree");
     expect(appShellSource).not.toContain("renderUtilityFileTree");
     expect(appShellSource).not.toContain("utility-file-navigator");
-    // Top-bar tools select right-rail tabs; they do not switch pages or chats.
-    expect(appShellSource).toContain('openProjectUtilityRail("project_tasks")');
+    // Changes and notifications select right-rail tabs. Tasks open a dropdown.
+    expect(appShellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(appShellSource).not.toContain('openProjectUtilityRail("project_tasks")');
     expect(appShellSource).toContain('openProjectUtilityRail("project_git")');
     expect(appShellSource).toContain('openProjectUtilityRail("project_notices")');
     expect(appShellSource).not.toContain('to="/aux"');

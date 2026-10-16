@@ -308,11 +308,15 @@ describe("AppShell layout contract", () => {
     expect(shellDictionary.en.agentBroadcastUnread).toBe("new broadcasts");
   });
 
-  it("opens project tasks from the title bar with a deduplicated running count", () => {
+  it("opens the title-bar task menu as a dropdown with a deduplicated running count", () => {
     expect(shellSource).toContain('aria-label={lang === "en" ? "Tasks" : "任务"}');
-    expect(shellSource).toContain('projectUtilities.model.activeId === "project_tasks"');
-    expect(shellSource).toContain('openProjectUtilityRail("project_tasks")');
-    expect(shellSource).toContain("projectTaskCount(activeWorkIndicator, shellAuxTasksQuery.data?.running ?? [])");
+    expect(shellSource).toContain("open={activeWorkOpen}");
+    expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shellSource).toContain("countedRuntimeTasks(activeWorkIndicator, shellRunningTasks)");
+    expect(shellSource).toContain("projectTaskCount(activeWorkIndicator, shellRunningTasks)");
+    expect(shellSource).toContain("const shellRunningTasks = shellAuxTasksQuery.data?.running ?? [];");
+    expect(shellSource).not.toContain('openProjectUtilityRail("project_tasks")');
+    expect(shellSource).not.toContain('projectUtilities.model.activeId === "project_tasks"');
     expect(shellSource).not.toContain('to="/aux"');
     // Global active-only count source: revision-aware payload, gentle foreground
     // beat, no background churn, cache entry distinct from /aux and session strips.
@@ -443,16 +447,17 @@ describe("AppShell layout contract", () => {
     expect(styles.settingsPopoverContent).toContain("280px");
   });
 
-  it("moves active work details into the project task rail", () => {
-    expect(shellSource).toContain('openProjectUtilityRail("project_tasks")');
+  it("shows active work details in the title-bar task menu", () => {
+    expect(shellSource).toContain("renderActiveWorkItem");
+    expect(shellSource).toContain("activeWorkIndicator?.items.map(renderActiveWorkItem)");
+    expect(shellSource).toContain("taskMenuRuntimeTasks.map");
+    expect(shellSource).toContain("styles.activeWorkDetailLink");
+    expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shellSource).not.toContain('openProjectUtilityRail("project_tasks")');
     expect(projectUtilityPanelSource).toContain("activeWork={deriveActiveWorkIndicator(runtime.data, lang)}");
     expect(runtimeTasksPanelSource).toContain("visibleActiveWork.map");
     expect(runtimeTasksPanelSource).toContain("activeWorkSessionIdentity(item)");
     expect(runtimeTasksPanelSource).toContain("item.href");
-    expect(shellSource).not.toContain("activeWorkIndicator.items.map");
-    expect(shellSource).not.toContain("renderActiveWorkItem");
-    expect(shellSource).not.toContain("activeWorkDetailLink");
-    expect(shellSource).not.toContain("activeWorkPopoverContent");
   });
 
   it("tells the truth when the backend is half dead", () => {
@@ -511,12 +516,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("document.addEventListener(\"visibilitychange\", handleVisibleRefetch)");
   });
 
-  it("uses the project rail for task details instead of a second title-bar popover", () => {
-    expect(shellSource).toContain('openProjectUtilityRail("project_tasks")');
-    expect(shellSource).not.toContain("activeWorkOpen");
-    expect(shellSource).not.toContain("popoverSwitchTimerRef");
-    expect(shellSource).not.toContain("schedulePopoverSwitch");
-    expect(shellSource).not.toContain("renderActiveWorkItem");
+  it("switches the task menu and the settings menu with one click", () => {
+    expect(shellSource).toContain("activeWorkOpen");
+    expect(shellSource).toContain("popoverSwitchTimerRef");
+    expect(shellSource).toContain("schedulePopoverSwitch");
+    expect(shellSource).toContain("renderActiveWorkItem");
+    expect(shellSource).toContain("if (utilityOpen) schedulePopoverSwitch(() => setActiveWorkOpen(true))");
+    expect(shellSource).toContain("if (activeWorkOpen) schedulePopoverSwitch(() => setUtilityOpen(true))");
+    expect(shellSource).not.toContain('openProjectUtilityRail("project_tasks")');
   });
 
   it("uniquifies active-work rows inside the task rail", () => {
@@ -571,20 +578,21 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf('<header className={styles.topBar}>'),
       shellSource.indexOf("</header>"),
     );
-    expect(titleBar).toContain("projectTaskCount(activeWorkIndicator, shellAuxTasksQuery.data?.running ?? [])");
+    expect(titleBar).toContain("{activeWorkCountDisplay}");
     expect(titleBar).toContain("activeWorkSlot");
     expect(titleBar).toContain('data-shell-group="active-work"');
     expect(titleBar.indexOf('data-shell-group="window-drag-region"')).toBeLessThan(titleBar.indexOf('data-shell-group="active-work"'));
     expect(shellSource).toContain('activeWorkUnavailable ? "—"');
   });
 
-  it("keeps task details out of the title bar and within the project task rail", () => {
+  it("keeps the task dropdown inside the title bar", () => {
     const titleBar = shellSource.slice(
       shellSource.indexOf('<header className={styles.topBar}>'),
       shellSource.indexOf("</header>"),
     );
-    expect(titleBar).not.toContain("activeWorkIndicator.items");
-    expect(titleBar).not.toContain("activeWorkDetail");
+    expect(titleBar).toContain("styles.activeWorkPanel");
+    expect(titleBar).toContain("activeWorkIndicator?.items.map(renderActiveWorkItem)");
+    expect(titleBar).toContain("styles.activeWorkDetailList");
     expect(runtimeTasksPanelSource).toContain("activeWorkBlock");
     expect(runtimeTasksPanelSource).toContain("renderTaskDetail");
   });
