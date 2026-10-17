@@ -29,10 +29,7 @@ import type { ConversationImagePreviewRequest } from "./ConversationImagePreview
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
-import {
-  buildConversationTurnNavDirectory,
-  resolveConversationTurnNavCurrentIndex,
-} from "./conversationTurnNavigation";
+import { useConversationTurnNav } from "./useConversationTurnNav";
 import { buildConversationModelSwitchBoundaries } from "./conversationModelSwitch";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
@@ -214,38 +211,6 @@ async function copyTextToClipboard(text: string) {
   if (!copied) {
     throw new Error("copy failed");
   }
-}
-
-/** Turn navigator label source: the user's prompt, else the assistant answer. */
-function turnNavPreviewText(message: ConversationMessage | undefined): string {
-  if (!message) {
-    return "";
-  }
-  if (message.role === "user") {
-    return String((message as { content?: string }).content ?? "");
-  }
-  return assistantFinalAnswerText(message);
-}
-
-/**
- * Markdown-free single-line preview for the turn rail hover cards: same
- * extraction as the nav label, then fences/images/links/emphasis/headings
- * reduced to plain words so the card never shows raw markdown punctuation.
- */
-function turnNavPlainPreviewText(message: ConversationMessage | undefined): string {
-  const raw = turnNavPreviewText(message);
-  if (!raw) {
-    return "";
-  }
-  return raw
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/^\s{0,3}>\s?/gm, "")
-    .replace(/\*\*|__|~~|`/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 // Memo gate: with stable prop references from the route (memoized conversation
@@ -699,35 +664,6 @@ export const ConversationView = React.memo(function ConversationView({
     () => activeTimelineRowIdentities.map((identity) => identity.rowKey),
     [activeTimelineRowIdentities],
   );
-  // Turn navigation directory (minimap rail): one entry per conversation
-  // turn, derived from the same row identities the virtualizer keys on. The
-  // markdown-free preview map feeds the rail's VHoverCard content through the
-  // entries' userPreviewText / assistantPreviewText fields.
-  const timelineTurnNavPreviewTextByRowKey = useMemo(() => {
-    const previewTextByRowKey = new Map<string, string>();
-    activeTimelineRowIdentities.forEach((identity, index) => {
-      const previewText = turnNavPlainPreviewText(activeTimelineMessages[index]);
-      if (previewText) {
-        previewTextByRowKey.set(identity.rowKey, previewText);
-      }
-    });
-    return previewTextByRowKey;
-  }, [activeTimelineRowIdentities, activeTimelineMessages]);
-  const timelineTurnNavEntries = useMemo(
-    () => buildConversationTurnNavDirectory(
-      activeTimelineRowIdentities.map((identity, index) => ({
-        rowKey: identity.rowKey,
-        previewText: turnNavPreviewText(activeTimelineMessages[index]),
-      })),
-      {
-        fallbackLabel: lang === "zh"
-          ? (turnNumber: number) => `第 ${turnNumber} 轮`
-          : (turnNumber: number) => `Turn ${turnNumber}`,
-        previewTextByRowKey: timelineTurnNavPreviewTextByRowKey,
-      },
-    ),
-    [activeTimelineRowIdentities, activeTimelineMessages, lang, timelineTurnNavPreviewTextByRowKey],
-  );
   // Turn-envelope model-switch boundaries (ZCode parity): the user row that
   // opens a turn running on a different model than the previous turn-with-model
   // gets a hairline divider ("using X" / "switched from A to B"). Labels
@@ -799,18 +735,17 @@ export const ConversationView = React.memo(function ConversationView({
   for (let tailOffset = 0; tailOffset < timelineLiveTailMessages.length; tailOffset += 1) {
     timelineRowPlan.push({ index: timelineLiveTailStartIndex + tailOffset, virtualStartPx: null });
   }
-  // Minimap current-turn highlight: rebuilt every render like the row plan so
-  // scroll notifications stay live (virtual history + static live tail).
-  const timelineTurnNavCurrentIndex = resolveConversationTurnNavCurrentIndex({
-    entries: timelineTurnNavEntries,
+  // Turn navigator directory and live current index, beside the row plan so
+  // the minimap highlight reads the same virtualizer snapshot.
+  const {
+    timelineTurnNavEntries,
+    timelineTurnNavCurrentIndex,
+  } = useConversationTurnNav({
+    lang,
+    activeTimelineMessages,
+    activeTimelineRowIdentities,
     historyRowCount: timelineLiveTailStartIndex,
-    historyTotalSize: timelineVirtualizer.getTotalSize(),
-    scrollOffset: timelineVirtualizer.scrollOffset ?? 0,
-    viewportHeight: timelineVirtualizer.scrollRect?.height ?? 0,
-    rowIndexAtOffset: (offset) => {
-      const item = timelineVirtualizer.getVirtualItemForOffset(offset);
-      return item ? item.index : null;
-    },
+    timelineVirtualizer,
   });
 
   const activeConversationMessagesById = useMemo(() => {
