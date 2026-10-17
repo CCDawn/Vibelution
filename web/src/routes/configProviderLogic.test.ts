@@ -310,6 +310,29 @@ describe("configProviderLogic", () => {
     expect(provider.discovery).toEqual({ mode: "manual", adapter: "openai_compatible" });
   });
 
+  it.each(["https://relay.example/google/v1beta/openai", "https://another.example/v1beta/openai/"])("rebinds Gemini discovery to the edited endpoint %s", (baseUrl) => {
+    const provider = buildProviderWizardDraft({
+      ...initialProviderWizardState(), driver: "openai", baseUrl,
+    }, {
+      driver: "openai", base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      discovery: { adapter: "gemini", cache_ttl_seconds: 300, models_url_override: "https://generativelanguage.googleapis.com/v1beta/models" },
+    });
+    expect(provider.discovery).toEqual({
+      mode: "auto", adapter: "gemini", cache_ttl_seconds: 300,
+      models_url_override: `${baseUrl.replace(/\/+$/, "").replace(/\/openai$/, "")}/models`,
+    });
+  });
+
+  it("updates discovery protocol and drops the template endpoint override when the driver changes", () => {
+    const provider = buildProviderWizardDraft({
+      ...initialProviderWizardState(), driver: "anthropic", baseUrl: "https://relay.example/v1",
+    }, {
+      driver: "openai", base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      discovery: { adapter: "gemini", models_url_override: "https://generativelanguage.googleapis.com/v1beta/models" },
+    });
+    expect(provider.discovery).toEqual({ mode: "auto", adapter: "anthropic" });
+  });
+
   it("does not fabricate deployment for a non-local provider", () => {
     const provider = buildProviderWizardDraft({
       ...initialProviderWizardState(),

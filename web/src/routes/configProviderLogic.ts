@@ -514,6 +514,28 @@ export function buildProviderWizardDraft(
   if (state.serviceClass !== "local_runtime") {
     delete source.deployment;
   }
+  const discovery = { ...asRecord(source.discovery) };
+  const driverChanged = !!asString(source.driver) && source.driver !== state.driver;
+  const endpointChanged = asString(source.base_url).trim().replace(/\/+$/, "") !== state.baseUrl.trim().replace(/\/+$/, "");
+  if (driverChanged) {
+    discovery.adapter = state.driver === "anthropic" ? "anthropic" : state.driver === "gemini" ? "gemini" : "openai_compatible";
+  }
+  if (driverChanged || endpointChanged) {
+    // Template overrides must never send the new service's credential to the old host.
+    delete discovery.models_url_override;
+    if (discovery.adapter === "gemini") {
+      try {
+        const endpoint = new URL(state.baseUrl);
+        const path = endpoint.pathname.replace(/\/+$/, "").replace(/\/openai$/, "");
+        endpoint.pathname = `${path.endsWith("/v1beta") ? path : `${path}/v1beta`}/models`;
+        endpoint.search = "";
+        endpoint.hash = "";
+        discovery.models_url_override = endpoint.toString();
+      } catch {
+        // The backend reports an invalid address without retaining a stale override.
+      }
+    }
+  }
   return {
     ...source,
     label: state.label,
@@ -525,8 +547,8 @@ export function buildProviderWizardDraft(
     requires_credential: state.authKind !== "none",
     protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
     discovery: {
-      ...asRecord(source.discovery),
-      mode: asString(asRecord(source.discovery).mode) || "auto",
+      ...discovery,
+      mode: asString(discovery.mode) || "auto",
     },
     ...(state.serviceClass === "local_runtime"
       ? {

@@ -115,6 +115,29 @@ describe("provider draft baseline and failure recovery", () => {
     expect(input.setProviderCredentialValue).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])("replaces a retry pin's protocol only in a new provider draft (saved provider %s)", async (saved) => {
+    const input = options();
+    const previous = { upstream_id: "Vendor/Model-A", wire_protocol: "chat_completions", interaction_contract: "old-contract" };
+    input.editBaselineRef.current.baseConfig = { llm: { providers: saved ? { relay: { models: {} } } : {} } };
+    input.providerDraftRequestRef.current!.publicConfig = { marker: "unrelated-edit", llm: { providers: {
+      relay: { models: { canonical: previous, unrelated: { upstream_id: "other" } } },
+    } } };
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    const model = { upstreamId: "Vendor/Model-A", modelRef: "relay/canonical", modelKey: "canonical", availability: "pinned" } as ConfigCatalogModel;
+    vi.mocked(pinDraftProviderModel).mockResolvedValue({
+      modelCatalog: { providers: { relay: { models: { canonical: model } } } },
+    } as ConfigWorkspace);
+    await run(input, async (actions) => {
+      await actions.handlePinManualProviderModel("relay", "Vendor/Model-A", { wire_protocol: "responses" });
+    });
+    const request = vi.mocked(pinDraftProviderModel).mock.calls[0][1];
+    expect(request.publicConfig).toEqual({ marker: "unrelated-edit", llm: { providers: {
+      relay: { models: { ...(saved ? { canonical: previous } : {}), unrelated: { upstream_id: "other" } } },
+    } } });
+    expect(request.overrides).toEqual({ wire_protocol: "responses" });
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+  });
+
   it.each(["request", "missing"])("rejects a manual pin %s failure without replacing draft or credentials", async (failure) => {
     const input = options();
     const original = structuredClone(input.providerDraftRequestRef.current);

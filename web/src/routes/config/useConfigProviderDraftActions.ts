@@ -258,9 +258,21 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     try {
       const modelId = upstreamId.trim();
       if (!modelId) throw new Error(copy.quickSetupFillModelFirst);
-      const response = await pinDraftProviderModel(providerId, buildProviderDraftRequest({
+      const request = buildProviderDraftRequest({
         providerId, upstreamId: modelId, modelKey: "", overrides,
-      }));
+      });
+      const baselineProviders = asRecord(asRecord(request.baseConfig?.llm).providers);
+      // A corrected protocol must replace this new provider's previous retry pin.
+      // Saved providers retain the backend's normal idempotent pin semantics.
+      if (request.baseConfig && !Object.prototype.hasOwnProperty.call(baselineProviders, providerId)) {
+        const nextConfig = clonePublicConfig(request.publicConfig);
+        const models = asRecord(asRecord(asRecord(asRecord(nextConfig.llm).providers)[providerId]).models);
+        for (const [key, entry] of Object.entries(models)) {
+          if (asRecord(entry).upstream_id === modelId) delete models[key];
+        }
+        request.publicConfig = nextConfig;
+      }
+      const response = await pinDraftProviderModel(providerId, request);
       const model = Object.values(response.modelCatalog?.providers?.[providerId]?.models ?? {})
         .find((item) => item.upstreamId === modelId && item.modelRef?.startsWith(`${providerId}/`));
       if (!model) throw new Error(copy.actionManualModelMissingMessage);

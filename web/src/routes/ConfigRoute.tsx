@@ -631,6 +631,7 @@ export function ConfigRoute() {
     return !showingSettingsIndex && (!requestedFocusSectionId || requestedFocusSectionId === sectionId)
       && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
+  const providerSetupVisible = isSectionVisible("models") && providerConnecting;
 
   const settingsNavCollapse = useConfigSettingsNavigationCollapse(
     isSectionVisible("models"),
@@ -1727,7 +1728,7 @@ export function ConfigRoute() {
               type="button"
               variant="primary"
               className={styles.primaryButton}
-              isDisabled={!canApplyConfigWorkspace || providerConnecting}
+              isDisabled={!canApplyConfigWorkspace || providerSetupVisible}
               title={!canApplyConfigWorkspace && hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
               onClick={() => {
                 void handleApply();
@@ -1782,7 +1783,7 @@ export function ConfigRoute() {
           </VSettingsGroupCard>
         ) : null}
 
-        {notice.text && !providerConnecting ? (
+        {notice.text && !providerSetupVisible ? (
           <div
             className={
               notice.tone === "error"
