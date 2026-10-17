@@ -161,6 +161,36 @@ def test_inspect_desktop_shell_source_newer_than_asar(tmp_path, monkeypatch):
     newer = tmp_path / "desktop" / "electron" / "src" / "main.ts"
     newer.write_text("export const next = 1;\n", encoding="utf-8")
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: None)
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+    assert status["stale"] is True
+    assert status["reason"] == "source_newer_than_asar"
+    assert status["launchBlocking"] is True
+
+
+def test_clean_electron_worktree_ignores_newer_timestamps(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=1_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    newer = tmp_path / "desktop" / "electron" / "src" / "main.ts"
+    newer.write_text("export const touched = 1;\n", encoding="utf-8")
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: False)
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+    assert status["stale"] is False
+    assert status["reason"] == "current"
+    assert status["launchBlocking"] is False
+
+
+def test_dirty_electron_worktree_is_source_newer_even_when_mtime_is_older(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    source = tmp_path / "desktop" / "electron" / "src" / "main.ts"
+    source.write_text("export const edited = 1;\n", encoding="utf-8")
+    os.utime(source, (1_000, 1_000))
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: True)
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is True
     assert status["reason"] == "source_newer_than_asar"
@@ -1282,6 +1312,7 @@ def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch
             self.pid = 88
 
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: None)
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
 
     def missing_git(_requested):
@@ -1375,6 +1406,7 @@ def test_launch_desktop_shell_forwards_hidden_presentation_to_electron_argv(tmp_
             self.pid = 88
 
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: None)
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
     monkeypatch.setattr(
         "core.infrastructure.branch_workspace.resolve_branch_workspace",
