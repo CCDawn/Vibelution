@@ -415,6 +415,160 @@ def test_actionable_retry_task_lands_directive_and_one_retry(
         harness.close()
 
 
+@pytest.mark.parametrize("skip_reason", ["planned", "active", "recent", "cooldown", "completed", "retry_pending"])
+def test_ineligible_first_run_does_not_starve_later_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, skip_reason: str
+) -> None:
+    from datetime import datetime, timezone
+    from core.web.services.team_workflow.research_runtime import (
+        stage_failure_planner as planner_module,
+        stage_task_remediation,
+    )
+
+    harness = _SweepHarness(tmp_path, monkeypatch, task=_base_task())
+    try:
+        first_run = replace(harness.child, run_id="run-z-skipped", thread_id="thread-skipped", created_at_ms=harness.child.created_at_ms + 1)
+        first_attempt = replace(harness.attempt, run_id=first_run.run_id, node_run_id="nr-skipped", command_id="cmd-skipped")
+        harness.runtime.store.submit(
+            lambda uow: (
+                uow.repository.insert_run(first_run),
+                uow.repository.insert_command(build_command_record(command_id="cmd-skipped", run_id=first_run.run_id, node_id=NODE_ID, idempotency_key="skipped")),
+                uow.repository.insert_attempt(first_attempt),
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        first_task = _base_task(taskId="task-skipped")
+        if skip_reason == "planned":
+            first_task["plannerDirective"] = {"recommendation": "rerun_source_finding"}
+        elif skip_reason == "active":
+            first_task["turn"] = {"status": "running"}
+        elif skip_reason == "recent":
+            first_task["updatedAt"] = datetime.now(timezone.utc).isoformat()
+        elif skip_reason == "completed":
+            first_task["status"] = "completed"
+        elif skip_reason == "retry_pending":
+            first_task["plannerDirective"] = {
+                "recommendation": "retry_task", "runId": first_run.run_id,
+                "nodeId": NODE_ID, "nodeRunId": first_attempt.node_run_id,
+            }
+            monkeypatch.setattr(harness.runtime.command_service, "submit", lambda _: (_ for _ in ()).throw(RuntimeError("still unavailable")))
+        else:
+            planner_module._mark_fail_open(first_run.run_id, first_attempt.node_run_id, now_ms=int(datetime.now(timezone.utc).timestamp() * 1000))
+        monkeypatch.setattr(stage_task_remediation, "source_stage_task_for_node_run", lambda **kwargs: dict(first_task if kwargs["node_run_id"] == "nr-skipped" else harness.task_state["task"]))
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_ESCALATE_VERDICT, calls=calls))
+        assert summary["escalated"] == 1
+        assert [scene["taskId"] for scene in calls] == ["stage-task-planner-1"]
+        assert harness.plan(_verdict_planner(_ESCALATE_VERDICT, calls=calls))["escalated"] == 0
+        assert len(calls) == 1
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("interruption", ["submit_failure", "version_race", "restart", "receipt_lost"])
+def test_persisted_retry_recovers_without_replanning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interruption: str
+) -> None:
+    from core.web.services.team_workflow.research_runtime.runtime_factory import build_workflow_runtime
+
+    harness = _SweepHarness(tmp_path, monkeypatch, task=_base_task())
+    calls: list[dict] = []
+    requests = []
+    original_submit = harness.runtime.command_service.submit
+
+    def interrupted_submit(request):
+        requests.append(request)
+        if interruption == "restart":
+            raise SystemExit("process stopped after directive persistence")
+        if interruption == "version_race":
+            harness.runtime.store.submit(
+                lambda uow: uow.repository.bump_run_version("run-planner", TEAM_ID, request.expected_run_version, 0, request.requested_at_ms),
+                force_flush=True,
+            ).result(timeout=10)
+            return original_submit(request)  # real optimistic version refusal
+        if interruption == "receipt_lost":
+            original_submit(request)
+        raise RuntimeError("retry transport interrupted")
+
+    monkeypatch.setattr(harness.runtime.command_service, "submit", interrupted_submit)
+    try:
+        planner = _verdict_planner(_RETRY_TASK_VERDICT, calls=calls)
+        if interruption == "restart":
+            with pytest.raises(SystemExit):
+                harness.plan(planner)
+            harness.runtime.close()
+            harness.runtime = build_workflow_runtime(tmp_path / "ledger.sqlite3", checkpoint_path=tmp_path / "checkpoints.sqlite3")
+            monkeypatch.setattr(harness.runtime.readiness, "evaluate", lambda **_: SimpleNamespace(ready=True, blockers=()))
+        else:
+            harness.plan(planner)
+            monkeypatch.setattr(harness.runtime.command_service, "submit", original_submit)
+        persisted = dict(harness.task_state["task"]["plannerDirective"])
+        summary = harness.plan(planner)
+        assert summary["retried"] == (0 if interruption == "receipt_lost" else 1)
+        latest = harness.runtime.store.latest_attempt("run-planner", NODE_ID)
+        assert latest.attempt == 2 and latest.retry_of_node_run_id == NODE_RUN_ID
+        assert len(calls) == 1
+        assert harness.task_state["task"]["plannerDirective"] == persisted
+        assert harness.plan(planner)["retried"] == 0
+        assert harness.runtime.store.latest_attempt("run-planner", NODE_ID).attempt == 2
+        assert len(calls) == 1
+        assert len(harness.upsert_calls) == 1
+        command = harness.runtime.store.get_command_by_idempotency("run-planner", requests[0].idempotency_key)
+        assert command is not None
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("change", ["new_attempt", "active_node", "running"])
+def test_retry_submission_rechecks_fresh_run_and_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    from core.web.services.team_workflow.research_runtime.stage_failure_planner import _submit_planner_retry
+
+    harness = _SweepHarness(tmp_path, monkeypatch, task=_base_task())
+    try:
+        def advance(uow):
+            repo = uow.repository
+            repo.bump_run_version("run-planner", TEAM_ID, harness.child.run_version, 0, 1_800_000_000_000)
+            if change == "new_attempt":
+                repo.insert_attempt(replace(harness.attempt, node_run_id="nr-newer", attempt=2))
+            else:
+                repo.update_run_status(
+                    "run-planner", TEAM_ID, "running" if change == "running" else "blocked",
+                    1_800_000_000_000, active_node_id="other-node" if change == "active_node" else NODE_ID,
+                )
+
+        harness.runtime.store.submit(advance, force_flush=True).result(timeout=10)
+        before = harness.runtime.store.get_run("run-planner")
+        submitted = []
+        monkeypatch.setattr(harness.runtime.command_service, "submit", submitted.append)
+        assert not _submit_planner_retry(
+            store=harness.runtime.store, command_service=harness.runtime.command_service,
+            run=harness.child, attempt=harness.attempt, node_id=NODE_ID, now_ms=1_800_000_000_001,
+        )
+        assert submitted == []
+        assert harness.runtime.store.get_run("run-planner") == before
+        assert harness.runtime.store.latest_attempt("run-planner", NODE_ID).attempt == (2 if change == "new_attempt" else 1)
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("field,value", [("runId", "other-run"), ("nodeId", "other-node"), ("nodeRunId", "older-attempt")])
+def test_mismatched_retry_directive_is_not_replanned_or_submitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: str
+) -> None:
+    directive = {"recommendation": "retry_task", "runId": "run-planner", "nodeId": NODE_ID, "nodeRunId": NODE_RUN_ID, field: value}
+    harness = _SweepHarness(tmp_path, monkeypatch, task=_base_task(plannerDirective=directive))
+    try:
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_RETRY_TASK_VERDICT, calls=calls))
+        assert (summary["planned"], summary["retried"]) == (0, 0)
+        assert calls == [] and harness.upsert_calls == []
+        assert harness.runtime.store.latest_attempt("run-planner", NODE_ID).attempt == 1
+    finally:
+        harness.close()
+
+
 def test_escalate_human_lands_anomaly_escalation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

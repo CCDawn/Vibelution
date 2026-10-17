@@ -21,8 +21,9 @@ LLM planner a bounded failure scene, and lands exactly one verdict:
   scene event (credential flapping must not spam the inbox).
 
 One planning attempt per task: tasks carrying ``plannerDirective`` or
-``anomalyEscalation`` are never re-planned, and the RETRY_NODE submission
-carries an attempt-scoped idempotency key so maintenance replays converge.
+``anomalyEscalation`` are never re-planned. A matching retry directive is a
+durable submission intent, recovered with the same attempt-scoped command
+identity after an interrupted submission.
 """
 
 from __future__ import annotations
@@ -310,11 +311,18 @@ def _submit_planner_retry(
 ) -> bool:
     """Submit exactly one idempotent RETRY_NODE for the planned attempt."""
 
-    fresh = store.get_run(run.run_id)
+    fresh, latest = store.read(
+        lambda repo: (repo.get_run(run.run_id), repo.latest_attempt(run.run_id, node_id))
+    )
     if (
         fresh is None
+        or fresh.team_id != run.team_id
         or str(fresh.status or "").strip() != "blocked"
-        or int(fresh.run_version) != int(run.run_version)
+        or str(fresh.active_node_id or "").strip() != node_id
+        or latest is None
+        or latest.node_run_id != attempt.node_run_id
+        or str(latest.status or "").strip() != "blocked"
+        or bool(str(latest.retry_of_node_run_id or "").strip())
     ):
         return False
     identity_hash = canonical_sha256(
@@ -325,6 +333,11 @@ def _submit_planner_retry(
             "reason": STAGE_FAILURE_PLANNER_REASON,
         }
     )
+    # A committed retry is already complete even if its caller lost the
+    # receipt. Do not replay it with a newer version and a different hash.
+    idempotency_key = f"stage-failure-planner:{identity_hash}"
+    if store.get_command_by_idempotency(run.run_id, idempotency_key) is not None:
+        return False
     command_service.submit(
         CommandRequest(
             command_id=f"cmd-stage-planner-{identity_hash[:24]}",
@@ -333,7 +346,7 @@ def _submit_planner_retry(
             command=WorkflowCommandKind.RETRY_NODE,
             node_id=node_id,
             expected_run_version=int(fresh.run_version),
-            idempotency_key=f"stage-failure-planner:{identity_hash}",
+            idempotency_key=idempotency_key,
             payload={
                 "reason": STAGE_FAILURE_PLANNER_REASON,
                 "retryOfNodeRunId": attempt.node_run_id,
@@ -343,6 +356,38 @@ def _submit_planner_retry(
         )
     )
     return True
+
+
+def _pending_planner_retry(task: Any, *, run: Any, attempt: Any, node_id: str) -> bool:
+    """Only the original blocked attempt may consume a durable retry intent."""
+    if not isinstance(task, Mapping):
+        return False
+    directive = task.get("plannerDirective")
+    return (
+        isinstance(directive, Mapping)
+        and directive.get("recommendation") == "retry_task"
+        and directive.get("runId") == run.run_id
+        and directive.get("nodeId") == node_id
+        and directive.get("nodeRunId") == attempt.node_run_id
+        and str(task.get("status") or "").strip().lower() in {"blocked", "needs_review"}
+        and not task.get("anomalyEscalation")
+        and not _stage_task_turn_is_active(task)
+    )
+
+
+def _try_planner_retry(**kwargs: Any) -> bool:
+    """Submission failure leaves the durable directive available next pass."""
+    try:
+        return _submit_planner_retry(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - directive is already durable
+        logger.warning(
+            "stage failure planner retry submit failed runId=%s "
+            "nodeRunId=%s errorType=%s",
+            kwargs["run"].run_id,
+            kwargs["attempt"].node_run_id,
+            type(exc).__name__,
+        )
+        return False
 
 
 def _utc_now_iso() -> str:
@@ -458,8 +503,6 @@ def plan_stage_task_failure_remediation(
             CHALLENGE_CUP_TEAM_ID,
             KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
         ):
-            if len(candidates) >= remaining:
-                break
             node_id = str(run.active_node_id or "").strip()
             if str(run.status or "").strip() != "blocked" or not node_id:
                 continue
@@ -482,7 +525,6 @@ def plan_stage_task_failure_remediation(
         return candidates
 
     candidates = store.read(load_candidates)
-    summary["scanned"] = len(candidates)
     if not candidates:
         return summary
 
@@ -493,6 +535,9 @@ def plan_stage_task_failure_remediation(
     from .stage_task_remediation import source_stage_task_for_node_run
 
     for run, attempt, source_run_id in candidates:
+        if remaining <= 0:
+            break
+        summary["scanned"] += 1
         node_id = str(run.active_node_id or "").strip()
         base_fields = {
             "runId": str(run.run_id or ""),
@@ -509,7 +554,8 @@ def plan_stage_task_failure_remediation(
         except Exception:  # noqa: BLE001 - one unreadable task must not stop the pass
             summary["skipped"] += 1
             continue
-        if not _planning_ready_task(task, now_ms=now):
+        pending_retry = _pending_planner_retry(task, run=run, attempt=attempt, node_id=node_id)
+        if not pending_retry and not _planning_ready_task(task, now_ms=now):
             summary["skipped"] += 1
             continue
         task = dict(task)
@@ -518,9 +564,26 @@ def plan_stage_task_failure_remediation(
             "stageId": _clip_text(task.get("stageId"), 80),
             "taskId": _clip_text(task.get("taskId"), 160),
         }
-        if _fail_open_recently_seen(run.run_id, attempt.node_run_id, now_ms=now):
+        if not pending_retry and _fail_open_recently_seen(run.run_id, attempt.node_run_id, now_ms=now):
             summary["skipped"] += 1
             continue
+        if pending_retry:
+            retried = _try_planner_retry(
+                store=store, command_service=command_service, run=run,
+                attempt=attempt, node_id=node_id, now_ms=now,
+            )
+            summary["retried"] += int(retried)
+            # An unavailable/stale retry intent must not monopolize the
+            # batch and starve other blocked tasks on every maintenance tick.
+            remaining -= int(retried)
+            _record_planner_event(
+                "stage_failure_planner.retry_recovered",
+                outcome="retry_submitted" if retried else "retry_pending",
+                fields=base_fields,
+            )
+            continue
+
+        remaining -= 1
 
         if planner_fn is None:
             _mark_fail_open(run.run_id, attempt.node_run_id, now_ms=now)
@@ -649,24 +712,14 @@ def plan_stage_task_failure_remediation(
             continue
         summary["planned"] += 1
         if recommendation == "retry_task":
-            try:
-                retried = _submit_planner_retry(
-                    store=store,
-                    command_service=command_service,
-                    run=run,
-                    attempt=attempt,
-                    node_id=node_id,
-                    now_ms=now,
-                )
-            except Exception as exc:  # noqa: BLE001 - directive is already durable
-                logger.warning(
-                    "stage failure planner retry submit failed runId=%s "
-                    "nodeRunId=%s errorType=%s",
-                    run.run_id,
-                    attempt.node_run_id,
-                    type(exc).__name__,
-                )
-                retried = False
+            retried = _try_planner_retry(
+                store=store,
+                command_service=command_service,
+                run=run,
+                attempt=attempt,
+                node_id=node_id,
+                now_ms=now,
+            )
             if retried:
                 summary["retried"] += 1
             _record_planner_event(
