@@ -54,6 +54,7 @@
   [data-vui-recipe="config-settings-workbench"] .configHeader { padding: 24px 20px; }
   [data-vui-recipe="config-settings-workbench"] .configHeader [data-vui="route-header"] { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
   [data-vui-recipe="config-settings-workbench"] .pageViewport { padding-inline: 20px; }
+  [data-vui-recipe="config-settings-workbench"] .treeFieldCardEdit.avatarImageCard { grid-template-columns: minmax(0, 1fr); }
   [data-vui-recipe="config-settings-workbench"] .userProfileAvatarHeader { flex-direction: column; align-items: flex-start; gap: 4px; }
   [data-vui-recipe="config-settings-workbench"] .userProfileAvatarHeader > span { white-space: normal; overflow: visible; text-overflow: clip; }
   [data-vui-recipe="config-settings-workbench"] button[data-vui="button"],
