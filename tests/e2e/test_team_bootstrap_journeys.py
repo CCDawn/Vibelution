@@ -20,7 +20,7 @@ pytestmark = [
 ]
 
 
-def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_instance):
+def test_team_catalog_initializes_and_survives_repeated_navigation(request, e2e_instance):
     from playwright.sync_api import expect
 
     # Read the deployed registry and native Sessions, not an in-process seed.
@@ -57,6 +57,9 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         assert session["agentId"] == agent["agentId"]
         assert not session.get("messages")
 
+    # Complete the deployment API assertions before the browser starts its
+    # unrelated first-page hydration and selection requests.
+    page = request.getfixturevalue("page")
     page.locator(primary_nav_link("/teams")).click()
     expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
     expect(page.get_by_text("6 位成员可用", exact=True)).to_be_visible()
