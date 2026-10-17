@@ -1,8 +1,8 @@
 import { ConversationAttachment, ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+import { postBrowserTelemetry } from "../app/browserTelemetry";
 import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
-import {
-  editMessageIndex,
+import {  editMessageIndex,
   editMessageTurnId,
   mergeEditResubmitDetailWithOutcome,
 } from "./chat/chatEditResubmitState";
@@ -58,9 +58,75 @@ function isCommittedUserMessage(message: ConversationMessage): boolean {
   return message.role === "user" && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] !== true;
 }
 
+export type UnsettledOptimisticUserWindow = {
+  optimisticCount: number;
+  canonicalUserCount: number;
+  reason: "canonical_user_absent" | "client_submission_id_missing";
+};
+
+/**
+ * Diagnosis for a window where an optimistic user row never settles. The
+ * canonical row only clears its optimistic twin when it carries the same
+ * `clientSubmissionId`, so "canonical row not merged yet" and "canonical row
+ * merged without that metadata" look identical on screen but need different
+ * fixes. Measured here instead of guessing after the duplicate disappears.
+ */
+export function describeUnsettledOptimisticUserWindow(
+  messages: ConversationMessage[],
+): UnsettledOptimisticUserWindow | undefined {
+  const optimisticCount = messages.filter(isOptimisticUserMessage).length;
+  if (optimisticCount === 0) {
+    return undefined;
+  }
+  const committedUserMessages = messages.filter(isCommittedUserMessage);
+  if (committedUserMessages.some(conversationMessageClientSubmissionId)) {
+    return undefined;
+  }
+  return {
+    optimisticCount,
+    canonicalUserCount: committedUserMessages.length,
+    reason: committedUserMessages.length > 0 ? "client_submission_id_missing" : "canonical_user_absent",
+  };
+}
+
+// The merge path runs on every detail/SSE apply, so one report per submission is
+// enough; an unfixed duplicate would otherwise flood the runtime scene.
+const reportedUnsettledOptimisticWindows = new Set<string>();
+
+function reportUnsettledOptimisticUserWindow(
+  messages: ConversationMessage[],
+  sessionId: string | undefined,
+) {
+  const diagnosis = describeUnsettledOptimisticUserWindow(messages);
+  if (!diagnosis) {
+    return;
+  }
+  const clientSubmissionId = messages
+    .filter(isOptimisticUserMessage)
+    .map(conversationMessageClientSubmissionId)
+    .find(Boolean) ?? "";
+  const reportKey = `${sessionId ?? ""}\u001f${clientSubmissionId || diagnosis.reason}`;
+  if (reportedUnsettledOptimisticWindows.has(reportKey)) {
+    return;
+  }
+  reportedUnsettledOptimisticWindows.add(reportKey);
+  postBrowserTelemetry({
+    phase: "chat_session_state",
+    eventCode: "browser.chat_session_state.optimistic_user_row_unsettled",
+    message: "Optimistic user row is still rendered next to its canonical row.",
+    level: "warning",
+    fields: {
+      sessionId: sessionId ?? "",
+      clientSubmissionId,
+      optimisticCount: diagnosis.optimisticCount,
+      canonicalUserCount: diagnosis.canonicalUserCount,
+      reason: diagnosis.reason,
+    },
+  });
+}
+
 function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
-  const committedSubmissionIds = new Set(
-    messages
+  const committedSubmissionIds = new Set(    messages
       .filter(isCommittedUserMessage)
       .map(conversationMessageClientSubmissionId)
       .filter(Boolean),
@@ -412,9 +478,9 @@ function reconcileAuthoritativeTailMessages(
 function mergeConversationMessageWindows(
   previousMessages: ConversationMessage[],
   nextMessages: ConversationMessage[],
+  sessionId?: string,
 ): ConversationMessage[] {
-  const orderById = new Map<string, number>();
-  const mergedById = new Map<string, ConversationMessage>();
+  const orderById = new Map<string, number>();  const mergedById = new Map<string, ConversationMessage>();
   for (const message of [...previousMessages, ...nextMessages]) {
     const id = String(message.id || "").trim();
     if (!id) {
@@ -425,9 +491,10 @@ function mergeConversationMessageWindows(
     }
     mergedById.set(id, message);
   }
-  return removeSettledOptimisticUserMessages([...mergedById.values()]).sort((left, right) => {
-    const leftIndex = messageWindowIndex(left);
-    const rightIndex = messageWindowIndex(right);
+const settledMessages = removeSettledOptimisticUserMessages([...mergedById.values()]);
+  reportUnsettledOptimisticUserWindow(settledMessages, sessionId);
+  return settledMessages.sort((left, right) => {
+    const leftIndex = messageWindowIndex(left);    const rightIndex = messageWindowIndex(right);
     if (leftIndex !== rightIndex) {
       return leftIndex - rightIndex;
     }
@@ -605,9 +672,8 @@ function mergeOlderSessionHistoryPage(
     return { detail: previous, historyMerged: false };
   }
 
-  const messages = mergeConversationMessageWindows(previous.messages, earlierMessages);
-  return {
-    detail: {
+const messages = mergeConversationMessageWindows(previous.messages, earlierMessages, previous.id);
+  return {    detail: {
       ...previous,
       messages,
       messageWindow: mergedMessageWindow(previousWindow, nextWindow, messages),
@@ -734,9 +800,8 @@ function mergeSessionDetailMessageWindowInner(
     merged,
     reconcileAuthoritativeTailMessages(
       merged,
-      mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []),
-      authoritativeTail,
-    ),
+mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? [], previous.id),
+      authoritativeTail,    ),
     authoritativeTail,
   );
   const base = merged.messageWindow.hasLater ? previous : merged;

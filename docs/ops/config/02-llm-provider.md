@@ -6,7 +6,9 @@
 
 在「设置 → 模型库 → 添加供应商」选择服务商，核对显示名、服务地址和 API 密钥，填写模型 ID 后点击「测试并保存」。获取模型列表是可选操作；服务没有模型列表接口时，可直接填写厂商提供的准确 ID，包括带 `/` 或大写字母的 ID。
 
-协议和认证方式放在「高级参数」。本地 HTTP 服务无需填写权重文件路径或运行框架；无需认证的服务可不填密钥。内置厂商预设会带入对应的连接协议、凭据引用和目录适配器。
+工作台只显示一条已经解析好的路线，例如 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 或 Gemini。`kind`、`api`、`driver`、wire protocol 和 interaction contract 留在解析器里，不在界面上分成多项去填。改路线时，界面会把默认线路和对应驱动写成一致的一组。打开页面不会改写已经保存的配置；服务上原本允许多条线路时，其余允许项会保留。
+
+路线和认证方式放在「高级参数」。本地 HTTP 服务无需填写权重文件路径或运行框架；无需认证的服务可不填密钥。内置厂商预设会带入对应的路线、凭据引用和目录适配器。
 
 测试失败会保留输入；通过真实调用测试后才保存到外部配置。新连接使用独立的凭据引用，避免覆盖其他服务的密钥；取消会移除本次未保存连接，保留其他配置草稿。保存模型后，仍需在 Agent 配置中选择并保存该模型绑定。
 
@@ -43,6 +45,8 @@ upstream_id = "deepseek-v4-flash"
 ```
 
 ## 字段说明
+
+下面是保存后的字段。工作台不逐项编辑 `kind`、`api`、`driver`、`protocols` 和模型上的 contract。直接改文件时，不要让这些字段互相矛盾；运行时仍由解析器收成一条路线。
 
 | 字段 | 必填 | 合法值 / 说明 |
 | --- | --- | --- |
@@ -90,7 +94,7 @@ allowed = ["chat_completions", "responses"]
 | `anthropic_messages` | Anthropic 线 id（body 现为 LiteLLM 兼容形） |
 | `gemini_generate_content` | Gemini 线 id（同上） |
 
-**注意**：`allowed` 若设置，模型显式 `wireProtocol` 必须在列表内。
+**注意**：`allowed` 若设置，模型显式 `wireProtocol` 必须在列表内。工作台改路线时会把所选路线放进 `allowed`，不会因为只打开页面而删掉已有允许项。
 
 ## `discovery` 子表
 
@@ -143,4 +147,4 @@ mode = "automatic"
 - [ ] `base_url` 可达且 path 正确
 - [ ] `credential_ref` 指向存在的 env
 - [ ] 至少一个 `models.*` 且含 `upstream_id`
-- [ ] `kind` + `driver` 与厂商匹配（见 05）
+- [ ] 路线与厂商匹配。`kind`、`api`、`driver`、wire、contract 保持一致，不分成互相矛盾的一组（见 05）

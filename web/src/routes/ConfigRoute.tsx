@@ -93,6 +93,7 @@ import {
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { publishConfigDraftPresence } from "./configDraftPresence";
+import { persistConfigChanges, rebaseConfigDraft, type ConfigValueChange } from "./config/configImmediateSave";
 import {
   markProviderOnboardingSeen,
   shouldAutoOpenProviderOnboarding,
@@ -186,10 +187,12 @@ const ConfigRuntimePanel = lazy(() =>
 );
 import {
   buildProviderWizardDraft,
+  canonicalProviderRoute,
   deriveProviderRegistryRows,
   initialProviderQuickSetupState,
   initialProviderWizardState,
   providerQuickSetupReducer,
+  providerRouteSelection,
   providerWizardReducer,
   type ProviderWizardState,
 } from "./configProviderLogic";
@@ -203,7 +206,7 @@ import {
   type ProviderRouteImpact,
   type ProviderRoutePreview,
 } from "./config/useConfigProviderDraftActions";
-import { CONFIG_COPY, formatConfigCopy, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
+import { CONFIG_COPY, formatConfigCopy, resolvedRouteSelectOptions, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
 import {
   type AvatarImageUploadResponse,
   ConfigSectionEditor,
@@ -244,7 +247,6 @@ export function ConfigRoute() {
   const [baseConfig, setBaseConfig] = useState<PublicConfigShape | null>(null);
   const [draftMeta, setDraftMeta] = useState<ConfigDraftMeta>(emptyDraftMeta());
   const [baseHash, setBaseHash] = useState("");
-  const [draftHash, setDraftHash] = useState("");
   const [activeWorkspace, setActiveWorkspace] = useState<ConfigWorkspace | null>(null);
   const [jsonText, setJsonText] = useState("{}");
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
@@ -275,6 +277,8 @@ export function ConfigRoute() {
   // 即时类字段（boolean/select）的行徽标生命周期：waiting → applied|failed。
   const [immediateFieldStatus, setImmediateFieldStatus] = useState<Record<string, ImmediateFieldStatus>>({});
   const immediateStatusTimersRef = useRef<Record<string, number>>({});
+  const immediateSaveLockRef = useRef(false);
+  const immediateDesiredValuesRef = useRef<Record<string, unknown>>({});
   // 分区保存失败的行内错误（wave 4）：按分区 path 记录，落在该分区内，
   // 不再占用全局 notice strip（那里保留给 apply/上传等真正全局的操作）。
   const [sectionSaveErrors, setSectionSaveErrors] = useState<Record<string, string>>({});
@@ -305,7 +309,6 @@ export function ConfigRoute() {
     setActiveWorkspace(clonePublicConfig(workspace));
     setDraftConfig(clonePublicConfig(workspace.publicConfig));
     setDraftMeta(clonePublicConfig(workspace.draftMeta));
-    setDraftHash(workspace.hash);
     setJsonText(formatJson(pickEditableConfigView(workspace.publicConfig, workspace.editorSections)));
     setNotice({ tone, text: workspace.message || "" });
   }
@@ -332,7 +335,7 @@ export function ConfigRoute() {
     () => formatJson(pickEditableConfigView(draftConfig ?? {}, workspace?.editorSections ?? [])),
     [draftConfig, workspace?.editorSections],
   );
-  const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
+  const hasUnsavedConfigChanges = Boolean(baseConfig && draftConfig && !configValuesEqual(baseConfig, draftConfig));
   // First-run onboarding: auto-open the provider quick-setup panel once per
   // browser session while no model credential is configured (skippable, and
   // the settings entry stays available via "添加供应商").
@@ -930,7 +933,6 @@ export function ConfigRoute() {
     handleUpdateProviderCredential: updateProviderCredential,
     handleUpdatePinnedModel,
     handleUpdateProviderContextWindow: updateProviderContextWindow,
-    handleToggleProviderEnabled,
     handleBeginProviderRouteEdit,
     handlePreviewProviderRoute,
     handleApplyProviderRoutePreview: applyProviderRoutePreview,
@@ -1313,48 +1315,116 @@ export function ConfigRoute() {
     }
   }
 
-  /**
-   * 即时类字段（boolean/select）行内变更：走「保存分区草稿 previewConfigDraft +
-   * 自动 apply」同一管线（复用 baseHash 乐观并发与过期降级重试）。
-   * 行徽标：等待中 → 已生效（短暂驻留后清除）/ 未生效（失败不静默，notice 走 toast）。
-   */
+  /** Adopt a persisted operation without committing or discarding other working edits. */
+  async function adoptImmediateWorkspace(saved: ConfigWorkspace, savedPaths: readonly (readonly string[])[]) {
+    const previousBase = editBaselineRef.current.baseConfig;
+    const local = providerDraftRequestRef.current;
+    let projected = saved;
+    let projectionError: unknown;
+    const publicConfig = previousBase && local
+      ? rebaseConfigDraft(previousBase, local.publicConfig, saved.publicConfig, savedPaths)
+      : saved.publicConfig;
+    const meta = local?.draftMeta ?? saved.draftMeta;
+    const hasWorkingDraft = !configValuesEqual(publicConfig, saved.publicConfig) || hasPendingSecretChanges(meta);
+    if (hasWorkingDraft) {
+      try {
+        projected = await previewConfigDraft({ publicConfig, draftMeta: meta, baseHash: saved.baseHash || saved.hash });
+      } catch (error) {
+        // Persistence already succeeded. Keep every draft locally if its projection fails.
+        projectionError = error;
+        projected = { ...(activeWorkspace ?? saved), publicConfig, draftMeta: meta, baseHash: saved.baseHash || saved.hash };
+      }
+    }
+    syncWorkspace(saved, "success");
+    if (hasWorkingDraft) syncWorkspace(projected, "neutral", { resetBase: false });
+    publishConfigDraftPresence(hasWorkingDraft || pendingConfigDraftCount > 0);
+    if (projectionError) markError(`${copy.rowStatusApplied}: ${readableErrorMessage(projectionError)}`);
+    await invalidateWorkbenchQueries(saved.publicConfig);
+  }
+
+  async function persistImmediateValues(changes: ConfigValueChange[], pendingLabel: string = copy.applying) {
+    if (immediateSaveLockRef.current) throw new Error(copy.rowStatusWaiting);
+    const baseline = editBaselineRef.current;
+    if (!baseline.baseConfig || !baseline.baseHash) throw new Error(copy.loadFailed);
+    immediateSaveLockRef.current = true;
+    setBusyAction(pendingLabel);
+    try {
+      const saved = await persistConfigChanges(baseline.baseConfig, baseline.baseHash, changes);
+      await adoptImmediateWorkspace(saved, changes.map((change) => change.path));
+    } finally {
+      immediateSaveLockRef.current = false;
+      setBusyAction("");
+    }
+  }
+
+  function markImmediateApplied(path: string) {
+    delete immediateDesiredValuesRef.current[path];
+    setImmediateFieldStatus((current) => ({ ...current, [path]: "applied" }));
+    immediateStatusTimersRef.current[path] = window.setTimeout(() => {
+      setImmediateFieldStatus((current) => {
+        if (current[path] !== "applied") return current;
+        const next = { ...current };
+        delete next[path];
+        return next;
+      });
+    }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
+  }
+
   async function handleImmediateFieldChange(path: string, nextValue: unknown) {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    if (isUiLanguageFieldPath(path)) {
-      // ui.language 单一写入方：语言只走专用端点（handleUiLanguageChange），
-      // 任何流入通用管线的调用在此拒绝（配套后端 apply 守卫保留存量语言）。
-      return;
-    }
+    if (structuredActionsDisabled || immediateSaveLockRef.current || isUiLanguageFieldPath(path)) return;
     clearImmediateStatusTimer(path);
+    immediateDesiredValuesRef.current[path] = nextValue;
     setImmediateFieldStatus((current) => ({ ...current, [path]: "waiting" }));
     try {
-      const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
-      const previewed = await previewDraft(updated, draftMeta, copy.applying);
-      if (!previewed) {
-        setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
-        return;
-      }
-      const applied = await persistImmediateDraft(copy.applying);
-      if (!applied) {
-        setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
-        return;
-      }
-      setImmediateFieldStatus((current) => ({ ...current, [path]: "applied" }));
-      immediateStatusTimersRef.current[path] = window.setTimeout(() => {
-        setImmediateFieldStatus((current) => {
-          if (current[path] !== "applied") {
-            return current;
-          }
-          const next = { ...current };
-          delete next[path];
-          return next;
-        });
-      }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
-    } catch {
+      const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
+      await persistImmediateValues([{ path: keys, value: nextValue }]);
+      markImmediateApplied(path);
+    } catch (error) {
+      markError(error);
       setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
     }
+  }
+
+  async function handleSaveProviderEnabled(providerId: string, enabled: boolean) {
+    if (structuredActionsDisabled || immediateSaveLockRef.current) return false;
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "enabled", providerId, phase: "busy", message: copy.actionToggleEnabledBusy });
+    try {
+      const providers = asRecord(asRecord(editBaselineRef.current.baseConfig?.llm).providers);
+      if (!Object.hasOwn(providers, providerId)) throw new Error(copy.homeProviderNeedsSave);
+      await persistImmediateValues([{ path: ["llm", "providers", providerId, "enabled"], value: enabled }], copy.actionToggleEnabledBusy);
+      setProviderActionFeedback({ kind: "enabled", providerId, phase: "success", message: enabled ? copy.enabledChangeSaved : copy.disabledChangeSaved });
+      return true;
+    } catch (error) {
+      const message = markError(error);
+      setProviderActionError(message);
+      setProviderActionFeedback({ kind: "enabled", providerId, phase: "error", message });
+      return false;
+    }
+  }
+
+  async function handleDecisionModelToggle(id: string, enabled: boolean) {
+    if (structuredActionsDisabled || immediateSaveLockRef.current) return false;
+    try {
+      const llm = asRecord(editBaselineRef.current.baseConfig?.llm);
+      if (!Object.hasOwn(asRecord(llm.decision_models), id)) throw new Error(copy.decisionModelNeedsSave);
+      const changes: ConfigValueChange[] = [{ path: ["llm", "decision_models", id, "enabled"], value: enabled }];
+      if (!enabled && llm.decision_handoff_model_id === id) changes.push({ path: ["llm", "decision_handoff_model_id"], value: "" });
+      await persistImmediateValues(changes);
+      return true;
+    } catch (error) { markError(error); return false; }
+  }
+
+  async function handleDecisionHandoff(handoffId: string) {
+    if (structuredActionsDisabled || immediateSaveLockRef.current) return false;
+    try {
+      const savedModels = asRecord(asRecord(editBaselineRef.current.baseConfig?.llm).decision_models);
+      if (handoffId && (!Object.hasOwn(savedModels, handoffId) || asRecord(savedModels[handoffId]).enabled === false)) {
+        throw new Error(copy.decisionModelNeedsSave);
+      }
+      await persistImmediateValues([{ path: ["llm", "decision_handoff_model_id"], value: handoffId }]);
+      return true;
+    } catch (error) { markError(error); return false; }
   }
 
   /**
@@ -1366,67 +1436,39 @@ export function ConfigRoute() {
    * 行徽标复用 immediateFieldStatus 的 waiting/applied/failed 生命周期。
    */
   async function handleUiLanguageChange(next: ConfigLanguage) {
-    if (structuredActionsDisabled) {
-      return;
-    }
+    if (structuredActionsDisabled || immediateSaveLockRef.current) return;
     const path = UI_LANGUAGE_FIELD_PATH;
     clearImmediateStatusTimer(path);
+    immediateDesiredValuesRef.current[path] = next;
     setImmediateFieldStatus((current) => ({ ...current, [path]: "waiting" }));
+    immediateSaveLockRef.current = true;
     setBusyAction(copy.applying);
+    let saved = false;
     try {
       await updateConfigLanguage(next);
-      // configPublic 供 AppShell 级 i18n 消费；configWorkspace 是本路由的
-      // 工作区/draft 读模型（refetchType none：下方显式 refetch 一次拿全）。
+      saved = true;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace(), refetchType: "none" }),
       ]);
       const fresh = await workspaceQuery.refetch();
-      if (fresh.data) {
-        syncWorkspace(fresh.data);
-      }
-      setImmediateFieldStatus((current) => ({ ...current, [path]: "applied" }));
-      immediateStatusTimersRef.current[path] = window.setTimeout(() => {
-        setImmediateFieldStatus((current) => {
-          if (current[path] !== "applied") {
-            return current;
-          }
-          const nextStatus = { ...current };
-          delete nextStatus[path];
-          return nextStatus;
-        });
-      }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
+      if (fresh.error || !fresh.data) throw fresh.error ?? new Error(copy.loadFailed);
+      await adoptImmediateWorkspace(fresh.data, [["ui", "language"]]);
+      markImmediateApplied(path);
     } catch (error) {
-      markError(error);
-      setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+      markError(saved ? `${copy.rowStatusSavedUnsynced}: ${readableErrorMessage(error)}` : error);
+      setImmediateFieldStatus((current) => ({ ...current, [path]: saved ? "refresh-failed" : "failed" }));
     } finally {
+      immediateSaveLockRef.current = false;
       setBusyAction("");
     }
   }
 
-  // 失败徽标的自动清理：该字段草稿值回到基线值（例如用户改回原值）时清除。
-  useEffect(() => {
-    setImmediateFieldStatus((current) => {
-      let changed = false;
-      const next: Record<string, ImmediateFieldStatus> = {};
-      for (const [path, status] of Object.entries(current)) {
-        if (status === "failed" && configValuesEqual(getConfigValueAtPath(draftConfig, path), getConfigValueAtPath(baseConfig, path))) {
-          changed = true;
-          continue;
-        }
-        next[path] = status;
-      }
-      return changed ? next : current;
-    });
-  }, [draftConfig, baseConfig]);
-
-  // 卸载时清理「已生效」徽标的驻留定时器。
-  useEffect(() => {
-    const timers = immediateStatusTimersRef.current;
-    return () => {
-      Object.values(timers).forEach((timer) => window.clearTimeout(timer));
-    };
-  }, []);
+  function retryImmediateField(path: string) {
+    const desired = immediateDesiredValuesRef.current[path];
+    if (isUiLanguageFieldPath(path)) void handleUiLanguageChange(desired === "en" ? "en" : "zh");
+    else void handleImmediateFieldChange(path, desired);
+  }
 
   async function handleAvatarImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
     setBusyAction(copy.avatarImageUploading);
@@ -1816,28 +1858,21 @@ export function ConfigRoute() {
                         />
                       </label>
                       <label className={styles.providerRouteEditField}>
-                        <span>{copy.routeFieldDriver}</span>
-                        <VStringSelect
-                          ariaLabel="Provider route driver"
-                          value={getString(routeEditProvider.driver)}
-                          isDisabled={Boolean(busyAction)}
-                          options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
-                          onValueChange={(driver) => setRouteEditProvider((current) => ({ ...current, driver }))}
-                        />
-                      </label>
-                      <label className={styles.providerRouteEditField}>
                         <span>{copy.routeFieldProtocol}</span>
                         <VStringSelect
-                          ariaLabel="Provider default wire protocol"
-                          value={getString(asRecord(routeEditProvider.protocols).default)}
+                          ariaLabel={copy.routeFieldProtocol}
+                          value={canonicalProviderRoute(getString(asRecord(routeEditProvider.protocols).default)) || getString(asRecord(routeEditProvider.protocols).default)}
                           isDisabled={Boolean(busyAction)}
-                          options={["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"].map((value) => ({ value, label: value }))}
-                          onValueChange={(defaultProtocol) => setRouteEditProvider((current) => {
+                          options={resolvedRouteSelectOptions(copy, getString(asRecord(routeEditProvider.protocols).default))}
+                          onValueChange={(route) => setRouteEditProvider((current) => {
                             const protocols = asRecord(current.protocols);
                             const allowed = Array.isArray(protocols.allowed) ? protocols.allowed.filter((item): item is string => typeof item === "string") : [];
+                            const next = providerRouteSelection(route, allowed, "union");
+                            if (!next) return current;
                             return {
                               ...current,
-                              protocols: { ...protocols, default: defaultProtocol, allowed: Array.from(new Set([...allowed, defaultProtocol])) },
+                              driver: next.driver,
+                              protocols: { ...protocols, default: next.defaultProtocol, allowed: next.allowedProtocols },
                             };
                           })}
                         />
@@ -1958,8 +1993,7 @@ export function ConfigRoute() {
                     void handleDeleteProvider(providerId);
                   }}
                   onToggleEnabled={(providerId, enabled) => {
-                    // Wave 2: draft-only toggle; the save prompt persists it.
-                    void handleToggleProviderEnabled(providerId, enabled);
+                    void handleSaveProviderEnabled(providerId, enabled);
                   }}
                   onUpdateModel={(providerId, modelKey, edits) => {
                     // Wave 3 governance path B: whitelist-gated entry edit,
@@ -2022,6 +2056,10 @@ export function ConfigRoute() {
               presets={workspace.decisionModelPresets ?? []}
               disabled={structuredActionsDisabled || Boolean(busyAction)}
               lang={currentLanguage}
+              savedModels={readDecisionModelMap(asRecord(baseConfig?.llm).decision_models)}
+              savedHandoffModelId={getString(asRecord(baseConfig?.llm).decision_handoff_model_id)}
+              onToggleEnabled={handleDecisionModelToggle}
+              onSelectHandoff={handleDecisionHandoff}
               onCommit={(nextModels, nextHandoff) => {
                 void updateSimpleDraft((next) => {
                   const llm = { ...asRecord(next.llm) };
@@ -2099,6 +2137,7 @@ export function ConfigRoute() {
               onUiStateChange={updateSectionUiState}
               onSaveSection={saveConfigSection}
               onImmediateFieldChange={handleImmediateFieldChange}
+              onRetryImmediateField={retryImmediateField}
               onLanguageChange={(next) => {
                 void handleUiLanguageChange(next);
               }}

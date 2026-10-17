@@ -16,15 +16,17 @@ import {
 import {
   buildProviderWizardDraft,
   canAdvanceProviderWizard,
+  canonicalProviderRoute,
   dispatchProviderWizardConnectionAction,
   isProviderWizardConnectionLocked,
   providerPresetToWizardState,
+  providerRouteSelection,
   type ProviderAuthKind,
   type ProviderWizardAction,
   type ProviderWizardState,
   type ProviderWizardStep,
 } from "./configProviderLogic";
-import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
+import { type ConfigCopy, formatConfigCopy, resolvedRouteSelectOptions } from "./config/configCopy";
 import styles from "./ConfigProviderWizard.styles";
 
 export type ConfigProviderWizardProps = {
@@ -56,8 +58,6 @@ const TEMPLATE_GROUPS: Array<{ id: string; copyKey: "wizardGroupOfficial" | "wiz
   { id: "local_runtime", copyKey: "wizardGroupLocalRuntime" },
   { id: "custom", copyKey: "wizardGroupCustom" },
 ];
-
-const PROTOCOL_OPTIONS = ["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"];
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -336,45 +336,24 @@ export function ConfigProviderWizard({
               />
             </label>
             <label className={styles.field}>
-              <span>Driver</span>
+              <span>{copy.protocolRowLabel}</span>
               <VStringSelect
-                ariaLabel="Driver"
-                value={state.driver}
+                ariaLabel={copy.protocolRowLabel}
+                value={canonicalProviderRoute(state.defaultProtocol) || state.defaultProtocol}
                 isDisabled={connectionLocked}
-                options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
-                onValueChange={(driver) => updateSavedConnection({ type: "set_protocol", driver, defaultProtocol: state.defaultProtocol, allowedProtocols: state.allowedProtocols })}
+                options={resolvedRouteSelectOptions(copy, state.defaultProtocol)}
+                onValueChange={(route) => {
+                  const next = providerRouteSelection(route, state.allowedProtocols, "union");
+                  if (!next) return;
+                  updateSavedConnection({
+                    type: "set_protocol",
+                    driver: next.driver,
+                    defaultProtocol: next.defaultProtocol,
+                    allowedProtocols: next.allowedProtocols,
+                  });
+                }}
               />
             </label>
-            <label className={styles.field}>
-              <span>{copy.wizardDefaultWireProtocol}</span>
-              <VStringSelect
-                ariaLabel={copy.wizardDefaultWireProtocol}
-                value={state.defaultProtocol}
-                isDisabled={connectionLocked}
-                options={PROTOCOL_OPTIONS.map((value) => ({ value, label: value }))}
-                onValueChange={(defaultProtocol) => updateSavedConnection({ type: "set_protocol", driver: state.driver, defaultProtocol, allowedProtocols: Array.from(new Set([...state.allowedProtocols, defaultProtocol])) })}
-              />
-            </label>
-            <div className={styles.fieldWide}>
-              <span>Allowed wire protocols</span>
-              <div className={styles.protocolGrid}>
-                {PROTOCOL_OPTIONS.map((protocol) => (
-                  <VCheckbox
-                    key={protocol}
-                    isSelected={state.allowedProtocols.includes(protocol)}
-                    isDisabled={connectionLocked || state.defaultProtocol === protocol}
-                    onChange={(selected) => updateSavedConnection({
-                      type: "set_protocol",
-                      driver: state.driver,
-                      defaultProtocol: state.defaultProtocol,
-                      allowedProtocols: selected ? [...state.allowedProtocols, protocol] : state.allowedProtocols.filter((item) => item !== protocol),
-                    })}
-                  >
-                    {protocol}
-                  </VCheckbox>
-                ))}
-              </div>
-            </div>
             {state.serviceClass === "local_runtime" ? (
               <>
                 <label className={styles.field}>

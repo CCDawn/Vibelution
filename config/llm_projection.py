@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, Mapping
 
 from .llm_credentials import canonicalize_credential_ref
 from .llm_identity import make_model_ref, split_model_ref, validate_provider_id
@@ -57,6 +57,35 @@ def _validate_credential_ownership(
                 visit(value)
 
     visit(payload, is_root=True)
+
+
+# Public schema v2 profiles are role references. Route identity and call
+# defaults stay on the pinned model; a profile may only point at one model,
+# name one fallback profile, and carry a small override set.
+PUBLIC_PROFILE_REFERENCE_FIELDS = frozenset(
+    {"profile_id", "model_ref", "fallback", "overrides", "label"}
+)
+
+
+def fold_public_profile_to_reference(raw_profile: dict[str, Any]) -> None:
+    """Drop copied route fields so a profile can be stored as a role reference."""
+
+    kept = {key: raw_profile[key] for key in PUBLIC_PROFILE_REFERENCE_FIELDS if key in raw_profile}
+    raw_profile.clear()
+    raw_profile.update(kept)
+
+
+def validate_public_profile_reference(profile_id: str, raw_profile: Mapping[str, Any]) -> None:
+    """Reject copied provider, model, or call fields on a public profile."""
+
+    unknown = sorted(set(raw_profile) - PUBLIC_PROFILE_REFERENCE_FIELDS)
+    if not unknown:
+        return
+    field_name = unknown[0]
+    raise ValueError(
+        f"llm.profiles.{profile_id}.{field_name} is not a profile reference field; "
+        "set model_ref, optional fallback, and optional overrides"
+    )
 
 
 def _validate_runtime_overrides(payload: dict[str, Any], scope: str) -> None:
@@ -263,4 +292,9 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     return projected
 
 
-__all__ = ["project_v2_llm_for_runtime"]
+__all__ = [
+    "PUBLIC_PROFILE_REFERENCE_FIELDS",
+    "project_v2_llm_for_runtime",
+    "fold_public_profile_to_reference",
+    "validate_public_profile_reference",
+]

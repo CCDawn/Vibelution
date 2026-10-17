@@ -412,9 +412,10 @@ export function deriveProviderRegistryRows(
         lastErrorType: observed?.lastErrorType ?? "",
         lastSuccessAt: observed?.lastSuccessAt ?? "",
         refreshDue: observed?.refreshDue ?? false,
-        // Row-level enable switch: draft providerOptions carry the toggled value,
-        // legacy rows without the key read as enabled.
-        enabled: provider.enabled !== false,
+        // The working public config is authoritative even if a projection refresh failed.
+        enabled: typeof asRecord(draftProviders[provider.provider_id]).enabled === "boolean"
+          ? asRecord(draftProviders[provider.provider_id]).enabled !== false
+          : provider.enabled !== false,
         models,
       };
     })
@@ -583,6 +584,65 @@ export function initialProviderWizardState(): ProviderWizardState {
   };
 }
 
+/**
+ * Operator-facing routes. kind, api, driver, wire, and contract stay inside
+ * `resolve_model_protocol`; this list only names the one choice the settings
+ * UI may show.
+ */
+export const PROVIDER_ROUTE_IDS = [
+  "chat_completions",
+  "responses",
+  "anthropic_messages",
+  "gemini_generate_content",
+] as const;
+
+export type ProviderRouteId = (typeof PROVIDER_ROUTE_IDS)[number];
+
+const PROVIDER_ROUTE_ALIASES: Record<string, ProviderRouteId> = {
+  chat_completions: "chat_completions",
+  openai_chat_completions: "chat_completions",
+  openai_completions: "chat_completions",
+  responses: "responses",
+  openai_responses: "responses",
+  anthropic_messages: "anthropic_messages",
+  gemini_generate_content: "gemini_generate_content",
+};
+
+export function canonicalProviderRoute(value: string): ProviderRouteId | "" {
+  const normalized = value.trim().toLowerCase().replace(/-/g, "_");
+  return PROVIDER_ROUTE_ALIASES[normalized] ?? "";
+}
+
+/** Driver stored beside a chosen route. Unknown routes do not invent a driver. */
+export function driverForProviderRoute(route: string): "openai" | "anthropic" | "gemini" | "" {
+  const id = canonicalProviderRoute(route);
+  if (id === "anthropic_messages") return "anthropic";
+  if (id === "gemini_generate_content") return "gemini";
+  if (id === "chat_completions" || id === "responses") return "openai";
+  return "";
+}
+
+/**
+ * Pack one route choice into the fields the existing provider save path stores.
+ * `union` keeps wires a saved provider already allows. `replace` is for a new
+ * connection. This does not resolve kind, api, or interaction contract.
+ */
+export function providerRouteSelection(
+  route: string,
+  allowed: readonly string[] = [],
+  mode: "union" | "replace" = "union",
+): { driver: "openai" | "anthropic" | "gemini"; defaultProtocol: ProviderRouteId; allowedProtocols: string[] } | null {
+  const id = canonicalProviderRoute(route);
+  const driver = driverForProviderRoute(id);
+  if (!id || !driver) return null;
+  const kept = mode === "replace" ? [] : allowed.map((item) => item.trim()).filter(Boolean);
+  return {
+    driver,
+    defaultProtocol: id,
+    allowedProtocols: Array.from(new Set([...kept, id])),
+  };
+}
+
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
@@ -622,7 +682,7 @@ export function providerPresetToWizardState(template: ConfigProviderPresetOption
     baseUrl: asString(provider.base_url).includes(".example.com") ? "" : asString(provider.base_url),
     authKind,
     credentialRef: authKind === "none" ? "none" : credentialRef,
-    driver: asString(provider.driver) || (defaultProtocol === "anthropic_messages" ? "anthropic" : defaultProtocol === "gemini_generate_content" ? "gemini" : "openai"),
+    driver: asString(provider.driver) || driverForProviderRoute(defaultProtocol) || "openai",
     defaultProtocol,
     allowedProtocols: allowedProtocols.length ? allowedProtocols : [defaultProtocol],
     runtimeFramework: asString(deployment.runtime_framework),

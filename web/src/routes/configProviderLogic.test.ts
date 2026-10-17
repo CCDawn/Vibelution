@@ -25,8 +25,11 @@ import {
   buildProviderSetupChecklist,
   defaultProviderModelFilter,
   filterProviderModels,
+  canonicalProviderRoute,
+  driverForProviderRoute,
   initialProviderQuickSetupState,
   initialProviderWizardState,
+  providerRouteSelection,
   isProviderWizardConnectionLocked,
   providerQuickSetupReducer,
   providerWizardReducer,
@@ -1175,4 +1178,35 @@ describe("configProviderLogic", () => {
       expect(canAdvanceProviderWizard(state)).toBe(true);
     },
   );
+});
+
+
+describe("provider route selection", () => {
+  it("maps one route onto a matching driver and keeps already allowed wires", () => {
+    expect(canonicalProviderRoute("openai-responses")).toBe("responses");
+    expect(driverForProviderRoute("responses")).toBe("openai");
+    expect(driverForProviderRoute("anthropic_messages")).toBe("anthropic");
+    expect(driverForProviderRoute("gemini_generate_content")).toBe("gemini");
+    expect(providerRouteSelection("responses", ["chat_completions"], "union")).toEqual({
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["chat_completions", "responses"],
+    });
+    expect(providerRouteSelection("anthropic_messages", ["chat_completions"], "replace")).toEqual({
+      driver: "anthropic",
+      defaultProtocol: "anthropic_messages",
+      allowedProtocols: ["anthropic_messages"],
+    });
+    expect(providerRouteSelection("custom_wire", ["responses"])).toBeNull();
+    expect(driverForProviderRoute("openai")).toBe("");
+  });
+});
+
+describe("provider enabled projection recovery", () => {
+  it("prefers the retained public config over a stale option after an immediate save", () => {
+    const options = [{ provider_id: "relay", label: "Relay", enabled: true, pinned_count: 0 }] as never;
+    const catalog = { providers: {} } as never;
+    expect(deriveProviderRegistryRows(options, catalog, { llm: { providers: { relay: { enabled: false } } } })[0].enabled).toBe(false);
+    expect(deriveProviderRegistryRows(options, catalog)[0].enabled).toBe(true);
+  });
 });

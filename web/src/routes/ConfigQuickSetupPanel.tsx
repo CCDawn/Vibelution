@@ -4,12 +4,14 @@ import { CheckCircle2, Search } from "lucide-react";
 import type { ConfigProviderPresetOption } from "../api/types";
 import { VButton, VFieldRow, VInput, VNativeSelect, VSection } from "../components/vui";
 import {
+  canonicalProviderRoute,
   providerPresetToWizardState,
+  providerRouteSelection,
   type ProviderAuthKind,
   type ProviderQuickSetupState,
   type ProviderWizardState,
 } from "./configProviderLogic";
-import type { ConfigCopy } from "./config/configCopy";
+import { resolvedRouteSelectOptions, type ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigQuickSetupPanel.styles";
 
 export type ConfigQuickSetupPanelProps = {
@@ -141,12 +143,19 @@ export function ConfigQuickSetupPanel({
           <summary className={styles.advancedSummary}>{copy.quickSetupAdvanced}</summary>
           <div className={styles.twoFields}>
             <VFieldRow label={copy.quickSetupProtocolLabel} htmlFor={`${id}-protocol`}>
-              <VNativeSelect className={styles.control} id={`${id}-protocol`} value={state.provider.defaultProtocol} onChange={(event) => {
-                const protocol = event.target.value;
-                onProviderChange({ ...state.provider, defaultProtocol: protocol, allowedProtocols: [protocol], driver: protocol === "anthropic_messages" ? "anthropic" : protocol === "gemini_generate_content" ? "gemini" : "openai" });
+              <VNativeSelect className={styles.control} id={`${id}-protocol`} value={canonicalProviderRoute(state.provider.defaultProtocol) || state.provider.defaultProtocol} onChange={(event) => {
+                const next = providerRouteSelection(event.target.value, [], "replace");
+                if (!next) return;
+                onProviderChange({
+                  ...state.provider,
+                  driver: next.driver,
+                  defaultProtocol: next.defaultProtocol,
+                  allowedProtocols: next.allowedProtocols,
+                });
               }}>
-                <option value="chat_completions">{copy.quickSetupChatCompletionsLabel}</option><option value="responses">OpenAI Responses</option>
-                <option value="anthropic_messages">Anthropic Messages</option><option value="gemini_generate_content">Gemini</option>
+                {resolvedRouteSelectOptions(copy, state.provider.defaultProtocol).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </VNativeSelect>
             </VFieldRow>
             <VFieldRow label={copy.quickSetupAuthMethodLabel} htmlFor={`${id}-auth`}>

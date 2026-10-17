@@ -14,15 +14,19 @@ export type DecisionModelEntry = {
   note: string;
 };
 
-type DecisionModelMap = Record<string, DecisionModelEntry>;
+export type DecisionModelMap = Record<string, DecisionModelEntry>;
 
 type ConfigDecisionModelsPanelProps = {
   models: DecisionModelMap;
   handoffModelId: string;
+  savedModels?: DecisionModelMap;
+  savedHandoffModelId?: string;
   presets: ConfigDecisionModelPreset[];
   disabled: boolean;
   lang: string;
   onCommit: (models: DecisionModelMap, handoffModelId: string) => void;
+  onToggleEnabled?: (id: string, enabled: boolean) => Promise<boolean>;
+  onSelectHandoff?: (handoffId: string) => Promise<boolean>;
 };
 
 const MAX_ENTRIES = 24;
@@ -154,10 +158,14 @@ function sameCatalog(
 export function ConfigDecisionModelsPanel({
   models,
   handoffModelId,
+  savedModels,
+  savedHandoffModelId,
   presets,
   disabled,
   lang,
   onCommit,
+  onToggleEnabled,
+  onSelectHandoff,
 }: ConfigDecisionModelsPanelProps) {
   const zh = lang === "zh";
   const [draft, setDraft] = useState<DecisionModelMap>(models);
@@ -165,6 +173,9 @@ export function ConfigDecisionModelsPanel({
   const [probe, setProbe] = useState<Record<string, ConfigDecisionModelProbe>>({});
   const [probing, setProbing] = useState("");
   const [holdReason, setHoldReason] = useState("");
+  const [savingImmediate, setSavingImmediate] = useState(false);
+  const persistedModels = savedModels ?? models;
+  const persistedHandoff = savedHandoffModelId ?? handoffModelId;
   const draftRef = useRef(draft);
   const handoffRef = useRef(handoff);
   const pendingCommit = useRef("");
@@ -208,6 +219,15 @@ export function ConfigDecisionModelsPanel({
   }
 
   function publish(nextModels: DecisionModelMap, nextHandoff: string) {
+    // Text drafts may outlive an immediate save. Never publish their old switches
+    // or handoff binding back over the latest saved values.
+    if (onToggleEnabled) {
+      nextModels = Object.fromEntries(Object.entries(nextModels).map(([id, entry]) => [
+        id,
+        persistedModels[id] ? { ...entry, enabled: persistedModels[id].enabled } : entry,
+      ]));
+    }
+    if (onSelectHandoff) nextHandoff = persistedHandoff;
     const bound = nextModels[nextHandoff];
     const handoffId = bound?.enabled ? nextHandoff : "";
     remember(nextModels, handoffId);
@@ -240,8 +260,20 @@ export function ConfigDecisionModelsPanel({
     if (publishNow) publish(next, handoffRef.current);
   }
 
+  async function saveImmediate(save: () => Promise<boolean>) {
+    if (disabled || savingImmediate) return;
+    setSavingImmediate(true);
+    try {
+      await save();
+    } catch {
+      // The owner reports save errors; saved props remain the control authority.
+    } finally {
+      setSavingImmediate(false);
+    }
+  }
+
   const full = Object.keys(draft).length >= MAX_ENTRIES;
-  const enabledOptions = Object.entries(draft)
+  const enabledOptions = Object.entries(onSelectHandoff ? persistedModels : draft)
     .filter(([, entry]) => entry.enabled)
     .map(([id, entry]) => ({ value: id, label: entry.label || id }));
 
@@ -297,11 +329,17 @@ export function ConfigDecisionModelsPanel({
         <span>{zh ? "交接使用" : "Handoff uses"}</span>
         <VStringSelect
           ariaLabel={zh ? "交接使用的决策模型" : "Decision model bound to handoff"}
-          isDisabled={disabled}
-          value={handoff}
+          isDisabled={disabled || savingImmediate}
+          value={onSelectHandoff ? persistedHandoff : handoff}
           placeholder={zh ? "不绑定" : "Unbound"}
           options={[{ value: "", label: zh ? "不绑定" : "Unbound" }, ...enabledOptions]}
-          onValueChange={(value) => publish(draftRef.current, value)}
+          onValueChange={(value) => {
+            if (onSelectHandoff) {
+              void saveImmediate(() => onSelectHandoff(value));
+            } else {
+              publish(draftRef.current, value);
+            }
+          }}
         />
       </label>
       {Object.entries(draft).map(([id, entry]) => (
@@ -309,9 +347,15 @@ export function ConfigDecisionModelsPanel({
           <div className={styles.cardHeader}>
             <strong className={styles.cardTitle}>{entry.label || id}</strong>
             <VCheckbox
-              isSelected={entry.enabled}
-              isDisabled={disabled}
-              onChange={(selected) => patchEntry(id, { enabled: selected }, true)}
+              isSelected={onToggleEnabled ? (persistedModels[id]?.enabled ?? entry.enabled) : entry.enabled}
+              isDisabled={disabled || savingImmediate || Boolean(onToggleEnabled && !persistedModels[id])}
+              onChange={(selected) => {
+                if (onToggleEnabled) {
+                  if (persistedModels[id]) void saveImmediate(() => onToggleEnabled(id, selected));
+                } else {
+                  patchEntry(id, { enabled: selected }, true);
+                }
+              }}
             >
               {zh ? "启用" : "Enabled"}
             </VCheckbox>

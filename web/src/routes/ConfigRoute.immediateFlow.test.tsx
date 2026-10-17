@@ -91,6 +91,7 @@ function installFetchMock(handlers: {
   previewResponse: unknown;
   previewError?: boolean;
   applyResponse: unknown;
+  applyError?: boolean;
 }) {
   const previewCalls: FetchCall[] = [];
   const applyCalls: FetchCall[] = [];
@@ -109,6 +110,7 @@ function installFetchMock(handlers: {
     }
     if (url.includes("/api/config/apply")) {
       applyCalls.push({ url, body });
+      if (handlers.applyError) return jsonResponse({ detail: "配置保存失败" }, 500);
       return jsonResponse(handlers.applyResponse);
     }
     if (url.includes("/api/diagnostics")) {
@@ -258,4 +260,18 @@ describe("ConfigRoute view-mode immediate field save flow", () => {
     // 失败不静默：notice 出现错误文案
     expect(container.querySelector('[role="alert"], [data-notice="error"], [class*="noticeError"]')).not.toBeNull();
   });
+  it("keeps the saved toggle and offers retry when preview succeeds but persistence fails", async () => {
+    const mock = installFetchMock({ workspace: workspaceFixture(),
+      previewResponse: workspaceFixture({ publicConfig: { ...BASE_PUBLIC_CONFIG, context_compression: { ...BASE_PUBLIC_CONFIG.context_compression, enabled: false } } }),
+      applyResponse: workspaceFixture(), applyError: true });
+    await renderRoute();
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "editor ready");
+    await toggleEnableCheckbox();
+    await waitFor(() => Boolean(container.querySelector('[data-vui-row-status="failed"]')), "failed status");
+    expect((container.querySelector('[data-testid="row-context_compression.enabled"] input') as HTMLInputElement).checked).toBe(true);
+    expect(container.querySelector('[data-testid="retry-immediate-context_compression.enabled"]')).not.toBeNull();
+    expect(mock.applyCalls).toHaveLength(1);
+    expect(Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('保存更改'))).toBeUndefined();
+  });
+
 });

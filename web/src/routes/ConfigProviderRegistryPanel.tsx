@@ -29,7 +29,7 @@ import type {
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
-import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
+import { type ConfigCopy, formatConfigCopy, resolvedRouteText } from "./config/configCopy";
 import {
   buildModelFieldValues,
   EDITABLE_MODEL_FIELDS,
@@ -39,6 +39,7 @@ import {
 } from "./config/modelEditableFields";
 import {
   buildProviderSetupChecklist,
+  canonicalProviderRoute,
   canTestProviderModel,
   defaultProviderModelFilter,
   deriveModelDotClass,
@@ -59,7 +60,7 @@ import styles from "./ConfigProviderRegistryPanel.styles";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
 
-export type ProviderActionKind = "discover" | "credential" | "route" | "pin" | "model";
+export type ProviderActionKind = "discover" | "credential" | "route" | "pin" | "model" | "enabled";
 
 export type ProviderActionFeedback = {
   kind: ProviderActionKind;
@@ -106,9 +107,9 @@ export type ConfigProviderRegistryPanelProps = {
   onDeleteProvider: (providerId: string) => void;
   onAddConnection?: () => void;
   /**
-   * Wave 2 row-level enable switch. Must flow through the config draft chain —
-   * the toggle only edits the draft; the「保存到外部配置」prompt persists it.
-   * Selection-surface semantics only: no running call is cut off.
+   * Wave 2 row-level enable switch. The owning shell persists this provider
+   * immediately and updates `rows` after the save result; the list reflects
+   * that accepted state. Selection-surface semantics only: no running call is cut off.
    */
   onToggleEnabled?: (providerId: string, enabled: boolean) => void;
   /**
@@ -519,7 +520,7 @@ function ConnectionTab({
             </label>
             <VButton variant="secondary" isDisabled={disabled || (contextWindowDraft.trim() !== "" && (!Number.isFinite(Number(contextWindowDraft)) || Number(contextWindowDraft) <= 0))}
               onPress={onSaveContextWindow}>{copy.saveContextWindow}</VButton>
-            <span className={styles.muted}>{copy.driverPrefix}{provider.driver || copy.notConfigured} · {provider.serviceClass || copy.notConfigured}</span>
+            <span className={styles.muted}>{provider.serviceClass || copy.notConfigured}</span>
             {provider.serviceClass === "local_runtime" ? <span className={styles.connectionAddress}>
               {copy.runtimeFrameworkPrefix}{provider.runtimeFramework || copy.unknownValue} · {copy.artifactFilePrefix}{provider.artifactPath || copy.notConfigured}
             </span> : null}
@@ -791,18 +792,14 @@ function ModelEntryEditor({
         ) : null}
       </div>
       {(() => {
-        const protocolFacts = extractProtocolFacts(model.draftEntry);
-        if (!protocolFacts.length) return null;
+        const wire = extractProtocolFacts(model.draftEntry).find((fact) => fact.field === "wire_protocol")?.value ?? "";
+        const route = canonicalProviderRoute(wire) || wire.trim();
+        if (!route) return null;
         return (
-          <div className={styles.modelEditProtocol} data-model-protocol-facts="true">
+          <div className={styles.modelEditProtocol} data-model-resolved-route={route}>
             <span className={styles.modelEditProtocolHeading}>{copy.modelEditProtocolHeading}</span>
-            {protocolFacts.map((fact) => (
-              <span key={fact.field} className={styles.modelEditProtocolFact} data-model-protocol-field={fact.field}>
-                <code>{fact.field}</code>
-                <span className={styles.modelEditProtocolValue}>{fact.value}</span>
-                <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
-              </span>
-            ))}
+            <span className={styles.modelEditProtocolValue}>{resolvedRouteText(copy, route)}</span>
+            <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
           </div>
         );
       })()}
@@ -1195,7 +1192,7 @@ function ProtocolsTab({ provider, copy }: { provider: ProviderRegistryRow; copy:
     <div className={styles.tabSurface}>
       <span className={styles.fact}>
         <small className={styles.factLabel}>{copy.wireProtocolLabel}</small>
-        <strong className={styles.factValue}>{provider.defaultProtocol || "unknown"}</strong>
+        <strong className={styles.factValue}>{resolvedRouteText(copy, provider.defaultProtocol, "unknown")}</strong>
       </span>
       {provider.models.length ? provider.models.map((model) => (
         <span key={model.modelRef} className={styles.fact} data-model-availability={model.availability}>
@@ -1234,7 +1231,7 @@ function DiagnosticsTab({
           { key: "success", label: copy.factLastSuccess, value: provider.lastSuccessAt || copy.valueNever },
           { key: "failure", label: copy.factLastFailure, value: discoveryErrorLabel(provider.lastErrorType ?? "", copy) },
           { key: "auth", label: copy.factAuth, value: provider.status === "auth_failed" ? copy.valueFailed : provider.credentialState },
-          { key: "protocol", label: copy.factProtocol, value: provider.status === "protocol_mismatch" ? copy.valueMismatch : provider.defaultProtocol || "unknown" },
+          { key: "protocol", label: copy.factProtocol, value: provider.status === "protocol_mismatch" ? copy.valueMismatch : resolvedRouteText(copy, provider.defaultProtocol, "unknown") },
         ]}
         actions={(
           <VButton
@@ -1317,10 +1314,20 @@ export function ConfigProviderRegistryPanel({
     },
     [copy, listRows, rows],
   );
+  const [managedDisabledOnly, setManagedDisabledOnly] = useState(false);
+  const workspaceListRows = useMemo(
+    () => managedDisabledOnly ? listRows.filter((row) => !row.enabled) : listRows,
+    [listRows, managedDisabledOnly],
+  );
+  const workspaceListItems = managedDisabledOnly
+    ? listItems.filter((item) => !item.enabled)
+    : listItems;
+  const homeItems = compactHome ? listItems.filter((item) => item.enabled) : listItems;
+  const disabledProviderCount = listItems.filter((item) => !item.enabled).length;
   const provider =
-    rows.find((row) => row.providerId === selectedProviderId)
-    ?? (listRows[0]
-      ? rows.find((row) => row.providerId === listRows[0].providerId) ?? null
+    rows.find((row) => row.providerId === selectedProviderId && workspaceListRows.some((item) => item.providerId === row.providerId))
+    ?? (workspaceListRows[0]
+      ? rows.find((row) => row.providerId === workspaceListRows[0].providerId) ?? null
       : null);
   const [modelQuery, setModelQuery] = useState("");
   const [contextWindowDraft, setContextWindowDraft] = useState("");
@@ -1338,12 +1345,12 @@ export function ConfigProviderRegistryPanel({
     setContextWindowDraft(provider.contextWindow ? String(provider.contextWindow) : "");
   }, [provider?.providerId, provider?.contextWindow]);
 
-  // Keep the selection on a listed provider; default to the first list row (in-use first).
+  // Keep the selection in the visible workspace list; default to its first row.
   useEffect(() => {
-    if (!listRows.length) return;
-    if (selectedProviderId && rows.some((row) => row.providerId === selectedProviderId)) return;
-    onSelectProvider(listRows[0].providerId);
-  }, [listRows, onSelectProvider, rows, selectedProviderId]);
+    if (!workspaceListRows.length) return;
+    if (selectedProviderId && workspaceListRows.some((row) => row.providerId === selectedProviderId)) return;
+    onSelectProvider(workspaceListRows[0].providerId);
+  }, [onSelectProvider, selectedProviderId, workspaceListRows]);
 
   const [mergePreview, setMergePreview] = useState<ConfigProviderMergePreview | null>(null);
   const [mergeResult, setMergeResult] = useState<ConfigProviderMergeResult | null>(null);
@@ -1365,6 +1372,14 @@ export function ConfigProviderRegistryPanel({
   ) ?? 0;
   const providerDeleteBlocked = Boolean(provider && (provider.pinnedCount > 0 || providerLiveReferenceCount > 0));
   const visibleFeedback = actionFeedback?.providerId === provider?.providerId ? actionFeedback : null;
+  const enabledRetryTarget = actionFeedback?.kind === "enabled" && actionFeedback.phase === "error"
+    ? rows.find((row) => row.providerId === actionFeedback.providerId)
+    : null;
+  const canRetryEnabledChange = Boolean(enabledRetryTarget && onToggleEnabled);
+  const retryEnabledChange = () => {
+    if (!enabledRetryTarget || !onToggleEnabled || disabled || saveBusy || actionFeedback?.phase === "busy") return;
+    onToggleEnabled(enabledRetryTarget.providerId, enabledRetryTarget.enabled === false);
+  };
   const discoverBusy = visibleFeedback?.kind === "discover" && visibleFeedback.phase === "busy";
   const pinBusy = visibleFeedback?.kind === "pin" && visibleFeedback.phase === "busy";
   const credentialActive = activeCredentialProviderId === provider?.providerId;
@@ -1530,13 +1545,23 @@ export function ConfigProviderRegistryPanel({
         sidebar={(
           <div className={styles.providerRail}>
             <div className={styles.providerListSection}>
-              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {listRows.length}</p>
+              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {workspaceListRows.length}</p>
               <VEntityList
                 ariaLabel={copy.configuredListAria}
                 activeId={provider?.providerId}
                 className={styles.providerList}
-                items={listItems}
-                empty={(
+                items={workspaceListItems}
+                empty={managedDisabledOnly ? (
+                  <VStateSurface tone="empty" title={copy.homeNoDisabledServicesTitle}>
+                    {copy.homeNoDisabledServicesBody}
+                    <VButton
+                      variant="secondary"
+                      data-provider-action="manage-all-providers"
+                      isDisabled={disabled}
+                      onPress={() => setManagedDisabledOnly(false)}
+                    >{copy.homeShowAllServicesAction}</VButton>
+                  </VStateSurface>
+                ) : (
                   <VStateSurface tone="empty" title={copy.emptyConfiguredTitle}>
                     {copy.emptyConfiguredNormal}
                   </VStateSurface>
@@ -1587,6 +1612,16 @@ export function ConfigProviderRegistryPanel({
                 aria-live="polite"
               >
                 {visibleFeedback.message}
+                {visibleFeedback.kind === "enabled" && visibleFeedback.phase === "error" && canRetryEnabledChange ? (
+                  <VButton
+                    variant="ghost"
+                    density="compact"
+                    contentLayout="plain"
+                    data-provider-retry-action="enabled"
+                    isDisabled={disabled || saveBusy}
+                    onPress={retryEnabledChange}
+                  >{copy.retryAction}</VButton>
+                ) : null}
               </p>
             ) : null}
             <div className={styles.providerSettings} data-vui-region="config-provider-connection">
@@ -1619,7 +1654,7 @@ export function ConfigProviderRegistryPanel({
                     onPress={() => onEditRoute(provider.providerId)}>{copy.editRouteAction}</VButton>}
                   footer={routeActive ? routeEditor : undefined} />
                 <VSettingsRow label={copy.protocolRowLabel} description={copy.protocolRowHint}
-                  control={<span className={styles.muted}>{provider.defaultProtocol || copy.notConfigured}</span>} />
+                  control={<span className={styles.muted} data-provider-resolved-route={canonicalProviderRoute(provider.defaultProtocol) || undefined}>{resolvedRouteText(copy, provider.defaultProtocol, copy.notConfigured)}</span>} />
               </VSettingsGroupCard>
               <ConnectionTab key={provider.providerId}
                 provider={provider} contextWindowDraft={contextWindowDraft}
@@ -1774,10 +1809,22 @@ export function ConfigProviderRegistryPanel({
             data-feedback-kind={actionFeedback.kind}
             role={actionFeedback.phase === "error" ? "alert" : "status"}
             aria-live="polite"
-          >{actionFeedback.message}</p>
+          >
+            {actionFeedback.message}
+            {actionFeedback.kind === "enabled" && actionFeedback.phase === "error" && canRetryEnabledChange ? (
+              <VButton
+                variant="ghost"
+                density="compact"
+                contentLayout="plain"
+                data-provider-retry-action="enabled"
+                isDisabled={disabled || saveBusy}
+                onPress={retryEnabledChange}
+              >{copy.retryAction}</VButton>
+            ) : null}
+          </p>
         ) : null}
         <div role="list" aria-label={copy.configuredListAria} className={styles.homeList}>
-          {listItems.map((item) => {
+          {homeItems.map((item) => {
             const row = rows.find((candidate) => candidate.providerId === item.providerId)!;
             const testModel = row.models.find((model) => model.availability === "pinned"
               && model.draftEntry?.enabled !== false && canTestProviderModel(model)
@@ -1806,18 +1853,38 @@ export function ConfigProviderRegistryPanel({
                     variant="ghost"
                     data-provider-home-action="manage"
                     isDisabled={disabled}
-                    onPress={() => { onSelectProvider(row.providerId); setManagedOpen(true); }}
+                    onPress={() => { setManagedDisabledOnly(false); onSelectProvider(row.providerId); setManagedOpen(true); }}
                   >{copy.homeManageAction}</VButton>
                 </VActionGroup>
               </div>
             );
           })}
         </div>
-        {!rows.length ? (
-          <VStateSurface tone="empty" title={copy.emptyConfiguredTitle}>
-            {copy.emptyConfiguredNormal}
+        {!homeItems.length ? (
+          <VStateSurface
+            tone="empty"
+            title={disabledProviderCount ? copy.homeNoEnabledServicesTitle : copy.emptyConfiguredTitle}
+          >
+            {disabledProviderCount ? copy.homeNoEnabledServicesBody : copy.emptyConfiguredNormal}
             {onAddConnection ? <VButton variant="secondary" icon={<Plus size={14} />} isDisabled={disabled} onPress={onAddConnection}>{copy.addProvider}</VButton> : null}
           </VStateSurface>
+        ) : null}
+        {disabledProviderCount ? (
+          <VButton
+            className={styles.homeDisabledManageAction}
+            variant="ghost"
+            density="compact"
+            contentLayout="plain"
+            data-provider-home-action="manage-disabled"
+            isDisabled={disabled}
+            onPress={() => {
+              const firstDisabled = listItems.find((item) => !item.enabled);
+              if (!firstDisabled) return;
+              setManagedDisabledOnly(true);
+              onSelectProvider(firstDisabled.providerId);
+              setManagedOpen(true);
+            }}
+          >{formatConfigCopy(copy.homeManageDisabledAction, { count: disabledProviderCount })}</VButton>
         ) : null}
       </VSurface>
       <VDialog open={managedOpen} onOpenChange={setManagedOpen} title={copy.homeManageTitle} size="xl" contentClassName={styles.managementDialog}>

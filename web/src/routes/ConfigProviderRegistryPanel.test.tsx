@@ -161,6 +161,25 @@ describe("compact model services home", () => {
     return container;
   }
 
+  async function mountWithRerender(initialProps: ConfigProviderRegistryPanelProps) {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    function Harness({ currentProps }: { currentProps: ConfigProviderRegistryPanelProps }) {
+      const [selected, setSelected] = React.useState(initialProps.selectedProviderId);
+      return <ConfigProviderRegistryPanel {...currentProps} compactHome selectedProviderId={selected}
+        onSelectProvider={(providerId) => { currentProps.onSelectProvider(providerId); setSelected(providerId); }} />;
+    }
+    await act(async () => root.render(<Harness currentProps={initialProps} />));
+    return {
+      container,
+      rerender: async (nextProps: ConfigProviderRegistryPanelProps) => {
+        await act(async () => root.render(<Harness currentProps={nextProps} />));
+      },
+    };
+  }
+
   it("shows flat service rows with real status and keeps the full workspace closed", () => {
     const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([model("pinned", "pinned")], {
       compactHome: true, hasPendingApply: true,
@@ -178,6 +197,79 @@ describe("compact model services home", () => {
     expect(markup).not.toContain('data-provider-action="add-provider"');
     expect(panelSourceRaw).not.toContain("collapse: {");
     expect(panelSourceRaw).toContain("layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets");
+  });
+
+  it("shows enabled services with connection errors and omits disabled services from the home", async () => {
+    const enabledError = { ...provider([]), providerId: "relay_broken", label: "Broken Relay", status: "auth_failed" };
+    const disabled = { ...provider([]), providerId: "relay_off", label: "Off Relay", enabled: false };
+    const container = await mount(panelProps([], { rows: [disabled, enabledError] }));
+
+    expect(container.querySelector('[data-provider-home-row="relay_broken"] [data-provider-status="auth_failed"]')).not.toBeNull();
+    expect(container.querySelector('[data-provider-home-row="relay_off"]')).toBeNull();
+    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')?.textContent).toContain("(1)");
+  });
+
+  it("opens the existing workspace with only disabled services in its sidebar", async () => {
+    const onSelectProvider = vi.fn();
+    const enabled = { ...provider([]), providerId: "relay_on", label: "Online Relay" };
+    const disabledA = { ...provider([]), providerId: "relay_off_a", label: "Off Relay A", enabled: false };
+    const disabledB = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
+    const container = await mount(panelProps([], { rows: [enabled, disabledA, disabledB], onSelectProvider }));
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-action="manage-disabled"]')!.click());
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+
+    expect(onSelectProvider).toHaveBeenCalledWith("relay_off_a");
+    expect(dialog.textContent).toContain("管理模型服务");
+    expect(dialog.querySelectorAll('[data-provider-enabled="false"]')).toHaveLength(2);
+    expect(dialog.querySelector('[data-provider-enabled="true"]')).toBeNull();
+    expect(dialog.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Off Relay A");
+  });
+
+  it("reflects restored rows only after props update and selects the next disabled service", async () => {
+    const onSelectProvider = vi.fn();
+    const active = { ...provider([]), providerId: "relay_on", label: "Online Relay" };
+    const restored = { ...provider([]), providerId: "relay_off_a", label: "Off Relay A", enabled: false };
+    const remaining = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
+    const initialProps = panelProps([], { rows: [active, restored, remaining], onSelectProvider });
+    const { container, rerender } = await mountWithRerender(initialProps);
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-action="manage-disabled"]')!.click());
+    await rerender(panelProps([], {
+      rows: [active, { ...restored, enabled: true }, remaining],
+      onSelectProvider,
+    }));
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(container.querySelector('[data-provider-home-row="relay_off_a"]')).not.toBeNull();
+    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')?.textContent).toContain("(1)");
+    expect(dialog.querySelector('[data-provider-enabled="true"]')).toBeNull();
+    expect(dialog.querySelector('[data-provider-enabled="false"]')?.getAttribute("data-provider-enabled")).toBe("false");
+    expect(dialog.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Off Relay B");
+    expect(onSelectProvider).toHaveBeenLastCalledWith("relay_off_b");
+  });
+
+  it("keeps an all-disabled home recoverable and offers an empty state after all services are restored", async () => {
+    const disabledA = { ...provider([]), providerId: "relay_off_a", label: "Off Relay A", enabled: false };
+    const disabledB = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
+    const initialProps = panelProps([], { rows: [disabledA, disabledB] });
+    const { container, rerender } = await mountWithRerender(initialProps);
+
+    expect(container.querySelectorAll('[data-provider-home-row]')).toHaveLength(0);
+    expect(container.textContent).toContain(CONFIG_COPY.zh.homeNoEnabledServicesTitle);
+    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')?.textContent).toContain("(2)");
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-action="manage-disabled"]')!.click());
+    await rerender(panelProps([], { rows: [{ ...disabledA, enabled: true }, { ...disabledB, enabled: true }] }));
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(container.querySelectorAll('[data-provider-home-row]')).toHaveLength(2);
+    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')).toBeNull();
+    expect(dialog.textContent).toContain(CONFIG_COPY.zh.homeNoDisabledServicesTitle);
+    expect(dialog.textContent).toContain(CONFIG_COPY.zh.homeNoDisabledServicesBody);
+
+    await act(async () => dialog.querySelector<HTMLButtonElement>('[data-provider-action="manage-all-providers"]')!.click());
+    expect(dialog.querySelectorAll('[data-provider-enabled="true"]')).toHaveLength(2);
   });
 
   it("tests an enabled pinned model belonging to the clicked service", async () => {
@@ -221,6 +313,89 @@ describe("compact model services home", () => {
     expect(button.disabled).toBe(true);
     await act(async () => button.click());
     expect(onTestModel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { enabled: true, retryEnabled: false },
+    { enabled: false, retryEnabled: true },
+  ])("retries an enabled-action failure toward the current opposite state ($enabled)", async ({ enabled, retryEnabled }) => {
+    const onToggleEnabled = vi.fn();
+    const row = { ...provider([]), enabled };
+    const container = await mount(panelProps([], {
+      rows: [row],
+      actionFeedback: { kind: "enabled", providerId: "relay_a", phase: "error", message: "保存失败" },
+      onToggleEnabled,
+    }));
+    const retry = container.querySelector<HTMLButtonElement>('[data-provider-retry-action="enabled"]')!;
+
+    expect(retry.textContent).toBe(CONFIG_COPY.zh.retryAction);
+    await act(async () => retry.click());
+    expect(onToggleEnabled).toHaveBeenCalledExactlyOnceWith("relay_a", retryEnabled);
+  });
+
+  it("does not show the enabled retry for other feedback kinds or busy feedback", () => {
+    const props = panelProps([], {
+      actionFeedback: { kind: "model", providerId: "relay_a", phase: "error", message: "模型调用失败" },
+      onToggleEnabled: vi.fn(),
+    });
+    const compactMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...props} compactHome />);
+    const workspaceMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...props} />);
+    const busyMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
+      actionFeedback: { kind: "enabled", providerId: "relay_a", phase: "busy", message: "正在保存" },
+      onToggleEnabled: vi.fn(),
+    })} compactHome />);
+    const missingRowMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
+      rows: [],
+      actionFeedback: { kind: "enabled", providerId: "missing-provider", phase: "error", message: "保存失败" },
+      onToggleEnabled: vi.fn(),
+    })} compactHome />);
+
+    expect(compactMarkup).not.toContain('data-provider-retry-action="enabled"');
+    expect(workspaceMarkup).not.toContain('data-provider-retry-action="enabled"');
+    expect(busyMarkup).not.toContain('data-provider-retry-action="enabled"');
+    expect(missingRowMarkup).not.toContain('data-provider-retry-action="enabled"');
+  });
+
+  it("retries enabled-action failures from workspace feedback", async () => {
+    const onToggleEnabled = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(
+      <ConfigProviderRegistryPanel {...panelProps([], {
+        actionFeedback: { kind: "enabled", providerId: "relay_a", phase: "error", message: "保存失败" },
+        onToggleEnabled,
+      })} />,
+    ));
+    const retry = container.querySelector<HTMLButtonElement>('[data-provider-retry-action="enabled"]')!;
+
+    await act(async () => retry.click());
+    expect(onToggleEnabled).toHaveBeenCalledExactlyOnceWith("relay_a", false);
+  });
+
+  it.each([
+    { disabled: true, saveBusy: false },
+    { disabled: false, saveBusy: true },
+  ])("keeps the workspace enabled-action retry disabled when disabled or busy", async ({ disabled, saveBusy }) => {
+    const onToggleEnabled = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(
+      <ConfigProviderRegistryPanel {...panelProps([], {
+        disabled,
+        actionFeedback: { kind: "enabled", providerId: "relay_a", phase: "error", message: "保存失败" },
+        onToggleEnabled,
+        saveBusy,
+      })} />,
+    ));
+    const retry = container.querySelector<HTMLButtonElement>('[data-provider-retry-action="enabled"]')!;
+
+    expect(retry.disabled).toBe(true);
+    await act(async () => retry.click());
+    expect(onToggleEnabled).not.toHaveBeenCalled();
   });
 
   it("opens the existing connection, key and model controls from Manage", async () => {
@@ -451,11 +626,14 @@ describe("ConfigProviderRegistryPanel", () => {
       "streaming",
       "default_reasoning_effort",
     ]);
-    // Protocol-layer facts are visible but read-only, with the rule-supplied note.
-    expect(markup).toContain('data-model-protocol-field="wire_protocol"');
-    expect(markup).toContain('data-model-protocol-field="interaction_contract"');
-    expect(markup).toContain('data-model-protocol-field="reasoning_effort_adapter"');
+    // One resolved route is visible. Raw protocol fields stay out of the form.
+    expect(markup).toContain('data-model-resolved-route="responses"');
+    expect(markup).toContain("OpenAI Responses");
     expect(markup).toContain("由协议规则供给");
+    expect(markup).not.toContain('data-model-protocol-field=');
+    expect(markup).not.toContain(">wire_protocol<");
+    expect(markup).not.toContain(">interaction_contract<");
+    expect(markup).not.toContain(">reasoning_effort_adapter<");
     // Save starts disabled (nothing edited yet).
     const save = markup.match(/<button[^>]*data-model-action="save-edit"[^>]*>/)?.[0] ?? "";
     expect(save).toContain("disabled");
@@ -749,8 +927,10 @@ describe("ConfigProviderRegistryPanel", () => {
     );
     expect(summary).toContain('data-provider-action="route"');
     expect(summary).toContain("修改地址与协议");
-    expect(summary).toContain("接口协议");
-    expect(summary).toContain("responses");
+    expect(summary).toContain("路线");
+    expect(summary).toContain("OpenAI Responses");
+    expect(summary).toContain('data-provider-resolved-route="responses"');
+    expect(summary).not.toContain("驱动：");
     expect(summary).toContain("更新 API Key");
     expect(summary).toContain("调整上限与部署详情");
     expect(summary).toContain("默认上下文上限");

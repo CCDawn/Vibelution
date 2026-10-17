@@ -690,40 +690,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     syncWorkspace,
   ]);
 
-  const handleToggleProviderEnabled = useCallback(async (providerId: string, enabled: boolean) => {
-    setBusyAction(copy.actionToggleEnabledBusy);
-    setProviderActionError("");
-    try {
-      const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
-      // Draft-only mutation: the「保存到外部配置」prompt applies it. No direct
-      // operator-config write here. Wave 2 semantics are selection-surface only —
-      // already-saved agent call configs keep working.
-      provider.enabled = enabled;
-      const response = await updateDraftProvider(
-        providerId,
-        buildProviderDraftRequest({ providerId, provider }),
-      );
-      syncWorkspace(response, "success", { resetBase: false });
-      return true;
-    } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionError(message);
-      markError(error);
-      return false;
-    } finally {
-      setBusyAction("");
-    }
-  }, [
-    buildProviderDraftRequest,
-    copy,
-    markError,
-    readableErrorMessage,
-    requireDraft,
-    setBusyAction,
-    setProviderActionError,
-    syncWorkspace,
-  ]);
-
   const handleBeginProviderRouteEdit = useCallback((providerId: string) => {
     const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
     setRouteEditProviderId(providerId);
@@ -821,7 +787,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     handleUpdateProviderCredential,
     handleUpdatePinnedModel,
     handleUpdateProviderContextWindow,
-    handleToggleProviderEnabled,
     handleBeginProviderRouteEdit,
     handlePreviewProviderRoute,
     handleApplyProviderRoutePreview,
