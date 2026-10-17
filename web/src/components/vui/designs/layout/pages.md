@@ -528,3 +528,13 @@ import { VSplitWorkspace } from "@/components/vui";
 
 ### 实现落点
 - `layout/VSplitWorkspace.tsx` + `usePersistedPaneResize`
+
+### 个人助理工作台与桌面聊天
+
+`PersonalAssistantRoute` 复用 `VSplitWorkspace`：左栏角色、中央原生会话、右栏平台概览。两侧宽度只由 `WORKBENCH_LAYOUT_IDS.personalAssistant` 记忆；右栏收起按钮位于自身顶栏最右侧。窄屏通过现有 `VDialog` 打开概览，不挤压原生输入区。
+
+概览固定顶部管理入口、状态条与 `VTabs`，正文只保留一个滚动区域。默认关注事项；会话和智能体独立搜索，每页八条；其余管理入口由 `VDropdownMenu` 保留。读取失败直接显示，旧缓存不可表示为刚刚更新的成功状态。
+
+角色复用 `DesktopPetCharacter`、现有 `PetActivity` 与原生 Session 的只读消息窗口。待确认、近期异常优先；新消息用原生 `turnId` + 逻辑 `itemId` 去重，首次历史快照不提醒，界面只保存有界 ID 与查看标记。未读提醒短暂播放后恢复，未读数保留到实际查看；减少动态效果时保留静态提示。
+
+桌面模式点击角色切换为 400×530 的聊天窗口，顶栏保留身份、状态、返回工作台、收起和关闭。正文继续挂载同一原生 `ChatCodingRoute`，不展示平台概览和会话列表，不另建 transcript、composer 或 SSE。窗口尺寸仍由 Electron 预设限定并夹紧到屏幕工作区；权限审批与错误保留在原生聊天中。

@@ -4,3 +4,7 @@
 @source "./*.styles.ts";
 @source "../PersonalAssistantRoute.tsx";
 @source "../desktopPet/DesktopAssistantRoute.tsx";
+
+.assistant-rail-character .desktop-pet-character { position: absolute; inset: 0; width: 100%; height: 100%; }
+.assistant-rail-character .desktop-pet-character__halo { display: none; }
+.assistant-rail-character .desktop-pet-character__frame { filter: drop-shadow(0 8px 11px rgb(60 85 120 / 10%)); }

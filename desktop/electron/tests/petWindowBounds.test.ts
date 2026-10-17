@@ -20,8 +20,8 @@ describe("desktop pet window bounds", () => {
   it("clamps the expanded preset and restores the collapsed size", () => {
     const area = { x: -1280, y: 0, width: 1280, height: 1024 };
     const expanded = desktopPetWindowExpandedBounds({ x: -300, y: 692 }, area, true);
-    expect(expanded).toEqual({ x: -760, y: 424, width: 760, height: 600 });
-    expect(desktopPetWindowExpandedBounds(expanded, area, false)).toEqual({ x: -760, y: 424, width: 300, height: 330 });
+    expect(expanded).toEqual({ x: -400, y: 494, width: 400, height: 530 });
+    expect(desktopPetWindowExpandedBounds(expanded, area, false)).toEqual({ x: -400, y: 494, width: 300, height: 330 });
     expect(desktopPetWindowExpandedBounds({ x: 900, y: 900 }, { x: 20, y: 30, width: 400, height: 300 }, true))
       .toEqual({ x: 20, y: 30, width: 400, height: 300 });
   });

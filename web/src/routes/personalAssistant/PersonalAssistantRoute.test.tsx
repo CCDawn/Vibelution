@@ -120,4 +120,20 @@ describe("personal assistant page admission", () => {
     expect(container.textContent).toContain("暂时无法读取平台状态");
     expect(container.textContent).not.toContain("在这里等你");
   });
+  it("places the character in the workbench sidebar and reflects platform work phases", async () => {
+    vi.mocked(fetchPetActivity).mockResolvedValue({ schemaVersion: 1, aggregateTone: "running", animationState: "thinking", activeCount: 1,
+      attentionCount: 0, generatedAt: "", sessions: [{ sessionId: "worker", title: "Worker", agentId: "worker", agentDisplayName: "Worker", tone: "running", phase: "thinking", updatedAt: "" }] });
+    await render("/personal-assistant");
+    expect(container.querySelector('aside[aria-label="个人助理角色"]')).not.toBeNull();
+    expect(container.querySelector('[data-whale-animation="thinking"]')).not.toBeNull();
+    expect(container.textContent).toContain("思考中");
+  });
+  it("keeps the expanded desktop window focused on the same native chat", async () => {
+    await render("/desktop-assistant", true);
+    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
+    expect(container.querySelector('[data-assistant-chat="compact"]')).not.toBeNull();
+    expect(container.querySelector('[data-native-session-chat]')).not.toBeNull();
+    expect(container.textContent).not.toContain("真实概览入口");
+    expect(container.querySelector('[aria-label="实时对话"]')).toBeNull();
+  });
 });

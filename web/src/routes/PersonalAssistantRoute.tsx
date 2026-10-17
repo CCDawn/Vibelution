@@ -10,6 +10,7 @@ import { PersonalAssistantState } from "./personalAssistant/PersonalAssistantSta
 import { usePersonalAssistant } from "./personalAssistant/usePersonalAssistant";
 import { useAssistantNarrowLayout } from "./personalAssistant/useAssistantNarrowLayout";
 import styles from "./personalAssistant/PersonalAssistant.styles";
+import { PersonalAssistantCharacterRail } from "./personalAssistant/PersonalAssistantCharacterRail";
 
 export function PersonalAssistantRoute() {
   const state = usePersonalAssistant();
@@ -33,13 +34,15 @@ export function PersonalAssistantRoute() {
     <header className={styles.header}><div><h1 className={styles.title}>{state.assistant?.displayName || "个人助理"}</h1>
       <p className={styles.caption}>大肥鲸 · 帮你管理 Vibelution</p></div><div className={styles.actions}>
       {narrow ? <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setOverviewOpen(true)}>平台概览</VButton> : null}
-      <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>桌面模式</VButton>
+      {narrow ? <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>桌面模式</VButton> : null}
     </div></header>
     {desktopError ? <p className={styles.error} role="alert">{desktopError}</p> : null}
     <VSplitWorkspace className={styles.split} chrome="workbench" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.personalAssistant,
-      aside: { defaultWidth: 280, minWidth: 220, maxWidth: 420 },
+      sidebar: { defaultWidth: 176, minWidth: 148, maxWidth: 220 },
+      aside: { defaultWidth: 340, minWidth: 280, maxWidth: 440 },
       collapse: { aside: { separatorLabel: "调整平台概览宽度", collapseLabel: "收起平台概览", expandLabel: "展开平台概览",
         placement: "header", restoreInRail: true, collapsed: overviewCollapsed, onCollapsedChange: setOverviewCollapsed } } }}
+      sidebar={state.verified && !narrow ? <PersonalAssistantCharacterRail assistant={state.assistant!} desktopPending={desktopPending} onOpenDesktop={() => void openDesktop()} /> : undefined}
       main={<div className={styles.main}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>}
       aside={state.verified && !narrow ? <PersonalAssistantOverview headerAction={<VIconButton variant="ghost" label="收起平台概览"
         icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />}

@@ -1,24 +1,18 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
-import "../personalAssistant/personal-assistant.tailwind.css";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ExternalLink, MessageCircle, PanelRightClose, RefreshCw, Settings, X } from "lucide-react";
+import { ChevronDown, ExternalLink, MessageCircle, RefreshCw, Settings, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
-import { fetchPetActivity } from "../../api/pet";
-import { queryKeys } from "../../api/queryKeys";
-import type { PetActivity } from "../../api/types/petActivity";
-import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
-import { VButton, VCheckbox, VIconButton, VInput, VNativeButton, VSplitWorkspace, VStateSurface } from "../../components/vui";
+import { VButton, VCheckbox, VIconButton, VInput, VNativeButton, VStateSurface } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { ChatCodingRoute } from "../ChatCodingRoute";
-import { PersonalAssistantOverview } from "../personalAssistant/PersonalAssistantOverview";
 import { PersonalAssistantState } from "../personalAssistant/PersonalAssistantState";
+import { useAssistantActivity } from "../personalAssistant/useAssistantActivity";
 import { usePersonalAssistant } from "../personalAssistant/usePersonalAssistant";
-import styles from "../personalAssistant/PersonalAssistant.styles";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import { nextDesktopPetCharacter } from "./desktopPetCharacterModel";
 import { readPetPreferences, savePetPreferences, type DesktopPetPreferences } from "./desktopPetPreferences";
-import { openSessionFromDesktopPet, petActivityRefetchInterval, petPhaseLabel, petToneLabel } from "./desktopPetModel";
+import { openSessionFromDesktopPet } from "./desktopPetModel";
 import {
   beginDesktopPetDrag,
   desktopPetWindowDragBridge,
@@ -28,16 +22,6 @@ import {
   type DesktopPetWindowDragBridge,
 } from "./desktopPetWindowDrag";
 import petStyles from "./DesktopAssistantRoute.styles";
-
-const EMPTY_ACTIVITY: PetActivity = {
-  schemaVersion: 1,
-  aggregateTone: "idle",
-  animationState: "idle",
-  activeCount: 0,
-  attentionCount: 0,
-  generatedAt: "",
-  sessions: [],
-};
 
 const COPY = {
   zh: {
@@ -53,11 +37,8 @@ const COPY = {
     chat: "聊一聊",
     expand: "展开个人助理聊天",
     collapse: "收起个人助理聊天",
-    sessions: "实时对话",
-    empty: "现在没有运行中的对话",
-    unavailable: "暂时无法读取平台状态",
     openFailed: "未能返回工作台，请稍后重试",
-    anonymous: "会话",
+    unread: "条未读提醒",
     returnToWorkbench: "返回工作台",
     close: "关闭个人助理",
     titleFallback: "个人助理",
@@ -67,9 +48,6 @@ const COPY = {
     enableFailed: "个人助理无法启用",
     retry: "重试",
     closeWindow: "关闭窗口",
-    overviewSeparator: "调整平台概览宽度",
-    overviewCollapse: "收起平台概览",
-    overviewExpand: "展开平台概览",
   },
   en: {
     names: { xiaoluo: "Xiao Luo", dafeiyu: "DeepSeek Whale" },
@@ -84,11 +62,8 @@ const COPY = {
     chat: "Chat",
     expand: "Open the assistant chat",
     collapse: "Collapse the assistant chat",
-    sessions: "Live conversations",
-    empty: "No conversations are running",
-    unavailable: "Platform status is unavailable",
     openFailed: "Could not return to the workbench. Try again.",
-    anonymous: "Conversation",
+    unread: "unread updates",
     returnToWorkbench: "Return to workbench",
     close: "Close the personal assistant",
     titleFallback: "Personal assistant",
@@ -98,9 +73,6 @@ const COPY = {
     enableFailed: "The personal assistant cannot start",
     retry: "Retry",
     closeWindow: "Close window",
-    overviewSeparator: "Resize the overview",
-    overviewCollapse: "Collapse the overview",
-    overviewExpand: "Expand the overview",
   },
 } as const;
 
@@ -116,17 +88,19 @@ export function DesktopAssistantRoute() {
   const context = useQuery({ queryKey: ["desktop-assistant", "native-context"], queryFn: getDesktopAssistantContext,
     retry: false, staleTime: Infinity });
   const state = usePersonalAssistant(context.isSuccess);
-  const activityQuery = useQuery({ queryKey: queryKeys.petActivity(), queryFn: fetchPetActivity,
-    enabled: context.isSuccess, refetchInterval: query => petActivityRefetchInterval(query.state.data),
-    refetchIntervalInBackground: false, retry: false });
-  const activity = activityQuery.data ?? EMPTY_ACTIVITY;
   const [expanded, setExpanded] = useState(false);
-  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [preferences, setPreferences] = useState(readPetPreferences);
+  const activity = useAssistantActivity({
+    enabled: context.isSuccess,
+    assistant: state.verified ? state.assistant : undefined,
+    reading: expanded && state.verified,
+    showCompletion: preferences.showCompletion,
+    idleMessage: preferences.idleMessage,
+  });
   const characterId = preferences.characterId;
   const dragStateRef = useRef<DesktopPetDragState | null>(null);
   const dragBridgeRef = useRef<DesktopPetWindowDragBridge | null>(desktopPetWindowDragBridge());
@@ -266,13 +240,10 @@ export function DesktopAssistantRoute() {
     void toggle();
   }
 
-  const visibleSessions = activity.sessions.filter((session) => preferences.showCompletion || session.tone !== "completed");
-  const tone = activityQuery.isError ? "idle"
-    : activity.aggregateTone === "completed" && !preferences.showCompletion ? "idle" : activity.aggregateTone;
-  const animationState = activityQuery.isError || (activity.aggregateTone === "completed" && !preferences.showCompletion)
-    ? "idle" : activity.animationState;
-  const statusText = activityQuery.isError ? copy.unavailable
-    : tone === "idle" && preferences.idleMessage.trim() ? preferences.idleMessage : petToneLabel(tone, lang);
+  const { tone, animationState, unreadCount } = activity;
+  const showStatus = preferences.showStatus || context.isPending || activity.query.isPending || activity.query.isError || Boolean(feedback);
+  const statusText = feedback || (context.isPending ? copy.checkingIdentity
+    : activity.query.isPending ? copy.readingStatus : activity.statusText);
   const appearanceName = copy.names[characterId];
   const nextCharacterId = nextDesktopPetCharacter(characterId);
 
@@ -288,11 +259,9 @@ export function DesktopAssistantRoute() {
   >
     <div className={petStyles.stage}>
       <div className={petStyles.toolbar}>
-        {preferences.showStatus || activityQuery.isError || feedback ? <span className={petStyles.status} role="status" aria-live="polite">
+        {showStatus ? <span className={petStyles.status} role="status" aria-live="polite">
           <span className={petStyles.statusDot} aria-hidden="true" />
-          {feedback || (context.isPending ? copy.checkingIdentity
-            : activityQuery.isError ? copy.unavailable
-              : activityQuery.data ? statusText : copy.readingStatus)}
+          {statusText}
         </span> : <span />}
         <div className={petStyles.toolbarActions}>
           <VIconButton
@@ -352,6 +321,7 @@ export function DesktopAssistantRoute() {
           tone={tone}
           animationState={animationState}
         />
+        {unreadCount > 0 ? <span className={petStyles.unreadBadge} aria-label={`${unreadCount} ${copy.unread}`} role="status">{unreadCount}</span> : null}
       </VNativeButton>
       <VNativeButton className={petStyles.chatCue} aria-label={copy.expand} onClick={() => void toggle()}>
         <MessageCircle size={13} aria-hidden="true" />
@@ -359,51 +329,23 @@ export function DesktopAssistantRoute() {
       </VNativeButton>
     </div>
   </main>;
-  return <div className={`${styles.desktop} ${styles.desktopExpanded}`}
-    data-vui-domain-recipe="desktop-assistant" data-expanded="true">
-    <header className={styles.desktopHeader}><h1 className={styles.title}>{state.assistant?.displayName || copy.titleFallback}</h1>
-      <div className={styles.actions}><VIconButton label={copy.returnToWorkbench} icon={<ExternalLink size={14} />} isDisabled={!state.verified}
-        onClick={() => { if (state.assistant) void openSession(state.assistant.directSessionId); }} />
-        <VIconButton label={copy.collapse} icon={<ChevronDown size={14} />} isDisabled={pending} onClick={() => void toggle()} />
-        <VIconButton label={copy.close} icon={<X size={14} />} onClick={() => window.close()} /></div>
+  return <div className={petStyles.chatWindow}
+    data-vui-domain-recipe="desktop-assistant" data-assistant-chat="compact" data-expanded="true" data-tone={tone}>
+    <header className={petStyles.chatHeader}>
+      <span className={petStyles.chatAvatar} aria-hidden="true"><Sparkles size={18} /></span>
+      <div className={petStyles.chatIdentity}>
+        <h1 className={petStyles.chatTitle}>{state.assistant?.displayName || copy.titleFallback}</h1>
+        {showStatus ? <span className={petStyles.chatStatus} role={feedback ? "alert" : "status"} aria-live="polite" title={statusText}>
+          <span className={petStyles.chatStatusDot} aria-hidden="true" /><span className={petStyles.chatStatusText}>{statusText}</span>
+        </span> : null}
+      </div>
+      <div className={petStyles.chatActions}>
+        <VIconButton variant="ghost" label={copy.returnToWorkbench} icon={<ExternalLink size={14} aria-hidden="true" />} isDisabled={!state.verified}
+          onClick={() => { if (state.verified && state.assistant) void openSession(state.assistant.directSessionId); }} />
+        <VIconButton variant="ghost" label={copy.collapse} icon={<ChevronDown size={14} aria-hidden="true" />} isDisabled={pending} onClick={() => void toggle()} />
+        <VIconButton variant="ghost" label={copy.close} icon={<X size={14} aria-hidden="true" />} onClick={() => window.close()} />
+      </div>
     </header>
-    <VSplitWorkspace className={styles.split} chrome="workbench" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.desktopAssistant,
-      aside: { defaultWidth: 220, minWidth: 180, maxWidth: 300 },
-      collapse: { aside: { separatorLabel: copy.overviewSeparator, collapseLabel: copy.overviewCollapse, expandLabel: copy.overviewExpand,
-        placement: "header", restoreInRail: true, collapsed: overviewCollapsed, onCollapsedChange: setOverviewCollapsed } } }}
-      main={<div className={styles.main}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>}
-      aside={state.verified ? <aside className={styles.asideColumn}>
-        <section className={styles.sessions} aria-label={copy.sessions}>
-          <div className={styles.sessionsHeaderRow}>
-            <h2 className={styles.sessionsHeader}>{copy.sessions}<span className={styles.sessionsCount}>{activity.activeCount}</span></h2>
-            <VIconButton variant="ghost" label={copy.overviewCollapse} icon={<PanelRightClose size={14} />}
-              onClick={() => setOverviewCollapsed(true)} />
-          </div>
-          <div className={styles.sessionsList}>
-            {activityQuery.isError ? <p role="status" className={styles.sessionsEmpty}>{copy.unavailable}</p> : null}
-            {visibleSessions.length > 0 ? visibleSessions.map((session, index) => (
-              <VNativeButton
-                key={session.sessionId}
-                className={styles.sessionRow}
-                data-tone={session.tone}
-                onClick={() => void openSession(session.sessionId)}
-              >
-                <span className={styles.sessionMarker} data-tone={session.tone} aria-hidden="true" />
-                <span className={styles.sessionCopy}>
-                  <strong className={styles.sessionTitle}>{preferences.showTitles ? session.title : `${copy.anonymous} ${index + 1}`}</strong>
-                  <span className={styles.sessionMeta}>
-                    {preferences.showTitles && session.agentDisplayName ? `${session.agentDisplayName} · ` : ""}
-                    {petPhaseLabel(session.phase, lang)}
-                  </span>
-                </span>
-              </VNativeButton>
-            )) : !activityQuery.isError ? <p className={styles.sessionsEmpty}>{copy.empty}</p> : null}
-          </div>
-        </section>
-        <div className={styles.overviewFill}>
-          <PersonalAssistantOverview desktop showTitles={preferences.showTitles} onOpenSession={id => void openSession(id)} />
-        </div>
-      </aside> : undefined} />
-    {feedback ? <p className={styles.error} role="alert">{feedback}</p> : null}
+    <div className={petStyles.chatBody}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>
   </div>;
 }

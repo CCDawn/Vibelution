@@ -68,8 +68,9 @@ describe("personal assistant native identity and presentation", () => {
     expect(desktopSource).toContain("desktopPetWindowDragBridge");
     expect(desktopSource).toContain("savePetPreferences");
     expect(desktopSource).toContain("openSessionFromDesktopPet");
-    expect(desktopSource).toContain('aria-label={copy.sessions}');
-    expect(desktopSource).toContain("petActivityRefetchInterval");
+    expect(desktopSource).toContain("useAssistantActivity");
+    expect(desktopSource).toContain('data-assistant-chat="compact"');
+    expect(desktopSource).not.toContain("PersonalAssistantOverview");
     expect(desktopSource).toContain('data-vui-domain-recipe="desktop-assistant"');
     expect(desktopSource).not.toContain('data-vui-domain-recipe="desktop-pet"');
   });

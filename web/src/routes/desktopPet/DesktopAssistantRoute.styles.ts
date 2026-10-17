@@ -13,7 +13,18 @@ const styles = {
   hudEmpty: "desktop-pet-hud__empty",
   settingsLabel: "text-[var(--vui-pet-fg-bright)]",
   characterButton: "desktop-pet-character-button",
+  unreadBadge: "pointer-events-none absolute right-5 top-4 z-[2] grid h-5 min-w-5 place-items-center rounded-full border border-[var(--vui-pet-cue-border)] bg-[var(--vui-pet-tone-approval)] px-1 text-[10px] font-semibold leading-none text-[var(--vui-pet-panel)] shadow-sm",
   chatCue: "desktop-assistant-chat-cue",
+  chatWindow: "flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[18px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-xl",
+  chatHeader: "flex min-w-0 shrink-0 items-center gap-2.5 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-4 py-3 [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]",
+  chatAvatar: "grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--vui-selection-bg)] text-[var(--fg-secondary)]",
+  chatIdentity: "flex min-w-0 flex-1 flex-col gap-1",
+  chatTitle: "truncate text-sm font-semibold",
+  chatStatus: "flex min-w-0 items-center gap-1.5 text-[10px] leading-4 text-[var(--fg-secondary)]",
+  chatStatusText: "truncate",
+  chatStatusDot: "size-1.5 shrink-0 rounded-full bg-[var(--fg-secondary)] [[data-tone=running]_&]:bg-[var(--vui-pet-accent)] [[data-tone=approval]_&]:bg-[var(--vui-pet-tone-approval)] [[data-tone=error]_&]:bg-[var(--vui-pet-tone-error)] [[data-tone=completed]_&]:bg-[var(--vui-pet-tone-completed)]",
+  chatActions: "flex shrink-0 items-center gap-0.5",
+  chatBody: "desktop-assistant-chat-body flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
 } as const;
 
 export default styles;

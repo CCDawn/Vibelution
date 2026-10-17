@@ -80,8 +80,8 @@ describe("desktop pet fixed-bounds drag IPC", () => {
   });
   it("executes bounded resize for the owned branch pet and rejects other frames, roles and free bounds", () => {
     const { handler, setBounds, event } = resizeHandler();
-    expect(handler(event, true)).toEqual({ expanded: true, width: 760, height: 600 });
-    expect(setBounds).toHaveBeenCalledWith({ x: 240, y: 300, width: 760, height: 600 }, false);
+    expect(handler(event, true)).toEqual({ expanded: true, width: 400, height: 530 });
+    expect(setBounds).toHaveBeenCalledWith({ x: 500, y: 370, width: 400, height: 530 }, false);
     expect(() => handler(event, { width: 3000, height: 3000 })).toThrow("Invalid desktop pet expanded state");
     expect(() => handler({ ...event, senderFrame: { url: event.senderFrame.url } }, false)).toThrow("blocked desktop pet ipc sender");
     expect(() => handler({ ...event, sender: { ...event.sender, getOSProcessId: () => 10 } }, false)).toThrow("blocked desktop pet ipc sender");

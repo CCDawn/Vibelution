@@ -15,8 +15,8 @@ export type DisplayWorkArea = {
 export const PET_WINDOW_WIDTH = 300;
 export const PET_WINDOW_HEIGHT = 330;
 export const PET_WINDOW_MARGIN = 18;
-export const PET_WINDOW_EXPANDED_WIDTH = 760;
-export const PET_WINDOW_EXPANDED_HEIGHT = 600;
+export const PET_WINDOW_EXPANDED_WIDTH = 400;
+export const PET_WINDOW_EXPANDED_HEIGHT = 530;
 
 /** Renderer selects a size preset, never arbitrary window bounds. */
 export function desktopPetWindowExpandedBounds(

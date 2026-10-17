@@ -6,6 +6,13 @@
 @source "../../routes/desktopPet/DesktopPetCharacter.tsx";
 @source "../../routes/desktopPet/DesktopPetCharacter.styles.ts";
 
+/* Compact assistant presentation only; native transcript/composer behavior is retained. */
+[data-assistant-chat="compact"] .vui-routes-chatcodingroute.centerPane { margin: 0; border: 0; border-radius: 0; grid-template-rows: auto minmax(0, 1fr); }
+[data-assistant-chat="compact"] .vui-routes-chatcodingroute.tabStrip { display: none; }
+[data-assistant-chat="compact"] .vui-components-conversationview.composerCodex { width: calc(100% - 24px); margin: 0 12px 12px; border-radius: 12px; }
+[data-assistant-chat="compact"] .vui-components-conversationview.timeline { padding-inline: 12px; }
+[data-assistant-chat="compact"] .vui-components-conversationview.userMessageBody { border: 0; background: var(--vui-selection-bg); border-radius: 12px 12px 3px 12px; padding: 10px 13px; }
+
 html[data-vibelution-desktop-pet="true"],
 body[data-vibelution-desktop-pet="true"],
 body[data-vibelution-desktop-pet="true"] #root {

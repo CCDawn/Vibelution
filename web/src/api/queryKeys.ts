@@ -2,6 +2,7 @@ export const queryKeys = {
   personalAssistant: () => ["personal-assistant"] as const,
   personalAssistantOverview: () => ["personal-assistant", "overview"] as const,
   personalAssistantBinding: (agentId: string, sessionId: string) => ["personal-assistant", "binding", agentId, sessionId] as const,
+  personalAssistantReplies: (agentId: string, sessionId: string) => ["personal-assistant", "replies", agentId, sessionId] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,
   petActivity: () => ["pet", "activity"] as const,
