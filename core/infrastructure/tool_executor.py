@@ -595,6 +595,7 @@ class ToolExecutor:
         self._register_default_tools()
 
     _READ_ONLY_BLOCKED_TOOLS = {
+        "personal_assistant_desktop_action_tool",
         "financial_evidence_stage_tool",
         "financial_evidence_withdraw_tool",
         "spawn_agent_tool",
@@ -663,6 +664,8 @@ class ToolExecutor:
         self._tool_map["spawn_agent_tool"] = spawn_agent_tool
 
         self._timeout_map = {
+            "personal_assistant_desktop_observe_tool": 90,
+            "personal_assistant_desktop_action_tool": 90,
             # Leave headroom for the finance socket budget and a final in-flight read.
             "financial_report_query_tool": 300,
             "cli_tool": 60,

@@ -10,12 +10,16 @@ from functools import lru_cache
 import json
 from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Literal, Optional
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.personal_assistant_tools import (
     personal_assistant_overview_tool as _personal_assistant_overview_impl,
     personal_assistant_manage_tool as _personal_assistant_manage_impl,
+)
+from tools.personal_assistant_desktop_tools import (
+    personal_assistant_desktop_observe_tool as _personal_assistant_desktop_observe_impl,
+    personal_assistant_desktop_action_tool as _personal_assistant_desktop_action_impl,
 )
 from tools.memory_tools import (
     commit_compressed_memory_tool as _commit_compressed_impl,
@@ -184,6 +188,17 @@ from tools.virtual_human_life_tools import (
     virtual_human_schedule_tool as _virtual_human_schedule_impl,
     virtual_human_status_tool as _virtual_human_status_impl,
 )
+
+class _PersonalAssistantDesktopObserveArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _PersonalAssistantDesktopActionArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["launch", "type_text", "save", "save_foreground", "end"]
+    observation_id: str = ""
+    text: str = ""
+
 
 def _shell_dialect_block() -> str:
     from tools.shell_tools import shell_command_dialect_guidance
@@ -2898,6 +2913,34 @@ def _build_key_tools() -> List[BaseTool]:
         """
         return _personal_assistant_manage_impl(action, arguments_json)
 
+    @tool(args_schema=_PersonalAssistantDesktopObserveArgs)
+    def personal_assistant_desktop_observe_tool(_cancel_checker=None) -> str:
+        """【个人助理测试窗口观察】只读操作者绑定的独立 Notepad 窗口 UIA；不截图。
+
+        UIA 是可访问性结构信息，不是视觉观察，不能据此声称看到了屏幕。
+        不接收任意窗口、路径、MCP 或脚本；后续动作使用 observation_id。
+        """
+        return _personal_assistant_desktop_observe_impl(_cancel_checker=_cancel_checker)
+
+    @tool(args_schema=_PersonalAssistantDesktopActionArgs)
+    def personal_assistant_desktop_action_tool(
+        action: str, observation_id: str = "", text: str = "", _cancel_checker=None,
+    ) -> str:
+        """【个人助理测试窗口操作】只操作操作者绑定的独立 Notepad 窗口，遵循原生审批策略。
+
+        action 仅 launch、type_text、save、save_foreground、end；不支持任意路径、MCP、脚本或快捷键。
+        save 先后台保存；只有回执 foregroundSaveAvailable=True 才可使用其新 observationId
+        调用 save_foreground，单独再次请求原生授权后前台保存，不能自行升级抢焦点。
+        request_approval 模式逐次审批；full_access 遵循平台已有授权语义。
+        按键 accepted 只表示输入受理，不能算保存成功；须以工具验证的保存回执为准。
+        unknown 或超时须先观察核对，不得盲目重试；UIA 不是视觉观察。
+        绑定使用 pid、进程创建时间及窗口编号；这是窗口授权，不保证文件级隔离。
+        launch 不会自动授权新窗口，配置的测试文件仅作保存核验。
+        """
+        return _personal_assistant_desktop_action_impl(
+            action=action, observation_id=observation_id, text=text, _cancel_checker=_cancel_checker,
+        )
+
     @tool
     def financial_report_query_tool(question: str, ticker: str, report_period: str) -> str:
         """
@@ -3700,6 +3743,8 @@ def _build_key_tools() -> List[BaseTool]:
         financial_report_query_tool,
         personal_assistant_overview_tool,
         personal_assistant_manage_tool,
+        personal_assistant_desktop_observe_tool,
+        personal_assistant_desktop_action_tool,
         financial_market_snapshot_tool,
         financial_index_context_tool,
         financial_market_screen_tool,

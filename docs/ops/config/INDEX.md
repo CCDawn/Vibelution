@@ -73,4 +73,5 @@
 
 ## 业务服务连接
 
+- [个人助理桌面 CUA 试验](desktop-cua.md)：独立 Notepad 窗口授权、固定驱动、原生审批与真实保存核验
 - [金融 Agent / RAGFlow 财报证据问答](financial-report-agent.md)：服务器侧环境配置、显式工具授权、引用与失败语义

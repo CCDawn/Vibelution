@@ -12,20 +12,22 @@ from core.web.services.session_archive_service import conversation_is_archived
 
 PROFILE = "personal_assistant_v1"
 ROLE = "personal_assistant"
-TOOLS = (
+_LEGACY_TOOLS = (
     "personal_assistant_overview_tool",
     "personal_assistant_manage_tool",
     "append_personal_memory_tool",
     "supersede_personal_memory_tool",
 )
 LEGACY_POLICY = {
-    "allowedTools": list(TOOLS),
-    "preferredTools": list(TOOLS),
+    "allowedTools": list(_LEGACY_TOOLS),
+    "preferredTools": list(_LEGACY_TOOLS),
     "networkAccess": "none",
     "mutationAccess": "controlled",
     "maxCallsPerTurn": 8,
 }
-POLICY = {**LEGACY_POLICY, "writeScopes": ["private"]}
+PRIVATE_V2_POLICY = {**LEGACY_POLICY, "writeScopes": ["private"]}
+TOOLS = (*_LEGACY_TOOLS, "personal_assistant_desktop_observe_tool", "personal_assistant_desktop_action_tool")
+POLICY = {**PRIVATE_V2_POLICY, "allowedTools": list(TOOLS), "preferredTools": list(TOOLS)}
 PERSONA = {
     "personality": "温和、可靠，尊重用户的偏好和注意力。",
     "communicationStyle": "用中文先讲结论，说明观察依据和需要用户决定的事项。",
@@ -35,7 +37,7 @@ PERSONA = {
 TASK = {
     "mission": "协助用户安排事务、推进目标，并管理 Vibelution 平台。",
     "responsibilities": "读取平台公开状态，主动提出有依据的建议；收到用户指令后通过授权工具执行并报告结果。",
-    "constraints": "观察不等于执行授权。删除、重启和权限变更须逐次确认具体对象与影响，等待原生工具审批；不得绕过策略、使用任意命令或读取其他 Agent 的私密记忆和会话正文。桌面模式不扩大权限。",
+    "constraints": "观察不等于执行授权。删除、重启和权限变更须逐次确认具体对象与影响，等待原生工具审批；不得绕过策略、使用任意命令或读取其他 Agent 的私密记忆和会话正文。桌面操作仅限配置授权的 Notepad 测试文档，遵循原生审批策略：request_approval 逐次审批，full_access 沿用平台已有授权。前台保存必须使用后台保存失败回执的新凭据再次请求授权，不得自动抢焦点；UIA 不是视觉，按键 accepted 不能算保存成功。桌面模式不扩大权限。",
     "preferredTasks": "事务梳理、目标跟进、平台状态解释、Agent 和任务管理。",
     "avoidTasks": "未经指令改变平台；用推测冒充执行结果；重复创建已存在的助理。",
 }
@@ -117,18 +119,21 @@ def _owns_session(agent: dict, row: dict | None) -> bool:
 
 
 def _needs_default_policy_upgrade(agent: dict) -> bool:
-    """Recognize only the untouched, private v1 assistant provisioning policy."""
+    """Recognize only untouched private assistant provisioning snapshots."""
     policy_id = "tool-" + agent["agentId"]
     if (
         agent.get("createdBy") != "user_personal_assistant"
         or agent.get("toolPolicyId") != policy_id
     ):
         return False
-    expected = directory.normalize_tool_policy(LEGACY_POLICY, policy_id)
     version = (agent.get("toolPolicy") or {}).get("policyVersion")
     pending = (agent.get("metadata") or {}).get("personalAssistantSetup") != "ready"
-    expected["policyVersion"] = 1 if pending and version == 1 else 2
-    return agent.get("toolPolicy") == expected
+    for snapshot in (LEGACY_POLICY, PRIVATE_V2_POLICY):
+        expected = directory.normalize_tool_policy(snapshot, policy_id)
+        expected["policyVersion"] = 1 if pending and version == 1 else 2
+        if agent.get("toolPolicy") == expected:
+            return True
+    return False
 
 
 def _project(agent: dict) -> dict:

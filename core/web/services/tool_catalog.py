@@ -138,6 +138,8 @@ GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
     "personal_assistant_overview_tool",
     "personal_assistant_manage_tool",
+    "personal_assistant_desktop_observe_tool",
+    "personal_assistant_desktop_action_tool",
     "financial_report_query_tool",
     "financial_market_snapshot_tool",
     "financial_index_context_tool",
@@ -906,6 +908,22 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["delete_or_cleanup", "permission_management", "runtime_restart"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "personal_assistant_desktop_observe_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["desktop_observation", "read_only"],
+        "riskTags": [],
+        "permissionTier": HIGH_PERMISSION_TIER,
+        "approval": "never",
+        "availability": {"platforms": ["windows"], "requiredConfig": ["VIBELUTION_DESKTOP_CUA_CONFIG"]},
+    },
+    "personal_assistant_desktop_action_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["desktop_action", "test_document"],
+        "riskTags": ["computer_control"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+        "approval": "always",
+        "availability": {"platforms": ["windows"], "requiredConfig": ["VIBELUTION_DESKTOP_CUA_CONFIG"]},
+    },
     "research_knowledge_query_tool": {
         "category": "media_research",
         "capabilityTags": ["research_database", "read_only"],
@@ -1492,6 +1510,8 @@ def metadata_for_tool(tool_name: str, *, source: str = "built_in") -> dict[str, 
         "riskTags": list(metadata.get("riskTags") or []),
         "permissionTier": str(metadata.get("permissionTier") or MEDIUM_PERMISSION_TIER),
         "argDescriptors": list(metadata.get("argDescriptors") or []),
+        **({"approval": metadata["approval"]} if "approval" in metadata else {}),
+        **({"availability": metadata["availability"]} if "availability" in metadata else {}),
     }
 
 
@@ -1527,13 +1547,21 @@ def build_tool_descriptor(
     if not capabilities:
         raise ToolDescriptorError(f"Tool descriptor has no capabilities: {name}")
     normalized_aliases = _normalized_descriptor_tokens(aliases, field="alias", pattern=_TOOL_ID_PATTERN)
-    normalized_platforms = _normalized_descriptor_tokens(platforms, field="platform")
-    normalized_required_config = _normalized_descriptor_tokens(required_config, field="required config")
+    availability = metadata.get("availability") or {}
+    normalized_platforms = _normalized_descriptor_tokens(platforms or availability.get("platforms", ()), field="platform")
+    normalized_required_config = _normalized_descriptor_tokens(
+        required_config or availability.get("requiredConfig", ()),
+        field="required config", pattern=re.compile(r"^[A-Za-z][A-Za-z0-9_]{1,127}$"),
+    )
     risk = _descriptor_risk(metadata)
     scopes = _CATEGORY_SCOPES.get(str(metadata.get("category") or ""), ("uncategorized",))
     approval: ToolApproval = "always" if risk == "destructive" else (
         "on_request" if str(metadata.get("permissionTier") or "") == HIGH_PERMISSION_TIER else "never"
     )
+    if "approval" in metadata:
+        if not isinstance(metadata["approval"], str) or metadata["approval"] not in _VALID_APPROVAL:
+            raise ToolDescriptorError(f"Invalid approval mode for {name}")
+        approval = metadata["approval"]
     concurrency: ToolConcurrency = "serialized" if risk in {"write", "execute", "destructive"} else "safe"
     risk_tags = {str(item or "").strip() for item in metadata.get("riskTags") or [] if str(item or "").strip()}
     write_scope_gated = risk == "write" and bool(risk_tags - WRITE_SCOPE_EXEMPT_RISK_TAGS)

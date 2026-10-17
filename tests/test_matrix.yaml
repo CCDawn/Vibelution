@@ -21,11 +21,15 @@ rules:
       - "focused"
     paths:
       - "core/web/services/personal_assistant_service.py"
+      - "core/web/services/personal_assistant_desktop_service.py"
+      - "core/infrastructure/cua_driver_client.py"
       - "core/web/routes/personal_assistant.py"
       - "tools/personal_assistant_tools.py"
+      - "tools/personal_assistant_desktop_tools.py"
+      - "tests/test_cua_driver_client.py"
       - "tests/test_personal_assistant_*.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_personal_assistant_service.py tests/test_personal_assistant_api.py tests/test_personal_assistant_tools.py tests/test_session_agent_runtime.py tests/test_tool_authorization_execution.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_personal_assistant_service.py tests/test_personal_assistant_api.py tests/test_personal_assistant_tools.py tests/test_personal_assistant_desktop.py tests/test_personal_assistant_desktop_registration.py tests/test_cua_driver_client.py tests/test_owned_process.py tests/test_windowless_subprocess.py tests/test_session_agent_runtime.py tests/test_tool_authorization_execution.py -q"
   - id: owned-runtime-shutdown
     description: "Physical worker retirement and bounded backend shutdown/reopen."
     executionLayers:

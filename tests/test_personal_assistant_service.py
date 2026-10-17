@@ -495,7 +495,8 @@ def test_created_assistant_can_execute_personal_memory_tools(personal_env):
 def test_legacy_default_upgrade_is_explicit_and_preserves_user_profiles(personal_env):
     row = service.create_personal_assistant()["assistant"]
     agent = directory.get_agent(row["agentId"])
-    legacy = dict(agent["toolPolicy"], writeScopes=[], policyVersion=2)
+    legacy = directory.normalize_tool_policy(service.LEGACY_POLICY, agent["toolPolicyId"])
+    legacy["policyVersion"] = 2
     directory.update_agent_instance(row["agentId"], persona_profile={"identityNotes": "自己的身份"}, task_profile={"constraints": "自己的约束"})
     _corrupt_agent(row["agentId"], toolPolicy=legacy)
     state = directory.load_state()

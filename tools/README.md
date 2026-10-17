@@ -36,6 +36,7 @@ Model 可见性
 | 实现文件 | 工具名（canonical） | 主测 |
 | --- | --- | --- |
 | `personal_assistant_tools.py` | `personal_assistant_overview_tool` · `personal_assistant_manage_tool`（canonical个人助理会话限定；管理操作逐次原生审批，只返回概要回执） | `test_personal_assistant_tools.py` |
+| `personal_assistant_desktop_tools.py` | `personal_assistant_desktop_observe_tool` · `personal_assistant_desktop_action_tool`（显式绑定独立 Notepad 窗口；UIA 试验与原生审批，见 [配置](../docs/ops/config/desktop-cua.md)） | `test_personal_assistant_desktop.py`, `test_personal_assistant_desktop_registration.py` |
 | `Key_Tools.py`（包装） | `read_file_tool` · `write_file_tool` · `glob_tool` · `apply_patch_tool` · `apply_diff_edit_tool` · `web_fetch_tool` · `exec_command` · `cli_tool` · `write_stdin` · `task_start_tool` · `task_stop_tool` · `task_output_tool` · `run_test_for_tool` · `web_search_tool` 等 26 个（见 `create_key_tools()`） | `test_agent_protocol.py` · `test_shell_tools.py` · `test_code_analysis_tools.py` |
 | `shell_tools.py` | （`exec_command` / `cli_tool` 实现） | `test_shell_tools.py` · `test_shell_tools_routing.py` |
 | `code_analysis_tools.py` | （`apply_diff_edit_tool` / `apply_patch_tool` / `read_file_tool` 实现） | `test_code_analysis_tools.py` |

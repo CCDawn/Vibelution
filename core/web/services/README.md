@@ -255,6 +255,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `computer_use_service.py` | Controlled Computer Use service for sandbox browser automation. | — | `computer_use.py` | `test_computer_use_tool.py`, `test_developer_sandbox_path_routing.py` |
+| `personal_assistant_desktop_service.py` | Opt-in Notepad window scope, single-use observations, bounded Cua actions and disk verification; [operator setup](../../../docs/ops/config/desktop-cua.md). | — | Canonical personal-assistant tools only | `test_personal_assistant_desktop.py`, `test_cua_driver_client.py` |
 
 ## Data processing
 
