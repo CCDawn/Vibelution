@@ -239,6 +239,64 @@ describe("projectAgentMessageTimelineMessages", () => {
 }).messages.map((message) => message.id)).toEqual(["thinking-only"]);
   });
 
+  it.each([false, true])("preserves distinct durable turn items when a final answer is present: %s", (settled) => {
+    const turnId = "turn-segments";
+    const itemBase = {
+      version: 3 as const,
+      sessionId: "session-1",
+      turnId,
+      revision: 1,
+      status: "completed" as const,
+      terminal: true,
+    };
+    const tool: SessionTurnItem = {
+      ...itemBase, id: "tool-1:1", itemId: "tool-1", sequence: 1,
+      type: "tool_call", toolName: "read_file_tool",
+    };
+    const reasoning: SessionTurnItem = {
+      ...itemBase, id: "reasoning-2:1", itemId: "reasoning-2", sequence: 2,
+      type: "reasoning", text: "Inspecting the tool result",
+    };
+    const answer: SessionTurnItem = {
+      ...itemBase, id: "answer-3:1", itemId: "answer-3", sequence: 3,
+      type: "agent_message", phase: "final_answer", text: "Completed answer",
+    };
+    const durableItems = settled ? [tool, reasoning, answer] : [tool, reasoning];
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: durableItems.map((item, index) => ({
+        id: `session-1-message-segment-${index}`,
+        role: "assistant" as const,
+        turnId,
+        status: "completed" as const,
+        timestamp: `2026-10-17T12:00:0${index}Z`,
+        turnItems: [item],
+      })),
+      ...(settled ? {
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-segments",
+          role: "assistant" as const,
+          turnId,
+          status: "running" as const,
+          timestamp: "2026-10-17T12:00:03Z",
+          turnItems: [{
+            ...answer, id: "stale-answer:1", itemId: "stale-answer",
+            status: "running" as const, terminal: false, text: "Incomplete answer",
+          }],
+          metadata: { kind: "session_active_turn_layer", turnId },
+        },
+      } : {}),
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    const message = projection.messages[0];
+    expect(message?.role).toBe("assistant");
+    if (message?.role !== "assistant") throw new Error("Expected an assistant row");
+    expect(message.turnItems.map((item) => item.itemId)).toEqual(durableItems.map((item) => item.itemId));
+    expect(message.metadata?.projectedMessageIds).toEqual(
+      durableItems.map((_, index) => `session-1-message-segment-${index}`),
+    );
+  });
+
   it("renders one assistant row when a backend live overlay and the active turn layer share a turn", () => {
     const inFlightItem = (owner: string): SessionTurnItem => ({
       id: `${owner}:1`,
@@ -256,6 +314,20 @@ describe("projectAgentMessageTimelineMessages", () => {
     });
     const projection = projectAgentMessageTimelineMessages({
       timelineMessages: [{
+        id: "session-1-message-durable-tool",
+        role: "assistant",
+        turnId: "turn-dupe",
+        status: "completed",
+        timestamp: "2026-10-17T11:59:59Z",
+        turnItems: [{
+          ...inFlightItem("persisted-tool"),
+          type: "tool_call",
+          toolName: "read_file_tool",
+          status: "completed",
+          terminal: true,
+          sequence: 0,
+        }],
+      }, {
         id: "session-1-message-live-turn-dupe",
         role: "assistant",
         turnId: "turn-dupe",
@@ -277,6 +349,8 @@ describe("projectAgentMessageTimelineMessages", () => {
 
     expect(projection.messages).toHaveLength(1);
     expect(projection.messages[0]?.id).toBe("session-1-message-active-turn-dupe");
+    expect(projection.messages[0]?.role === "assistant" && projection.messages[0].turnItems.map((item) => item.itemId))
+      .toEqual(["persisted-tool", "active"]);
   });
 
   it("keeps the streaming backend overlay when the active turn layer is an empty shell", () => {
