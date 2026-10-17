@@ -8,6 +8,7 @@ import { fetchSessionDetail } from "../../api/chat";
 import { createPersonalAssistant, fetchPersonalAssistant } from "../../api/personalAssistant";
 import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
+import { queryKeys } from "../../api/queryKeys";
 import type { PetActivity } from "../../api/types/petActivity";
 import type { SessionDetail } from "../../api/types";
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
@@ -135,5 +136,24 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector('[data-native-session-chat]')).not.toBeNull();
     expect(container.textContent).not.toContain("真实概览入口");
     expect(container.querySelector('[aria-label="实时对话"]')).toBeNull();
+  });
+  it("announces a native final reply once, preserves approval priority, and clears on focused viewing", async () => {
+    await render("/desktop-assistant", true);
+    const reply = { id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main", messages: [{ role: "assistant", status: "completed", turnId: "reply-turn", turnItems: [
+      { type: "agent_message", phase: "final_answer", status: "completed", itemId: "reply-item", text: "Done" },
+    ] }] } as SessionDetail;
+    await act(async () => client.setQueryData(queryKeys.personalAssistantReplies(assistant.agentId, assistant.directSessionId), reply));
+    await settle();
+    expect(container.textContent).toContain("有 1 条新消息");
+    await act(async () => client.setQueryData(queryKeys.personalAssistantReplies(assistant.agentId, assistant.directSessionId), { ...reply, updatedAt: "clock-only" }));
+    expect(container.textContent).not.toContain("有 2 条新消息");
+    await act(async () => client.setQueryData(queryKeys.petActivity(), { schemaVersion: 1, aggregateTone: "approval", animationState: "waiting", activeCount: 1, attentionCount: 1, generatedAt: "", sessions: [] }));
+    await settle();
+    expect(container.querySelector('[data-whale-animation="waiting"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="1 条未读提醒"]')).not.toBeNull();
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
+    expect(container.querySelector('[aria-label="1 条未读提醒"]')).toBeNull();
+    focus.mockRestore();
   });
 });

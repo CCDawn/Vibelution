@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchPersonalAssistantOverview } from "../../api/personalAssistant";
 import { PersonalAssistantOverview } from "./PersonalAssistantOverview";
@@ -12,6 +12,7 @@ vi.mock("../../api/personalAssistant", () => ({ fetchPersonalAssistantOverview: 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, container: HTMLDivElement, client: QueryClient;
 const openSession = vi.fn();
+function CurrentLocation() { return <output>{useLocation().pathname}</output>; }
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "2026-10-14T01:00:00Z",
@@ -23,7 +24,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
 async function render(desktop = false, showTitles = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter>
-    <PersonalAssistantOverview desktop={desktop} showTitles={showTitles} onOpenSession={openSession} />
+    <PersonalAssistantOverview desktop={desktop} showTitles={showTitles} onOpenSession={openSession} /><CurrentLocation />
   </MemoryRouter></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
@@ -32,14 +33,20 @@ describe("personal assistant management shortcuts", () => {
     await render();
     const links = [...container.querySelectorAll("a")].map(link => [link.textContent, link.getAttribute("href")]);
     expect(links).toEqual([
-      ["智能体管理", "/agents"], ["后台任务", "/aux"], ["记忆管理", "/memory"], ["工具管理", "/agents/tools"],
-      ["团队管理", "/teams"], ["知识管理", "/memory/knowledge"], ["配置管理", "/config"], ["运行诊断", "/logs"],
+      ["智能体", "/agents"], ["后台任务", "/aux"], ["配置", "/config"], ["运行诊断", "/logs"],
     ]);
     for (const [, path] of links) expect(routerSource).toContain(`path: "${path!.slice(1)}"`);
+    const more = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("更多管理"))!;
+    await act(async () => more.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" })));
+    const items = [...document.querySelectorAll('[role="menuitem"]')];
+    expect(items.map(item => item.textContent)).toEqual(["团队管理", "工具管理", "记忆管理", "知识管理"]);
+    await act(async () => (items[0] as HTMLElement).click());
+    expect(container.querySelector("output")?.textContent).toBe("/teams");
   });
   it("keeps desktop navigation with the owner workbench Session callback", async () => {
     await render(true);
     expect(container.querySelectorAll("a")).toHaveLength(0);
+    await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     const session = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("平台任务"))!;
     await act(async () => session.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
@@ -54,10 +61,30 @@ describe("personal assistant management shortcuts", () => {
     await render(true, false);
     expect(container.textContent).not.toMatch(/私人智能体|私人待办|私人任务/);
     expect(container.textContent).toContain("事项 1");
-    expect(container.textContent).toContain("会话 1");
-    expect(container.textContent).toContain("智能体 1");
-    const session = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("会话 1"))!;
+    const attention = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("事项 1"))!;
+    await act(async () => attention.click());
+    expect(openSession).toHaveBeenCalledWith("worker-session");
+    await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    const session = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("会话 1就绪") || button.textContent?.startsWith("会话 1操作工具中"))!;
     await act(async () => session.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
+  });
+  it("shows eight sessions per page with search and status filters", async () => {
+    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "", counts: { agents: 0, sessions: 19, running: 1, waiting: 0, failed: 0 }, agents: [], attention: [],
+      sessions: Array.from({ length: 19 }, (_, i) => ({ id: `s-${i}`, agentId: "a", title: `任务 ${i}`, status: i === 0 ? "running" : "ready", currentPhase: i === 0 ? "tooling" : "ready" })) });
+    await render();
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    expect(container.querySelectorAll("li")).toHaveLength(8);
+    const next = [...container.querySelectorAll("button")].find(button => button.textContent === "下一页")!;
+    await act(async () => next.click());
+    expect(container.querySelector("li")?.textContent).toContain("任务 8");
+    const search = container.querySelector('input[aria-label="搜索会话"]') as HTMLInputElement;
+    await act(async () => { const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; setter.call(search, "任务 18"); search.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+    const running = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("运行中 1"))!;
+    await act(async () => running.click());
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+    expect(container.querySelector("li")?.textContent).toContain("任务 0");
   });
 });
