@@ -11,6 +11,7 @@ import {
   VButton,
   VDropdownMenu,
   VEmptyState,
+  VIconButton,
   VInput,
   VRouteLinkButton,
   VSurface,
@@ -1214,15 +1215,14 @@ export function ChatRightRail({
               onSelect: () => activate(kind),
             }))}
           />
-          <VButton
+          <VIconButton
             type="button"
-            isIconOnly
-            aria-label={copy.collapse}
+            variant="ghost"
+            label={copy.collapse}
             className={styles.iconButton}
+            icon={<PanelRightClose size={16} aria-hidden="true" />}
             onClick={onCollapse}
-          >
-            <PanelRightClose size={16} aria-hidden="true" />
-          </VButton>
+          />
         </div>
       </div>
       {tabMenu ? (

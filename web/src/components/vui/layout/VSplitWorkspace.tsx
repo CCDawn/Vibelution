@@ -27,6 +27,8 @@ type CollapseControl = {
   separatorLabel: string;
   collapseLabel: string;
   expandLabel: string;
+  /** Retain a top-aligned restore action when the header-owning pane is hidden. */
+  restoreInRail?: boolean;
 } & (
   | {
       /** Default placement keeps the toggle in the separator rail. */
@@ -232,7 +234,7 @@ function ResizableSplitWorkspace({
             {sidebar}
           </aside>
           {resize.collapse?.sidebar ? (
-            resize.collapse.sidebar.placement === "header" ? (
+            resize.collapse.sidebar.placement === "header" && !resize.collapse.sidebar.restoreInRail ? (
               sidebarCollapsed ? null : (
                 <PaneResizeHandle
                   label={resize.collapse.sidebar.separatorLabel}
@@ -247,6 +249,7 @@ function ResizableSplitWorkspace({
             ) : (
               <PaneCollapseHandle
                 side="left"
+                togglePlacement={resize.collapse.sidebar.placement}
                 collapsed={sidebarCollapsed}
                 separatorLabel={resize.collapse.sidebar.separatorLabel}
                 collapseLabel={resize.collapse.sidebar.collapseLabel}
@@ -282,7 +285,7 @@ function ResizableSplitWorkspace({
       {aside && asideSpec ? (
         <>
           {resize.collapse?.aside ? (
-            resize.collapse.aside.placement === "header" ? (
+            resize.collapse.aside.placement === "header" && !resize.collapse.aside.restoreInRail ? (
               asideCollapsed ? null : (
                 <PaneResizeHandle
                   label={resize.collapse.aside.separatorLabel}
@@ -297,6 +300,7 @@ function ResizableSplitWorkspace({
             ) : (
               <PaneCollapseHandle
                 side="right"
+                togglePlacement={resize.collapse.aside.placement}
                 collapsed={asideCollapsed}
                 separatorLabel={resize.collapse.aside.separatorLabel}
                 collapseLabel={resize.collapse.aside.collapseLabel}

@@ -12,6 +12,7 @@ import {
   Bot,
   LoaderCircle,
   MessageSquareText,
+  PanelLeftClose,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -1618,6 +1619,13 @@ export function SelfEvolutionTrack({
                     icon={activePage === "workspace" ? <ScrollText size={15} /> : <MessageSquareText size={15} />}
                     onPress={() => setActivePage((current) => current === "workspace" ? "status" : "workspace")}
                   />
+                  <VIconButton
+                    label={lang === "zh" ? "收起自进化侧栏" : "Collapse self-evolution sidebar"}
+                    aria-expanded={!sidebarCollapsed}
+                    variant="ghost"
+                    icon={<PanelLeftClose size={15} />}
+                    onPress={() => setSidebarCollapsed((current) => !current)}
+                  />
                 </div>
               </div>
               <div className={styles.railFactGrid}>
@@ -1864,6 +1872,7 @@ export function SelfEvolutionTrack({
 
           <PaneCollapseHandle
             side="left"
+            togglePlacement="header"
             collapsed={sidebarCollapsed}
             separatorLabel={lang === "zh" ? "调整自进化侧栏宽度" : "Resize self-evolution sidebar"}
             collapseLabel={lang === "zh" ? "收起自进化侧栏" : "Collapse self-evolution sidebar"}

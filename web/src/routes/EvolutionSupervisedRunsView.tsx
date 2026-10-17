@@ -28,6 +28,7 @@ export type EvolutionSupervisedRunsViewProps = {
   runDeletableCount: number;
   selectedRunCount: number;
   runsWorkspaceStyle?: CSSProperties;
+  queueHeaderActions?: ReactNode;
   separator: ReactNode;
   queueCollapsed: boolean;
   filteredRuns: EvolutionRun[];
@@ -83,6 +84,7 @@ export function EvolutionSupervisedRunsView({
   runDeletableCount,
   selectedRunCount,
   runsWorkspaceStyle,
+  queueHeaderActions,
   separator,
   queueCollapsed,
   filteredRuns,
@@ -182,6 +184,7 @@ export function EvolutionSupervisedRunsView({
           style={runsWorkspaceStyle}
           lang={lang}
           labels={labels}
+          queueHeaderActions={queueHeaderActions}
           separator={separator}
           queueCollapsed={queueCollapsed}
           filteredRuns={filteredRuns}

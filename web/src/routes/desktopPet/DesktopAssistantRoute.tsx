@@ -1,7 +1,7 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import "../personalAssistant/personal-assistant.tailwind.css";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ExternalLink, MessageCircle, RefreshCw, Settings, X } from "lucide-react";
+import { ChevronDown, ExternalLink, MessageCircle, PanelRightClose, RefreshCw, Settings, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
@@ -121,6 +121,7 @@ export function DesktopAssistantRoute() {
     refetchIntervalInBackground: false, retry: false });
   const activity = activityQuery.data ?? EMPTY_ACTIVITY;
   const [expanded, setExpanded] = useState(false);
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -368,11 +369,16 @@ export function DesktopAssistantRoute() {
     </header>
     <VSplitWorkspace className={styles.split} chrome="workbench" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.desktopAssistant,
       aside: { defaultWidth: 220, minWidth: 180, maxWidth: 300 },
-      collapse: { aside: { separatorLabel: copy.overviewSeparator, collapseLabel: copy.overviewCollapse, expandLabel: copy.overviewExpand } } }}
+      collapse: { aside: { separatorLabel: copy.overviewSeparator, collapseLabel: copy.overviewCollapse, expandLabel: copy.overviewExpand,
+        placement: "header", restoreInRail: true, collapsed: overviewCollapsed, onCollapsedChange: setOverviewCollapsed } } }}
       main={<div className={styles.main}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>}
       aside={state.verified ? <aside className={styles.asideColumn}>
         <section className={styles.sessions} aria-label={copy.sessions}>
-          <h2 className={styles.sessionsHeader}>{copy.sessions}<span className={styles.sessionsCount}>{activity.activeCount}</span></h2>
+          <div className={styles.sessionsHeaderRow}>
+            <h2 className={styles.sessionsHeader}>{copy.sessions}<span className={styles.sessionsCount}>{activity.activeCount}</span></h2>
+            <VIconButton variant="ghost" label={copy.overviewCollapse} icon={<PanelRightClose size={14} />}
+              onClick={() => setOverviewCollapsed(true)} />
+          </div>
           <div className={styles.sessionsList}>
             {activityQuery.isError ? <p role="status" className={styles.sessionsEmpty}>{copy.unavailable}</p> : null}
             {visibleSessions.length > 0 ? visibleSessions.map((session, index) => (

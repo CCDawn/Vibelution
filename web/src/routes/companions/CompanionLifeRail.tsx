@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Coffee, Heart, MapPin, Sparkles } from "lucide-react";
+import { CalendarDays, Coffee, Heart, MapPin, PanelRightClose, Sparkles } from "lucide-react";
 
 import {
   fetchVirtualHumanDiary,
@@ -29,7 +29,7 @@ import type {
   VirtualHumanWorldProjection,
 } from "../../api/types";
 import { usePageVisibility } from "../../app/pollingPolicy";
-import { VButton, VStateSurface, VStatusChip, VTabs, VUI_WORKBENCH_RAIL_CLASS } from "../../components/vui";
+import { VButton, VIconButton, VStateSurface, VStatusChip, VTabs, VUI_WORKBENCH_RAIL_CLASS } from "../../components/vui";
 import {
   currentLifeActivity,
   currentLifeActivityLabel,
@@ -577,6 +577,7 @@ export function CompanionLifeRail({
   errorMessage,
   lang,
   onOpenLifeSteward,
+  onCollapse,
 }: {
   className: string;
   collapsed: boolean;
@@ -586,6 +587,7 @@ export function CompanionLifeRail({
   errorMessage?: string;
   lang: "zh" | "en";
   onOpenLifeSteward: (sessionId: string) => void;
+  onCollapse?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState("now");
   const [reviewFeedback, setReviewFeedback] = useState("");
@@ -717,9 +719,19 @@ export function CompanionLifeRail({
             <p>Life context</p>
             <h2>{companion ? `${companion.displayName} ${lang === "zh" ? "的生活" : "life"}` : stateCopy}</h2>
           </div>
-          {companion?.snapshot.state?.lifePaused ? (
-            <VStatusChip tone="warning">{lang === "zh" ? "已暂停" : "Paused"}</VStatusChip>
-          ) : null}
+          <div className={styles.paneHeaderActions}>
+            {companion?.snapshot.state?.lifePaused ? (
+              <VStatusChip tone="warning">{lang === "zh" ? "已暂停" : "Paused"}</VStatusChip>
+            ) : null}
+            {onCollapse ? (
+              <VIconButton
+                variant="ghost"
+                label={lang === "zh" ? "收起状态栏" : "Collapse status rail"}
+                icon={<PanelRightClose size={16} aria-hidden="true" />}
+                onClick={onCollapse}
+              />
+            ) : null}
+          </div>
         </div>
         <VTabs
           className={styles.tabs}

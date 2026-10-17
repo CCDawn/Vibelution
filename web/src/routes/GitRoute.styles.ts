@@ -13,6 +13,8 @@ const mutedControl =
   "inline-flex h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_var(--vui-alpha-veil),transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55";
 
 export const gitRouteStyles = {
+  collapseHeaderActions: "ml-auto flex shrink-0 items-center justify-end gap-2",
+  pendingChangePanel: "!grid-rows-[auto_minmax(0,1fr)]",
   route:
     "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-auto",
   header:
@@ -25,14 +27,14 @@ export const gitRouteStyles = {
   notice:
     "mx-2 mt-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),transparent)] px-2.5 py-2 [font-size:var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:
-    `grid min-h-0 min-w-0 grid-cols-[var(--pane-w-change-panel,320px)_10px_minmax(0,1fr)_clamp(250px,22vw,360px)] p-1.5 max-[1200px]:grid-cols-[minmax(240px,var(--pane-w-change-panel,300px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(200px,34vh)] max-[1200px]:gap-y-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-1.5 ${vuiWorkspaceFillClass}`,
+    `grid min-h-0 min-w-0 grid-cols-[var(--pane-w-change-panel,320px)_auto_minmax(0,1fr)_clamp(250px,22vw,360px)] p-1.5 max-[1200px]:grid-cols-[minmax(240px,var(--pane-w-change-panel,300px))_auto_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(200px,34vh)] max-[1200px]:gap-y-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-1.5 ${vuiWorkspaceFillClass}`,
   // Clean overview must fully override the dirty-mode 4-column change-list template
   // (workspace + workspaceOverview are combined). Without !grid-cols, left rail stays
   // ~320px and nested 本地提交|WORKTREE cards crush/overlap text.
   workspaceOverview:
     "!grid-cols-[minmax(360px,1fr)_minmax(0,1.2fr)_minmax(300px,0.85fr)] !gap-2 max-[1400px]:!grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] max-[1400px]:!grid-rows-[minmax(240px,0.95fr)_minmax(220px,0.85fr)] max-[1400px]:!gap-y-2 max-[860px]:!grid-cols-[minmax(0,1fr)] max-[860px]:!grid-rows-none max-[860px]:!content-start max-[860px]:!gap-1.5",
   // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
-  resizeHandle: "max-[860px]:hidden",
+  resizeHandle: "w-2.5 max-[1200px]:w-2 max-[860px]:hidden",
   changePanel:
     "grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 p-2",
   commitPanel:

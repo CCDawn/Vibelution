@@ -8,6 +8,8 @@ import {
   Copy,
   Eraser,
   ListFilter,
+  PanelLeftClose,
+  PanelRightClose,
   Search,
   Square,
   TriangleAlert,
@@ -902,14 +904,26 @@ export function LogsRoute() {
               aria-hidden={sidebarCollapsed}
             >
               <div className={styles.sidebarHeader}>
-                <div>
-                  <p className={styles.sidebarEyebrow}>{activeRootLabelKey ? t(activeRootLabelKey) : t("navLogs")}</p>
-                  <h2 className={styles.sidebarTitle}>{packageIndexLabel}</h2>
-                  <VTooltip content={activeRoot?.path ?? t("loading")} width="wide">
-                    <p className={styles.sidebarPath} tabIndex={0}>
-                      {activeRoot?.path ?? t("loading")}
-                    </p>
-                  </VTooltip>
+                <div className={styles.collapseHeaderRow}>
+                  <div className={styles.collapseHeaderTitle}>
+                    <p className={styles.sidebarEyebrow}>{activeRootLabelKey ? t(activeRootLabelKey) : t("navLogs")}</p>
+                    <h2 className={styles.sidebarTitle}>{packageIndexLabel}</h2>
+                    <VTooltip content={activeRoot?.path ?? t("loading")} width="wide">
+                      <p className={styles.sidebarPath} tabIndex={0}>
+                        {activeRoot?.path ?? t("loading")}
+                      </p>
+                    </VTooltip>
+                  </div>
+                  <div className={styles.collapseHeaderActions}>
+                    <VIconButton
+                      label={lang === "zh" ? "收起日志列表" : "Collapse log list"}
+                      className={styles.headerCollapseButton}
+                      aria-expanded={!sidebarCollapsed}
+                      variant="ghost"
+                      icon={<PanelLeftClose size={15} />}
+                      onPress={() => setSidebarCollapsed((current) => !current)}
+                    />
+                  </div>
                 </div>
                 <div className={styles.selectionToolbar}>
                   <span className={styles.selectionPill}>{selectedCountLabel}</span>
@@ -1070,6 +1084,7 @@ export function LogsRoute() {
 
             <PaneCollapseHandle
               side="left"
+              togglePlacement="header"
               collapsed={sidebarCollapsed}
               separatorLabel={t("resizeLeftPanel")}
               collapseLabel={lang === "zh" ? "收起日志列表" : "Collapse log list"}
@@ -1234,6 +1249,7 @@ export function LogsRoute() {
 
         <PaneCollapseHandle
           side="right"
+          togglePlacement="header"
           collapsed={rightRailCollapsed}
           separatorLabel={resizeRightRailLabel}
           collapseLabel={lang === "zh" ? "收起右侧日志导航" : "Collapse right log navigation"}
@@ -1256,11 +1272,25 @@ export function LogsRoute() {
           aria-hidden={rightRailCollapsed}
         >
           <div className={styles.railHeader}>
-            <p className={styles.sidebarEyebrow}>{t("logsRootNavigation")}</p>
-            <h2 className={styles.railTitle}>{t("navLogs")}</h2>
-            <VTooltip content={t("logsSubtitle")} width="wide">
-              <p className={styles.railText} tabIndex={0}>{logsCompactSubtitle}</p>
-            </VTooltip>
+            <div className={styles.collapseRailHeaderRow}>
+              <div className={styles.collapseHeaderTitle}>
+                <p className={styles.sidebarEyebrow}>{t("logsRootNavigation")}</p>
+                <h2 className={styles.railTitle}>{t("navLogs")}</h2>
+                <VTooltip content={t("logsSubtitle")} width="wide">
+                  <p className={styles.railText} tabIndex={0}>{logsCompactSubtitle}</p>
+                </VTooltip>
+              </div>
+              <div className={styles.collapseHeaderActions}>
+                <VIconButton
+                  label={lang === "zh" ? "收起右侧日志导航" : "Collapse right log navigation"}
+                  className={styles.headerCollapseButton}
+                  aria-expanded={!rightRailCollapsed}
+                  variant="ghost"
+                  icon={<PanelRightClose size={15} />}
+                  onPress={() => setRightRailCollapsed((current) => !current)}
+                />
+              </div>
+            </div>
           </div>
 
           <nav className={styles.rootNav} aria-label={t("logsRootNavigation")}>

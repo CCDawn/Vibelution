@@ -5,7 +5,7 @@ import {
 
 const styles = {
   sidebar: `vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 w-full min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border-r border-vui-border-subtle ${vuiRailFillClass} p-4 max-[720px]:h-auto max-[720px]:w-full max-[720px]:[grid-template-rows:auto_auto_auto] max-[720px]:overflow-visible`,
-  sidebarHeader: "vui-routes-configsettingsnavigation sidebarHeader grid min-w-0 gap-1",
+  sidebarHeader: "vui-routes-configsettingsnavigation sidebarHeader !flex min-w-0 items-center justify-between gap-2",
   searchStack: "vui-routes-configsettingsnavigation searchStack grid min-w-0 gap-2",
   searchField: "vui-routes-configsettingsnavigation searchField grid min-w-0 gap-1",
   searchLabel: "vui-routes-configsettingsnavigation searchLabel m-0 [font-size:var(--vui-font-xs)] font-bold text-vui-fg-tertiary",

@@ -82,6 +82,8 @@ const timelineItem = "grid min-w-0 grid-cols-[8px_minmax(0,1fr)] gap-2 [&>span]:
 const state = "m-3";
 
 export default {
+  paneHeader: "flex h-[44px] shrink-0 items-center gap-2 px-3",
+  paneHeaderActions: "ml-auto flex shrink-0 items-center justify-end gap-2",
   personRail,
   lifeRail,
   railActions,

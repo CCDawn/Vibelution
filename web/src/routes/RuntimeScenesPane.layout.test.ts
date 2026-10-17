@@ -112,6 +112,12 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("setSidebarCollapsed");
     expect(paneSource).toContain('paneWidthCssVar("sidebar")');
     expect(paneSource).toContain("data-vui-layout-id");
+    expect(styles.paneCollapsed.split(/\s+/)).not.toContain("hidden");
+    expect(styles.paneCollapsed).toContain("invisible");
+    expect(styles.resizableLayout).toContain("grid-cols-[var(--pane-w-sidebar)_auto_minmax(0,1fr)]");
+    expect(styles.resizeHandle).toContain("max-[900px]:hidden");
+    expect(styles.headerCollapseButton).toBe("max-[900px]:!hidden");
+    expect(paneSource).toContain("className={styles.headerCollapseButton}");
   });
 
   it("keeps the scene list on the lightweight package index", () => {

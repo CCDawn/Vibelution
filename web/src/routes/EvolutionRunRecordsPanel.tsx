@@ -32,6 +32,7 @@ export type EvolutionRunRecordsPanelProps = {
   style?: CSSProperties;
   lang: Lang;
   labels: EvolutionRunRecordsPanelLabels;
+  queueHeaderActions?: ReactNode;
   separator: ReactNode;
   queueCollapsed: boolean;
   filteredRuns: EvolutionRun[];
@@ -140,6 +141,7 @@ export function EvolutionRunRecordsPanel({
   style,
   lang,
   labels,
+  queueHeaderActions,
   separator,
   queueCollapsed,
   filteredRuns,
@@ -226,7 +228,10 @@ export function EvolutionRunRecordsPanel({
             <p className={styles.eyebrow}>{t("runQueue")}</p>
             <h2 className={styles.sectionTitle}>{t("runs")}</h2>
           </div>
-          <span className={styles.secondaryPill}>{filteredRuns.length}</span>
+          <div className={styles.collapseHeaderActions}>
+            <span className={styles.secondaryPill}>{filteredRuns.length}</span>
+            {queueHeaderActions}
+          </div>
         </div>
         {hasFilteredRuns ? (
           <div className={styles.bulkToolbar}>

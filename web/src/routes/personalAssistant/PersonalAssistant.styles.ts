@@ -1,4 +1,6 @@
 const styles = {
+  sessionsHeaderRow: "flex shrink-0 items-center justify-between gap-2",
+  overviewHeaderActions: "ml-auto flex shrink-0 items-center gap-1",
   root: "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-[var(--fg-primary)]",
   header: "flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-4 py-2",
   title: "min-w-0 text-sm font-medium",

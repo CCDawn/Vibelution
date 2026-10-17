@@ -1,7 +1,7 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Check, CheckSquare, Copy, Hand, ListFilter, Square, Trash2, TriangleAlert, X } from "lucide-react";
+import { CircleAlert, Check, CheckSquare, Copy, Hand, ListFilter, PanelLeftClose, Square, Trash2, TriangleAlert, X } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -888,6 +888,13 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const revealStackedSidebar = () => { if (media.matches) setSidebarCollapsed(false); };
+    revealStackedSidebar();
+    media.addEventListener("change", revealStackedSidebar);
+    return () => media.removeEventListener("change", revealStackedSidebar);
+  }, []);
+  useEffect(() => {
     migrateLegacyNumericPane(RUNTIME_SCENES_LAYOUT_ID, "sidebar", RUNTIME_SCENES_SIDEBAR_STORAGE_KEY);
   }, []);
   const {
@@ -1444,10 +1451,22 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
     >
       <aside className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar} aria-hidden={sidebarCollapsed}>
         <div className={styles.sidebarHeader}>
-          <div>
-            <p className={styles.sidebarEyebrow}>{t("logsRootRuntimeScenes")}</p>
-            <h2 className={styles.sidebarTitle}>{activeRoot.path}</h2>
-            <p className={styles.railText}>{t("runtimeScenesSubtitle")}</p>
+          <div className={styles.collapseHeaderRow}>
+            <div className={styles.collapseHeaderTitle}>
+              <p className={styles.sidebarEyebrow}>{t("logsRootRuntimeScenes")}</p>
+              <h2 className={styles.sidebarTitle}>{activeRoot.path}</h2>
+              <p className={styles.railText}>{t("runtimeScenesSubtitle")}</p>
+            </div>
+            <div className={styles.collapseHeaderActions}>
+              <VIconButton
+                label={lang === "zh" ? "收起左栏" : "Collapse left pane"}
+                className={styles.headerCollapseButton}
+                aria-expanded={!sidebarCollapsed}
+                variant="ghost"
+                icon={<PanelLeftClose size={15} />}
+                onPress={() => setSidebarCollapsed((current) => !current)}
+              />
+            </div>
           </div>
           <div className={styles.selectionToolbar}>
             <span className={styles.selectionPill}>{selectedCountLabel}</span>
@@ -1604,6 +1623,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
 
       <PaneCollapseHandle
         side="left"
+        togglePlacement="header"
         collapsed={sidebarCollapsed}
         separatorLabel={t("resizeLeftPanel")}
         collapseLabel={lang === "zh" ? "收起左栏" : "Collapse left pane"}

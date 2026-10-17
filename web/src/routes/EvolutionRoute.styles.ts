@@ -25,6 +25,7 @@ const compactMetricSurface =
   `grid [gap:3px] min-w-0 ${rowSurfaceSoft} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-weight:600] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [min-height:36px] [padding:5px_7px]`;
 
 const styles = {
+  collapseHeaderActions: "ml-auto flex shrink-0 items-center gap-1.5",
   supervisedLivePage: "!gap-0 !p-0",
   selfDetailsDialog: "!translate-none !transform-[translate(-50%,-50%)] !animate-none !h-[min(90dvh,1000px)] !w-[min(94vw,1400px)] !max-w-[calc(100vw-24px)] [&_[data-slot=dialog-body]]:min-h-0",
   supervisedSetupFrame: "flex h-full min-h-0 min-w-0 flex-1 flex-col",
@@ -254,7 +255,7 @@ const styles = {
   liveSurface:
     "[overflow:auto] grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] [font-size:0.9rem] max-[900px]:[height:auto] max-[900px]:min-h-0 max-[900px]:[overflow:visible]",
   masterDetail:
-    "grid [grid-template-columns:var(--pane-w-library-list,_360px)_12px_minmax(0,_1fr)] min-h-0 [height:100%] [overflow:hidden] max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[height:auto] max-[1200px]:[overflow:visible]",
+    "grid [grid-template-columns:var(--pane-w-library-list,_360px)_auto_minmax(0,_1fr)] min-h-0 [height:100%] [overflow:hidden] max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[height:auto] max-[1200px]:[overflow:visible]",
   metaRow:
     "flex [align-items:center] [justify-content:space-between] [gap:12px] [&_span]:[color:var(--fg-tertiary)]",
   metricTile:
@@ -291,6 +292,8 @@ const styles = {
   // Wave 4B: visual rule from PaneCollapseHandle; keep breakpoint hide local.
   resizeHandle:
     "max-[1200px]:hidden",
+  headerCollapseButton:
+    "max-[1200px]:!hidden",
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
   runItemActive:
@@ -300,7 +303,7 @@ const styles = {
   runsCommandStrip:
     "grid [grid-template-columns:minmax(220px,_0.42fr)_minmax(0,_1fr)] [gap:10px] [align-items:end] [padding:8px_10px] max-[1200px]:[grid-template-columns:1fr]",
   runsWorkspace:
-    "grid [grid-template-columns:var(--pane-w-runs-queue,_380px)_12px_minmax(0,_1fr)] [align-items:stretch] min-h-0 max-[1200px]:[grid-template-columns:1fr]",
+    "grid [grid-template-columns:var(--pane-w-runs-queue,_380px)_auto_minmax(0,_1fr)] [align-items:stretch] min-h-0 max-[1200px]:[grid-template-columns:1fr]",
   secondaryPill:
     `${pillSurface} [color:var(--fg-secondary)]`,
   sectionHeadingRow:

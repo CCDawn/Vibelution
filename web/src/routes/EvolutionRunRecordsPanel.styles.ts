@@ -7,6 +7,7 @@ const rowSurfaceSoft = "[border:1px_solid_var(--vui-border-subtle)] [border-radi
 const actionSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:var(--vui-control-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] hover:[background:var(--vui-control-muted-hover)]";
 
 const styles = {
+  collapseHeaderActions: "ml-auto flex shrink-0 items-center gap-1.5",
   actionRow:
     "flex [flex-wrap:wrap] [gap:6px]",
   batchToggle:

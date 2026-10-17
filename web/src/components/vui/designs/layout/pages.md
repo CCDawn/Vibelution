@@ -513,12 +513,15 @@ import { VSplitWorkspace } from "@/components/vui";
 | resize.layoutId | 宽度记忆 | 仅 registry id |
 | resize.collapse | 可选 sidebar / aside 收起 | `placement` 缺省为 `rail`，复用 `PaneCollapseHandle`；标签由消费者提供；收起不覆盖已记忆宽度 |
 | `resize.collapse.*.placement` | `rail` / `header`，缺省为 `rail` | `header` 时由页面使用现有 `VIconButton` 并提供受控折叠状态；展开时分隔轨只保留 `PaneResizeHandle`，折叠时移除轨道和侧栏，宽度仍复用 `layoutId` 记忆 |
+| `resize.collapse.*.restoreInRail` | 可选 boolean，缺省 false | 配合 `header` 时，展开仅保留调宽分隔线，收起保留 36px 窄轨，展开按钮置于轨道顶部；草稿保持挂载，宽度记忆不变 |
 | `resize.collapse.*.collapsed` / `onCollapsedChange` | 受控折叠值与回调必须一起提供；`header` placement 必须受控 | 响应式策略归页面；`rail` 未提供时保持内部手动切换。撤销受控值时沿用 owner 最后接受的状态，不采用尚未接受的点击请求。收起只隐藏列、不卸载草稿；点击请求 owner 更新，不另建宽度记忆 |
 | columnsClassName | 固定列模板覆盖 | 默认列宽带 16rem 回退，未注入页面变量时仍保持桌面横向分栏 |
 
 ### 共享拖动线的边界对齐
 
 `PaneResizeHandle` 与 `PaneCollapseHandle` 继续共用 1px 可见线和 12px 隐形命中区。布局可设置 `--pane-resize-rule-offset`，同时移动可见线和命中区；`--pane-resize-rule-top` / `--pane-resize-rule-bottom` 将可见线限制在圆角面板边框的直线段，默认均为 0px。外层可用 `--pane-resize-rule-color` 设置中性线色；未设置时保留现有 hover/focus/active 强调色。页面不重新绘制分隔线，也不改变共享键盘、拖动或持久化协议。
+
+栏级收起按钮统一使用 `VIconButton variant="ghost"`，放在所属栏顶栏 actions 的最右端。自定义布局的 `PaneCollapseHandle` 使用 `togglePlacement="header"`：展开时不在分隔条重复渲染收起按钮，收起后的恢复入口置顶并占用独立窄轨；grid 容器须让此轨道随内容宽度分配空间。窄屏隐藏分隔轨时，顶栏收起入口同步隐藏，或由页面提供始终可用的展开入口。正文、树节点和分组的折叠不受此约定影响。
 
 ### 实现落点
 - `layout/VSplitWorkspace.tsx` + `usePersistedPaneResize`

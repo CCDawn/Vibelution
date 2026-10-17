@@ -48,6 +48,7 @@ export function ChatCodingStatusRail({
   statusRailClassName,
   statusRailCollapsed,
   statusRailOverlayOpen,
+  onCollapseStatusRail,
   t,
   toggleChangeRail,
   updateRailModel,
@@ -83,6 +84,7 @@ export function ChatCodingStatusRail({
   statusRailClassName: string;
   statusRailCollapsed: boolean;
   statusRailOverlayOpen: boolean;
+  onCollapseStatusRail: () => void;
   t: (key: TranslationKey) => string;
   toggleChangeRail: () => void;
   updateRailModel: (update: ChatRightRailModel | ((current: ChatRightRailModel) => ChatRightRailModel)) => void;
@@ -100,6 +102,7 @@ export function ChatCodingStatusRail({
         state={companionRailState}
         errorMessage={companionRailError}
         lang={lang}
+        onCollapse={onCollapseStatusRail}
         onOpenLifeSteward={(stewardSessionId) => {
           openSession(stewardSessionId, {
             replace: false,

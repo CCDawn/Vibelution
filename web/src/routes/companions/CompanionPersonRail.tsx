@@ -1,7 +1,7 @@
-import { ArrowLeft, Heart, MapPin, Settings, Sparkles } from "lucide-react";
+import { ArrowLeft, Heart, MapPin, PanelLeftClose, Settings, Sparkles } from "lucide-react";
 
 import type { VirtualHumanCompanion } from "../../api/types";
-import { VRouteLinkButton, VStateSurface, VStatusChip, VUI_WORKBENCH_RAIL_CLASS } from "../../components/vui";
+import { VIconButton, VRouteLinkButton, VStateSurface, VStatusChip, VUI_WORKBENCH_RAIL_CLASS } from "../../components/vui";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import { CompanionPortrait } from "./CompanionPortrait";
 import {
@@ -24,6 +24,7 @@ export function CompanionPersonRail({
   state,
   errorMessage,
   lang,
+  onCollapse,
 }: {
   className: string;
   collapsed: boolean;
@@ -32,6 +33,7 @@ export function CompanionPersonRail({
   state: CompanionRailState;
   errorMessage?: string;
   lang: "zh" | "en";
+  onCollapse: () => void;
 }) {
   const unavailableTitle = state === "loading"
     ? (lang === "zh" ? "正在载入人物" : "Loading person")
@@ -50,7 +52,7 @@ export function CompanionPersonRail({
       aria-label={companion ? `${companion.displayName} 人物栏` : unavailableTitle}
       data-companion-person-rail="true"
     >
-      <div className={styles.railActions}>
+      <div className={styles.paneHeader}>
         <VRouteLinkButton
           to="/companions"
           variant="ghost"
@@ -58,20 +60,29 @@ export function CompanionPersonRail({
           aria-label={lang === "zh" ? "返回人物大厅" : "Back to companion lobby"}
           icon={<ArrowLeft size={16} aria-hidden="true" />}
         />
-        {companion ? (
-          <VRouteLinkButton
-            to={agentCenterConfigRoute({
-              agentId: companion.agentId,
-              pane: "config",
-              returnTo: companionReturnTarget(companion),
-              returnLabel: companion.displayName,
-            })}
+        <div className={styles.paneHeaderActions}>
+          {companion ? (
+            <VRouteLinkButton
+              to={agentCenterConfigRoute({
+                agentId: companion.agentId,
+                pane: "config",
+                returnTo: companionReturnTarget(companion),
+                returnLabel: companion.displayName,
+              })}
+              variant="ghost"
+              className={styles.railIconButton}
+              aria-label={lang === "zh" ? "虚拟人设置" : "Virtual human settings"}
+              icon={<Settings size={16} aria-hidden="true" />}
+            />
+          ) : null}
+          <VIconButton
             variant="ghost"
             className={styles.railIconButton}
-            aria-label={lang === "zh" ? "虚拟人设置" : "Virtual human settings"}
-            icon={<Settings size={16} aria-hidden="true" />}
+            label={lang === "zh" ? "收起人物栏" : "Collapse person rail"}
+            icon={<PanelLeftClose size={16} aria-hidden="true" />}
+            onClick={onCollapse}
           />
-        ) : null}
+        </div>
       </div>
 
       {state !== "ready" || !companion ? (

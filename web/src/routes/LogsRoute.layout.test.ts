@@ -94,9 +94,11 @@ describe("LogsRoute layout contract", () => {
   });
 
   it("keeps the resizable logs workspace as a three-column grid", () => {
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--pane-w-right,280px))]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_auto_minmax(0,var(--pane-w-right,280px))]");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
+    expect(styles.paneCollapsed.split(/\s+/)).not.toContain("hidden");
+    expect(styles.paneCollapsed).toContain("invisible");
   });
 
   it("prevents the logs route and workspace from forcing horizontal page overflow", () => {
@@ -117,6 +119,8 @@ describe("LogsRoute layout contract", () => {
     expect(styles.sidebar).toContain("max-[760px]:max-h-[34vh]");
     expect(styles.rightRail).toContain("max-[760px]:max-h-[34vh]");
     expect(styles.resizeHandle).toContain("max-[760px]:hidden");
+    expect(styles.headerCollapseButton).toBe("max-[760px]:!hidden");
+    expect(routeSource.match(/className={styles\.headerCollapseButton}/g)).toHaveLength(2);
     expect(styles.previewStateFlow).toContain("max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]");
     expect(styles.stateFactRow).toContain("max-[560px]:grid-cols-[minmax(0,1fr)]");
   });

@@ -34,6 +34,34 @@ beforeEach(() => { host = document.createElement("div"); document.body.append(ho
 afterEach(async () => { await act(() => root.unmount()); host.remove(); });
 
 describe("VSplitWorkspace controlled collapse", () => {
+  it.each(["sidebar", "aside"] as const)("keeps %s collapse in its header and restores from the top rail", async (side) => {
+    const onCollapsedChange = vi.fn();
+    const renderHeader = (collapsed: boolean) => renderSinglePane({
+      [side]: { ...labels, placement: "header", restoreInRail: true, collapsed, onCollapsedChange },
+    }, side);
+    await renderHeader(false);
+    const width = sidePane(side).style.width;
+    expect(host.querySelector("button")).toBeNull();
+    const separator = host.querySelector<HTMLElement>('[role="separator"]')!;
+    await act(() => separator.dispatchEvent(new KeyboardEvent("keydown", {
+      key: side === "sidebar" ? "ArrowRight" : "ArrowLeft", bubbles: true,
+    })));
+    expect(separator.getAttribute("aria-valuenow")).toBe("344");
+    await renderHeader(true);
+    expect(sidePane(side).hidden).toBe(true);
+    const restore = button(labels.expandLabel);
+    expect(restore.className).toContain("!top-2");
+    expect(host.querySelector('[role="separator"]')?.className).toContain("!w-9");
+    await act(() => restore.click());
+    expect(onCollapsedChange).toHaveBeenCalledWith(false);
+    expect(sidePane(side).hidden).toBe(true);
+    await renderHeader(false);
+    expect(sidePane(side).hidden).toBe(false);
+    expect(sidePane(side).style.width).toBe(width);
+    expect(host.querySelector('[role="separator"]')?.getAttribute("aria-valuenow")).toBe("344");
+    expect(host.querySelector("button")).toBeNull();
+  });
+
   it("requests changes from the owner and preserves mounted drafts and widths", async () => {
     const onCollapsedChange = vi.fn();
     await render({ sidebar: { ...labels, collapsed: true, onCollapsedChange } });
