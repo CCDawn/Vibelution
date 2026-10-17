@@ -29,7 +29,7 @@ import type {
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
-import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
+import { type ConfigCopy, formatConfigCopy, resolvedRouteText } from "./config/configCopy";
 import {
   buildModelFieldValues,
   EDITABLE_MODEL_FIELDS,
@@ -39,6 +39,7 @@ import {
 } from "./config/modelEditableFields";
 import {
   buildProviderSetupChecklist,
+  canonicalProviderRoute,
   canTestProviderModel,
   defaultProviderModelFilter,
   deriveModelDotClass,
@@ -519,7 +520,7 @@ function ConnectionTab({
             </label>
             <VButton variant="secondary" isDisabled={disabled || (contextWindowDraft.trim() !== "" && (!Number.isFinite(Number(contextWindowDraft)) || Number(contextWindowDraft) <= 0))}
               onPress={onSaveContextWindow}>{copy.saveContextWindow}</VButton>
-            <span className={styles.muted}>{copy.driverPrefix}{provider.driver || copy.notConfigured} · {provider.serviceClass || copy.notConfigured}</span>
+            <span className={styles.muted}>{provider.serviceClass || copy.notConfigured}</span>
             {provider.serviceClass === "local_runtime" ? <span className={styles.connectionAddress}>
               {copy.runtimeFrameworkPrefix}{provider.runtimeFramework || copy.unknownValue} · {copy.artifactFilePrefix}{provider.artifactPath || copy.notConfigured}
             </span> : null}
@@ -791,18 +792,14 @@ function ModelEntryEditor({
         ) : null}
       </div>
       {(() => {
-        const protocolFacts = extractProtocolFacts(model.draftEntry);
-        if (!protocolFacts.length) return null;
+        const wire = extractProtocolFacts(model.draftEntry).find((fact) => fact.field === "wire_protocol")?.value ?? "";
+        const route = canonicalProviderRoute(wire) || wire.trim();
+        if (!route) return null;
         return (
-          <div className={styles.modelEditProtocol} data-model-protocol-facts="true">
+          <div className={styles.modelEditProtocol} data-model-resolved-route={route}>
             <span className={styles.modelEditProtocolHeading}>{copy.modelEditProtocolHeading}</span>
-            {protocolFacts.map((fact) => (
-              <span key={fact.field} className={styles.modelEditProtocolFact} data-model-protocol-field={fact.field}>
-                <code>{fact.field}</code>
-                <span className={styles.modelEditProtocolValue}>{fact.value}</span>
-                <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
-              </span>
-            ))}
+            <span className={styles.modelEditProtocolValue}>{resolvedRouteText(copy, route)}</span>
+            <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
           </div>
         );
       })()}
@@ -1195,7 +1192,7 @@ function ProtocolsTab({ provider, copy }: { provider: ProviderRegistryRow; copy:
     <div className={styles.tabSurface}>
       <span className={styles.fact}>
         <small className={styles.factLabel}>{copy.wireProtocolLabel}</small>
-        <strong className={styles.factValue}>{provider.defaultProtocol || "unknown"}</strong>
+        <strong className={styles.factValue}>{resolvedRouteText(copy, provider.defaultProtocol, "unknown")}</strong>
       </span>
       {provider.models.length ? provider.models.map((model) => (
         <span key={model.modelRef} className={styles.fact} data-model-availability={model.availability}>
@@ -1234,7 +1231,7 @@ function DiagnosticsTab({
           { key: "success", label: copy.factLastSuccess, value: provider.lastSuccessAt || copy.valueNever },
           { key: "failure", label: copy.factLastFailure, value: discoveryErrorLabel(provider.lastErrorType ?? "", copy) },
           { key: "auth", label: copy.factAuth, value: provider.status === "auth_failed" ? copy.valueFailed : provider.credentialState },
-          { key: "protocol", label: copy.factProtocol, value: provider.status === "protocol_mismatch" ? copy.valueMismatch : provider.defaultProtocol || "unknown" },
+          { key: "protocol", label: copy.factProtocol, value: provider.status === "protocol_mismatch" ? copy.valueMismatch : resolvedRouteText(copy, provider.defaultProtocol, "unknown") },
         ]}
         actions={(
           <VButton
@@ -1657,7 +1654,7 @@ export function ConfigProviderRegistryPanel({
                     onPress={() => onEditRoute(provider.providerId)}>{copy.editRouteAction}</VButton>}
                   footer={routeActive ? routeEditor : undefined} />
                 <VSettingsRow label={copy.protocolRowLabel} description={copy.protocolRowHint}
-                  control={<span className={styles.muted}>{provider.defaultProtocol || copy.notConfigured}</span>} />
+                  control={<span className={styles.muted} data-provider-resolved-route={canonicalProviderRoute(provider.defaultProtocol) || undefined}>{resolvedRouteText(copy, provider.defaultProtocol, copy.notConfigured)}</span>} />
               </VSettingsGroupCard>
               <ConnectionTab key={provider.providerId}
                 provider={provider} contextWindowDraft={contextWindowDraft}

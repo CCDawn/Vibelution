@@ -626,11 +626,14 @@ describe("ConfigProviderRegistryPanel", () => {
       "streaming",
       "default_reasoning_effort",
     ]);
-    // Protocol-layer facts are visible but read-only, with the rule-supplied note.
-    expect(markup).toContain('data-model-protocol-field="wire_protocol"');
-    expect(markup).toContain('data-model-protocol-field="interaction_contract"');
-    expect(markup).toContain('data-model-protocol-field="reasoning_effort_adapter"');
+    // One resolved route is visible. Raw protocol fields stay out of the form.
+    expect(markup).toContain('data-model-resolved-route="responses"');
+    expect(markup).toContain("OpenAI Responses");
     expect(markup).toContain("由协议规则供给");
+    expect(markup).not.toContain('data-model-protocol-field=');
+    expect(markup).not.toContain(">wire_protocol<");
+    expect(markup).not.toContain(">interaction_contract<");
+    expect(markup).not.toContain(">reasoning_effort_adapter<");
     // Save starts disabled (nothing edited yet).
     const save = markup.match(/<button[^>]*data-model-action="save-edit"[^>]*>/)?.[0] ?? "";
     expect(save).toContain("disabled");
@@ -924,8 +927,10 @@ describe("ConfigProviderRegistryPanel", () => {
     );
     expect(summary).toContain('data-provider-action="route"');
     expect(summary).toContain("修改地址与协议");
-    expect(summary).toContain("接口协议");
-    expect(summary).toContain("responses");
+    expect(summary).toContain("路线");
+    expect(summary).toContain("OpenAI Responses");
+    expect(summary).toContain('data-provider-resolved-route="responses"');
+    expect(summary).not.toContain("驱动：");
     expect(summary).toContain("更新 API Key");
     expect(summary).toContain("调整上限与部署详情");
     expect(summary).toContain("默认上下文上限");

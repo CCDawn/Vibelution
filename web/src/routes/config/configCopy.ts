@@ -1,8 +1,13 @@
 /**
- * Settings-align wave 3 — bilingual settings copy table, extracted verbatim
- * from ConfigRoute.tsx (zero wording changes). Single import source for the
- * route shell, the section editor, and the extracted display panels.
+ * Bilingual settings copy table. Single import source for the route shell,
+ * the section editor, and the extracted display panels.
  */
+
+import {
+  PROVIDER_ROUTE_IDS,
+  canonicalProviderRoute,
+  type ProviderRouteId,
+} from "../configProviderLogic";
 
 export type ConfigLanguage = "zh" | "en";
 
@@ -370,7 +375,7 @@ export const CONFIG_COPY = {
     routePreviewAction: "预览替换影响",
     routeFieldBaseUrl: "服务地址",
     routeFieldDriver: "接口类型",
-    routeFieldProtocol: "请求协议",
+    routeFieldProtocol: "路线",
     routeEditWarning: "保存前会检查哪些模型和 Agent 受到影响，请确认后再应用。",
     routeConfirmChangedTitle: "确认连接修改",
     routeConfirmUnchangedTitle: "连接没有变化",
@@ -537,8 +542,8 @@ export const CONFIG_COPY = {
     modelDetailTitle: "模型详情",
     modelDetailDescription: "完整标识、能力与验证记录",
     modelEditSectionTitle: "编辑",
-    modelEditSectionHint: "只开放白名单字段；协议层字段由内置规则与发现供给，改动请走对应流程。",
-    modelEditProtocolHeading: "协议层（只读）",
+    modelEditSectionHint: "只开放白名单字段。路线由内置规则与发现供给，这里不能改。",
+    modelEditProtocolHeading: "路线",
     modelEditProtocolNote: "由协议规则供给",
     modelEditFieldLabel: "显示名",
     modelEditFieldModel: "模型名",
@@ -554,7 +559,7 @@ export const CONFIG_COPY = {
     modelEditSaveAction: "保存修改",
     modelEditCancelAction: "放弃修改",
     modelEditFieldsAria: "模型可编辑字段",
-    wireProtocolLabel: "默认 wire protocol",
+    wireProtocolLabel: "路线",
     noCapabilityTitle: "暂无能力观测",
     noCapabilityBody: "运行发现后，unknown 与 unsupported 会分别显示。",
     providerCriticalPrefix: "当前 Provider 状态为 ",
@@ -596,8 +601,8 @@ export const CONFIG_COPY = {
     advancedManage: "高级管理",
     baseUrlRowLabel: "服务地址",
     editRouteAction: "修改地址与协议",
-    protocolRowLabel: "接口协议",
-    protocolRowHint: "此供应商下模型使用的默认协议",
+    protocolRowLabel: "路线",
+    protocolRowHint: "此供应商下的模型默认走这一条路线。",
     pinnedModelsTemplate: "已添加 {count} 个模型",
     pickProviderTitle: "选择左侧已配置服务",
     pickProviderBody: "点选服务查看已添加模型；点「连接设置」修改地址与密钥。",
@@ -644,7 +649,7 @@ export const CONFIG_COPY = {
     wizardLockedBody: "返回 Provider 详情使用“修改路由”并完成 backend preview token 确认；向导不会静默忽略字段修改。",
     wizardDisplayName: "显示名称",
     wizardSecretOnce: "Secret（仅本次请求）",
-    wizardDefaultWireProtocol: "默认 wire protocol",
+    wizardDefaultWireProtocol: "路线",
     wizardDiscoverFailedTitle: "发现失败，已保留上次目录",
     wizardDiscoveredTemplate: "发现 {count} 个模型",
     wizardDiscoverIdleTitle: "创建连接并测试发现",
@@ -704,8 +709,11 @@ export const CONFIG_COPY = {
     quickSetupKeyPlaceholder: "仅用于本次本地配置请求",
     quickSetupDetectHint: "自动检测服务端点、协议和模型目录，不会直接写入正式配置。",
     quickSetupAdvanced: "高级参数",
-    quickSetupProtocolLabel: "协议",
+    quickSetupProtocolLabel: "路线",
     quickSetupChatCompletionsLabel: "OpenAI Chat Completions（兼容接口）",
+    resolvedRouteResponses: "OpenAI Responses",
+    resolvedRouteAnthropic: "Anthropic Messages",
+    resolvedRouteGemini: "Gemini",
     quickSetupAuthMethodLabel: "认证方式",
     quickSetupNoAuthLabel: "无需认证（仅限服务明确支持）",
     quickSetupModelToAdd: "要添加的模型",
@@ -1197,7 +1205,7 @@ export const CONFIG_COPY = {
     routePreviewAction: "Preview replacement impact",
     routeFieldBaseUrl: "Service URL",
     routeFieldDriver: "Interface type",
-    routeFieldProtocol: "Wire protocol",
+    routeFieldProtocol: "Route",
     routeEditWarning: "Before saving, the models and Agents affected are checked. Review them before applying.",
     routeConfirmChangedTitle: "Confirm connection changes",
     routeConfirmUnchangedTitle: "No connection changes",
@@ -1364,8 +1372,8 @@ export const CONFIG_COPY = {
     modelDetailTitle: "Model details",
     modelDetailDescription: "Full identity, capabilities, and verification records",
     modelEditSectionTitle: "Edit",
-    modelEditSectionHint: "Only whitelisted fields are editable; protocol-layer fields come from built-in rules and discovery.",
-    modelEditProtocolHeading: "Protocol layer (read-only)",
+    modelEditSectionHint: "Only whitelist fields are editable. The route comes from built-in rules and discovery and cannot be changed here.",
+    modelEditProtocolHeading: "Route",
     modelEditProtocolNote: "Supplied by protocol rules",
     modelEditFieldLabel: "Label",
     modelEditFieldModel: "Model name",
@@ -1381,7 +1389,7 @@ export const CONFIG_COPY = {
     modelEditSaveAction: "Save changes",
     modelEditCancelAction: "Discard changes",
     modelEditFieldsAria: "Editable model fields",
-    wireProtocolLabel: "Default wire protocol",
+    wireProtocolLabel: "Route",
     noCapabilityTitle: "No capability observations yet",
     noCapabilityBody: "Run discovery and unknown / unsupported will show up separately.",
     providerCriticalPrefix: "This provider's status is ",
@@ -1423,8 +1431,8 @@ export const CONFIG_COPY = {
     advancedManage: "Advanced manage",
     baseUrlRowLabel: "Service URL",
     editRouteAction: "Edit URL and protocol",
-    protocolRowLabel: "Interface protocol",
-    protocolRowHint: "The default protocol models under this provider use",
+    protocolRowLabel: "Route",
+    protocolRowHint: "Models on this provider use this one route by default.",
     pinnedModelsTemplate: "{count} models added",
     pickProviderTitle: "Pick a configured provider",
     pickProviderBody: "Select a provider to view its added models; use \"Connection settings\" to edit URL and key.",
@@ -1471,7 +1479,7 @@ export const CONFIG_COPY = {
     wizardLockedBody: "Go back to the provider detail and use \"Edit route\" with the backend preview token confirmation. The wizard never silently ignores field changes.",
     wizardDisplayName: "Display name",
     wizardSecretOnce: "Secret (this request only)",
-    wizardDefaultWireProtocol: "Default wire protocol",
+    wizardDefaultWireProtocol: "Route",
     wizardDiscoverFailedTitle: "Discovery failed; previous catalog kept",
     wizardDiscoveredTemplate: "{count} models discovered",
     wizardDiscoverIdleTitle: "Create the connection and test discovery",
@@ -1531,8 +1539,11 @@ export const CONFIG_COPY = {
     quickSetupKeyPlaceholder: "Only used for this local config request",
     quickSetupDetectHint: "Detects the service endpoint, protocol, and model catalog. Nothing is written to the real config directly.",
     quickSetupAdvanced: "Advanced parameters",
-    quickSetupProtocolLabel: "Protocol",
+    quickSetupProtocolLabel: "Route",
     quickSetupChatCompletionsLabel: "OpenAI Chat Completions (compatible)",
+    resolvedRouteResponses: "OpenAI Responses",
+    resolvedRouteAnthropic: "Anthropic Messages",
+    resolvedRouteGemini: "Gemini",
     quickSetupAuthMethodLabel: "Auth method",
     quickSetupNoAuthLabel: "No auth (only if the service explicitly supports it)",
     quickSetupModelToAdd: "Model to add",
@@ -1664,6 +1675,38 @@ export const CONFIG_COPY = {
 } as const;
 
 export type ConfigCopy = Record<keyof (typeof CONFIG_COPY)["zh"], string>;
+
+export function resolvedRouteLabels(copy: ConfigCopy): Record<ProviderRouteId, string> {
+  return {
+    chat_completions: copy.quickSetupChatCompletionsLabel,
+    responses: copy.resolvedRouteResponses,
+    anthropic_messages: copy.resolvedRouteAnthropic,
+    gemini_generate_content: copy.resolvedRouteGemini,
+  };
+}
+
+/** Human label for one stored route. Unknown text stays as stored; empty uses fallback. */
+export function resolvedRouteText(copy: ConfigCopy, route: string, fallback = ""): string {
+  const id = canonicalProviderRoute(route);
+  if (!id) return route.trim() || fallback;
+  return resolvedRouteLabels(copy)[id];
+}
+
+/** Route select options. A stored value outside the four routes stays visible and unchanged. */
+export function resolvedRouteSelectOptions(
+  copy: ConfigCopy,
+  current = "",
+): Array<{ value: string; label: string }> {
+  const options = PROVIDER_ROUTE_IDS.map((value) => ({
+    value,
+    label: resolvedRouteLabels(copy)[value],
+  }));
+  const raw = current.trim();
+  if (raw && !canonicalProviderRoute(raw) && !options.some((option) => option.value === raw)) {
+    return [{ value: raw, label: raw }, ...options];
+  }
+  return options;
+}
 
 /** Substitute `{name}` placeholders in a copy template. Missing keys stay literal. */
 export function formatConfigCopy(template: string, vars: Record<string, string | number>): string {
