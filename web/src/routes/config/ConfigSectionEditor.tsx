@@ -79,6 +79,7 @@ type ConfigSectionEditorProps = {
   onUiStateChange: (sectionId: string, nextState: ConfigSectionUiState) => void;
   onSaveSection: (path: string, nextValue: unknown) => Promise<boolean>;
   onImmediateFieldChange: (path: string, nextValue: unknown) => void;
+  onRetryImmediateField?: (path: string) => void;
   /** ui.language 专用切换：走 PUT /api/config/language，不经通用 immediate-apply。 */
   onLanguageChange: (next: ConfigLanguage) => void;
   immediateFieldStatus: Record<string, ImmediateFieldStatus>;
@@ -187,6 +188,7 @@ export function ConfigSectionEditor({
   onUiStateChange,
   onSaveSection,
   onImmediateFieldChange,
+  onRetryImmediateField,
   onLanguageChange,
   immediateFieldStatus,
   onAvatarImageUpload,
@@ -470,12 +472,14 @@ export function ConfigSectionEditor({
         </VChip>
       );
     }
-    if (immediateStatus === "failed") {
-      return (
-        <VChip tone="danger" data-testid={`row-status-${absolutePath}`} data-vui-row-status="failed">
-          {copy.rowStatusFailed}
+    if (immediateStatus === "failed" || immediateStatus === "refresh-failed") {
+      return <>
+        <VChip tone={immediateStatus === "refresh-failed" ? "warning" : "danger"} data-testid={`row-status-${absolutePath}`} data-vui-row-status={immediateStatus}>
+          {immediateStatus === "refresh-failed" ? copy.rowStatusSavedUnsynced : copy.rowStatusFailed}
         </VChip>
-      );
+        {onRetryImmediateField ? <VButton variant="ghost" density="compact" isDisabled={disabled}
+          data-testid={`retry-immediate-${absolutePath}`} onPress={() => onRetryImmediateField(absolutePath)}>{copy.retryAction}</VButton> : null}
+      </>;
     }
     if (options.pending) {
       return (

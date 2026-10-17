@@ -412,9 +412,10 @@ export function deriveProviderRegistryRows(
         lastErrorType: observed?.lastErrorType ?? "",
         lastSuccessAt: observed?.lastSuccessAt ?? "",
         refreshDue: observed?.refreshDue ?? false,
-        // Row-level enable switch: draft providerOptions carry the toggled value,
-        // legacy rows without the key read as enabled.
-        enabled: provider.enabled !== false,
+        // The working public config is authoritative even if a projection refresh failed.
+        enabled: typeof asRecord(draftProviders[provider.provider_id]).enabled === "boolean"
+          ? asRecord(draftProviders[provider.provider_id]).enabled !== false
+          : provider.enabled !== false,
         models,
       };
     })
