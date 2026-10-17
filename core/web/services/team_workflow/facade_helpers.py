@@ -685,13 +685,30 @@ def _normalize_stage_type(value: Any) -> str:
     return normalized
 
 
+# Structured list items (e.g. extraction keyFindings fact-dicts) degrade to
+# their primary text field instead of freezing a Python repr into stored
+# metadata.  Keyless dicts keep the legacy str() shape so existing callers
+# observe no output change beyond the dict-repr fix.
+_DICT_TEXT_KEYS = ("fact", "claim", "finding", "summary", "text", "title", "name")
+
+
 def _normalize_text_list(value: Any, *, max_items: int, max_length: int) -> list[str]:
     s = _service()
     if not isinstance(value, list):
         return []
     normalized: list[str] = []
     for item in value[:max_items]:
-        text = s._trim_text(item, max_length=max_length)
+        if isinstance(item, dict):
+            text = ""
+            for key in _DICT_TEXT_KEYS:
+                candidate = s._trim_text(item.get(key), max_length=max_length)
+                if candidate:
+                    text = candidate
+                    break
+            if not text:
+                text = s._trim_text(item, max_length=max_length)
+        else:
+            text = s._trim_text(item, max_length=max_length)
         if text and text not in normalized:
             normalized.append(text)
     return normalized

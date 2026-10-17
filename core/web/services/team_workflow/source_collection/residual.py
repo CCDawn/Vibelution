@@ -1541,7 +1541,79 @@ def _resolve_source_collection_record_id(raw_record_id: str, records: list[dict[
     return "", "record_not_in_source_collection_run"
 
 
-def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _source_collection_query_perspective_from_plan(
+    run: dict[str, Any],
+    source_trace: dict[str, Any],
+    *,
+    team_id: str = "",
+) -> str:
+    """Resolve the frozen query perspective behind one data record's queryId.
+
+    The executor stores only ``queryId`` on the record trace; the perspective
+    lives in the run's frozen query plan (collection assignments mirror
+    ``search_plan.json`` queries into ``scope.assignedQueries``) and, for
+    supplemental queries that exist only as search events, in the canonical
+    event projection (``project_source_collection_search_trace``).  Candidate
+    imports must carry the resolved perspective in metadata or the
+    source-finding receipt gate blocks the node with
+    ``source_search_receipt_missing``.  Unresolvable ids return ``""``:
+    plan/event read failures never raise and never block the import.
+    """
+    s = _service()
+    trace = source_trace if isinstance(source_trace, dict) else {}
+    direct = s._trim_text(trace.get("perspective") or trace.get("perspectiveId"), max_length=80)
+    if direct:
+        return direct
+    query_id = s._trim_text(trace.get("queryId"), max_length=160)
+    run_id = s._trim_text(run.get("runId"), max_length=160)
+    if not query_id or not run_id:
+        return ""
+    # 1) Frozen query plan: assignments distribute search_plan.json queries
+    #    with their server-bound perspective per queryId.
+    try:
+        assignments_payload = s.data_processing_service.list_collection_assignments(run_id)
+    except Exception:  # noqa: BLE001 - plan read must never block import
+        assignments_payload = {}
+    for assignment in list(assignments_payload.get("assignments") or []):
+        if not isinstance(assignment, dict):
+            continue
+        scope = assignment.get("scope") if isinstance(assignment.get("scope"), dict) else {}
+        for query in list(scope.get("assignedQueries") or []):
+            if not isinstance(query, dict):
+                continue
+            if s._trim_text(query.get("queryId"), max_length=160) != query_id:
+                continue
+            perspective = s._trim_text(query.get("perspective") or query.get("perspectiveId"), max_length=80)
+            if perspective:
+                return perspective
+    # 2) Canonical search-event projection: supplemental query ids never enter
+    #    the frozen plan; their events still carry the parent perspective.
+    normalized_team_id = s._trim_text(team_id, max_length=96)
+    if not normalized_team_id:
+        return ""
+    try:
+        from .search_execution import project_source_collection_search_trace
+
+        for item in project_source_collection_search_trace(normalized_team_id, run_id):
+            if not isinstance(item, dict):
+                continue
+            if s._trim_text(item.get("queryId"), max_length=160) != query_id:
+                continue
+            perspective = s._trim_text(item.get("perspective"), max_length=80)
+            if perspective:
+                return perspective
+    except Exception:  # noqa: BLE001 - event projection must never block import
+        return ""
+    return ""
+
+
+def _source_candidate_payload_from_data_record(
+    run: dict[str, Any],
+    record: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    team_id: str = "",
+) -> dict[str, Any]:
     s = _service()
     source_type = s._trim_text(record.get("sourceType"), max_length=80) or "unknown"
     source_ref = s._trim_text(record.get("sourceRef"), max_length=2000)
@@ -1563,6 +1635,17 @@ def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict
     quality_signals = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
     collection_trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
     source_trace = record_metadata.get("sourceCollectionTrace") if isinstance(record_metadata.get("sourceCollectionTrace"), dict) else collection_trace
+    # E2E defect fix (challenge-sci-002): the record trace carries only
+    # queryId; resolve the frozen perspective from the run query plan so the
+    # imported candidate satisfies the source-finding receipt gate.  Missing
+    # resolution keeps the historical import shape (no key, no error).
+    resolved_perspective = s._trim_text(metadata.get("perspective"), max_length=80) or _source_collection_query_perspective_from_plan(
+        run,
+        source_trace,
+        team_id=team_id,
+    )
+    if resolved_perspective and not s._trim_text(source_trace.get("perspective"), max_length=80):
+        source_trace = {**source_trace, "perspective": resolved_perspective}
     source_category = s._source_collection_source_category(
         source_kind=source_kind,
         source_ref=source_ref,
@@ -1609,6 +1692,8 @@ def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict
     if doi:
         metadata["doi"] = doi
         metadata["importedFromDataRecord"]["doi"] = doi
+    if resolved_perspective:
+        metadata["perspective"] = resolved_perspective
     source_identity_key = s._source_collection_record_identity_key(record)
     if source_identity_key:
         metadata["sourceIdentityKey"] = source_identity_key
@@ -2244,7 +2329,7 @@ def _source_collection_extraction_claim_items(value: Any) -> list[dict[str, str]
     claims: list[dict[str, str]] = []
     for item in value[:24]:
         if isinstance(item, dict):
-            claim = s._trim_text(item.get("claim") or item.get("finding") or item.get("summary") or item.get("text"), max_length=600)
+            claim = s._trim_text(item.get("fact") or item.get("claim") or item.get("finding") or item.get("summary") or item.get("text"), max_length=600)
             normalized = {
                 "claim": claim,
                 "sourceRef": s._trim_text(item.get("sourceRef") or item.get("sourceRefId") or item.get("sourceId"), max_length=240),
@@ -2359,7 +2444,7 @@ def _source_collection_extraction_key_finding_items(value: Any) -> list[dict[str
     findings: list[dict[str, str]] = []
     for item in value[:24]:
         if isinstance(item, dict):
-            finding = s._trim_text(item.get("finding") or item.get("claim") or item.get("summary") or item.get("text"), max_length=600)
+            finding = s._trim_text(item.get("fact") or item.get("finding") or item.get("claim") or item.get("summary") or item.get("text"), max_length=600)
             normalized = {
                 "finding": finding,
                 "sourceRef": s._trim_text(item.get("sourceRef") or item.get("sourceRefId") or item.get("sourceId"), max_length=240),
@@ -2391,8 +2476,13 @@ def _source_collection_extraction_key_finding_texts(extraction: dict[str, Any]) 
     findings: list[str] = []
     for item in raw_findings[:12]:
         if isinstance(item, dict):
+            # Contract (stage_writeback_prompt_contracts): every claims[]/
+            # keyFindings[] item carries an explicit `fact`; the runtime
+            # recognizes `fact` first so fact-dicts never fall through to the
+            # str()-repr trim in _normalize_text_list.
             text = s._trim_text(
-                item.get("finding")
+                item.get("fact")
+                or item.get("finding")
                 or item.get("claim")
                 or item.get("summary")
                 or item.get("text"),

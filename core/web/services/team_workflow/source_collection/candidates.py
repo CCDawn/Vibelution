@@ -230,7 +230,14 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
         # check+register 同临界区：payload 构建与注册留在 identity 检查所在的 _WORKFLOW_LOCK
         # 窗口内（RLock 可重入、纯本地文件读写，无网络/重 IO），消除「出锁后才注册」窗口内
         # 并发导入同一 source 产生双份候选的竞态。
-        candidate_payload = s._source_candidate_payload_from_data_record(run, record, import_payload)
+        candidate_payload = s._source_candidate_payload_from_data_record(
+            run,
+            record,
+            import_payload,
+            # team_id enables the supplemental-query fallback that reads the
+            # canonical search-event projection (plan lookup needs only run).
+            team_id=normalized_team_id,
+        )
         response = register_candidate_source(normalized_team_id, candidate_payload, run_id=normalized_run_id)
     candidate = response["candidate"]
     if response.get("duplicate"):
