@@ -59,6 +59,28 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
 # ``/abs/2502.01542v2`` (new style) or ``/abs/math.GT/0309136v2`` (old style).
 _ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
 
+# DOI path segment for cross-host receipt bridging: a registrant prefix plus
+# suffix ending the URL path, e.g. ``/10.21656/1000-0887.390245`` on doi.org
+# itself or ``/EN/10.21656/1000-0887.390245`` / ``/doi/10.21656/...`` /
+# ``/article/doi/10.21656/...`` on a publisher mirror.  The leading-slash
+# boundary keeps version-ish substrings (``.../v10.1234/...``) from matching.
+_DOI_PATH_SEGMENT = re.compile(r"(?<=/)(10\.\d{4,9}/\S+)$")
+
+
+def _doi_locator_key(path: str) -> str:
+    """Canonical ``doi:<doi>`` bridge key for one URL path, or ``""``.
+
+    DOI-registered sources are otherwise a structural dead end: fetching the
+    ``doi.org`` locator is rejected as a cross-host redirect while the fetched
+    publisher mirror never string-matches the DOI locator.  The key carries no
+    scheme/host, so both receipt and candidate sides agree on it.
+    """
+    match = _DOI_PATH_SEGMENT.search(path)
+    if not match:
+        return ""
+    doi = match.group(1).rstrip(".,;:")
+    return f"doi:{doi.lower()}" if doi else ""
+
 
 def _normalized_locator_keys(url: Any) -> list[str]:
     """Candidate match keys for one source locator: raw form first, then one
@@ -70,7 +92,9 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     ``export.arxiv.org`` mirror onto ``arxiv.org``, and — only for arXiv
     ``/abs/`` pages — strip the optional trailing ``vN`` version suffix from
     the paper id (``/abs/2502.01542v2`` and ``/abs/2502.01542`` serve the same
-    page).  Paths on every other site are never rewritten.
+    page).  Paths on every other site are never rewritten; URLs whose path
+    ends in a DOI segment additionally emit a scheme-free ``doi:<doi>`` bridge
+    key so a DOI locator matches its publisher-mirror fetch receipt.
     """
     raw = _clean(url)
     if not raw:
@@ -97,6 +121,9 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     normalized = urlunsplit((parsed.scheme, netloc, path, parsed.query, parsed.fragment))
     if normalized != raw and normalized not in keys:
         keys.append(normalized)
+    doi_key = _doi_locator_key(path)
+    if doi_key and doi_key not in keys:
+        keys.append(doi_key)
     return keys
 
 
