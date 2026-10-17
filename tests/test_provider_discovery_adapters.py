@@ -8,6 +8,7 @@ import pytest
 from config.llm_identity import provider_discovery_fingerprint
 from config.model_catalog import load_model_catalog_state
 from config.models import ProviderDiscoverySettings
+from config.public_config import list_llm_provider_preset_options
 from core.llm.provider_discovery.adapters import (
     MAX_DISCOVERED_MODELS,
     MAX_DISCOVERY_RESPONSE_BYTES,
@@ -47,6 +48,54 @@ def _config(adapter: str, *, base_url: str = "https://models.example/v1") -> dic
             "profiles": {},
         }
     }
+
+
+@pytest.mark.parametrize("option", list_llm_provider_preset_options(), ids=lambda x: x["provider_id"])
+def test_fixed_provider_templates_discover_with_matching_auth_and_response_shape(
+    monkeypatch, tmp_path, option: dict
+) -> None:
+    provider = option["provider"]
+    provider_id = option["provider_id"]
+    if provider["requires_credential"]:
+        monkeypatch.setenv(provider["credential_ref"].removeprefix("env:"), "preset-test-secret")
+    adapter = provider["discovery"]["adapter"]
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if adapter == "anthropic":
+            assert request.url.path == "/v1/models"
+            assert request.headers["x-api-key"] == "preset-test-secret"
+            assert request.headers["anthropic-version"] == "2023-06-01"
+            assert "authorization" not in request.headers
+            payload = {"data": [{"id": "catalog-model"}]}
+        elif adapter == "gemini":
+            assert request.url.path == "/v1beta/models"
+            assert request.url.host == "generativelanguage.googleapis.com"
+            assert request.url.params["key"] == "preset-test-secret"
+            assert "authorization" not in request.headers
+            payload = {"models": [{"name": "models/catalog-model"}]}
+        elif adapter == "ollama":
+            assert request.url.path == "/api/tags"
+            assert request.url.port == 11434
+            assert "authorization" not in request.headers
+            assert "key" not in request.url.params
+            payload = {"models": [{"name": "catalog-model"}]}
+        else:
+            assert request.headers["authorization"] == "Bearer preset-test-secret"
+            assert request.url.path.endswith("/models")
+            payload = {"data": [{"id": "catalog-model"}]}
+        return httpx.Response(200, json=payload)
+
+    result = discover_provider_models(
+        {"llm": {"schema_version": 2, "providers": {provider_id: provider}}},
+        provider_id,
+        catalog_path=tmp_path / "state.json",
+        transport=httpx.MockTransport(handler),
+    )
+    assert len(calls) == 1
+    assert [model.upstream_id for model in result.models] == ["catalog-model"]
+    assert "preset-test-secret" not in repr(result)
 
 
 def test_request_repr_never_contains_credential() -> None:
@@ -325,7 +374,7 @@ def test_ollama_adapter_uses_native_tags_surface(tmp_path) -> None:
     ("adapter", "path", "header", "expected_id"),
     [
         ("anthropic", "/v1/models", "x-api-key", "claude-native"),
-        ("gemini", "/v1beta/models", "", "models/gemini-native"),
+        ("gemini", "/v1beta/models", "", "gemini-native"),
     ],
 )
 def test_native_adapters_use_native_auth_without_secret_in_endpoint_summary(
@@ -372,7 +421,7 @@ def test_native_adapters_use_native_auth_without_secret_in_endpoint_summary(
             "https://models.example",
             "https://catalog.example/custom/gemini-models",
             {"models": [{"name": "models/gemini-override"}]},
-            "models/gemini-override",
+            "gemini-override",
         ),
         (
             "ollama",

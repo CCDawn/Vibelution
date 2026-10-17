@@ -35,6 +35,7 @@ from .paths import (
     resolve_config_path,
 )
 from .profiles import apply_runtime_profile
+from .provider_preset_contract import normalize_provider_preset
 from .runtime_capabilities import (
     apply_model_capability_overrides,
     strip_runtime_model_capability_fields,
@@ -834,13 +835,17 @@ LLM_PROVIDER_TEMPLATE_LABELS = {
     "google_main": "Gemini OpenAI 兼容",
     "local_main": "本地 OpenAI-compatible",
     "minimax_main": "MiniMax 官方 API",
+    "moonshot_main": "月之暗面 Moonshot",
     "openai_image": "OpenAI 图片接口",
     "openai_main": "OpenAI 官方 API",
+    "openrouter_main": "OpenRouter",
     "relay_image": "Image2 中转",
     "relay_openai": "OpenAI Responses 中转",
     "siliconflow_main": "硅基流动 API",
+    "volcengine_main": "火山方舟",
     "xiaomi_mimo_api_cn": "MiMo 官方 API CN",
     "xiaomi_mimo_token_plan_cn": "MiMo Token Plan CN",
+    "zhipu_main": "智谱 AI",
 }
 
 
@@ -1216,6 +1221,17 @@ def _canonicalize_public_config(public_config: dict, *, allow_legacy_v1: bool = 
     return _ensure_llm_profiles_container(canonicalized)
 
 
+def _canonicalize_json_numbers(value: Any) -> Any:
+    """Match integral JSON numbers after a browser parse/stringify roundtrip."""
+    if isinstance(value, dict):
+        return {key: _canonicalize_json_numbers(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_json_numbers(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def public_config_hash(public_config: dict) -> str:
     llm = public_config.get("llm") if isinstance(public_config, dict) else None
     allow_legacy_v1 = False
@@ -1228,7 +1244,7 @@ def public_config_hash(public_config: dict) -> str:
         _canonicalize_public_config(public_config, allow_legacy_v1=allow_legacy_v1)
     )
     payload = json.dumps(
-        canonical,
+        _canonicalize_json_numbers(canonical),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -1849,6 +1865,8 @@ def list_llm_provider_preset_options() -> list[dict[str, object]]:
         provider = copy.deepcopy(preset.get("provider", {}))
         if not isinstance(provider, dict):
             continue
+        model = copy.deepcopy(preset.get("model", {}))
+        model = model if isinstance(model, dict) else {}
         provider_id = str(preset.get("provider_id") or "").strip() or str(preset_id)
         if provider_id in seen:
             continue
@@ -1863,7 +1881,7 @@ def list_llm_provider_preset_options() -> list[dict[str, object]]:
                 "category": _llm_model_preset_category(preset),
                 "provider_id": provider_id,
                 "source_preset_id": str(preset_id),
-                "provider": provider,
+                "provider": normalize_provider_preset(provider, model),
                 "default_model": copy.deepcopy(preset.get("model", {})),
             }
         )

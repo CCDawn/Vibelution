@@ -89,6 +89,21 @@ def test_same_endpoint_with_different_credential_is_distinct() -> None:
     assert set(config["llm"]["providers"]) == {"relay_a", "relay_b"}
 
 
+def test_existing_duplicate_pairs_do_not_block_unrelated_provider_changes() -> None:
+    config = _empty_v2()
+    config["llm"]["providers"] = {"old_a": _provider(), "old_b": _provider()}
+    with pytest.raises(ValueError, match="duplicates active provider"):
+        validate_provider_registry(config)
+    added = add_llm_provider(config, "new", _provider("env:NEW_KEY"))
+    edited = update_llm_provider(added, "new", {**_provider("env:NEW_KEY"), "label": "Updated"})
+    assert edited["llm"]["providers"]["new"]["label"] == "Updated"
+    assert config["llm"]["providers"] == {"old_a": _provider(), "old_b": _provider()}
+    with pytest.raises(ValueError, match="duplicates active provider"):
+        add_llm_provider(added, "another", _provider())
+    with pytest.raises(ValueError, match="duplicates active provider"):
+        update_llm_provider(added, "new", _provider())
+
+
 @pytest.mark.skipif(
     os.name != "nt",
     reason="credential env names fold case only on Windows; on POSIX "

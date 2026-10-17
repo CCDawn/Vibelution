@@ -1608,9 +1608,9 @@ export function ConfigProviderRegistryPanel({
                 )} />
               <p
                 className={styles.providerFreshness}
-                data-provider-freshness={provider.refreshDue ? "stale" : "fresh"}
+                data-provider-freshness={!provider.lastSuccessAt ? "unchecked" : provider.refreshDue ? "stale" : "fresh"}
               >
-                {provider.refreshDue ? copy.catalogStaleLine : copy.catalogFreshLine}
+                {!provider.lastSuccessAt ? copy.catalogNotCheckedLine : provider.refreshDue ? copy.catalogStaleLine : copy.catalogFreshLine}
               </p>
               <VSettingsGroupCard>
                 <VSettingsRow label={copy.baseUrlRowLabel} description={provider.baseUrl || copy.notConfigured}

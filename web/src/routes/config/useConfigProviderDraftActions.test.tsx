@@ -2,7 +2,8 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { discoverDraftProvider, fetchConfigWorkspace, pinDraftProviderModel, updateDraftProvider } from "../../api/config";
+import { addDraftProvider, discoverDraftProvider, fetchConfigWorkspace, pinDraftProviderModel, previewConfigDraft, previewDraftProviderRoute, updateDraftProvider } from "../../api/config";
+import { initialProviderWizardState } from "../configProviderLogic";
 import type { ConfigCatalogModel, ConfigWorkspace } from "../../api/types";
 import { CONFIG_COPY } from "./configCopy";
 import { useConfigProviderDraftActions, type UseConfigProviderDraftActionsOptions } from "./useConfigProviderDraftActions";
@@ -12,6 +13,7 @@ import { useConfigProviderDraftActions, type UseConfigProviderDraftActionsOption
 vi.mock("../../api/config", () => ({
   addDraftProvider: vi.fn(), deleteDraftProvider: vi.fn(), discoverDraftProvider: vi.fn(),
   fetchConfigWorkspace: vi.fn(), pinDraftProviderModel: vi.fn(), previewDraftProviderRoute: vi.fn(),
+  previewConfigDraft: vi.fn(),
   suggestDraftProviderId: vi.fn(), unpinDraftProviderModel: vi.fn(), updateDraftProvider: vi.fn(),
 }));
 
@@ -46,7 +48,165 @@ async function run(input: UseConfigProviderDraftActionsOptions, action: (actions
 }
 
 describe("provider draft baseline and failure recovery", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
+
+  it.each([false, true])("discards only new providers and exclusive pending tokens, retaining unrelated draft edits (shared env %s)", async (shared) => {
+    const input = options();
+    const original = {
+      publicConfig: { marker: "unrelated-unsaved-edit", llm: { providers: {
+        relay: { label: "Edited existing service", credential_ref: shared ? "env:NEW_KEY" : "env:SAVED_KEY" },
+        new_provider: { credential_ref: "env:NEW_KEY", models: { manual: { upstream_id: "Vendor/Model" } } },
+        other_draft: { credential_ref: "env:OTHER_KEY" },
+      } } },
+      draftMeta: { pending_api_keys: { NEW_KEY: "own-token", OTHER_KEY: "other-token" }, pending_cleared_api_keys: ["NEW_KEY", "OTHER_KEY"] },
+      baseHash: "baseline",
+    };
+    input.providerDraftRequestRef.current = structuredClone(original);
+    vi.mocked(previewConfigDraft).mockImplementation(async (request) => ({
+      publicConfig: request.publicConfig, draftMeta: request.draftMeta, hash: "preview-hash", modelCatalog: { providers: {} },
+    }) as ConfigWorkspace);
+    await run(input, async (actions) => {
+      await actions.handleDiscardDraftProviders(["new_provider", "relay"]);
+    });
+    const request = vi.mocked(previewConfigDraft).mock.calls[0][0];
+    expect(request.publicConfig).toEqual({ marker: "unrelated-unsaved-edit", llm: { providers: {
+      relay: original.publicConfig.llm.providers.relay, other_draft: original.publicConfig.llm.providers.other_draft,
+    } } });
+    expect(request.draftMeta).toEqual({
+      pending_api_keys: shared ? { NEW_KEY: "own-token", OTHER_KEY: "other-token" } : { OTHER_KEY: "other-token" },
+      pending_cleared_api_keys: shared ? ["NEW_KEY", "OTHER_KEY"] : ["OTHER_KEY"],
+    });
+    expect(request.baseHash).toBe("baseline");
+    expect(request.baseConfig).toEqual(input.editBaselineRef.current.baseConfig);
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+    expect(input.syncWorkspace).toHaveBeenCalledWith(expect.anything(), "neutral", { resetBase: false });
+    expect(fetchConfigWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("preserves the complete draft if cancel projection fails", async () => {
+    const input = options();
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    vi.mocked(previewConfigDraft).mockRejectedValueOnce(new Error("projection failed"));
+    await run(input, async (actions) => {
+      await expect(actions.handleDiscardDraftProviders(["new_provider"])).rejects.toThrow("projection failed");
+    });
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+    expect(input.syncWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("lets the backend normalize a manual upstream ID and returns its model ref with latest pending meta", async () => {
+    const input = options();
+    const meta = { pending_api_keys: { relay: "new-pending-token" } };
+    input.providerDraftRequestRef.current!.draftMeta = meta;
+    const model = { upstreamId: "Vendor/Model-A", modelRef: "relay/vendor-model-a-1234", modelKey: "vendor-model-a-1234", availability: "pinned" } as ConfigCatalogModel;
+    const response = {
+      publicConfig: input.draftConfig, draftMeta: meta, hash: "new-draft-hash",
+      modelCatalog: { providers: { relay: { models: { [model.modelKey]: model } } } },
+    } as ConfigWorkspace;
+    vi.mocked(pinDraftProviderModel).mockResolvedValueOnce(response);
+    await run(input, async (actions) => {
+      expect(await actions.handlePinManualProviderModel("relay", "Vendor/Model-A", { wire_protocol: "responses" })).toEqual(model);
+    });
+    expect(pinDraftProviderModel).toHaveBeenCalledWith("relay", expect.objectContaining({
+      baseHash: "baseline", baseConfig: input.editBaselineRef.current.baseConfig,
+      upstreamId: "Vendor/Model-A", modelKey: "", draftMeta: meta, overrides: { wire_protocol: "responses" },
+    }));
+    expect(input.syncWorkspace).toHaveBeenCalledWith(response, "success", { resetBase: false });
+    expect(input.setProviderCredentialValue).not.toHaveBeenCalled();
+  });
+
+  it.each(["request", "missing"])("rejects a manual pin %s failure without replacing draft or credentials", async (failure) => {
+    const input = options();
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    if (failure === "request") {
+      vi.mocked(pinDraftProviderModel).mockRejectedValueOnce(new Error("pin failed"));
+    } else {
+      vi.mocked(pinDraftProviderModel).mockResolvedValueOnce({ modelCatalog: { providers: {} } } as ConfigWorkspace);
+    }
+    await run(input, async (actions) => {
+      await expect(actions.handlePinManualProviderModel("relay", "Vendor/Model-A")).rejects.toThrow();
+    });
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+    expect(input.syncWorkspace).not.toHaveBeenCalled();
+    expect(input.setProviderCredentialValue).not.toHaveBeenCalled();
+  });
+
+  it("updates only an unpersisted provider on retry through route preview and retains pinned models", async () => {
+    const input = options();
+    input.editBaselineRef.current.baseConfig = { llm: { providers: {} } };
+    const models = { pinned: { upstream_id: "pinned", enabled: true } };
+    const existing = { label: "Draft", base_url: "https://wrong.example", models };
+    input.providerDraftRequestRef.current!.publicConfig = { llm: { providers: { relay: existing } } };
+    vi.mocked(previewDraftProviderRoute).mockResolvedValue({
+      providerId: "relay", routeChanged: true, routePreviewToken: "single-use-token", modelRefs: ["relay/pinned"], impactedRefs: [],
+    });
+    vi.mocked(updateDraftProvider).mockImplementation(async (_id, request) => ({
+      publicConfig: request.publicConfig, draftMeta: request.draftMeta, hash: "draft-hash", modelCatalog: { providers: {} },
+    }) as ConfigWorkspace);
+    await run(input, async (actions) => {
+      await actions.handleCreateProvider({ ...initialProviderWizardState(), providerId: "relay", baseUrl: "https://fixed.example/v1" }, "fixed-key");
+    });
+    expect(addDraftProvider).not.toHaveBeenCalled();
+    expect(previewDraftProviderRoute).toHaveBeenCalledWith("relay", expect.objectContaining({
+      baseHash: "baseline", baseConfig: input.editBaselineRef.current.baseConfig, draftMeta: input.draftMeta,
+      provider: expect.objectContaining({ base_url: "https://fixed.example/v1", models }),
+    }));
+    expect(updateDraftProvider).toHaveBeenCalledWith("relay", expect.objectContaining({
+      routePreviewToken: "single-use-token", credentialValue: "fixed-key", draftMeta: input.draftMeta,
+      provider: expect.objectContaining({ base_url: "https://fixed.example/v1", models }),
+    }));
+    expect(existing.base_url).toBe("https://wrong.example");
+    expect(input.syncWorkspace).toHaveBeenCalledWith(expect.anything(), "success", { resetBase: false });
+  });
+
+  it("never silently updates a provider already present in the saved baseline", async () => {
+    const input = options();
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    vi.mocked(addDraftProvider).mockRejectedValueOnce(new Error("provider already exists"));
+    await run(input, async (actions) => {
+      await expect(actions.handleCreateProvider({ ...initialProviderWizardState(), providerId: "relay" }, "key"))
+        .rejects.toThrow("provider already exists");
+    });
+    expect(previewDraftProviderRoute).not.toHaveBeenCalled();
+    expect(updateDraftProvider).not.toHaveBeenCalled();
+    expect(input.syncWorkspace).not.toHaveBeenCalled();
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+    expect(input.setProviderCredentialValue).not.toHaveBeenCalled();
+  });
+
+  it.each(["preview", "update"])("rethrows a draft %s failure without changing the draft or clearing credentials", async (stage) => {
+    const input = options();
+    input.editBaselineRef.current.baseConfig = { llm: { providers: {} } };
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    vi.mocked(previewDraftProviderRoute).mockResolvedValueOnce({
+      providerId: "relay", routeChanged: true, routePreviewToken: "single-use-token", modelRefs: [], impactedRefs: [],
+    });
+    if (stage === "preview") {
+      vi.mocked(previewDraftProviderRoute).mockReset().mockRejectedValueOnce(new Error("baseline conflict"));
+    } else {
+      vi.mocked(updateDraftProvider).mockRejectedValueOnce(new Error("baseline conflict"));
+    }
+    await run(input, async (actions) => {
+      await expect(actions.handleCreateProvider({ ...initialProviderWizardState(), providerId: "relay" }, "key"))
+        .rejects.toThrow("baseline conflict");
+    });
+    expect(updateDraftProvider).toHaveBeenCalledTimes(stage === "update" ? 1 : 0);
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+    expect(input.syncWorkspace).not.toHaveBeenCalled();
+    expect(input.setProviderCredentialValue).not.toHaveBeenCalled();
+  });
+
+  it("does not infer an unpersisted provider when the edit baseline is missing", async () => {
+    const input = options();
+    input.editBaselineRef.current.baseConfig = null;
+    vi.mocked(addDraftProvider).mockRejectedValueOnce(new Error("provider already exists"));
+    await run(input, async (actions) => {
+      await expect(actions.handleCreateProvider({ ...initialProviderWizardState(), providerId: "relay" }, "key"))
+        .rejects.toThrow("provider already exists");
+    });
+    expect(previewDraftProviderRoute).not.toHaveBeenCalled();
+    expect(updateDraftProvider).not.toHaveBeenCalled();
+  });
 
   it("sends the paired baseline and preserves draft plus pending credentials on conflict", async () => {
     const input = options();
@@ -92,7 +252,7 @@ describe("provider draft baseline and failure recovery", () => {
 });
 
 describe("pinned model whitelist edit (wave 3 governance path B)", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
 
   function pinnedEntryOptions() {
     const input = options();

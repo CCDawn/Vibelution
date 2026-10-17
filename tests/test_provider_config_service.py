@@ -361,6 +361,80 @@ def test_provider_draft_mutations_require_nonempty_current_base_hash(monkeypatch
         )
 
 
+def _browser_number_roundtrip(config: dict) -> dict:
+    def parse_number(value: str) -> int | float:
+        number = float(value)
+        return int(number) if number.is_integer() else number
+
+    return json.loads(json.dumps(config), parse_float=parse_number)
+
+
+@pytest.mark.parametrize("operation", ["add", "discover"])
+def test_provider_draft_accepts_browser_number_roundtrip(monkeypatch, operation) -> None:
+    saved = _v2_with_provider()
+    saved["llm"]["providers"]["relay_a"]["models"]["base-model"]["defaults"] = {
+        "temperature": 1.0,
+    }
+    _patch_saved(monkeypatch, saved)
+    base_hash = public_config_hash(saved)
+    browser_config = _browser_number_roundtrip(saved)
+    assert type(browser_config["llm"]["providers"]["relay_a"]["models"]["base-model"]["defaults"]["temperature"]) is int
+    monkeypatch.setattr(provider_config_service, "_record_provider_event", lambda *args, **kwargs: None)
+
+    if operation == "add":
+        workspace = provider_config_service.draft_add_provider(
+            browser_config,
+            draft_meta={},
+            base_hash=base_hash,
+            base_config=copy.deepcopy(browser_config),
+            provider_id="relay_b",
+            provider=_provider("env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY"),
+        )
+        assert "relay_b" in workspace["publicConfig"]["llm"]["providers"]
+    else:
+        discovered = []
+
+        def discover(public_config, provider_id, **kwargs):
+            discovered.append(provider_id)
+            return SimpleNamespace(
+                provider_id=provider_id,
+                adapter_id="openai_compatible",
+                attempted_endpoints=("models",),
+                discovered_at="2026-10-17T00:00:00+00:00",
+                models=(),
+            )
+
+        monkeypatch.setattr(provider_config_service, "discover_provider_models", discover)
+        workspace = provider_config_service.discover_draft_provider(
+            browser_config,
+            draft_meta={},
+            base_hash=base_hash,
+            base_config=copy.deepcopy(browser_config),
+            provider_id="relay_a",
+        )
+        assert discovered == ["relay_a"]
+        assert "relay_a" in workspace["publicConfig"]["llm"]["providers"]
+
+
+def test_provider_draft_browser_roundtrip_still_rejects_changed_target(monkeypatch) -> None:
+    base = _v2_with_provider()
+    base["llm"]["providers"]["relay_a"]["models"]["base-model"]["defaults"] = {
+        "temperature": 1.0,
+    }
+    browser_config = _browser_number_roundtrip(base)
+    current = copy.deepcopy(base)
+    current["llm"]["providers"]["relay_a"]["models"]["base-model"]["defaults"]["temperature"] = 1.1
+    _patch_saved(monkeypatch, current)
+
+    with pytest.raises(config_service.ConfigConflictError, match="This provider changed|当前供应商"):
+        provider_config_service._current_draft(
+            browser_config,
+            base_hash=public_config_hash(base),
+            base_config=browser_config,
+            provider_id="relay_a",
+        )
+
+
 def test_provider_draft_allows_unrelated_saved_changes_without_rebasing_draft(monkeypatch) -> None:
     base = _v2_with_provider()
     current = copy.deepcopy(base)

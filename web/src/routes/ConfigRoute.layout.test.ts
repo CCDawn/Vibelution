@@ -195,12 +195,12 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("① 模型资产");
     expect(routeSource).not.toContain("② 添加连接");
     // Wave 4: quick-setup strings live in the shared bilingual copy table.
-    expect(configCopySource).toContain("检测连接");
-    expect(configCopySource).toContain("保存并完成");
-    expect(quickSetupSource).toContain("quickSetupDetect");
-    expect(quickSetupSource).toContain("quickSetupSaveFinish");
-    expect(quickSetupStyles.workspace).toContain("max-w-4xl");
-    expect(quickSetupStyles.inputGrid).toContain("grid-cols-1");
+    expect(configCopySource.includes("获取模型列表")).toBe(true);
+    expect(configCopySource.includes("测试并保存")).toBe(true);
+    expect(quickSetupSource.includes("quickSetupGetModels")).toBe(true);
+    expect(quickSetupSource.includes("quickSetupTestAndSave")).toBe(true);
+    expect(quickSetupStyles.workspace).toContain("max-w-[704px]");
+    expect(quickSetupStyles.twoFields).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
     expect(quickSetupSource).toContain('state.phase !== "input"');
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
@@ -210,20 +210,33 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps formal config apply outside Provider detection orchestration", () => {
-    const detectionBody = routeSource.slice(
-      routeSource.indexOf("const handlePrepareProviderQuickSetup = useCallback"),
-      routeSource.indexOf("const handleConfirmProviderQuickSetup = useCallback"),
-    );
-    const confirmationBody = routeSource.slice(
-      routeSource.indexOf("const handleConfirmProviderQuickSetup = useCallback"),
-      routeSource.indexOf("return {\n    handlePrepareProviderQuickSetup"),
-    );
+    const ensureStart = configQuickSetupActionsSource.indexOf("const ensureProviderQuickSetup = useCallback");
+    const detectionStart = configQuickSetupActionsSource.indexOf("const handlePrepareProviderQuickSetup = useCallback");
+    const testAndSaveStart = configQuickSetupActionsSource.indexOf("const handleTestAndSaveProviderQuickSetup = useCallback");
+    const cancelStart = configQuickSetupActionsSource.indexOf("const handleCancelProviderQuickSetup = useCallback");
+    const confirmationStart = configQuickSetupActionsSource.indexOf("const handleConfirmProviderQuickSetup = useCallback");
+    expect(ensureStart).toBeGreaterThanOrEqual(0);
+    expect(detectionStart).toBeGreaterThan(ensureStart);
+    expect(testAndSaveStart).toBeGreaterThan(detectionStart);
+    expect(cancelStart).toBeGreaterThan(testAndSaveStart);
+    expect(confirmationStart).toBeGreaterThan(cancelStart);
+    const ensureBody = configQuickSetupActionsSource.slice(ensureStart, detectionStart);
+    const detectionBody = configQuickSetupActionsSource.slice(detectionStart, testAndSaveStart);
+    const testAndSaveBody = configQuickSetupActionsSource.slice(testAndSaveStart, cancelStart);
+    const confirmationBody = configQuickSetupActionsSource.slice(confirmationStart, configQuickSetupActionsSource.indexOf("return {\n    handlePrepareProviderQuickSetup"));
 
-    expect(detectionBody).toContain("handleCreateProvider");
-    expect(detectionBody).toContain("handleDiscoverProvider");
-    expect(detectionBody).not.toContain("handleApply(");
-    expect(confirmationBody).toContain("handlePinProviderModels");
-    expect(confirmationBody).toContain("handleApply(");
+    expect(ensureBody.includes("handleCreateProvider")).toBe(true);
+    expect(ensureBody.includes("handleApply(")).toBe(false);
+    expect(detectionBody.includes("ensureProviderQuickSetup(input)")).toBe(true);
+    expect(detectionBody.includes("handleDiscoverProvider")).toBe(true);
+    expect(detectionBody.includes("handleApply(")).toBe(false);
+    // Direct entry has its own tested-model path; discovery remains optional.
+    expect(testAndSaveBody.includes("await testConfigLlm(")).toBe(true);
+    expect(testAndSaveBody.includes("if (!result.ok) throw")).toBe(true);
+    expect(testAndSaveBody.indexOf("if (!result.ok)")).toBeLessThan(testAndSaveBody.indexOf("await handleApply("));
+    expect(testAndSaveBody.includes("handleDiscoverProvider")).toBe(false);
+    expect(confirmationBody.includes("handlePinProviderModels")).toBe(true);
+    expect(confirmationBody.includes("handleApply(")).toBe(true);
   });
 
   it("applies quick setup from the latest synchronized Provider workspace instead of stale React state", () => {
@@ -325,8 +338,14 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('setProviderCredentialValue("")');
     expect(routeSource).toContain("setSelectedProviderId(providerId)");
     expect(routeSource).toContain('setSelectedProviderTab("connection")');
-    expect(providerPanelSource).not.toContain("credential_ref");
-    expect(routeSource).not.toContain("credential_ref");
+    // Internal env references are needed for safe per-provider credential isolation.
+    // The ordinary credential editors must bind only the secret value, never its internal ref.
+    const credentialRefInput = /<(?:VInput|VNativeInput|input|VTextarea|VNativeTextarea|textarea)\b[^>]*\b(?:value|defaultValue)=\{[^}]*credential(?:Ref|_ref)/;
+    for (const source of [providerPanelSource, routeSourceRaw, quickSetupSource]) {
+      expect(credentialRefInput.test(source)).toBe(false);
+    }
+    expect(configQuickSetupActionsSource.includes("usedRefs")).toBe(true);
+    expect(configQuickSetupActionsSource.includes("credential_ref")).toBe(true);
   });
 
   it("owns typed Provider action feedback and resets local editors when switching Provider", () => {
@@ -383,7 +402,10 @@ describe("ConfigRoute layout contract", () => {
   it("reuses one canonical Provider draft builder for suggestion and creation", () => {
     expect(wizardSource).toContain("buildProviderWizardDraft(state, selectedTemplate?.provider)");
     expect(routeSource).toContain("buildProviderWizardDraft(state, template?.provider)");
-    expect(wizardSource).toContain("const templateDeployment = asRecord(templateProvider.deployment)");
+    expect(wizardSource.includes("providerPresetToWizardState(selectedTemplate)")).toBe(true);
+    expect(providerLogicSource.includes("const deployment = asRecord(provider.deployment)")).toBe(true);
+    expect(providerLogicSource.includes("runtimeFramework: asString(deployment.runtime_framework)")).toBe(true);
+    expect(providerLogicSource.includes("artifactPath: asString(deployment.artifact_path)")).toBe(true);
     expect(wizardSource).not.toContain("asString(templateProvider.runtime_framework)");
     expect(wizardSource).not.toContain("asString(templateProvider.artifact_path)");
     expect(wizardSource).not.toContain("function providerDraft(");
@@ -417,20 +439,23 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toContain("width:100vw");
   });
 
-  it("keeps quick setup in a bounded progressive desktop workspace", () => {
-    expect(quickSetupSource).toContain('<div className={styles.workspace}>');
+  it("keeps quick setup in one bounded responsive form with optional model discovery", () => {
+    expect(quickSetupSource.includes('<form className={styles.workspace}')).toBe(true);
+    expect(quickSetupSource.includes("event.preventDefault(); submit();")).toBe(true);
+    expect(quickSetupSource.includes("onTestAndSave({ provider: state.provider, credentialValue, modelId: modelId.trim() })")).toBe(true);
     expect(quickSetupStyles.root).not.toContain("grid-template-columns");
-    expect(quickSetupStyles.workspace).toContain("max-w-4xl");
-    expect(quickSetupStyles.inputGrid).toContain("grid-cols-1");
-    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
-    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
+    expect(quickSetupStyles.workspace).toContain("max-w-[704px]");
+    expect(quickSetupStyles.twoFields).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(quickSetupStyles.control).toContain("!h-10");
+    expect(quickSetupStyles.control).toContain("max-[640px]:!h-11");
+    expect(quickSetupStyles.modelInput).toContain("max-[640px]:flex-wrap");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
     expect(styles.providerModeButton).not.toMatch(/min-h-|font-size/);
     // P0: add-provider entry lives on the provider list bottom row, not the page header.
     expect(providerPanelSource).toContain('data-provider-action="add-provider"');
     expect(routeSource).toContain("aria-pressed={providerShowMore}");
     expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
-    expect(quickSetupStyles.resultRegion).not.toContain("min-h-");
+    expect(quickSetupStyles.feedback).not.toContain("min-h-");
     expect(quickSetupStylesSource).not.toContain("position:fixed");
     expect(quickSetupStylesSource).not.toContain("bottom-0");
   });

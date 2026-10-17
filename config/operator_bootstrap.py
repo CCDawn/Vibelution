@@ -11,9 +11,8 @@ import os
 import tomllib
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlsplit
 
-from config.llm_credentials import canonicalize_credential_ref, resolve_credential_ref
+from config.llm_credentials import resolve_credential_ref
 from config.llm_identity import (
     make_model_key,
     make_model_ref,
@@ -22,6 +21,7 @@ from config.llm_identity import (
     validate_provider_id,
 )
 from config.models import DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_ROLE_PROFILE_IDS
+from config.provider_preset_contract import _protocol_bundle, normalize_provider_preset
 from config.toml_writer import dumps_public_config
 
 EnvReader = Callable[[str], str | None]
@@ -105,49 +105,11 @@ def _read_env_default(name: str) -> str | None:
     return str(value)
 
 
-def _service_class(kind: str, base_url: str) -> str:
-    token = str(kind or "").strip().lower()
-    if token in {"local", "local_runtime", "ollama", "llamacpp"}:
-        return "local_runtime"
-    host = (urlsplit(base_url).hostname or "").lower()
-    if host in {"localhost", "127.0.0.1", "::1"}:
-        return "local_runtime"
-    if token == "relay":
-        return "relay"
-    if token in {"openrouter", "aggregator", "siliconflow"}:
-        return "aggregator"
-    return "official_api"
-
-
-def _driver(kind: str, compat_mode: str) -> str:
-    token = str(kind or "").strip().lower()
-    compat = str(compat_mode or "").strip().lower()
-    if token == "anthropic" or compat == "native":
-        return "anthropic" if token == "anthropic" else "openai"
-    return "openai"
-
-
-def _vendor(kind: str) -> str:
-    token = str(kind or "").strip().lower().replace("-", "_")
-    if token in {"local", "local_runtime", "ollama", "llamacpp"}:
-        return "custom"
-    if token in {"openai_compatible"}:
-        return "custom"
-    return token or "custom"
-
-
 def _is_dialogue_upstream(upstream_id: str) -> bool:
     text = str(upstream_id or "").strip().lower()
     if not text:
         return False
     return not any(marker in text for marker in _NON_DIALOGUE_UPSTREAM_MARKERS)
-
-
-def _protocol_bundle(transports: set[str]) -> dict[str, Any]:
-    allowed = sorted(transports) if transports else ["chat_completions"]
-    # Prefer chat_completions as default when available for broad agent tooling.
-    default = "chat_completions" if "chat_completions" in allowed else allowed[0]
-    return {"default": default, "allowed": allowed}
 
 
 def _local_provider() -> dict[str, Any]:
@@ -229,6 +191,7 @@ def build_default_llm_section(
     fingerprint_to_id: dict[str, str] = {}
     providers: dict[str, dict[str, Any]] = {}
     transport_by_provider: dict[str, set[str]] = {}
+    explicit_protocols: set[str] = set()
     dialogue_candidates: list[tuple[int, str]] = []
 
     for preset_id, preset in LLM_MODEL_PRESETS.items():
@@ -255,22 +218,17 @@ def build_default_llm_section(
         except ValueError:
             continue
 
-        kind = str(raw_provider.get("kind") or "").strip().lower()
         env_name = (
             overrides.get(provider_id)
             or overrides.get(preset_id)
             or str(raw_provider.get("api_key_env") or raw_model.get("api_key_env") or "").strip()
         )
-        requires = bool(raw_provider.get("requires_api_key", True))
-        if not requires or not env_name:
-            credential_ref = "none"
-            auth_kind = "none"
-        else:
-            try:
-                credential_ref = canonicalize_credential_ref(f"env:{env_name}")
-            except ValueError:
-                continue
-            auth_kind = "api_key"
+        try:
+            connection = normalize_provider_preset(raw_provider, raw_model, credential_env=env_name)
+        except ValueError:
+            continue
+        credential_ref = connection["credential_ref"]
+        auth_kind = connection["auth_kind"]
 
         if auth_kind == "api_key" and not include_unconfigured_providers:
             resolution = resolve_credential_ref(credential_ref, env_reader=reader)
@@ -295,22 +253,13 @@ def build_default_llm_section(
             )
             providers[provider_id] = {
                 "label": label,
-                "service_class": _service_class(kind, base_url),
-                "vendor": _vendor(kind),
-                "driver": _driver(kind, str(raw_provider.get("compat_mode") or "")),
-                "base_url": base_url,
-                "auth_kind": auth_kind,
-                "credential_ref": credential_ref,
-                "requires_credential": auth_kind != "none",
-                "protocols": {"default": "chat_completions", "allowed": ["chat_completions"]},
-                "discovery": {
-                    "mode": "auto",
-                    "adapter": "openai_compatible",
-                    "cache_ttl_seconds": 300,
-                },
+                **connection,
                 "models": {},
             }
             transport_by_provider[provider_id] = set()
+        if raw_provider.get("protocols"):
+            explicit_protocols.add(provider_id)
+            providers[provider_id]["protocols"] = connection["protocols"]
 
         upstream_id = str(raw_model.get("model") or preset.get("model_id") or preset_id).strip()
         if not upstream_id:
@@ -320,14 +269,14 @@ def build_default_llm_section(
             "upstream_id": upstream_id,
             "label": str(raw_model.get("label") or preset.get("label") or upstream_id),
             "enabled": True,
+            "wire_protocol": str(raw_model.get("wire_protocol") or connection["protocols"]["default"]),
         }
         defaults = _model_defaults_from_preset(raw_model)
         if defaults:
             model_entry["defaults"] = defaults
         providers[provider_id]["models"][model_key] = model_entry
 
-        transport = str(raw_model.get("transport") or "chat_completions").strip() or "chat_completions"
-        transport_by_provider.setdefault(provider_id, set()).add(transport)
+        transport_by_provider.setdefault(provider_id, set()).update(connection["protocols"]["allowed"])
 
         if _is_dialogue_upstream(upstream_id):
             tool_mode = str(raw_model.get("tool_calling_mode") or "auto").strip().lower()
@@ -368,7 +317,7 @@ def build_default_llm_section(
     transport_by_provider[_LOCAL_PROVIDER_ID] = {"chat_completions"}
 
     for provider_id, transports in transport_by_provider.items():
-        if provider_id in providers:
+        if provider_id in providers and provider_id not in explicit_protocols:
             providers[provider_id]["protocols"] = _protocol_bundle(transports)
 
     dialogue_candidates.sort(key=lambda item: (item[0], item[1]))

@@ -1,200 +1,128 @@
-import React from "react";
+/** @vitest-environment happy-dom */
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigProviderPresetOption } from "../api/types";
 import { ConfigQuickSetupPanel, templateToProvider, type ConfigQuickSetupPanelProps } from "./ConfigQuickSetupPanel";
-import panelSourceRaw from "./ConfigQuickSetupPanel.tsx?raw";
-import configCopyRaw from "./config/configCopy.ts?raw";
 import { CONFIG_COPY } from "./config/configCopy";
-
-/** Panel source + shared bilingual copy table (wave 4): UI strings live in configCopy. */
-const panelSource = `${panelSourceRaw}
-${configCopyRaw}`;
-import styles from "./ConfigQuickSetupPanel.styles";
-import { initialProviderQuickSetupState, initialProviderWizardState } from "./configProviderLogic";
+import { initialProviderQuickSetupState } from "./configProviderLogic";
 
 const templates: ConfigProviderPresetOption[] = [{
-  provider_preset_id: "openai",
-  label: "OpenAI 官方 API",
-  vendor_id: "openai",
-  vendor_label: "OpenAI",
-  category: "official",
-  provider_id: "openai",
-  source_preset_id: "openai",
-  provider: {
-    service_class: "official_api",
-    base_url: "https://api.openai.com/v1",
-    auth_kind: "api_key",
-    credential_ref: "env:OPENAI_API_KEY",
-    driver: "openai",
-    protocols: { default: "responses", allowed: ["responses"] },
-  },
-  default_model: { model_ref: "openai/gpt-5" },
+  provider_preset_id: "openai", label: "OpenAI", vendor_id: "openai", vendor_label: "OpenAI",
+  category: "official", provider_id: "openai", source_preset_id: "openai",
+  provider: { service_class: "official_api", base_url: "https://api.openai.com/v1", auth_kind: "api_key", credential_ref: "env:OPENAI_API_KEY", driver: "openai", protocols: { default: "responses", allowed: ["responses"] } },
+  default_model: { model: "gpt-5.5", model_ref: "openai/gpt-5.5" },
+}, {
+  provider_preset_id: "local", label: "Local", vendor_id: "local", vendor_label: "Local", category: "local", provider_id: "local", source_preset_id: "local",
+  provider: { service_class: "local_runtime", base_url: "http://127.0.0.1:11434/v1", auth_kind: "none", credential_ref: "none", driver: "openai", protocols: { default: "chat_completions" } },
+  default_model: { model: "qwen3:8b", model_ref: "local/qwen" },
+}, {
+  provider_preset_id: "custom_openai_compatible_relay", label: "自定义 OpenAI 兼容 API", vendor_id: "custom", vendor_label: "Custom", category: "openai_compatible", provider_id: "custom", source_preset_id: "custom_openai_compatible_relay",
+  provider: { service_class: "self_hosted", base_url: "", auth_kind: "api_key", credential_ref: "env:CUSTOM_API_KEY", driver: "openai", protocols: { default: "chat_completions" } }, default_model: {},
 }];
-
 function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuickSetupPanelProps {
   return {
-    copy: CONFIG_COPY.zh,
-    state: initialProviderQuickSetupState(),
-    templates,
-    credentialValue: "",
-    disabled: false,
-    onCredentialChange: () => undefined,
-    onProviderChange: () => undefined,
-    onDetect: () => undefined,
-    onModelChange: () => undefined,
-    onConfirm: () => undefined,
-    onReset: () => undefined,
-    ...overrides,
+    copy: CONFIG_COPY.zh, state: { ...initialProviderQuickSetupState(), provider: templateToProvider(templates[0]) },
+    templates, credentialValue: "safe-test-key", disabled: false,
+    onCredentialChange: vi.fn(), onProviderChange: vi.fn(), onDetect: vi.fn(), onModelChange: vi.fn(),
+    onConfirm: vi.fn(), onReset: vi.fn(), onTestAndSave: vi.fn(), ...overrides,
   };
 }
 
-describe("ConfigQuickSetupPanel", () => {
-  it("offers save retry without requiring a credential or repeating detection", () => {
-    const state = { ...initialProviderQuickSetupState(), phase: "error" as const, errorKind: "partial_save" as const, selectedModelRef: "test/model" };
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
-    expect(markup).toContain("重试保存");
-    expect(markup).not.toContain("检测连接");
-    expect(markup).toContain("要添加的模型");
+describe("ConfigQuickSetupPanel single form", () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
+  afterEach(() => { act(() => root.unmount()); host.remove(); });
+  function mount(input: ConfigQuickSetupPanelProps) { act(() => root.render(<ConfigQuickSetupPanel {...input} />)); }
+  function input(suffix: string) { const element = host.querySelector<HTMLInputElement>(`input[id$='-${suffix}']`); if (!element) throw Error(`Missing ${suffix}`); return element; }
+  function changeModel(value: string) { const control = input("model"); act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
+  function select(suffix: string, value: string) { const control = host.querySelector<HTMLSelectElement>(`select[id$='-${suffix}']`)!; act(() => { control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); }); }
+  function button(label: string) { const match = [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label); if (!match) throw Error(`Missing button ${label}`); return match; }
+  function submit() { act(() => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
+
+  it("shows all connection fields together and submits the upstream template ID without discovery", () => {
+    const current = props(); mount(current);
+    expect(input("model").value).toBe("gpt-5.5");
+    expect(input("endpoint").value).toBe("https://api.openai.com/v1");
+    expect(input("label").value).toBe("OpenAI");
+    expect(host.querySelector("details")?.open).toBe(false);
+    submit();
+    expect(current.onTestAndSave).toHaveBeenCalledWith({ provider: current.state.provider, credentialValue: "safe-test-key", modelId: "gpt-5.5" });
+    expect(current.onDetect).not.toHaveBeenCalled();
+    expect(current.onConfirm).not.toHaveBeenCalled();
   });
-  it("maps actual preset credential requirements instead of treating missing credential_ref as no auth", () => {
-    const preset = { ...templates[0], provider: { kind: "openai_compatible", requires_api_key: true, base_url: "https://relay.example.com/v1", api_key_env: "OPENAI_API_KEY" }, default_model: { transport: "chat_completions" } };
-    const provider = templateToProvider(preset);
-    expect(provider).toMatchObject({ authKind: "api_key", driver: "openai", baseUrl: "", defaultProtocol: "chat_completions" });
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ templates: [preset], state: { ...initialProviderQuickSetupState(), provider } })} />);
-    expect(markup).toContain('type="password"');
-    expect(markup).toContain('type="url"');
-    expect(markup).not.toContain('readonly');
-    expect(markup).toContain("先填写服务地址");
-    expect(templateToProvider({ ...preset, provider: { ...preset.provider, requires_api_key: false } }).authKind).toBe("none");
+  it("preserves a typed model when provider ID suggestions or discovery results rerender the same template", () => {
+    const current = props(); mount(current); changeModel("my/custom-upstream");
+    mount({ ...current, state: { ...current.state, provider: { ...current.state.provider, providerId: "openai_2" }, phase: "review", selectedModelRef: "internal/recommended", discoveredModels: [{ availability: "observed", status: "observed", label: "Recommended", modelKey: "internal/recommended", modelRef: "internal/recommended", upstreamId: "different-upstream", capabilities: {} }] } });
+    expect(input("model").value).toBe("my/custom-upstream"); submit();
+    expect(current.onTestAndSave).toHaveBeenCalledWith(expect.objectContaining({ modelId: "my/custom-upstream" }));
   });
-  it("uses a full-width desktop workspace and announces progressive feedback", () => {
-    expect(styles.workspace).toContain("w-full");
-    expect(styles.workspace).toContain("max-w-4xl");
-    expect(styles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
-    expect(styles.primaryAction).toContain("min-h-10");
-    expect(styles.reviewActions).toContain("items-end");
-    expect(panelSource).toContain('aria-live="polite"');
-    expect(panelSource).toContain("title={credentialHint}");
-    expect(panelSource).toContain("disabledReason={detectDisabledReason}");
-    expect(panelSource).not.toContain("<small className={styles.hint}>{credentialHint}</small>");
+  it("resets the model only for a different template and allows local no-auth services without paths", () => {
+    const current = props(); mount(current); changeModel("manual-model");
+    mount({ ...current, credentialValue: "", state: { ...current.state, provider: templateToProvider(templates[1]) } });
+    expect(input("model").value).toBe("qwen3:8b");
+    expect(host.querySelector('input[type="password"]')).toBeNull();
+    expect(host.textContent).not.toContain("artifact_path");
+    expect(host.textContent).not.toContain("runtime_framework"); submit();
+    expect(current.onTestAndSave).toHaveBeenCalledWith(expect.objectContaining({ modelId: "qwen3:8b", credentialValue: "" }));
   });
-
-  it("renders a compact input flow without an idle result panel", () => {
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props()} />);
-
-    expect(markup).toContain("连接一个模型服务");
-    expect(markup).toContain("选择服务商");
-    expect(markup).toContain('type="password"');
-    expect(markup.match(/type="password"/g)).toHaveLength(1);
-    expect(markup).toContain("高级参数");
-    expect(markup).not.toContain("<details open");
-    expect(markup).toContain("检测连接");
-    expect(markup).not.toContain('data-quick-setup-result="true"');
-    expect(markup).not.toContain("等待检测");
+  it("keeps direct model entry and save available after model discovery fails", () => {
+    const current = props(); current.state = { ...current.state, phase: "error", errorKind: "discovery", errorMessage: "404 models unavailable" }; mount(current);
+    changeModel("still-supported-model");
+    expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(button(CONFIG_COPY.zh.quickSetupTestAndSave).disabled).toBe(false); submit();
+    expect(current.onTestAndSave).toHaveBeenCalledWith(expect.objectContaining({ modelId: "still-supported-model" }));
+    act(() => button(CONFIG_COPY.zh.quickSetupGetModels).click());
+    expect(current.onDetect).toHaveBeenCalledWith({ provider: current.state.provider, credentialValue: "safe-test-key" });
   });
-
-  it("hides the credential input for a no-auth Provider", () => {
-    const state = {
-      ...initialProviderQuickSetupState(),
-      provider: {
-        ...initialProviderWizardState(),
-        templateId: "local",
-        serviceClass: "local_runtime",
-        authKind: "none" as const,
-        credentialRef: "none",
-      },
-    };
-
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
-
-    expect(markup).not.toContain('type="password"');
-    expect(markup).toContain("无需凭据");
+  it("copies a discovered upstream ID into the model input while retaining the legacy modelRef callback", () => {
+    const current = props(); current.state.discoveredModels = [{ availability: "observed", status: "observed", label: "Special", modelKey: "internal-key", modelRef: "provider/internal-key", upstreamId: "actual-upstream-id", capabilities: {} }];
+    mount(current); select("catalog", "provider/internal-key");
+    expect(input("model").value).toBe("actual-upstream-id");
+    expect(current.onModelChange).toHaveBeenCalledWith("provider/internal-key"); submit();
+    expect(current.onTestAndSave).toHaveBeenCalledWith(expect.objectContaining({ modelId: "actual-upstream-id" }));
   });
-
-  it.each([
-    ["checking", "正在检测连接"],
-    ["review", "确认生成的配置"],
-    ["saving", "正在保存配置"],
-    ["success", "配置已保存"],
-    ["error", "需要处理后重试"],
-  ] as const)("renders the progressive result region for %s", (phase, title) => {
-    const state = {
-      ...initialProviderQuickSetupState(),
-      phase,
-      errorKind: phase === "error" ? "auth" as const : "" as const,
-      errorMessage: phase === "error" ? "认证失败" : "",
-    };
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
-
-    expect(markup).toContain('data-quick-setup-result="true"');
-    expect(markup).toContain(title);
-    if (phase === "review") expect(markup).toContain("保存并完成");
+  it.each(["checking", "saving"] as const)("blocks edits, model fetching and duplicate submits during %s", (phase) => {
+    const current = props(); current.state.phase = phase; mount(current);
+    expect(host.querySelector("fieldset")?.disabled).toBe(true);
+    expect(button(CONFIG_COPY.zh.quickSetupGetModels).disabled).toBe(true);
+    expect(button(CONFIG_COPY.zh.quickSetupTestAndSave).disabled).toBe(true);
+    expect(button(CONFIG_COPY.zh.quickSetupTestAndSave).getAttribute("aria-busy")).toBe("true"); submit();
+    expect(current.onTestAndSave).not.toHaveBeenCalled();
   });
-
-  it("shows model confirmation only after detection reaches review", () => {
-    const state = {
-      ...initialProviderQuickSetupState(),
-      phase: "review" as const,
-      provider: {
-        ...initialProviderWizardState(),
-        templateId: "openai",
-        providerId: "openai",
-        label: "OpenAI 官方 API",
-        baseUrl: "https://api.openai.com/v1",
-        defaultProtocol: "responses",
-      },
-      discoveredModels: [{
-        availability: "observed" as const,
-        label: "GPT-5",
-        modelKey: "openai/gpt-5",
-        modelRef: "openai/gpt-5",
-        status: "observed",
-        upstreamId: "gpt-5",
-        capabilities: {},
-      }],
-      selectedModelRef: "openai/gpt-5",
-      recommendationReason: "使用 Provider 模板默认模型",
-    };
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
-
-    expect(markup).toContain("要添加的模型");
-    expect(markup).toContain("GPT-5");
-    expect(markup).toContain("保存并完成");
+  it("shows one error message near the credential, and one primary action", () => {
+    const current = props(); current.state = { ...current.state, phase: "error", errorKind: "auth", errorMessage: "401 credential rejected" }; mount(current);
+    expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(host.textContent?.match(/401 credential rejected/g)).toHaveLength(1);
+    expect(input("credential").getAttribute("aria-invalid")).toBe("true");
+    expect([...host.querySelectorAll("button")].filter((item) => item.textContent?.trim() === CONFIG_COPY.zh.quickSetupTestAndSave)).toHaveLength(1);
   });
-
-  it.each([
-    ["checking", "检测中…", "检测中"],
-    ["error", "重新检测", "需处理"],
-    ["saving", "保存中…", "保存中"],
-    ["success", "配置已保存", "已完成"],
-  ] as const)("aligns the primary feedback for %s", (phase, actionCopy, statusCopy) => {
-    const state = {
-      ...initialProviderQuickSetupState(),
-      phase,
-      errorKind: phase === "error" ? "auth" as const : "" as const,
-      errorMessage: phase === "error" ? "认证失败" : "",
-    };
-    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
-
-    expect(markup).toContain(actionCopy);
-    expect(markup).toContain(statusCopy);
+  it("retains model input on save conflicts and exposes the saved Agent handoff", () => {
+    const current = props({ onConfigureAgent: vi.fn() }); mount(current); changeModel("saved-model"); submit();
+    mount({ ...current, state: { ...current.state, phase: "error", errorKind: "save", errorMessage: "conflict; retry" } });
+    expect(input("model").value).toBe("saved-model"); submit(); expect(current.onTestAndSave).toHaveBeenCalledTimes(2);
+    mount({ ...current, state: { ...current.state, phase: "success" } });
+    expect(host.textContent).toContain(CONFIG_COPY.zh.quickSetupSavedBody); expect(host.textContent).toContain("saved-model");
+    act(() => button(CONFIG_COPY.zh.quickSetupGoAgents).click()); expect(current.onConfigureAgent).toHaveBeenCalledOnce();
   });
-
-  it("never renders a credential value in result or error copy", () => {
-    const secret = "sk-never-render-this";
-    const state = {
-      ...initialProviderQuickSetupState(),
-      phase: "error" as const,
-      errorKind: "auth" as const,
-      errorMessage: "认证失败，请替换凭据",
-    };
-    const markup = renderToStaticMarkup(
-      <ConfigQuickSetupPanel {...props({ state, credentialValue: secret })} />,
-    );
-    const resultMarkup = markup.slice(markup.indexOf('data-quick-setup-result="true"'));
-
-    expect(resultMarkup).not.toContain(secret);
+  it("uses the backend custom preset credential reference and restores it when auth is re-enabled", () => {
+    const current = props(); mount(current); select("provider", "custom");
+    const provider = vi.mocked(current.onProviderChange).mock.calls[0][0];
+    expect(provider).toMatchObject({ templateId: "custom_openai_compatible_relay", credentialRef: "env:CUSTOM_API_KEY" });
+    expect(templates.find((template) => template.provider_preset_id === provider.templateId)).toBeDefined();
+    mount({ ...current, state: { ...current.state, provider: { ...provider, authKind: "none", credentialRef: "none" } } }); select("auth", "api_key");
+    expect(current.onProviderChange).toHaveBeenLastCalledWith(expect.objectContaining({ authKind: "api_key", credentialRef: "env:CUSTOM_API_KEY" }));
+  });
+  it("wires cancel without invoking save and renders translated copy", () => {
+    const current = props({ copy: CONFIG_COPY.en, onCancel: vi.fn() }); mount(current);
+    act(() => button(CONFIG_COPY.en.cancel).click()); expect(current.onCancel).toHaveBeenCalledOnce(); expect(current.onTestAndSave).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(CONFIG_COPY.en.quickSetupTestAndSave);
+  });
+  it("does not derive an upstream model ID from an internal model_ref", () => {
+    const template = { ...templates[0], default_model: { model_ref: "provider/internal-only" } };
+    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ templates: [template] })} />);
+    expect(markup).not.toContain('value="provider/internal-only"');
   });
 });
