@@ -2132,10 +2132,31 @@ def _electron_sources_newer_than_asar(project_root: Path) -> bool:
     return _electron_sources_newer_than(project_root, packaged_asar_path(project_root))
 
 
+def _electron_worktree_dirty(project_root: Path) -> bool | None:
+    """Whether ``desktop/electron/src`` differs from HEAD.
+
+    A checkout refreshes file timestamps without changing bytes. Those
+    timestamps must not schedule a shell rebuild. ``None`` means git could
+    not answer, so the caller keeps the timestamp fallback.
+    """
+
+    result = run_git(
+        ["status", "--porcelain", "--untracked-files=normal", "--", ELECTRON_SRC_RELATIVE.as_posix()],
+        cwd=project_root,
+        timeout=10.0,
+    )
+    if int(result.returncode or 0) != 0:
+        return None
+    return bool(str(result.stdout or "").strip())
+
+
 def _electron_sources_newer_than(project_root: Path, artifact: Path) -> bool:
     src_root = project_root / ELECTRON_SRC_RELATIVE
     if not artifact.is_file() or not src_root.is_dir():
         return False
+    dirty = _electron_worktree_dirty(project_root)
+    if dirty is not None:
+        return dirty
     try:
         artifact_mtime = artifact.stat().st_mtime
     except OSError:
