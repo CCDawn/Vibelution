@@ -958,6 +958,12 @@ class WebChatConfig(BaseModel):
         ge=1,
         description="一次 Web Chat 用户消息最多连续推进多少个 single_turn",
     )
+    personal_assistant_max_calls_per_turn: int = Field(
+        default=16,
+        ge=1,
+        le=256,
+        description="个人助理工具策略每回合最多工具调用次数（POLICY maxCallsPerTurn）",
+    )
 
 
 class SessionCatalogConfig(BaseModel):

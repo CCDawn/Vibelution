@@ -61,6 +61,11 @@ const previewExemptDesignSections = new Set([
   "DesktopAssistantRoute",
   "PersonalAssistantOverview",
   "PersonalAssistantState",
+  // Server-bound product dialog: settings payload and whitelisted model
+  // choices come from the personal-assistant settings API and session LLM
+  // options, so its meaningful state cannot be expressed as a static preview.
+  // Covered by its dialog interaction tests (open/rename/appearance/model).
+  "PersonalAssistantSettings",
   "DesktopAssistantReturnNotice",
 ]);
 

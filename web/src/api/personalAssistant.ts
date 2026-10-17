@@ -1,5 +1,11 @@
 import { fetchJson } from "./client";
-import type { PersonalAssistantResponse, PersonalAssistantOverview } from "./types/personalAssistant";
+import type {
+  PersonalAssistantModelResponse,
+  PersonalAssistantOverview,
+  PersonalAssistantResponse,
+  PersonalAssistantSettings,
+  PersonalAssistantSettingsResponse,
+} from "./types/personalAssistant";
 
 export function fetchPersonalAssistant(options?: { signal?: AbortSignal }): Promise<PersonalAssistantResponse> {
   return fetchJson("/api/personal-assistant", { signal: options?.signal });
@@ -9,6 +15,29 @@ export function createPersonalAssistant(displayName?: string): Promise<PersonalA
   return fetchJson("/api/personal-assistant", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(displayName ? { displayName } : {}),
+  });
+}
+
+export function fetchPersonalAssistantSettings(options?: { signal?: AbortSignal }): Promise<PersonalAssistantSettingsResponse> {
+  return fetchJson("/api/personal-assistant/settings", { signal: options?.signal });
+}
+
+/** Partial settings patch; only provided keys are updated server-side. */
+export function updatePersonalAssistantSettings(payload: {
+  displayName?: string;
+  preferences?: Partial<PersonalAssistantSettings["preferences"]>;
+}): Promise<PersonalAssistantSettingsResponse> {
+  return fetchJson("/api/personal-assistant/settings", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Rebinds the assistant dialogue model; server validates the whitelist. */
+export function updatePersonalAssistantModel(modelId: string): Promise<PersonalAssistantModelResponse> {
+  return fetchJson("/api/personal-assistant/settings/model", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ modelId }),
   });
 }
 

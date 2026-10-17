@@ -90,13 +90,15 @@ def test_interrupted_seed_recovers_missing_session_without_duplicate_agent(fresh
 
 def test_startup_seeds_after_storage_and_before_requesting_team_bindings(monkeypatch):
     from core.web.services.agent_directory import bootstrap
+    from core.web.services.agent_directory import public_presets
     calls = []
     monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: False)
     monkeypatch.setattr(directory_runtime, "wait_for_directory_startup", lambda: calls.append("storage") or "ready")
     monkeypatch.setattr(bootstrap, "ensure_builtin_agents", lambda: calls.append("agents") or {})
+    monkeypatch.setattr(public_presets, "ensure_public_agent_presets", lambda: calls.append("public") or {"publicPresetAgentIds": []})
     monkeypatch.setattr(team_service, "request_system_team_bootstrap", lambda **kwargs: calls.append("teams") or {})
     bootstrap.initialize_builtin_agent_catalog()
-    assert calls == ["storage", "agents", "teams"]
+    assert calls == ["storage", "agents", "public", "teams"]
 
 
 @pytest.mark.parametrize("phase", ["starting", "failed", "stopped", "superseded"])

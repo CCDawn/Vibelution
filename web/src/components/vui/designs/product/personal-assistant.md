@@ -90,3 +90,20 @@ VStateSurface 表达加载与失败；空列表用简短文案；共享状态标
 `routes/personalAssistant/PersonalAssistantState.tsx`。
 ### 反冗余
 复用 VStateSurface，不新增 alert、button 或 loading 控件。
+
+## PersonalAssistantSettings
+
+### 功能
+个人助理的设置弹层：改名、默认外观（大肥鲸/小洛，纯外观偏好，同一 Agent/会话）与对话模型选择；全部以后端设置 API 为权威。
+### 适用范围
+`/personal-assistant` 工作台头部的「助理设置」入口（打开 VDialog）；桌面浮动窗继续使用自己的紧凑 HUD，不复用本弹层。不承担模型库管理、Provider 配置或偏好外的任何 Agent 治理。
+### 使用方式
+`<PersonalAssistantSettings open onOpenChange />`。打开时才读取 `GET /personal-assistant/settings`（本地 query key 复用 `personal-assistant` 前缀便于统一失效）。名称行 VInput + 保存按钮（草稿未变时禁用）；外观行 VStringSelect（dafeiyu/xiaoluo，选中即保存）；模型行 VStringSelect（选项来自后端白名单 choices，坏通道/缺 API Key 的选项禁用并在标签中说明），选择即 `PATCH /personal-assistant/settings/model`。成功与失败经 role=status 行内反馈；改名成功后失效助理投影与设置缓存。文案 zh/en 双语。
+### 非职责
+不创建/恢复助理（创建仍由页面访问语义负责）、不直接写 Agent 目录、不管理模型库或 Provider、不持久化到 localStorage（偏好持久化归桌面偏好层的后端权威链路）。
+### 视觉与状态
+VDialog size=sm + 纵向表单行；读取中 VStateSurface loading 骨架，读取失败 error + 重试；保存中按钮 isPending；空模型列表显示引导文案，不伪造可选项。
+### 实现落点
+`routes/personalAssistant/PersonalAssistantSettings.tsx`（组合 VDialog/VInput/VStringSelect/VButton/VStateSurface）。
+### 反冗余
+复用 VUI 表单原语与既有 settings API，不新建第二套选择器；模型白名单与治理全部在后端 choices，前端不另建模型清单。
