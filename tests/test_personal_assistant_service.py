@@ -545,3 +545,188 @@ def test_resuming_pending_setup_preserves_user_policy_and_profiles(personal_env,
     after = directory.get_agent(row["agentId"])
     assert after["toolPolicy"] == before["toolPolicy"]
     assert after["personaProfile"] == before["personaProfile"]
+
+
+# --- Settings surface: config knob, preferences, renderer, model binding ---
+
+
+class _WebChatKnob:
+    def __init__(self, value):
+        self.personal_assistant_max_calls_per_turn = value
+
+
+class _ConfigStub:
+    def __init__(self, value):
+        self.web_chat = _WebChatKnob(value)
+
+
+def _set_budget_knob(monkeypatch, value):
+    import config.settings as settings_module
+
+    monkeypatch.setattr(
+        settings_module, "get_config", lambda *args, **kwargs: _ConfigStub(value)
+    )
+
+
+def test_policy_budget_reads_config_knob_with_default_and_fallback(monkeypatch):
+    assert service.current_policy()["maxCallsPerTurn"] == 16
+    _set_budget_knob(monkeypatch, 24)
+    assert service.current_policy()["maxCallsPerTurn"] == 24
+
+    import config.settings as settings_module
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr(settings_module, "get_config", broken)
+    assert service.current_policy()["maxCallsPerTurn"] == 16
+
+
+def test_provisioned_policy_uses_configured_budget(personal_env, monkeypatch):
+    _set_budget_knob(monkeypatch, 32)
+    row = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    assert agent["toolPolicy"]["maxCallsPerTurn"] == 32
+    assert service.LEGACY_POLICY["maxCallsPerTurn"] == 8
+
+
+def _created_assistant(personal_env, monkeypatch, model_id="assistant-model"):
+    monkeypatch.setattr(
+        session_service,
+        "default_session_llm_bindings",
+        lambda: {"dialogue": {"modelId": model_id}},
+    )
+    return service.create_personal_assistant()["assistant"]
+
+
+def _llm_options(monkeypatch, choices, current="assistant-model"):
+    monkeypatch.setattr(
+        session_service,
+        "get_session_llm_options",
+        lambda session_id: {
+            "sessionId": session_id,
+            "currentModelId": current,
+            "choices": choices,
+            "model": None,
+        },
+    )
+
+
+def test_settings_read_projects_defaults_without_provisioning(personal_env, monkeypatch):
+    row = _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [
+            {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "isDefault": True, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+            {"modelId": "other-model", "label": "其他", "providerLabel": "测试",
+             "isDefault": False, "providerHealthy": False, "missingApiKey": True,
+             "availability": "missing"},
+        ],
+    )
+    payload = service.get_personal_assistant_settings()["settings"]
+    assert payload["displayName"] == "个人助理"
+    assert payload["preferences"] == {
+        "characterId": "dafeiyu", "showStatus": True, "showTitles": True,
+        "showCompletion": True, "idleMessage": "",
+    }
+    assert payload["preferencesConfigured"] is False
+    assert payload["model"]["currentModelId"] == "assistant-model"
+    assert [choice["modelId"] for choice in payload["model"]["choices"]] == [
+        "assistant-model",
+        "other-model",
+    ]
+    assert payload["model"]["choices"][1]["providerHealthy"] is False
+
+
+def test_settings_update_renames_and_persists_preferences(personal_env, monkeypatch):
+    row = _created_assistant(personal_env, monkeypatch)
+    result = service.update_personal_assistant_settings(
+        display_name="小洛管家",
+        preferences={"characterId": "xiaoluo", "showTitles": False},
+    )["settings"]
+    assert result["displayName"] == "小洛管家"
+    assert result["preferences"]["characterId"] == "xiaoluo"
+    assert result["preferences"]["showTitles"] is False
+    assert result["preferences"]["showStatus"] is True
+    assert result["preferencesConfigured"] is True
+    agent = directory.get_agent(row["agentId"])
+    assert agent["metadata"][service.PREFERENCES_METADATA_KEY] == result["preferences"]
+    projected = service.get_personal_assistant()["assistant"]
+    assert projected["renderer"] == "xiaoluo"
+    assert projected["displayName"] == "小洛管家"
+
+
+def test_settings_update_rejects_invalid_payloads(personal_env, monkeypatch):
+    _created_assistant(personal_env, monkeypatch)
+    before = directory.load_state()
+    for name in ["", "  ", "a\nb", "a" * 81]:
+        with pytest.raises(directory.AgentDirectoryError):
+            service.update_personal_assistant_settings(display_name=name)
+    with pytest.raises(directory.AgentDirectoryError):
+        service.update_personal_assistant_settings(preferences={"unknown": True})
+    with pytest.raises(directory.AgentDirectoryError):
+        service.update_personal_assistant_settings(
+            preferences={"characterId": "other"}
+        )
+    assert directory.load_state() == before
+
+
+def test_settings_update_requires_active_assistant(personal_env, monkeypatch):
+    with pytest.raises(directory.AgentDirectoryError):
+        service.update_personal_assistant_settings(display_name="改名")
+    row = _created_assistant(personal_env, monkeypatch)
+    directory.update_agent_instance(row["agentId"], status="archived")
+    with pytest.raises(directory.AgentStateConflictError):
+        service.update_personal_assistant_settings(display_name="改名")
+
+
+def test_preferences_corruption_falls_back_to_safe_defaults(personal_env, monkeypatch):
+    row = _created_assistant(personal_env, monkeypatch)
+    _corrupt_agent(
+        row["agentId"],
+        metadata={
+            **directory.get_agent(row["agentId"])["metadata"],
+            service.PREFERENCES_METADATA_KEY: {"characterId": "hacker", "idleMessage": "x" * 200},
+        },
+    )
+    payload = service.get_personal_assistant_settings()["settings"]
+    assert payload["preferences"] == {
+        "characterId": "dafeiyu", "showStatus": True, "showTitles": True,
+        "showCompletion": True, "idleMessage": "x" * 48,
+    }
+    assert service.get_personal_assistant()["assistant"]["renderer"] == "whale"
+
+
+def test_model_update_follows_whitelist_and_rebinds_dialogue(personal_env, monkeypatch):
+    row = _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [
+            {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "isDefault": True, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+            {"modelId": "whale-xl", "label": "大模型", "providerLabel": "测试",
+             "isDefault": False, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+        ],
+    )
+    result = service.update_personal_assistant_model("whale-xl")["model"]
+    assert result["currentModelId"] == "whale-xl"
+    assert directory.get_agent(row["agentId"])["llmBindings"] == {
+        "dialogue": {"modelId": "whale-xl"}
+    }
+    before = directory.load_state()
+    with pytest.raises(directory.AgentDirectoryError):
+        service.update_personal_assistant_model("not-in-whitelist")
+    with pytest.raises(directory.AgentDirectoryError):
+        service.update_personal_assistant_model("  ")
+    assert directory.load_state() == before
+
+
+def test_model_update_requires_owned_ready_session(personal_env, monkeypatch):
+    row = _created_assistant(personal_env, monkeypatch)
+    session_service.delete_chat_session_lightweight(row["directSessionId"])
+    with pytest.raises(directory.AgentStateConflictError):
+        service.update_personal_assistant_model("assistant-model")
