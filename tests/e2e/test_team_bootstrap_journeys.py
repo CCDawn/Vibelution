@@ -51,7 +51,8 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
     page.on("response", capture)
     try:
         page.locator(primary_nav_link("/teams")).click()
-        expect(page.locator(domain_recipe_selector("teams-organization-workbench"))).to_be_visible()
+        expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
+        expect(page.get_by_text("6 位成员可用", exact=True)).to_be_visible()
         # Observe normal frontend polling; diagnostics must not trigger extra repairs.
         for _ in range(120):
             if snapshots and snapshots[-1].get("status") in {"ready", "failed"}:
@@ -67,10 +68,10 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
             page.locator(primary_nav_link("/chat")).click()
             expect(page).to_have_url(re.compile(re.escape(e2e_instance.base_url) + r"/chat(?:\?|$)"))
             page.locator(primary_nav_link("/teams")).click()
-            expect(page.locator(domain_recipe_selector("teams-organization-workbench"))).to_be_visible()
+            expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
         with page.expect_response(lambda response: urlparse(response.url).path == "/api/teams" and response.status == 200):
             page.reload(wait_until="domcontentloaded")
-        expect(page.locator(domain_recipe_selector("teams-organization-workbench"))).to_be_visible()
+        expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
         assert expected <= {team["teamId"] for team in catalogs[-1].get("teams", [])}
         assert snapshots[-1].get("attempt") == attempt, "Navigation restarted initialization during the retry window"
         final_agents = e2e_instance.api_get("/api/agents")
