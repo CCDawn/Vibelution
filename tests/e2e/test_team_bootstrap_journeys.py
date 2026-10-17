@@ -26,6 +26,21 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
 
     snapshots = []
     catalogs = []
+    # Read the deployed registry and native Sessions, not an in-process seed.
+    # Every bundled identity must be selectable before visiting a feature page.
+    agents = e2e_instance.api_get("/api/agents")
+    bundled = [agent for agent in agents if (agent.get("metadata") or {}).get("builtinPreset")]
+    starter = [agent for agent in bundled if agent["metadata"]["builtinPreset"] == "general_assistant_v1"]
+    research = [agent for agent in bundled if agent["metadata"]["builtinPreset"].startswith("research_role_v1:")]
+    assert len(starter) == 1, starter
+    assert starter[0]["primaryMode"] == "chat"
+    assert len(research) == 6, research
+    assert len({agent["agentId"] for agent in bundled}) == 7
+    for agent in bundled:
+        assert agent["status"] == "active"
+        session = e2e_instance.api_get(f"/api/sessions/{agent['directSessionId']}")
+        assert session["id"] == agent["directSessionId"]
+        assert session["agentId"] == agent["agentId"]
 
     def capture(response):
         if urlparse(response.url).path == "/api/teams" and response.request.method == "GET" and response.status == 200:
@@ -58,5 +73,9 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         expect(page.locator(domain_recipe_selector("teams-organization-workbench"))).to_be_visible()
         assert expected <= {team["teamId"] for team in catalogs[-1].get("teams", [])}
         assert snapshots[-1].get("attempt") == attempt, "Navigation restarted initialization during the retry window"
+        final_agents = e2e_instance.api_get("/api/agents")
+        assert {agent["agentId"] for agent in final_agents if (agent.get("metadata") or {}).get("builtinPreset")} == {
+            agent["agentId"] for agent in bundled
+        }, "Feature navigation duplicated the bundled Agent catalog"
     finally:
         page.remove_listener("response", capture)
