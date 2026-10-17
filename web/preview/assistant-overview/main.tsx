@@ -122,4 +122,6 @@ function App() {
     {toast ? <div role="status" className="preview-toast" onClick={()=>setToast("")}>{toast}<VButton variant="ghost" onPress={()=>setToast("")}>关闭</VButton></div> : null}
   </main></VuiProvider>;
 }
-createRoot(document.getElementById("root")!).render(<QueryClientProvider client={previewClient}><App/></QueryClientProvider>);
+const root = createRoot(document.getElementById("root")!);
+root.render(<QueryClientProvider client={previewClient}><App/></QueryClientProvider>);
+if (import.meta.hot) import.meta.hot.dispose(() => root.unmount());
