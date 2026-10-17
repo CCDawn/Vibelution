@@ -1176,3 +1176,13 @@ describe("configProviderLogic", () => {
     },
   );
 });
+
+
+describe("provider enabled projection recovery", () => {
+  it("prefers the retained public config over a stale option after an immediate save", () => {
+    const options = [{ provider_id: "relay", label: "Relay", enabled: true, pinned_count: 0 }] as never;
+    const catalog = { providers: {} } as never;
+    expect(deriveProviderRegistryRows(options, catalog, { llm: { providers: { relay: { enabled: false } } } })[0].enabled).toBe(false);
+    expect(deriveProviderRegistryRows(options, catalog)[0].enabled).toBe(true);
+  });
+});

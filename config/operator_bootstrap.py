@@ -85,11 +85,11 @@ _NON_DIALOGUE_UPSTREAM_MARKERS = (
     "sora",
 )
 
-# 新用户 bootstrap 只物化基础角色集合；subagent_explorer / research_themes /
-# research_card / compression 由各自运行路径按需创建，不预先写入 operator config。
-_BOOTSTRAP_EXCLUDED_PROFILE_IDS = frozenset(
-    {"subagent_explorer", "research_themes", "research_card", "compression"}
-)
+# 新用户 bootstrap 只物化基础角色集合。research_themes / research_card
+# 仍是可选全局角色，不预先写入 operator config。
+# compression / subagent_worker / subagent_explorer 已退出模型角色表，
+# 见 config.models.RETIRED_GLOBAL_MODEL_ROLE_IDS。
+_BOOTSTRAP_EXCLUDED_PROFILE_IDS = frozenset({"research_themes", "research_card"})
 
 _PROFILE_IDS = tuple(
     profile_id
