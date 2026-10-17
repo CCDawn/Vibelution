@@ -31,6 +31,7 @@ import conversationTimelineItemsSource from "./conversationTimelineItems.tsx?raw
 import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import conversationTimelineFollowSource from "./useConversationTimelineFollow.ts?raw";
+import conversationProcessExpansionSource from "./useConversationProcessExpansion.ts?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
@@ -511,9 +512,10 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("freezes first-seen expansion defaults so SSE status changes do not fight the UI", () => {
-    expect(conversationViewSource).toContain("defaultExpansionRef");
-    expect(conversationViewSource).toContain("messageDefaults[section] === undefined");
-    expect(conversationViewSource).toContain("return messageDefaults[section]");
+    expect(conversationViewSource).toContain("useConversationProcessExpansion({");
+    expect(conversationProcessExpansionSource).toContain("defaultExpansionRef");
+    expect(conversationProcessExpansionSource).toContain("messageDefaults[section] === undefined");
+    expect(conversationProcessExpansionSource).toContain("return messageDefaults[section]");
   });
   it("does not reintroduce a fixed-rate typewriter buffer for live assistant deltas", () => {
     expect(conversationViewSource).not.toContain("STREAMING_REVEAL_INTERVAL_MS");
@@ -956,11 +958,13 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
   it("caches response segmentation while delegating markdown rendering to the shared renderer", () => {
-    expect(conversationViewSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
-    expect(conversationViewSource).toContain("function getCachedResponseSegments(content: string)");
-    expect(conversationViewSource).toContain('from "./conversationResponseSegmentCache"');
-    expect(conversationViewSource).toContain("return getCachedResponseSegmentsFromCache(");
+    expect(conversationViewSource).toContain("useConversationProcessExpansion({");
+    expect(conversationProcessExpansionSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
+    expect(conversationProcessExpansionSource).toContain("function getCachedResponseSegments(content: string)");
+    expect(conversationProcessExpansionSource).toContain('from "./conversationResponseSegmentCache"');
+    expect(conversationProcessExpansionSource).toContain("return getCachedResponseSegmentsFromCache(");
     expect(conversationViewSource).not.toContain("trimOldestCacheEntries(");
+    expect(conversationProcessExpansionSource).not.toContain("trimOldestCacheEntries(");
     expect(conversationViewSource).not.toContain("markdownBlockCacheRef");
     expect(conversationViewSource).not.toContain("MARKDOWN_PARSE_CACHE_LIMIT");
     expect(conversationViewSource).not.toContain("function getCachedMarkdownBlocks(content: string)");
@@ -976,8 +980,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationTimelineRowsSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
     expect(conversationTimelineRowsSource).not.toContain("responseExpanded && !isResponseStreaming");
     expect(conversationTimelineRowsSource).toContain("? getCachedResponseSegments(responseText)");
-    expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
-    expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
+    expect(conversationProcessExpansionSource).toContain("const prewarmMessages = timelineMessages");
+    expect(conversationProcessExpansionSource).toContain("window.setTimeout(prewarmNext, 48)");
   });
 
   it("renders the codex assistant cell through one component type across streaming and settled", () => {
@@ -1231,17 +1235,21 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
     expect(conversationTimelineFollowSource).toContain("function revealEarlierTimelineMessages()");
     expect(conversationTimelineFollowSource).toContain("preserveCurrentExpansionDefaults();");
-    expect(conversationViewSource).toContain("function preserveCurrentExpansionDefaults()");
+    expect(conversationViewSource).toContain("preserveCurrentExpansionDefaults,");
+    expect(conversationProcessExpansionSource).toContain("function preserveCurrentExpansionDefaults()");
+    expect(conversationViewSource).toContain("resetSessionExpansion();");
     expect(conversationTimelineRowsSource).toContain("const responseExpanded = getExpansionState(message.id, \"response\", defaultResponseExpanded)");
     expect(conversationViewSource).not.toContain("defaultExpansionRef.current = {};\n    responseSegmentCacheRef.current.clear();\n    markdownBlockCacheRef.current.clear();\n    setSectionExpansion({});\n  }, [sessionId, visibleMessageLimit]");
+    expect(conversationProcessExpansionSource).not.toContain("}, [sessionId, visibleMessageLimit]");
   });
 
   it("freezes process and timeline expansion defaults before top-edge history loading", () => {
-    expect(conversationViewSource).toContain('from "./conversationExpansionDefaults"');
-    expect(conversationViewSource).toContain("preserveConversationExpansionDefaults({");
-    expect(conversationViewSource).toContain("timelineItemsByMessageId: agentTimelineItemsByMessageId");
-    expect(conversationViewSource).toContain("operationGroupsByMessageId: agentOperationGroupsByMessageId");
+    expect(conversationProcessExpansionSource).toContain('from "./conversationExpansionDefaults"');
+    expect(conversationProcessExpansionSource).toContain("preserveConversationExpansionDefaults({");
+    expect(conversationProcessExpansionSource).toContain("timelineItemsByMessageId: agentTimelineItemsByMessageId");
+    expect(conversationProcessExpansionSource).toContain("operationGroupsByMessageId: agentOperationGroupsByMessageId");
     expect(conversationViewSource).not.toMatch(/function preserveCurrentExpansionDefaults\(\)[\s\S]*?setDefault\(\"response\"[\s\S]*?}\n  }/);
+    expect(conversationProcessExpansionSource).not.toMatch(/function preserveCurrentExpansionDefaults\(\)[\s\S]*?setDefault\(\"response\"[\s\S]*?}\n  }/);
   });
 
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
