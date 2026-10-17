@@ -505,6 +505,36 @@ describe("launcher api helpers", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("opens Launcher for a legacy workbench without reporting a shell restart", async () => {
+    vi.stubGlobal("window", {});
+    const open = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("vibelutionLauncher", { getLauncherFreshness: vi.fn(), showLauncherWindow: open });
+
+    await expect(requestWorkbenchShellUpdate()).resolves.toMatchObject({
+      accepted: false, operation: "restart-latest-shell", code: "launcher_update_requires_control_window",
+      message: expect.stringContaining("Launcher"),
+    });
+    expect(open).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports failure to open the legacy Launcher update window", async () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("vibelutionLauncher", {
+      getLauncherFreshness: vi.fn(), showLauncherWindow: vi.fn().mockRejectedValue(new Error("window unavailable")),
+    });
+    await expect(requestWorkbenchShellUpdate()).rejects.toThrow("window unavailable");
+  });
+
+  it("retains full Launcher IPC updates when the narrow workbench verb is absent", async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, payload: { accepted: true, operation: "restart-latest-shell" } });
+    stubLauncherIpcBridge(invoke);
+    await expect(requestWorkbenchShellUpdate()).resolves.toMatchObject({ accepted: true, operation: "restart-latest-shell" });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
   it("still rejects restart when neither the bridge nor the narrow verb exists", async () => {
     vi.stubGlobal("window", {
       location: {

@@ -691,10 +691,23 @@ function workbenchShellUpdateVerb(): WorkbenchShellUpdateVerb | null {
 }
 
 /** Explicit workbench request to replace a stale desktop shell. */
-export function requestWorkbenchShellUpdate() {
+export function requestWorkbenchShellUpdate(): Promise<
+  Pick<LauncherControlResponse, "accepted" | "code" | "message" | "commandId">
+  & { operation: LauncherOperation | "restart-latest-shell" }
+> {
   const verb = workbenchShellUpdateVerb();
   if (verb !== null) {
     return verb().then((result) => unwrapLauncherIpcInvokeResult<LauncherControlResponse>(result));
+  }
+  if (!hasLauncherIpcBridge() && workbenchUpdateBridge() !== null) {
+    // Older workbench preloads can navigate to Launcher but cannot replace
+    // the shell. Opening that control window is not a completed restart.
+    return showLauncherWindow().then(() => ({
+      accepted: false,
+      operation: "restart-latest-shell",
+      code: "launcher_update_requires_control_window",
+      message: "已打开 Launcher。请在 Launcher 顶栏点击更新并确认；当前桌面壳尚未重启。",
+    }));
   }
   return restartLatestLauncher();
 }
