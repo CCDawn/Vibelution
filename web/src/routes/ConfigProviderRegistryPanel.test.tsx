@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigCatalogModel } from "../api/types";
 import {
@@ -121,10 +121,12 @@ function renderModels(
 }
 
 let mountedRoots: Root[] = [];
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => {
   for (const root of mountedRoots) await act(async () => root.unmount());
   mountedRoots = [];
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
 });
 
 async function renderModelDetails(models: ConfigCatalogModel[], options: {liveReferences?: Record<string, number>; imageCapabilityBusy?: boolean; onTestModel?: (modelRef: string) => void; onUpdateModel?: (providerId: string, modelKey: string, edits: Record<string, string | boolean>) => void; modelUpdateBusy?: boolean} = {}) {
@@ -143,6 +145,115 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
   await act(async () => row!.click());
   return container.querySelector<HTMLElement>('[data-vui-region="config-models-detail"]')!.outerHTML;
 }
+
+describe("compact model services home", () => {
+  async function mount(props: ConfigProviderRegistryPanelProps) {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    function Harness() {
+      const [selected, setSelected] = React.useState(props.selectedProviderId);
+      return <ConfigProviderRegistryPanel {...props} compactHome selectedProviderId={selected}
+        onSelectProvider={(providerId) => { props.onSelectProvider(providerId); setSelected(providerId); }} />;
+    }
+    await act(async () => root.render(<Harness />));
+    return container;
+  }
+
+  it("shows flat service rows with real status and keeps the full workspace closed", () => {
+    const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([model("pinned", "pinned")], {
+      compactHome: true, hasPendingApply: true,
+      actionFeedback: { kind: "model", providerId: "relay_a", phase: "error", message: "真实调用失败" },
+    })} />);
+    expect(markup).toContain('data-vui-region="config-model-services-home"');
+    expect(markup).toContain("Relay A");
+    expect(markup).toContain("https://relay.example/v1");
+    expect(markup).toContain("已添加 1 个模型");
+    expect(markup).toContain("目录已更新");
+    expect(markup).toContain("真实调用失败");
+    expect(markup).toContain('role="alert"');
+    expect(markup).not.toContain('data-vui-region="config-provider-connection"');
+    expect(markup).not.toContain('data-save-prompt="pending"');
+    expect(markup).not.toContain('data-provider-action="add-provider"');
+    expect(panelSourceRaw).not.toContain("collapse: {");
+    expect(panelSourceRaw).toContain("layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets");
+  });
+
+  it("tests an enabled pinned model belonging to the clicked service", async () => {
+    const onTestModel = vi.fn();
+    const onDiscover = vi.fn();
+    const rows = [
+      provider([model("first", "pinned")]),
+      { ...provider([
+        { ...model("disabled-entry", "pinned"), modelRef: "relay_b/disabled-entry", draftEntry: { enabled: false } },
+        model("foreign", "pinned"),
+        { ...model("discovered", "observed"), modelRef: "relay_b/discovered" },
+        { ...model("actual", "pinned"), modelRef: "relay_b/actual" },
+      ]), providerId: "relay_b", label: "Relay B" },
+    ];
+    const container = await mount(panelProps([], { rows, onTestModel, onDiscover }));
+    const button = container.querySelector<HTMLButtonElement>('[data-provider-home-row="relay_b"] [data-provider-home-action="test"]')!;
+    await act(async () => button.click());
+    expect(onTestModel).toHaveBeenCalledExactlyOnceWith("relay_b/actual");
+    expect(onDiscover).not.toHaveBeenCalled();
+  });
+
+  it("fetches models instead of calling a discovered or missing model", async () => {
+    const onDiscover = vi.fn();
+    const onTestModel = vi.fn();
+    const container = await mount(panelProps([model("seen", "observed"), model("missing", "missing_remote")], { onDiscover, onTestModel }));
+    const button = container.querySelector<HTMLButtonElement>('[data-provider-home-action="discover"]')!;
+    expect(button.textContent).toBe("获取模型");
+    await act(async () => button.click());
+    expect(onDiscover).toHaveBeenCalledExactlyOnceWith("relay_a");
+    expect(onTestModel).not.toHaveBeenCalled();
+  });
+
+  it("keeps busy feedback visible and disables the matching action", async () => {
+    const onTestModel = vi.fn();
+    const container = await mount(panelProps([model("pinned", "pinned")], {
+      onTestModel,
+      actionFeedback: { kind: "model", providerId: "relay_a", phase: "busy", message: "正在真实调用模型" },
+    }));
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("正在真实调用模型");
+    const button = container.querySelector<HTMLButtonElement>('[data-provider-home-action="test"]')!;
+    expect(button.disabled).toBe(true);
+    await act(async () => button.click());
+    expect(onTestModel).not.toHaveBeenCalled();
+  });
+
+  it("opens the existing connection, key and model controls from Manage", async () => {
+    const onSelectProvider = vi.fn();
+    const onEditRoute = vi.fn();
+    const onEditCredential = vi.fn();
+    const container = await mount(panelProps([model("pinned", "pinned")], {
+      onSelectProvider, onEditRoute, onEditCredential,
+      rows: [provider([model("pinned", "pinned")]), {
+        ...provider([{ ...model("second", "pinned"), modelRef: "relay_b/second" }]), providerId: "relay_b", label: "Relay B",
+      }],
+    }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-row="relay_b"] [data-provider-home-action="manage"]')!.click());
+    expect(onSelectProvider).toHaveBeenCalledWith("relay_b");
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("管理模型服务");
+    expect(dialog.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Relay B");
+    expect(dialog.querySelector('[data-vui-region="config-provider-connection"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-provider-tab="models"]')).not.toBeNull();
+    expect(document.querySelectorAll('#config-models')).toHaveLength(1);
+    await act(async () => dialog.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
+    expect(onEditRoute).toHaveBeenCalledWith("relay_b");
+    const keyButton = Array.from(dialog.querySelectorAll('button')).find((button) => button.textContent?.includes("更新 API Key"))!;
+    await act(async () => keyButton.click());
+    expect(onEditCredential).toHaveBeenCalledWith("relay_b");
+    await act(async () => dialog.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
+    const inspector = document.querySelector<HTMLElement>('[data-vui-region="config-asset-inspector"]')!;
+    const advanced = Array.from(inspector.querySelectorAll('button')).find((button) => button.textContent?.includes(CONFIG_COPY.zh.diagnosticsMergeAdvanced))!;
+    await act(async () => advanced.click());
+    expect(inspector.textContent).toContain(CONFIG_COPY.zh.wireProtocolLabel);
+    expect(inspector.textContent).toContain(CONFIG_COPY.zh.registryDiagnosticsTitle);
+  });
+});
 
 describe("ConfigProviderRegistryPanel", () => {
   it.each([
@@ -679,7 +790,7 @@ describe("ConfigProviderRegistryPanel", () => {
     );
     expect(dirty).toContain('data-save-prompt="pending"');
     expect(dirty).toContain("有未保存的模型配置");
-    expect(dirty).toContain("保存到外部配置");
+    expect(dirty).toContain("保存更改");
     // savePrompt must not steal the 1fr row from the workspace when present
     expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:grid-rows-[auto_minmax(0,1fr)]");
     expect(panelStyles.savePrompt).toContain("shrink-0");

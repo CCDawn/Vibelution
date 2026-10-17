@@ -62,6 +62,7 @@ import {
   describeListIssue,
   describeNumberIssue,
   formatConfigDisplayValue,
+  getConfigValueAtPath,
   isConfigObjectListValue,
   isPlainObject,
   readableErrorMessage,
@@ -87,6 +88,8 @@ type ConfigSectionEditorProps = {
   highlightFieldPath?: string;
   /** 分区保存失败的行内错误（wave 4）：落在该分区头部，不进全局 notice strip。 */
   saveError?: string;
+  /** Settings workbench edits drafts directly; its shared footer owns save/cancel. */
+  inlineEditing?: boolean;
 };
 
 export type AvatarImageUploadResponse = {
@@ -190,11 +193,13 @@ export function ConfigSectionEditor({
   onThemeBackgroundImageUpload,
   highlightFieldPath = "",
   saveError = "",
+  inlineEditing = false,
 }: ConfigSectionEditorProps) {
-  const sectionExpanded = uiState.expanded;
-  const editing = uiState.editing;
+  const sectionExpanded = inlineEditing || uiState.expanded;
+  const editing = inlineEditing || uiState.editing;
   const advancedExpanded = uiState.advancedExpanded;
   const expandedPaths = uiState.expandedPaths;
+  const expandedPathKey = Object.keys(expandedPaths).filter((path) => expandedPaths[path]).sort().join("\0");
   const presentation = configSectionPresentation(section.id, lang);
   const tierCounts = configSectionTierCounts(section.id, section.fieldCount);
   const draftValue = editing ? (uiState.draftValue ?? value) : value;
@@ -203,7 +208,7 @@ export function ConfigSectionEditor({
   // 意图模块广播；导航意图（分区/字段聚焦）据此落地，替代旧的 60 帧 rAF 轮询。
   useEffect(() => {
     notifySettingsContentReady();
-  }, [section.id, sectionExpanded, advancedExpanded, expandedPaths]);
+  }, [section.id, sectionExpanded, advancedExpanded, expandedPathKey]);
   // 待保存口径：草稿类字段的草稿值（原始文本先按 schema 解析）与当前分区值比较；
   // 即时类字段（boolean/select）永不滞留草稿，不计入。
   const pendingDraftLeaves = useMemo(
@@ -1041,6 +1046,10 @@ export function ConfigSectionEditor({
   }
 
   function renderConfigField(childValue: unknown, childPath: string, mode: "view" | "edit") {
+    if (mode === "edit" && (shouldImmediateApplyFieldKind(metaMap[childPath]?.kind, childPath) || isUiLanguageFieldPath(childPath))) {
+      const relativePath = childPath.slice(section.path.length + 1);
+      childValue = getConfigValueAtPath(value, relativePath);
+    }
     return mode === "edit" ? renderFieldEditor(childValue, childPath) : renderFieldView(childValue, childPath);
   }
 
@@ -1163,9 +1172,9 @@ export function ConfigSectionEditor({
             <div className={styles.configTierHeader}>
               <div className={styles.configTierHeaderCopy}>
                 <strong>{presentation.commonTitle}</strong>
-                <span>{presentation.commonHint}</span>
+                {!inlineEditing && <span>{presentation.commonHint}</span>}
               </div>
-              <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
+              {!inlineEditing && <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>}
             </div>
             <VSettingsGroupCard
               testId={`settings-group-${absolutePath}`}
@@ -1191,23 +1200,21 @@ export function ConfigSectionEditor({
               >
                 <div className={styles.configTierHeaderCopy}>
                   <strong>{presentation.advancedTitle}</strong>
-                  <span>{presentation.advancedHint}</span>
+                  {!inlineEditing && <span>{presentation.advancedHint}</span>}
                 </div>
                 <div className={styles.configAdvancedToggleMeta}>
-                  <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>
+                  {!inlineEditing && <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>}
                   <ChevronRight
                     size={16}
                     className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
                   />
                 </div>
               </VButton>
-              {advancedExpanded ? (
-                <div className={styles.configAdvancedBody}>
+              {inlineEditing || advancedExpanded ? <div hidden={!advancedExpanded} className={`${styles.configAdvancedBody}${advancedExpanded ? "" : " !hidden"}`}>
                   <VSettingsGroupCard className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
                     {advancedEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
                   </VSettingsGroupCard>
-                </div>
-              ) : null}
+                </div> : null}
             </div>
           ) : null}
         </div>
@@ -1281,9 +1288,9 @@ export function ConfigSectionEditor({
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
           <h2 className={styles.sectionTitle} title={section.path}>{presentation?.sectionTitle ?? section.title}</h2>
-          <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>
+          {!inlineEditing && <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>}
         </div>
-        <div className={styles.sectionHeaderActions}>
+        {!inlineEditing && <div className={styles.sectionHeaderActions}>
           <div className={styles.sectionToolbarGroup}>
             <VButton
               type="button"
@@ -1341,7 +1348,7 @@ export function ConfigSectionEditor({
               </VButton>
           )}
           </div>
-        </div>
+        </div>}
       </div>
       {saveError ? (
         <div className={styles.sectionSaveError} data-section-save-error="true" role="alert">

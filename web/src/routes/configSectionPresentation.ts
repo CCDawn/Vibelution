@@ -37,6 +37,7 @@ const CONTEXT_COMPRESSION_COMMON_PATHS = [
 ] as const;
 
 const UI_COMMON_PATHS = [
+  "ui.language",
   "ui.workbench_theme",
 ] as const;
 
@@ -134,7 +135,7 @@ const SECTION_PRESENTATION: Record<
       commonPaths: UI_COMMON_PATHS,
       commonFieldCount: 3,
       commonTitle: "外观快速设置",
-      commonHint: "设置工作台背景；语言与启动设置由 Launcher 维护。",
+      commonHint: "设置语言与工作台背景；启动设置由 Launcher 维护。",
       advancedTitle: "终端显示与刷新（高级）",
       advancedHint: "ASCII、欢迎内容、刷新频率和日志容量通常保持默认。",
       advancedCountLabel: (count) => `${count} 项`,

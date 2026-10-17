@@ -6,16 +6,8 @@ import {
   type ConfigSettingsGroupCopy,
 } from "./ConfigSettingsNavigation";
 
-/**
- * Settings-align wave 3 — new-section registration single source of truth.
- *
- * Acceptance script: the backend `_config_sections` (core/web/services/
- * config_service.py) is the only registration authority. Adding a section on
- * the backend (with `group`/`page` membership) must surface it in the right
- * settings page with ZERO frontend edits, and a section whose membership does
- * not match any declared page must land in the explicit fallback page instead
- * of being silently dropped.
- */
+/** Backend sections remain the registration authority. Known section IDs have
+ * an explicit frontend projection; unknown sections follow backend annotations. */
 
 const groupCopy: ConfigSettingsGroupCopy = {
   "overview-apply": { title: "总览与保存", summary: "状态与保存" },
@@ -36,7 +28,7 @@ function pageMembers(groups: ReturnType<typeof buildConfigSettingsGroups>, group
   return page?.memberSectionIds ?? [];
 }
 
-describe("settings navigation SSOT (wave 3)", () => {
+describe("settings navigation registration and presentation", () => {
   it("places a newly registered backend section with zero frontend edits", () => {
     // Acceptance script: simulate the backend registering a brand-new section
     // with membership — no frontend change is involved in this test at all.
@@ -52,7 +44,7 @@ describe("settings navigation SSOT (wave 3)", () => {
     expect(page?.summary).toBe("theme-editor");
   });
 
-  it("keeps unannotated sections on the frozen legacy member tables", () => {
+  it("places registered unannotated known sections in the presentation mapping", () => {
     const groups = buildConfigSettingsGroups(
       [section("overview"), section("diagnostics"), section("shell"), section("ui")],
       groupCopy,
@@ -62,17 +54,14 @@ describe("settings navigation SSOT (wave 3)", () => {
     expect(pageMembers(groups, "workbench-interface", "workbench-interface")).toEqual(["shell", "ui"]);
   });
 
-  it("lets backend membership override the legacy static table", () => {
-    // Backend re-grouping wins: "ui" is statically listed under
-    // workbench-interface but annotated to runtime-context. Newcomers append
-    // after the page's legacy members (documented ordering).
+  it("projects known sections independently of legacy backend page membership", () => {
     const groups = buildConfigSettingsGroups(
       [section("ui", "runtime-context", "runtime-context"), section("context-compression", "runtime-context", "runtime-context")],
       groupCopy,
       "zh",
     );
-    expect(pageMembers(groups, "runtime-context", "runtime-context")).toEqual(["context-compression", "ui"]);
-    expect(pageMembers(groups, "workbench-interface", "workbench-interface")).toEqual([]);
+    expect(pageMembers(groups, "runtime-context", "runtime-context")).toEqual(["context-compression"]);
+    expect(pageMembers(groups, "workbench-interface", "workbench-interface")).toEqual(["ui"]);
   });
 
   it("collects annotated sections with undeclared membership in the explicit fallback page", () => {
@@ -85,11 +74,8 @@ describe("settings navigation SSOT (wave 3)", () => {
       groupCopy,
       "zh",
     );
-    // mystery-a is annotated but its (group, page) is undeclared -> fallback.
-    expect(pageMembers(groups, "tooling-diagnostics", "tooling-other")).toEqual(["mystery-a"]);
-    // Unannotated sections are not silently re-homed either — they simply stay
-    // off the page cards unless the legacy table lists them (existing behavior).
-    expect(pageMembers(groups, "tooling-diagnostics", "tooling-access")).toEqual(["network"]);
+    expect(pageMembers(groups, "tooling-diagnostics", "tooling-other")).toEqual(["mystery-a", "mystery-b"]);
+    expect(pageMembers(groups, "tooling-diagnostics", "tooling-network")).toEqual(["network"]);
   });
 
   it("hides the fallback page entirely when every annotation is declared", () => {
@@ -102,4 +88,22 @@ describe("settings navigation SSOT (wave 3)", () => {
     const toolingGroup = groups.find((candidate) => candidate.id === "tooling-diagnostics");
     expect(toolingGroup?.pages.some((page) => page.id === "tooling-other")).toBe(false);
   });
+
+  it("keeps unknown sections on declared pages and maps the retired access page", () => {
+    const registered = [
+      section("new-security-control", "tooling-diagnostics", "tooling-security"),
+      section("new-network-control", "tooling-diagnostics", "tooling-access"),
+      section("new-assistant-control", "avatar-pet", "personal-assistant"),
+      section("unknown-page", "avatar-pet", "future-page"),
+      section("unannotated"),
+    ];
+    const groups = buildConfigSettingsGroups(registered, groupCopy, "zh");
+    expect(pageMembers(groups, "tooling-diagnostics", "tooling-security")).toEqual(["new-security-control"]);
+    expect(pageMembers(groups, "tooling-diagnostics", "tooling-network")).toEqual(["new-network-control"]);
+    expect(pageMembers(groups, "avatar-pet", "personal-assistant")).toEqual(["new-assistant-control"]);
+    expect(pageMembers(groups, "tooling-diagnostics", "tooling-other")).toEqual(["unknown-page", "unannotated"]);
+    const visible = groups.flatMap((group) => group.pages.flatMap((page) => page.memberSectionIds));
+    expect(visible.sort()).toEqual(registered.map((entry) => entry.id).sort());
+  });
+
 });

@@ -19,6 +19,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { seedControlTokenForTests } from "../api/client";
+import { writeLastSettingsLocation } from "../app/settingsNavigation";
 import { ConfigRoute } from "./ConfigRoute";
 
 const BASE_PUBLIC_CONFIG = {
@@ -95,6 +96,7 @@ function installFetchMock(handlers: {
   workspace: unknown;
   previewResponse?: unknown;
   previewError?: boolean;
+  applyError?: boolean;
   applyResponse?: unknown;
 }) {
   const applyCalls: ApplyCall[] = [];
@@ -112,6 +114,7 @@ function installFetchMock(handlers: {
     }
     if (url.includes("/api/config/apply")) {
       applyCalls.push({ url, body });
+      if (handlers.applyError) return jsonResponse({ detail: "配置保存失败，请稍后重试" }, 500);
       return jsonResponse(handlers.applyResponse ?? handlers.workspace);
     }
     if (url.includes("/api/diagnostics")) {
@@ -205,13 +208,8 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
     element.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  /** 进入分区编辑态并把 number 草稿改成 24000（走 number 步进器输入框）。 */
+  /** 数值直接可编辑，修改后进入统一保存草稿。 */
   async function editNumberDraft() {
-    const editButton = findButtonByText("编辑分区");
-    expect(editButton, "edit section button renders").not.toBeNull();
-    await act(async () => {
-      editButton?.click();
-    });
     const numberInput = container.querySelector(
       '[data-testid="number-editor-context_compression.max_token_limit"] input',
     ) as HTMLInputElement | null;
@@ -220,6 +218,27 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
       setInputValue(numberInput as HTMLInputElement, "24000");
     });
   }
+
+  it("opens a category-only link directly in its settings page", async () => {
+    installFetchMock({ workspace: workspaceFixture() });
+    await renderRoute("/config?section=runtime-context");
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "category editor renders without another entry click");
+    expect(findButtonByText("编辑分区")).toBeNull();
+    expect(container.querySelector('[data-testid="number-editor-context_compression.max_token_limit"] input')).not.toBeNull();
+  });
+
+  it("restores the remembered page instead of stopping at a category index", async () => {
+    writeLastSettingsLocation({ groupId: "runtime-context", pageId: "runtime-context" });
+    installFetchMock({ workspace: workspaceFixture() });
+    const router = await renderRoute("/config");
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "remembered page editor renders");
+    expect(new URLSearchParams(router.state.location.search).get("page")).toBe("runtime-context");
+    await act(async () => {
+      findButtonByText("全部设置")?.click();
+    });
+    await waitFor(() => !container.querySelector('[data-testid="row-context_compression.enabled"]'), "explicit all-settings index remains reachable");
+    expect(router.state.location.search).toBe("");
+  });
 
   it("surfaces the global pending-save badge from a section draft and clears it after a folded global save", async () => {
     const mock = installFetchMock({ workspace: workspaceFixture() });
@@ -233,7 +252,7 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
     expect(badge?.textContent).toContain("1");
 
     await act(async () => {
-      findButtonByText("保存到外部配置")?.click();
+      findButtonByText("保存更改")?.click();
     });
     await waitFor(() => mock.applyCalls.length === 1, "apply called once");
     const applyBody = mock.applyCalls[0]?.body as {
@@ -245,30 +264,50 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
     expect(applyBody.baseHash).toBe("base-hash-1");
     // 保存成功后徽标清除、编辑态收起
     await waitFor(() => !container.querySelector('[data-testid="config-pending-save-count"]'), "badge clears");
-    expect(findButtonByText("编辑分区")).not.toBeNull();
+    expect(findButtonByText("编辑分区")).toBeNull();
   });
 
-  it("surfaces a failed section save inline inside the section instead of the global notice strip", async () => {
-    // Wave 4: section-scoped save failures render inside the section (VErrorSummary),
-    // the global notice strip stays reserved for global operations (apply/uploads).
-    installFetchMock({ workspace: workspaceFixture(), previewError: true });
+  it("preserves inline edits and offers retry after a shared save fails", async () => {
+    installFetchMock({ workspace: workspaceFixture(), applyError: true });
     await renderRoute();
-    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "view row renders");
-
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "editor renders");
     await editNumberDraft();
-    await act(async () => {
-      findButtonByText("确认分区修改")?.click();
-    });
-    await waitFor(
-      () => Boolean(container.querySelector('[data-section-save-error="true"]')),
-      "inline section save error shows",
-    );
-    const inlineError = container.querySelector('[data-section-save-error="true"]');
-    expect(inlineError?.textContent).toContain("配置基线已过期");
-    expect(inlineError?.getAttribute("role")).toBe("alert");
-    // 失败后编辑态保留，全局 notice strip 不出现该错误。
-    expect(findButtonByText("确认分区修改")).not.toBeNull();
-    expect(container.querySelector('[class*="noticeError"]')).toBeNull();
+    await act(async () => { findButtonByText("保存更改")?.click(); });
+    await waitFor(() => Boolean(container.querySelector('[class*="noticeError"]')), "save error shows");
+    expect(container.querySelector('[class*="noticeError"]')?.textContent).toContain("配置保存失败");
+    expect((container.querySelector('[data-testid="number-editor-context_compression.max_token_limit"] input') as HTMLInputElement).value).toBe("24000");
+    expect(container.querySelector('[data-testid="config-pending-save-count"]')).not.toBeNull();
+    expect(findButtonByText("保存更改")?.disabled).toBe(false);
+  });
+
+  it("discards inline drafts only after confirmation and restores saved values", async () => {
+    const mock = installFetchMock({ workspace: workspaceFixture() });
+    await renderRoute();
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "editor renders");
+    await editNumberDraft();
+    await act(async () => { findButtonByText("取消更改")?.click(); });
+    expect(container.querySelector('[data-testid="config-pending-save-count"]')).not.toBeNull();
+    await act(async () => { dialogButtons().find((button) => button.textContent?.includes("放弃并重新读取"))?.click(); });
+    await waitFor(() => !container.querySelector('[data-testid="config-pending-save-count"]'), "draft discarded");
+    expect((container.querySelector('[data-testid="number-editor-context_compression.max_token_limit"] input') as HTMLInputElement).value).toBe("16000");
+    expect(mock.applyCalls).toHaveLength(0);
+  });
+
+  it("keeps a numeric draft while an immediate field updates its live value", async () => {
+    const updated = workspaceFixture({ publicConfig: { ...BASE_PUBLIC_CONFIG, context_compression: { ...BASE_PUBLIC_CONFIG.context_compression, enabled: false } } });
+    const mock = installFetchMock({ workspace: workspaceFixture(), previewResponse: updated, applyResponse: updated });
+    await renderRoute();
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "editor renders");
+    await editNumberDraft();
+    await act(async () => { (container.querySelector('[data-testid="row-context_compression.enabled"] input') as HTMLInputElement)?.click(); });
+    await waitFor(() => container.querySelector('[data-vui-row-status="applied"]') !== null, "immediate field applied");
+    expect((container.querySelector('[data-testid="row-context_compression.enabled"] input') as HTMLInputElement).checked).toBe(false);
+    expect((container.querySelector('[data-testid="number-editor-context_compression.max_token_limit"] input') as HTMLInputElement).value).toBe("24000");
+    expect(container.querySelector('[data-testid="config-pending-save-count"]')).not.toBeNull();
+    await act(async () => { findButtonByText("保存更改")?.click(); });
+    await waitFor(() => mock.applyCalls.length === 2, "remaining draft saved");
+    expect((mock.applyCalls[1].body.publicConfig as typeof BASE_PUBLIC_CONFIG).context_compression.enabled).toBe(false);
+    expect((mock.applyCalls[1].body.publicConfig as typeof BASE_PUBLIC_CONFIG).context_compression.max_token_limit).toBe(24000);
   });
 
   it("blocks the global save while a section draft is invalid", async () => {
@@ -290,10 +329,10 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
       "number inline error shows",
     );
     await waitFor(() => {
-      const saveButton = findButtonByText("保存到外部配置");
+      const saveButton = findButtonByText("保存更改");
       return Boolean(saveButton?.disabled);
     }, "global save disabled");
-    const saveButton = findButtonByText("保存到外部配置");
+    const saveButton = findButtonByText("保存更改");
     expect(saveButton?.getAttribute("title")).toBe("有格式不正确的修改，修正后才能保存");
     await act(async () => {
       saveButton?.click();

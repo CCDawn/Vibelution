@@ -114,6 +114,7 @@ import {
 } from "./shellPrimaryNavClick";
 import {
   readStoredWorkbenchTheme,
+  subscribeStoredWorkbenchTheme,
   writeStoredWorkbenchTheme,
   type WorkbenchTheme,
 } from "./themePreference";
@@ -1349,6 +1350,7 @@ export function AppShell() {
 
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
+  useEffect(() => subscribeStoredWorkbenchTheme(setTheme), []);
 
   // Interface font size base: the index.html bootstrap already painted it
   // pre-CSS; re-apply once on mount and track settings/storage changes live

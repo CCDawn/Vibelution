@@ -1,6 +1,8 @@
-import React from "react";
+// @vitest-environment happy-dom
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigSummary } from "../api/types";
 import {
@@ -24,6 +26,7 @@ const sections: ConfigSummary["sections"] = [
   { id: "pet", title: "宠物", summary: "陪伴体" },
   { id: "models", title: "模型库", summary: "模型连接" },
   { id: "context-compression", title: "上下文压缩", summary: "上下文压缩" },
+  { id: "session-recovery", title: "会话恢复", summary: "恢复设置" },
   { id: "analysis", title: "分析", summary: "分析" },
   { id: "security", title: "安全", summary: "权限设置" },
   { id: "network", title: "网络", summary: "网络设置" },
@@ -46,7 +49,7 @@ const groupCopy: ConfigSettingsGroupCopy = {
 };
 
 describe("ConfigSettingsNavigation", () => {
-  it("builds six desktop groups and layers tooling into daily, troubleshooting, and advanced pages", () => {
+  it("projects registered sections into the approved categories while retaining group IDs", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
 
     expect(groups).toHaveLength(6);
@@ -66,16 +69,18 @@ describe("ConfigSettingsNavigation", () => {
       expect.objectContaining({ id: "workbench-shortcuts", memberSectionIds: ["shortcuts"] }),
     ]);
     expect(groups.find((group) => group.id === "avatar-pet")?.pages).toEqual([
-      expect.objectContaining({ id: "identity-profile", memberSectionIds: ["user-profile", "avatar", "pet"] }),
+      expect.objectContaining({ id: "identity-profile", memberSectionIds: ["user-profile"] }),
+      expect.objectContaining({ id: "personal-assistant", memberSectionIds: ["avatar", "pet"] }),
     ]);
     expect(groups.find((group) => group.id === "runtime-context")?.pages).toEqual([
-      expect.objectContaining({ id: "runtime-context", memberSectionIds: ["context-compression", "analysis"] }),
+      expect.objectContaining({ id: "runtime-context", memberSectionIds: ["context-compression", "session-recovery"] }),
     ]);
     expect(groups.find((group) => group.id === "tooling-diagnostics")?.pages).toEqual(
       [
-        expect.objectContaining({ id: "tooling-access", memberSectionIds: ["security", "network", "parser"] }),
+        expect.objectContaining({ id: "tooling-network", memberSectionIds: ["network", "parser"] }),
+        expect.objectContaining({ id: "tooling-security", memberSectionIds: ["security"] }),
         expect.objectContaining({ id: "tooling-health", memberSectionIds: ["health-diagnostics", "log", "debug"] }),
-        expect.objectContaining({ id: "tooling-git", memberSectionIds: ["git-commit-model", "git-commit-prompt", "draft"] }),
+        expect.objectContaining({ id: "tooling-git", memberSectionIds: ["git-commit-model", "git-commit-prompt", "analysis", "draft"] }),
       ],
     );
   });
@@ -131,7 +136,7 @@ describe("ConfigSettingsNavigation", () => {
       />,
     );
 
-    expect(markup).toContain("工作台与界面");
+    expect(markup).toContain("外观与交互");
     expect(markup).toContain("快捷键");
     expect(markup).toContain('aria-current="page"');
   });
@@ -152,7 +157,7 @@ describe("ConfigSettingsNavigation", () => {
     expect(selection.page?.id).toBe("model-connection");
   });
 
-  it("renders large group buttons and an accessible current page", () => {
+  it("renders direct category entries, a native mobile selector and one current page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
     const activeGroup = groups.find((group) => group.id === "tooling-diagnostics") ?? null;
     const sidebarMarkup = renderToStaticMarkup(
@@ -164,6 +169,7 @@ describe("ConfigSettingsNavigation", () => {
         statusLabel="已同步"
         groups={groups}
         activeGroupId="tooling-diagnostics"
+        activePageId="tooling-health"
         onSelectGroup={() => undefined}
       />,
     );
@@ -176,27 +182,116 @@ describe("ConfigSettingsNavigation", () => {
       />,
     );
 
-    expect(sidebarMarkup).toContain("总览与保存");
-    expect(sidebarMarkup).toContain("工具与诊断");
+    expect(sidebarMarkup).toContain("配置管理");
+    expect(sidebarMarkup).toContain("个人资料");
+    expect(sidebarMarkup).toContain("个人助理");
     expect(sidebarMarkup).toContain("搜索设置");
     expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
+    expect(sidebarMarkup).toContain('data-vui="native-select"');
+    expect(sidebarMarkup).toContain('<optgroup label="工作台">');
+    expect(sidebarMarkup).toContain('<optgroup label="Agent">');
+    expect(sidebarMarkup).toContain('<optgroup label="系统">');
     expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
-    // Navigation uses native titles so pointer entry cannot remount the click target.
-    expect(componentSource).toContain("title={group.summary}");
-    expect(componentSource).not.toContain("tooltip={group.summary}");
-    expect(sidebarMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(groups.length);
-    expect(sidebarMarkup).toMatch(/aria-pressed="true"[^>]*><span>工具与诊断<\/span>/);
-    expect(tabsMarkup).toContain("日常工具");
-    expect(tabsMarkup).toContain("排障中心");
+    // Plain native titles keep pointer entry from remounting a navigation target.
+    expect(componentSource).toContain("title={page.summary}");
+    expect(componentSource).not.toContain("tooltip={page.summary}");
+    expect(sidebarMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(groups.flatMap((group) => group.pages).length);
+    expect(sidebarMarkup.match(/aria-current="page"/g)).toHaveLength(1);
+    expect(sidebarMarkup).toMatch(/aria-current="page"[^>]*>.*?<span>日志与诊断<\/span>/);
+    expect(tabsMarkup).toContain("网络与解析");
+    expect(tabsMarkup).toContain("安全保护");
+    expect(tabsMarkup).toContain("日志与诊断");
     expect(tabsMarkup).toContain("高级维护");
-    expect(tabsMarkup).not.toContain("日志与调试");
-    expect(tabsMarkup).not.toContain("原始配置");
     expect(tabsMarkup).toContain('aria-current="page"');
     expect(tabsMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(activeGroup?.pages.length ?? 0);
     expect(styles.groupButton).toContain("!min-h-9");
     expect(styles.pageButton).not.toContain("min-h-10");
     expect(styles.sidebar).toContain("w-full");
+    expect(styles.groupNav).toContain("max-[720px]:hidden");
+    expect(styles.mobileCategory).toContain("max-[720px]:grid");
     expect(styles.pageTabs).toContain("overflow-x-auto");
     expect(componentSource).not.toContain(["@heroui", "react"].join("/"));
+  });
+
+  it("resolves legacy category URLs and section focus to the new owner", () => {
+    const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
+    expect(resolveConfigSettingsSelection(groups, "tooling-diagnostics", "tooling-access").page?.id).toBe("tooling-network");
+    expect(resolveConfigSettingsSelection(groups, "tooling-diagnostics", "tooling-access", "security").page?.id).toBe("tooling-security");
+    expect(resolveConfigSettingsSelection(groups, "avatar-pet", "identity-profile", "pet").page?.id).toBe("personal-assistant");
+    const analysis = resolveConfigSettingsSelection(groups, "runtime-context", "runtime-context", "analysis");
+    expect(analysis.group?.id).toBe("tooling-diagnostics");
+    expect(analysis.page?.id).toBe("tooling-git");
+    expect(resolveConfigSettingsSelection([], "", "")).toEqual({ group: null, page: null });
+  });
+});
+
+let root: Root | undefined;
+let container: HTMLDivElement;
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  container = document.createElement("div");
+  document.body.append(container);
+});
+afterEach(async () => {
+  await act(async () => root?.unmount());
+  root = undefined;
+  container.remove();
+  vi.unstubAllGlobals();
+});
+
+async function mountSidebar(onNavigate = vi.fn(), onShowAll = vi.fn()) {
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<ConfigSettingsSidebar
+      language="zh" title="设置" subtitle="配置" statusLabel="已同步"
+      groups={buildConfigSettingsGroups(sections, groupCopy, "zh")}
+      activeGroupId="workbench-interface" activePageId="workbench-shortcuts"
+      onSelectGroup={vi.fn()} onNavigate={onNavigate} onShowAll={onShowAll}
+      searchDocuments={[{
+        groupId: "avatar-pet", pageId: "personal-assistant", sectionId: "pet", fieldId: "pet.name",
+        title: "助理称呼", detail: "个人助理", haystack: "助理称呼", titleHaystack: "助理称呼", valueHaystack: "",
+      }]}
+    />);
+  });
+  return { onNavigate, onShowAll };
+}
+
+describe("direct settings category interactions", () => {
+  it("opens each category with one click and keeps the full settings entry", async () => {
+    const { onNavigate, onShowAll } = await mountSidebar();
+    const nav = container.querySelector('nav[aria-label="设置分类"]')!;
+    const button = Array.from(nav.querySelectorAll("button")).find((node) => node.textContent === "个人助理")!;
+    await act(async () => button.click());
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith("avatar-pet", "personal-assistant");
+    expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe("快捷键");
+    const all = Array.from(nav.querySelectorAll("button")).at(-1)!;
+    expect(all.textContent).toBe("全部设置");
+    await act(async () => all.click());
+    expect(onShowAll).toHaveBeenCalledOnce();
+  });
+
+  it("navigates directly from the native mobile category selector", async () => {
+    const { onNavigate } = await mountSidebar();
+    const select = container.querySelector("select")!;
+    expect(select.value).toBe("workbench-shortcuts");
+    await act(async () => {
+      select.value = "tooling-security";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith("tooling-diagnostics", "tooling-security");
+  });
+
+  it("preserves field-level search navigation across the category split", async () => {
+    const { onNavigate } = await mountSidebar();
+    const input = container.querySelector("input")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "助理称呼");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const hit = container.querySelector('nav[aria-label="搜索结果"] button') as HTMLButtonElement;
+    expect(hit).not.toBeNull();
+    await act(async () => hit.click());
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith("avatar-pet", "personal-assistant", "pet", "pet.name");
   });
 });

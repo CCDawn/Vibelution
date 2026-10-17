@@ -1,4 +1,12 @@
 const styles = {
+  compactHome: "vui-routes-configproviderregistrypanel compactHome grid min-h-0 min-w-0 content-start gap-3 !border-0 !rounded-none !bg-transparent !shadow-none",
+  homeList: "vui-routes-configproviderregistrypanel homeList grid min-w-0 divide-y divide-vui-border-subtle",
+  homeRow: "vui-routes-configproviderregistrypanel homeRow flex min-w-0 items-center justify-between gap-4 py-4 max-[560px]:flex-wrap max-[560px]:gap-2",
+  homeIdentity: "vui-routes-configproviderregistrypanel homeIdentity grid min-w-0 flex-1 gap-1 [&_strong]:text-vui-sm [&_strong]:font-medium [&_small]:text-vui-xs [&_small]:text-vui-fg-tertiary",
+  homeEndpoint: "vui-routes-configproviderregistrypanel homeEndpoint min-w-0 text-vui-xs text-vui-fg-secondary [overflow-wrap:anywhere]",
+  homeStatus: "vui-routes-configproviderregistrypanel homeStatus text-vui-xs text-vui-fg-tertiary",
+  homeActions: "vui-routes-configproviderregistrypanel homeActions shrink-0 flex-wrap",
+  managementDialog: "vui-routes-configproviderregistrypanel managementDialog !w-[min(96vw,75rem)] h-[min(88dvh,52rem)]",
   sectionSurface: "vui-routes-configproviderregistrypanel sectionSurface grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden !border-0 !rounded-none !bg-transparent !shadow-none [&:has(>_.savePrompt)]:grid-rows-[auto_minmax(0,1fr)]",
   savePrompt:
     "vui-routes-configproviderregistrypanel savePrompt relative z-10 grid min-w-0 shrink-0 items-center gap-3 rounded-lg border border-[color-mix(in_srgb,var(--state-warning)_45%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_12%,var(--vui-surface-panel))] px-3 py-2.5 shadow-sm max-[720px]:grid-cols-1 [grid-template-columns:minmax(0,1fr)_auto]",

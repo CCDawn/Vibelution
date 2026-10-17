@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveConfigSettingsNavigationCollapsed } from "./ConfigRoute";
 import routeSourceRaw from "./ConfigRoute.tsx?raw";
 // Settings-align wave 3: route-local modules extracted from the ConfigRoute
 // monolith; layout contracts may live in any of them (concatenated below).
@@ -83,25 +82,18 @@ describe("ConfigRoute layout contract", () => {
   });
   it("prioritizes model content at medium widths while retaining shared panes and the narrow layout", () => {
     expect(routeSourceRaw).toContain("WORKBENCH_LAYOUT_IDS.configSettings");
-    expect(routeSourceRaw).toContain("minWidth: 220");
+    expect(styles.settingsSplit).toContain("224px_minmax(0,1fr)");
     expect(providerPanelStyles.registryWorkspaceMedium).toContain("min-[721px]:max-[1120px]:[&>[data-vui=split-sidebar]]:!max-w-48");
     expect(providerPanelSource).toContain("WORKBENCH_LAYOUT_IDS.configModelAssets");
     expect(providerPanelStyles.registryWorkspace).toContain("max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto");
-    expect(styles.configStatusActions).toContain("min-[961px]:max-[1120px]:[flex-wrap:nowrap]");
+    expect(styles.saveFooter).toContain("!justify-between");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
   });
-  it("collapses the settings rail by default at 1024 on the model page and preserves narrow navigation", () => {
-    const input = {
-      isModelConnectionPage: true,
-      isMediumViewport: true,
-      isNarrowViewport: false,
-      userOverride: null,
-    };
-    expect(deriveConfigSettingsNavigationCollapsed(input)).toBe(true);
-    expect(deriveConfigSettingsNavigationCollapsed({ ...input, userOverride: false })).toBe(false);
-    expect(deriveConfigSettingsNavigationCollapsed({ ...input, userOverride: true })).toBe(true);
-    expect(deriveConfigSettingsNavigationCollapsed({ ...input, isMediumViewport: false })).toBe(false);
-    expect(deriveConfigSettingsNavigationCollapsed({ ...input, isNarrowViewport: true, userOverride: true })).toBe(false);
+  it("keeps settings categories visible without floating rail collapse controls", () => {
+    expect(routeSourceRaw).toContain('resize={false}');
+    expect(routeSourceRaw).not.toContain('settingsNavCollapse');
+    expect(providerPanelSource).not.toContain('collapse: {');
+    expect(routeSourceRaw).toContain('activePageId={showingSettingsIndex');
   });
   it("hosts unsaved leave guard on VDialog instead of a hand-rolled overlay", () => {
     expect(routeSource).toContain("<VDialog");
@@ -205,7 +197,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
-    expect(routeSource).toContain("providerShowMore ? (\n                  <>");
+    expect(routeSourceRaw).toContain("compactHome");
     expect(routeSource).toContain('isSectionVisible("models")');
   });
 
@@ -466,7 +458,8 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.providerList).toContain("min-h-0");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.detailSurface).toContain("overflow-y-auto");
-    expect(styles.providerModelsLayout).toContain("[&>#config-models]:min-h-[28rem]");
+    expect(providerPanelSource).toContain("workspaceView");
+    expect(providerPanelSource).toContain("compactHome");
   });
 
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
@@ -496,11 +489,11 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelStyles.loadingShell).toContain("[height:100%]");
   });
 
-  it("uses fixed two-level settings navigation with one active page", () => {
+  it("uses direct category navigation with one active page", () => {
     expect(routeSource).toContain("const [activeGroupId, setActiveGroupId]");
     expect(routeSource).toContain("const [activePageId, setActivePageId]");
     expect(routeSource).toContain("<ConfigSettingsSidebar");
-    expect(routeSource).toContain("<ConfigSettingsPageTabs");
+    expect(routeSourceRaw).not.toContain("<ConfigSettingsPageTabs");
     expect(routeSource).toContain("activePage?.memberSectionIds.includes(sectionId)");
     expect(routeSource).not.toContain("SIDEBAR_WIDTH_STORAGE_KEY");
     expect(routeSource).not.toContain("beginSidebarResize");
@@ -513,12 +506,8 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.content).toContain("flex");
     expect(styles.content).toContain("h-full");
     expect(styles.pageViewport).toContain("overflow-y-auto");
-    expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[align-content:stretch]");
-    expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]");
-    // Notice must reserve its own auto row so it is not covered by full-height models layout.
-    expect(styles.pageViewport).toContain(
-      "[&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
-    );
+    expect(styles.pageViewport).toContain("content-start");
+    expect(styles.providerModelsLayout).not.toContain("h-full");
     expect(styles.notice).toContain("relative");
     expect(styles.notice).toContain("z-10");
     expect(styles.notice).toContain("shrink-0");
@@ -613,7 +602,7 @@ describe("ConfigRoute layout contract", () => {
     expect(draftPanelSource).toContain("configPath: string");
     expect(draftPanelSource).toContain("<LazyJsonCodeMirror");
     expect(draftPanelSource).toContain("<pre");
-    expect(routeSource).toContain('activePage?.id === "tooling-access"');
+    expect(routeSource).toContain('activePage?.id === "tooling-git"');
     expect(routeSource).toContain("developerModeConfig.enabled");
     expect(routeSource).toContain("aria-label={copy.developerModeReadonly}");
   });
@@ -702,7 +691,8 @@ describe("ConfigRoute layout contract", () => {
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:h-auto");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:overflow-visible");
-    expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:overflow-visible");
+    expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:hidden");
+    expect(settingsNavigationStyles.mobileCategory).toContain("max-[720px]:grid");
     expect(settingsNavigationStyles.groupButton).toContain("!w-full");
     expect(settingsNavigationStyles.pageButton).toContain("shrink-0");
     // Residual route map buttonBlock (if present) stays content-sized, not forced full-width at tablet.
@@ -749,14 +739,15 @@ describe("ConfigRoute layout contract", () => {
     // Settings nav width is owned by VSplitWorkspace + WORKBENCH_LAYOUT_IDS.configSettings.
     expect(routeSource).toContain("VSplitWorkspace");
     expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.configSettings");
-    expect(routeSource).toContain("CONFIG_SETTINGS_SIDEBAR_RESIZE");
+    expect(routeSourceRaw).toContain("resize={false}");
     expect(routeSource).not.toContain("usePersistedPaneResize");
     expect(routeSource).not.toContain("PaneResizeHandle");
     expect(styles.page).toContain("flex h-full min-h-0");
     expect(styles.settingsSplit).toContain("flex-1");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:h-auto");
-    expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:overflow-visible");
+    expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:hidden");
+    expect(settingsNavigationStyles.mobileCategory).toContain("max-[720px]:grid");
 
     expect(stylesSource).toContain("contentModels:");
     expect(styles.contentModels).toContain("max-[720px]:[max-height:none]");
@@ -1005,7 +996,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configAdvancedToggle).toContain("w-full");
     expect(styles.treeGrid).toContain("grid-cols-1");
     expect(styles.treeFieldCardView).toContain("grid-cols-[16rem_minmax(0,1fr)]");
-    expect(styles.configProgressiveBody).toContain("max-w-[64rem]");
+    expect(styles.pageViewport).toContain("max-w-[1104px]");
     expect(styles.treeFieldCard).not.toContain("bg-vui-surface-row");
     expect(routeSource).not.toContain("configCommonGridClass");
   });
@@ -1107,12 +1098,12 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelSource).not.toContain("<VPanelHeader");
     expect(routeSource).toContain("<ConfigSettingsSidebar");
     expect(routeSource).toContain("VSettingsFormPage");
-    expect(routeSource).toContain('title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}');
+    expect(routeSource).toContain('title={showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}');
     expect(routeSource).toContain("<ConfigSettingsIndex");
     expect(routeSource).not.toContain("返回设置列表");
     expect(routeSource).toContain('onShowAll={() => showSettingsIndex()}');
     expect(routeSource).toContain("<ConfigDesktopPetSettings language={currentLanguage}");
-    expect(routeSource).toContain('pageId: "identity-profile", sectionId: "pet"');
+    expect(routeSource).toContain('pageId: "personal-assistant", sectionId: "pet"');
     expect(routeSource).not.toContain('toolbar={isSectionVisible("models") ? undefined');
   });
 

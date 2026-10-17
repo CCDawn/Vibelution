@@ -2,6 +2,7 @@ export type WorkbenchTheme = "dark" | "light";
 
 export const WORKBENCH_THEME_STORAGE_KEY = "vibelution.workbench.theme";
 export const DEFAULT_WORKBENCH_THEME: WorkbenchTheme = "light";
+const THEME_CHANGE_EVENT = "vibelution:workbench-theme-change";
 
 type ThemeStorage = Pick<Storage, "getItem" | "setItem">;
 type ThemeDocumentTarget = Pick<Document, "documentElement">;
@@ -35,8 +36,24 @@ export function writeStoredWorkbenchTheme(theme: WorkbenchTheme, storage: ThemeS
   }
   try {
     storage.setItem(WORKBENCH_THEME_STORAGE_KEY, theme);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: theme }));
   } catch {
   }
+}
+
+/** Keep shell menu and settings rows in sync, including changes in other windows. */
+export function subscribeStoredWorkbenchTheme(listener: (theme: WorkbenchTheme) => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const local = (event: Event) => {
+    const next = normalizeWorkbenchTheme((event as CustomEvent<unknown>).detail);
+    if (next) listener(next);
+  };
+  const remote = (event: StorageEvent) => {
+    if (event.key === WORKBENCH_THEME_STORAGE_KEY || event.key === null) listener(readStoredWorkbenchTheme());
+  };
+  window.addEventListener(THEME_CHANGE_EVENT, local);
+  window.addEventListener("storage", remote);
+  return () => { window.removeEventListener(THEME_CHANGE_EVENT, local); window.removeEventListener("storage", remote); };
 }
 
 export function nextWorkbenchTheme(theme: WorkbenchTheme): WorkbenchTheme {

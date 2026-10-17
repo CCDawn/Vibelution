@@ -64,7 +64,7 @@ const styles = {
   compactButton:
     "vui-routes-configroute compactButton",
   configProgressiveBody:
-    "vui-routes-configroute configProgressiveBody grid min-w-0 w-full max-w-[64rem] gap-6 py-2",
+    "vui-routes-configroute configProgressiveBody grid min-w-0 w-full gap-6",
   configCompactPathProgressiveBody:
     "vui-routes-configroute configCompactPathProgressiveBody gap-4",
   configCompactAdvancedProgressiveBody:
@@ -88,11 +88,11 @@ const styles = {
   configDenseSection:
     "vui-routes-configroute configDenseSection [&_.treeFieldCardView]:[grid-template-columns:minmax(108px,0.34fr)_minmax(0,1fr)] [&_.treeFieldCardView]:[gap:4px_7px] [&_.treeFieldCardView]:[min-height:34px] [&_.treeFieldCardView]:[padding:6px] [&_.treeFieldCardEdit]:[gap:5px] [&_.treeFieldCardEdit]:[padding:7px] [&_.treeObjectCell_.treeObjectBlock]:[min-height:38px] [&_.treeObjectCell_.treeObjectBlock]:[padding:7px] [&_.treeObjectCell_.treeNestedBlock]:[min-height:38px] [&_.treeObjectCell_.treeNestedBlock]:[padding:7px] [&_.treeObjectCell_.treeToggle]:[min-height:30px]",
   configEditorSection:
-    "vui-routes-configroute configEditorSection [&>_.treeGrid]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.treeStack]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.helperText]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)]",
+    "vui-routes-configroute configEditorSection [&>_.treeGrid]:m-0 [&>_.treeStack]:m-0 [&>_.helperText]:m-0 [&_[data-vui=settings-group]]:!border-0 [&_[data-vui=settings-group]]:!rounded-none [&_[data-vui=settings-group]]:!bg-transparent [&_[data-vui=settings-row]]:!px-0",
   configStatusActions:
     "vui-routes-configroute configStatusActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap] min-[961px]:max-[1120px]:[flex-wrap:nowrap] max-[720px]:[justify-content:start]",
   configHeader:
-    "vui-routes-configroute configHeader min-w-0 !border-0 !rounded-none !shadow-none !bg-vui-surface-panel [&>[data-vui=route-header]]:!border-0 [&>[data-vui=route-header]]:!rounded-none [&>[data-vui=route-header]]:!shadow-none [&>[data-vui=route-header]]:!bg-transparent [&>[data-vui=route-header]]:!py-2 [&>[data-vui=route-header]]:!px-3",
+    "vui-routes-configroute configHeader w-full max-w-[1104px] mx-auto px-12 pt-8 pb-6 min-w-0 !border-0 !rounded-none !shadow-none !bg-vui-surface-panel [&>[data-vui=route-header]]:!border-0 [&>[data-vui=route-header]]:!bg-transparent [&>[data-vui=route-header]]:!p-0 [&_h1]:!text-[22px] [&_h1]:!font-semibold [&_[data-vui=route-header]>div:first-child>div]:!flex-col [&_[data-vui=route-header]>div:first-child>div]:!items-start [&_[data-vui=route-header]>div:first-child>div>span]:!whitespace-normal [&_[data-vui=route-header]>div:first-child>div>span]:!font-normal max-[980px]:px-7 max-[720px]:px-5 max-[720px]:pt-6 max-[720px]:[&>[data-vui=route-header]]:!flex max-[720px]:[&>[data-vui=route-header]]:!flex-col max-[720px]:[&>[data-vui=route-header]]:!items-start max-[720px]:[&>[data-vui=route-header]]:!gap-4",
   configStatusMeta:
     "vui-routes-configroute configStatusMeta [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap] [min-width:0]",
   configStatusPath:
@@ -102,11 +102,11 @@ const styles = {
   content:
     "vui-routes-configroute content max-[720px]:!h-auto max-[720px]:!overflow-visible !flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
   pageViewport:
-    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:24px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:24px] max-[720px]:[padding:16px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)] [&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
+    "vui-routes-configroute pageViewport grid content-start gap-7 w-full max-w-[1104px] mx-auto min-w-0 min-h-0 overflow-y-auto overflow-x-hidden px-12 pb-8 [scrollbar-gutter:stable] max-[980px]:px-7 max-[720px]:px-5 max-[720px]:overflow-visible",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
-    "vui-routes-configroute providerModelsLayout flex flex-col h-full min-h-0 min-w-0 gap-4 overflow-y-auto overflow-x-hidden [&>#config-models]:flex-1 [&>#config-models]:min-h-[28rem]",
+    "vui-routes-configroute providerModelsLayout flex shrink-0 flex-col min-w-0 gap-7 [&>*]:shrink-0",
   providerModeButton:
     "vui-routes-configroute providerModeButton self-start",
   providerRouteEditSurface:
@@ -160,7 +160,9 @@ const styles = {
   // Wave 4B: shared PaneResizeHandle visual; only breakpoint hide stays local.
   /** Split owns nav/main widths via WORKBENCH_LAYOUT_IDS.configSettings. */
   settingsSplit:
-    "vui-routes-configroute settingsSplit max-[720px]:[&>[data-vui=split-sidebar]]:!w-full max-[720px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[720px]:[&>[data-vui=split-sidebar]]:!h-auto max-[720px]:[&>[role=separator]]:hidden max-[720px]:[&>[data-vui=split-main]]:!h-auto max-[720px]:[&>[data-vui=split-main]]:!overflow-visible h-full min-h-0 min-w-0 flex-1 max-[720px]:!flex-col max-[720px]:overflow-visible",
+    "vui-routes-configroute settingsSplit !grid [grid-template-columns:224px_minmax(0,1fr)] gap-0 h-full min-h-0 min-w-0 flex-1 max-[980px]:[grid-template-columns:200px_minmax(0,1fr)] max-[720px]:!flex max-[720px]:!flex-col max-[720px]:overflow-visible max-[720px]:[&>[data-vui=split-sidebar]]:!w-full max-[720px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[720px]:[&>[data-vui=split-sidebar]]:!h-auto max-[720px]:[&>[data-vui=split-main]]:!h-auto max-[720px]:[&>[data-vui=split-main]]:!overflow-visible",
+  saveFooter:
+    "vui-routes-configroute saveFooter !justify-between !bg-vui-surface-panel !px-12 !py-3 gap-3 [&>div:last-child]:ml-auto max-[980px]:!px-7 max-[720px]:!px-5 max-[720px]:[&_button]:!min-h-11",
   primaryButton:
     "vui-routes-configroute primaryButton",
   profileTableWrap:
@@ -298,7 +300,7 @@ const styles = {
   userProfileIdentityFields:
     "vui-routes-configroute userProfileIdentityFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,1fr)]",
   userProfileLayout:
-    "vui-routes-configroute userProfileLayout grid min-w-0 w-full max-w-[64rem] gap-6 p-4 max-[720px]:p-2",
+    "vui-routes-configroute userProfileLayout grid min-w-0 w-full gap-6",
   userProfilePrimaryGrid:
     "vui-routes-configroute userProfilePrimaryGrid grid min-w-0 w-full grid-cols-1 gap-6",
   userProfileAdvancedFields:

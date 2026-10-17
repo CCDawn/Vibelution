@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { Activity, Bot, Braces, BrainCircuit, FileSliders, Globe, Keyboard, Palette, Plug, ShieldCheck, User } from "lucide-react";
 
 import type { ConfigSummary } from "../api/types";
-import { VButton, VNativeInput, VPanelHeader } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VPanelHeader } from "../components/vui";
 import styles from "./ConfigSettingsNavigation.styles";
 import {
   searchConfigSettings,
@@ -53,49 +54,41 @@ const GROUP_ORDER: ConfigSettingsGroupId[] = [
   "overview-apply",
 ];
 
-/**
- * Settings-align wave 3 — new-section registration single source of truth.
- *
- * The backend `_config_sections` (core/web/services/config_service.py) is the
- * only registration authority: every section it emits carries `group`/`page`
- * membership, and `buildConfigSettingsGroups` derives page members from it —
- * adding a backend section needs ZERO frontend edits. Adjudication notes:
- * - PAGE_DEFINITIONS below stays the frontend declaration of the group/page
- *   skeleton: ids, bilingual titles, and order. It is the smallest testable
- *   split (skeleton frontend-declared, membership backend-derived).
- * - The `members` arrays are a frozen legacy fallback kept only for payloads
- *   that predate backend membership (older fixtures/callers); annotated
- *   sections always win over the static table so backend re-grouping applies.
- * - Annotated sections whose (group, page) does not match any declared page
- *   land in the explicit fallback page below instead of being dropped.
- */
+/** The backend registers sections; this table only projects registered IDs into
+ * the approved frontend categories. Unknown sections still follow annotations. */
 const FALLBACK_GROUP_ID: ConfigSettingsGroupId = "tooling-diagnostics";
 const FALLBACK_PAGE_ID = "tooling-other";
 
 const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]> = {
   "overview-apply": [
-    { id: "overview-save", zh: "总览与保存", en: "Overview & save", members: ["overview", "diagnostics"] },
+    { id: "overview-save", zh: "配置管理", en: "Configuration", members: ["overview", "diagnostics"] },
   ],
   "workbench-interface": [
-    { id: "workbench-interface", zh: "工作台与界面", en: "Workbench & interface", members: ["shell", "ui"] },
+    { id: "workbench-interface", zh: "外观与交互", en: "Appearance & interaction", members: ["shell", "ui"] },
     { id: "workbench-shortcuts", zh: "快捷键", en: "Keyboard shortcuts", members: ["shortcuts"] },
   ],
   "avatar-pet": [
-    { id: "identity-profile", zh: "个人资料与陪伴体", en: "Profile & companion", members: ["user-profile", "avatar", "pet"] },
+    { id: "identity-profile", zh: "个人资料", en: "Personal profile", members: ["user-profile"] },
+    { id: "personal-assistant", zh: "个人助理", en: "Personal assistant", members: ["avatar", "pet"] },
   ],
   "models-profiles": [
-    { id: "model-connection", zh: "模型连接", en: "Connections", members: ["models"] },
+    { id: "model-connection", zh: "模型服务", en: "Model services", members: ["models"] },
   ],
   "runtime-context": [
-    { id: "runtime-context", zh: "上下文与分析", en: "Context & analysis", members: ["context-compression", "analysis"] },
+    { id: "runtime-context", zh: "上下文与恢复", en: "Context & recovery", members: ["context-compression", "session-recovery"] },
   ],
   "tooling-diagnostics": [
-    { id: "tooling-access", zh: "日常工具", en: "Everyday tools", members: ["security", "network", "parser"] },
-    { id: "tooling-health", zh: "排障中心", en: "Troubleshooting", members: ["health-diagnostics", "log", "debug"] },
-    { id: "tooling-git", zh: "高级维护", en: "Advanced maintenance", members: ["git-commit-model", "git-commit-prompt", "draft"] },
+    { id: "tooling-network", zh: "网络与解析", en: "Network & parsing", members: ["network", "parser"] },
+    { id: "tooling-security", zh: "安全保护", en: "Security", members: ["security"] },
+    { id: "tooling-health", zh: "日志与诊断", en: "Logs & diagnostics", members: ["health-diagnostics", "log", "debug"] },
+    { id: "tooling-git", zh: "高级维护", en: "Advanced maintenance", members: ["git-commit-model", "git-commit-prompt", "analysis", "draft"] },
     { id: FALLBACK_PAGE_ID, zh: "其他设置", en: "Other settings", members: [] },
   ],
 };
+
+function projectedAnnotationPage(groupId: string | undefined, pageId: string | undefined): string | undefined {
+  return groupId === "tooling-diagnostics" && pageId === "tooling-access" ? "tooling-network" : pageId;
+}
 
 export function buildConfigSettingsGroups(
   sections: ConfigSummary["sections"],
@@ -103,100 +96,77 @@ export function buildConfigSettingsGroups(
   language: ConfigSettingsLanguage,
 ): ConfigSettingsGroup[] {
   const sectionMap = new Map(sections.map((section) => [section.id, section]));
-  // Annotated sections carry backend membership; they override the frozen
-  // legacy member tables and drive newcomer placement.
-  const annotated = sections.filter((section) => typeof section.group === "string" && typeof section.page === "string");
-  const annotatedById = new Map(annotated.map((section) => [section.id, section]));
-  const declaredPageKeys = new Set(
-    GROUP_ORDER.flatMap((groupId) => PAGE_DEFINITIONS[groupId].map((definition) => `${groupId}::${definition.id}`)),
-  );
-  // Annotated sections whose (group, page) matches no declared page: collected
-  // into the explicit fallback page instead of being silently dropped.
-  const unplacedAnnotatedIds = annotated
-    .filter((section) => !declaredPageKeys.has(`${section.group}::${section.page}`))
-    .map((section) => section.id);
-
-  function buildPage(groupId: ConfigSettingsGroupId, definition: PageDefinition): ConfigSettingsPage {
-    const memberSectionIds = [
-      // Frozen legacy member table: only still consulted for sections without
-      // backend membership; an annotated section always follows its annotation.
-      ...definition.members.filter((sectionId) => {
-        if (!sectionMap.has(sectionId)) {
-          return false;
-        }
-        const annotation = annotatedById.get(sectionId);
-        return annotation ? annotation.group === groupId && annotation.page === definition.id : true;
-      }),
-      // Backend-registered members of this page (covers newcomers with zero
-      // frontend edits), appended in backend order after legacy members.
-      ...annotated
-        .filter((section) => section.group === groupId && section.page === definition.id && !definition.members.includes(section.id))
-        .map((section) => section.id),
-    ];
-    return summarizePage({
-      id: definition.id,
-      title: language === "zh" ? definition.zh : definition.en,
-      summary: "",
-      memberSectionIds,
-    });
-  }
-
-  function summarizePage(page: ConfigSettingsPage): ConfigSettingsPage {
-    const members = page.memberSectionIds.map((sectionId) => sectionMap.get(sectionId)).filter(Boolean);
-    return {
-      ...page,
-      summary: members.length === 1
-        ? members[0]?.summary ?? ""
-        : members.map((section) => section?.title).filter(Boolean).join(language === "zh" ? "、" : ", "),
-    };
-  }
-
-  return GROUP_ORDER.map((groupId) => {
-    const pages = PAGE_DEFINITIONS[groupId]
-      .map((definition) => buildPage(groupId, definition))
-      .filter((page) => page.memberSectionIds.length > 0);
-    // Explicit fallback page: annotated sections with an undeclared (group,
-    // page) stay visible instead of being silently dropped.
-    if (groupId === FALLBACK_GROUP_ID && unplacedAnnotatedIds.length > 0) {
-      const definition = PAGE_DEFINITIONS[groupId].find((candidate) => candidate.id === FALLBACK_PAGE_ID);
-      const fallbackPage: ConfigSettingsPage = summarizePage({
-        id: FALLBACK_PAGE_ID,
-        title: language === "zh" ? definition?.zh ?? "其他设置" : definition?.en ?? "Other settings",
-        summary: "",
-        memberSectionIds: unplacedAnnotatedIds,
-      });
-      const existingIndex = pages.findIndex((page) => page.id === FALLBACK_PAGE_ID);
-      if (existingIndex >= 0) {
-        pages[existingIndex] = {
-          ...fallbackPage,
-          memberSectionIds: [...pages[existingIndex].memberSectionIds, ...unplacedAnnotatedIds],
-        };
-        pages[existingIndex] = summarizePage(pages[existingIndex]);
-      } else {
-        pages.push(fallbackPage);
-      }
+  const placements = new Map<string, { groupId: ConfigSettingsGroupId; pageId: string }>();
+  for (const groupId of GROUP_ORDER) {
+    for (const page of PAGE_DEFINITIONS[groupId]) {
+      for (const sectionId of page.members) placements.set(sectionId, { groupId, pageId: page.id });
     }
-    return {
-      id: groupId,
-      title: groupCopy[groupId].title,
-      summary: groupCopy[groupId].summary,
-      pages,
-    } satisfies ConfigSettingsGroup;
-  }).filter((group) => group.pages.length > 0);
+  }
+  for (const section of sections) {
+    if (placements.has(section.id)) continue;
+    const groupId = GROUP_ORDER.find((candidate) => candidate === section.group);
+    const pageId = projectedAnnotationPage(section.group, section.page);
+    const hasDeclaredPage = groupId && PAGE_DEFINITIONS[groupId].some((page) => page.id === pageId);
+    placements.set(section.id, hasDeclaredPage
+      ? { groupId, pageId: pageId! }
+      : { groupId: FALLBACK_GROUP_ID, pageId: FALLBACK_PAGE_ID });
+  }
+
+  return GROUP_ORDER.map((groupId) => ({
+    id: groupId,
+    title: groupCopy[groupId].title,
+    summary: groupCopy[groupId].summary,
+    pages: PAGE_DEFINITIONS[groupId].map((definition) => {
+      // Keep familiar members in presentation order, append newcomers in backend order.
+      const memberSectionIds = [
+        ...definition.members.filter((id) => sectionMap.has(id)),
+        ...sections.filter((section) => {
+          const target = placements.get(section.id);
+          return target?.groupId === groupId && target.pageId === definition.id && !definition.members.includes(section.id);
+        }).map((section) => section.id),
+      ];
+      const members = memberSectionIds.map((id) => sectionMap.get(id)!);
+      return {
+        id: definition.id,
+        title: language === "zh" ? definition.zh : definition.en,
+        summary: members.length === 1 ? members[0].summary : members.map((section) => section.title).join(language === "zh" ? "、" : ", "),
+        memberSectionIds,
+      };
+    }).filter((page) => page.memberSectionIds.length > 0),
+  })).filter((group) => group.pages.length > 0);
 }
 
 export function resolveConfigSettingsSelection(
   groups: ConfigSettingsGroup[],
   requestedGroupId: string,
   requestedPageId: string,
+  focusSectionId = "",
 ): { group: ConfigSettingsGroup | null; page: ConfigSettingsPage | null } {
-  const group = groups.find((candidate) => candidate.id === requestedGroupId)
+  // Old deep links retain their section/field target after a category split.
+  const focusedGroup = focusSectionId ? groups.find((candidate) => candidate.pages.some((page) => page.memberSectionIds.includes(focusSectionId))) : undefined;
+  const group = focusedGroup ?? groups.find((candidate) => candidate.id === requestedGroupId)
     ?? groups.find((candidate) => candidate.id === DEFAULT_CONFIG_SETTINGS_GROUP_ID)
     ?? groups[0]
     ?? null;
-  const page = group?.pages.find((candidate) => candidate.id === requestedPageId) ?? group?.pages[0] ?? null;
+  const pageId = projectedAnnotationPage(group?.id, requestedPageId);
+  const page = group?.pages.find((candidate) => candidate.memberSectionIds.includes(focusSectionId))
+    ?? group?.pages.find((candidate) => candidate.id === pageId) ?? group?.pages[0] ?? null;
   return { group, page };
 }
+
+const CATEGORY_ICONS: Record<string, typeof Palette> = {
+  "workbench-interface": Palette,
+  "workbench-shortcuts": Keyboard,
+  "identity-profile": User,
+  "personal-assistant": Bot,
+  "model-connection": Plug,
+  "runtime-context": BrainCircuit,
+  "tooling-network": Globe,
+  "tooling-security": ShieldCheck,
+  "tooling-health": Activity,
+  "tooling-git": Braces,
+  "overview-save": FileSliders,
+};
 
 type ConfigSettingsSidebarProps = {
   language: ConfigSettingsLanguage;
@@ -206,6 +176,7 @@ type ConfigSettingsSidebarProps = {
   statusLabel: string;
   groups: ConfigSettingsGroup[];
   activeGroupId: string;
+  activePageId?: string;
   onSelectGroup: (groupId: ConfigSettingsGroupId) => void;
   onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string, sectionId?: string, fieldId?: string) => void;
   searchDocuments?: ConfigSettingsSearchDocument[];
@@ -222,6 +193,7 @@ export function ConfigSettingsSidebar({
   statusLabel,
   groups,
   activeGroupId,
+  activePageId,
   onSelectGroup,
   onNavigate,
   searchDocuments = [],
@@ -233,6 +205,25 @@ export function ConfigSettingsSidebar({
     () => searchConfigSettings(searchDocuments, searchQuery),
     [searchDocuments, searchQuery],
   );
+
+  const categories = [
+    { title: language === "zh" ? "工作台" : "Workbench", pageIds: ["workbench-interface", "workbench-shortcuts", "identity-profile", "personal-assistant"] },
+    { title: "Agent", pageIds: ["model-connection", "runtime-context", "tooling-network", "tooling-security"] },
+    { title: language === "zh" ? "系统" : "System", pageIds: ["tooling-health", "tooling-git", "overview-save", "tooling-other"] },
+  ].map((category) => ({
+    ...category,
+    entries: category.pageIds.flatMap((pageId) => groups.flatMap((group) => {
+      const page = group.pages.find((candidate) => candidate.id === pageId);
+      return page ? [{ group, page }] : [];
+    })),
+  })).filter((category) => category.entries.length > 0);
+  const currentPageId = groups.find((group) => group.id === activeGroupId)?.pages.find((page) => page.id === activePageId)?.id
+    ?? groups.find((group) => group.id === activeGroupId)?.pages[0]?.id ?? "";
+
+  function navigateToPage(groupId: ConfigSettingsGroupId, pageId: string) {
+    if (onNavigate) onNavigate(groupId, pageId);
+    else onSelectGroup(groupId);
+  }
 
   function selectHit(hit: ConfigSettingsSearchHit) {
     if (onNavigate) {
@@ -294,24 +285,54 @@ export function ConfigSettingsSidebar({
         <span>{language === "zh" ? "配置状态" : "Config status"}</span>
         <strong className={styles.statusValue}>{statusLabel}</strong>
       </div>
-      <nav className={styles.groupNav} aria-label={language === "zh" ? "设置分区" : "Settings groups"}>
-        {onShowAll ? <VButton className={!activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
-          contentLayout="plain" variant="ghost" aria-pressed={!activeGroupId} onPress={onShowAll}>
-          {language === "zh" ? "全部设置" : "All settings"}
-        </VButton> : null}
-        {groups.map((group) => (
-          <VButton
-            key={group.id}
-            className={group.id === activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
-            contentLayout="plain"
-            variant={group.id === activeGroupId ? "primary" : "ghost"}
-            title={group.summary}
-            aria-pressed={group.id === activeGroupId}
-            onPress={() => onSelectGroup(group.id)}
-          >
-            <span>{group.title}</span>
-          </VButton>
+      <label className={styles.mobileCategory}>
+        <span className={styles.searchLabel}>{language === "zh" ? "设置分类" : "Settings category"}</span>
+        <VNativeSelect
+          aria-label={language === "zh" ? "设置分类" : "Settings category"}
+          value={activeGroupId ? currentPageId : ""}
+          onChange={(event) => {
+            const pageId = event.target.value;
+            if (!pageId) { onShowAll?.(); return; }
+            const entry = categories.flatMap((category) => category.entries).find((candidate) => candidate.page.id === pageId);
+            if (entry) navigateToPage(entry.group.id, entry.page.id);
+          }}
+        >
+          {onShowAll ? <option value="">{language === "zh" ? "全部设置" : "All settings"}</option> : null}
+          {categories.map((category) => (
+            <optgroup key={category.title} label={category.title}>
+              {category.entries.map(({ page }) => <option key={page.id} value={page.id}>{page.title}</option>)}
+            </optgroup>
+          ))}
+        </VNativeSelect>
+      </label>
+      <nav className={styles.groupNav} aria-label={language === "zh" ? "设置分类" : "Settings categories"}>
+        {categories.map((category) => (
+          <div key={category.title} className={styles.categoryGroup}>
+            <div className={styles.categoryLabel}>{category.title}</div>
+            {category.entries.map(({ group, page }) => {
+              const active = group.id === activeGroupId && page.id === currentPageId;
+              const Icon = CATEGORY_ICONS[page.id];
+              return (
+                <VButton
+                  key={page.id}
+                  className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
+                  contentLayout="plain"
+                  variant="ghost"
+                  title={page.summary}
+                  aria-current={active ? "page" : undefined}
+                  onPress={() => navigateToPage(group.id, page.id)}
+                >
+                  {Icon ? <Icon size={16} aria-hidden="true" /> : null}
+                  <span>{page.title}</span>
+                </VButton>
+              );
+            })}
+          </div>
         ))}
+        {onShowAll ? <VButton className={!activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
+          contentLayout="plain" variant="ghost" aria-current={!activeGroupId ? "page" : undefined} onPress={onShowAll}>
+          <span>{language === "zh" ? "全部设置" : "All settings"}</span>
+        </VButton> : null}
       </nav>
     </aside>
   );

@@ -192,12 +192,12 @@ describe("progressive config section presentation", () => {
       sectionTitle: "界面外观",
       sectionSummary: "先调整工作台背景；终端显示与刷新参数按需展开。",
       layout: "compact_paths",
-      commonPaths: ["ui.workbench_theme"],
+      commonPaths: ["ui.language", "ui.workbench_theme"],
       commonFieldCount: 3,
       commonTitle: "外观快速设置",
       advancedTitle: "终端显示与刷新（高级）",
     });
-    expect(isCommonConfigSectionEntry("ui", "ui.language")).toBe(false);
+    expect(isCommonConfigSectionEntry("ui", "ui.language")).toBe(true);
     expect(isCommonConfigSectionEntry("ui", "ui.workbench_theme")).toBe(true);
     expect(configSectionPresentation("security", "zh")?.commonPaths).toEqual([
       "security.enabled",

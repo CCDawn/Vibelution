@@ -95,8 +95,8 @@ describe("configSettingsSearch", () => {
     expect(searchConfigSettings(documents, "模型")[0]).toEqual(
       expect.objectContaining({ groupId: "models-profiles" }),
     );
-    expect(searchConfigSettings(documents, "陪伴")[0]).toEqual(
-      expect.objectContaining({ groupId: "avatar-pet", pageId: "identity-profile" }),
+    expect(searchConfigSettings(documents, "陪伴体名称")[0]).toEqual(
+      expect.objectContaining({ groupId: "avatar-pet", pageId: "personal-assistant", sectionId: "pet", fieldId: "pet.name" }),
     );
     expect(searchConfigSettings(documents, "")).toEqual([]);
   });
@@ -139,7 +139,7 @@ describe("configSettingsSearch", () => {
       expect.objectContaining({ groupId: "workbench-interface", sectionId: "ui", title: "工作台背景" }),
     );
     expect(theme?.detail).toContain("界面与工作台");
-    expect(theme?.detail).toContain("工作台与界面");
+    expect(theme?.detail).toContain("外观与交互");
     expect(theme?.detail).toContain("界面");
     expect(theme?.valueSummary).toBe("midnight");
 
@@ -253,10 +253,26 @@ describe("configSettingsSearch", () => {
 
     const withoutField = new URLSearchParams(buildConfigSettingsNavigationSearch(params, "workbench-interface", "workbench-shortcuts", "shortcuts"));
     expect(withoutField.get("field")).toBeNull();
-    const sectionOnly = new URLSearchParams(buildConfigSettingsNavigationSearch("", "avatar-pet", "identity-profile", "pet", "pet.name"));
+    const sectionOnly = new URLSearchParams(buildConfigSettingsNavigationSearch("", "avatar-pet", "personal-assistant", "pet", "pet.name"));
     // 有 field 必须同时有 focus（字段依附分区）；只给 field 不给 focus 时不写 field。
     const orphanField = new URLSearchParams(buildConfigSettingsNavigationSearch("", "avatar-pet", "identity-profile", "", "pet.name"));
     expect(sectionOnly.get("field")).toBe("pet.name");
     expect(orphanField.get("field")).toBeNull();
   });
+
+  it("indexes fields in newly registered and fallback sections without dropping them", () => {
+    const groups = buildConfigSettingsGroups([
+      ...sections,
+      { id: "future", title: "扩展设置", summary: "动态扩展", group: "space", page: "future" },
+    ], groupCopy, "zh");
+    const documents = buildConfigSettingsSearchIndex({
+      groups,
+      editorSections: [{ id: "future", path: "future", title: "扩展设置", summary: "动态扩展", fieldCount: 1 }],
+      editorMeta: { "future.name": { path: "future.name", label: "扩展名称", hint: "", kind: "text", badge: "Text", options: [] } },
+    });
+    expect(searchConfigSettings(documents, "扩展名称")[0]).toMatchObject({
+      groupId: "tooling-diagnostics", pageId: "tooling-other", sectionId: "future", fieldId: "future.name",
+    });
+  });
+
 });
