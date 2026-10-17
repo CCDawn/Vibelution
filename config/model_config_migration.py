@@ -717,6 +717,13 @@ def preview_v2_canonical_repair(
             EffectiveLLMGraphBuilder().build(
                 canonical, fallback_profile_ids=canonical.declared_fallback_profile_ids()
             )
+            from config.llm_projection import fold_public_profile_to_reference
+
+            repair_profiles = proposed_llm.get("profiles")
+            if isinstance(repair_profiles, dict):
+                for repair_profile in repair_profiles.values():
+                    if isinstance(repair_profile, dict):
+                        fold_public_profile_to_reference(repair_profile)
             build_effective_config(proposed)
             validate_llm_public_config(proposed)
         except CanonicalLLMConfigError as exc:

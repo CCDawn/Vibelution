@@ -54,7 +54,7 @@ export function isUiLanguageFieldPath(path: string): boolean {
 }
 
 /** Row badge lifecycle for an immediate-kind field change. */
-export type ImmediateFieldStatus = "waiting" | "applied" | "failed";
+export type ImmediateFieldStatus = "waiting" | "applied" | "failed" | "refresh-failed";
 
 /** Immediate-kind fields apply inline; all other kinds buffer as drafts. */
 export function shouldImmediateApplyFieldKind(
