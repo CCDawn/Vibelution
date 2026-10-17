@@ -390,6 +390,21 @@ def _active_profile_agent() -> dict:
     return agent
 
 
+def _eligible_dialogue_model_choices(options: dict) -> list[dict]:
+    """Project only pinned, enabled candidates allowed for the dialogue slot."""
+    choices = []
+    for row in options.get("choices") or []:
+        if not isinstance(row, dict) or row.get("runtimeSelectable") is not True:
+            continue
+        compatibility = row.get("slotCompatibility")
+        dialogue = compatibility.get("dialogue") if isinstance(compatibility, dict) else None
+        if not isinstance(dialogue, dict) or dialogue.get("allowed") is not True:
+            continue
+        if str(row.get("modelId") or "").strip():
+            choices.append(row)
+    return choices
+
+
 def _model_settings(agent: dict) -> dict:
     """Bound dialogue model plus the whitelisted session model choices."""
     bindings = directory.normalize_agent_llm_bindings(agent.get("llmBindings"))
@@ -401,10 +416,8 @@ def _model_settings(agent: dict) -> dict:
             options = session_service.get_session_llm_options(session_id)
         except Exception:
             options = {}
-        for row in options.get("choices") or []:
+        for row in _eligible_dialogue_model_choices(options):
             model_id = str((row or {}).get("modelId") or "").strip()
-            if not model_id:
-                continue
             choices.append(
                 {
                     "modelId": model_id,
@@ -496,7 +509,7 @@ def update_personal_assistant_model(model_id: str) -> dict:
         ) from exc
     whitelisted = {
         str((row or {}).get("modelId") or "").strip()
-        for row in options.get("choices") or []
+        for row in _eligible_dialogue_model_choices(options)
     }
     if normalized_model_id not in whitelisted:
         raise directory.AgentDirectoryError("所选模型不在可用模型列表中。")

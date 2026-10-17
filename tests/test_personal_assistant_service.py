@@ -618,9 +618,11 @@ def test_settings_read_projects_defaults_without_provisioning(personal_env, monk
         monkeypatch,
         [
             {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
              "isDefault": True, "providerHealthy": True, "missingApiKey": False,
              "availability": "available"},
             {"modelId": "other-model", "label": "其他", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
              "isDefault": False, "providerHealthy": False, "missingApiKey": True,
              "availability": "missing"},
         ],
@@ -705,9 +707,11 @@ def test_model_update_follows_whitelist_and_rebinds_dialogue(personal_env, monke
         monkeypatch,
         [
             {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
              "isDefault": True, "providerHealthy": True, "missingApiKey": False,
              "availability": "available"},
             {"modelId": "whale-xl", "label": "大模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
              "isDefault": False, "providerHealthy": True, "missingApiKey": False,
              "availability": "available"},
         ],
@@ -723,6 +727,38 @@ def test_model_update_follows_whitelist_and_rebinds_dialogue(personal_env, monke
     with pytest.raises(directory.AgentDirectoryError):
         service.update_personal_assistant_model("  ")
     assert directory.load_state() == before
+
+
+@pytest.mark.parametrize(
+    "eligibility",
+    [
+        {"runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": False}}},
+        {"runtimeSelectable": False, "slotCompatibility": {"dialogue": {"allowed": True}}},
+        {"slotCompatibility": {"dialogue": {"allowed": True}}},
+        {"runtimeSelectable": True},
+        {"runtimeSelectable": True, "slotCompatibility": {"dialogue": {}}},
+    ],
+    ids=["embedding", "discovered-only", "missing-runtime", "missing-slots", "missing-allowed"],
+)
+def test_model_update_rejects_ineligible_choices_without_writing(
+    personal_env, monkeypatch, eligibility
+):
+    _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [{
+            "modelId": "ineligible-model", "providerHealthy": True,
+            "missingApiKey": False, "availability": "available", **eligibility,
+        }],
+    )
+    writes = []
+    monkeypatch.setattr(directory, "update_agent_instance", lambda *args, **kwargs: writes.append(kwargs))
+    before = directory.load_state()
+    with pytest.raises(directory.AgentDirectoryError, match="不在可用模型列表"):
+        service.update_personal_assistant_model("ineligible-model")
+    assert writes == []
+    assert directory.load_state() == before
+    assert service.get_personal_assistant_settings()["settings"]["model"]["choices"] == []
 
 
 def test_model_update_requires_owned_ready_session(personal_env, monkeypatch):
