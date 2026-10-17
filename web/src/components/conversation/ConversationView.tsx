@@ -87,10 +87,6 @@ import {
 } from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import { ConversationToolActivityPills } from "./ConversationToolActivityPills";
-import {
-  preserveConversationExpansionDefaults,
-  shouldRefreshConversationExpansionDefault,
-} from "./conversationExpansionDefaults";
 import { type AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
 import { useAgentThread } from "./useAgentThread";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
@@ -101,7 +97,6 @@ import {
   isSteerGuidanceMessage,
   isTurnErrorMessage,
 } from "./conversationMessagePredicates";
-import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import {
   addComparableConversationImageUrl,
   comparableConversationImageUrl,
@@ -122,6 +117,7 @@ import {
   CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
   type TimelineUserScrollIntent,
 } from "./conversationTimelineFollowState";
+import { useConversationProcessExpansion } from "./useConversationProcessExpansion";
 import { useConversationTimelineFollow } from "./useConversationTimelineFollow";
 import {
   conversationPerformanceNowMs,
@@ -137,7 +133,6 @@ import {
   resolveTurnErrorTypeLabelKey,
 } from "./conversationTurnErrorPresentation";
 import { buildConversationToolActivityDetailRows } from "./conversationToolActivityDetail";
-import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import {
   resolveMessageTurnAvatar,
   userAvatarSymbol,
@@ -148,7 +143,6 @@ import type {
   ConversationViewProps,
 } from "./conversationViewTypes";
 import { compactConversationPreview } from "./conversationOperationPresentation";
-import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
 import {
   completedToolPresentationSummary,
   conversationToolPresentationLabel,
@@ -180,9 +174,6 @@ import styles from "./ConversationView.styles";
 
 
 
-const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
-const RESPONSE_PARSE_CACHE_LIMIT = 80;
-const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 // Virtual timeline (react-virtual): rows rendered beyond the measured viewport
 // per direction, vertical rhythm matching the timelineContent grid gap, the
 // scroll container's top padding before the virtual host, and a
@@ -483,9 +474,6 @@ export const ConversationView = React.memo(function ConversationView({
   }
   const autoScrollToLatestRef = useRef(autoScrollToLatest);
   autoScrollToLatestRef.current = autoScrollToLatest;
-  const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
-  const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
-  const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
@@ -924,26 +912,6 @@ export const ConversationView = React.memo(function ConversationView({
     },
     [activeTimelineMessages, agentRenderStatesByMessageId],
   );
-  const defaultExpandedResponseIds = useMemo(() => {
-    const ids = new Set<string>();
-    let expandedResponseCount = 0;
-    for (let index = activeTimelineMessages.length - 1; index >= 0; index -= 1) {
-      const message = activeTimelineMessages[index];
-      const agentRenderState = agentRenderStatesByMessageId.get(message.id);
-      if (!agentRenderState?.sectionState.hasResponseBlock) {
-        continue;
-      }
-      expandedResponseCount += 1;
-      ids.add(message.id);
-      for (const projectedId of projectedConversationMessageIds(message)) {
-        ids.add(projectedId);
-      }
-      if (expandedResponseCount >= DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT) {
-        break;
-      }
-    }
-    return ids;
-  }, [activeTimelineMessages, agentRenderStatesByMessageId]);
   const timelineScrollSignal = useMemo(
     () => buildTimelineScrollSignal(timelineMessages, agentRenderStatesByMessageId, {
       includeMentalSignals: showMentalSnapshots,
@@ -1091,17 +1059,22 @@ export const ConversationView = React.memo(function ConversationView({
     setPreviewImage(null);
   }
 
-  function preserveCurrentExpansionDefaults() {
-    defaultExpansionRef.current = preserveConversationExpansionDefaults({
-      currentDefaults: defaultExpansionRef.current,
-      sectionExpansion,
-      messages: activeTimelineMessages,
-      renderStatesByMessageId: agentRenderStatesByMessageId,
-      timelineItemsByMessageId: agentTimelineItemsByMessageId,
-      operationGroupsByMessageId: agentOperationGroupsByMessageId,
-      defaultExpandedResponseIds,
-    });
-  }
+  const {
+    sectionExpansion,
+    defaultExpandedResponseIds,
+    preserveCurrentExpansionDefaults,
+    resetSessionExpansion,
+    getCachedResponseSegments,
+    getExpansionState,
+    toggleSection,
+  } = useConversationProcessExpansion({
+    sessionId,
+    timelineMessages,
+    activeTimelineMessages,
+    agentRenderStatesByMessageId,
+    agentTimelineItemsByMessageId,
+    agentOperationGroupsByMessageId,
+  });
 
   const {
     handleProcessDisclosureUserToggle,
@@ -1191,116 +1164,8 @@ export const ConversationView = React.memo(function ConversationView({
     readingViewportAnchorRef.current = null;
     historyScrollAnchorRef.current = null;
     historyAnchorCorrectingRef.current = null;
-    defaultExpansionRef.current = {};
-    responseSegmentCacheRef.current.clear();
-    setSectionExpansion({});
-  }, [sessionId]);
-
-  useEffect(() => {
-    const prewarmMessages = timelineMessages
-      .filter(
-        (message) => {
-          const agentRenderState = agentRenderStatesByMessageId.get(message.id);
-          return message.role === "assistant"
-            && !assistantTurnIsStreaming(message)
-            && Boolean(agentRenderState?.sectionState.hasResponseBlock);
-        },
-      )
-      .slice(-RESPONSE_PREWARM_MESSAGE_LIMIT);
-    if (!prewarmMessages.length) {
-      return undefined;
-    }
-    let cancelled = false;
-    let timeoutId: number | undefined;
-    let index = 0;
-    const prewarmNext = () => {
-      if (cancelled) {
-        return;
-      }
-      const message = prewarmMessages[index];
-      if (message) {
-        getCachedResponseSegments(assistantFinalAnswerText(message));
-      }
-      index += 1;
-      if (index < prewarmMessages.length) {
-        timeoutId = window.setTimeout(prewarmNext, 24);
-      }
-    };
-    timeoutId = window.setTimeout(prewarmNext, 48);
-    return () => {
-      cancelled = true;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [agentRenderStatesByMessageId, sessionId, timelineMessages]);
-
-  function getCachedResponseSegments(content: string) {
-    return getCachedResponseSegmentsFromCache(
-      responseSegmentCacheRef.current,
-      content,
-      RESPONSE_PARSE_CACHE_LIMIT,
-    );
-  }
-
-  function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {
-    const explicit = sectionExpansion[messageId]?.[section];
-    if (explicit !== undefined) {
-      return explicit;
-    }
-    const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
-    if (messageDefaults[section] === undefined) {
-      defaultExpansionRef.current = {
-        ...defaultExpansionRef.current,
-        [messageId]: {
-          ...messageDefaults,
-          [section]: defaultExpanded,
-        },
-      };
-      return defaultExpanded;
-    }
-    if (shouldRefreshConversationExpansionDefault(section, messageDefaults[section], defaultExpanded)) {
-      defaultExpansionRef.current = {
-        ...defaultExpansionRef.current,
-        [messageId]: {
-          ...messageDefaults,
-          [section]: defaultExpanded,
-        },
-      };
-      return defaultExpanded;
-    }
-    return messageDefaults[section];
-  }
-
-  function resolveExpansionState(
-    expansion: Record<string, Record<string, boolean>>,
-    messageId: string,
-    section: string,
-    defaultExpanded: boolean,
-  ) {
-    const explicit = expansion[messageId]?.[section];
-    if (explicit !== undefined) {
-      return explicit;
-    }
-    const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
-    if (messageDefaults[section] !== undefined) {
-      return messageDefaults[section];
-    }
-    return defaultExpanded;
-  }
-
-  function toggleSection(messageId: string, section: string, defaultExpanded: boolean) {
-    setSectionExpansion((current) => {
-      const currentlyExpanded = resolveExpansionState(current, messageId, section, defaultExpanded);
-      return {
-        ...current,
-        [messageId]: {
-          ...(current[messageId] ?? {}),
-          [section]: !currentlyExpanded,
-        },
-      };
-    });
-  }
+    resetSessionExpansion();
+  }, [resetSessionExpansion, sessionId]);
 
   const {
     formatDuration,
