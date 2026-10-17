@@ -29,6 +29,8 @@ from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
 _MAX_RECURSION_DEPTH = 1
 _SUBAGENT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 _MAX_SCENE_TEXT = 1200
+# Execution model is the Agent slot. Global profile ids subagent_worker and
+# subagent_explorer are not model selectors; those strings remain tool scopes.
 _SUBAGENT_EXECUTION_LLM_SLOT = "subagentExecution"
 _stream_sink_local = threading.local()
 

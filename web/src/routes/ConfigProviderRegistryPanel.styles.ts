@@ -6,6 +6,7 @@ const styles = {
   homeEndpoint: "vui-routes-configproviderregistrypanel homeEndpoint min-w-0 text-vui-xs text-vui-fg-secondary [overflow-wrap:anywhere]",
   homeStatus: "vui-routes-configproviderregistrypanel homeStatus text-vui-xs text-vui-fg-tertiary",
   homeActions: "vui-routes-configproviderregistrypanel homeActions shrink-0 flex-wrap",
+  homeDisabledManageAction: "vui-routes-configproviderregistrypanel homeDisabledManageAction !h-auto !min-h-8 !justify-start !px-1 !py-1 text-vui-xs !text-vui-fg-tertiary hover:!text-vui-fg-secondary",
   managementDialog: "vui-routes-configproviderregistrypanel managementDialog !w-[min(96vw,75rem)] h-[min(88dvh,52rem)]",
   sectionSurface: "vui-routes-configproviderregistrypanel sectionSurface grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden !border-0 !rounded-none !bg-transparent !shadow-none [&:has(>_.savePrompt)]:grid-rows-[auto_minmax(0,1fr)]",
   savePrompt:

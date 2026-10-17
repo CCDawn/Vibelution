@@ -91,7 +91,7 @@ function jsonResponse(payload: unknown, status = 200) {
 
 type FetchCall = { url: string; body: Record<string, unknown> };
 
-function installFetchMock(options: { languageEndpointStatus?: number } = {}) {
+function installFetchMock(options: { languageEndpointStatus?: number; refetchError?: boolean } = {}) {
   let workspaceLanguage: "zh" | "en" = "zh";
   const languageCalls: FetchCall[] = [];
   const previewCalls: FetchCall[] = [];
@@ -102,6 +102,7 @@ function installFetchMock(options: { languageEndpointStatus?: number } = {}) {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     if (url.includes("/api/config/workspace")) {
       workspaceCalls.push({ url, body });
+      if (options.refetchError && workspaceCalls.length > 1) return jsonResponse({ detail: "readback unavailable" }, 500);
       return jsonResponse(workspaceFixture(workspaceLanguage));
     }
     if (url.includes("/api/config/language")) {
@@ -254,4 +255,16 @@ describe("ConfigRoute ui.language dedicated endpoint flow", () => {
     expect(container.querySelector('[role="alert"], [class*="noticeError"]')).not.toBeNull();
     expect(queryClient.getQueryState(queryKeys.configPublic())?.isInvalidated).toBe(false);
   });
+  it("reports a saved language separately from a failed readback and offers retry", async () => {
+    const mock = installFetchMock({ refetchError: true }); await renderRoute();
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-ui.language"]')), "language ready");
+    await pickEnglishOption();
+    await waitFor(() => Boolean(container.querySelector('[data-vui-row-status="refresh-failed"]')), "saved but unsynchronized");
+    expect(mock.languageCalls).toHaveLength(1);
+    expect(mock.applyCalls).toHaveLength(0);
+    expect(container.querySelector('[data-testid="row-ui.language"]')?.textContent).toContain("已保存，页面未同步");
+    expect(container.querySelector('[data-testid="retry-immediate-ui.language"]')).not.toBeNull();
+    expect(container.querySelector('[data-vui-row-status="failed"]')).toBeNull();
+  });
+
 });

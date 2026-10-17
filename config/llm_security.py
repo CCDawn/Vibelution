@@ -333,6 +333,17 @@ def validate_llm_public_config(public_config: dict[str, Any], *, context: str = 
 
     profiles = llm.get("profiles", {})
     if isinstance(profiles, dict):
+        schema_version = llm.get("schema_version")
+        try:
+            is_schema_v2 = int(schema_version) == 2
+        except (TypeError, ValueError):
+            is_schema_v2 = False
+        if is_schema_v2:
+            from .llm_projection import validate_public_profile_reference
+
+            for profile_id, profile in profiles.items():
+                if isinstance(profile, dict):
+                    validate_public_profile_reference(str(profile_id), profile)
         for profile_id, profile in profiles.items():
             if not isinstance(profile, dict):
                 continue

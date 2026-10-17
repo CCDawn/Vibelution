@@ -841,6 +841,37 @@ def test_v2_projection_defaults_deepseek_prompt_cache_to_automatic() -> None:
     assert profile["prompt_cache"]["mode"] == "automatic"
 
 
+def test_v2_public_profile_ignores_copied_route_fields_when_loading() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["primary"]["model"] = "other-model"
+    public_config["llm"]["profiles"]["primary"]["provider_id"] = "pixel_relay"
+
+    normalized = normalize_public_config_dict(public_config)
+
+    assert normalized["llm"]["profiles"]["primary"]["model"] == "gpt-5.6-luna"
+    assert normalized["llm"]["profiles"]["primary"]["model_ref"] == "pixel_relay/gpt-5.6-luna"
+
+
+def test_v2_public_profile_rejects_copied_route_fields_on_apply() -> None:
+    from config.llm_security import validate_llm_public_config
+
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["primary"]["model"] = "other-model"
+
+    with pytest.raises(ValueError, match=r"llm\.profiles\.primary\.model is not a profile reference field"):
+        validate_llm_public_config(public_config)
+
+
+def test_v2_public_profile_keeps_label_as_display_metadata() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["primary"]["label"] = "主路由"
+
+    normalized = normalize_public_config_dict(public_config)
+
+    assert normalized["llm"]["profiles"]["primary"]["model_ref"] == "pixel_relay/gpt-5.6-luna"
+    assert normalized["llm"]["profiles"]["primary"]["model"] == "gpt-5.6-luna"
+
+
 def test_v2_profile_provider_id_derived_from_model_ref_prefix() -> None:
     """A model_ref-only profile must not keep the phantom default provider id.
 
@@ -918,7 +949,7 @@ def test_v2_reference_integrity_enforced_on_config_apply_path() -> None:
         "model": "some-model",
         "provider_id": "no_such_provider",
     }
-    with pytest.raises(ValueError, match="provider_id references unknown provider: no_such_provider"):
+    with pytest.raises(ValueError, match="llm.profiles.broken.model is not a profile reference field"):
         validate_llm_public_config(unknown_provider)
 
     model_ref_derived = copy.deepcopy(base)

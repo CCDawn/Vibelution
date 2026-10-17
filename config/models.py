@@ -537,12 +537,24 @@ class LLMProfile(BaseModel):
         return _validate_model_reasoning_contract(self)
 
 
+# These ids used to look like model roles. The jobs now live on Agent slots:
+# compression -> summary (an empty summary slot follows dialogue);
+# subagent_worker -> subagentExecution.
+# subagent_explorer remains a tool-permission scope, not a model slot.
+# Profiles already saved under these ids still load. Callers must not select
+# a model through them.
+RETIRED_GLOBAL_MODEL_ROLE_IDS = frozenset(
+    {
+        "compression",
+        "subagent_worker",
+        "subagent_explorer",
+    }
+)
+
 DEFAULT_ROLE_PROFILE_IDS = (
     "primary",
     "mental_model",
     "runtime_status",
-    "subagent_worker",
-    "subagent_explorer",
     "supervised_baseline",
     "supervised_candidate",
     "research_broad",
@@ -550,7 +562,6 @@ DEFAULT_ROLE_PROFILE_IDS = (
     "research_review",
     "research_themes",
     "research_card",
-    "compression",
 )
 
 # Display labels for role profile ids, shared by the config panel and the web
@@ -559,8 +570,6 @@ PROFILE_LABELS: Dict[str, Dict[str, str]] = {
     "primary": {"zh": "主智能体", "en": "Primary"},
     "mental_model": {"zh": "心智模型", "en": "Mental Model"},
     "runtime_status": {"zh": "运行时状态", "en": "Runtime Status"},
-    "subagent_worker": {"zh": "子代理执行", "en": "Subagent Worker"},
-    "subagent_explorer": {"zh": "子代理探索", "en": "Subagent Explorer"},
     "supervised_baseline": {"zh": "监督基线", "en": "Supervised Baseline"},
     "supervised_candidate": {"zh": "监督候选", "en": "Supervised Candidate"},
     "research_broad": {"zh": "科研广搜", "en": "Research Broad Search"},
@@ -568,7 +577,6 @@ PROFILE_LABELS: Dict[str, Dict[str, str]] = {
     "research_review": {"zh": "科研审查", "en": "Research Review"},
     "research_themes": {"zh": "科研主题生成", "en": "Research Theme Generation"},
     "research_card": {"zh": "科研主题卡", "en": "Research Theme Card"},
-    "compression": {"zh": "上下文压缩", "en": "Compression"},
 }
 
 
