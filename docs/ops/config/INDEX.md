@@ -24,6 +24,7 @@
 | 04 | [协议 / Wire / Prompt Cache](./04-llm-protocol-wire-cache.md) | 调用失败、缓存不命中、协议选型 |
 | 05 | [厂商菜谱（OpenAI/DeepSeek/Anthropic/…）](./05-llm-vendor-recipes.md) | 按厂商抄正确片段 |
 | 06 | [Agent / Evolution](./06-agent-evolution.md) | Agent 行为、进化、工具面 |
+| 06a | [公共 Agent 预设](./public-agent-presets.md) | 全新部署的角色、虚拟人人物配置、模型回退与初始化 |
 | 07 | [Launcher / Runtime / Workbench](./07-launcher-runtime-workbench.md) | 启动、窗口、运行时 |
 | 08 | [Git / UI / User](./08-git-ui-user.md) | 提交文案模型、UI、用户资料 |
 | 09 | [Agent 配置自检清单](./09-agent-checklist.md) | 交付前必过 |

@@ -11,6 +11,8 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 |-------------------|------------|
 | Persona / task profile normalize | `profiles.py` |
 | Fresh-deployment bundled Agent assets (create missing only) | `bootstrap.py` |
+| Portable public role catalog, models and avatar installation | `public_presets.py` · `presets/catalog.json` |
+| First-install Companion binding and paused native helper identities | `companion_preset.py` |
 | Tool / memory / delegation / supervision policy | `policies.py` |
 | Archive / purge / reset | `lifecycle.py` |
 | List/get / API hydration | `projections.py` |

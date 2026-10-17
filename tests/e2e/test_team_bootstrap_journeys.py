@@ -41,6 +41,24 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         session = e2e_instance.api_get(f"/api/sessions/{agent['directSessionId']}")
         assert session["id"] == agent["directSessionId"]
         assert session["agentId"] == agent["agentId"]
+    public_presets = [agent for agent in agents if (agent.get("metadata") or {}).get("publicPresetKey")]
+    assert len(public_presets) == 11
+    assert all(agent["metadata"].get("publicPresetSeedComplete") for agent in public_presets)
+    for agent in public_presets:
+        session = e2e_instance.api_get(f"/api/sessions/{agent['directSessionId']}")
+        assert session["agentId"] == agent["agentId"]
+        assert not session.get("messages"), "Public presets must start without developer transcripts"
+    companions = e2e_instance.api_get("/api/agent-plugins/virtual-human-life/companions")
+    companion = next(row for row in companions if row["displayName"] == "洛天依")
+    assert companion["snapshot"]["state"]["lifePaused"] is True
+    owner_id = companion["agentId"]
+    helpers = [agent for agent in agents if (agent.get("metadata") or {}).get("lifeStewardForAgentId") == owner_id
+               or (agent.get("metadata") or {}).get("selfWakeForAgentId") == owner_id]
+    assert len(helpers) == 2
+    for agent in helpers:
+        session = e2e_instance.api_get(f"/api/sessions/{agent['directSessionId']}")
+        assert session["agentId"] == agent["agentId"]
+        assert not session.get("messages")
 
     def capture(response):
         if urlparse(response.url).path == "/api/teams" and response.request.method == "GET" and response.status == 200:
@@ -74,6 +92,9 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
         assert expected <= {team["teamId"] for team in catalogs[-1].get("teams", [])}
         assert snapshots[-1].get("attempt") == attempt, "Navigation restarted initialization during the retry window"
+        page.goto(f"{e2e_instance.base_url}/companions", wait_until="domcontentloaded")
+        expect(page.locator(domain_recipe_selector("virtual-human-companion-lobby"))).to_be_visible()
+        expect(page.get_by_text("洛天依", exact=True)).to_be_visible()
         final_agents = e2e_instance.api_get("/api/agents")
         assert {agent["agentId"] for agent in final_agents if (agent.get("metadata") or {}).get("builtinPreset")} == {
             agent["agentId"] for agent in bundled
