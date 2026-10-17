@@ -19,7 +19,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { seedControlTokenForTests } from "../api/client";
-import { writeLastSettingsLocation } from "../app/settingsNavigation";
+import { requestSettingsFocus, writeLastSettingsLocation } from "../app/settingsNavigation";
 import { ConfigRoute } from "./ConfigRoute";
 
 const BASE_PUBLIC_CONFIG = {
@@ -238,6 +238,28 @@ describe("ConfigRoute main save flow (wave 3 safety net)", () => {
     });
     await waitFor(() => !container.querySelector('[data-testid="row-context_compression.enabled"]'), "explicit all-settings index remains reachable");
     expect(router.state.location.search).toBe("");
+  });
+
+  it.each([
+    { groupId: "tooling-diagnostics", pageId: "tooling-access", sectionId: "security", expectedPage: "tooling-security", row: "security.enabled" },
+    { groupId: "runtime-context", pageId: "runtime-context", sectionId: "analysis", expectedPage: "tooling-git", row: "analysis.data_dir" },
+  ])("resolves a moved section in a legacy focus intent: $sectionId", async (target) => {
+    const fixture = workspaceFixture();
+    installFetchMock({ workspace: {
+      ...fixture,
+      publicConfig: { ...BASE_PUBLIC_CONFIG, security: { enabled: true }, analysis: { data_dir: "data/analysis" }, network: { timeout: 30 } },
+      sections: [...fixture.sections, { id: "security", title: "安全", summary: "" }, { id: "analysis", title: "分析", summary: "" }, { id: "network", title: "网络", summary: "" }],
+      editorSections: [...fixture.editorSections, { id: "security", path: "security", title: "安全", summary: "", fieldCount: 1 }, { id: "analysis", path: "analysis", title: "分析", summary: "", fieldCount: 1 }],
+      editorMeta: { ...EDITOR_META,
+        "security.enabled": { path: "security.enabled", label: "安全验证", hint: "", kind: "boolean", badge: "", options: [] },
+        "analysis.data_dir": { path: "analysis.data_dir", label: "数据目录", hint: "", kind: "text", badge: "", options: [] },
+      },
+    } });
+    const router = await renderRoute();
+    await waitFor(() => Boolean(container.querySelector('[data-testid="row-context_compression.enabled"]')), "initial editor renders");
+    await act(async () => { requestSettingsFocus(target); });
+    await waitFor(() => Boolean(container.querySelector(`[data-testid="row-${target.row}"]`)), "moved section editor renders");
+    expect(new URLSearchParams(router.state.location.search).get("page")).toBe(target.expectedPage);
   });
 
   it("surfaces the global pending-save badge from a section draft and clears it after a folded global save", async () => {

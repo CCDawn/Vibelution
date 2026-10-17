@@ -18,9 +18,12 @@ const styles = {
   status:
     "vui-routes-configsettingsnavigation status flex min-h-8 items-center justify-between gap-3 px-1 text-vui-xs font-normal text-vui-fg-secondary",
   statusValue: "vui-routes-configsettingsnavigation statusValue text-vui-fg-primary",
-  groupNav: "vui-routes-configsettingsnavigation groupNav grid min-h-0 content-start gap-1 overflow-y-auto pr-1 max-[720px]:overflow-visible max-[720px]:grid-cols-2",
+  mobileCategory: "vui-routes-configsettingsnavigation mobileCategory hidden min-w-0 gap-1 max-[720px]:grid",
+  categoryGroup: "vui-routes-configsettingsnavigation categoryGroup grid min-w-0 gap-1",
+  categoryLabel: "vui-routes-configsettingsnavigation categoryLabel px-3 pb-1 pt-3 text-vui-xs font-medium text-vui-fg-tertiary",
+  groupNav: "vui-routes-configsettingsnavigation groupNav grid min-h-0 content-start gap-2 overflow-y-auto pr-1 max-[720px]:hidden",
   groupButton:
-    "vui-routes-configsettingsnavigation groupButton !grid !min-h-9 !w-full !grid-cols-[minmax(0,1fr)] !justify-stretch !border-transparent rounded-vui-control px-3 text-left text-vui-sm font-medium",
+    "vui-routes-configsettingsnavigation groupButton !flex !min-h-9 !w-full !justify-start gap-2 !border-transparent rounded-vui-control px-3 text-left text-vui-sm font-medium [&_svg]:shrink-0 [&_span]:min-w-0 [&_span]:break-words",
   groupButtonActive:
     "vui-routes-configsettingsnavigation groupButtonActive !text-vui-fg-primary !bg-vui-surface-row !border-transparent !shadow-none",
   pageTabs: `vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle ${vuiToolbarFillClass} !bg-transparent px-0 py-0 [scrollbar-width:thin]`,

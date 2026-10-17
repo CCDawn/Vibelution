@@ -72,6 +72,10 @@ const PAGE_DESCRIPTIONS: Record<string, readonly [string, string]> = {
   "overview-save": ["查看配置位置、检查问题和迁移兼容状态。", "Inspect configuration paths, issues, and migration compatibility."],
 };
 
+export function configSettingsPageDescription(page: ConfigSettingsPage | null, language: ConfigSettingsLanguage): string | undefined {
+  return page ? PAGE_DESCRIPTIONS[page.id]?.[language === "zh" ? 0 : 1] ?? page.summary : undefined;
+}
+
 const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]> = {
   "overview-apply": [
     { id: "overview-save", zh: "配置管理", en: "Configuration", members: ["overview", "diagnostics"] },
@@ -142,7 +146,7 @@ export function buildConfigSettingsGroups(
       return {
         id: definition.id,
         title: language === "zh" ? definition.zh : definition.en,
-        summary: PAGE_DESCRIPTIONS[definition.id]?.[language === "zh" ? 0 : 1] ?? (members.length === 1 ? members[0].summary : members.map((section) => section.title).join(language === "zh" ? "、" : ", ")),
+        summary: members.length === 1 ? members[0].summary : members.map((section) => section.title).join(language === "zh" ? "、" : ", "),
         memberSectionIds,
       };
     }).filter((page) => page.memberSectionIds.length > 0),

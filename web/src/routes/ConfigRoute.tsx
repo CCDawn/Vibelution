@@ -1,9 +1,10 @@
 import "../design/route-css/config.tailwind.css";
+import "./ConfigSettingsWorkbench.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
 import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 import { ConfigDecisionModelsPanel, readDecisionModelMap } from "./ConfigDecisionModelsPanel";
-import { ConfigUiFontSettings } from "./ConfigUiFontSettings";
+import { ConfigAppearancePreferences } from "./ConfigAppearancePreferences";
 
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -133,7 +134,7 @@ import {
 } from "./ConfigProviderRegistryPanel";
 import {
   buildConfigSettingsGroups,
-  ConfigSettingsPageTabs,
+  configSettingsPageDescription,
   ConfigSettingsSidebar,
   DEFAULT_CONFIG_SETTINGS_GROUP_ID,
   resolveConfigSettingsSelection,
@@ -195,72 +196,8 @@ import {
 import styles from "./ConfigRoute.styles";
 
 const CONFIG_SETTINGS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.configSettings;
-/** Sidebar width contract — owned by VSplitWorkspace resize (not route-local CSS vars). */
-const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
-  id: "sidebar",
-  defaultWidth: 280,
-  minWidth: 220,
-  maxWidth: 360,
-} as const;
-/** 已生效徽标的最短展示时长：apply 成功后基线立即对齐，徽标短暂驻留后再清除。 */
+/** Minimum hold time for successful immediate-save feedback. */
 const IMMEDIATE_APPLIED_BADGE_HOLD_MS = 4000;
-
-type ConfigSettingsNavigationCollapseInput = {
-  isModelConnectionPage: boolean;
-  isMediumViewport: boolean;
-  isNarrowViewport: boolean;
-  userOverride: boolean | null;
-};
-
-export function deriveConfigSettingsNavigationCollapsed({
-  isModelConnectionPage,
-  isMediumViewport,
-  isNarrowViewport,
-  userOverride,
-}: ConfigSettingsNavigationCollapseInput): boolean {
-  if (isNarrowViewport) return false;
-  return userOverride ?? (isModelConnectionPage && isMediumViewport);
-}
-
-function useViewportQueryMatches(query: string): boolean {
-  const [matches, setMatches] = useState(() => (
-    typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia(query).matches
-  ));
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mediaQuery = window.matchMedia(query);
-    const update = () => setMatches(mediaQuery.matches);
-    update();
-    mediaQuery.addEventListener("change", update);
-    return () => mediaQuery.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
-
-export function useConfigSettingsNavigationCollapse(isModelConnectionPage: boolean, navigationKey: string) {
-  const [userOverride, setUserOverride] = useState<boolean | null>(null);
-  const isMediumViewport = useViewportQueryMatches("(min-width: 721px) and (max-width: 1120px)");
-  const isNarrowViewport = useViewportQueryMatches("(max-width: 720px)");
-
-  useEffect(() => {
-    setUserOverride(null);
-  }, [navigationKey]);
-
-  const onCollapsedChange = useCallback((collapsed: boolean) => setUserOverride(collapsed), []);
-  return {
-    collapsed: deriveConfigSettingsNavigationCollapsed({
-      isModelConnectionPage,
-      isMediumViewport,
-      isNarrowViewport,
-      userOverride,
-    }),
-    onCollapsedChange,
-  };
-}
 
 import {
   type ProviderRouteImpact,
@@ -313,6 +250,7 @@ export function ConfigRoute() {
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
   const [busyAction, setBusyAction] = useState("");
   const [providerConnecting, setProviderConnecting] = useState(false);
+  const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
   const [providerShowMore, setProviderShowMore] = useState(false);
   const [providerQuickSetupState, dispatchProviderQuickSetup] = useReducer(
     providerQuickSetupReducer,
@@ -387,7 +325,7 @@ export function ConfigRoute() {
   const requestedPageId = String(searchParams.get("page") || "").trim();
   const requestedFocusSectionId = String(searchParams.get("focus") || "").trim();
   const requestedFocusFieldId = String(searchParams.get("field") || "").trim();
-  const showingSettingsIndex = !requestedPageId && !requestedFocusSectionId;
+  const showingSettingsIndex = !requestedSectionId && !requestedPageId && !requestedFocusSectionId;
   const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const formattedDraft = useMemo(
@@ -430,7 +368,7 @@ export function ConfigRoute() {
       configValues: draftConfig,
       language: currentLanguage,
     }), {
-      groupId: "avatar-pet" as const, pageId: "identity-profile", sectionId: "pet",
+      groupId: "avatar-pet" as const, pageId: "personal-assistant", sectionId: "pet",
       title: copy.searchPetTitle,
       detail: copy.searchPetDetail,
       haystack: copy.searchPetHaystack,
@@ -440,8 +378,8 @@ export function ConfigRoute() {
     [currentLanguage, draftConfig, settingsGroups, workspace?.editorMeta, workspace?.editorSections],
   );
   const { group: activeGroup, page: activePage } = useMemo(
-    () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
-    [activeGroupId, activePageId, settingsGroups],
+    () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId, requestedFocusSectionId),
+    [activeGroupId, activePageId, requestedFocusSectionId, settingsGroups],
   );
   const editorSectionById = new Map(editorSections.map((section) => [section.id, section]));
   const activeEditorSections = (activePage?.memberSectionIds ?? [])
@@ -468,13 +406,12 @@ export function ConfigRoute() {
     const requestedSelectionKey = `${requestedSectionId}:${requestedPageId}:${requestedFocusSectionId}`;
     if (requestedSelectionKey !== lastRequestedSelectionRef.current) {
       lastRequestedSelectionRef.current = requestedSelectionKey;
-      const requestedGroup = settingsGroups.find((group) => group.id === requestedSectionId)
-        ?? settingsGroups.find((group) => group.id === DEFAULT_CONFIG_SETTINGS_GROUP_ID)
-        ?? settingsGroups[0];
+      const { group: requestedGroup, page: requestedPage } = resolveConfigSettingsSelection(
+        settingsGroups, requestedSectionId, requestedPageId, requestedFocusSectionId,
+      );
       setActiveGroupId(requestedGroup?.id ?? "");
-      const requestedPage = requestedGroup?.pages.find((page) => page.id === requestedPageId);
-      setActivePageId(requestedPage?.id ?? requestedGroup?.pages[0]?.id ?? "");
-      const focusPage = requestedPage ?? requestedGroup?.pages[0];
+      setActivePageId(requestedPage?.id ?? "");
+      const focusPage = requestedPage;
       if (requestedFocusSectionId && focusPage?.memberSectionIds.includes(requestedFocusSectionId)) {
         setSectionUiState((current) => ({
           ...current,
@@ -595,6 +532,7 @@ export function ConfigRoute() {
     return items;
   }, [draftConfig, editorMeta, editorSections, sectionUiState]);
   const pendingConfigDraftCount = pendingConfigDraftItems.length;
+  const hasLocalConfigChanges = hasPendingApply || hasEditorChanges || pendingConfigDraftCount > 0;
   const hasInvalidConfigDraft = pendingConfigDraftItems.some((item) => !item.valid);
   const canApplyConfigWorkspace =
     !structuredActionsDisabled && !hasInvalidConfigDraft && (canSaveConfig || pendingConfigDraftCount > 0);
@@ -618,7 +556,6 @@ export function ConfigRoute() {
   const leaveBlocker = useBlocker(shouldBlockLeave);
   const leaveGuardOpen = leaveBlocker.state === "blocked";
   const leaveGuardSaveLabel = busyAction === copy.leaveGuardSaving ? copy.leaveGuardSaving : copy.leaveGuardSave;
-  const sidebarNextStepLabel = hasEditorChanges ? copy.settingsNeedsCheck : hasPendingApply ? copy.settingsCanSave : copy.settingsSynced;
   const launcherConfig = asRecord(draftConfig?.launcher);
   const developerModeConfig = asRecord(launcherConfig.developer_mode);
   const developerModeReadonlyLabel = developerModeConfig.enabled ? copy.developerModeEnabled : copy.developerModeDisabled;
@@ -632,11 +569,6 @@ export function ConfigRoute() {
       && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
   const providerSetupVisible = isSectionVisible("models") && providerConnecting;
-
-  const settingsNavCollapse = useConfigSettingsNavigationCollapse(
-    isSectionVisible("models"),
-    `${showingSettingsIndex ? "index" : "page"}:${activeGroup?.id ?? ""}:${activePage?.id ?? ""}`,
-  );
 
   const healthDiagnosticsQuery = useConfigHealthDiagnosticsQuery(isSectionVisible("health-diagnostics"));
 
@@ -700,16 +632,6 @@ export function ConfigRoute() {
   function applySettingsFocusTarget(target: SettingsFocusTarget) {
     const fieldId = (target.fieldId ?? "").trim();
     let sectionId = (target.sectionId ?? "").trim();
-    let group = target.groupId ? settingsGroups.find((candidate) => candidate.id === target.groupId) : undefined;
-    if (!group && sectionId) {
-      for (const candidate of settingsGroups) {
-        const ownerPage = candidate.pages.find((item) => item.memberSectionIds.includes(sectionId));
-        if (ownerPage) {
-          group = candidate;
-          break;
-        }
-      }
-    }
     if (!sectionId && fieldId) {
       // 字段目标缺分区时按编辑器分区归属推导。
       const owner = (workspace?.editorSections ?? []).find(
@@ -717,7 +639,9 @@ export function ConfigRoute() {
       );
       sectionId = owner?.id ?? "";
     }
-    const page = group?.pages.find((item) => item.id === target.pageId) ?? group?.pages[0];
+    const { group, page } = resolveConfigSettingsSelection(
+      settingsGroups, target.groupId ?? "", target.pageId ?? "", sectionId,
+    );
     if (group) {
       setActiveGroupId(group.id);
       setActivePageId(page?.id ?? "");
@@ -871,13 +795,7 @@ export function ConfigRoute() {
       const page = group.pages.find((candidate) => candidate.id === entry.pageId) ?? group.pages[0];
       setActiveGroupId(group.id);
       setActivePageId(page?.id ?? "");
-      // 与手点分组一致：落回该组的设置索引（?section=组，无 page/focus/field）。
-      const params = new URLSearchParams(searchParams);
-      params.set("section", group.id);
-      params.delete("page");
-      params.delete("focus");
-      params.delete("field");
-      navigate({ search: params.toString() }, { replace: true });
+      navigate({ search: buildConfigSettingsNavigationSearch(searchParams, group.id, page?.id ?? "") }, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsGroups, requestedSectionId, requestedPageId, requestedFocusSectionId, requestedFocusFieldId]);
@@ -1179,8 +1097,11 @@ export function ConfigRoute() {
     setBusyAction(copy.refreshPending);
     try {
       const fresh = await workspaceQuery.refetch();
+      if (fresh.error) throw fresh.error;
       if (fresh.data) {
         syncWorkspace(fresh.data);
+        setSectionUiState({});
+        setSectionSaveErrors({});
       }
     } catch (error) {
       markError(error);
@@ -1219,7 +1140,15 @@ export function ConfigRoute() {
         allValid = false;
         continue;
       }
-      next = setValueAtConfigPath(next, section.path, resolution.value);
+      // A section draft may predate a successful immediate-field save. Keep
+      // those live values authoritative when applying the remaining text draft.
+      let sectionValue = resolution.value;
+      for (const [path, meta] of Object.entries(editorMeta)) {
+        if (!path.startsWith(`${section.path}.`)) continue;
+        if (!shouldImmediateApplyFieldKind(meta.kind, path) && !isUiLanguageFieldPath(path)) continue;
+        sectionValue = setValueAtConfigPath(sectionValue, path.slice(section.path.length + 1), getConfigValueAtPath(next, path));
+      }
+      next = setValueAtConfigPath(next, section.path, sectionValue);
     }
     return { config: next, allValid };
   }
@@ -1641,32 +1570,28 @@ export function ConfigRoute() {
           void handleConfirmApplyMigration();
         }}
       />
+      <VConfirmDialog open={discardDraftOpen} onOpenChange={setDiscardDraftOpen}
+        title={copy.discardChangesTitle}
+        description={copy.discardChangesDescription}
+        confirmLabel={copy.discardAndReload} cancelLabel={copy.cancel}
+        confirmPending={Boolean(busyAction)} onCancel={() => setDiscardDraftOpen(false)}
+        onConfirm={() => { void reloadWorkspace().then(() => setDiscardDraftOpen(false)); }} />
       <VSplitWorkspace
         chrome="workbench"
         className={styles.settingsSplit}
         data-vui-region="config-settings-split"
-        resize={{
-          layoutId: CONFIG_SETTINGS_LAYOUT_ID,
-          sidebar: CONFIG_SETTINGS_SIDEBAR_RESIZE,
-          collapse: {
-            sidebar: {
-              separatorLabel: copy.navResizeSeparator,
-              collapseLabel: copy.navCollapse,
-              expandLabel: copy.navExpand,
-              collapsed: settingsNavCollapse.collapsed,
-              onCollapsedChange: settingsNavCollapse.onCollapsedChange,
-            },
-          },
-        }}
+        columnsClassName=""
+        resize={false}
         sidebar={(
           <ConfigSettingsSidebar
             language={currentLanguage}
             title={copy.pageTitle}
             subtitle={copy.subtitle}
             subtitleHint={copy.subtitleHint}
-            statusLabel={hasPendingApply ? copy.statusUnsaved : copy.statusSaved}
+            statusLabel={hasLocalConfigChanges ? copy.statusUnsaved : copy.statusSaved}
             groups={settingsGroups}
             activeGroupId={showingSettingsIndex && !requestedSectionId ? "" : activeGroup?.id ?? ""}
+            activePageId={showingSettingsIndex ? "" : activePage?.id ?? ""}
             onShowAll={() => showSettingsIndex()}
             onSelectGroup={handleSelectGroup}
             onNavigate={handleNavigateSettings}
@@ -1684,12 +1609,13 @@ export function ConfigRoute() {
         )}
         main={(
       <VSettingsFormPage
-        ariaLabel={activeGroup?.title ?? copy.pageTitle}
+        ariaLabel={activePage?.title ?? copy.pageTitle}
         className={styles.content}
         data-vui-region="config-settings-main"
         headerClassName={styles.configHeader}
         bodyClassName="!gap-0 !overflow-hidden !content-stretch"
-        title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}
+        title={showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}
+        meta={showingSettingsIndex ? undefined : configSettingsPageDescription(activePage, currentLanguage)}
         actions={
           <div className={styles.configStatusActions}>
             {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
@@ -1705,68 +1631,32 @@ export function ConfigRoute() {
                   </VButton>
                 </VActionGroup>
             ) : null}
-            <VButton
-              type="button"
-              className={styles.actionButton}
-              isDisabled={Boolean(busyAction)}
-              onClick={() => {
-                void reloadWorkspace();
-              }}
- icon={<RotateCcw size={14} />}>
-                {copy.refresh}
-              </VButton>
-            {pendingConfigDraftCount > 0 ? (
-              <VChip
-                tone={hasInvalidConfigDraft ? "danger" : "warning"}
-                data-testid="config-pending-save-count"
-                title={hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
-              >
-                {pendingConfigDraftCount}{copy.settingsPendingCountUnit}
-              </VChip>
+            {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
+              <VButton variant="primary" icon={<Plus size={14} />} isDisabled={structuredActionsDisabled || Boolean(busyAction)}
+                onPress={() => setProviderConnecting(true)}>{copy.addModelService}</VButton>
             ) : null}
-            <VButton
-              type="button"
-              variant="primary"
-              className={styles.primaryButton}
-              isDisabled={!canApplyConfigWorkspace || providerSetupVisible}
-              title={!canApplyConfigWorkspace && hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
-              onClick={() => {
-                void handleApply();
-              }}
- icon={<Save size={14} />}>
-                {saveButtonLabel}
-              </VButton>
+            {isSectionVisible("overview") ? <VButton variant="ghost" icon={<RotateCcw size={14} />} isDisabled={Boolean(busyAction)}
+              onPress={() => { if (hasLocalConfigChanges) setDiscardDraftOpen(true); else void reloadWorkspace(); }}>{copy.refresh}</VButton> : null}
           </div>
         }
-        toolbar={isSectionVisible("overview") || (!showingSettingsIndex && !requestedFocusSectionId && (activeGroup?.pages.length ?? 0) > 1) ? (
-          <div className={styles.configToolbar}>
-            {isSectionVisible("overview") ? <VStatusStrip
-              className={styles.configStatusMeta}
-              items={[
-                {
-                  label: copy.configStatus,
-                  value: hasPendingApply ? copy.unsavedDraft : copy.syncedDraft,
-                  tone: hasPendingApply ? "warning" : "success",
-                },
-                { label: copy.settingsNextStep, value: sidebarNextStepLabel, tone: "info" },
-                {
-                  label: copy.configPath,
-                  value: (
-                    <span className={styles.configStatusPath} title={workspace.configPath}>
-                      {workspace.configPath}
-                    </span>
-                  ),
-                },
-              ]}
-            /> : null}
-            {!showingSettingsIndex && !requestedFocusSectionId ? <ConfigSettingsPageTabs
-              language={currentLanguage}
-              group={activeGroup}
-              activePageId={activePage?.id ?? ""}
-              onSelectPage={handleSelectPage}
-            /> : null}
+        footerClassName={styles.saveFooter}
+        footer={hasLocalConfigChanges ? <>
+          <span className={hasInvalidConfigDraft ? styles.inlineError : styles.helperText} role="status">
+            {hasInvalidConfigDraft ? copy.saveBlockedInvalid : copy.unsavedChanges}
+          </span>
+          {pendingConfigDraftCount > 0 ? <VChip tone={hasInvalidConfigDraft ? "danger" : "neutral"} data-testid="config-pending-save-count">
+            {pendingConfigDraftCount}{copy.settingsPendingCountUnit}
+          </VChip> : null}
+          <div className={styles.configStatusActions}>
+            <VButton variant="ghost" isDisabled={Boolean(busyAction)} onPress={() => setDiscardDraftOpen(true)}>
+              {copy.discardChanges}
+            </VButton>
+            <VButton variant="primary" isDisabled={!canApplyConfigWorkspace || providerSetupVisible} isPending={Boolean(busyAction)}
+              title={hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined} onPress={() => { void handleApply(); }} icon={<Save size={14} />}>
+              {saveButtonLabel}
+            </VButton>
           </div>
-        ) : undefined}
+        </> : undefined}
       >
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
 
@@ -1776,8 +1666,7 @@ export function ConfigRoute() {
           sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
         /> : null}
 
-        {!showingSettingsIndex && activeGroup?.id === "avatar-pet"
-          && (!requestedFocusSectionId || requestedFocusSectionId === "pet") ? (
+        {isSectionVisible("pet") ? (
           <VSettingsGroupCard>
             <ConfigDesktopPetSettings language={currentLanguage} />
           </VSettingsGroupCard>
@@ -1883,6 +1772,7 @@ export function ConfigRoute() {
                 ) : !providerShowMore ? (
                   <>
                 <ConfigProviderRegistryPanel
+                  compactHome
                   copy={copy}
                   routeEditor={routeEditProviderId ? <>
                 {routeEditProviderId && !routePreview ? (
@@ -2144,7 +2034,7 @@ export function ConfigRoute() {
           </div>
         ) : null}
 
-        {!showingSettingsIndex && activePage?.id === "tooling-access" ? (
+        {!showingSettingsIndex && activePage?.id === "tooling-git" ? (
           <VSurface as="section" className={styles.toolingMetaPanel} padding="compact" tone="row">
             <VStatusStrip
               aria-label={copy.developerModeReadonly}
@@ -2198,6 +2088,7 @@ export function ConfigRoute() {
         {showingSettingsIndex || (workspace.schemaVersion === 2 && isSectionVisible("models")) ? null : activeEditorSections.map((section) => (
           <Fragment key={section.id}>
             <ConfigSectionEditor
+              inlineEditing
               section={section}
               value={getConfigValueAtPath(draftConfig, section.path)}
               metaMap={editorMeta}
@@ -2221,7 +2112,7 @@ export function ConfigRoute() {
               // 界面字号：--vui-font-base 的本地偏好控制行（不进 config.toml），
               // 渲染在「界面外观」分区卡片之后，VSettingsRow 组卡先例同 ConfigDesktopPetSettings。
               <VSettingsGroupCard testId="config-ui-font-settings">
-                <ConfigUiFontSettings copy={copy} />
+                <ConfigAppearancePreferences copy={copy} />
               </VSettingsGroupCard>
             ) : null}
           </Fragment>

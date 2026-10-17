@@ -69,6 +69,8 @@ export type ProviderActionFeedback = {
 } | null;
 
 export type ConfigProviderRegistryPanelProps = {
+  /** Show the flat service home; the complete workspace opens from Manage. */
+  compactHome?: boolean;
   /** Bilingual copy table (wave 4): every user-facing string comes from here. */
   copy: ConfigCopy;
   rows: ProviderRegistryRow[];
@@ -1252,6 +1254,7 @@ function DiagnosticsTab({
 }
 
 export function ConfigProviderRegistryPanel({
+  compactHome = false,
   copy,
   rows,
   selectedProviderId,
@@ -1325,6 +1328,7 @@ export function ConfigProviderRegistryPanel({
     defaultProviderModelFilter(provider?.models ?? []),
   );
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const [managedOpen, setManagedOpen] = useState(false);
 
   useEffect(() => {
     if (!provider) {
@@ -1498,8 +1502,8 @@ export function ConfigProviderRegistryPanel({
     onSaveContextWindow(target.providerId, Math.round(parsed));
   };
 
-  return (
-    <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
+  const workspaceView = (
+    <VSurface as="section" id={compactHome ? "config-models-workspace" : "config-models"} className={styles.sectionSurface} padding="none">
       {hasPendingApply ? (
         <div className={styles.savePrompt} role="status" data-save-prompt="pending" aria-live="polite">
           <div className={styles.savePromptCopy}>
@@ -1522,9 +1526,6 @@ export function ConfigProviderRegistryPanel({
         resize={{
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
           sidebar: { defaultWidth: 224, minWidth: 180, maxWidth: 300 },
-          collapse: {
-            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand },
-          },
         }}
         sidebar={(
           <div className={styles.providerRail}>
@@ -1690,6 +1691,7 @@ export function ConfigProviderRegistryPanel({
               </VActionGroup>
               {showAdvancedTools ? (
                 <div className={styles.inspectorAdvanced}>
+                  <ProtocolsTab provider={inspectorProvider} copy={copy} />
                   <DiagnosticsTab provider={inspectorProvider} disabled={disabled} copy={copy} onDiscover={onDiscover} />
                   {mergeCandidate ? (
                     <VSection
@@ -1758,5 +1760,69 @@ export function ConfigProviderRegistryPanel({
         ) : null}
       </VDialog>
     </VSurface>
+  );
+
+  if (!compactHome) return workspaceView;
+
+  return (
+    <>
+      <VSurface as="section" id="config-models" className={styles.compactHome} padding="none" data-vui-region="config-model-services-home">
+        {actionFeedback ? (
+          <p
+            className={actionFeedback.phase === "error" ? styles.actionFeedbackError : actionFeedback.phase === "success" ? styles.actionFeedbackSuccess : styles.actionFeedback}
+            data-feedback-phase={actionFeedback.phase}
+            data-feedback-kind={actionFeedback.kind}
+            role={actionFeedback.phase === "error" ? "alert" : "status"}
+            aria-live="polite"
+          >{actionFeedback.message}</p>
+        ) : null}
+        <div role="list" aria-label={copy.configuredListAria} className={styles.homeList}>
+          {listItems.map((item) => {
+            const row = rows.find((candidate) => candidate.providerId === item.providerId)!;
+            const testModel = row.models.find((model) => model.availability === "pinned"
+              && model.draftEntry?.enabled !== false && canTestProviderModel(model)
+              && model.modelRef.startsWith(`${row.providerId}/`));
+            const busy = actionFeedback?.providerId === row.providerId && actionFeedback.phase === "busy";
+            return (
+              <div key={row.providerId} role="listitem" className={styles.homeRow} data-provider-home-row={row.providerId}>
+                <div className={styles.homeIdentity}>
+                  <strong>{row.label || row.providerId}</strong>
+                  {item.showProviderId ? <small>{row.providerId}</small> : null}
+                  <span className={styles.homeEndpoint}>{row.baseUrl || copy.notConfigured}</span>
+                  <span className={styles.homeStatus} data-provider-status={row.enabled === false ? "disabled" : row.status}>
+                    {formatConfigCopy(copy.pinnedModelsTemplate, { count: row.pinnedCount })}
+                    {" · "}{providerStatusLabel(row.enabled === false ? "disabled" : row.status, copy)}
+                  </span>
+                </div>
+                <VActionGroup ariaLabel={`${row.label || row.providerId} ${copy.providerHeaderActionsAria}`} className={styles.homeActions}>
+                  <VButton
+                    variant="secondary"
+                    data-provider-home-action={testModel ? "test" : "discover"}
+                    isDisabled={disabled || busy || row.enabled === false}
+                    title={testModel ? copy.testCallHint : copy.detectHint}
+                    onPress={() => testModel ? onTestModel(testModel.modelRef) : onDiscover(row.providerId)}
+                  >{busy ? copy.detectBusy : testModel ? copy.testCall : copy.homeGetModelsAction}</VButton>
+                  <VButton
+                    variant="ghost"
+                    data-provider-home-action="manage"
+                    isDisabled={disabled}
+                    onPress={() => { onSelectProvider(row.providerId); setManagedOpen(true); }}
+                  >{copy.homeManageAction}</VButton>
+                </VActionGroup>
+              </div>
+            );
+          })}
+        </div>
+        {!rows.length ? (
+          <VStateSurface tone="empty" title={copy.emptyConfiguredTitle}>
+            {copy.emptyConfiguredNormal}
+            {onAddConnection ? <VButton variant="secondary" icon={<Plus size={14} />} isDisabled={disabled} onPress={onAddConnection}>{copy.addProvider}</VButton> : null}
+          </VStateSurface>
+        ) : null}
+      </VSurface>
+      <VDialog open={managedOpen} onOpenChange={setManagedOpen} title={copy.homeManageTitle} size="xl" contentClassName={styles.managementDialog}>
+        {workspaceView}
+      </VDialog>
+    </>
   );
 }
