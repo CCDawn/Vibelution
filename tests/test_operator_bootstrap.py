@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import tomllib
 
+from config.models import (
+    DEFAULT_ROLE_PROFILE_IDS,
+    PROFILE_LABELS,
+    RETIRED_GLOBAL_MODEL_ROLE_IDS,
+)
 from config.operator_bootstrap import (
     build_default_llm_section,
     is_thin_local_only_starter,
@@ -11,6 +16,16 @@ from config.operator_bootstrap import (
 )
 from config.paths import ensure_global_config_initialized
 from config.public_config import build_effective_config
+
+
+def test_retired_model_roles_stay_out_of_the_default_catalog() -> None:
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS == {
+        "compression",
+        "subagent_worker",
+        "subagent_explorer",
+    }
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS.isdisjoint(DEFAULT_ROLE_PROFILE_IDS)
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS.isdisjoint(PROFILE_LABELS)
 
 
 def test_bootstrap_includes_fixed_vendor_instances_without_inline_secrets() -> None:
@@ -34,6 +49,7 @@ def test_bootstrap_includes_fixed_vendor_instances_without_inline_secrets() -> N
     effective = build_effective_config(payload)
     assert effective.llm.schema_version == 2
     assert effective.llm.get_profile("primary").model_ref
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS.isdisjoint(payload["llm"]["profiles"])
 
 
 def test_bootstrap_can_prefer_only_configured_credentials() -> None:

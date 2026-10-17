@@ -2899,9 +2899,9 @@ def _build_key_tools() -> List[BaseTool]:
         action 为 agent_create、agent_update、agent_archive、session_create、
         session_update、session_stop、session_delete、knowledge_acl_grant 或 restart。
         arguments_json 使用相应原生工具的具名参数 JSON 对象；restart 仅接受 reason。
-        agent_create 必须提供 display_name、primary_mode、prompt_template_id、model_id
+        agent_create 需要提供 display_name、primary_mode、prompt_template_id、model_id
         （或 llm_bindings_json）；模型、使用位置和提示词不自动补默认值，未知时先向用户确认。
-        primary_mode 非 chat 时还必须提供 role_key、persona_profile_json、task_profile_json、
+        primary_mode 非 chat 时还需要提供 role_key、persona_profile_json、task_profile_json、
         tool_policy_json（含非空 allowedTools）。这些 JSON 字符串需使用平台现有格式。
         agent_update: agent_id、updates_json（PATCH配置字段JSON，可选expected_config_revision）。
         agent_archive: agent_id。session_create: agent_id、title。

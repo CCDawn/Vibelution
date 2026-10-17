@@ -5,11 +5,15 @@
 | 要改的事 | 改哪里 |
 | --- | --- |
 | 某个 Agent 的对话、心智、摘要、子代理、视觉 | 该 Agent 的 `llmBindings` 槽位。权威在 Agent 记录，不在全局 Profile |
-| 压缩、科研等全局角色 | `llm.profiles.<profile_id>.model_ref` |
+| 上下文压缩用哪只模型 | 同一个 Agent 的 `summary` 槽。这个槽空着时，用它的对话模型 |
+| 子代理规划和执行用哪只模型 | `subagentPlanning`、`subagentExecution` |
+| 科研等仍独立的全局角色 | `llm.profiles.<profile_id>.model_ref` |
 | 温度、超时、推理、缓存、协议 | 钉选模型的 `defaults`。只有这个角色要和模型默认不同时，才写 `overrides` |
 | 地址、密钥、发现 | 供应商连接，见 [02](./02-llm-provider.md) |
 
 Agent 槽位是 `dialogue`、`mentalModel`、`summary`、`subagentPlanning`、`subagentExecution`、`vision`。槽位里写的是模型引用 `provider_id/model_key`。已绑定的 Agent 不会因为改了 `primary` Profile 而换对话模型。
+
+`compression`、`subagent_worker`、`subagent_explorer` 不再是模型用途。配置文件里已经写下的这些 Profile 会保留，压缩和子代理不会读它们来选模型。工具页里的 `subagent_explorer`、`subagent_worker` 是工具权限范围，和模型槽位不是一回事。
 
 ## 钉选模型
 
