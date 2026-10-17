@@ -1189,20 +1189,33 @@ def get_source_collection_stage_task_context(
         page_candidate_ids = {
             str(item.get("candidateId") or "") for item in selected_candidates
         }
+        # ce-* → 候选 的绑定图必须全量供给（session-20261017-201057-238483 回归）：
+        # allowedEvidenceRefs 是全局权威，若绑定卡按当前分页过滤，页外候选的证据卡
+        # 会整页丢失，agent 无法把任何 ce-* 绑定到候选，只能 blocked。改为
+        # 「全量绑定图 + 页内标注」：所有卡无条件保留，inCurrentPage 标注该卡的
+        # 候选是否落在当前分页（边端点闭集 endpointPolicy.allowedEndpointIds 本就是
+        # 全量的，页外候选的边同样合法）。
         context["relationEvidence"] = [
-            card for card in load_relation_evidence_context(
+            {
+                **card,
+                "inCurrentPage": bool(
+                    card.get("candidateId") in page_candidate_ids
+                    or card.get("sourceId") in page_candidate_ids
+                ),
+            }
+            for card in load_relation_evidence_context(
                 team_id=normalized_team_id,
                 authority_run_id=normalized_run_id,
                 workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
             )
-            if card.get("candidateId") in page_candidate_ids
-            or card.get("sourceId") in page_candidate_ids
         ]
         context["usage"]["evidenceInstruction"] = (
             "关系 evidenceRefs[] 和 counterEvidenceRefs[].evidenceRef 必须逐字使用 "
-            "allowedEvidenceRefs 中的 claimEvidenceId；relationEvidence[] 给出本页证据 ID、"
-            "候选 ID、原文引述和支持方向的对应关系，不要通过重复读取猜测映射。"
-            "该列表为空时请报告证据缺失。"
+            "allowedEvidenceRefs 中的 claimEvidenceId；relationEvidence[] 是全量证据绑定图，"
+            "不因分页截断，每张卡给出 claimEvidenceId、候选 ID、原文引述和支持方向的对应关系，"
+            "inCurrentPage 标注该证据的候选是否在当前分页（页外候选的绑定同样可用于构图）；"
+            "不要通过重复读取猜测映射。allowedEvidenceRefs 非空而 relationEvidence 缺少对应"
+            "绑定卡时才报告证据绑定缺失；两个列表同时为空表示本轮没有可绑定证据。"
         )
     if retry_focus:
         context["retryFocus"] = retry_focus
