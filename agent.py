@@ -1643,7 +1643,13 @@ class AgentRuntime:
         self._bound_llm_cache["restart_focus"] = rebound
         return rebound
 
-    def _get_llm_for_agent_slot(self, slot: str, *, disable_tools: bool = False):
+    def _get_llm_for_agent_slot(
+        self,
+        slot: str,
+        *,
+        disable_tools: bool = False,
+        fallback_to_dialogue: bool = False,
+    ):
         agent_id = str((getattr(self, "runtime_agent_binding", {}) or {}).get("agentId") or "").strip()
         if not agent_id:
             return None
@@ -1655,7 +1661,7 @@ class AgentRuntime:
                 agent,
                 slot,
                 config=getattr(self, "config", None),
-                fallback_to_dialogue=False,
+                fallback_to_dialogue=fallback_to_dialogue,
             )
             llm = self._get_or_create_agent_llm_client(
                 role="primary",
@@ -1907,15 +1913,7 @@ class AgentRuntime:
             return
         self.token_compressor = EnhancedTokenCompressor(
             token_budget=self._effective_max_token_limit,
-            compression_llm=(
-                self._get_llm_for_agent_slot(AGENT_LLM_SLOT_SUMMARY, disable_tools=True)
-                or self._get_or_create_agent_llm_client(
-                    role="compression",
-                    profile_id=None,
-                    config=self.config,
-                    factory=lambda: get_llm_client(role="compression", config=self.config),
-                )
-            ),
+            compression_llm=self._llm_for_summary_slot(),
         )
         try:
             get_ui().note_context_compression_config(
@@ -1925,6 +1923,22 @@ class AgentRuntime:
             )
         except Exception:
             pass
+
+    def _llm_for_summary_slot(self):
+        """Model for context compression: the Agent summary slot, then dialogue.
+
+        A global profile named compression is not a selector. When this process
+        has no Agent binding, compression stays on the model already bound for
+        the run.
+        """
+        slotted = self._get_llm_for_agent_slot(
+            AGENT_LLM_SLOT_SUMMARY,
+            disable_tools=True,
+            fallback_to_dialogue=True,
+        )
+        if slotted is not None:
+            return slotted
+        return getattr(self, "_base_llm", None)
 
     def _compress_messages(self, messages: list, iteration: int, reason: str = "", trigger_source: str = ""):
         """执行消息压缩。返回 (messages, should_break)。"""

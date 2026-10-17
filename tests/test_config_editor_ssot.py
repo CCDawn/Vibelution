@@ -12,6 +12,7 @@ from config.models import (
     DEFAULT_ROLE_PROFILE_IDS,
     IMPLICIT_DEFAULT_PROVIDER_CONTEXT_WINDOW,
     PROFILE_LABELS,
+    RETIRED_GLOBAL_MODEL_ROLE_IDS,
     UNCONFIGURED_PROVIDER_CONTEXT_WINDOW,
     VALID_AGENT_MODES,
     LLMConfig,
@@ -60,6 +61,17 @@ def test_bootstrap_profile_ids_derive_from_default_role_profile_ids() -> None:
 def test_default_max_output_tokens_has_single_constant() -> None:
     assert LLMProfile.model_fields["max_output_tokens"].default == DEFAULT_MAX_OUTPUT_TOKENS
     assert PinnedModelDefaults.model_fields["max_output_tokens"].default == DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def test_retired_global_model_roles_are_not_profile_selectors() -> None:
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS == {
+        "compression",
+        "subagent_worker",
+        "subagent_explorer",
+    }
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS.isdisjoint(DEFAULT_ROLE_PROFILE_IDS)
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS.isdisjoint(PROFILE_LABELS)
+    assert RETIRED_GLOBAL_MODEL_ROLE_IDS.isdisjoint(_PROFILE_IDS)
 
 
 def test_profile_labels_have_single_source() -> None:

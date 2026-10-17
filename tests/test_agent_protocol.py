@@ -5458,6 +5458,110 @@ class TestLocalProviderBootstrap:
         assert agent.token_compressor.compression_llm.model == "summary-model"
         assert "dialogue-model" in created_models
 
+    def test_context_compression_ignores_retired_compression_profile(self, monkeypatch):
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+        monkeypatch.setattr(AgentRuntime, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr(
+            agent_module,
+            "resolve_feature_decision",
+            lambda feature, **kwargs: MagicMock(effective_enabled=True),
+        )
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        records: dict[str, dict] = {}
+        monkeypatch.setattr(
+            directory_module,
+            "get_agent",
+            lambda agent_id, include_archived=False: records[agent_id],
+        )
+        monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
+
+        def build_config():
+            config = isolated_settings_config(
+                **{
+                    "llm.providers.default.kind": "local",
+                    "llm.providers.default.base_url": "http://localhost:11434/v1",
+                    "llm.providers.default.compat_mode": "openai",
+                    "llm.providers.default.requires_api_key": False,
+                    "llm.profiles.primary.provider_id": "default",
+                    "llm.profiles.primary.model": "dialogue-model",
+                },
+            )
+            provider_id = config.llm.get_profile(profile_id="primary").provider_id
+            config.llm.model_library = {
+                "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
+                "summary-model-id": {
+                    "provider_id": provider_id,
+                    "model": "summary-model",
+                    "contract": "basic_chat",
+                    "tool_calling_mode": "disabled",
+                },
+            }
+            retired = copy.deepcopy(config.llm.profiles["primary"])
+            retired.profile_id = "compression"
+            retired.model = "compression-profile-model"
+            config.llm.profiles["compression"] = retired
+            return config
+
+        class RoleAwareClient:
+            def __init__(self, config=None, role=None, profile_id=None):
+                resolved_id = str(profile_id or "").strip()
+                if not resolved_id:
+                    resolved_id = config.llm.get_role_profile_id(role or "primary")
+                profile = config.llm.get_profile(profile_id=resolved_id)
+                self.model = profile.model
+                self.profile_id = profile.profile_id
+
+            def bind_tools(self, _tools):
+                return self
+
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda role=None, profile_id=None, config=None: RoleAwareClient(
+                config=config,
+                role=role,
+                profile_id=profile_id,
+            ),
+        )
+
+        summary_config = build_config()
+        records["agent-summary"] = {
+            "agentId": "agent-summary",
+            "llmBindings": {
+                "dialogue": {"modelId": "dialogue-model-id"},
+                "summary": {"modelId": "summary-model-id"},
+            },
+        }
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-summary")
+        summary_agent = AgentRuntime(config=summary_config, mode="chat")
+        assert summary_agent.token_compressor.compression_llm.model == "summary-model"
+        assert summary_agent.token_compressor.compression_llm.model != "compression-profile-model"
+
+        dialogue_config = build_config()
+        records["agent-dialogue-only"] = {
+            "agentId": "agent-dialogue-only",
+            "llmBindings": {"dialogue": {"modelId": "dialogue-model-id"}},
+        }
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-dialogue-only")
+        dialogue_agent = AgentRuntime(config=dialogue_config, mode="chat")
+        assert dialogue_agent.token_compressor.compression_llm.model == "dialogue-model"
+
+        unbound_config = build_config()
+        monkeypatch.delenv("VIBELUTION_AGENT_ID", raising=False)
+        unbound_agent = AgentRuntime(config=unbound_config, mode="chat")
+        assert unbound_agent.token_compressor.compression_llm.model == "dialogue-model"
+        assert unbound_agent.token_compressor.compression_llm.profile_id != "compression"
+
     def test_runtime_agent_dialogue_binding_is_default_chat_source_of_truth(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-dialogue-default")
         monkeypatch.delenv("VIBELUTION_AGENT_LLM_SLOT", raising=False)
