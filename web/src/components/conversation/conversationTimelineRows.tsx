@@ -394,8 +394,7 @@ export type ConversationTimelineRowsDeps = {
   inlineEditInputRef: RefObject<HTMLTextAreaElement | null>;
   copiedAnswerMessageId: string;
   curationFeedback: CurationFeedback;
-  setForkScope: (scope: ConversationForkScope) => void;
-  setForkDialogMessage: (message: ConversationMessage | null) => void;
+  openForkDialog: (message: ConversationMessage) => void;
   formatTimestamp: (timestamp: string) => string;
   compactPreview: (value: string, maxLength?: number) => string;
   conversationModelLabel: (modelId: string) => string;
@@ -477,8 +476,7 @@ export function createConversationTimelineRows({
   inlineEditInputRef,
   copiedAnswerMessageId,
   curationFeedback,
-  setForkScope,
-  setForkDialogMessage,
+  openForkDialog,
   formatTimestamp,
   compactPreview,
   conversationModelLabel,
@@ -1119,10 +1117,7 @@ export function createConversationTimelineRows({
                       <VButton
                         type="button"
                         className={styles.turnIconButton}
-                        onClick={() => {
-                          setForkScope("visible_path");
-                          setForkDialogMessage(message);
-                        }}
+                        onClick={() => openForkDialog(message)}
                         isDisabled={versionSwitchDisabled}
                         title={t("forkSessionFromMessage")}
                         aria-label={t("forkSessionFromMessage")}
