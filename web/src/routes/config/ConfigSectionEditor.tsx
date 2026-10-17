@@ -1064,9 +1064,9 @@ export function ConfigSectionEditor({
           <div className={styles.configTierHeader}>
             <div className={styles.configTierHeaderCopy}>
               <strong>{presentation.commonTitle}</strong>
-              <span>{presentation.commonHint}</span>
+              {!inlineEditing && <span>{presentation.commonHint}</span>}
             </div>
-            <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
+            {!inlineEditing && <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>}
           </div>
           <div className={styles.userProfilePrimaryGrid}>
             <VSettingsGroupCard className={styles.userProfileIdentityFields}>
@@ -1100,21 +1100,21 @@ export function ConfigSectionEditor({
           >
             <div className={styles.configTierHeaderCopy}>
               <strong>{presentation.advancedTitle}</strong>
-              <span>{presentation.advancedHint}</span>
+              {!inlineEditing && <span>{presentation.advancedHint}</span>}
             </div>
             <div className={styles.configAdvancedToggleMeta}>
-              <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>
+              {!inlineEditing && <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>}
               <ChevronRight
                 size={16}
                 className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
               />
             </div>
           </VButton>
-          {advancedExpanded ? (
-            <VSettingsGroupCard className={`${styles.configAdvancedBody} ${styles.userProfileAdvancedFields}`}>
+          {inlineEditing || advancedExpanded ? (
+            <div hidden={!advancedExpanded} className={advancedExpanded ? undefined : "!hidden"}><VSettingsGroupCard className={`${styles.configAdvancedBody} ${styles.userProfileAdvancedFields}`}>
               {field("bio")}
               {field("preferences")}
-            </VSettingsGroupCard>
+            </VSettingsGroupCard></div>
           ) : null}
         </div>
       </div>
@@ -1285,7 +1285,7 @@ export function ConfigSectionEditor({
 
   return (
     <VSurface as="section" id={`config-${section.id}`} tabIndex={-1} className={sectionClassName} padding="none">
-      <div className={styles.sectionHeader}>
+      {(!inlineEditing || !presentation) && <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
           <h2 className={styles.sectionTitle} title={section.path}>{presentation?.sectionTitle ?? section.title}</h2>
           {!inlineEditing && <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>}
@@ -1349,7 +1349,7 @@ export function ConfigSectionEditor({
           )}
           </div>
         </div>}
-      </div>
+      </div>}
       {saveError ? (
         <div className={styles.sectionSaveError} data-section-save-error="true" role="alert">
           <VErrorSummary

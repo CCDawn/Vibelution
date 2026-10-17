@@ -58,6 +58,19 @@ const GROUP_ORDER: ConfigSettingsGroupId[] = [
  * the approved frontend categories. Unknown sections still follow annotations. */
 const FALLBACK_GROUP_ID: ConfigSettingsGroupId = "tooling-diagnostics";
 const FALLBACK_PAGE_ID = "tooling-other";
+const PAGE_DESCRIPTIONS: Record<string, readonly [string, string]> = {
+  "workbench-interface": ["调整工作台的显示方式和默认审核习惯。", "Adjust workbench appearance and default review behavior."],
+  "workbench-shortcuts": ["修改全局快捷键，保存在本机并立即生效。", "Customize global keyboard shortcuts on this device."],
+  "identity-profile": ["管理显示信息，以及提供给 Agent 的背景与偏好。", "Manage your display information and context shared with Agents."],
+  "personal-assistant": ["管理桌面显示、助理形象与陪伴偏好。", "Manage desktop visibility, appearance, and companion preferences."],
+  "model-connection": ["连接服务商，管理密钥与可用模型。", "Connect providers and manage credentials and available models."],
+  "runtime-context": ["控制上下文压缩和重启后的会话恢复。", "Configure context compression and session recovery after restart."],
+  "tooling-network": ["管理代理、请求参数与模型响应解析。", "Manage proxy settings, requests, and model response parsing."],
+  "tooling-security": ["管理文件和命令保护；工具授权在各 Agent 中配置。", "Protect files and commands. Configure tool permissions per Agent."],
+  "tooling-health": ["查看运行状态、日志和排障信息。", "Inspect runtime health, logs, and diagnostic information."],
+  "tooling-git": ["管理低频参数、Git 助手和完整配置。", "Manage advanced parameters, Git assistance, and the full configuration."],
+  "overview-save": ["查看配置位置、检查问题和迁移兼容状态。", "Inspect configuration paths, issues, and migration compatibility."],
+};
 
 const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]> = {
   "overview-apply": [
@@ -129,7 +142,7 @@ export function buildConfigSettingsGroups(
       return {
         id: definition.id,
         title: language === "zh" ? definition.zh : definition.en,
-        summary: members.length === 1 ? members[0].summary : members.map((section) => section.title).join(language === "zh" ? "、" : ", "),
+        summary: PAGE_DESCRIPTIONS[definition.id]?.[language === "zh" ? 0 : 1] ?? (members.length === 1 ? members[0].summary : members.map((section) => section.title).join(language === "zh" ? "、" : ", ")),
         memberSectionIds,
       };
     }).filter((page) => page.memberSectionIds.length > 0),
