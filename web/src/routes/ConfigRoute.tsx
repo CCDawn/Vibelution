@@ -187,10 +187,12 @@ const ConfigRuntimePanel = lazy(() =>
 );
 import {
   buildProviderWizardDraft,
+  canonicalProviderRoute,
   deriveProviderRegistryRows,
   initialProviderQuickSetupState,
   initialProviderWizardState,
   providerQuickSetupReducer,
+  providerRouteSelection,
   providerWizardReducer,
   type ProviderWizardState,
 } from "./configProviderLogic";
@@ -204,7 +206,7 @@ import {
   type ProviderRouteImpact,
   type ProviderRoutePreview,
 } from "./config/useConfigProviderDraftActions";
-import { CONFIG_COPY, formatConfigCopy, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
+import { CONFIG_COPY, formatConfigCopy, resolvedRouteSelectOptions, type ConfigCopy, type ConfigLanguage } from "./config/configCopy";
 import {
   type AvatarImageUploadResponse,
   ConfigSectionEditor,
@@ -1856,28 +1858,21 @@ export function ConfigRoute() {
                         />
                       </label>
                       <label className={styles.providerRouteEditField}>
-                        <span>{copy.routeFieldDriver}</span>
-                        <VStringSelect
-                          ariaLabel="Provider route driver"
-                          value={getString(routeEditProvider.driver)}
-                          isDisabled={Boolean(busyAction)}
-                          options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
-                          onValueChange={(driver) => setRouteEditProvider((current) => ({ ...current, driver }))}
-                        />
-                      </label>
-                      <label className={styles.providerRouteEditField}>
                         <span>{copy.routeFieldProtocol}</span>
                         <VStringSelect
-                          ariaLabel="Provider default wire protocol"
-                          value={getString(asRecord(routeEditProvider.protocols).default)}
+                          ariaLabel={copy.routeFieldProtocol}
+                          value={canonicalProviderRoute(getString(asRecord(routeEditProvider.protocols).default)) || getString(asRecord(routeEditProvider.protocols).default)}
                           isDisabled={Boolean(busyAction)}
-                          options={["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"].map((value) => ({ value, label: value }))}
-                          onValueChange={(defaultProtocol) => setRouteEditProvider((current) => {
+                          options={resolvedRouteSelectOptions(copy, getString(asRecord(routeEditProvider.protocols).default))}
+                          onValueChange={(route) => setRouteEditProvider((current) => {
                             const protocols = asRecord(current.protocols);
                             const allowed = Array.isArray(protocols.allowed) ? protocols.allowed.filter((item): item is string => typeof item === "string") : [];
+                            const next = providerRouteSelection(route, allowed, "union");
+                            if (!next) return current;
                             return {
                               ...current,
-                              protocols: { ...protocols, default: defaultProtocol, allowed: Array.from(new Set([...allowed, defaultProtocol])) },
+                              driver: next.driver,
+                              protocols: { ...protocols, default: next.defaultProtocol, allowed: next.allowedProtocols },
                             };
                           })}
                         />

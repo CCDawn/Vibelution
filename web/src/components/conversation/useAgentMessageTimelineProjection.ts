@@ -144,10 +144,79 @@ function suppressSupersededCompanionInFlightMessages(messages: ConversationMessa
 }
 
 /**
+ * One live turn can reach the renderer as two overlays: the backend projection
+ * (`<sessionId>-message-live-<turnId>`, kind `session_live_overlay`) and the
+ * frontend active turn layer (`<sessionId>-message-active-<turnId>`, kind
+ * `session_active_turn_layer`). Their ids never collide and each one retires on
+ * its own rule, so concatenating both paints the same in-flight answer twice
+ * until the turn settles. Keep exactly one message per assistant turn.
+ */
+function assistantOverlayHasText(message: ConversationMessage): boolean {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  if (assistantFinalAnswerText(message).trim()) {
+    return true;
+  }
+  return (message.turnItems ?? []).some((item) => (
+    (item.type === "agent_message" || item.type === "reasoning")
+    && String(item.text ?? "").trim().length > 0
+  ));
+}
+
+function assistantTurnDuplicateRank(message: ConversationMessage): number {
+  if (hasTerminalCanonicalTurnOutcome(message) || hasCommittedAssistantProtocolAnswer(message)) {
+    return 4;
+  }
+  // `hasVisibleTurnData` treats an empty in-flight shell as visible, which would
+  // let a pending placeholder shadow an overlay that already streams text.
+  const hasContent = assistantOverlayHasText(message);
+  const kind = String(message.metadata?.kind ?? "").trim();  // An empty overlay must never shadow a sibling that already streams text, and
+  // a content-bearing active layer beats the coarser backend projection because
+  // it repaints from the lowest-latency stream.
+  if (kind === "session_active_turn_layer") {
+    return hasContent ? 3 : 1;
+  }
+  if (kind === "session_live_overlay" || /-message-live-/.test(String(message.id ?? ""))) {
+    return hasContent ? 2 : 1;
+  }
+  return hasContent ? 3 : 1;
+}
+
+function dedupeAssistantTurnOverlays(messages: ConversationMessage[]): ConversationMessage[] {
+  const winnerByTurnId = new Map<string, ConversationMessage>();
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+const turnId = messageTurnId(message);
+    if (!turnId) {
+      continue;
+    }
+    const current = winnerByTurnId.get(turnId);    // Strictly greater keeps the first message on a tie, so an already painted
+    // row never swaps identity mid-stream.
+    if (!current || assistantTurnDuplicateRank(message) > assistantTurnDuplicateRank(current)) {
+      winnerByTurnId.set(turnId, message);
+    }
+  }
+  if (winnerByTurnId.size === 0) {
+    return messages;
+  }
+  return messages.filter((message) => {
+    if (message.role !== "assistant") {
+      return true;
+    }
+const turnId = messageTurnId(message);
+    if (!turnId) {
+      return true;
+    }
+    return winnerByTurnId.get(turnId) === message;  });
+}
+
+/**
  * Convert the canonical session stream to the renderer model exactly once.
  * There is no side-channel merge of thought, feedback, transcript or content.
- */
-export function projectAgentMessageTimelineMessages({
+ */export function projectAgentMessageTimelineMessages({
   timelineMessages,
   activeTurnMessage,
   companionMode = false,
@@ -158,11 +227,12 @@ export function projectAgentMessageTimelineMessages({
   const canonicalActiveTurn = activeTurnMessage
     ? normalizeConversationMessageForRenderer(projectConversationMessageFromTurnItemsV2(activeTurnMessage))
     : undefined;
-  const folded = projectTimelineProcessMessages([
-    ...canonicalTimeline,
-    ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
-  ]);
-  const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
+const folded = projectTimelineProcessMessages(
+    dedupeAssistantTurnOverlays([
+      ...canonicalTimeline,
+      ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
+    ]),
+  );  const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
   const messages = companionMode
     ? suppressCompanionRestatedFollowups(
       suppressSupersededCompanionInFlightMessages(orderedMessages),
