@@ -130,6 +130,7 @@ def test_finding_context_tool_scopes_and_compacts_trace(monkeypatch) -> None:
             team_id="team-1",
             run_id="source-1",
             stage_id="finding",
+            task_id="task-1",
         )
     )
 

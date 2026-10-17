@@ -23,9 +23,9 @@ def test_finding_context_refreshes_receipts_even_when_context_is_cached(monkeypa
     monkeypatch.setattr(service, "get_source_collection_stage_task_context", context)
     receipts = []
     monkeypatch.setattr(search_execution, "project_source_collection_search_trace", lambda *_: list(receipts))
-    first = json.loads(stage_tools.source_collection_context_tool(team_id="team-1", run_id="source-1", stage_id="finding"))
+    first = json.loads(stage_tools.source_collection_context_tool(team_id="team-1", run_id="source-1", stage_id="finding", task_id="task-1"))
     receipts.append({"resultRefs": ["https://example.org/new"]})
-    second = json.loads(stage_tools.source_collection_context_tool(team_id="team-1", run_id="source-1", stage_id="finding"))
+    second = json.loads(stage_tools.source_collection_context_tool(team_id="team-1", run_id="source-1", stage_id="finding", task_id="task-1"))
     assert first["searchReceipts"] == []
     assert [item["resultRefs"] for item in second["searchReceipts"]] == [
         item["resultRefs"] for item in receipts

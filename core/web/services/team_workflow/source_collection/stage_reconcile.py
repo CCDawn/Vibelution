@@ -2092,6 +2092,41 @@ def _find_source_collection_stage_session_task_by_id(team_id: str, task_id: str)
     return None, ""
 
 
+def _find_source_collection_stage_session_task_by_session(
+    team_id: str, session_id: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """Resolve the unique stage task bound to a canonical Agent session.
+
+    Mirrors the by-id scan (same store roots), matching ``sessionId``.  A
+    session normally anchors exactly one stage task (formal retries open a new
+    session); an ambiguous match fails closed with ``None`` so callers never
+    guess between lineages.
+    """
+
+    s = _service()
+    normalized_session_id = s._trim_text(session_id, max_length=160)
+    if not normalized_session_id:
+        return None, ""
+    matches: list[dict[str, Any]] = []
+    match_run_ids: list[str] = []
+    for runs_root in s._source_collection_task_store_search_roots(team_id):
+        if not runs_root.exists():
+            continue
+        for path in runs_root.glob("*/stage_session_tasks.json"):
+            store = s._read_json(path)
+            if store.get("teamId") != team_id:
+                continue
+            for item in list(store.get("tasks") or []):
+                if not isinstance(item, dict):
+                    continue
+                if s._trim_text(item.get("sessionId"), max_length=160) == normalized_session_id:
+                    matches.append(item)
+                    match_run_ids.append(path.parent.name)
+    if len(matches) != 1:
+        return None, ""
+    return matches[0], match_run_ids[0]
+
+
 def _upsert_source_collection_stage_session_task(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
     s = _service()
     task_id = s._trim_text(task.get("taskId"), max_length=160)

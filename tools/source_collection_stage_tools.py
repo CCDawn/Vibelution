@@ -84,6 +84,53 @@ def source_collection_context_tool(
             run_id=run_id,
             task_id=task_id,
         )
+        if not _text(task_id):
+            # Fail closed on a missing stage task anchor: without it the service
+            # would silently return an "ok" payload with empty assignments and
+            # an empty agentId, which stage Agents misread as "not dispatched to
+            # me".  First try the authoritative fallback (the runtime identity
+            # of the calling Agent session binds exactly one stage task); when
+            # that cannot resolve, return the explicit error instead.
+            fallback_task_id, fallback_resolution = _resolve_source_collection_task_id_from_runtime_session(
+                resolved_team_id,
+            )
+            if fallback_task_id:
+                task_id = fallback_task_id
+                resolution = {**(resolution or {}), **fallback_resolution}
+            else:
+                _record_stage_tool_event(
+                    "tool.source_collection_context.failed",
+                    level="warning",
+                    outcome="failed",
+                    fields={
+                        "teamId": resolved_team_id,
+                        "runId": _text(run_id),
+                        "stageId": _text(stage_id),
+                        "taskId": "",
+                        "errorType": "missing_task_id",
+                    },
+                )
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "errorType": "missing_task_id",
+                        "message": (
+                            "[工具参数错误] source_collection_context_tool 缺少 task_id：上下文按阶段任务派发。"
+                            "task_id is required; call with the stage task_id from your assignment message."
+                            "Empty assignments never mean the task was not dispatched to you."
+                        ),
+                        "teamId": resolved_team_id,
+                        "runId": _text(run_id),
+                        "taskId": "",
+                        "recovery": _source_collection_context_recovery_hint(
+                            team_id=team_id,
+                            run_id=run_id,
+                            task_id=task_id,
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
         cache_key = (
             _text(resolved_team_id),
             _text(run_id),
@@ -487,6 +534,44 @@ def _resolve_source_collection_team_id(
     return normalized_team_id, {}
 
 
+def _resolve_source_collection_task_id_from_runtime_session(
+    team_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Resolve the stage task bound to the calling Agent session, if unique.
+
+    The executing tool call's runtime identity (sessionId) is the only
+    authoritative source; a session normally anchors exactly one stage task.
+    Without a runtime session or on an ambiguous match this returns empty so
+    the caller keeps the explicit error path.
+    """
+
+    normalized_team_id = _text(team_id)
+    if not normalized_team_id:
+        return "", {}
+    try:
+        from core.web.services import team_workflow_orchestration_service as workflow_service
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        session_id = _text((current_agent_runtime() or {}).get("sessionId"))
+        if not session_id:
+            return "", {}
+        task, task_run_id = workflow_service._find_source_collection_stage_session_task_by_session(
+            normalized_team_id,
+            session_id,
+        )
+    except Exception:
+        return "", {}
+    fallback_task_id = _text((task or {}).get("taskId"))
+    if not fallback_task_id:
+        return "", {}
+    return fallback_task_id, {
+        "taskIdSource": "agent_runtime_session",
+        "taskId": fallback_task_id,
+        "runId": _text((task or {}).get("runId")) or _text(task_run_id),
+        "sessionId": _text((task or {}).get("sessionId")),
+    }
+
+
 def _team_id_from_run(run_id: str) -> str:
     try:
         from core.web.services import data_processing_service
@@ -550,6 +635,11 @@ def _source_collection_context_recovery_hint(
             if match.get("teamId"):
                 return f"Retry with team_id={str(match['teamId'])!r}; this was inferred from the stage task."
         return "Provide team_id from the stage task message. If run_id is available, use the run's scope.teamId; for Challenge Cup source collection this is usually 'research-team'."
+    if not _text(task_id):
+        return (
+            "task_id is required; call with the stage task_id from your assignment message "
+            "(taskId / sourceCollectionStageTaskId in the source_collection_stage_session_task start message)."
+        )
     return "Use source_collection_stage_writeback_tool with status=blocked if this context is required to finish the stage task."
 
 

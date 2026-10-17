@@ -513,6 +513,7 @@ from core.web.services.team_workflow.source_collection.stage_reconcile import (
     _source_collection_stage_evidence_retry_focus,
     _find_source_collection_stage_session_task,
     _find_source_collection_stage_session_task_by_id,
+    _find_source_collection_stage_session_task_by_session,
     _upsert_source_collection_stage_session_task,
     _source_collection_stage_task_idempotency_key,
     _source_collection_stage_task_tool_progress_from_trace,

@@ -810,7 +810,7 @@ def _build_key_tools() -> List[BaseTool]:
             team_id: 团队 ID，阶段任务消息中的 teamId
             run_id: 资料搜集运行 ID，阶段任务消息中的 runId
             stage_id: 阶段 ID，可选 finding/extraction/relations/ingestion
-            task_id: 阶段任务 ID；传入后会自动补齐 run/stage
+            task_id: 阶段任务 ID（必填；缺少时工具直接报错，空 assignments 不代表任务未派发）；传入后会自动补齐 run/stage
             max_records: 最多返回多少条资料记录，默认 5，上限由后端限制
             include_candidates: 是否返回本轮已导入的 source_manifest 候选
             record_offset: 原始 DataRecord 分页起点，默认 0；下一页用 recordPage.nextOffset

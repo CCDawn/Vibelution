@@ -277,6 +277,71 @@ def _service():
     return team_workflow_orchestration_service
 
 
+def _heal_source_collection_stage_agent_direct_session(
+    team_id: str,
+    agent: dict[str, Any],
+    *,
+    run_id: str = "",
+    stage_id: str = "",
+    purpose: str = "stage_session_task",
+) -> dict[str, Any]:
+    """Rebind a stage Agent whose roster directSessionId is lost or invalid.
+
+    Historical data or a restart can leave a system-team roster Agent with an
+    empty/deleted ``directSessionId`` while the Team index keeps the member
+    entry; without a rebind the Agent has no canonical direct session and
+    dispatch-time consumers fail with no in-product repair.  Detection reuses
+    the team-service availability probe and the rebind reuses the product's
+    ``ensure_agent_direct_session``; a workflow event records the heal (or the
+    failed attempt) for audit.  A healthy binding is a no-op.
+    """
+
+    s = _service()
+    agent_id = s._trim_text(agent.get("agentId"), max_length=160)
+    if not agent_id:
+        return agent
+    previous_session_id = s._trim_text(agent.get("directSessionId"), max_length=160)
+    try:
+        if s.team_service._agent_direct_session_available(agent, session_service=s.session_service):
+            return agent
+    except Exception:
+        return agent
+    fields = {
+        "runId": s._trim_text(run_id, max_length=160),
+        "stageId": s._trim_text(stage_id, max_length=80),
+        "agentId": agent_id,
+        "agentRole": s._trim_text(agent.get("roleKey"), max_length=80),
+        "previousDirectSessionId": previous_session_id,
+        "purpose": s._trim_text(purpose, max_length=80),
+    }
+    try:
+        s.session_service.ensure_agent_direct_session(
+            agent_id=agent_id,
+            title=s._trim_text(agent.get("displayName"), max_length=120),
+            created_by="source_collection_stage_session",
+            conversation_index_kind=s.team_service._member_direct_session_kind(agent),
+        )
+    except Exception as exc:
+        s._record_workflow_event(
+            "source_collection.stage_agent_direct_session_rebind_failed",
+            team_id,
+            fields={**fields, "errorType": type(exc).__name__},
+        )
+        return agent
+    healed = s.agent_directory_service.get_agent(agent_id)
+    if not isinstance(healed, dict):
+        return agent
+    s._record_workflow_event(
+        "source_collection.stage_agent_direct_session_rebound",
+        team_id,
+        fields={
+            **fields,
+            "directSessionId": s._trim_text(healed.get("directSessionId"), max_length=160),
+        },
+    )
+    return healed
+
+
 def _canonical_problem_understanding_record_id(workflow_run_id: str) -> str:
     """Artifact identity (node run id) of the authoritative attempt, or "".
 
@@ -634,6 +699,13 @@ def seed_source_collection_agent_session_context(
     agent = s.agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise s.TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
+    agent = _heal_source_collection_stage_agent_direct_session(
+        normalized_team_id,
+        agent,
+        run_id=normalized_run_id,
+        stage_id=stage_id,
+        purpose="session_context_seed",
+    )
 
     try:
         run = s.data_processing_service.get_processing_run(normalized_run_id)
@@ -1080,6 +1152,13 @@ def start_source_collection_stage_session_task(
     agent = s.agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise s.TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
+    agent = _heal_source_collection_stage_agent_direct_session(
+        normalized_team_id,
+        agent,
+        run_id=normalized_run_id,
+        stage_id=stage_id,
+        purpose="stage_session_task",
+    )
 
     dialogue_model_id = s.agent_directory_service.agent_dialogue_model_id(agent)
     try:
