@@ -12,6 +12,7 @@ from core.web.services.team.team_constants import (
     KNOWLEDGE_EXPANSION_TEAM_ID,
 )
 from tests.e2e.conftest import e2e_enabled
+from tests.e2e.helpers.instance_registry import fetch_json
 from tests.e2e.helpers.page_anchors import domain_recipe_selector, primary_nav_link
 
 pytestmark = [
@@ -25,7 +26,10 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(request, e2e_
 
     # Read the deployed registry and native Sessions, not an in-process seed.
     # Every bundled identity must be selectable before visiting a feature page.
-    agents = e2e_instance.api_get("/api/agents?detail=summary")
+    # The existing route provisions configured evolution roles on its first
+    # cold read. Allow that startup work; subsequent reads keep the normal
+    # fixture timeout. This does not impose a new product latency contract.
+    agents = fetch_json(e2e_instance.port, "/api/agents?detail=summary", timeout_seconds=60)
     bundled = [agent for agent in agents if (agent.get("metadata") or {}).get("builtinPreset")]
     starter = [agent for agent in bundled if agent["metadata"]["builtinPreset"] == "general_assistant_v1"]
     research = [agent for agent in bundled if agent["metadata"]["builtinPreset"].startswith("research_role_v1:")]
