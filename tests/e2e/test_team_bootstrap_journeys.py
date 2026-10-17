@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse
 
 import pytest
 
@@ -24,8 +23,6 @@ pytestmark = [
 def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_instance):
     from playwright.sync_api import expect
 
-    snapshots = []
-    catalogs = []
     # Read the deployed registry and native Sessions, not an in-process seed.
     # Every bundled identity must be selectable before visiting a feature page.
     agents = e2e_instance.api_get("/api/agents?detail=summary")
@@ -60,44 +57,38 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         assert session["agentId"] == agent["agentId"]
         assert not session.get("messages")
 
-    def capture(response):
-        if urlparse(response.url).path == "/api/teams" and response.request.method == "GET" and response.status == 200:
-            payload = response.json()
-            snapshots.append(payload.get("systemTeamBootstrap", {}))
-            catalogs.append(payload)
-
-    page.on("response", capture)
-    try:
+    page.locator(primary_nav_link("/teams")).click()
+    expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
+    expect(page.get_by_text("6 位成员可用", exact=True)).to_be_visible()
+    # A warm frontend can reuse its catalog cache. Inspect the deployed owner
+    # through its normal read endpoint instead of requiring another UI request.
+    for _ in range(120):
+        catalog = e2e_instance.api_get("/api/teams")
+        state = catalog.get("systemTeamBootstrap", {})
+        if state.get("status") in {"ready", "failed"}:
+            break
+        page.wait_for_timeout(500)
+    print(f"[team-journey] instance={e2e_instance.instance_id} bootstrap={state}")
+    assert state.get("status") == "ready", state
+    expected = {CHALLENGE_CUP_RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, *EVOLUTION_SYSTEM_TEAM_IDS}
+    assert expected <= {team["teamId"] for team in catalog.get("teams", [])}
+    attempt = state.get("attempt")
+    for _ in range(3):
+        page.locator(primary_nav_link("/chat")).click()
+        expect(page).to_have_url(re.compile(re.escape(e2e_instance.base_url) + r"/chat(?:\?|$)"))
         page.locator(primary_nav_link("/teams")).click()
         expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
-        expect(page.get_by_text("6 位成员可用", exact=True)).to_be_visible()
-        # Observe normal frontend polling; diagnostics must not trigger extra repairs.
-        for _ in range(120):
-            if snapshots and snapshots[-1].get("status") in {"ready", "failed"}:
-                break
-            page.wait_for_timeout(500)
-        assert snapshots, "Team navigation made no successful catalog request"
-        state = snapshots[-1]
-        print(f"[team-journey] instance={e2e_instance.instance_id} bootstrap={state}")
-        assert state.get("status") == "ready", state
-        expected = {CHALLENGE_CUP_RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, *EVOLUTION_SYSTEM_TEAM_IDS}
-        attempt = state.get("attempt")
-        for _ in range(3):
-            page.locator(primary_nav_link("/chat")).click()
-            expect(page).to_have_url(re.compile(re.escape(e2e_instance.base_url) + r"/chat(?:\?|$)"))
-            page.locator(primary_nav_link("/teams")).click()
-            expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/teams" and response.status == 200):
-            page.reload(wait_until="domcontentloaded")
-        expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
-        assert expected <= {team["teamId"] for team in catalogs[-1].get("teams", [])}
-        assert snapshots[-1].get("attempt") == attempt, "Navigation restarted initialization during the retry window"
-        page.goto(f"{e2e_instance.base_url}/companions", wait_until="domcontentloaded")
-        expect(page.locator(domain_recipe_selector("virtual-human-companion-lobby"))).to_be_visible()
-        expect(page.get_by_text("洛天依", exact=True)).to_be_visible()
-        final_agents = e2e_instance.api_get("/api/agents?detail=summary")
-        assert {agent["agentId"] for agent in final_agents if (agent.get("metadata") or {}).get("builtinPreset")} == {
-            agent["agentId"] for agent in bundled
-        }, "Feature navigation duplicated the bundled Agent catalog"
-    finally:
-        page.remove_listener("response", capture)
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator(domain_recipe_selector("generic-team-workspace"))).to_be_visible()
+    final_catalog = e2e_instance.api_get("/api/teams")
+    final_state = final_catalog.get("systemTeamBootstrap", {})
+    assert final_state.get("status") == "ready", final_state
+    assert expected <= {team["teamId"] for team in final_catalog.get("teams", [])}
+    assert final_state.get("attempt") == attempt, "Navigation restarted initialization during the retry window"
+    page.goto(f"{e2e_instance.base_url}/companions", wait_until="domcontentloaded")
+    expect(page.locator(domain_recipe_selector("virtual-human-companion-lobby"))).to_be_visible()
+    expect(page.get_by_text("洛天依", exact=True)).to_be_visible()
+    final_agents = e2e_instance.api_get("/api/agents?detail=summary")
+    assert {agent["agentId"] for agent in final_agents} == {agent["agentId"] for agent in agents}, (
+        "Feature navigation duplicated the deployed Agent catalog"
+    )
