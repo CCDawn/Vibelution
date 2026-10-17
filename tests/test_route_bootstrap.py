@@ -9,6 +9,31 @@ from fastapi import FastAPI
 from core.web.route_bootstrap import register_spa_routes
 
 
+@pytest.mark.parametrize("background", [False, True])
+def test_agent_assets_exist_before_functional_routes_become_ready(monkeypatch, background):
+    from core.web import route_bootstrap
+    from core.web.services.agent_directory import bootstrap
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    calls = []
+
+    def seed():
+        assert not app.state.web_routes_registered
+        calls.append("agents")
+
+    monkeypatch.setattr(route_bootstrap, "import_web_route_modules", lambda **kwargs: [])
+    monkeypatch.setattr(route_bootstrap, "register_web_routers_from_modules", lambda *args: calls.append("routes"))
+    monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(route_bootstrap, "_log_routes_bootstrap_summary", lambda payload: None)
+    monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", seed)
+    if background:
+        asyncio.run(route_bootstrap.warm_web_routes_in_background(app))
+    else:
+        route_bootstrap.ensure_web_routes_registered(app)
+    assert calls == ["agents", "routes"]
+    assert app.state.web_routes_registered
+
+
 def test_register_spa_routes_fails_closed_when_pinned_release_disappears(tmp_path: Path) -> None:
     app = FastAPI()
     app.state.serving_frontend_dist = str(tmp_path / "release-missing")

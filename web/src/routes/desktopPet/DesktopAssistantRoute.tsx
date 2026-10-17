@@ -395,7 +395,7 @@ export function DesktopAssistantRoute() {
           </div>
         </section>
         <div className={styles.overviewFill}>
-          <PersonalAssistantOverview desktop onOpenSession={id => void openSession(id)} />
+          <PersonalAssistantOverview desktop showTitles={preferences.showTitles} onOpenSession={id => void openSession(id)} />
         </div>
       </aside> : undefined} />
     {feedback ? <p className={styles.error} role="alert">{feedback}</p> : null}

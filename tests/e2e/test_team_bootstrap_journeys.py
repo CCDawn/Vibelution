@@ -8,6 +8,7 @@ import pytest
 
 from core.web.services.team.team_constants import (
     AI_SEARCH_TEAM_ID,
+    CHALLENGE_CUP_RESEARCH_TEAM_ID,
     EVOLUTION_SYSTEM_TEAM_IDS,
     KNOWLEDGE_EXPANSION_TEAM_ID,
 )
@@ -44,14 +45,8 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         assert snapshots, "Team navigation made no successful catalog request"
         state = snapshots[-1]
         print(f"[team-journey] instance={e2e_instance.instance_id} bootstrap={state}")
-        # A fresh instance may lack the six preconfigured Challenge Cup Agents.
-        # This refusal must not prevent independent system Teams from appearing.
-        if state.get("status") == "failed":
-            assert "Challenge Cup AgentDirectory asset is missing:" in state.get("lastError", ""), state
-            assert state.get("requiredSteps") == ["challenge_cup_research_team"], state
-        else:
-            assert state.get("status") == "ready", state
-        expected = {AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, *EVOLUTION_SYSTEM_TEAM_IDS}
+        assert state.get("status") == "ready", state
+        expected = {CHALLENGE_CUP_RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, *EVOLUTION_SYSTEM_TEAM_IDS}
         attempt = state.get("attempt")
         for _ in range(3):
             page.locator(primary_nav_link("/chat")).click()

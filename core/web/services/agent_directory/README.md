@@ -10,6 +10,7 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | You are changing… | Open first |
 |-------------------|------------|
 | Persona / task profile normalize | `profiles.py` |
+| Fresh-deployment bundled Agent assets (create missing only) | `bootstrap.py` |
 | Tool / memory / delegation / supervision policy | `policies.py` |
 | Archive / purge / reset | `lifecycle.py` |
 | List/get / API hydration | `projections.py` |
@@ -45,7 +46,8 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 3. Lifecycle archive/purge/reset keep serializer wrappers on the facade (`__wrapped__` identity).
 4. Re-export public symbols from `agent_directory_service` for route stability.
 5. `get_core_context_tool` / `get_current_goal_tool` / `commit_compressed_memory_tool` belong to self-evolution generation handoff, not the default session pack.
-6. Current personal memories are dumped into `build_agent_context` as `## 个人记忆` so every session of the same Agent can see them. This dump is not generation-handoff `MEMORY`.
+6. `bootstrap.py` seeds the public general assistant and research-role assets before functional routes become ready. Existing or archived assets remain operator-owned; startup must not replace their models, prompts, policies, or lifecycle state. Team bootstrap continues to bind existing Agent assets only.
+7. Current personal memories are dumped into `build_agent_context` as `## 个人记忆` so every session of the same Agent can see them. This dump is not generation-handoff `MEMORY`.
 
 ## Extraction progress
 

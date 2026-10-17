@@ -266,6 +266,9 @@ def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) 
         module_imports, on_module_imported = _new_module_timing_sink()
         try:
             modules = import_web_route_modules(on_module_imported=on_module_imported)
+            from .services.agent_directory.bootstrap import initialize_builtin_agent_catalog
+
+            initialize_builtin_agent_catalog()
             import_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
             mount_started = time.perf_counter()
             register_web_routers_from_modules(app, modules)
@@ -325,6 +328,12 @@ async def warm_web_routes_in_background(
             )
         import_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
         # include_router must stay on the main thread / event loop.
+        from .services.agent_directory.bootstrap import initialize_builtin_agent_catalog
+
+        if run_sync is None:
+            await asyncio.to_thread(initialize_builtin_agent_catalog)
+        else:
+            await run_sync("builtin-agent-bootstrap", initialize_builtin_agent_catalog)
         with _REGISTER_LOCK:
             if bool(getattr(app.state, "web_routes_registered", False)):
                 _start_financial_team_coordinator(app, run_sync=run_sync)

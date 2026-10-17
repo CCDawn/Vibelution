@@ -21,9 +21,9 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
-async function render(desktop = false) {
+async function render(desktop = false, showTitles = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter>
-    <PersonalAssistantOverview desktop={desktop} onOpenSession={openSession} />
+    <PersonalAssistantOverview desktop={desktop} showTitles={showTitles} onOpenSession={openSession} />
   </MemoryRouter></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
@@ -44,5 +44,20 @@ describe("personal assistant management shortcuts", () => {
     await act(async () => session.click());
     expect(openSession).toHaveBeenCalledWith("worker-session");
     expect(container.textContent).toContain("操作工具中");
+  });
+  it("hides private titles and Agent names throughout the desktop overview without breaking navigation", async () => {
+    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "",
+      counts: { agents: 1, sessions: 1, running: 1, waiting: 1, failed: 0 },
+      agents: [{ id: "private-agent", displayName: "私人智能体", status: "idle" }],
+      attention: [{ id: "private-attention", title: "私人待办", sessionId: "worker-session", kind: "approval" }],
+      sessions: [{ id: "worker-session", agentId: "private-agent", title: "私人任务", status: "running", currentPhase: "tooling" }] });
+    await render(true, false);
+    expect(container.textContent).not.toMatch(/私人智能体|私人待办|私人任务/);
+    expect(container.textContent).toContain("事项 1");
+    expect(container.textContent).toContain("会话 1");
+    expect(container.textContent).toContain("智能体 1");
+    const session = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("会话 1"))!;
+    await act(async () => session.click());
+    expect(openSession).toHaveBeenCalledWith("worker-session");
   });
 });

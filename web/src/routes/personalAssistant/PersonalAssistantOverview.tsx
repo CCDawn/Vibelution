@@ -6,8 +6,8 @@ import { VButton, VIconButton, VRouteLinkButton, VStateSurface } from "../../com
 import { assistantStatusLabel } from "./personalAssistantModel";
 import styles from "./PersonalAssistant.styles";
 
-export function PersonalAssistantOverview({ onOpenSession, desktop = false }: {
-  onOpenSession: (sessionId: string) => void; desktop?: boolean;
+export function PersonalAssistantOverview({ onOpenSession, desktop = false, showTitles = true }: {
+  onOpenSession: (sessionId: string) => void; desktop?: boolean; showTitles?: boolean;
 }) {
   const overview = useQuery({ queryKey: queryKeys.personalAssistantOverview(),
     queryFn: ({ signal }) => fetchPersonalAssistantOverview({ signal }), refetchInterval: 5_000,
@@ -25,17 +25,17 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false }: {
         ] as const).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         <p className={styles.caption}>更新于 {data.generatedAt ? new Date(data.generatedAt).toLocaleTimeString() : "—"}</p>
         <h3 className={styles.sectionTitle}>需要关注</h3>
-        {data.attention.length ? <ul className={styles.list}>{data.attention.map(item => <li key={item.id}>
-          {item.sessionId ? <VButton variant="ghost" className={styles.rowButton} onClick={() => onOpenSession(item.sessionId!)}>{item.title}</VButton> : <span>{item.title}</span>}
+        {data.attention.length ? <ul className={styles.list}>{data.attention.map((item, index) => <li key={item.id}>
+          {item.sessionId ? <VButton variant="ghost" className={styles.rowButton} onClick={() => onOpenSession(item.sessionId!)}>{showTitles ? item.title : `事项 ${index + 1}`}</VButton> : <span>{showTitles ? item.title : `事项 ${index + 1}`}</span>}
         </li>)}</ul> : <p className={styles.caption}>当前没有待处理事项</p>}
         <h3 className={styles.sectionTitle}>会话状态</h3>
-        {data.sessions.length ? <ul className={styles.list}>{data.sessions.map(session => <li key={session.id}>
+        {data.sessions.length ? <ul className={styles.list}>{data.sessions.map((session, index) => <li key={session.id}>
           <VButton variant="ghost" className={styles.rowButton} onClick={() => onOpenSession(session.id)}>
-            <span className="min-w-0 truncate">{session.title || "未命名会话"}</span><span className={styles.caption}>{assistantStatusLabel(session.currentPhase || session.status)}</span>
+            <span className="min-w-0 truncate">{showTitles ? session.title || "未命名会话" : `会话 ${index + 1}`}</span><span className={styles.caption}>{assistantStatusLabel(session.currentPhase || session.status)}</span>
           </VButton></li>)}</ul> : <p className={styles.caption}>还没有会话</p>}
         <h3 className={styles.sectionTitle}>智能体</h3>
-        <ul className={styles.list}>{data.agents.map(agent => <li key={agent.id} className={styles.agentRow}>
-          <span className="min-w-0 truncate">{agent.displayName || agent.id}</span><span className={styles.caption}>{assistantStatusLabel(agent.status)}</span>
+        <ul className={styles.list}>{data.agents.map((agent, index) => <li key={agent.id} className={styles.agentRow}>
+          <span className="min-w-0 truncate">{showTitles ? agent.displayName || agent.id : `智能体 ${index + 1}`}</span><span className={styles.caption}>{assistantStatusLabel(agent.status)}</span>
         </li>)}</ul>
       </> : null}
     {!desktop ? <div className={styles.links}>
