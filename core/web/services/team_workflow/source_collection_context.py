@@ -279,6 +279,11 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
     # passthrough it would never see the system-computed remediation.
     if isinstance(context.get("writebackRemediation"), dict) and context.get("writebackRemediation"):
         compact["writebackRemediation"] = normalize_metadata(context["writebackRemediation"])
+    # Unconsumed planner directive must survive compaction the same way: the
+    # retried agent reads the compact context by default and starts from the
+    # failure-review planner's exact repair instruction.
+    if isinstance(context.get("plannerDirective"), dict) and context.get("plannerDirective"):
+        compact["plannerDirective"] = normalize_metadata(context["plannerDirective"])
     compact_record_ids = [
         trim_text(item.get("recordId"), max_length=160)
         for item in records
