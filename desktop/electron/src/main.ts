@@ -2075,25 +2075,20 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
     return false;
   }
   notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新…");
-  shellRefreshInFlight = true;
   try {
-    await scheduleCurrentDesktopShellRefresh(thenLifecycle);
+    // Automatic freshness checks never authorize interrupting active work.
+    // Reuse the guarded update transaction: prepare, recheck, confirm stops,
+    // then schedule replacement and exit. A failed stop must retain this shell.
+    const result = await restartLauncherToLatestBuild(false, thenLifecycle);
+    if (!result.accepted && result.message) {
+      notifyDesktopTray("Vibelution", result.message, "warning");
+    }
+    return result.accepted;
   } catch (error: unknown) {
-    shellRefreshInFlight = false;
     const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `无法安排桌面壳更新：${detail.slice(0, 220)}`, "warning");
+    notifyDesktopTray("Vibelution", `桌面壳自动更新未完成，保留当前壳：${detail.slice(0, 220)}`, "warning");
     return false;
   }
-  await bestEffortStopIsolatedInstancesForShutdown("stop isolated instances before desktop shell refresh exit");
-  try {
-    await stopManagedRuntime();
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将退出以便更新：${detail.slice(0, 220)}`, "warning");
-  }
-  shutdownApproved = true;
-  app.exit(0);
-  return true;
 }
 
 async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
@@ -3187,14 +3182,8 @@ function startPeriodicShellFreshnessWatch(): void {
       ) {
         return;
       }
-      shellRefreshInFlight = true;
-      notifyDesktopTray("Vibelution", "检测到桌面壳过期，正在无控制台更新…");
-      const refreshed = await refreshPackagedDesktopShellIfStale("");
-      if (!refreshed) {
-        shellRefreshInFlight = false;
-      }
+      await refreshPackagedDesktopShellIfStale("");
     })().catch((error: unknown) => {
-      shellRefreshInFlight = false;
       console.warn(error instanceof Error ? error.message : String(error));
     });
   }, PERIODIC_SHELL_FRESHNESS_MS);

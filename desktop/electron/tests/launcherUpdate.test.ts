@@ -15,6 +15,90 @@ function updateInputs(state: ActiveWorkStatus = { state: "idle", message: "" }) 
 }
 
 describe("guarded local Launcher update", () => {
+  function automaticRefreshHarness() {
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const refresh = main.slice(main.indexOf("async function refreshPackagedDesktopShellIfStale("), main.indexOf("async function runSmokeAndQuit("));
+    const restart = main.slice(main.indexOf("async function restartLauncherToLatestBuild("), main.indexOf("async function resolveLauncherUpdateActiveWork("));
+    const sandbox = {
+      app: { isPackaged: true, exit: vi.fn() },
+      desktopCliArgs: {}, shellRefreshInFlight: false, shutdownApproved: false,
+      decidePackagedDesktopShellRefresh: () => "refresh",
+      inspectCurrentDesktopShell: vi.fn().mockResolvedValue({ stale: true }),
+      notifyDesktopTray: vi.fn(), executeLauncherUpdate,
+      resolveLauncherUpdateActiveWork: vi.fn().mockResolvedValue({ state: "idle", message: "" }),
+      ensureLatestLauncher: vi.fn().mockResolvedValue({}),
+      createDesktopPathsForApp: () => ({ workspaceRoot: "test-workspace" }),
+      desktopPythonPath: () => "pythonw.exe",
+      stopMainRuntimeForApprovedShutdown: vi.fn().mockResolvedValue(undefined),
+      stopIsolatedInstancesForApprovedShutdown: vi.fn().mockResolvedValue(undefined),
+      scheduleCurrentDesktopShellRefresh: vi.fn().mockResolvedValue(undefined),
+      // Exiting is simulated; no real windows or child processes are touched.
+      setTimeout: (callback: () => void) => { callback(); },
+      refresh: undefined as unknown as (operation: string) => Promise<boolean>,
+    };
+    Object.assign(sandbox, {
+      bestEffortStopIsolatedInstancesForShutdown: sandbox.stopIsolatedInstancesForApprovedShutdown,
+      stopManagedRuntime: sandbox.stopMainRuntimeForApprovedShutdown,
+    });
+    const code = transpileModule(refresh + restart + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;", {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText;
+    runInNewContext(code, sandbox);
+    return sandbox;
+  }
+
+  it.each(["active", "unknown"] as const)("keeps the automatic refresh idle when tasks are %s", async (state) => {
+    const input = automaticRefreshHarness();
+    input.resolveLauncherUpdateActiveWork.mockResolvedValue({ state, message: "" });
+    expect(await input.refresh("")).toBe(false);
+    expect(input.ensureLatestLauncher).not.toHaveBeenCalled();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.stopIsolatedInstancesForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    expect(input.shellRefreshInFlight).toBe(false);
+    expect(input.shutdownApproved).toBe(false);
+  });
+
+  it("defers automatic refresh when work starts during preparation", async () => {
+    const input = automaticRefreshHarness();
+    input.resolveLauncherUpdateActiveWork.mockResolvedValueOnce({ state: "idle", message: "" })
+      .mockResolvedValueOnce({ state: "active", message: "" });
+    expect(await input.refresh("")).toBe(false);
+    expect(input.ensureLatestLauncher).toHaveBeenCalledOnce();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+  });
+
+  it.each(["main", "isolated"])("retains the shell if the %s runtime refuses automatic shutdown", async (target) => {
+    const input = automaticRefreshHarness();
+    const stop = target === "main" ? input.stopMainRuntimeForApprovedShutdown : input.stopIsolatedInstancesForApprovedShutdown;
+    stop.mockRejectedValue(new Error("stop refused"));
+    expect(await input.refresh("")).toBe(false);
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    expect(input.shellRefreshInFlight).toBe(false);
+    expect(input.shutdownApproved).toBe(false);
+  });
+
+  it("only schedules and exits automatic refresh after both non-interrupting stops", async () => {
+    const input = automaticRefreshHarness();
+    expect(await input.refresh("open")).toBe(true);
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(false);
+    expect(input.stopIsolatedInstancesForApprovedShutdown).toHaveBeenCalledWith(false);
+    expect(input.stopIsolatedInstancesForApprovedShutdown.mock.invocationCallOrder[0])
+      .toBeLessThan(input.scheduleCurrentDesktopShellRefresh.mock.invocationCallOrder[0]);
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: true, shellKind: "packaged" });
+    expect(input.app.exit).toHaveBeenCalledOnce();
+    expect(input.shutdownApproved).toBe(true);
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const watch = main.slice(main.indexOf("function startPeriodicShellFreshnessWatch("), main.indexOf("async function runTrayBranchInstance("));
+    expect(watch).toContain('refreshPackagedDesktopShellIfStale("")');
+    // The shared transaction owns this flag, including rejected overlapping probes.
+    expect(watch).not.toContain("shellRefreshInFlight =");
+  });
+
   it.each(["active", "unknown"] as const)("does not build, stop or schedule when tasks are %s", async (state) => {
     const input = updateInputs({ state, count: state === "active" ? 1 : 0, message: "" });
     expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: false, operation: "restart-latest-shell" });
