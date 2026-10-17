@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from config.model_catalog import load_model_catalog_state, save_model_catalog_state
+from config.llm_identity import make_model_key, provider_discovery_fingerprint
+from config.model_catalog import empty_model_catalog_state, load_model_catalog_state, record_model_verification, save_model_catalog_state
 from config.public_config import public_config_hash
 from core.web.services import config_service, provider_config_service
 from core.web.services.model_reference_service import ModelReferenceConflictError
@@ -758,6 +759,35 @@ def test_discovery_delegates_and_records_bounded_redacted_events(monkeypatch) ->
         "artifact_path",
     ):
         assert forbidden not in serialized
+
+
+def test_retry_pin_preserves_upstream_identity_after_verification_without_discovery(monkeypatch) -> None:
+    config = _v2_with_provider()
+    _patch_saved(monkeypatch, config)
+    upstream_id = "Config Trial/Model-A"
+    model_key = make_model_key(upstream_id)
+    state = record_model_verification(
+        empty_model_catalog_state(),
+        model_ref=f"relay_a/{model_key}",
+        provider_fingerprint=provider_discovery_fingerprint(config["llm"]["providers"]["relay_a"]),
+        checked_at="2026-10-17T00:00:00Z",
+        ok=False,
+        error_type="protocol_mismatch",
+    )
+    assert state["providers"]["relay_a"]["models"][model_key]["upstreamId"] == model_key
+    monkeypatch.setattr(config_service, "load_model_catalog_state", lambda: copy.deepcopy(state))
+    workspace = provider_config_service.draft_pin_provider_model(
+        config,
+        draft_meta={},
+        base_hash=public_config_hash(config),
+        provider_id="relay_a",
+        upstream_id=upstream_id,
+        overrides={"wire_protocol": "responses"},
+    )
+    model = workspace["modelCatalog"]["providers"]["relay_a"]["models"][model_key]
+    assert model["upstreamId"] == upstream_id
+    assert model["modelRef"] == f"relay_a/{model_key}"
+    assert workspace["publicConfig"]["llm"]["providers"]["relay_a"]["models"][model_key]["wire_protocol"] == "responses"
 
 
 def test_catalog_summary_omits_sensitive_details_and_derives_protocol_status(monkeypatch) -> None:

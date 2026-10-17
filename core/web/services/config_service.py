@@ -1936,8 +1936,8 @@ def summarize_model_catalog(
                 "modelKey": str(model_key),
                 "modelRef": model_ref,
                 "upstreamId": str(
-                    catalog_model.get("upstreamId")
-                    or pinned_model.get("upstream_id")
+                    pinned_model.get("upstream_id")
+                    or catalog_model.get("upstreamId")
                     or model_key
                 )[:256],
                 "label": str(
