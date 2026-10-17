@@ -18,6 +18,7 @@ import {
   canAdvanceProviderWizard,
   dispatchProviderWizardConnectionAction,
   isProviderWizardConnectionLocked,
+  providerPresetToWizardState,
   type ProviderAuthKind,
   type ProviderWizardAction,
   type ProviderWizardState,
@@ -66,11 +67,6 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function normalizeProviderAuthKind(value: unknown, credentialRef: string): ProviderAuthKind {
-  if (value === "api_key" || value === "oauth" || value === "none") return value;
-  return credentialRef === "none" ? "none" : "api_key";
-}
-
 function templateServiceClass(template: ConfigProviderPresetOption): string {
   const providerServiceType = asString(asRecord(template.provider).service_class);
   if (providerServiceType) return providerServiceType;
@@ -114,32 +110,27 @@ export function ConfigProviderWizard({
       return;
     }
     appliedTemplateRef.current = selectedTemplate.provider_preset_id;
-    const templateProvider = asRecord(selectedTemplate.provider);
-    const templateDeployment = asRecord(templateProvider.deployment);
-    const protocols = asRecord(templateProvider.protocols);
-    const allowed = Array.isArray(protocols.allowed)
-      ? protocols.allowed.filter((value): value is string => typeof value === "string")
-      : [];
-    const credentialRef = state.credentialRef || asString(templateProvider.credential_ref) || "none";
+    const preset = providerPresetToWizardState(selectedTemplate);
+    const credentialRef = state.credentialRef || preset.credentialRef;
     onChange({
       type: "set_connection",
       providerId: state.providerId,
       label: state.label || selectedTemplate.label,
-      baseUrl: state.baseUrl || asString(templateProvider.base_url),
-      authKind: normalizeProviderAuthKind(templateProvider.auth_kind, credentialRef),
+      baseUrl: state.baseUrl || preset.baseUrl,
+      authKind: preset.authKind,
       credentialRef,
     });
     onChange({
       type: "set_protocol",
-      driver: state.driver || asString(templateProvider.driver),
-      defaultProtocol: state.defaultProtocol || asString(protocols.default) || allowed[0] || "responses",
-      allowedProtocols: allowed.length ? allowed : ["responses"],
+      driver: state.driver || preset.driver,
+      defaultProtocol: state.defaultProtocol || preset.defaultProtocol,
+      allowedProtocols: preset.allowedProtocols,
     });
     if (state.serviceClass === "local_runtime") {
       onChange({
         type: "set_deployment",
-        runtimeFramework: state.runtimeFramework || asString(templateDeployment.runtime_framework),
-        artifactPath: state.artifactPath || asString(templateDeployment.artifact_path),
+        runtimeFramework: state.runtimeFramework || preset.runtimeFramework,
+        artifactPath: state.artifactPath || preset.artifactPath,
       });
     }
   }, [onChange, selectedTemplate, state]);

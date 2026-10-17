@@ -449,7 +449,7 @@ class GeminiDiscoveryAdapter:
             normalize=lambda payload: [
                 model
                 for raw in payload.get("models", []) if isinstance(payload, dict)
-                if (model := _model(raw, id_field="name")) is not None
+                if (model := _model(raw, id_field="name", strip_prefix="models/")) is not None
             ],
         )
 

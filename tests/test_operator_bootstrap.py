@@ -51,6 +51,34 @@ def test_bootstrap_can_prefer_only_configured_credentials() -> None:
     assert str(llm["profiles"]["primary"]["model_ref"]).startswith("deepseek_main/")
 
 
+def test_bootstrap_and_public_presets_share_connection_contracts() -> None:
+    from config.public_config import list_llm_provider_preset_options
+
+    llm = build_default_llm_section(env_reader=lambda _name: None, credential_env_overrides={})
+    # Fingerprint grouping and skipped placeholder templates remain unchanged.
+    for option in list_llm_provider_preset_options():
+        if option["provider_id"] not in llm["providers"]:
+            continue
+        provider = llm["providers"][option["provider_id"]]
+        for field in ("driver", "auth_kind", "credential_ref", "protocols", "discovery"):
+            assert provider[field] == option["provider"][field]
+    assert llm["providers"]["anthropic_main"]["protocols"]["default"] == "anthropic_messages"
+    assert llm["providers"]["google_main"]["discovery"]["adapter"] == "gemini"
+    assert llm["providers"]["local_main"]["discovery"]["adapter"] == "ollama"
+
+
+def test_bootstrap_preserves_explicit_provider_protocols_and_model_wire(monkeypatch) -> None:
+    monkeypatch.setattr("config.public_config.LLM_MODEL_PRESETS", {"fixture": {
+        "provider_id": "lab", "provider": {
+            "kind": "relay", "base_url": "https://relay.example/v1", "api_key_env": "LAB_KEY",
+            "protocols": {"default": "responses", "allowed": ["responses", "chat_completions"]},
+        }, "model": {"model": "claude-gemini", "wire_protocol": "chat_completions", "transport": "responses"},
+    }})
+    provider = build_default_llm_section(env_reader=lambda _: None, credential_env_overrides={})["providers"]["lab"]
+    assert provider["protocols"] == {"default": "responses", "allowed": ["responses", "chat_completions"]}
+    assert provider["models"]["claude-gemini"]["wire_protocol"] == "chat_completions"
+
+
 def test_thin_local_only_starter_is_upgraded_once(tmp_path) -> None:
     config_home = tmp_path / "config"
     config_home.mkdir()

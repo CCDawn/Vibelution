@@ -83,7 +83,15 @@ def suggest_provider_id(provider: dict[str, Any], existing_ids: Iterable[str]) -
     return validate_provider_id(f"{base[:55]}_{_fingerprint(provider)[:8]}")
 
 
-def validate_provider_registry(public_config: dict[str, Any]) -> None:
+def _validate_provider_registry(
+    public_config: dict[str, Any],
+    previous: dict[str, Any] | None = None,
+) -> None:
+    existing: dict[str, set[str]] = {}
+    if previous is not None:
+        for provider_id, provider in _providers(previous).items():
+            if isinstance(provider, dict):
+                existing.setdefault(_fingerprint(provider), set()).add(str(provider_id))
     fingerprints: dict[str, str] = {}
     for provider_id, provider in _providers(public_config).items():
         validate_provider_id(str(provider_id))
@@ -91,11 +99,17 @@ def validate_provider_registry(public_config: dict[str, Any]) -> None:
             raise ValueError(f"provider {provider_id} must be an object")
         fingerprint = _fingerprint(provider)
         duplicate = fingerprints.get(fingerprint)
-        if duplicate:
+        unchanged_members = existing.get(fingerprint, set())
+        if duplicate and not {str(provider_id), duplicate}.issubset(unchanged_members):
             raise ValueError(
                 f"provider {provider_id} duplicates active provider {duplicate}"
             )
         fingerprints[fingerprint] = str(provider_id)
+
+
+def validate_provider_registry(public_config: dict[str, Any]) -> None:
+    """Strict audit; mutations also preserve unrelated pre-existing duplicate pairs."""
+    _validate_provider_registry(public_config)
 
 
 def add_llm_provider(
@@ -110,7 +124,7 @@ def add_llm_provider(
         raise ValueError(f"LLM provider already exists: {canonical_id}")
     providers[canonical_id] = copy.deepcopy(provider)
     providers[canonical_id].setdefault("models", {})
-    validate_provider_registry(updated)
+    _validate_provider_registry(updated, previous=public_config)
     return updated
 
 
@@ -128,7 +142,7 @@ def update_llm_provider(
     providers[provider_id]["models"] = copy.deepcopy(
         provider.get("models", existing_models)
     )
-    validate_provider_registry(updated)
+    _validate_provider_registry(updated, previous=public_config)
     return updated
 
 

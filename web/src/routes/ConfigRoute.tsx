@@ -631,6 +631,7 @@ export function ConfigRoute() {
     return !showingSettingsIndex && (!requestedFocusSectionId || requestedFocusSectionId === sectionId)
       && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
+  const providerSetupVisible = isSectionVisible("models") && providerConnecting;
 
   const settingsNavCollapse = useConfigSettingsNavigationCollapse(
     isSectionVisible("models"),
@@ -1001,6 +1002,8 @@ export function ConfigRoute() {
     handleSuggestProviderId,
     handleCreateProvider,
     handlePinProviderModels,
+    handlePinManualProviderModel,
+    handleDiscardDraftProviders,
     handleUnpinProviderModel: unpinProviderModel,
     handleDeleteProvider,
     deleteProviderRequest,
@@ -1046,6 +1049,8 @@ export function ConfigRoute() {
   const {
     handlePrepareProviderQuickSetup,
     handleConfirmProviderQuickSetup,
+    handleTestAndSaveProviderQuickSetup,
+    handleCancelProviderQuickSetup,
   } = useConfigProviderQuickSetupActions({
     providerQuickSetupState,
     copy,
@@ -1058,6 +1063,8 @@ export function ConfigRoute() {
     handleCreateProvider,
     handleDiscoverProvider,
     handlePinProviderModels,
+    handlePinManualProviderModel,
+    handleDiscardDraftProviders,
     handleApply,
     readableErrorMessage,
   });
@@ -1685,7 +1692,7 @@ export function ConfigRoute() {
         title={showingSettingsIndex && !requestedSectionId ? copy.pageTitle : activeGroup?.title ?? copy.pageTitle}
         actions={
           <div className={styles.configStatusActions}>
-            {isSectionVisible("models") && workspace.schemaVersion === 2 ? (
+            {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
                 <VActionGroup ariaLabel={copy.modelsActionsAria}>
                   <VButton
                     title={copy.advancedSettingsHint}
@@ -1721,7 +1728,7 @@ export function ConfigRoute() {
               type="button"
               variant="primary"
               className={styles.primaryButton}
-              isDisabled={!canApplyConfigWorkspace}
+              isDisabled={!canApplyConfigWorkspace || providerSetupVisible}
               title={!canApplyConfigWorkspace && hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined}
               onClick={() => {
                 void handleApply();
@@ -1776,7 +1783,7 @@ export function ConfigRoute() {
           </VSettingsGroupCard>
         ) : null}
 
-        {notice.text ? (
+        {notice.text && !providerSetupVisible ? (
           <div
             className={
               notice.tone === "error"
@@ -1833,7 +1840,11 @@ export function ConfigRoute() {
                     <VButton
                       className={styles.providerModeButton}
                       variant="ghost"
-                      onPress={() => setProviderConnecting(false)}
+                      onPress={() => {
+                        void handleCancelProviderQuickSetup().then((cancelled) => {
+                          if (cancelled) setProviderConnecting(false);
+                        });
+                      }}
                     >
                       {copy.backToConfiguredProviders}
                     </VButton>
@@ -1852,13 +1863,20 @@ export function ConfigRoute() {
                       onDetect={(input) => {
                         void handlePrepareProviderQuickSetup(input);
                       }}
+                      onTestAndSave={(input) => {
+                        void handleTestAndSaveProviderQuickSetup(input);
+                      }}
+                      onCancel={() => {
+                        void handleCancelProviderQuickSetup().then((cancelled) => {
+                          if (cancelled) setProviderConnecting(false);
+                        });
+                      }}
                       onModelChange={(modelRef) => dispatchProviderQuickSetup({ type: "select_model", modelRef })}
                       onConfirm={() => {
                         void handleConfirmProviderQuickSetup();
                       }}
                       onReset={() => {
-                        setProviderQuickCredential("");
-                        dispatchProviderQuickSetup({ type: "reset" });
+                        void handleCancelProviderQuickSetup();
                       }}
                     />
                   </>
@@ -2076,9 +2094,8 @@ export function ConfigRoute() {
                   onDiscover={handleDiscoverProvider}
                   onPin={async (providerId, models) => {
                     const pinned = await handlePinProviderModels(providerId, models);
-                    if (pinned) {
-                      await persistImmediateDraft(copy.applying);
-                    }
+                    if (!pinned) throw new Error(copy.wizardPinFailed);
+                    if (!await persistImmediateDraft(copy.applying)) throw new Error(copy.quickSetupPartialSaveMessage);
                   }}
                 />
                 {workspace.modelAliasUsage.totalLiveReferenceCount > 0 ? <ConfigModelMigrationPanel
@@ -2108,8 +2125,8 @@ export function ConfigRoute() {
                 }}
               />
             )}
-            {providerActionError ? <p className={styles.noticeError} role="alert">{providerActionError}</p> : null}
-            {workspace.schemaVersion === 2 ? <ConfigDecisionModelsPanel
+            {providerActionError && !providerConnecting ? <p className={styles.noticeError} role="alert">{providerActionError}</p> : null}
+            {workspace.schemaVersion === 2 && !providerConnecting ? <ConfigDecisionModelsPanel
               models={readDecisionModelMap(asRecord(draftConfig.llm).decision_models)}
               handoffModelId={getString(asRecord(draftConfig.llm).decision_handoff_model_id)}
               presets={workspace.decisionModelPresets ?? []}

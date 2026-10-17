@@ -701,6 +701,15 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(freshMarkup).toContain("模型目录已同步");
   });
 
+  it("does not call an untested provider catalog synchronized", () => {
+    const untested = { ...provider([model("manual", "pinned")]), status: "not_discovered" as const, lastSuccessAt: "", lastAttemptAt: "" };
+    const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], { rows: [untested] })} />);
+    expect(markup).toContain('data-provider-freshness="unchecked"');
+    expect(markup).toContain("模型目录尚未检测");
+    expect(markup).not.toContain("模型目录已同步");
+    expect(markup).toContain("manual");
+  });
+
   it("pins in-use providers to the top with a badge and no extra words", () => {
     const idle = { ...provider([]), providerId: "relay_idle", label: "Idle Relay" };
     const busy = { ...provider([model("luna", "pinned")]), providerId: "relay_busy", label: "Busy Relay" };

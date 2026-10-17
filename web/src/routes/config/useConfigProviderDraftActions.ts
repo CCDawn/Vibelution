@@ -12,6 +12,7 @@ import {
   deleteDraftProvider,
   discoverDraftProvider,
   pinDraftProviderModel,
+  previewConfigDraft,
   previewDraftProviderRoute,
   suggestDraftProviderId,
   unpinDraftProviderModel,
@@ -204,11 +205,28 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setBusyAction(copy.actionCreateProviderBusy);
     setProviderActionError("");
     const template = providerPresetOptions.find((item) => item.provider_preset_id === state.templateId);
-    const provider = buildProviderWizardDraft(state, template?.provider);
+    let provider = buildProviderWizardDraft(state, template?.provider);
     try {
-      const response = await addDraftProvider(
-        buildProviderDraftRequest({ providerId: state.providerId, provider, credentialValue }),
-      );
+      const request = buildProviderDraftRequest({ providerId: state.providerId, provider, credentialValue });
+      const providers = asRecord(asRecord(request.publicConfig.llm).providers);
+      const baselineProviders = asRecord(asRecord(request.baseConfig?.llm).providers);
+      // A retry may edit a new draft, never an identity in the saved baseline.
+      const isUnpersistedProvider = request.baseConfig != null
+        && Object.prototype.hasOwnProperty.call(providers, state.providerId)
+        && !Object.prototype.hasOwnProperty.call(baselineProviders, state.providerId);
+      let response: ConfigWorkspace;
+      if (isUnpersistedProvider) {
+        const existing = asRecord(providers[state.providerId]);
+        provider = { ...existing, ...provider, models: asRecord(existing.models) };
+        const updateRequest = { ...request, provider };
+        const preview = await previewDraftProviderRoute(state.providerId, updateRequest);
+        response = await updateDraftProvider(state.providerId, {
+          ...updateRequest,
+          routePreviewToken: preview.routePreviewToken,
+        });
+      } else {
+        response = await addDraftProvider(request);
+      }
       syncWorkspace(response, "success", { resetBase: false });
       setSelectedProviderId(state.providerId);
     } catch (error) {
@@ -229,6 +247,79 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setSelectedProviderId,
     syncWorkspace,
   ]);
+
+  const handlePinManualProviderModel = useCallback(async (
+    providerId: string,
+    upstreamId: string,
+    overrides: Record<string, unknown> = {},
+  ): Promise<ConfigCatalogModel> => {
+    setBusyAction(copy.actionModelUpdateBusy);
+    setProviderActionError("");
+    try {
+      const modelId = upstreamId.trim();
+      if (!modelId) throw new Error(copy.quickSetupFillModelFirst);
+      const request = buildProviderDraftRequest({
+        providerId, upstreamId: modelId, modelKey: "", overrides,
+      });
+      const baselineProviders = asRecord(asRecord(request.baseConfig?.llm).providers);
+      // A corrected protocol must replace this new provider's previous retry pin.
+      // Saved providers retain the backend's normal idempotent pin semantics.
+      if (request.baseConfig && !Object.prototype.hasOwnProperty.call(baselineProviders, providerId)) {
+        const nextConfig = clonePublicConfig(request.publicConfig);
+        const models = asRecord(asRecord(asRecord(asRecord(nextConfig.llm).providers)[providerId]).models);
+        for (const [key, entry] of Object.entries(models)) {
+          if (asRecord(entry).upstream_id === modelId) delete models[key];
+        }
+        request.publicConfig = nextConfig;
+      }
+      const response = await pinDraftProviderModel(providerId, request);
+      const model = Object.values(response.modelCatalog?.providers?.[providerId]?.models ?? {})
+        .find((item) => item.upstreamId === modelId && item.modelRef?.startsWith(`${providerId}/`));
+      if (!model) throw new Error(copy.actionManualModelMissingMessage);
+      syncWorkspace(response, "success", { resetBase: false });
+      setSelectedProviderId(providerId);
+      return model;
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+      throw error;
+    } finally {
+      setBusyAction("");
+    }
+  }, [buildProviderDraftRequest, copy, markError, readableErrorMessage, setBusyAction, setProviderActionError, setSelectedProviderId, syncWorkspace]);
+
+  const handleDiscardDraftProviders = useCallback(async (providerIds: string[]): Promise<void> => {
+    if (!providerIds.length) return;
+    try {
+      const request = buildProviderDraftRequest({});
+      if (!request.baseConfig) throw new Error(loadFailedMessage);
+      const publicConfig = clonePublicConfig(request.publicConfig);
+      const providers = asRecord(asRecord(publicConfig.llm).providers);
+      const baselineProviders = asRecord(asRecord(request.baseConfig.llm).providers);
+      const removedEnvs = new Set<string>();
+      for (const providerId of providerIds) {
+        if (Object.prototype.hasOwnProperty.call(baselineProviders, providerId)) continue;
+        const credentialRef = asRecord(providers[providerId]).credential_ref;
+        if (typeof credentialRef === "string" && credentialRef.startsWith("env:")) {
+          removedEnvs.add(credentialRef.slice(4));
+        }
+        delete providers[providerId];
+      }
+      const remainingRefs = new Set(Object.values(providers).map((provider) => asRecord(provider).credential_ref));
+      const meta = clonePublicConfig(request.draftMeta);
+      for (const env of removedEnvs) {
+        if (remainingRefs.has(`env:${env}`)) continue;
+        delete meta.pending_api_keys?.[env];
+        meta.pending_cleared_api_keys = (meta.pending_cleared_api_keys ?? []).filter((item) => item !== env);
+      }
+      const response = await previewConfigDraft({ ...request, publicConfig, draftMeta: meta });
+      syncWorkspace(response, "neutral", { resetBase: false });
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+      throw error;
+    }
+  }, [buildProviderDraftRequest, loadFailedMessage, markError, readableErrorMessage, setProviderActionError, syncWorkspace]);
 
   const handlePinProviderModels = useCallback(async (providerId: string, models: ConfigCatalogModel[]): Promise<boolean> => {
     const report = (phase: "busy" | "success" | "error", message: string) => {
@@ -719,6 +810,8 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     handleDiscoverProvider,
     handleSuggestProviderId,
     handleCreateProvider,
+    handlePinManualProviderModel,
+    handleDiscardDraftProviders,
     handlePinProviderModels,
     handleUnpinProviderModel,
     handleDeleteProvider,

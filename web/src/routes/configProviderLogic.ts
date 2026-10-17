@@ -2,6 +2,7 @@ import type {
   ConfigCatalogModel,
   ConfigModelCatalog,
   ConfigProviderOption,
+  ConfigProviderPresetOption,
   ConfigProviderStatus,
 } from "../api/types";
 
@@ -513,6 +514,28 @@ export function buildProviderWizardDraft(
   if (state.serviceClass !== "local_runtime") {
     delete source.deployment;
   }
+  const discovery = { ...asRecord(source.discovery) };
+  const driverChanged = !!asString(source.driver) && source.driver !== state.driver;
+  const endpointChanged = asString(source.base_url).trim().replace(/\/+$/, "") !== state.baseUrl.trim().replace(/\/+$/, "");
+  if (driverChanged) {
+    discovery.adapter = state.driver === "anthropic" ? "anthropic" : state.driver === "gemini" ? "gemini" : "openai_compatible";
+  }
+  if (driverChanged || endpointChanged) {
+    // Template overrides must never send the new service's credential to the old host.
+    delete discovery.models_url_override;
+    if (discovery.adapter === "gemini") {
+      try {
+        const endpoint = new URL(state.baseUrl);
+        const path = endpoint.pathname.replace(/\/+$/, "").replace(/\/openai$/, "");
+        endpoint.pathname = `${path.endsWith("/v1beta") ? path : `${path}/v1beta`}/models`;
+        endpoint.search = "";
+        endpoint.hash = "";
+        discovery.models_url_override = endpoint.toString();
+      } catch {
+        // The backend reports an invalid address without retaining a stale override.
+      }
+    }
+  }
   return {
     ...source,
     label: state.label,
@@ -524,8 +547,8 @@ export function buildProviderWizardDraft(
     requires_credential: state.authKind !== "none",
     protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
     discovery: {
-      ...asRecord(source.discovery),
-      mode: asString(asRecord(source.discovery).mode) || "auto",
+      ...discovery,
+      mode: asString(discovery.mode) || "auto",
     },
     ...(state.serviceClass === "local_runtime"
       ? {
@@ -559,6 +582,54 @@ export function initialProviderWizardState(): ProviderWizardState {
     pinnedModelRefs: [],
   };
 }
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function templateServiceClass(template: ConfigProviderPresetOption): string {
+  const provider = asRecord(template.provider);
+  const declared = asString(provider.service_class);
+  if (declared) return declared;
+  if (template.category === "local") return "local_runtime";
+  if (template.category === "official") return "official_api";
+  if (template.category === "relay") return "relay";
+  return "self_hosted";
+}
+
+export function providerPresetToWizardState(template: ConfigProviderPresetOption): ProviderWizardState {
+  const provider = asRecord(template.provider);
+  const model = asRecord(template.default_model);
+  const protocols = asRecord(provider.protocols);
+  const deployment = asRecord(provider.deployment);
+  const credentialRef = asString(provider.credential_ref);
+  const rawAuthKind = asString(provider.auth_kind);
+  const authKind: ProviderAuthKind = rawAuthKind === "none" || rawAuthKind === "oauth" || rawAuthKind === "api_key"
+    ? rawAuthKind
+    : provider.requires_api_key === false || provider.requires_credential === false || credentialRef === "none"
+      ? "none" : "api_key";
+  const allowedProtocols = asStringArray(protocols.allowed);
+  const modelWire = asString(model.wire_protocol);
+  const defaultProtocol = modelWire && (!allowedProtocols.length || allowedProtocols.includes(modelWire))
+    ? modelWire
+    : asString(protocols.default) || allowedProtocols[0] || asString(model.transport) || "chat_completions";
+  return {
+    ...initialProviderWizardState(),
+    templateId: template.provider_preset_id,
+    serviceClass: templateServiceClass(template),
+    providerId: template.provider_id,
+    label: template.label,
+    baseUrl: asString(provider.base_url).includes(".example.com") ? "" : asString(provider.base_url),
+    authKind,
+    credentialRef: authKind === "none" ? "none" : credentialRef,
+    driver: asString(provider.driver) || (defaultProtocol === "anthropic_messages" ? "anthropic" : defaultProtocol === "gemini_generate_content" ? "gemini" : "openai"),
+    defaultProtocol,
+    allowedProtocols: allowedProtocols.length ? allowedProtocols : [defaultProtocol],
+    runtimeFramework: asString(deployment.runtime_framework),
+    artifactPath: asString(deployment.artifact_path),
+  };
+}
+
 
 export function initialProviderQuickSetupState(): ProviderQuickSetupState {
   return {
@@ -657,9 +728,8 @@ export function canAdvanceProviderWizard(state: ProviderWizardState): boolean {
       && state.defaultProtocol
       && state.allowedProtocols.includes(state.defaultProtocol)
     );
-    return state.serviceClass === "local_runtime"
-      ? connectionReady && Boolean(state.runtimeFramework && state.artifactPath)
-      : connectionReady;
+    // This wizard connects an HTTP service; deployment metadata is optional.
+    return connectionReady;
   }
   if (state.step === "discovery") {
     return state.discoveredModels.length > 0

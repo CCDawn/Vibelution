@@ -1,16 +1,10 @@
-import { CheckCircle2, KeyRound, Search, Sparkles } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { CheckCircle2, Search } from "lucide-react";
 
 import type { ConfigProviderPresetOption } from "../api/types";
+import { VButton, VFieldRow, VInput, VNativeSelect, VSection } from "../components/vui";
 import {
-  VButton,
-  VInput,
-  VSection,
-  VStateSurface,
-  VStatusChip,
-  VStringSelect,
-} from "../components/vui";
-import {
-  initialProviderWizardState,
+  providerPresetToWizardState,
   type ProviderAuthKind,
   type ProviderQuickSetupState,
   type ProviderWizardState,
@@ -19,7 +13,6 @@ import type { ConfigCopy } from "./config/configCopy";
 import styles from "./ConfigQuickSetupPanel.styles";
 
 export type ConfigQuickSetupPanelProps = {
-  /** Bilingual copy table (wave 4). */
   copy: ConfigCopy;
   state: ProviderQuickSetupState;
   templates: ConfigProviderPresetOption[];
@@ -32,297 +25,157 @@ export type ConfigQuickSetupPanelProps = {
   onConfirm: () => void;
   onReset: () => void;
   onConfigureAgent?: () => void;
+  onTestAndSave?: (input: { provider: ProviderWizardState; credentialValue: string; modelId: string }) => void;
+  onCancel?: () => void;
 };
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+function templateModelId(template?: ConfigProviderPresetOption): string {
+  return typeof template?.default_model.model === "string" ? template.default_model.model : "";
 }
 
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function templateServiceClass(template: ConfigProviderPresetOption): string {
-  const provider = asRecord(template.provider);
-  const declared = asString(provider.service_class);
-  if (declared) return declared;
-  if (template.category === "local") return "local_runtime";
-  if (template.category === "official") return "official_api";
-  if (template.category === "relay") return "relay";
-  return "self_hosted";
-}
-
-export function templateToProvider(template: ConfigProviderPresetOption): ProviderWizardState {
-  const provider = asRecord(template.provider);
-  const model = asRecord(template.default_model);
-  const protocols = asRecord(provider.protocols);
-  const deployment = asRecord(provider.deployment);
-  const credentialRef = asString(provider.credential_ref);
-  const rawAuthKind = asString(provider.auth_kind);
-  const authKind: ProviderAuthKind = rawAuthKind === "none" || rawAuthKind === "oauth" || rawAuthKind === "api_key"
-    ? rawAuthKind
-    : provider.requires_api_key === false || provider.requires_credential === false || credentialRef === "none"
-      ? "none" : "api_key";
-  const allowedProtocols = asStringArray(protocols.allowed);
-  const defaultProtocol = asString(protocols.default) || allowedProtocols[0] || asString(model.transport) || "chat_completions";
-  return {
-    ...initialProviderWizardState(),
-    templateId: template.provider_preset_id,
-    serviceClass: templateServiceClass(template),
-    providerId: template.provider_id,
-    label: template.label,
-    baseUrl: asString(provider.base_url).includes(".example.com") ? "" : asString(provider.base_url),
-    authKind,
-    credentialRef: authKind === "none" ? "none" : credentialRef,
-    driver: asString(provider.driver) || (defaultProtocol === "anthropic_messages" ? "anthropic" : defaultProtocol === "gemini_generate_content" ? "gemini" : "openai"),
-    defaultProtocol,
-    allowedProtocols: allowedProtocols.length ? allowedProtocols : [defaultProtocol],
-    runtimeFramework: asString(deployment.runtime_framework),
-    artifactPath: asString(deployment.artifact_path),
-  };
-}
-
-function resultCopy(state: ProviderQuickSetupState, copy: ConfigCopy) {
-  if (state.phase === "checking") return { title: copy.quickSetupCheckingTitle, tone: "loading" as const };
-  if (state.phase === "review") return { title: copy.quickSetupReviewTitle, tone: "info" as const };
-  if (state.phase === "saving") return { title: copy.quickSetupSavingTitle, tone: "loading" as const };
-  if (state.phase === "success") return { title: copy.quickSetupSuccessTitle, tone: "info" as const };
-  if (state.phase === "error") return { title: copy.quickSetupErrorTitle, tone: "error" as const };
-  return { title: copy.quickSetupIdleTitle, tone: "empty" as const };
-}
-
-function phaseLabel(state: ProviderQuickSetupState, copy: ConfigCopy): string {
-  if (state.phase === "checking") return copy.quickSetupPhaseChecking;
-  if (state.phase === "review") return copy.quickSetupPhaseReview;
-  if (state.phase === "saving") return copy.quickSetupPhaseSaving;
-  if (state.phase === "success") return copy.quickSetupPhaseSuccess;
-  if (state.phase === "error") return copy.quickSetupPhaseError;
-  return copy.quickSetupPhaseIdle;
-}
+// Kept for callers that imported the old panel helper.
+export const templateToProvider = providerPresetToWizardState;
 
 export function ConfigQuickSetupPanel({
-  copy,
-  state,
-  templates,
-  credentialValue,
-  disabled,
-  onCredentialChange,
-  onProviderChange,
-  onDetect,
-  onModelChange,
-  onConfirm,
-  onReset,
-  onConfigureAgent,
+  copy, state, templates, credentialValue, disabled, onCredentialChange,
+  onProviderChange, onDetect, onModelChange, onConfirm, onReset,
+  onConfigureAgent, onTestAndSave, onCancel,
 }: ConfigQuickSetupPanelProps) {
-  const result = resultCopy(state, copy);
+  const id = useId();
   const selectedTemplate = templates.find((template) => template.provider_preset_id === state.provider.templateId);
-  const canDetect = Boolean(
-    state.provider.templateId
-    && state.provider.baseUrl.trim()
-    && (state.provider.authKind === "none" || credentialValue.trim())
-    && !disabled
-    && state.phase !== "checking"
-    && state.phase !== "saving",
-  );
-  const retrySave = state.phase === "error" && ["partial_save", "save"].includes(state.errorKind);
-  const canConfirm = (state.phase === "review" || retrySave) && Boolean(state.selectedModelRef) && !disabled;
-  const showResult = state.phase !== "input";
-  const showDetectAction = state.phase === "input" || state.phase === "checking" || (state.phase === "error" && !retrySave);
-  const showReviewActions = state.phase === "review" || state.phase === "saving" || retrySave;
-  const detectLabel = state.phase === "checking"
-    ? copy.quickSetupDetecting
-    : state.phase === "error"
-      ? copy.quickSetupRedetect
-      : copy.quickSetupDetect;
-  const resultFacts = [
-    { key: "provider", label: "Provider", value: state.provider.label || selectedTemplate?.label || "-" },
-    { key: "endpoint", label: copy.quickSetupFactEndpoint, value: state.provider.baseUrl || "-" },
-    { key: "protocol", label: copy.quickSetupFactProtocol, value: state.provider.defaultProtocol || "-" },
-    { key: "models", label: copy.quickSetupFactModels, value: state.discoveredModels.length },
-  ];
-  const resultMessage = state.phase === "error"
-    ? state.errorMessage || copy.quickSetupErrorFallback
-    : state.phase === "review"
-      ? `${copy.quickSetupRecommendationPrefix}${state.recommendationReason || copy.quickSetupWaitingChoice}`
-      : state.phase === "success"
-        ? copy.quickSetupSavedBody
-        : copy.quickSetupIdleBody;
-  const credentialHint = copy.quickSetupCredentialHint;
-  const detectDisabledReason = disabled
-    ? copy.quickSetupDisabledReason
-    : !state.provider.templateId
-      ? copy.quickSetupPickProviderFirst
-      : !state.provider.baseUrl.trim()
-        ? copy.quickSetupFillBaseUrlFirst
-      : state.provider.authKind !== "none" && !credentialValue.trim()
-        ? copy.quickSetupFillKeyFirst
-        : state.phase === "checking" || state.phase === "saving"
-          ? copy.quickSetupBusyReason
-          : undefined;
+  const customTemplate = templates.find((template) => template.provider_preset_id === "custom_openai_compatible_relay");
+  const [modelDraft, setModelDraft] = useState({ templateId: state.provider.templateId, value: templateModelId(selectedTemplate) });
+  const submittedModelId = useRef("");
+  const modelId = modelDraft.templateId === state.provider.templateId ? modelDraft.value : templateModelId(selectedTemplate);
+  // Provider IDs may be suggested asynchronously. Only a different template resets user input.
+  useEffect(() => {
+    setModelDraft((current) => current.templateId === state.provider.templateId
+      ? current : { templateId: state.provider.templateId, value: templateModelId(selectedTemplate) });
+  }, [state.provider.templateId, selectedTemplate]);
 
-  return (
-    <VSection
-      className={styles.root}
-      aria-labelledby="provider-quick-setup-title"
-      eyebrow="Model connection"
-      title={copy.quickSetupTitle}
-      tooltip={copy.quickSetupTooltip}
-      tooltipLabel={copy.quickSetupTooltipLabel}
-    >
-      <div className={styles.workspace}>
-        {state.phase !== "success" ? <div className={styles.inputPanel}>
-          <div className={styles.inputGrid}>
-            <label className={styles.field}>
-              <span>{copy.quickSetupProviderLabel}</span>
-              <VStringSelect
-                ariaLabel={copy.quickSetupProviderLabel}
-                value={state.provider.templateId}
-                placeholder={copy.quickSetupProviderPlaceholder}
-                isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                options={templates.map((template) => ({
-                  value: template.provider_preset_id,
-                  label: template.label,
-                  description: asString(asRecord(template.default_model).label) || asString(asRecord(template.default_model).model_ref),
-                }))}
-                onValueChange={(templateId) => {
-                  const template = templates.find((candidate) => candidate.provider_preset_id === templateId);
-                  if (template) onProviderChange(templateToProvider(template));
-                }}
-              />
-            </label>
+  const busy = state.phase === "checking" || state.phase === "saving";
+  const locked = disabled || busy;
+  const requiresCredential = state.provider.authKind !== "none";
+  const missingConnection = !state.provider.templateId ? copy.quickSetupPickProviderFirst
+    : !state.provider.label.trim() ? copy.quickSetupFillNameFirst
+      : !state.provider.baseUrl.trim() ? copy.quickSetupFillBaseUrlFirst
+        : requiresCredential && !credentialValue.trim() ? copy.quickSetupFillKeyFirst : "";
+  const disabledReason = disabled ? copy.quickSetupDisabledReason : busy ? copy.quickSetupBusyReason
+    : missingConnection || (!modelId.trim() ? copy.quickSetupFillModelFirst : undefined);
+  const error = state.phase === "error" ? state.errorMessage || copy.quickSetupErrorFallback : "";
+  const credentialError = state.errorKind === "auth" ? error : "";
+  const endpointError = state.errorKind === "endpoint" ? error : "";
+  const modelError = ["discovery", "no_recommendation"].includes(state.errorKind) ? error : "";
+  const saveError = error && !credentialError && !endpointError && !modelError ? error : "";
+  const savedModelId = submittedModelId.current
+    || state.discoveredModels.find((model) => model.modelRef === state.selectedModelRef)?.upstreamId || modelId;
+  const selectedCatalogModel = state.discoveredModels.find((model) => model.upstreamId === modelId);
 
-            {selectedTemplate ? (
-              <label className={styles.field}>
-                <span>{copy.routeFieldBaseUrl}</span>
-                <VInput type="url" value={state.provider.baseUrl} disabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                  placeholder={copy.quickSetupBaseUrlPlaceholder}
-                  onChange={(event) => onProviderChange({ ...state.provider, baseUrl: event.target.value })} />
-              </label>
-            ) : null}
+  function submit() {
+    if (disabledReason) return;
+    submittedModelId.current = modelId.trim();
+    if (onTestAndSave) onTestAndSave({ provider: state.provider, credentialValue, modelId: modelId.trim() });
+    else if (state.phase === "review" || ["partial_save", "save"].includes(state.errorKind)) onConfirm();
+    else onDetect({ provider: state.provider, credentialValue });
+  }
 
-            {state.provider.authKind === "none" ? (
-              <div className={styles.field}>
-                <span>{copy.quickSetupCredentialLabel}</span>
-                <div className={styles.noCredential}>
-                  <CheckCircle2 size={14} />
-                  {copy.quickSetupNoCredential}
-                </div>
-              </div>
-            ) : (
-              <label className={styles.field}>
-                <span>API Key</span>
-                  <VInput
-                    type="password"
-                    title={credentialHint}
-                    autoComplete="new-password"
-                    value={credentialValue}
-                    disabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                    placeholder={copy.quickSetupKeyPlaceholder}
-                    onChange={(event) => onCredentialChange(event.target.value)}
-                  />
-              </label>
-            )}
-
-            {showDetectAction ? (
-              <VButton
-                className={styles.primaryAction}
-                variant="primary"
-                icon={<Search size={14} />}
-                isDisabled={!canDetect}
-                title={copy.quickSetupDetectHint}
-                disabledReason={detectDisabledReason}
-                onPress={() => onDetect({ provider: state.provider, credentialValue })}
-              >
-                {detectLabel}
-              </VButton>
-            ) : null}
+  return <VSection className={styles.root} title={copy.quickSetupTitle}>
+    <form className={styles.workspace} onSubmit={(event) => { event.preventDefault(); submit(); }} noValidate>
+      <fieldset className={styles.inputPanel} disabled={locked}>
+        <legend className="sr-only">{copy.quickSetupTitle}</legend>
+        <div className={styles.twoFields}>
+          <VFieldRow label={copy.quickSetupProviderLabel} htmlFor={`${id}-provider`}>
+            <VNativeSelect className={styles.control} id={`${id}-provider`} value={state.provider.templateId} onChange={(event) => {
+              const templateId = event.target.value;
+              const template = templateId === "custom" ? customTemplate : templates.find((item) => item.provider_preset_id === templateId);
+              if (!template) return;
+              const provider = templateToProvider(template);
+              onProviderChange(templateId === "custom" ? { ...provider, label: "", baseUrl: "" } : provider);
+            }}>
+              <option value="" disabled>{copy.quickSetupProviderPlaceholder}</option>
+              {templates.map((template) => <option key={template.provider_preset_id} value={template.provider_preset_id}>{template.label}</option>)}
+              <option value="custom" disabled={!customTemplate}>{copy.quickSetupCustomService}</option>
+            </VNativeSelect>
+          </VFieldRow>
+          <VFieldRow label={copy.label} htmlFor={`${id}-label`}>
+            <VInput className={styles.control} id={`${id}-label`} value={state.provider.label} onChange={(event) => onProviderChange({ ...state.provider, label: event.target.value })} />
+          </VFieldRow>
+        </div>
+        <VFieldRow label={copy.routeFieldBaseUrl} htmlFor={`${id}-endpoint`}>
+          <VInput className={styles.control} id={`${id}-endpoint`} type="url" value={state.provider.baseUrl} spellCheck={false} placeholder={copy.quickSetupBaseUrlPlaceholder}
+            aria-invalid={!!endpointError} aria-describedby={endpointError ? `${id}-endpoint-error` : undefined}
+            onChange={(event) => onProviderChange({ ...state.provider, baseUrl: event.target.value })} />
+          {endpointError && <span id={`${id}-endpoint-error`} className={styles.error} role="alert">{endpointError}</span>}
+        </VFieldRow>
+        <VFieldRow label={copy.apiKeyRowLabel} htmlFor={`${id}-credential`}>
+          {requiresCredential ? <VInput className={styles.control} id={`${id}-credential`} type="password" autoComplete="new-password" value={credentialValue}
+            placeholder={copy.quickSetupKeyPlaceholder} aria-invalid={!!credentialError} aria-describedby={credentialError ? `${id}-credential-error` : undefined}
+            onChange={(event) => onCredentialChange(event.target.value)} />
+            : <span className={styles.noCredential}><CheckCircle2 size={14} aria-hidden="true" />{copy.quickSetupNoCredential}</span>}
+          {credentialError && <span id={`${id}-credential-error`} className={styles.error} role="alert">{credentialError}</span>}
+        </VFieldRow>
+        <VFieldRow label={copy.modelId} htmlFor={`${id}-model`}>
+          <div className={styles.modelInput}>
+            <VInput className={styles.control} id={`${id}-model`} value={modelId} spellCheck={false} aria-describedby={`${id}-model-hint`}
+              onChange={(event) => setModelDraft({ templateId: state.provider.templateId, value: event.target.value })} />
+            <VButton type="button" variant="secondary" icon={<Search size={14} />} className={styles.detectAction} isDisabled={locked || !!missingConnection}
+              disabledReason={locked ? copy.quickSetupBusyReason : missingConnection || undefined} onPress={() => onDetect({ provider: state.provider, credentialValue })}>
+              {copy.quickSetupGetModels}
+            </VButton>
           </div>
-
-          <details className={styles.advanced}>
-            <summary className={styles.advancedSummary}>{copy.quickSetupAdvanced}</summary>
-            <div className={styles.advancedGrid}>
-              <label className={styles.field}>
-                <span>{copy.quickSetupProtocolLabel}</span>
-                <VStringSelect ariaLabel={copy.routeFieldProtocol} value={state.provider.defaultProtocol}
-                  isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                  options={[
-                    { value: "chat_completions", label: copy.quickSetupChatCompletionsLabel },
-                    { value: "responses", label: "OpenAI Responses" },
-                    { value: "anthropic_messages", label: "Anthropic Messages" },
-                    { value: "gemini_generate_content", label: "Gemini" },
-                  ]}
-                  onValueChange={(protocol) => onProviderChange({ ...state.provider, defaultProtocol: protocol, allowedProtocols: [protocol],
-                    driver: protocol === "anthropic_messages" ? "anthropic" : protocol === "gemini_generate_content" ? "gemini" : "openai" })} />
-              </label>
-              <label className={styles.field}>
-                <span>{copy.quickSetupAuthMethodLabel}</span>
-                <VStringSelect ariaLabel={copy.quickSetupAuthMethodLabel} value={state.provider.authKind}
-                  isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                  options={[{ value: "api_key", label: "API Key" }, { value: "none", label: copy.quickSetupNoAuthLabel }]}
-                  onValueChange={(authKind) => onProviderChange({ ...state.provider, authKind: authKind as ProviderAuthKind, credentialRef: authKind === "none" ? "none" : "" })} />
-              </label>
-            </div>
-          </details>
-        </div> : null}
-
-        {showResult ? (
-          <section className={styles.resultRegion} data-quick-setup-result="true" aria-live="polite">
-            <div className={styles.resultHeader}>
-              <h3 className={styles.resultTitle}>{result.title}</h3>
-              <VStatusChip tone={state.phase === "error" ? "danger" : state.phase === "success" ? "success" : "accent"}>
-                {phaseLabel(state, copy)}
-              </VStatusChip>
-            </div>
-            <VStateSurface
-              tone={result.tone}
-              busy={state.phase === "checking" || state.phase === "saving"}
-              skeletonLines={state.phase === "checking" ? 3 : false}
-              icon={state.phase === "review" || state.phase === "success" ? <Sparkles size={15} /> : <KeyRound size={15} />}
-              title={result.title}
-              facts={state.phase === "review" || state.phase === "saving" || state.phase === "success" ? resultFacts : []}
-            >
-              {resultMessage}
-            </VStateSurface>
-
-            {state.phase === "success" && onConfigureAgent ? (
-              <VButton variant="primary" onPress={onConfigureAgent}>{copy.quickSetupGoAgents}</VButton>
-            ) : null}
-            {showReviewActions ? (
-              <div className={styles.reviewActions}>
-                <label className={styles.field}>
-                  <span>{copy.quickSetupModelToAdd}</span>
-                  <VStringSelect
-                    ariaLabel={copy.quickSetupModelToAdd}
-                    value={state.selectedModelRef}
-                    isDisabled={state.phase === "saving" || retrySave}
-                    options={state.discoveredModels.map((model) => ({
-                      value: model.modelRef,
-                      label: model.label || model.modelRef,
-                      description: model.modelRef,
-                    }))}
-                    onValueChange={onModelChange}
-                  />
-                </label>
-                <VButton variant="ghost" isDisabled={state.phase === "saving"} onPress={onReset}>
-                  {copy.quickSetupRedetect}
-                </VButton>
-                <VButton
-                  variant="primary"
-                  icon={<CheckCircle2 size={14} />}
-                  isDisabled={!canConfirm}
-                  onPress={onConfirm}
-                >
-                  {state.phase === "saving" ? copy.quickSetupSaving : retrySave ? copy.quickSetupRetrySave : copy.quickSetupSaveFinish}
-                </VButton>
-              </div>
-            ) : null}
-          </section>
-        ) : null}
+          <span id={`${id}-model-hint`} className={modelError ? styles.error : styles.hint} role={modelError ? "alert" : undefined}>
+            {modelError ? `${modelError} ${copy.quickSetupModelIdHint}` : copy.quickSetupModelIdHint}
+          </span>
+        </VFieldRow>
+        {state.discoveredModels.length > 0 && <VFieldRow label={copy.quickSetupModelListLabel} htmlFor={`${id}-catalog`}>
+          <VNativeSelect className={styles.control} id={`${id}-catalog`} value={selectedCatalogModel?.modelRef || ""} onChange={(event) => {
+            const model = state.discoveredModels.find((candidate) => candidate.modelRef === event.target.value);
+            if (!model?.upstreamId) return;
+            setModelDraft({ templateId: state.provider.templateId, value: model.upstreamId }); onModelChange(model.modelRef);
+          }}>
+            <option value="">{copy.quickSetupKeepManualModel}</option>
+            {state.discoveredModels.filter((model) => model.upstreamId).map((model) => <option key={model.modelRef} value={model.modelRef}>{model.label || model.upstreamId} · {model.upstreamId}</option>)}
+          </VNativeSelect>
+        </VFieldRow>}
+        <details className={styles.advanced}>
+          <summary className={styles.advancedSummary}>{copy.quickSetupAdvanced}</summary>
+          <div className={styles.twoFields}>
+            <VFieldRow label={copy.quickSetupProtocolLabel} htmlFor={`${id}-protocol`}>
+              <VNativeSelect className={styles.control} id={`${id}-protocol`} value={state.provider.defaultProtocol} onChange={(event) => {
+                const protocol = event.target.value;
+                onProviderChange({ ...state.provider, defaultProtocol: protocol, allowedProtocols: [protocol], driver: protocol === "anthropic_messages" ? "anthropic" : protocol === "gemini_generate_content" ? "gemini" : "openai" });
+              }}>
+                <option value="chat_completions">{copy.quickSetupChatCompletionsLabel}</option><option value="responses">OpenAI Responses</option>
+                <option value="anthropic_messages">Anthropic Messages</option><option value="gemini_generate_content">Gemini</option>
+              </VNativeSelect>
+            </VFieldRow>
+            <VFieldRow label={copy.quickSetupAuthMethodLabel} htmlFor={`${id}-auth`}>
+              <VNativeSelect className={styles.control} id={`${id}-auth`} value={state.provider.authKind} onChange={(event) => {
+                const authKind = event.target.value as ProviderAuthKind;
+                const template = selectedTemplate || customTemplate;
+                const credentialRef = authKind === "none" ? "none" : template ? templateToProvider(template).credentialRef
+                  : state.provider.credentialRef === "none" ? "" : state.provider.credentialRef;
+                onProviderChange({ ...state.provider, authKind, credentialRef });
+              }}>
+                <option value="api_key">API Key</option><option value="none">{copy.quickSetupNoAuthLabel}</option>
+                {state.provider.authKind === "oauth" && <option value="oauth">OAuth</option>}
+              </VNativeSelect>
+            </VFieldRow>
+          </div>
+        </details>
+      </fieldset>
+      <div className={styles.footer}>
+        <div className={styles.feedback} aria-live="polite" data-quick-setup-result={state.phase !== "input" ? "true" : undefined}>
+          {saveError ? <span className={styles.error} role="alert">{saveError}</span>
+            : state.phase === "success" ? <span className={styles.success}><CheckCircle2 size={15} aria-hidden="true" />{copy.quickSetupSavedBody}<span className={styles.savedModel}>{savedModelId}</span></span>
+              : busy ? state.phase === "saving" ? copy.quickSetupSavingTitle : copy.quickSetupCheckingTitle : copy.quickSetupReadyHint}
+        </div>
+        <div className={styles.actions}>
+          {state.phase === "success" && onConfigureAgent && <VButton type="button" variant="secondary" isDisabled={locked} onPress={onConfigureAgent}>{copy.quickSetupGoAgents}</VButton>}
+          <VButton type="button" variant="secondary" isDisabled={locked} onPress={onCancel || onReset}>{copy.cancel}</VButton>
+          <VButton type="submit" variant="primary" className={styles.primaryAction} isPending={busy} isDisabled={!!disabledReason} disabledReason={disabledReason}>{copy.quickSetupTestAndSave}</VButton>
+        </div>
       </div>
-    </VSection>
-  );
+    </form>
+  </VSection>;
 }

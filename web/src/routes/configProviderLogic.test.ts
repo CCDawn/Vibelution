@@ -9,6 +9,7 @@ import {
   deriveProviderListRows,
   deriveProviderMergeCandidate,
   buildProviderWizardDraft,
+  providerPresetToWizardState,
   canAdvanceProviderWizard,
   canTestProviderModel,
   canUnpinProviderModel,
@@ -113,6 +114,17 @@ const catalog: ConfigModelCatalog = {
 };
 
 describe("configProviderLogic", () => {
+  it("uses the preset model's explicit allowed wire instead of a broader provider default", () => {
+    const template = {
+      provider_preset_id: "custom_opencode_relay", provider_id: "opencode", label: "OpenCode",
+      category: "relay", vendor_id: "relay", vendor_label: "Relay", source_preset_id: "opencode",
+      provider: { driver: "openai", credential_ref: "env:OPENCODE_KEY", protocols: { default: "chat_completions", allowed: ["chat_completions", "responses"] } },
+      default_model: { model: "gpt-5.6-luna", transport: "responses", wire_protocol: "responses" },
+    };
+    expect(providerPresetToWizardState(template).defaultProtocol).toBe("responses");
+    expect(providerPresetToWizardState({ ...template, default_model: { ...template.default_model, wire_protocol: "anthropic_messages" } }).defaultProtocol).toBe("chat_completions");
+  });
+
   it("finds exact-contract duplicate Providers without guessing endpoint equivalence", () => {
     const rows = deriveProviderRegistryRows(providers, catalog);
     expect(deriveProviderMergeCandidate(rows, "relay_a")).toEqual({
@@ -296,6 +308,29 @@ describe("configProviderLogic", () => {
     expect(provider).not.toHaveProperty("runtime_framework");
     expect(provider).not.toHaveProperty("artifact_path");
     expect(provider.discovery).toEqual({ mode: "manual", adapter: "openai_compatible" });
+  });
+
+  it.each(["https://relay.example/google/v1beta/openai", "https://another.example/v1beta/openai/"])("rebinds Gemini discovery to the edited endpoint %s", (baseUrl) => {
+    const provider = buildProviderWizardDraft({
+      ...initialProviderWizardState(), driver: "openai", baseUrl,
+    }, {
+      driver: "openai", base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      discovery: { adapter: "gemini", cache_ttl_seconds: 300, models_url_override: "https://generativelanguage.googleapis.com/v1beta/models" },
+    });
+    expect(provider.discovery).toEqual({
+      mode: "auto", adapter: "gemini", cache_ttl_seconds: 300,
+      models_url_override: `${baseUrl.replace(/\/+$/, "").replace(/\/openai$/, "")}/models`,
+    });
+  });
+
+  it("updates discovery protocol and drops the template endpoint override when the driver changes", () => {
+    const provider = buildProviderWizardDraft({
+      ...initialProviderWizardState(), driver: "anthropic", baseUrl: "https://relay.example/v1",
+    }, {
+      driver: "openai", base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      discovery: { adapter: "gemini", models_url_override: "https://generativelanguage.googleapis.com/v1beta/models" },
+    });
+    expect(provider.discovery).toEqual({ mode: "auto", adapter: "anthropic" });
   });
 
   it("does not fabricate deployment for a non-local provider", () => {
@@ -882,7 +917,7 @@ describe("configProviderLogic", () => {
     expect(JSON.stringify(state)).not.toContain("must-not-survive");
   });
 
-  it("keeps local deployment and protocol requirements inside the connection boundary", () => {
+  it("connects an existing local service without requiring a model file or deployment framework", () => {
     let state = providerWizardReducer(initialProviderWizardState(), {
       type: "choose_template",
       templateId: "local_vllm",
@@ -905,7 +940,7 @@ describe("configProviderLogic", () => {
       defaultProtocol: "responses",
       allowedProtocols: ["responses"],
     });
-    expect(canAdvanceProviderWizard(state)).toBe(false);
+    expect(canAdvanceProviderWizard(state)).toBe(true);
 
     state = providerWizardReducer(state, {
       type: "set_deployment",
