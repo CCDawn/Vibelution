@@ -5,10 +5,11 @@
  * Protocol-layer fields (wire protocol, interaction contract, reasoning
  * adapters, ...) are supplied by built-in rules and discovery; hand-editing
  * them breaks protocol combinations, so the editor exposes a small whitelist
- * of leaf fields and renders protocol-layer fields read-only with a
- * 「由协议规则供给」note. This module is the single source for both the
- * whitelist and the pure edit application, so the form and the draft write
- * action cannot drift apart.
+ * of leaf fields. The settings UI shows one resolved route from
+ * `wire_protocol` and leaves kind, api, driver, wire, and contract inside
+ * the resolver. This module is the single source for both the whitelist and
+ * the pure edit application, so the form and the draft write action cannot
+ * drift apart.
  *
  * Field paths (schema v2 pinned entry `llm.providers.<id>.models.<key>`):
  * - entry-level: label, upstream_id, context_window, enabled

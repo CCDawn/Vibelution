@@ -61,6 +61,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- `source_url` 只能写真实的 `https://` 定位符，`retrieved_at` 必须是带时区的 RFC3339 时间；不得从 DOI、URL、摘要、标题或 `valueSummary` 猜造 `fact`、`relation` 或验证状态。",
             "- 每条 evidence card 必须同时保留 `sourceId` 与 `candidateId`（或 `recordId`）的正式来源联结；`sourceId` 必须等于该 candidate/record ID，不能用 URL 充当来源身份。可选字段为 `doi`、`date`、`limitations`（字符串数组，每项一条限制；不要写成单个字符串）。",
             "- 若正式字段缺失、来源联结不一致或没有真实 citation anchor，必须结构化回写 `needs_review`/`blocked` 及原因；不能用旧版宽松卡片冒充 Challenge v2 证据。",
+            "- 写回被 Challenge v2 证据卡契约校验拒绝后，系统会计算确定性补救契约：下一次读取上下文时若带 `writebackRemediation`（kind=evidence_fields），它是系统算出的精确补救指令——按 `findings[]` 每条的 `path`/`detail` 补全或修正对应条目字段后重新回写 completed。同类违规只有一次系统修正机会：契约 `exhausted=true` 后上下文不再注入，再次违规将按契约直接拒绝。",
         ]
     if stage_id == "relations":
         return [
@@ -73,6 +74,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 先用 `source_collection_context_tool` 读到本批候选与写回契约：边端点优先用契约 `endpointPolicy.allowedEndpointIds` 中的完整 `candidateId`（主题枢纽端点用已声明主题的主题 ID，物化为 `source-theme:<themeId>`）。",
             "- 端点记不住完整 ID 时可写候选标题或已声明主题的 label/裸主题 ID 作语义端点，服务端会确定性解析回注册表节点；解析不了的边按悬空处理计入 `missingLinks`（danglingEdgeCount），阻塞下游 knowledge_ingestion。",
             "- 语义枢纽必须先在同一轮回写的 `themeNodes[]` 中声明（themeId+label）再连边；禁止发明 `rh_claim` 之类未声明的逻辑端点或展示别名。",
+            "- 写回被 `evidence_relation_graph_invalid` 拒绝后，系统会在拒绝点计算确定性补救契约：下一次读取上下文时若带 `writebackRemediation`（kind=relation_refs 或 relation_missing_fields），它是系统算出的精确补救指令——按 `findings[]` 每条的 `path`/`value` 把违规 evidenceRef 值替换为 `allowedEvidenceRefs` 中的 canonical claimEvidenceId，或补全缺失的必需集合，然后重新回写。同类违规只有一次系统修正机会：契约 `exhausted=true` 后上下文不再注入，再次违规将按契约直接拒绝。",
         ]
     if stage_id == "ingestion":
         return [

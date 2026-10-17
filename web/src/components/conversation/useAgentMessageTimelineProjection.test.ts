@@ -236,6 +236,136 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projectAgentMessageTimelineMessages({
       timelineMessages: [thinking],
       companionMode: false,
-    }).messages.map((message) => message.id)).toEqual(["thinking-only"]);
+}).messages.map((message) => message.id)).toEqual(["thinking-only"]);
+  });
+
+  it("renders one assistant row when a backend live overlay and the active turn layer share a turn", () => {
+    const inFlightItem = (owner: string): SessionTurnItem => ({
+      id: `${owner}:1`,
+      itemId: owner,
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-dupe",
+      type: "agent_message",
+      phase: "final_answer",
+      status: "running",
+      revision: 1,
+      sequence: 1,
+      terminal: false,
+      text: "正在输出的同一段回答",
+    });
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [{
+        id: "session-1-message-live-turn-dupe",
+        role: "assistant",
+        turnId: "turn-dupe",
+        status: "running",
+        timestamp: "2026-10-17T12:00:00Z",
+        turnItems: [inFlightItem("live")],
+        metadata: { kind: "session_live_overlay", turnId: "turn-dupe" },
+      }],
+      activeTurnMessage: {
+        id: "session-1-message-active-turn-dupe",
+        role: "assistant",
+        turnId: "turn-dupe",
+        status: "running",
+        timestamp: "2026-10-17T12:00:01Z",
+        turnItems: [inFlightItem("active")],
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-dupe" },
+      },
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0]?.id).toBe("session-1-message-active-turn-dupe");
+  });
+
+  it("keeps the streaming backend overlay when the active turn layer is an empty shell", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [{
+        id: "session-1-message-live-turn-shell",
+        role: "assistant",
+        turnId: "turn-shell",
+        status: "running",
+        timestamp: "2026-10-17T12:00:00Z",
+        turnItems: [{
+          id: "live-text:1",
+          itemId: "live-text",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-shell",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "running",
+          revision: 1,
+          sequence: 1,
+          terminal: false,
+          text: "后端投影已经流出的正文",
+        }],
+        metadata: { kind: "session_live_overlay", turnId: "turn-shell" },
+      }],
+      activeTurnMessage: {
+        id: "session-1-message-active-turn-shell",
+        role: "assistant",
+        turnId: "turn-shell",
+        status: "pending",
+        timestamp: "2026-10-17T12:00:01Z",
+        turnItems: [],
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-shell", processStage: "user_submit" },
+      },
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0]?.id).toBe("session-1-message-live-turn-shell");
+  });
+
+  it("retires a stale active turn overlay once the same turn committed its answer", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [{
+        id: "session-1-message-12",
+        role: "assistant",
+        turnId: "turn-committed",
+        status: "completed",
+        timestamp: "2026-10-17T12:00:02Z",
+        turnItems: [{
+          id: "answer:1",
+          itemId: "answer",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-committed",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "completed",
+          revision: 2,
+          sequence: 1,
+          terminal: true,
+          text: "已经提交的最终回答",
+        }],
+      }],
+      activeTurnMessage: {
+        id: "session-1-message-active-turn-committed",
+        role: "assistant",
+        turnId: "turn-committed",
+        status: "running",
+        timestamp: "2026-10-17T12:00:01Z",
+        turnItems: [{
+          id: "answer-stale:1",
+          itemId: "answer-stale",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-committed",
+          type: "agent_message",
+          phase: "final_answer",
+          status: "running",
+          revision: 1,
+          sequence: 1,
+          terminal: false,
+          text: "已经提交的最终",
+        }],
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-committed" },
+      },
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0]?.id).toBe("session-1-message-12");
   });
 });

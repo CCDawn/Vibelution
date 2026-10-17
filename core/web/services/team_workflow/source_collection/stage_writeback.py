@@ -5,6 +5,7 @@ Clarity B6: split from stages.py. Shared gates/helpers import from stage_session
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
@@ -21,6 +22,18 @@ from .extraction_quote_anchor_supply import (
 )
 from .extraction_retrieved_at_backfill import (
     backfill_source_collection_stage_writeback_retrieved_at,
+)
+from .writeback_remediation_contract import (
+    WRITEBACK_REMEDIATION_KIND_EVIDENCE_FIELDS,
+    WRITEBACK_REMEDIATION_KIND_RELATION_REFS,
+    active_writeback_remediation,
+    build_writeback_remediation_contract,
+    classify_relation_graph_rejection_error,
+    collect_relation_ref_violations,
+    evidence_field_findings,
+    next_writeback_remediation_attempt,
+    relation_missing_field_findings,
+    writeback_remediation_hint_block,
 )
 
 from .stage_session import (
@@ -546,6 +559,119 @@ def _apply_finding_receipt_gate_to_closure(
     })
 
 
+def _persist_source_collection_stage_writeback_remediation_contract(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    contract: dict[str, Any],
+) -> None:
+    """Record the one-shot remediation contract on the canonical task record.
+
+    This runs at a deterministic rejection, right before the writeback raises:
+    the contract is upserted into the task store and a workflow event is
+    emitted so the next ``source_collection_context_tool`` read can inject
+    ``writebackRemediation``.  Persistence must never mask or alter the
+    rejection itself — any store failure is swallowed with a stderr breadcrumb
+    (same shape as ``_record_workflow_event``).  The task status is untouched:
+    only the rejection semantics decide that.
+    """
+    s = _service()
+    task["writebackRemediationContract"] = contract
+    try:
+        s._upsert_source_collection_stage_session_task(team_id, run_id, task)
+    except Exception as exc:  # noqa: BLE001 - diagnostic breadcrumb, never masks the rejection
+        try:
+            print(
+                "[team-workflow] writeback remediation contract persist failed "
+                f"teamId={team_id} taskId={task.get('taskId', '')} "
+                f"errorType={type(exc).__name__} error={str(exc)[:200]}",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001, S110 - breadcrumb must never raise
+            pass
+    s._record_workflow_event(
+        "source_collection.stage_session_task_writeback_remediation_contract",
+        team_id,
+        fields={
+            "runId": run_id,
+            "taskId": s._trim_text(task.get("taskId"), max_length=160),
+            "stageId": s._trim_text(task.get("stageId"), max_length=80),
+            "agentId": s._trim_text(task.get("agentId"), max_length=160),
+            "kind": contract.get("kind", ""),
+            "findingCount": len(contract.get("findings") or []),
+            "remediationAttempt": int(contract.get("attempt") or 1),
+            "exhausted": bool(contract.get("exhausted")),
+        },
+        level="warning",
+        outcome="rejected",
+    )
+
+
+def _prepare_relation_graph_writeback_remediation(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    result_payload: dict[str, Any],
+    error_text: str,
+) -> str:
+    """Build + persist the relations-graph rejection contract; return the hint block.
+
+    At the rejection point the system holds both the allowed canonical refs
+    and the submitted result, so the diff is deterministic (production session
+    session-20261017-203847-419417: the relations agent re-read context 11
+    times and still submitted ``dprec-*`` record ids as evidenceRefs because
+    nothing told it exactly what to change).  The historical rejection prefix
+    is preserved byte-for-byte; only an appended ``补救提示`` block is new.
+    Graceful degradation: when the error is not classifiable, or the allowed
+    list cannot be loaded, the block degrades (allowed list only / absent) —
+    no validation is ever relaxed to manufacture a diff.
+    """
+    s = _service()
+    kind = classify_relation_graph_rejection_error(error_text)
+    if not kind:
+        return ""
+    from ..research_runtime.artifact_readback_registry import load_allowed_evidence_refs
+
+    try:
+        allowed_refs = list(
+            load_allowed_evidence_refs(
+                team_id=team_id,
+                authority_run_id=run_id,
+                workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
+            )
+        )
+    except Exception:  # noqa: BLE001 - diff degrades to violations-only
+        allowed_refs = []
+    if kind == WRITEBACK_REMEDIATION_KIND_RELATION_REFS:
+        findings = collect_relation_ref_violations(
+            result_payload if isinstance(result_payload, dict) else {},
+            set(allowed_refs),
+        )
+    else:
+        findings = relation_missing_field_findings(error_text)
+    attempt, exhausted = next_writeback_remediation_attempt(
+        task.get("writebackRemediationContract")
+        if isinstance(task.get("writebackRemediationContract"), dict)
+        else None,
+        kind,
+    )
+    contract = build_writeback_remediation_contract(
+        kind,
+        findings,
+        recorded_at=s.utc_now_iso(),
+        attempt=attempt,
+    )
+    contract["exhausted"] = exhausted
+    _persist_source_collection_stage_writeback_remediation_contract(
+        team_id,
+        run_id,
+        task,
+        contract,
+    )
+    return writeback_remediation_hint_block(kind, findings, allowed_refs)
+
+
 def writeback_source_collection_stage_session_task(
     team_id: str,
     task_id: str,
@@ -644,6 +770,29 @@ def writeback_source_collection_stage_session_task(
             result_payload,
         )
         if card_contract_errors:
+            # Deterministic remediation contract (one-shot): the card errors
+            # are path-based, so the contract can tell the agent exactly which
+            # entry/field to fix on its single rewrite.  Persistence is
+            # best-effort and never alters the rejection below.
+            attempt, exhausted = next_writeback_remediation_attempt(
+                task.get("writebackRemediationContract")
+                if isinstance(task.get("writebackRemediationContract"), dict)
+                else None,
+                WRITEBACK_REMEDIATION_KIND_EVIDENCE_FIELDS,
+            )
+            card_contract = build_writeback_remediation_contract(
+                WRITEBACK_REMEDIATION_KIND_EVIDENCE_FIELDS,
+                evidence_field_findings(card_contract_errors),
+                recorded_at=s.utc_now_iso(),
+                attempt=attempt,
+            )
+            card_contract["exhausted"] = exhausted
+            _persist_source_collection_stage_writeback_remediation_contract(
+                normalized_team_id,
+                run_id,
+                task,
+                card_contract,
+            )
             raise s.TeamWorkflowOrchestrationError(
                 "extraction writeback rejected: Challenge v2 证据卡契约校验失败 —— "
                 "请在对应条目补全缺失字段后重写；"
@@ -828,13 +977,33 @@ def writeback_source_collection_stage_session_task(
                 raise_on_invalid=True,
             )
         except ValueError as exc:
+            # Information enhancement only: the historical rejection prefix is
+            # preserved byte-for-byte (tests pin it) and an appended
+            # deterministic diff block is added — allowed canonical refs plus
+            # the offending values/paths extracted from the submitted result.
+            # A structured one-shot ``writebackRemediationContract`` is upserted
+            # onto the task record so the next context read injects
+            # ``writebackRemediation``; the second rejection of the same kind
+            # flips it to exhausted and keeps this message unchanged.
+            remediation_hint = _prepare_relation_graph_writeback_remediation(
+                team_id=normalized_team_id,
+                run_id=run_id,
+                task=task,
+                result_payload=result_payload,
+                error_text=str(exc),
+            )
             raise s.TeamWorkflowOrchestrationError(
                 f"evidence_relation_graph_invalid: {exc}. Read source_collection_context_tool, "
                 "then repair the existing graph with evidenceGaps and real counterEvidenceRefs. "
                 "Every candidateRelations, sourceThemeEdges and topicRelations edge needs "
                 "canonical evidenceRefs from allowedEvidenceRefs. Do not invent evidence; "
                 "if unavailable, write status=blocked with the actual reason."
+                + remediation_hint
             ) from exc
+    # Compliant (accepted) writeback: clear any stale remediation contract so
+    # the next deterministic rejection of any kind starts a fresh one-shot
+    # cycle — the same lifecycle shape as the quote-anchor marker above.
+    task.pop("writebackRemediationContract", None)
     task["status"] = status
     task["summary"] = writeback["summary"] or s._trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
@@ -1217,6 +1386,15 @@ def get_source_collection_stage_task_context(
             "不要通过重复读取猜测映射。allowedEvidenceRefs 非空而 relationEvidence 缺少对应"
             "绑定卡时才报告证据绑定缺失；两个列表同时为空表示本轮没有可绑定证据。"
         )
+    # One-shot writeback remediation contract: after a deterministic writeback
+    # rejection the task carries an unexhausted ``writebackRemediationContract``
+    # (relation refs / missing graph fields / evidence-card fields).  Inject it
+    # verbatim as ``writebackRemediation`` so the agent sees the system-computed
+    # exact remediation instruction instead of re-reading context blind; an
+    # exhausted contract stops injecting (the one-shot boundary).
+    active_remediation = active_writeback_remediation(task)
+    if active_remediation:
+        context["writebackRemediation"] = active_remediation
     if retry_focus:
         context["retryFocus"] = retry_focus
         context["usage"]["retryInstruction"] = s._trim_text(retry_focus.get("retryInstruction"), max_length=1000)
