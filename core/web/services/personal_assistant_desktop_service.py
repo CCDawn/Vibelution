@@ -186,7 +186,13 @@ class Call:
                          max_elements=160, timeout_ms=3000)
         if not _title_matches(str(state.get("window_title", "")), scope.document):
             raise DesktopBlocked("活动文档已经改变，已拒绝输入。")
-        if state.get("elements_complete") is not True or state.get("truncated") is True:
+        # On Windows 0.36.0, elements_complete=false also denotes an inherently
+        # non-exhaustive platform walk, even when all 36/36 rows were returned.
+        # Refuse an actually cut response, rather than rejecting that platform.
+        if (state.get("truncated") is True or
+                (isinstance(state.get("returned_element_count"), int)
+                 and isinstance(state.get("total_element_count"), int)
+                 and state["returned_element_count"] < state["total_element_count"])):
             raise DesktopBlocked("窗口控件信息不完整，已拒绝输入。")
         elements = state.get("elements", [])
         editors = [e for e in elements if isinstance(e, dict)

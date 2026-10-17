@@ -162,9 +162,23 @@ def test_partial_accessibility_tree_is_not_used_for_actions(desktop):
         result = original(name, args, **kwargs)
         if name == "get_window_state":
             result["structuredContent"]["elements_complete"] = False
+            result["structuredContent"]["truncated"] = True
         return result
     driver.call = partial
     assert not call()["ok"]
+
+
+def test_windows_nonexhaustive_flag_alone_is_not_a_truncated_response(desktop):
+    driver, _ = desktop
+    original = driver.call
+    def windows_snapshot(name, args, **kwargs):
+        result = original(name, args, **kwargs)
+        if name == "get_window_state":
+            result["structuredContent"].update(elements_complete=False, truncated=False,
+                                                returned_element_count=3, total_element_count=3)
+        return result
+    driver.call = windows_snapshot
+    assert call()["ok"]
 
 
 def test_refused_native_save_does_not_send_background_keyboard_input(desktop):
