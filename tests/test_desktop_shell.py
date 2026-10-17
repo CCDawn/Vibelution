@@ -182,19 +182,20 @@ def test_clean_electron_worktree_ignores_newer_timestamps(tmp_path, monkeypatch)
     assert status["launchBlocking"] is False
 
 
-def test_dirty_electron_worktree_is_source_newer_even_when_mtime_is_older(tmp_path, monkeypatch):
+@pytest.mark.parametrize("source_mtime,stale", [(1_000, False), (2_000_000_100, True)])
+def test_dirty_electron_worktree_is_stale_only_when_source_is_newer(tmp_path, monkeypatch, source_mtime, stale):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
     _mock_frontend_inspection(monkeypatch, tmp_path)
     source = tmp_path / "desktop" / "electron" / "src" / "main.ts"
     source.write_text("export const edited = 1;\n", encoding="utf-8")
-    os.utime(source, (1_000, 1_000))
+    os.utime(source, (source_mtime, source_mtime))
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: True)
     status = desktop_shell.inspect_desktop_shell(tmp_path)
-    assert status["stale"] is True
-    assert status["reason"] == "source_newer_than_asar"
-    assert status["launchBlocking"] is True
+    assert status["stale"] is stale
+    assert status["reason"] == ("source_newer_than_asar" if stale else "current")
+    assert status["launchBlocking"] is stale
 
 
 def test_inspect_desktop_shell_package_frontend_bytes_must_match_provenance(tmp_path, monkeypatch):
@@ -1023,6 +1024,35 @@ def test_branch_launch_does_not_consume_live_shell_rebuild_signal(tmp_path, monk
     assert spec["reason"] == "forward_to_live_shell"
     assert spec["args"][spec["args"].index("--project") + 1] == str(branch)
     assert spec["args"][-1] == "start"
+
+
+def test_ensure_unpackaged_electron_dirty_source_is_current_after_rebuild(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=1_000)
+    source = tmp_path / desktop_shell.ELECTRON_SRC_RELATIVE / "main.ts"
+    source.write_text("export const edited = 1;\n", encoding="utf-8")
+    os.utime(source, (1_100, 1_100))
+    rebuilds = []
+
+    def fake_rebuild(root):
+        rebuilds.append(root)
+        os.utime(desktop_shell.unpackaged_main_js(root), (1_200, 1_200))
+
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", lambda root: True)
+    monkeypatch.setattr(desktop_shell, "_rebuild_unpackaged_electron", fake_rebuild)
+    before = desktop_shell.inspect_unpackaged_electron(tmp_path)
+    assert before["stale"] is True
+    assert before["reason"] == "source_newer_than_bundle"
+
+    result = desktop_shell.ensure_unpackaged_electron(tmp_path)
+
+    assert result["rebuilt"] is True
+    assert result["stale"] is False
+    assert result["reason"] == "current"
+    assert result["sourceNewerThanBundle"] is False
+    assert desktop_shell.ensure_unpackaged_electron(tmp_path)["rebuilt"] is False
+    assert rebuilds == [tmp_path]
 
 
 def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch):
