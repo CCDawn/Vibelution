@@ -949,6 +949,7 @@ def _ensure_conversation_agent_metadata(
                 prompt_template_id=prompt_template_id,
                 existing_agent_id=existing_agent_id,
                 session_workspace_path=session_workspace,
+                project_root=_agent_directory_startup_project_root(),
             )
             existing_agent = s._conversation_agent_from_state(repaired_agent)
             if agent_by_id is not None:
@@ -1044,6 +1045,7 @@ def _ensure_conversation_agent_metadata(
         prompt_template_id=prompt_template_id,
         existing_agent_id=existing_agent_id,
         session_workspace_path=session_workspace,
+        project_root=_agent_directory_startup_project_root(),
     )
     agent_id = str(agent.get("agentId") or "").strip()
     if agent_by_id is not None and agent_id:
@@ -1092,6 +1094,23 @@ def _sync_agent_directory_project_root() -> None:
     if s.agent_directory_service.PROJECT_ROOT != project_root:
         s.agent_directory_service.PROJECT_ROOT = project_root
         s._invalidate_session_list_cache()
+
+
+def _agent_directory_startup_project_root() -> Path | None:
+    """Startup-pinned session directory root for Agent repair calls.
+
+    ``agent_directory_service.PROJECT_ROOT`` is a mutable module global that
+    research background streams can briefly repoint at identity-less data
+    directories; the session-repair ensure calls then mint into the wrong
+    store. The directory runtime root is fixed at startup and only cleared on
+    shutdown, so passing it explicitly pins repair to the correct root. When
+    the directory runtime is not open (pytest/legacy), returns None and the
+    calls keep their existing module-root behavior.
+    """
+
+    from . import directory_runtime
+
+    return directory_runtime.directory_store_project_root()
 
 
 def _conversation_agent_from_state(
@@ -2082,6 +2101,7 @@ def create_chat_session(
                         ),
                         created_by=created_by,
                         conversation_index_kind=conversation_index_kind,
+                        project_root=_agent_directory_startup_project_root(),
                     )
                 normalized_agent_id = str(agent.get("agentId") or "").strip()
                 if idempotency_path is not None and normalized_agent_id:
@@ -2296,6 +2316,7 @@ def _bind_conversation_to_agent_instance(
                 session_workspace_path=str(conversation.get("workspace_path") or conversation.get("workspacePath") or s._session_workspace_relative_path(session_id)),
                 created_by="session_agent_binding",
                 conversation_index_kind=conversation_index_kind,
+                project_root=_agent_directory_startup_project_root(),
             )
     except s.AgentNotFoundError:
         raise s.SessionValidationError(f"Session Agent not found: {agent_id}") from None

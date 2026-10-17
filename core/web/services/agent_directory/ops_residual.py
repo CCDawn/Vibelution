@@ -1326,6 +1326,40 @@ def effective_visible_tool_names_for_current_agent(tools: Iterable[Any] | None =
     )
 
 
+def _untrusted_session_repair_store_root() -> Path | None:
+    """Return the effective root when session-repair must not write the store.
+
+    Session repair runs on session list/detail read paths and must be able to
+    fire while a research background stream has briefly repointed the
+    module-level ``agent_directory_service.PROJECT_ROOT`` at an identity-less
+    data directory. The developer-sandbox router then silently falls back to
+    the shared default operator workspace, and the minted replacement Agent
+    lands in the wrong cross-project store. An identity-less root therefore
+    blocks minting and updates here — unless the fallback home was explicitly
+    designated (``VIBELUTION_DATA_HOME`` / ``[storage].data_home``, or the
+    pytest harness pinning the env): then the identity-less route converges
+    on the explicitly chosen store and existing semantics stay unchanged.
+    """
+
+    from config.paths import DATA_HOME_ENV, resolve_configured_data_home
+    from vibelution_storage import ProjectIdentityError, load_project_identity
+
+    s = _service()
+    root = s._project_root()
+    try:
+        load_project_identity(root)
+    except ProjectIdentityError:
+        if str(os.environ.get(DATA_HOME_ENV) or "").strip():
+            return None
+        try:
+            if resolve_configured_data_home() is not None:
+                return None
+        except Exception:
+            pass
+        return root
+    return None
+
+
 def ensure_agent_for_session(
     session_id: str,
     *,
@@ -1338,177 +1372,199 @@ def ensure_agent_for_session(
     session_workspace_path: str = "",
     created_by: str = "session_repair",
     conversation_index_kind: str = "",
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         raise s.AgentDirectoryError("Session id is required to bind an AgentInstance.")
 
-    with s._STATE_LOCK:
-        state = s.repair_agent_directory()
-        now = s.utc_now_iso()
-        normalized_llm_bindings = s.normalize_agent_llm_bindings(llm_bindings)
-        creation_llm_bindings = dict(normalized_llm_bindings)
-        if not s.agent_dialogue_model_id({"llmBindings": creation_llm_bindings}):
-            default_model_id = s._profile_id_to_model_id("primary")
-            if default_model_id:
-                creation_llm_bindings[s.DEFAULT_AGENT_LLM_SLOT] = {"modelId": default_model_id}
-        agent = s._find_agent(state, existing_agent_id)
-        if agent is None:
-            agent = s._find_agent_by_direct_session(state, normalized_session_id)
-        if agent is None:
-            session_visibility = s._direct_session_visibility(
-                normalized_session_id,
-                session_workspace_path=session_workspace_path,
+    # scoped_project_root only sets a ContextVar read by _active_project_root;
+    # the module-level PROJECT_ROOT (and its research-stream repointing) is
+    # untouched, so an explicit project_root pins this call stack even while
+    # the global is polluted.
+    with s.scoped_project_root(project_root):
+        untrusted_root = _untrusted_session_repair_store_root()
+        if untrusted_root is not None:
+            s._debug_logger.warning(
+                f"Skipped session Agent repair mint/update under identity-less project root "
+                f"root={untrusted_root}. Repair retries on the next session list/detail read. "
+                f"session={normalized_session_id}",
+                tag="AGENT_TOOL_DIRECTORY",
             )
-            metadata_payload = {
-                "legacySessionWorkspacePath": str(session_workspace_path or "").strip(),
-                "directSessionVisibility": session_visibility,
-            }
-            metadata_payload.update(s._agent_metadata_conversation_index_updates(conversation_index_kind))
-            if str(created_by or "").strip() == "session_repair":
-                metadata_payload.setdefault("conversationIndexKind", s.CONVERSATION_INDEX_KIND_PERSONAL_AGENT)
-                metadata_payload.setdefault("conversationIndexVisibility", s.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
-            created = s.create_agent_instance(
-                display_name=display_name or normalized_session_id,
-                llm_bindings=creation_llm_bindings,
-                primary_mode=primary_mode,
-                role_key=role_key,
-                prompt_template_id=prompt_template_id,
-                direct_session_id=normalized_session_id,
-                created_by=created_by,
-                metadata=metadata_payload,
-            )
-            return created
+            state = s.load_state()
+            agent = s._find_agent(state, existing_agent_id)
+            if agent is None:
+                agent = s._find_agent_by_direct_session(state, normalized_session_id)
+            if agent is None:
+                return None
+            return s._agent_to_api(agent)
 
-        changed = False
-        if not s._normalize_agent_code(agent.get("agentCode")):
-            agent["agentCode"] = s._next_agent_code(
-                state.get("agents") or [],
-                exclude_agent_id=str(agent.get("agentId") or ""),
-            )
-            changed = True
-        if str(agent.get("directSessionId") or "").strip() != normalized_session_id:
-            s._ensure_active_direct_session_available(
-                state,
-                normalized_session_id,
-                agent_id=str(agent.get("agentId") or "").strip(),
-            )
-            agent["directSessionId"] = normalized_session_id
-            changed = True
-        normalized_primary_mode = s._normalize_primary_mode(primary_mode or agent.get("primaryMode") or s.DEFAULT_AGENT_PRIMARY_MODE)
-        if str(agent.get("primaryMode") or "").strip() != normalized_primary_mode:
-            agent["primaryMode"] = normalized_primary_mode
-            changed = True
-        normalized_role_key = s._normalize_role_key(role_key or agent.get("roleKey") or s._infer_agent_role_key(agent))
-        if str(agent.get("roleKey") or "").strip() != normalized_role_key:
-            agent["roleKey"] = normalized_role_key
-            changed = True
-        normalized_prompt_template_id = s._normalize_prompt_template_id(
-            prompt_template_id
-            or agent.get("promptTemplateId")
-            or s._agent_metadata_prompt_template_id(agent)
-            or s._infer_agent_prompt_template_id(agent)
-        )
-        if str(agent.get("promptTemplateId") or "").strip() != normalized_prompt_template_id:
-            agent["promptTemplateId"] = normalized_prompt_template_id
-            changed = True
-        title = s.trim_lines(display_name or "", max_lines=1).strip()
-        if title:
-            metadata = s._with_functional_display_name(dict(agent.get("metadata") or {}), title)
-            if metadata != agent.get("metadata"):
-                agent["metadata"] = metadata
+        with s._STATE_LOCK:
+            state = s.repair_agent_directory()
+            now = s.utc_now_iso()
+            normalized_llm_bindings = s.normalize_agent_llm_bindings(llm_bindings)
+            creation_llm_bindings = dict(normalized_llm_bindings)
+            if not s.agent_dialogue_model_id({"llmBindings": creation_llm_bindings}):
+                default_model_id = s._profile_id_to_model_id("primary")
+                if default_model_id:
+                    creation_llm_bindings[s.DEFAULT_AGENT_LLM_SLOT] = {"modelId": default_model_id}
+            agent = s._find_agent(state, existing_agent_id)
+            if agent is None:
+                agent = s._find_agent_by_direct_session(state, normalized_session_id)
+            if agent is None:
+                session_visibility = s._direct_session_visibility(
+                    normalized_session_id,
+                    session_workspace_path=session_workspace_path,
+                )
+                metadata_payload = {
+                    "legacySessionWorkspacePath": str(session_workspace_path or "").strip(),
+                    "directSessionVisibility": session_visibility,
+                }
+                metadata_payload.update(s._agent_metadata_conversation_index_updates(conversation_index_kind))
+                if str(created_by or "").strip() == "session_repair":
+                    metadata_payload.setdefault("conversationIndexKind", s.CONVERSATION_INDEX_KIND_PERSONAL_AGENT)
+                    metadata_payload.setdefault("conversationIndexVisibility", s.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
+                created = s.create_agent_instance(
+                    display_name=display_name or normalized_session_id,
+                    llm_bindings=creation_llm_bindings,
+                    primary_mode=primary_mode,
+                    role_key=role_key,
+                    prompt_template_id=prompt_template_id,
+                    direct_session_id=normalized_session_id,
+                    created_by=created_by,
+                    metadata=metadata_payload,
+                )
+                return created
+
+            changed = False
+            if not s._normalize_agent_code(agent.get("agentCode")):
+                agent["agentCode"] = s._next_agent_code(
+                    state.get("agents") or [],
+                    exclude_agent_id=str(agent.get("agentId") or ""),
+                )
                 changed = True
-            if s._should_repair_public_display_name(agent):
-                responsibility_name = str(metadata.get("functionalDisplayName") or title).strip()
+            if str(agent.get("directSessionId") or "").strip() != normalized_session_id:
+                s._ensure_active_direct_session_available(
+                    state,
+                    normalized_session_id,
+                    agent_id=str(agent.get("agentId") or "").strip(),
+                )
+                agent["directSessionId"] = normalized_session_id
+                changed = True
+            normalized_primary_mode = s._normalize_primary_mode(primary_mode or agent.get("primaryMode") or s.DEFAULT_AGENT_PRIMARY_MODE)
+            if str(agent.get("primaryMode") or "").strip() != normalized_primary_mode:
+                agent["primaryMode"] = normalized_primary_mode
+                changed = True
+            normalized_role_key = s._normalize_role_key(role_key or agent.get("roleKey") or s._infer_agent_role_key(agent))
+            if str(agent.get("roleKey") or "").strip() != normalized_role_key:
+                agent["roleKey"] = normalized_role_key
+                changed = True
+            normalized_prompt_template_id = s._normalize_prompt_template_id(
+                prompt_template_id
+                or agent.get("promptTemplateId")
+                or s._agent_metadata_prompt_template_id(agent)
+                or s._infer_agent_prompt_template_id(agent)
+            )
+            if str(agent.get("promptTemplateId") or "").strip() != normalized_prompt_template_id:
+                agent["promptTemplateId"] = normalized_prompt_template_id
+                changed = True
+            title = s.trim_lines(display_name or "", max_lines=1).strip()
+            if title:
+                metadata = s._with_functional_display_name(dict(agent.get("metadata") or {}), title)
+                if metadata != agent.get("metadata"):
+                    agent["metadata"] = metadata
+                    changed = True
+                if s._should_repair_public_display_name(agent):
+                    responsibility_name = str(metadata.get("functionalDisplayName") or title).strip()
+                    agent["displayName"] = s._agent_public_display_name(
+                        responsibility_name,
+                        existing_agents=state.get("agents") or [],
+                        agent_id=str(agent.get("agentId") or ""),
+                        metadata=metadata,
+                    )
+                    agent["metadata"] = s._mark_display_name_responsibility(
+                        dict(agent.get("metadata") or {}),
+                        force=True,
+                    )
+                    changed = True
+            if not str(agent.get("displayName") or "").strip():
                 agent["displayName"] = s._agent_public_display_name(
-                    responsibility_name,
+                    str(
+                        (agent.get("metadata") or {}).get("functionalDisplayName")
+                        or title
+                        or agent.get("agentCode")
+                        or agent.get("agentId")
+                        or "Agent"
+                    ),
                     existing_agents=state.get("agents") or [],
                     agent_id=str(agent.get("agentId") or ""),
-                    metadata=metadata,
+                    metadata=dict(agent.get("metadata") or {}),
                 )
                 agent["metadata"] = s._mark_display_name_responsibility(
                     dict(agent.get("metadata") or {}),
                     force=True,
                 )
                 changed = True
-        if not str(agent.get("displayName") or "").strip():
-            agent["displayName"] = s._agent_public_display_name(
-                str(
-                    (agent.get("metadata") or {}).get("functionalDisplayName")
-                    or title
-                    or agent.get("agentCode")
-                    or agent.get("agentId")
-                    or "Agent"
-                ),
-                existing_agents=state.get("agents") or [],
-                agent_id=str(agent.get("agentId") or ""),
-                metadata=dict(agent.get("metadata") or {}),
-            )
-            agent["metadata"] = s._mark_display_name_responsibility(
-                dict(agent.get("metadata") or {}),
-                force=True,
-            )
-            changed = True
-        if normalized_llm_bindings and s.normalize_agent_llm_bindings(agent.get("llmBindings")) != normalized_llm_bindings:
-            agent["llmBindings"] = normalized_llm_bindings
-            changed = True
-        if str(agent.get("status") or "active").strip() == "archived":
-            s._record_agent_event("agent.ensure.skipped_archived", agent, lifecycle=True)
-            raise s.AgentArchivedError(f"Archived Agent cannot be ensured for session: {agent.get('agentId') or ''}")
-        policy_changed = s._ensure_session_agent_tool_policy(state, agent)
-        if policy_changed:
-            changed = True
-        metadata = dict(agent.get("metadata") or {})
-        creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
-        agent_created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
-        if (
-            agent_created_by == "session_repair"
-            and not str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip()
-        ):
-            metadata["conversationIndexKind"] = s.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
-            metadata.setdefault("conversationIndexVisibility", s.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
-            agent["metadata"] = metadata
-            changed = True
-        conversation_index_updates = s._agent_metadata_conversation_index_updates(conversation_index_kind)
-        for key, value in conversation_index_updates.items():
-            if metadata.get(key) != value:
-                metadata[key] = value
+            if normalized_llm_bindings and s.normalize_agent_llm_bindings(agent.get("llmBindings")) != normalized_llm_bindings:
+                agent["llmBindings"] = normalized_llm_bindings
+                changed = True
+            if str(agent.get("status") or "active").strip() == "archived":
+                s._record_agent_event("agent.ensure.skipped_archived", agent, lifecycle=True)
+                raise s.AgentArchivedError(f"Archived Agent cannot be ensured for session: {agent.get('agentId') or ''}")
+            policy_changed = s._ensure_session_agent_tool_policy(state, agent)
+            if policy_changed:
+                changed = True
+            metadata = dict(agent.get("metadata") or {})
+            creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+            agent_created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+            if (
+                agent_created_by == "session_repair"
+                and not str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip()
+            ):
+                metadata["conversationIndexKind"] = s.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+                metadata.setdefault("conversationIndexVisibility", s.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
                 agent["metadata"] = metadata
                 changed = True
-        legacy_path = str(session_workspace_path or "").strip()
-        if legacy_path and metadata.get("legacySessionWorkspacePath") != legacy_path:
-            metadata["legacySessionWorkspacePath"] = legacy_path
-            agent["metadata"] = metadata
-            changed = True
-        session_visibility = s._direct_session_visibility(
-            normalized_session_id,
-            session_workspace_path=str(metadata.get("legacySessionWorkspacePath") or legacy_path),
-        )
-        if session_visibility != str(metadata.get("directSessionVisibility") or "").strip():
-            metadata["directSessionVisibility"] = session_visibility
-            agent["metadata"] = metadata
-            changed = True
-        workspace_path = str(agent.get("workspacePath") or "").strip() or s._agent_workspace_relative_path(str(agent["agentId"]))
-        if not agent.get("workspacePath"):
-            agent["workspacePath"] = workspace_path
-            changed = True
-        s._ensure_agent_workspace(workspace_path)
-        memory_policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{agent['agentId']}"
-        if str(agent.get("memoryPolicyId") or "").strip() != memory_policy_id:
-            agent["memoryPolicyId"] = memory_policy_id
-            changed = True
-        policies = s._memory_policies(state)
-        if memory_policy_id not in policies:
-            policies[memory_policy_id] = s.default_memory_policy(memory_policy_id, workspace_path)
-            state["memoryPolicies"] = policies
-            changed = True
-        if changed:
-            agent["updatedAt"] = now
-            s.save_state(state)
-            s._record_agent_event("agent.repaired", agent)
-            s._record_agent_territory_event("agent_territory.resolved", agent, outcome="repaired")
-    return s._agent_to_api(agent)
+            conversation_index_updates = s._agent_metadata_conversation_index_updates(conversation_index_kind)
+            for key, value in conversation_index_updates.items():
+                if metadata.get(key) != value:
+                    metadata[key] = value
+                    agent["metadata"] = metadata
+                    changed = True
+            legacy_path = str(session_workspace_path or "").strip()
+            if legacy_path and metadata.get("legacySessionWorkspacePath") != legacy_path:
+                metadata["legacySessionWorkspacePath"] = legacy_path
+                agent["metadata"] = metadata
+                changed = True
+            session_visibility = s._direct_session_visibility(
+                normalized_session_id,
+                session_workspace_path=str(metadata.get("legacySessionWorkspacePath") or legacy_path),
+            )
+            if session_visibility != str(metadata.get("directSessionVisibility") or "").strip():
+                metadata["directSessionVisibility"] = session_visibility
+                agent["metadata"] = metadata
+                changed = True
+            workspace_path = str(agent.get("workspacePath") or "").strip() or s._agent_workspace_relative_path(str(agent["agentId"]))
+            if not agent.get("workspacePath"):
+                agent["workspacePath"] = workspace_path
+                changed = True
+            s._ensure_agent_workspace(workspace_path)
+            memory_policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{agent['agentId']}"
+            if str(agent.get("memoryPolicyId") or "").strip() != memory_policy_id:
+                agent["memoryPolicyId"] = memory_policy_id
+                changed = True
+            policies = s._memory_policies(state)
+            if memory_policy_id not in policies:
+                policies[memory_policy_id] = s.default_memory_policy(memory_policy_id, workspace_path)
+                state["memoryPolicies"] = policies
+                changed = True
+            if changed:
+                agent["updatedAt"] = now
+                s.save_state(state)
+                s._record_agent_event("agent.repaired", agent)
+                s._record_agent_territory_event("agent_territory.resolved", agent, outcome="repaired")
+        return s._agent_to_api(agent)
 
 
 def _strip_windows_extended_prefix(path: Path) -> str:

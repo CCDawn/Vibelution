@@ -923,6 +923,8 @@ def _repair_child_root_agent_direct_session_bindings(
             # the Agent directory display name.
             title = ""
         session_workspace = str(conversation.get("workspace_path") or s._session_workspace_relative_path(conversation_id))
+        from .conversation_index import _agent_directory_startup_project_root
+
         repaired_agent = s.ensure_agent_for_session(
             conversation_id,
             display_name=title,
@@ -933,6 +935,7 @@ def _repair_child_root_agent_direct_session_bindings(
             prompt_template_id=str(agent.get("promptTemplateId") or "").strip(),
             existing_agent_id=agent_id,
             session_workspace_path=session_workspace,
+            project_root=_agent_directory_startup_project_root(),
         )
         agent_by_id[agent_id] = s._conversation_agent_from_state(repaired_agent)
         s._record_session_agent_child_direct_binding_repaired_event(
