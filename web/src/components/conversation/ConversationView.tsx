@@ -143,10 +143,7 @@ import {
   userAvatarSymbol,
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
-import type {
-  ConversationForkScope,
-  ConversationViewProps,
-} from "./conversationViewTypes";
+import type { ConversationViewProps } from "./conversationViewTypes";
 import { compactConversationPreview } from "./conversationOperationPresentation";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
 import {
@@ -174,6 +171,7 @@ import { createConversationTimelineRows } from "./conversationTimelineRows";
 import { useComputerUseResults } from "./useComputerUseResults";
 import { useConversationComposer } from "./useConversationComposer";
 import { useConversationFind } from "./useConversationFind";
+import { useConversationForkSession } from "./useConversationForkSession";
 import { useConversationSelectionQuote } from "./useConversationSelectionQuote";
 import { VButton } from "../vui";
 import styles from "./ConversationView.styles";
@@ -523,10 +521,15 @@ export const ConversationView = React.memo(function ConversationView({
     setCurationOverrides(new Map());
     setCurationFeedback(null);
   }, [sessionId]);
-  /** Branch fork exit: dialog target message + copy scope (route executes the API call). */
-  const [forkDialogMessage, setForkDialogMessage] = useState<ConversationMessage | null>(null);
-  const [forkScope, setForkScope] = useState<ConversationForkScope>("visible_path");
-  const [forkPending, setForkPending] = useState(false);
+  const {
+    forkDialogMessage,
+    forkScope,
+    forkPending,
+    setForkScope,
+    openForkDialog,
+    closeForkDialog,
+    confirmForkSession,
+  } = useConversationForkSession({ onForkSessionFromNode });
   const { timelineAreaRef, menu: selectionQuoteMenu } = useConversationSelectionQuote({
     sessionId,
     lang,
@@ -1633,8 +1636,7 @@ export const ConversationView = React.memo(function ConversationView({
     inlineEditInputRef,
     copiedAnswerMessageId,
     curationFeedback,
-    setForkScope,
-    setForkDialogMessage,
+    openForkDialog,
     formatTimestamp,
     compactPreview,
     conversationModelLabel,
@@ -1965,18 +1967,8 @@ export const ConversationView = React.memo(function ConversationView({
           cancel: t("forkSessionCancel"),
         }}
         onScopeChange={setForkScope}
-        onConfirm={() => {
-          const message = forkDialogMessage;
-          if (!message || !onForkSessionFromNode || forkPending) {
-            return;
-          }
-          setForkPending(true);
-          void Promise.resolve(onForkSessionFromNode(message, forkScope))
-            .then(() => setForkDialogMessage(null))
-            .catch(() => undefined)
-            .finally(() => setForkPending(false));
-        }}
-        onCancel={() => setForkDialogMessage(null)}
+        onConfirm={confirmForkSession}
+        onCancel={closeForkDialog}
       />
     </div>
   );
