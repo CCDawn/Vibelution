@@ -6,7 +6,8 @@ in the context it had already read, and nothing reviewed the failure or
 issued a remediation instruction — the loop never closed.  The first layer
 (the deterministic one-shot ``writebackRemediationContract``) answers
 rejections the system can diff locally; this module is the second layer:
-a maintenance-thread sweep that detects a first blocked attempt, shows an
+a maintenance-thread sweep that detects a blocked attempt on an unplanned
+retry chain (first failure or post-retry re-failure alike), shows an
 LLM planner a bounded failure scene, and lands exactly one verdict:
 
 - actionable ``retry_task`` → persist ``plannerDirective`` on the canonical
@@ -20,10 +21,11 @@ LLM planner a bounded failure scene, and lands exactly one verdict:
 - no review credentials → fail-open: no retry, no escalation, one bounded
   scene event (credential flapping must not spam the inbox).
 
-One planning attempt per task: tasks carrying ``plannerDirective`` or
-``anomalyEscalation`` are never re-planned. A matching retry directive is a
-durable submission intent, recovered with the same attempt-scoped command
-identity after an interrupted submission.
+One planning attempt per retry chain: tasks carrying ``plannerDirective``
+or ``anomalyEscalation`` are never re-planned, and a retry chain with any
+ancestor task already carrying either marker is skipped. A matching retry
+directive is a durable submission intent, recovered with the same
+attempt-scoped command identity after an interrupted submission.
 """
 
 from __future__ import annotations
@@ -73,6 +75,11 @@ STAGE_PLANNER_GRACE_ENV = "VIBELUTION_STAGE_PLANNER_GRACE_MS"
 _FAIL_OPEN_COOLDOWN_MS = 60 * 60 * 1000
 _FAIL_OPEN_SEEN: dict[str, int] = {}
 _FAIL_OPEN_SEEN_LIMIT = 256
+
+# The retry-chain planner-trace walk is bounded: at most this many hops up
+# the ``retry_of_node_run_id`` chain, with a visited set so a corrupt cyclic
+# chain cannot loop.  Hops beyond the bound are simply not consulted.
+_RETRY_CHAIN_WALK_MAX_STEPS = 5
 
 # Bounded scene assembly clips.
 _SCENE_SUMMARY_MAX_CHARS = 4000
@@ -154,6 +161,18 @@ def _record_planner_event(
         return
 
 
+def _task_carries_planner_marker(task: Any) -> bool:
+    """Non-empty ``plannerDirective`` / ``anomalyEscalation`` on a task record."""
+
+    if not isinstance(task, Mapping):
+        return False
+    for field in ("plannerDirective", "anomalyEscalation"):
+        value = task.get(field)
+        if isinstance(value, Mapping) and value:
+            return True
+    return False
+
+
 def _planning_ready_task(
     task: Mapping[str, Any] | None,
     *,
@@ -165,13 +184,7 @@ def _planning_ready_task(
         return False
     if str(task.get("status") or "").strip().lower() not in {"blocked", "needs_review"}:
         return False
-    if isinstance(task.get("plannerDirective"), Mapping) and task.get(
-        "plannerDirective"
-    ):
-        return False
-    if isinstance(task.get("anomalyEscalation"), Mapping) and task.get(
-        "anomalyEscalation"
-    ):
+    if _task_carries_planner_marker(task):
         return False
     if _stage_task_turn_is_active(task):
         return False
@@ -179,6 +192,69 @@ def _planning_ready_task(
     if updated_at_ms is None:
         return False
     return max(0, int(now_ms) - updated_at_ms) >= _planner_grace_ms()
+
+
+def _retry_chain_already_planned(
+    store: Any,
+    *,
+    team_id: str,
+    source_run_id: str,
+    latest_attempt: Any,
+) -> bool:
+    """True when the latest attempt's retry chain already saw the planner.
+
+    Walks up the latest attempt's ``retry_of_node_run_id`` chain using the
+    ledger attempt records (``repo.get_attempt``) and resolves each ancestor
+    node_run's canonical stage task via ``source_stage_task_for_node_run``:
+    any task carrying a non-empty ``plannerDirective`` or
+    ``anomalyEscalation`` marks the chain as already planned.  The walk is
+    bounded to ``_RETRY_CHAIN_WALK_MAX_STEPS`` hops and cycle safe (visited
+    set).  A chain node whose task is missing or unreadable counts as no
+    trace and the walk continues on the ledger chain; a ledger walk failure
+    degrades to "no trace" (the once-only guards in the planning loop still
+    apply).  Never raises.
+    """
+
+    parent_node_run_id = str(latest_attempt.retry_of_node_run_id or "").strip()
+    if not parent_node_run_id:
+        return False
+
+    from .stage_task_remediation import source_stage_task_for_node_run
+
+    start_node_run_id = str(latest_attempt.node_run_id or "")
+
+    def walk(repo: Any) -> bool:
+        visited = {start_node_run_id}
+        steps = 0
+        current = parent_node_run_id
+        while (
+            current and current not in visited and steps < _RETRY_CHAIN_WALK_MAX_STEPS
+        ):
+            visited.add(current)
+            steps += 1
+            try:
+                ancestor_task = source_stage_task_for_node_run(
+                    team_id=team_id,
+                    source_run_id=source_run_id,
+                    node_run_id=current,
+                )
+            except Exception:  # noqa: BLE001 - unreadable task = no trace
+                ancestor_task = None
+            if _task_carries_planner_marker(ancestor_task):
+                return True
+            try:
+                ancestor = repo.get_attempt(current)
+            except Exception:  # noqa: BLE001 - unreadable ledger = no trace
+                return False
+            if ancestor is None:
+                return False
+            current = str(ancestor.retry_of_node_run_id or "").strip()
+        return False
+
+    try:
+        return bool(store.read(walk))
+    except Exception:  # noqa: BLE001 - never fails the sweep
+        return False
 
 
 def _clip_text(value: Any, max_chars: int) -> str:
@@ -314,6 +390,11 @@ def _submit_planner_retry(
     fresh, latest = store.read(
         lambda repo: (repo.get_run(run.run_id), repo.latest_attempt(run.run_id, node_id))
     )
+    # NOTE: the latest attempt may itself be a retry (chain-level candidate
+    # semantics), so there is deliberately no ``latest.retry_of`` guard here;
+    # the identity check below plus the idempotency pre-check already
+    # prevent replaying a retry whose attempt moved on or whose command
+    # already committed.
     if (
         fresh is None
         or fresh.team_id != run.team_id
@@ -322,7 +403,6 @@ def _submit_planner_retry(
         or latest is None
         or latest.node_run_id != attempt.node_run_id
         or str(latest.status or "").strip() != "blocked"
-        or bool(str(latest.retry_of_node_run_id or "").strip())
     ):
         return False
     identity_hash = canonical_sha256(
@@ -476,6 +556,27 @@ def plan_stage_task_failure_remediation(
 ) -> dict[str, Any]:
     """Plan one bounded remediation pass over self-blocked stage tasks.
 
+    Candidates are blocked runs whose latest node attempt is blocked —
+    first failure or post-retry re-failure alike.  The historical
+    attempt-level ``retry_of`` exclusion (only never-retried first failures
+    were planned) is replaced by a chain-level planner-trace check: a
+    candidate whose retry chain already carries a planner verdict anywhere
+    (``_retry_chain_already_planned``) is skipped as already planned, while
+    a task already carrying a matching ``retry_task`` directive is a
+    durable submission intent recovered by ``_pending_planner_retry``
+    rather than re-planned.
+
+    Boundedness: the planner intervenes at most once per retry chain.  An
+    actionable ``retry_task`` verdict persists ``plannerDirective`` on the
+    planned attempt's task before the RETRY_NODE creates the next attempt,
+    so when that retry blocks again its ``retry_of`` walk reaches the
+    ancestor task carrying the directive and skips the chain; an
+    ``escalate_human`` verdict persists ``anomalyEscalation`` on the chain
+    the same way.  The walk itself is bounded (five hops, cycle safe), so a
+    corrupt cyclic or over-long chain degrades to "no trace" instead of
+    looping — planning then still runs at most once because the marker
+    lands on the task record.
+
     Returns a small counters dict for the maintenance log.  Never raises per
     candidate; the runtime wrapper adds the outer never-raise net.
     """
@@ -507,11 +608,7 @@ def plan_stage_task_failure_remediation(
             if str(run.status or "").strip() != "blocked" or not node_id:
                 continue
             attempt = repo.latest_attempt(run.run_id, node_id)
-            if (
-                attempt is None
-                or str(attempt.status or "").strip() != "blocked"
-                or bool(str(attempt.retry_of_node_run_id or "").strip())
-            ):
+            if attempt is None or str(attempt.status or "").strip() != "blocked":
                 continue
             try:
                 snapshot = json.loads(str(run.input_snapshot_json or "{}"))
@@ -556,6 +653,14 @@ def plan_stage_task_failure_remediation(
             continue
         pending_retry = _pending_planner_retry(task, run=run, attempt=attempt, node_id=node_id)
         if not pending_retry and not _planning_ready_task(task, now_ms=now):
+            summary["skipped"] += 1
+            continue
+        if not pending_retry and _retry_chain_already_planned(
+            store,
+            team_id=run.team_id,
+            source_run_id=source_run_id,
+            latest_attempt=attempt,
+        ):
             summary["skipped"] += 1
             continue
         task = dict(task)

@@ -6,8 +6,9 @@ blocked 举手提问，答案就在它读过的上下文里；L1 的确定性补
 可本地 diff 的拒绝，没有人审查失败现场并给补救指令，闭环率低。
 
 回归契约：
-- 首次 blocked（latest attempt 且非 retry）+ 宽限窗外的任务触发一次 LLM
-  规划（同任务只一次：指令/升级落任务后不再规划）；
+- blocked（最新 attempt，含 retry 后仍 blocked）+ 宽限窗外的任务触发一次
+  LLM 规划；同一条 retry 链只一次：链上任一旧 attempt 的任务带指令/升级
+  痕迹即整链跳过（链级防重入，上溯最多 5 步、防环、任务解析失败视为无痕迹）；
 - actionable retry_task → ``plannerDirective`` 落正典任务记录、上下文注入
   ``context["plannerDirective"]``、一次幂等 RETRY_NODE（重复 sweep 不二次
   提交）；completed 合规回写清除指令；
@@ -44,6 +45,7 @@ from tests._support.workflow_ledger_helpers import (
 TEAM_ID = "research-team"
 NODE_ID = "evidence_relations"
 NODE_RUN_ID = "nr-run-planner-evidence_relations-a1"
+A2_NODE_RUN_ID = "nr-run-planner-evidence_relations-a2"
 SOURCE_RUN_ID = "source-planner"
 OLD_UPDATED_AT = "2026-01-01T00:00:00+00:00"
 
@@ -123,9 +125,27 @@ def _base_task(**overrides) -> dict:
 
 
 class _SweepHarness:
-    """Real Ledger runtime + fake stage-task store + injected planner."""
+    """Real Ledger runtime + fake stage-task store + injected planner.
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, task: dict) -> None:
+    ``chain_attempts`` seeds a retry chain instead of the default single
+    attempt: a list of ``(node_run_id, retry_of_node_run_id)`` tuples whose
+    ordinals are 1..N (latest = last entry).  ``cycle_back_edge`` re-points
+    one seeded attempt's ``retry_of`` via raw SQL so a cyclic chain can be
+    fixture-built despite the FK insert order.  ``chain_tasks`` overrides
+    task resolution per node_run_id (dict → task record, BaseException →
+    resolver raises), anything else falls back to the latest task record.
+    """
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        task: dict,
+        chain_attempts: list[tuple[str, str | None]] | None = None,
+        chain_tasks: dict[str, dict | BaseException] | None = None,
+        cycle_back_edge: tuple[str, str] | None = None,
+    ) -> None:
         from core.web.services.team_workflow.research_runtime.runtime_factory import (
             build_workflow_runtime,
         )
@@ -140,6 +160,9 @@ class _SweepHarness:
         self.task_state: dict[str, dict] = {"task": dict(task)}
         self.upsert_calls: list[dict] = []
         self.planner_scenes: list[dict] = []
+        self.task_lookups: list[str] = []
+        self.chain_tasks: dict[str, dict | BaseException] = dict(chain_tasks or {})
+        self.latest_node_run_id: str = ""
         self.child = replace(
             build_run_record(
                 run_id="run-planner",
@@ -157,45 +180,63 @@ class _SweepHarness:
             ),
             structure_hash=identity.structureHash,
         )
-        self.attempt = replace(
-            build_attempt_record(
-                node_run_id=NODE_RUN_ID,
-                run_id=self.child.run_id,
-                node_id=NODE_ID,
-                status="blocked",
-                command_id="cmd-planner-a1",
-                problem_json=json.dumps({"code": "evidence_relation_graph_invalid"}),
-            ),
-            finished_at_ms=1_750_000_000_001,
-        )
-        self.runtime.store.submit(
-            lambda uow: (
-                uow.repository.insert_run(self.child),
-                uow.repository.insert_command(
-                    build_command_record(
-                        command_id=self.attempt.command_id,
+        entries = list(chain_attempts or [(NODE_RUN_ID, None)])
+        self.latest_node_run_id = entries[-1][0]
+        self.attempt = None  # first seeded attempt record (single-attempt seam)
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(self.child)
+            for index, (node_run_id, retry_of) in enumerate(entries, start=1):
+                attempt = replace(
+                    build_attempt_record(
+                        node_run_id=node_run_id,
                         run_id=self.child.run_id,
                         node_id=NODE_ID,
-                        idempotency_key="planner-a1",
+                        attempt=index,
+                        status="blocked",
+                        command_id=f"cmd-planner-a{index}",
+                        problem_json=json.dumps(
+                            {"code": "evidence_relation_graph_invalid"}
+                        ),
+                    ),
+                    finished_at_ms=1_750_000_000_001,
+                    retry_of_node_run_id=retry_of,
+                )
+                if index == 1:
+                    self.attempt = attempt
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id=attempt.command_id,
+                        run_id=self.child.run_id,
+                        node_id=NODE_ID,
+                        idempotency_key=f"planner-a{index}",
                     )
-                ),
-                uow.repository.insert_attempt(self.attempt),
-            ),
-            force_flush=True,
-        ).result(timeout=10)
+                )
+                uow.repository.insert_attempt(attempt)
+            if cycle_back_edge is not None:
+                uow.repository.execute(
+                    "UPDATE node_attempts SET retry_of_node_run_id = ? "
+                    "WHERE node_run_id = ?",
+                    (cycle_back_edge[1], cycle_back_edge[0]),
+                )
 
-        # Fake canonical stage-task store: resolution returns the latest
-        # upserted record so the once-only guard is observable across sweeps.
+        self.runtime.store.submit(seed, force_flush=True).result(timeout=10)
+
+        # Fake canonical stage-task store: per-node_run overrides (record or
+        # raise), fallback returns the latest upserted record so the
+        # once-only guard stays observable across sweeps.
         from core.web.services.team_workflow.research_runtime import (
             stage_task_remediation,
         )
 
         def task_for_node_run(*, team_id, source_run_id, node_run_id):
-            assert (team_id, source_run_id, node_run_id) == (
-                TEAM_ID,
-                SOURCE_RUN_ID,
-                NODE_RUN_ID,
-            )
+            assert (team_id, source_run_id) == (TEAM_ID, SOURCE_RUN_ID)
+            self.task_lookups.append(str(node_run_id))
+            override = self.chain_tasks.get(str(node_run_id))
+            if isinstance(override, BaseException):
+                raise override
+            if isinstance(override, dict):
+                return dict(override)
             return dict(self.task_state["task"])
 
         monkeypatch.setattr(
@@ -301,14 +342,14 @@ def _maintenance_plan(runtime, monkeypatch, *, planner) -> dict:
     return {}
 
 
-def test_first_blocked_task_planned_once_and_skips_already_retried(
+def test_first_blocked_task_planned_once_via_task_guard(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """(a) 首次 blocked+宽限窗外触发规划师且同任务只一次。
 
     Verdict 用 escalate_human（不提交重试），使「同任务只一次」直接落在任务
-    层守卫（anomalyEscalation 持久化后不再规划）；ledger 层的「retry 后不再
-    是第一次 blocked」由 (b) 覆盖。
+    层守卫（anomalyEscalation 持久化后不再规划）；retry 链级的防重入由下方
+    chain 用例覆盖。
     """
     harness = _SweepHarness(tmp_path, monkeypatch, task=_base_task())
     try:
@@ -327,6 +368,180 @@ def test_first_blocked_task_planned_once_and_skips_already_retried(
         assert second["escalated"] == 0
         assert second["skipped"] == 1
         assert len(calls) == 1, "task carrying anomalyEscalation must not be re-planned"
+    finally:
+        harness.close()
+
+
+# ---------------------------------------------------------------------------
+# Retry-chain candidate semantics: chain-level planner-trace exclusion
+# ---------------------------------------------------------------------------
+
+
+def _chain_marker(marker: str) -> dict:
+    """Non-empty plannerDirective / anomalyEscalation stamp for chain nodes."""
+
+    if marker == "plannerDirective":
+        return {
+            "schemaVersion": 1,
+            "recommendation": "retry_task",
+            "directive": "替换引用后重新回写 completed。",
+            "targetFix": {},
+            "justification": "上一次规划已给出修复指令。",
+            "recordedAt": OLD_UPDATED_AT,
+            "runId": "run-planner",
+            "nodeId": NODE_ID,
+            "nodeRunId": NODE_RUN_ID,
+        }
+    return {
+        "status": "emitted",
+        "taxonomyCode": "stage_task_planner_escalation",
+        "taskId": "stage-task-planner-a1",
+        "stageId": "relations",
+        "runId": "run-planner",
+        "nodeId": NODE_ID,
+        "nodeRunId": NODE_RUN_ID,
+        "sourceCollectionRunId": SOURCE_RUN_ID,
+        "emittedAt": OLD_UPDATED_AT,
+        "items": [],
+    }
+
+
+def test_blocked_retry_attempt_without_chain_trace_is_planned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """回归 run-cd671f3d5dc7：retry 后仍 blocked 的最新 attempt 是候选。
+
+    旧的 attempt 级排除（最新 attempt retry_of 非空即跳过）把 a2 全部过滤，
+    实弹里 evidence_relations 最新 attempt blocked 且 retry_of=a1，7 分钟无人
+    裁决；链级语义下 a1 无介入痕迹 → a2 走完整规划并提交重试。
+    """
+    harness = _SweepHarness(
+        tmp_path,
+        monkeypatch,
+        task=_base_task(),
+        chain_attempts=[(NODE_RUN_ID, None), (A2_NODE_RUN_ID, NODE_RUN_ID)],
+    )
+    try:
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_RETRY_TASK_VERDICT, calls=calls))
+        assert (summary["planned"], summary["retried"]) == (1, 1)
+        assert len(calls) == 1
+        directive = harness.task_state["task"]["plannerDirective"]
+        assert directive["nodeRunId"] == A2_NODE_RUN_ID
+        # 链级防重入：痕迹已落在链上任务记录里，同一条链不再二次规划。
+        second = harness.plan(_verdict_planner(_RETRY_TASK_VERDICT, calls=calls))
+        assert second["planned"] == 0
+        assert len(calls) == 1
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("marker", ["plannerDirective", "anomalyEscalation"])
+def test_retry_chain_with_planner_marker_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, marker: str
+) -> None:
+    """链上旧 attempt 的任务已带介入痕迹 → 整条链跳过（skipped 计数）。"""
+    ancestor_task = _base_task(taskId="stage-task-planner-a1")
+    ancestor_task[marker] = _chain_marker(marker)
+    harness = _SweepHarness(
+        tmp_path / marker,
+        monkeypatch,
+        task=_base_task(),
+        chain_attempts=[(NODE_RUN_ID, None), (A2_NODE_RUN_ID, NODE_RUN_ID)],
+        chain_tasks={NODE_RUN_ID: ancestor_task},
+    )
+    try:
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_RETRY_TASK_VERDICT, calls=calls))
+        assert summary == {
+            "scanned": 1,
+            "planned": 0,
+            "retried": 0,
+            "escalated": 0,
+            "degraded": 0,
+            "skipped": 1,
+        }
+        assert calls == []
+        assert harness.upsert_calls == []
+    finally:
+        harness.close()
+
+
+def test_cyclic_retry_chain_terminates_without_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """a2→a1→a2 环形 retry 链：防环截断，按无痕迹处理，有限时间出裁决。"""
+    harness = _SweepHarness(
+        tmp_path,
+        monkeypatch,
+        task=_base_task(),
+        chain_attempts=[(NODE_RUN_ID, None), (A2_NODE_RUN_ID, NODE_RUN_ID)],
+        cycle_back_edge=(NODE_RUN_ID, A2_NODE_RUN_ID),
+    )
+    try:
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_ESCALATE_VERDICT, calls=calls))
+        assert summary["escalated"] == 1
+        assert len(calls) == 1
+    finally:
+        harness.close()
+
+
+def test_retry_chain_walk_truncated_at_five_hops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """链长超过 5 步：截断安全——第 6 跳上的痕迹不可见，按无痕迹规划。"""
+    entries: list[tuple[str, str | None]] = [(NODE_RUN_ID, None)]
+    for index in range(2, 8):
+        entries.append((f"nr-run-planner-evidence_relations-a{index}", entries[-1][0]))
+    deepest_task = _base_task(taskId="stage-task-planner-a1")
+    deepest_task["plannerDirective"] = _chain_marker("plannerDirective")
+    harness = _SweepHarness(
+        tmp_path,
+        monkeypatch,
+        task=_base_task(),
+        chain_attempts=entries,
+        chain_tasks={NODE_RUN_ID: deepest_task},
+    )
+    try:
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_ESCALATE_VERDICT, calls=calls))
+        assert summary["escalated"] == 1
+        # 上溯只走最近 5 跳（a6..a2）：主循环解析最新 a7 一次 + 5 跳祖先，
+        # 最深一跳 a1 的任务从未被查询。
+        assert len(harness.task_lookups) == 6
+        assert NODE_RUN_ID not in harness.task_lookups
+    finally:
+        harness.close()
+
+
+def test_chain_task_lookup_error_swallowed_and_walk_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """链上任务解析抛异常：吞掉继续上溯，更深一跳的介入痕迹仍被发现。"""
+    deepest_task = _base_task(taskId="stage-task-planner-a1")
+    deepest_task["plannerDirective"] = _chain_marker("plannerDirective")
+    a3_node_run_id = "nr-run-planner-evidence_relations-a3"
+    harness = _SweepHarness(
+        tmp_path,
+        monkeypatch,
+        task=_base_task(),
+        chain_attempts=[
+            (NODE_RUN_ID, None),
+            (A2_NODE_RUN_ID, NODE_RUN_ID),
+            (a3_node_run_id, A2_NODE_RUN_ID),
+        ],
+        chain_tasks={
+            A2_NODE_RUN_ID: RuntimeError("stage session store unreadable"),
+            NODE_RUN_ID: deepest_task,
+        },
+    )
+    try:
+        calls: list[dict] = []
+        summary = harness.plan(_verdict_planner(_RETRY_TASK_VERDICT, calls=calls))
+        assert summary["skipped"] == 1
+        assert summary["planned"] == 0
+        assert calls == []
     finally:
         harness.close()
 
