@@ -51,7 +51,7 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false, show
         <div className={styles.headerActions}><VIconButton variant="ghost" label="刷新平台概览" icon={<RefreshCw size={14} />}
           isPending={overview.isFetching} onClick={() => void overview.refetch()} />{headerAction}</div></header>
       {!desktop ? <><nav className={styles.shortcuts} aria-label="常用管理入口">{shortcuts.map(({ label, to, icon: Icon }) => <VRouteLinkButton key={to} to={to}
-        variant="secondary" className={styles.shortcut}><Icon size={14} /><span>{label}</span><ArrowRight size={12} /></VRouteLinkButton>)}</nav>
+        variant="secondary" className={styles.shortcut} icon={<Icon size={14} />} trailingIcon={<ArrowRight size={12} />}>{label}</VRouteLinkButton>)}</nav>
         <div className={styles.more}><span>常用管理</span><VDropdownMenu aria-label="更多管理入口" align="end"
           trigger={<VButton variant="ghost" className={styles.moreButton} icon={<ChevronDown size={12} />}>更多管理</VButton>}
           items={more.map(row => ({ id: row.to, label: row.label, onSelect: () => navigate(row.to) }))} /></div></> : null}

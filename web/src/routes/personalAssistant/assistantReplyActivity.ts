@@ -51,7 +51,7 @@ export function assistantReplyStore(identity: string): ReplyStore {
       if (!raw) return fallback;
       const value = JSON.parse(raw) as Partial<AssistantReplyActivity>;
       const ids = (list: unknown) => Array.isArray(list) ? list.filter((id): id is string => typeof id === "string").slice(-LIMIT) : [];
-      return { known: value.known === null ? null : ids(value.known), unread: ids(value.unread),
+      return { known: Array.isArray(value.known) ? ids(value.known) : null, unread: ids(value.unread),
         pulseKey: typeof value.pulseKey === "string" ? value.pulseKey : "",
         pulseUntil: Number.isFinite(value.pulseUntil) ? Number(value.pulseUntil) : 0 };
     } catch { return fallback; }

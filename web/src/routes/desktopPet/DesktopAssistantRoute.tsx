@@ -241,7 +241,7 @@ export function DesktopAssistantRoute() {
   }
 
   const { tone, animationState, unreadCount } = activity;
-  const showStatus = preferences.showStatus || context.isPending || activity.query.isPending || activity.query.isError || Boolean(feedback);
+  const showStatus = preferences.showStatus || context.isPending || activity.query.isPending || activity.unavailable || Boolean(feedback);
   const statusText = feedback || (context.isPending ? copy.checkingIdentity
     : activity.query.isPending ? copy.readingStatus : activity.statusText);
   const appearanceName = copy.names[characterId];

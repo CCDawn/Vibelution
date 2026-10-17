@@ -5,7 +5,7 @@ const styles = {
   headerActions: "ml-auto flex shrink-0 items-center gap-1",
   updated: "mt-1 text-[10px] text-[var(--fg-secondary)]",
   shortcuts: "grid grid-cols-2 gap-1.5 px-4",
-  shortcut: "flex min-w-0 justify-start gap-2 text-xs [&_span]:truncate [&_svg]:shrink-0 [&_svg:last-child]:ml-auto",
+  shortcut: "flex min-w-0 justify-start text-xs [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:justify-start [&_[data-slot=vui-button-trailing-icon]]:ml-auto",
   more: "flex items-center justify-between px-4 py-1 text-[10px] text-[var(--fg-secondary)]",
   moreButton: "min-h-7 px-1 text-[11px]",
   statusStrip: "mx-4 mb-3 grid grid-cols-3 overflow-hidden rounded-[6px] border border-[var(--vui-border-subtle)]",

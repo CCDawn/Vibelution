@@ -23,7 +23,7 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
     enabled: enabled && Boolean(assistant), refetchInterval: 3000, refetchIntervalInBackground: false, retry: false });
   const store = useMemo(() => assistantReplyStore(`${assistant?.agentId ?? ""}:${sessionId}`), [assistant?.agentId, sessionId]);
   const replyState = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  const [clock, setClock] = useState(Date.now);
+  const [clock, setClock] = useState(0);
   const [completionUntil, setCompletionUntil] = useState(0);
   const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   useEffect(() => {
@@ -50,22 +50,22 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
     setCompletionUntil(base?.animationState === "celebrating" && showCompletion ? Date.now() + 1400 : 0);
   }, [base?.animationState, showCompletion]);
   useEffect(() => {
-    const until = Math.min(...[replyState.pulseUntil, completionUntil].filter(value => value > Date.now()));
-    setClock(Date.now());
+    const now = Date.now();
+    const until = Math.min(...[replyState.pulseUntil, completionUntil].filter(value => value > now));
     if (!Number.isFinite(until)) return;
-    const timer = window.setTimeout(() => setClock(Date.now()), until - Date.now() + 1);
+    const timer = window.setTimeout(() => setClock(value => value + 1), until - now + 1);
     return () => window.clearTimeout(timer);
-  }, [replyState.pulseUntil, completionUntil]);
+  }, [replyState.pulseUntil, completionUntil, clock]);
   const unavailable = query.isError || (assistant && (replies.isError
     || (replies.data && !personalAssistantSessionMatches(assistant, replies.data))));
   const unreadCount = assistant ? replyState.unread.length : 0;
   const attention = base?.aggregateTone === "approval" || base?.aggregateTone === "error";
-  const messagePulse = unreadCount > 0 && replyState.pulseUntil > clock;
+  const messagePulse = unreadCount > 0 && replyState.pulseUntil > Date.now();
   let tone: PetActivityTone = base?.aggregateTone ?? "idle";
   let animationState: PetAnimationState = base?.animationState ?? "idle";
   if (unavailable || !enabled) { tone = "idle"; animationState = "idle"; }
   else if (!attention && unreadCount > 0) { tone = "completed"; animationState = messagePulse && !reduced ? "celebrating" : base?.aggregateTone === "running" ? base.animationState : "idle"; }
-  else if (animationState === "celebrating" && (!showCompletion || reduced || completionUntil <= clock)) animationState = "idle";
+  else if (animationState === "celebrating" && (!showCompletion || reduced || completionUntil <= Date.now())) animationState = "idle";
   if (tone === "completed" && !showCompletion && !unreadCount) tone = "idle";
   const phaseLabel = base?.sessions.find(session => session.tone === base.aggregateTone)?.phase;
   const statusText = unavailable ? (lang === "zh" ? "暂时无法读取平台状态" : "Platform status is unavailable")
@@ -73,5 +73,5 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
       : !attention && unreadCount > 0 ? (lang === "zh" ? `有 ${unreadCount} 条新消息` : `${unreadCount} new messages`)
         : tone === "running" && phaseLabel ? petPhaseLabel(phaseLabel, lang)
           : tone === "idle" && idleMessage.trim() ? idleMessage : petToneLabel(tone, lang);
-  return { query, tone, animationState, statusText, unreadCount, markRead: store.markRead };
+  return { query, tone, animationState, statusText, unreadCount, unavailable: Boolean(unavailable), markRead: store.markRead };
 }
