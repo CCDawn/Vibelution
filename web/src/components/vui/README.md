@@ -84,7 +84,7 @@ Exit criteria per migration: route line-count drops, no new ad-hoc width keys, r
 | Piece | Path | Contract |
 | --- | --- | --- |
 | Resize only | `components/layout/PaneResizeHandle` | `role=separator`, `aria-valuenow/min/max`, hover-lit 1px rule, Home/End + arrows via `usePersistedPaneResize` |
-| Collapse + resize | `components/layout/PaneCollapseHandle` | Same visual contract + centered toggle; routes pass **placement** class only |
+| Collapse + resize | `components/layout/PaneCollapseHandle` | Pane collapse belongs at the far right of its header (`VIconButton`); `togglePlacement="header"` leaves resize on the divider and restores a hidden pane from the top of its narrow rail |
 | Keyboard helper | `components/layout/paneResizeKeyboard` | Shared Arrow/Home/End resolution for Chat/Logs/custom drag |
 | Persistence | `pane-layouts.v1[layoutId]` | Wave 4A store; do not invent new width keys |
 

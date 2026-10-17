@@ -1,4 +1,4 @@
-import { AlertTriangle, CircleHelp, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, CircleHelp, Database, Image as ImageIcon, PanelLeftClose, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -10,6 +10,7 @@ import {
   VDialog,
   VEntityList,
   VInput,
+  VIconButton,
   VPanelHeader,
   VSection,
   VSettingsGroupCard,
@@ -1288,6 +1289,15 @@ export function ConfigProviderRegistryPanel({
   onUpdateModel,
   modelUpdateBusy = false,
 }: ConfigProviderRegistryPanelProps) {
+  const [providerRailCollapsed, setProviderRailCollapsed] = useState(false);
+  const [providerRailNarrow, setProviderRailNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth <= 720);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 720px)");
+    const update = () => setProviderRailNarrow(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
   // P0 single list: every provider shows once; dot carries availability, in-use sorts first.
   const listRows = useMemo(
@@ -1523,13 +1533,17 @@ export function ConfigProviderRegistryPanel({
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
           sidebar: { defaultWidth: 224, minWidth: 180, maxWidth: 300 },
           collapse: {
-            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand },
+            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand,
+              placement: "header", restoreInRail: true, collapsed: providerRailCollapsed && !providerRailNarrow, onCollapsedChange: setProviderRailCollapsed },
           },
         }}
         sidebar={(
           <div className={styles.providerRail}>
             <div className={styles.providerListSection}>
-              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {listRows.length}</p>
+              <VPanelHeader headingLevel={null}
+                title={<span className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {listRows.length}</span>}
+                actions={<VIconButton variant="ghost" className="max-[720px]:!hidden" label={copy.navCollapse} icon={<PanelLeftClose size={14} />}
+                  onClick={() => setProviderRailCollapsed(true)} />} />
               <VEntityList
                 ariaLabel={copy.configuredListAria}
                 activeId={provider?.providerId}

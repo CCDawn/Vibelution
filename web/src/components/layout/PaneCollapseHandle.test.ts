@@ -5,7 +5,10 @@ import stylesSource from "./PaneCollapseHandle.styles.ts?raw";
 import resizeStylesSource from "./PaneResizeHandle.styles.ts?raw";
 
 describe("PaneCollapseHandle", () => {
-  it("renders a separator-owned centered toggle without starting resize drag", () => {
+  it("keeps header-owned collapse outside the separator and restores at the top", () => {
+    expect(source).toContain('togglePlacement === "rail" || collapsed');
+    expect(source).toContain('"!top-2 !min-h-0 !translate-y-0"');
+    expect(source).toContain('"!w-9 !min-w-9 !basis-9"');
     expect(source).toContain('role="separator"');
     expect(source).not.toContain("title={separatorLabel}");
     expect(source).toContain("stopHandleDrag");

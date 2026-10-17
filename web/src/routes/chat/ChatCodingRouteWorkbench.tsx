@@ -3271,6 +3271,10 @@ export function ChatCodingRouteWorkbench() {
         statusRailCollapsed={statusRailCollapsed}
         statusRailOverlayOpen={statusRailOverlayOpen}
         t={t}
+        onCollapseStatusRail={() => {
+          if (statusRailOverlayOpen) closeResponsiveOverlayPane();
+          else setRightPaneCollapsed(true);
+        }}
         toggleChangeRail={toggleChangeRail}
         updateRailModel={updateRailModel}
         verifiedCompanionMode={verifiedCompanionMode}
@@ -3281,6 +3285,7 @@ export function ChatCodingRouteWorkbench() {
       leftResizeHandle={
       embeddedSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
+        togglePlacement="header"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
         collapseLabel={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
@@ -3445,6 +3450,7 @@ export function ChatCodingRouteWorkbench() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       />) : <PaneCollapseHandle
         side="right"
+        togglePlacement="header"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
         collapseLabel={verifiedCompanionMode ? (lang === "zh" ? "收起状态栏" : "Collapse status rail") : (lang === "zh" ? "收起改动" : "Collapse changes")}
@@ -3462,6 +3468,10 @@ export function ChatCodingRouteWorkbench() {
       conversationIndex={embeddedSurface ? null : verifiedCompanionMode ? (
       <CompanionPersonRail
         className={conversationIndexPaneClassName}
+        onCollapse={() => {
+          if (conversationIndexOverlayOpen) closeResponsiveOverlayPane();
+          else setLeftRailCollapsed(true);
+        }}
         collapsed={conversationIndexCollapsed}
         overlayOpen={conversationIndexOverlayOpen}
         companion={activeCompanion}

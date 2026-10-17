@@ -8,6 +8,7 @@ import { ConfigUiFontSettings } from "./ConfigUiFontSettings";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
+  PanelLeftClose,
   Image as ImageIcon,
   Pencil,
   Plus,
@@ -75,6 +76,7 @@ import {
   VConfirmDialog,
   VDialog,
   VInput,
+  VIconButton,
   VPanelHeader,
   VRouteLinkButton,
   VSection,
@@ -1653,6 +1655,8 @@ export function ConfigRoute() {
               separatorLabel: copy.navResizeSeparator,
               collapseLabel: copy.navCollapse,
               expandLabel: copy.navExpand,
+              placement: "header",
+              restoreInRail: true,
               collapsed: settingsNavCollapse.collapsed,
               onCollapsedChange: settingsNavCollapse.onCollapsedChange,
             },
@@ -1671,7 +1675,7 @@ export function ConfigRoute() {
             onSelectGroup={handleSelectGroup}
             onNavigate={handleNavigateSettings}
             searchDocuments={settingsSearchDocuments}
-            headerAction={returnToPath ? (
+            headerAction={<>{returnToPath ? (
               <VRouteLinkButton
                 to={returnToPath}
                 className={styles.returnButton}
@@ -1679,7 +1683,8 @@ export function ConfigRoute() {
               >
                 {returnToLabel}
               </VRouteLinkButton>
-            ) : undefined}
+            ) : null}<VIconButton variant="ghost" className="max-[720px]:!hidden" label={copy.navCollapse} icon={<PanelLeftClose size={14} />}
+              onClick={() => settingsNavCollapse.onCollapsedChange(true)} /></>}
           />
         )}
         main={(

@@ -1,7 +1,7 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Save, Square } from "lucide-react";
+import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, PanelLeftClose, RefreshCw, Save, Square } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { fetchConfigWorkspace } from "../api/config";
@@ -629,6 +629,16 @@ export function GitRoute() {
     />
   );
 
+  const changePanelCollapseAction = (
+    <VIconButton
+      variant="ghost"
+      className="max-[860px]:!hidden"
+      label={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
+      icon={<PanelLeftClose size={16} aria-hidden="true" />}
+      onPress={() => setChangePanelCollapsed((current) => !current)}
+    />
+  );
+
   return (
     <VDenseOpsPage
       chrome="workspace"
@@ -686,22 +696,29 @@ export function GitRoute() {
       >
         {statusInitialLoading || statusEmptyError ? (
           <>
-            {statusInitialLoading ? (
-              <div className={cn(styles.changePanel, VUI_WORKBENCH_RAIL_CLASS, changePanelCollapsed && styles.paneCollapsed)}>
-                <ProgressiveRegionSkeleton variant="list" label={gitStatusLoading} />
+            <VSurface as="aside" ariaLabel={t("gitChangedScope")} className={cn(styles.changePanel, styles.pendingChangePanel, VUI_WORKBENCH_RAIL_CLASS, changePanelCollapsed && styles.paneCollapsed)} padding="none" tone="rail" aria-hidden={changePanelCollapsed} inert={changePanelCollapsed}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
+                  <h2>{t("gitAllChanges")}</h2>
+                </div>
+                {changePanelCollapseAction}
               </div>
-            ) : (
-              <VStateSurface
-                className={cn(styles.changePanel, VUI_WORKBENCH_RAIL_CLASS, changePanelCollapsed && styles.paneCollapsed)}
-                tone="error"
-                title={gitStatusError}
-                actions={(
-                <VButton type="button" variant="secondary" onPress={() => void statusQuery.refetch()}>{retryLabel}</VButton>
-                )}
-              />
-            )}
+              {statusInitialLoading ? (
+                <ProgressiveRegionSkeleton variant="list" label={gitStatusLoading} />
+              ) : (
+                <VStateSurface
+                  tone="error"
+                  title={gitStatusError}
+                  actions={(
+                    <VButton type="button" variant="secondary" onPress={() => void statusQuery.refetch()}>{retryLabel}</VButton>
+                  )}
+                />
+              )}
+            </VSurface>
             <PaneCollapseHandle
               side="left"
+              togglePlacement="header"
               collapsed={changePanelCollapsed}
               separatorLabel={resizeChangePanelLabel}
               collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
@@ -852,7 +869,10 @@ export function GitRoute() {
                   <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
                   <h2>{t("gitAllChanges")}</h2>
                 </div>
-                <span className={styles.countPill}>{filteredFiles.length}</span>
+                <div className={styles.collapseHeaderActions}>
+                  <span className={styles.countPill}>{filteredFiles.length}</span>
+                  {changePanelCollapseAction}
+                </div>
               </div>
               <VTabs
                 density="compact"
@@ -920,6 +940,7 @@ export function GitRoute() {
 
             <PaneCollapseHandle
               side="left"
+              togglePlacement="header"
               collapsed={changePanelCollapsed}
               separatorLabel={resizeChangePanelLabel}
               collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}

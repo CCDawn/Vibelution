@@ -123,7 +123,7 @@ const styles = {
   noticeSuccess:
     "noticeSuccess m-0 min-w-0 shrink-0 break-words bg-[var(--vui-status-success-bg)] px-5 py-2 text-vui-2xs leading-relaxed text-[var(--state-success)]",
   paneCollapsed:
-    "paneCollapsed min-w-0 hidden",
+    "paneCollapsed min-w-0 invisible overflow-hidden p-0 border-0",
   panelEyebrow:
     "panelEyebrow text-vui-2xs font-normal leading-relaxed text-vui-fg-tertiary",
   panelHeader:

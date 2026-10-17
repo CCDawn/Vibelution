@@ -31,6 +31,9 @@ const successTone =
 const scrollStack = "grid min-h-0 content-start gap-1.5 overflow-auto";
 
 const styles = {
+  collapseHeaderRow: "flex w-full min-w-0 items-start gap-2",
+  collapseHeaderTitle: "min-w-0 flex-1",
+  collapseHeaderActions: "flex shrink-0 items-center",
   copyButton:
     `copyButton min-w-0 ${buttonBase} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]`,
   deleteButton:
@@ -151,7 +154,9 @@ const styles = {
   packageWorkRunPathButton:
     `packageWorkRunPathButton min-w-0 ${buttonBase} font-mono`,
   paneCollapsed:
-    "paneCollapsed min-w-0 hidden",
+    "paneCollapsed min-w-0 invisible overflow-hidden p-0 border-0",
+  headerCollapseButton:
+    "max-[900px]:!hidden",
   panelSearch:
     `panelSearch min-w-0 ${panelSurface}`,
   panelSearchInput:
@@ -174,7 +179,7 @@ const styles = {
     "resizableLayout min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--pane-w-sidebar)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:grid-rows-[max-content_minmax(0,1fr)]",
   // Shared PaneCollapseHandle owns the visual rule (Wave 4C+).
   resizeHandle:
-    "resizeHandle min-w-0",
+    "resizeHandle min-w-0 max-[900px]:hidden",
   sceneCard:
     `sceneCard min-w-0 ${panelSurface}`,
   sceneCardActive:

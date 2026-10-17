@@ -10,6 +10,8 @@ export type PaneSide = "left" | "right";
 export type PaneCollapseHandleProps = {
   side: PaneSide;
   collapsed: boolean;
+  /** The owning pane renders its collapse action in the header. */
+  togglePlacement?: "rail" | "header";
   className?: string;
   activeClassName?: string;
   active?: boolean;
@@ -39,6 +41,7 @@ function stopHandleDrag(event: PointerEvent<HTMLButtonElement> | MouseEvent<HTML
 export function PaneCollapseHandle({
   side,
   collapsed,
+  togglePlacement = "rail",
   className = "",
   activeClassName = "",
   active = false,
@@ -68,6 +71,7 @@ export function PaneCollapseHandle({
     paneResizeHandleStyles.handle,
     active && !collapsed ? paneResizeHandleStyles.handleActive : "",
     collapsed ? paneResizeHandleStyles.handleCollapsed : "",
+    collapsed && togglePlacement === "header" ? "!w-9 !min-w-9 !basis-9" : "",
     active && activeClassName ? activeClassName : "",
     className,
   ].filter(Boolean).join(" ");
@@ -84,6 +88,7 @@ export function PaneCollapseHandle({
       data-side={side}
       data-active={active ? "true" : "false"}
       data-collapsed={collapsed ? "true" : "false"}
+      data-toggle-placement={togglePlacement}
       tabIndex={0}
       className={rootClassName}
       onPointerDown={onPointerDown}
@@ -91,10 +96,11 @@ export function PaneCollapseHandle({
       onKeyDown={onKeyDown}
     >
       {children}
-      <VIconButton
+      {togglePlacement === "rail" || collapsed ? <VIconButton
         type="button"
         className={[
           styles.paneToggleButtonClass,
+          togglePlacement === "header" ? "!top-2 !min-h-0 !translate-y-0" : "",
           active ? styles.paneToggleButtonActive : "",
         ].filter(Boolean).join(" ")}
         label={label}
@@ -107,7 +113,7 @@ export function PaneCollapseHandle({
           onToggle();
         }}
         icon={<Icon size={15} strokeWidth={2.4} />}
-      />
+      /> : null}
     </div>
   );
 }

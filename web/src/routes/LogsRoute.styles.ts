@@ -24,6 +24,10 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
+  collapseHeaderRow: "flex w-full min-w-0 items-start gap-2",
+  collapseRailHeaderRow: "flex min-w-0 items-start gap-2",
+  collapseHeaderTitle: "min-w-0 flex-1",
+  collapseHeaderActions: "flex shrink-0 items-center",
   clearButton:
     `clearButton min-w-0 ${vuiControlQuietClass}`,
   cleanupActionGroup: "cleanupActionGroup min-w-0 border-t border-[var(--vui-border-soft)] pt-1.5",
@@ -128,7 +132,9 @@ const styles = {
   packageWorkRunPathButton:
     `packageWorkRunPathButton min-w-0 ${vuiControlQuietClass} font-mono`,
   paneCollapsed:
-    "paneCollapsed min-w-0 hidden",
+    "paneCollapsed min-w-0 invisible overflow-hidden p-0 border-0",
+  headerCollapseButton:
+    "max-[760px]:!hidden",
   panelSearch: `panelSearch min-w-0 flex items-center gap-1.5 ${vuiFlatPanelClass} p-2`,
   panelSearchInput:
     "panelSearchInput min-w-0 flex-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
@@ -208,7 +214,7 @@ const styles = {
   toolbarButton:
     "toolbarButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&>span]:truncate",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--pane-w-right,280px))] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(360px,1fr)_minmax(180px,34vh)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 grid-cols-[minmax(0,1fr)_auto_minmax(0,var(--pane-w-right,280px))] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(360px,1fr)_minmax(180px,34vh)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;

@@ -116,12 +116,15 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("<img");
   });
 
-  it("keeps the workspace side column collapsible from the centered divider", () => {
+  it("keeps the workspace side column collapsible from its header", () => {
     expect(selfEvolutionSource).toContain("PaneCollapseHandle");
+    expect(selfEvolutionSource).toContain('togglePlacement="header"');
+    expect(selfEvolutionSource).toContain('label={lang === "zh" ? "收起自进化侧栏" : "Collapse self-evolution sidebar"}');
     expect(selfEvolutionSource).toContain("sidebarCollapsed");
     expect(selfEvolutionSource).toContain("setSidebarCollapsed");
     expect(selfEvolutionSource).toContain('paneWidthCssVar("sidebar")');
     expect(selfEvolutionSource).toContain("workspaceLayoutStyle(sidebarCollapsed, selfPaneVariablesStyle)");
+    expect(styles.workspaceLayout).toContain("grid-cols-[var(--pane-w-sidebar,340px)_auto_minmax(0,1fr)]");
     expect(selfEvolutionSource).not.toContain('style={{ ["--pane-w-sidebar" as string]');
   });
 

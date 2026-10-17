@@ -338,11 +338,13 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolsShowSchema");
   });
 
-  it("lets the left tool list collapse from the centered resize handle", () => {
+  it("collapses the tool list from its header and reserves its resize rail for restore", () => {
     expect(routeSource).toContain("PaneCollapseHandle");
     expect(routeSource).toContain("leftPanelCollapsed");
     expect(routeSource).toContain("setLeftPanelCollapsed");
     expect(routeSource).toContain('paneWidthCssVar("left")');
+    expect(routeSource).toContain('togglePlacement="header"');
+    expect(routeSource).toContain('className="max-[760px]:!hidden"');
   });
 
   it("supports bulk selection while preserving tool registry safety rules", () => {

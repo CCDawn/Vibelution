@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { fetchPersonalAssistantOverview } from "../../api/personalAssistant";
 import { queryKeys } from "../../api/queryKeys";
@@ -6,16 +7,17 @@ import { VButton, VIconButton, VRouteLinkButton, VStateSurface } from "../../com
 import { assistantStatusLabel } from "./personalAssistantModel";
 import styles from "./PersonalAssistant.styles";
 
-export function PersonalAssistantOverview({ onOpenSession, desktop = false, showTitles = true }: {
+export function PersonalAssistantOverview({ onOpenSession, desktop = false, showTitles = true, headerAction }: {
   onOpenSession: (sessionId: string) => void; desktop?: boolean; showTitles?: boolean;
+  headerAction?: ReactNode;
 }) {
   const overview = useQuery({ queryKey: queryKeys.personalAssistantOverview(),
     queryFn: ({ signal }) => fetchPersonalAssistantOverview({ signal }), refetchInterval: 5_000,
     refetchIntervalInBackground: false, retry: 1 });
   const data = overview.data;
   return <section className={styles.overview} aria-label="平台概览">
-    <div className={styles.sectionHeader}><h2>平台概览</h2><VIconButton label="刷新平台概览" icon={<RefreshCw size={14} />}
-      isDisabled={overview.isFetching} onClick={() => void overview.refetch()} /></div>
+    <div className={styles.sectionHeader}><h2>平台概览</h2><div className={styles.overviewHeaderActions}><VIconButton label="刷新平台概览" icon={<RefreshCw size={14} />}
+      isDisabled={overview.isFetching} onClick={() => void overview.refetch()} />{headerAction}</div></div>
     {overview.isError ? <VStateSurface density="compact" tone="error" title="平台状态读取失败">{overview.error.message}</VStateSurface>
       : overview.isPending ? <VStateSurface density="compact" tone="loading" busy skeletonLines title="正在读取平台状态" />
       : data ? <>

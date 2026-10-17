@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowLeft, Box, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, ListChecks, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, Box, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, ListChecks, PanelLeftClose, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -1903,6 +1903,16 @@ export function ToolsRoute() {
     }
   }
 
+  const collapseToolListAction = (
+    <VIconButton
+      variant="ghost"
+      className="max-[760px]:!hidden"
+      label={lang === "zh" ? "收起工具列表" : "Collapse tool list"}
+      icon={<PanelLeftClose size={16} aria-hidden="true" />}
+      onPress={() => setLeftPanelCollapsed((current) => !current)}
+    />
+  );
+
   return (
     <VDenseOpsPage
       chrome="workspace"
@@ -1960,9 +1970,10 @@ export function ToolsRoute() {
             <div>
                                               <h2>{lang === "zh" ? "工具库" : "Tool library"}</h2>
             </div>
-            <div className={styles.libraryHeaderActions}><span className={styles.countPill}>{visibleTools.length}</span>
+            <div className={`${styles.libraryHeaderActions} ml-auto shrink-0 justify-end`}><span className={styles.countPill}>{visibleTools.length}</span>
               <VIconButton variant="ghost" label={lang === "zh" ? (bulkSelectionMode ? "退出批量选择" : "批量选择") : (bulkSelectionMode ? "Exit bulk selection" : "Bulk select")}
                 icon={<ListChecks size={16}/>} onPress={() => { setBulkSelectionMode((current) => !current); clearBulkTools(); }} />
+              {collapseToolListAction}
             </div>
           </div>
           <label className={styles.searchBox}>
@@ -2102,7 +2113,7 @@ export function ToolsRoute() {
           </section>
           ) : null}
           </> : <>
-          <div className={styles.panelHeader}><h2>{lang === "zh" ? "工具包" : "Tool packages"}</h2></div>
+          <div className={styles.panelHeader}><h2>{lang === "zh" ? "工具包" : "Tool packages"}</h2>{collapseToolListAction}</div>
           <div className={styles.policyBundleList} aria-label={lang === "zh" ? "工具包列表" : "Tool packages"}>
             {policyBundleEntries.map((entry) => <VNativeButton key={entry.id} className={`${styles.policyBundleButton} ${entry.id === activePolicyBundleId ? styles.policyBundleButtonActive : ""}`}
               aria-pressed={entry.id === activePolicyBundleId} title={entry.description} onClick={() => selectPolicyBundle(entry.id)}>
@@ -2115,6 +2126,7 @@ export function ToolsRoute() {
 
         <PaneCollapseHandle
           side="left"
+          togglePlacement="header"
           collapsed={leftPanelCollapsed}
           separatorLabel={resizeLeftPanelLabel}
           collapseLabel={lang === "zh" ? "收起工具列表" : "Collapse tool list"}

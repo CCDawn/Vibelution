@@ -1,8 +1,9 @@
 import "./personalAssistant/personal-assistant.tailwind.css";
 import { useMemo, useState } from "react";
+import { PanelRightClose } from "lucide-react";
 import { controlDesktopAssistant } from "../api/desktopPet";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDialog, VSplitWorkspace } from "../components/vui";
+import { VButton, VDialog, VIconButton, VSplitWorkspace } from "../components/vui";
 import { ChatCodingRoute } from "./ChatCodingRoute";
 import { PersonalAssistantOverview } from "./personalAssistant/PersonalAssistantOverview";
 import { PersonalAssistantState } from "./personalAssistant/PersonalAssistantState";
@@ -14,6 +15,7 @@ export function PersonalAssistantRoute() {
   const state = usePersonalAssistant();
   const narrow = useAssistantNarrowLayout();
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const [desktopPending, setDesktopPending] = useState(false);
   const [desktopError, setDesktopError] = useState("");
@@ -36,9 +38,12 @@ export function PersonalAssistantRoute() {
     {desktopError ? <p className={styles.error} role="alert">{desktopError}</p> : null}
     <VSplitWorkspace className={styles.split} chrome="workbench" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.personalAssistant,
       aside: { defaultWidth: 280, minWidth: 220, maxWidth: 420 },
-      collapse: { aside: { separatorLabel: "调整平台概览宽度", collapseLabel: "收起平台概览", expandLabel: "展开平台概览" } } }}
+      collapse: { aside: { separatorLabel: "调整平台概览宽度", collapseLabel: "收起平台概览", expandLabel: "展开平台概览",
+        placement: "header", restoreInRail: true, collapsed: overviewCollapsed, onCollapsedChange: setOverviewCollapsed } } }}
       main={<div className={styles.main}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>}
-      aside={state.verified && !narrow ? <PersonalAssistantOverview onOpenSession={id => state.route.openSession(id, { surface: "chat", replace: false })} /> : undefined} />
+      aside={state.verified && !narrow ? <PersonalAssistantOverview headerAction={<VIconButton variant="ghost" label="收起平台概览"
+        icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />}
+        onOpenSession={id => state.route.openSession(id, { surface: "chat", replace: false })} /> : undefined} />
     <VDialog open={narrow && overviewOpen} onOpenChange={setOverviewOpen} title="平台概览" size="sm">
       <div className={styles.narrowOverview}><PersonalAssistantOverview onOpenSession={id => {
         setOverviewOpen(false); state.route.openSession(id, { surface: "chat", replace: false });

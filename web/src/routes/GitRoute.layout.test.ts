@@ -115,6 +115,10 @@ describe("GitRoute layout contract", () => {
     expect(gitRouteStyles.workspace).toContain("min-w-0");
     expect(gitRouteStyles.workspace).toContain("minmax(0,1fr)");
     expect(gitRouteStyles.workspace).toContain("clamp(250px,22vw,360px)");
+    expect(gitRouteStyles.workspace).toContain("_auto_minmax(0,1fr)");
+    expect(gitRouteStyles.resizeHandle).toContain("w-2.5");
+    expect(gitRouteStyles.resizeHandle).toContain("max-[1200px]:w-2");
+    expect(routeSource).toContain('className="max-[860px]:!hidden"');
     expect(gitRouteStyles.workspace).not.toMatch(/minmax\((500|520)px/);
     expect(gitRouteStyles.workspace).not.toContain("minmax(250px,310px)");
     expect(gitRouteStyles.workspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");

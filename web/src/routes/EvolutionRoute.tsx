@@ -1,6 +1,7 @@
 import "../design/route-css/evolution.tailwind.css";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { PanelLeftClose } from "lucide-react";
 import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -50,6 +51,7 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
   VDialog,
+  VIconButton,
   VMetricStrip,
   VSection,
   VSurface,
@@ -2622,9 +2624,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           runDeletableCount={runDeletableCount}
           selectedRunCount={selectedRunIds.length}
           runsWorkspaceStyle={runsWorkspaceStyle}
+          queueHeaderActions={(
+            <VIconButton
+              label={lang === "zh" ? "收起运行列表" : "Collapse run list"}
+              className={styles.headerCollapseButton}
+              aria-expanded={!runsQueueCollapsed}
+              variant="ghost"
+              icon={<PanelLeftClose size={15} />}
+              onPress={() => setRunsQueueCollapsed((current) => !current)}
+            />
+          )}
           separator={(
             <PaneCollapseHandle
               side="left"
+              togglePlacement="header"
               collapsed={runsQueueCollapsed}
               separatorLabel={resizeRunsQueueLabel}
               collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}

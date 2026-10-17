@@ -1,11 +1,12 @@
 import { Suspense, lazy, type CSSProperties } from "react";
-import { ArrowUpRight, Pencil, Save, Trash2, X } from "lucide-react";
+import { ArrowUpRight, PanelLeftClose, Pencil, Save, Trash2, X } from "lucide-react";
 
 import type { EvolutionLibraryEntry, EvolutionProposalDetail } from "../api/types";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
   VButton,
   VCheckbox,
+  VIconButton,
   VInput,
   VStateSurface,
   VStatusChip,
@@ -479,24 +480,35 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                     <strong>{t("selectedCount")}</strong>
                     <span>{selectedProposalRunIds.length}</span>
                   </div>
-                  <div className={styles.actionRow}>
-                    <VButton
-                      type="button"
-                      className={styles.inlineAction}
-                      isDisabled={selectedProposalRunIds.length === 0}
-                      onClick={() => onClearProposalSelection()}
-                    >
-                      {t("clearSelection")}
-                    </VButton>
-                    <VButton
-                      type="button"
-                      variant="danger"
-                      className={styles.inlineAction}
-                      isDisabled={selectedProposalRunIds.length === 0 || bulkDeletePending}
-                      onClick={onBulkDelete}
- icon={<Trash2 size={15} />}>
-                  {t("deleteSelected")}
-                </VButton>
+                  <div className={styles.collapseHeaderActions}>
+                    <div className={styles.actionRow}>
+                      <VButton
+                        type="button"
+                        className={styles.inlineAction}
+                        isDisabled={selectedProposalRunIds.length === 0}
+                        onClick={() => onClearProposalSelection()}
+                      >
+                        {t("clearSelection")}
+                      </VButton>
+                      <VButton
+                        type="button"
+                        variant="danger"
+                        className={styles.inlineAction}
+                        isDisabled={selectedProposalRunIds.length === 0 || bulkDeletePending}
+                        onClick={onBulkDelete}
+                        icon={<Trash2 size={15} />}
+                      >
+                        {t("deleteSelected")}
+                      </VButton>
+                    </div>
+                    <VIconButton
+                      label={lang === "zh" ? "收起提案列表" : "Collapse proposal list"}
+                      className={styles.headerCollapseButton}
+                      aria-expanded={!libraryListCollapsed}
+                      variant="ghost"
+                      icon={<PanelLeftClose size={15} />}
+                      onPress={onToggleLibraryListCollapsed}
+                    />
                   </div>
                 </div>
                 <div className={styles.libraryFilters}>
@@ -661,6 +673,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
 
             <PaneCollapseHandle
               side="left"
+              togglePlacement="header"
               collapsed={libraryListCollapsed}
               separatorLabel={resizeLibraryListLabel}
               collapseLabel={lang === "zh" ? "收起提案列表" : "Collapse proposal list"}

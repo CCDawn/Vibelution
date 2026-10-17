@@ -72,6 +72,15 @@ const evolutionSources = [
 ].join("\n");
 
 describe("EvolutionRoute library user flow contract", () => {
+  it("reserves the collapsed restore rail without allowing collapse in stacked layouts", () => {
+    expect(routeStyles.masterDetail).toContain("[grid-template-columns:var(--pane-w-library-list,_360px)_auto_minmax(0,_1fr)]");
+    expect(routeStyles.runsWorkspace).toContain("[grid-template-columns:var(--pane-w-runs-queue,_380px)_auto_minmax(0,_1fr)]");
+    expect(routeStyles.resizeHandle).toBe("max-[1200px]:hidden");
+    expect(routeStyles.headerCollapseButton).toBe("max-[1200px]:!hidden");
+    expect(routeSource).toContain("className={styles.headerCollapseButton}");
+    expect(supervisedLibraryViewSource).toContain("className={styles.headerCollapseButton}");
+  });
+
   it("uses VUI composition for supervised Evolution surfaces without native control wrappers", () => {
     expect(routeSource).toContain("VTrackWorkbenchPage");
     expect(routeSource).toContain("VMetricStrip");

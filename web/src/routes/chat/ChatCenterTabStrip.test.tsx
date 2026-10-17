@@ -63,7 +63,7 @@ describe("ChatCenterTabStrip return navigation", () => {
     expect(controlsRow).toContain('aria-label="会话操作"');
   });
 
-  it("preserves the right rail icon control name and expanded state", () => {
+  it("keeps a named expand control while the right rail is closed", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <ChatCenterTabStrip
@@ -71,15 +71,26 @@ describe("ChatCenterTabStrip return navigation", () => {
           styles={{ overlayPaneControls: "overlay-controls", toolbarIconButton: "toolbar-icon" }}
           chatReturnTarget={null}
           rightRailLabel="侧栏"
-          rightRailOpen
+          rightRailOpen={false}
         />
       </MemoryRouter>,
     );
 
     expect(html).toContain('id="chat-status-toggle"');
-    expect(html).toContain('aria-label="收起侧栏"');
-    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-label="展开侧栏"');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-controls="chat-status-pane"');
     expect(html).toMatch(/class="[^"]*toolbar-icon[^"]*"/);
+  });
+
+  it("leaves collapse to the open right rail's own header", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <ChatCenterTabStrip {...props} chatReturnTarget={null} rightRailLabel="侧栏" rightRailOpen />
+      </MemoryRouter>,
+    );
+
+    expect(html).not.toContain('id="chat-status-toggle"');
+    expect(html).not.toContain('aria-label="收起侧栏"');
   });
 });
