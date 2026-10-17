@@ -1,95 +1,68 @@
-# 03 · 模型钉选与 Profile
+# 03 · 钉选模型与 Profile 引用
 
-## 概念
+## 谁决定用哪只模型
 
-| 概念 | 配置位置 | 作用 |
-| --- | --- | --- |
-| 钉选模型 | `llm.providers.<id>.models.<key>` | 目录中的可选模型 + 默认值 |
-| Profile | `llm.profiles.<profile_id>` | **实际调用**用的运行档案 |
-| 角色绑定 | `llm.roles` / 角色 → profile | primary / dialogue 等 |
+| 要改的事 | 改哪里 |
+| --- | --- |
+| 某个 Agent 的对话、心智、摘要、子代理、视觉 | 该 Agent 的 `llmBindings` 槽位。权威在 Agent 记录，不在全局 Profile |
+| 压缩、科研等全局角色 | `llm.profiles.<profile_id>.model_ref` |
+| 温度、超时、推理、缓存、协议 | 钉选模型的 `defaults`。只有这个角色要和模型默认不同时，才写 `overrides` |
+| 地址、密钥、发现 | 供应商连接，见 [02](./02-llm-provider.md) |
 
-Agent 对话一般走 **dialogue/primary profile**，不是直接写 model 字符串到代码。
+Agent 槽位是 `dialogue`、`mentalModel`、`summary`、`subagentPlanning`、`subagentExecution`、`vision`。槽位里写的是模型引用 `provider_id/model_key`。已绑定的 Agent 不会因为改了 `primary` Profile 而换对话模型。
 
-## Profile 最小片段
+## 钉选模型
+
+位置：`llm.providers.<provider_id>.models.<model_key>`
 
 ```toml
-[llm.profiles.primary]
-profile_id = "primary"
-provider_id = "deepseek_main"
-model = "deepseek-v4-flash"          # 发给上游的模型 id
-model_ref = "deepseek_main/deepseek-v4-flash"  # 推荐显式
-transport = "chat_completions"       # chat_completions | responses
-contract = "tool_chat"               # basic_chat | tool_chat | reasoning_chat | responses_agent
-# protocol = "deepseek_reasoning"    # 可选：强制 ModelProtocol
+[llm.providers.deepseek_main.models."deepseek-v4-flash"]
+upstream_id = "deepseek-v4-flash"
+label = "DeepSeek V4 Flash"
+
+[llm.providers.deepseek_main.models."deepseek-v4-flash".defaults]
 temperature = 0.7
 max_output_tokens = 4096
 timeout = 60
 connect_timeout = 30
 streaming = true
 tool_calling_mode = "auto"
-strict_compatibility = true
 
-[llm.profiles.primary.prompt_cache]
-mode = "automatic"                   # 见 04
-# key = ""                           # 一般留空，运行时按 partition 生成
-# retention = ""                     # in_memory | 24h | 空=按策略默认
-
-[llm.profiles.primary.retry_policy]
-max_attempts = 5
-backoff_base_seconds = 2.0
+[llm.providers.deepseek_main.models."deepseek-v4-flash".defaults.prompt_cache]
+mode = "automatic"
 ```
 
-## 字段字典
+`upstream_id` 是发给上游的模型 ID。模型引用是 `deepseek_main/deepseek-v4-flash`。协议写在钉选模型的 `wire_protocol`、`interaction_contract`、`model_protocol`，或由供应商 `protocols` 推导。不要把 `chat_completions` 以外的线路名写进 Profile。
 
-| 字段 | 合法值 | 说明 |
-| --- | --- | --- |
-| `provider_id` | 已存在 provider | 必填关联 |
-| `model` | 上游 id | 与钉选 `upstream_id` 一致 |
-| `model_ref` | `provider/model_key` | UI/角色引用 |
-| `transport` | `chat_completions` \| `responses` | **仅这两种**；不是 wire 全集 |
-| `contract` | `basic_chat` `tool_chat` `reasoning_chat` `responses_agent` | 对话链模式提示 |
-| `protocol` | 空或 ModelProtocol 名 | 如 `openai_responses` `deepseek_reasoning` `anthropic_chat` |
-| `temperature` | 0–2 | GPT-5 族可能被 adapter 强制 1.0 |
-| `max_output_tokens` | >0 | |
-| `timeout` / `connect_timeout` | >0 秒 | |
-| `streaming` | bool | |
-| `thinking_type` | `""` `adaptive` `disabled` | Anthropic 等 |
-| `thinking_display` | `""` `summarized` `omitted` | |
-| `reasoning_effort` | 厂商相关 | OpenAI Responses |
-| `reasoning_effort_adapter` | `""` `reasoning_object` `reasoning_effort` `thinking_toggle` `none` | **禁止靠模型名瞎猜**（D2） |
-| `reasoning_effort_values` | list | 合同允许值 |
-| `supports_image_input` | bool/null | 是否确认支持图 |
-| `compat` | object | 覆盖协议 compat 提示 |
+## Profile 只是角色引用
 
-## Prompt Cache 子表（profile 或 model.defaults）
+公开配置里，一个 Profile 只能有这些字段：
 
-见 [04](./04-llm-protocol-wire-cache.md)。
+| 字段 | 作用 |
+| --- | --- |
+| `model_ref` | 指向已钉选的 `provider_id/model_key` |
+| `fallback` | 可选，另一条 Profile 的 id。不能指向自己 |
+| `overrides` | 可选，只覆盖这个角色。允许的键与钉选模型 `defaults` 相同 |
+| `label` | 可选，显示名，不参与选路 |
 
 ```toml
-[llm.profiles.primary.prompt_cache]
-mode = "automatic"   # disabled | automatic | explicit_cache_control | unsupported
-key = ""
-retention = ""       # "" | in_memory | 24h
+[llm.profiles.primary]
+model_ref = "deepseek_main/deepseek-v4-flash"
+fallback = "local"
+
+[llm.profiles.primary.overrides]
+temperature = 0.2
 ```
 
-## 角色绑定（示意）
+加载时会把钉选模型展开成运行时调用档案，再用 `overrides` 盖住。Profile 上的 `provider_id`、`model`、`transport`、`temperature` 不参与选路。保存配置时这些字段会被拒绝。文件里已经写下的旧字段不会被自动删掉，也不会改结果。
 
-具体键名以当前 `config.toml` / UI 为准，常见模式：
-
-```toml
-# 角色 → profile_id（示例，以实际 schema 为准）
-# [llm.roles]
-# primary = "primary"
-# dialogue = "primary"
-```
-
-改对话模型：改 **角色绑定的 profile** 的 `provider_id` + `model`，不要只改钉选目录。
+改某个全局角色用的模型：只改它的 `model_ref`。改所有使用该钉选模型的调用的默认温度：改钉选模型的 `defaults`。
 
 ## 常见错误
 
 | 错误 | 修复 |
 | --- | --- |
-| `transport` 写成 `anthropic_messages` | transport 只能 chat/responses；wire 由 kind/api 解析 |
-| `contract=tool_chat` 但 `protocol` 禁 tools | 与 ModelProtocol 冲突 |
-| 有 thinking 却用 basic_chat | 用 reasoning_chat / 正确 protocol |
-| model 与 upstream_id 不一致 | 对齐二者 |
+| 改了 `primary`，某个 Agent 的对话模型没变 | 改该 Agent 的 `llmBindings.dialogue.modelId` |
+| `is not a profile reference field` | 删掉 Profile 上复制的连接或模型字段；参数放进钉选模型 `defaults` 或 `overrides` |
+| `fallback references unknown profile` | `fallback` 必须是已有 Profile id |
+| 模型引用不存在 | 先在供应商下钉选模型，再让 Profile 或 Agent 槽位引用它 |

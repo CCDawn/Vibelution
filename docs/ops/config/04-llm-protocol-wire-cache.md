@@ -91,19 +91,14 @@
 
 **DeepSeek：**
 
+缓存写在钉选模型 `defaults.prompt_cache`。只有某一个 Profile 要和模型默认不同时，才写 `llm.profiles.<id>.overrides.prompt_cache`。
+
 ```toml
-[llm.profiles.X.prompt_cache]
+[llm.providers.deepseek_main.models."deepseek-v4-flash".defaults.prompt_cache]
 mode = "automatic"
 ```
 
-**OpenAI：**
-
-```toml
-[llm.profiles.X]
-transport = "chat_completions"  # 或 responses
-[llm.profiles.X.prompt_cache]
-mode = "automatic"
-```
+**OpenAI：** 线路写在钉选模型的 `wire_protocol`（`chat_completions` 或 `responses`），缓存同样写在该模型的 `defaults.prompt_cache`。
 
 **Anthropic：**
 
@@ -111,7 +106,8 @@ mode = "automatic"
 [llm.providers.anthropic_main]
 kind = "anthropic"
 driver = "anthropic"
-[llm.profiles.X.prompt_cache]
+
+[llm.providers.anthropic_main.models."claude-sonnet-4-6".defaults.prompt_cache]
 mode = "automatic"   # 顶层 cache_control
 # 或 mode = "explicit_cache_control"
 ```
