@@ -27,7 +27,25 @@ def _finding_writeback_budget_line() -> str:
     )
 
 
+def _planner_directive_line() -> str:
+    return (
+        "- 上下文若带 `plannerDirective`（失败审查规划师指令），它是系统审查本次任务失败现场后给出的修复判定："
+        "先按 `directive`（必要时参考 `targetFix`）逐条修复，再调用 `source_collection_stage_writeback_tool` "
+        "重新回写 completed；`recommendation=rerun_source_finding` 表示现有证据面不足，需补充来源/证据后重跑资料搜集。"
+        "该指令即是对你停靠提问的正式回答，不要无视它直接再次举手提问或重复读取同样的上下文。"
+    )
+
+
 def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
+    lines = _stage_writeback_prompt_lines(stage_id)
+    if not lines:
+        return []
+    # The planner directive applies to every stage equally: whichever stage
+    # task got planned, its agent reads the same contract line.
+    return [*lines, _planner_directive_line()]
+
+
+def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
     if stage_id == "finding":
         return [
             "- 调用 `source_collection_stage_writeback_tool` 时，结构化结果必须 JSON 序列化到参数 `result_json`；该工具没有 `payload_json` 参数，禁止使用 `payload_json`。",
