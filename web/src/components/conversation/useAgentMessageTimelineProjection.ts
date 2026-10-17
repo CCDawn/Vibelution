@@ -149,7 +149,8 @@ function suppressSupersededCompanionInFlightMessages(messages: ConversationMessa
  * frontend active turn layer (`<sessionId>-message-active-<turnId>`, kind
  * `session_active_turn_layer`). Their ids never collide and each one retires on
  * its own rule, so concatenating both paints the same in-flight answer twice
- * until the turn settles. Keep exactly one message per assistant turn.
+ * until the turn settles. Select one overlay, leaving all durable segments for
+ * projectTimelineProcessMessages to fold by revisioned item identity.
  */
 function assistantOverlayHasText(message: ConversationMessage): boolean {
   if (message.role !== "assistant") {
@@ -171,7 +172,8 @@ function assistantTurnDuplicateRank(message: ConversationMessage): number {
   // `hasVisibleTurnData` treats an empty in-flight shell as visible, which would
   // let a pending placeholder shadow an overlay that already streams text.
   const hasContent = assistantOverlayHasText(message);
-  const kind = String(message.metadata?.kind ?? "").trim();  // An empty overlay must never shadow a sibling that already streams text, and
+  const kind = String(message.metadata?.kind ?? "").trim();
+  // An empty overlay must never shadow a sibling that already streams text, and
   // a content-bearing active layer beats the coarser backend projection because
   // it repaints from the lowest-latency stream.
   if (kind === "session_active_turn_layer") {
@@ -183,17 +185,36 @@ function assistantTurnDuplicateRank(message: ConversationMessage): number {
   return hasContent ? 3 : 1;
 }
 
-function dedupeAssistantTurnOverlays(messages: ConversationMessage[]): ConversationMessage[] {
+function dedupeAssistantTurnOverlays(
+  messages: ConversationMessage[],
+  activeTurnMessage?: ConversationMessage,
+): ConversationMessage[] {
+  const isOverlay = (message: ConversationMessage) => (
+    message === activeTurnMessage
+    || message.metadata?.kind === "session_active_turn_layer"
+    || message.metadata?.kind === "session_live_overlay"
+    || /-message-(live|active)-/.test(message.id)
+  );
   const winnerByTurnId = new Map<string, ConversationMessage>();
+  const settledTurnIds = new Set<string>();
   for (const message of messages) {
     if (message.role !== "assistant") {
       continue;
     }
-const turnId = messageTurnId(message);
+    const turnId = messageTurnId(message);
     if (!turnId) {
       continue;
     }
-    const current = winnerByTurnId.get(turnId);    // Strictly greater keeps the first message on a tie, so an already painted
+    // Durable segments can contain different items from the same turn. Only
+    // their terminal outcome competes with overlays; never discard a segment.
+    if (!isOverlay(message)) {
+      if (hasTerminalCanonicalTurnOutcome(message) || hasCommittedAssistantProtocolAnswer(message)) {
+        settledTurnIds.add(turnId);
+      }
+      continue;
+    }
+    const current = winnerByTurnId.get(turnId);
+    // Strictly greater keeps the first message on a tie, so an already painted
     // row never swaps identity mid-stream.
     if (!current || assistantTurnDuplicateRank(message) > assistantTurnDuplicateRank(current)) {
       winnerByTurnId.set(turnId, message);
@@ -203,20 +224,22 @@ const turnId = messageTurnId(message);
     return messages;
   }
   return messages.filter((message) => {
-    if (message.role !== "assistant") {
+    if (message.role !== "assistant" || !isOverlay(message)) {
       return true;
     }
-const turnId = messageTurnId(message);
+    const turnId = messageTurnId(message);
     if (!turnId) {
       return true;
     }
-    return winnerByTurnId.get(turnId) === message;  });
+    return !settledTurnIds.has(turnId) && winnerByTurnId.get(turnId) === message;
+  });
 }
 
 /**
  * Convert the canonical session stream to the renderer model exactly once.
  * There is no side-channel merge of thought, feedback, transcript or content.
- */export function projectAgentMessageTimelineMessages({
+ */
+export function projectAgentMessageTimelineMessages({
   timelineMessages,
   activeTurnMessage,
   companionMode = false,
@@ -227,12 +250,13 @@ const turnId = messageTurnId(message);
   const canonicalActiveTurn = activeTurnMessage
     ? normalizeConversationMessageForRenderer(projectConversationMessageFromTurnItemsV2(activeTurnMessage))
     : undefined;
-const folded = projectTimelineProcessMessages(
+  const folded = projectTimelineProcessMessages(
     dedupeAssistantTurnOverlays([
       ...canonicalTimeline,
       ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
-    ]),
-  );  const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
+    ], canonicalActiveTurn),
+  );
+  const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
   const messages = companionMode
     ? suppressCompanionRestatedFollowups(
       suppressSupersededCompanionInFlightMessages(orderedMessages),
