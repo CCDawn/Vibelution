@@ -28,7 +28,7 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
     catalogs = []
     # Read the deployed registry and native Sessions, not an in-process seed.
     # Every bundled identity must be selectable before visiting a feature page.
-    agents = e2e_instance.api_get("/api/agents")
+    agents = e2e_instance.api_get("/api/agents?detail=summary")
     bundled = [agent for agent in agents if (agent.get("metadata") or {}).get("builtinPreset")]
     starter = [agent for agent in bundled if agent["metadata"]["builtinPreset"] == "general_assistant_v1"]
     research = [agent for agent in bundled if agent["metadata"]["builtinPreset"].startswith("research_role_v1:")]
@@ -95,7 +95,7 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(page, e2e_ins
         page.goto(f"{e2e_instance.base_url}/companions", wait_until="domcontentloaded")
         expect(page.locator(domain_recipe_selector("virtual-human-companion-lobby"))).to_be_visible()
         expect(page.get_by_text("洛天依", exact=True)).to_be_visible()
-        final_agents = e2e_instance.api_get("/api/agents")
+        final_agents = e2e_instance.api_get("/api/agents?detail=summary")
         assert {agent["agentId"] for agent in final_agents if (agent.get("metadata") or {}).get("builtinPreset")} == {
             agent["agentId"] for agent in bundled
         }, "Feature navigation duplicated the bundled Agent catalog"
