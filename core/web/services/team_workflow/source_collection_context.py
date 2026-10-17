@@ -274,6 +274,11 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         compact["quotableSources"] = quotable_sources
     if isinstance(context.get("quoteAnchorRemediation"), dict) and context.get("quoteAnchorRemediation"):
         compact["quoteAnchorRemediation"] = normalize_metadata(context["quoteAnchorRemediation"])
+    # One-shot writeback remediation contract must survive compaction: the
+    # rejected agent reads the compact context by default, and without this
+    # passthrough it would never see the system-computed remediation.
+    if isinstance(context.get("writebackRemediation"), dict) and context.get("writebackRemediation"):
+        compact["writebackRemediation"] = normalize_metadata(context["writebackRemediation"])
     compact_record_ids = [
         trim_text(item.get("recordId"), max_length=160)
         for item in records
