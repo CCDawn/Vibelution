@@ -125,6 +125,27 @@ def project_reasoning_contract(
 
     defaults = pinned.get("defaults") if isinstance(pinned.get("defaults"), dict) else {}
     capabilities = pinned.get("capabilities") if isinstance(pinned.get("capabilities"), dict) else {}
+    # Runtime profiles merge protocol family defaults; the candidate projection must
+    # expose the same contract or pins that only declare model_protocol hide the
+    # reasoning strength control in the Agent UI (official DeepSeek pins, for one).
+    from config.protocol_families import resolve_model_entry_family_defaults
+
+    family_resolved = resolve_model_entry_family_defaults({**capabilities, **pinned, **defaults})
+    family_defaults = {
+        key: family_resolved[key]
+        for key in ("reasoning_effort_values", "default_reasoning_effort", "reasoning_effort_adapter")
+        if key in family_resolved
+    }
+    explicit_defaults = defaults
+    if family_defaults:
+        defaults = {
+            **family_defaults,
+            **{
+                key: value
+                for key, value in defaults.items()
+                if value not in (None, "", [], {})
+            },
+        }
     observed_contract = (
         observed.get("reasoningContract")
         if isinstance(observed.get("reasoningContract"), dict)
@@ -146,8 +167,13 @@ def project_reasoning_contract(
         if normalized and normalized not in values:
             values.append(normalized)
 
-    if operator_values:
+    explicit_values = explicit_defaults.get("reasoning_effort_values") or capabilities.get(
+        "reasoning_effort_values"
+    )
+    if explicit_values:
         source = "operator_override"
+    elif family_defaults.get("reasoning_effort_values"):
+        source = "protocol_family_default"
     elif observed_verified:
         source = str(observed_contract.get("source") or "unknown").strip() or "unknown"
     else:
