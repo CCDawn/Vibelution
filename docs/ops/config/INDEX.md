@@ -20,7 +20,7 @@
 | 00 | [README](./README.md) | 任何配置任务 |
 | 01 | [权威路径与加载](./01-authority-and-paths.md) | 找不到配置、多环境、env 覆盖 |
 | 02 | [LLM Provider](./02-llm-provider.md) | 新增/改厂商、base_url、密钥、discovery |
-| 03 | [模型与 Profile](./03-llm-model-and-profile.md) | 挂模型、temperature、timeout、thinking |
+| 03 | [模型与 Profile](./03-llm-model-and-profile.md) | 钉选模型默认值、Profile 引用、Agent 槽位 |
 | 04 | [协议 / Wire / Prompt Cache](./04-llm-protocol-wire-cache.md) | 调用失败、缓存不命中、协议选型 |
 | 05 | [厂商菜谱（OpenAI/DeepSeek/Anthropic/…）](./05-llm-vendor-recipes.md) | 按厂商抄正确片段 |
 | 06 | [Agent / Evolution](./06-agent-evolution.md) | Agent 行为、进化、工具面 |

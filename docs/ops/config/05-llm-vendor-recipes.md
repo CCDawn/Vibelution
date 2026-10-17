@@ -1,6 +1,6 @@
 # 05 · 厂商菜谱（复制用）
 
-每个厂商：**Provider + 钉选模型 + Profile + Cache**。密钥一律 `env:`。
+每个厂商：**供应商连接 + 钉选模型**。Profile 只写 `model_ref`。密钥一律 `env:`。调用参数和缓存写在钉选模型 `defaults`。
 
 运行时细节：[PROTOCOL.md](../../../core/llm/PROTOCOL.md)。
 
@@ -26,13 +26,7 @@ upstream_id = "gpt-5.5"
 mode = "automatic"
 
 [llm.profiles.openai_primary]
-provider_id = "openai_main"
-model = "gpt-5.5"
 model_ref = "openai_main/gpt-5.5"
-transport = "chat_completions"   # 或 responses + protocol openai_responses
-contract = "tool_chat"
-[llm.profiles.openai_primary.prompt_cache]
-mode = "automatic"
 ```
 
 | 检查 | 值 |
@@ -53,14 +47,17 @@ base_url = "https://your-relay.example/v1"
 credential_ref = "env:VIBELUTION_LLM_MODEL_RELAY_..."
 compat_mode = "openai_compatible"
 
-[llm.profiles.relay_dialogue]
-provider_id = "relay_openai"
-model = "gpt-5.6-terra"
-transport = "responses"
-contract = "responses_agent"
-protocol = "relay_responses"   # 或 openai_responses
-[llm.profiles.relay_dialogue.prompt_cache]
+[llm.providers.relay_openai.models."gpt-5.6-terra"]
+upstream_id = "gpt-5.6-terra"
+wire_protocol = "responses"
+interaction_contract = "responses_agent"
+model_protocol = "relay_responses"
+
+[llm.providers.relay_openai.models."gpt-5.6-terra".defaults.prompt_cache]
 mode = "automatic"
+
+[llm.profiles.relay_dialogue]
+model_ref = "relay_openai/gpt-5.6-terra"
 ```
 
 ---
@@ -118,14 +115,11 @@ compat_mode = "native"
 [llm.providers.deepseek_main.models.deepseek-v4-flash]
 upstream_id = "deepseek-v4-flash"
 
-[llm.profiles.deepseek_primary]
-provider_id = "deepseek_main"
-model = "deepseek-v4-flash"
-transport = "chat_completions"
-contract = "reasoning_chat"
-# protocol 可省略，kind 会倾向 deepseek_reasoning
-[llm.profiles.deepseek_primary.prompt_cache]
+[llm.providers.deepseek_main.models.deepseek-v4-flash.defaults.prompt_cache]
 mode = "automatic"
+
+[llm.profiles.deepseek_primary]
+model_ref = "deepseek_main/deepseek-v4-flash"
 ```
 
 | 检查 | 值 |
@@ -151,16 +145,12 @@ upstream_id = "claude-sonnet-4-6"
 [llm.providers.anthropic_main.models.claude-sonnet-4-6.defaults.prompt_cache]
 mode = "automatic"
 
-[llm.profiles.claude_primary]
-provider_id = "anthropic_main"
-model = "claude-sonnet-4-6"
-transport = "chat_completions"
-contract = "tool_chat"
-thinking_type = "adaptive"          # 可选
+[llm.providers.anthropic_main.models.claude-sonnet-4-6.defaults]
+thinking_type = "adaptive"
 thinking_display = "summarized"
-[llm.profiles.claude_primary.prompt_cache]
-mode = "automatic"                  # 顶层 cache_control
-# mode = "explicit_cache_control"   # 块级 breakpoint
+
+[llm.profiles.claude_primary]
+model_ref = "anthropic_main/claude-sonnet-4-6"
 ```
 
 | 检查 | 值 |
@@ -182,21 +172,17 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 credential_ref = "env:DASHSCOPE_API_KEY"
 compat_mode = "openai_compatible"
 
+[llm.providers.aliyun_main.models."qwen-plus"]
+upstream_id = "qwen-plus"
+
+[llm.providers.aliyun_main.models."qwen-plus".defaults.prompt_cache]
+mode = "explicit_cache_control"
+
 [llm.profiles.qwen_primary]
-provider_id = "aliyun_main"
-model = "qwen-plus"
-transport = "chat_completions"
-contract = "tool_chat"
-[llm.profiles.qwen_primary.prompt_cache]
-mode = "explicit_cache_control"   # 本地/兼容常用
+model_ref = "aliyun_main/qwen-plus"
 ```
 
-Thinking：
-
-```toml
-contract = "reasoning_chat"
-# protocol = "qwen_thinking_no_prefill"
-```
+思考模型把 `interaction_contract` 设为 `reasoning_chat`，`model_protocol` 设为 `qwen_thinking_no_prefill`，写在钉选模型上。
 
 ---
 
@@ -209,13 +195,15 @@ driver = "gemini"
 base_url = "https://generativelanguage.googleapis.com"
 credential_ref = "env:GOOGLE_API_KEY"
 
+[llm.providers.google_main.models."gemini-3-flash-preview"]
+upstream_id = "gemini-3-flash-preview"
+wire_protocol = "gemini_generate_content"
+
+[llm.providers.google_main.models."gemini-3-flash-preview".defaults.prompt_cache]
+mode = "automatic"
+
 [llm.profiles.gemini_primary]
-provider_id = "google_main"
-model = "gemini-3-flash-preview"
-transport = "chat_completions"
-contract = "tool_chat"
-[llm.profiles.gemini_primary.prompt_cache]
-mode = "automatic"   # 实际命中依赖端点/LiteLLM
+model_ref = "google_main/gemini-3-flash-preview"
 ```
 
 Wire 可为 `gemini_generate_content`；body 仍为 OpenAI 形经 LiteLLM。
@@ -230,7 +218,7 @@ Wire 可为 `gemini_generate_content`；body 仍为 OpenAI 形经 LiteLLM。
 | MiniMax | `minimax` | 首条 system；缓存弱 |
 | llama.cpp | 本地 | 通常无磁盘 prompt cache 计费 |
 
-优先保证 **transport/contract/tools** 正确，再谈 cache。
+优先保证钉选模型的 `wire_protocol`、`interaction_contract` 和工具调用正确，再谈 cache。
 
 ---
 
