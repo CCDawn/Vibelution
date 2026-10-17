@@ -45,6 +45,29 @@ def _release_scheduled_job(team_id: str, meeting_round_id: str) -> None:
         meeting_runtime._MEETING_DISCUSSION_SESSIONS.pop(key, None)
 
 
+def _strip_deadline_policy(team_id: str, meeting_round_id: str) -> None:
+    """Stage the TTL-feature's owning shape: a meeting with no governed deadline.
+
+    Dev/cold-start meetings now receive their governed deadline at open time
+    (challenge identity is recognized from the frozen roster), and a persisted
+    deadline deliberately takes priority over the digest TTL stop-loss.  The
+    TTL path is therefore exercised on records staged deadline-less — the same
+    latest-wins append staging the recovery tests use.
+    """
+
+    record = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+    with meetings._LOCK:
+        meetings._append_round_record(
+            team_id,
+            {
+                **record,
+                "challengeDeadlineAtMs": 0,
+                "meetingDeadlineAtMs": 0,
+                "deadlinePolicyVersion": "",
+            },
+        )
+
+
 def _meeting_record(**overrides) -> dict:
     now = datetime.now(timezone.utc)
     stale = (now - timedelta(minutes=90)).isoformat().replace("+00:00", "Z")
@@ -187,6 +210,7 @@ def test_schedule_meeting_discussion_stops_after_digest_ttl(tmp_path, monkeypatc
     team_id, agents, opened = _open_meeting(tmp_path, monkeypatch)
     meeting_round_id = opened["meetingRound"]["meetingRoundId"]
     agent_ids = list(agents.values())
+    _strip_deadline_policy(team_id, meeting_round_id)
     meetings.begin_meeting_summary(team_id, meeting_round_id, actor=agent_ids[0])
     meeting_runtime.draft_meeting_digest(team_id, meeting_round_id)
     monkeypatch.setattr(meeting_runtime, "_meeting_digest_ttl_ms", lambda: 1)
@@ -260,6 +284,7 @@ def test_ttl_pause_keeps_approval_reject_and_close_working(tmp_path, monkeypatch
     team_id, agents, opened = _open_meeting(tmp_path, monkeypatch)
     meeting_round_id = opened["meetingRound"]["meetingRoundId"]
     agent_ids = list(agents.values())
+    _strip_deadline_policy(team_id, meeting_round_id)
     meetings.begin_meeting_summary(team_id, meeting_round_id, actor=agent_ids[0])
     meeting_runtime.draft_meeting_digest(team_id, meeting_round_id)
     monkeypatch.setattr(meeting_runtime, "_meeting_digest_ttl_ms", lambda: 1)
@@ -318,6 +343,7 @@ def test_meeting_bound_round_stops_before_first_speaker_after_ttl(
     meeting_round_id = opened["meetingRound"]["meetingRoundId"]
     room_id = opened["meetingRound"]["linkedChatRoomId"]
     agent_ids = list(agents.values())
+    _strip_deadline_policy(team_id, meeting_round_id)
     meetings.begin_meeting_summary(team_id, meeting_round_id, actor=agent_ids[0])
     meeting_runtime.draft_meeting_digest(team_id, meeting_round_id)
     monkeypatch.setattr(meeting_runtime, "_meeting_digest_ttl_ms", lambda: 1)

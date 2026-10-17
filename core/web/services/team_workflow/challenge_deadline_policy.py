@@ -272,10 +272,40 @@ def _participant_model_refs(agent_ids: Sequence[str]) -> list[str]:
     return refs
 
 
+def _has_challenge_participant_contract(value: Mapping[str, Any]) -> bool:
+    """True when the record carries the challenge chain's frozen roster.
+
+    Dev/cold-start meetings have no workflow run yet, so they carry neither a
+    receipt authority nor a scope authority; every meeting-open path still
+    stamps the server-resolved participant contract on the record.  Records
+    predating that contract can never present it, so the contract is the
+    identity signal a dev meeting can still show and still receive the
+    governed deadline backfill with.
+    """
+
+    role_ids = value.get("participantRoleIds")
+    if not isinstance(role_ids, (list, tuple)) or not any(
+        str(item or "").strip() for item in role_ids
+    ):
+        return False
+    if any(
+        _positive_int(value.get(field)) is None
+        for field in ("teamRoleContractVersion", "participantPolicyVersion")
+    ):
+        return False
+    return bool(
+        str(value.get("roleContractFingerprint") or "").strip()
+        and str(value.get("resolutionHash") or "").strip()
+    )
+
+
 def is_challenge_meeting(value: Mapping[str, Any]) -> bool:
-    return isinstance(value.get("modelInvocationReceiptAuthority"), Mapping) or str(
-        value.get("scopeAuthority") or ""
-    ).strip() in _CHALLENGE_SCOPE_AUTHORITIES
+    return (
+        isinstance(value.get("modelInvocationReceiptAuthority"), Mapping)
+        or str(value.get("scopeAuthority") or "").strip()
+        in _CHALLENGE_SCOPE_AUTHORITIES
+        or _has_challenge_participant_contract(value)
+    )
 
 
 def _hypothesis_review_finalist_count(meeting: Mapping[str, Any]) -> int:

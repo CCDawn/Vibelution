@@ -2225,6 +2225,37 @@ def _record_driver_work_state(
         return False
 
 
+def _record_opening_round_dispatch_evidence(
+    team_id: str,
+    meeting_round_id: str,
+    meeting_round: Mapping[str, Any],
+) -> None:
+    """Persist a pending intent while the dispatched opening round runs.
+
+    The opening round runs in the chat executor, so while it is in flight the
+    meeting driver has no durable work yet and a restarted backend read the
+    meeting as work-less, letting the recovery sweep fence it as a legacy
+    orphan while its opening round was still running.  Recording a pending
+    ``run_discussion`` intent (only when no durable intent exists at all) gives
+    recovery the fact that this meeting already dispatched its opening round:
+    the sweep then re-enters this same scheduler, which stays a no-op until the
+    opening round is terminal.  Storage outages are swallowed — the evidence
+    accelerates recovery only and must never break scheduling.
+    """
+
+    try:
+        if meeting_driver_work.latest_intent(team_id, meeting_round_id) is not None:
+            return
+    except Exception:  # noqa: BLE001 - unreadable evidence must not break scheduling
+        return
+    _record_driver_work_state(
+        team_id,
+        meeting_round_id,
+        status=meeting_driver_work.STATUS_PENDING,
+        deadline_at_ms=_digest_recovery_deadline_ms(meeting_round),
+    )
+
+
 class _DiscussionSupersededError(RuntimeError):
     """Raised when a wedged driver's replacement already owns the meeting."""
 
@@ -2866,6 +2897,13 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
             "meetingRoundId": normalized_round_id,
         }
     if meeting_rounds.running_bound_round_ids(meeting_round):
+        # The dispatched opening round is still running, so the driver stays a
+        # no-op — but the dispatch fact must survive a restart: persist durable
+        # pending evidence so recovery sees scheduled work instead of fencing
+        # the meeting as a work-less legacy orphan.
+        _record_opening_round_dispatch_evidence(
+            normalized_team_id, normalized_round_id, meeting_round
+        )
         return {
             "status": "waiting_for_opening_round",
             "teamId": normalized_team_id,

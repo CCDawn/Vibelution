@@ -78,9 +78,11 @@ _VALID_STATUSES = frozenset(
 # observes an expired ``challengeDeadlineAtMs`` (stop_reason ``challenge_deadline``).
 _FENCE_REASON_DEADLINE = "challenge_deadline"
 # Legacy meetings predate the challenge identity contract (no scope authority,
-# no receipt authority), so no governed deadline can ever be derived for them.
-# The sweep closes such orphans through the existing terminal path instead of
-# leaving a permanent ``open``/``summarizing`` hang with no possible closer.
+# no receipt authority, no participant-contract stamp), so no governed deadline
+# can ever be derived for them.  The sweep closes such orphans through the
+# existing terminal path instead of leaving a permanent ``open``/``summarizing``
+# hang with no possible closer — unless a bound round is still running, which
+# proves live work the fence must respect.
 _FENCE_REASON_LEGACY_ORPHAN = "legacy_orphan_closeout"
 MAX_AUTO_RESCHEDULE_ATTEMPTS = 3
 _MAX_LAST_PROBLEM_LENGTH = 240
@@ -1425,10 +1427,12 @@ def _close_or_backfill_identity_gap(
     Challenge-identity meetings whose deadline was never persisted get the
     governed deadline backfilled through the existing persist primitive, so a
     later sweep can fence them on expiry.  Meetings without any challenge
-    identity (legacy records created before the scope/receipt authority
-    contract) can never receive a governed deadline and have no driver that
-    could advance them; the sweep fences them through the existing terminal
-    path with an auditable reason instead of skipping them forever.
+    identity (legacy records created before the scope/receipt authority and
+    participant-contract stamps) can never receive a governed deadline; the
+    sweep fences them through the existing terminal path with an auditable
+    reason instead of skipping them forever — unless they still have a bound
+    round in flight or a live in-process driver, which proves real work and
+    exempts the meeting from the orphan close.
     """
 
     from core.web.services.team_workflow.challenge_deadline_policy import (
@@ -1449,6 +1453,12 @@ def _close_or_backfill_identity_gap(
         return "skipped"
     from core.web.services.team_workflow import meeting_runtime
 
+    if _meeting_rounds().running_bound_round_ids(meeting):
+        # A meeting with a bound round still running has live in-flight work
+        # (its opening round or a follow-up round in the chat executor); even
+        # though it shows no durable driver intent and no identity fields, it
+        # is not an orphan and must not be closed by the fence.
+        return "skipped"
     key = (str(team_id or "").strip(), meeting_round_id)
     with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
         has_live_driver = key in meeting_runtime._MEETING_DISCUSSION_JOBS
