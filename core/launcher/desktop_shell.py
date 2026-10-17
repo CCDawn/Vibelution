@@ -2155,8 +2155,8 @@ def _electron_sources_newer_than(project_root: Path, artifact: Path) -> bool:
     if not artifact.is_file() or not src_root.is_dir():
         return False
     dirty = _electron_worktree_dirty(project_root)
-    if dirty is not None:
-        return dirty
+    if dirty is False:
+        return False
     try:
         artifact_mtime = artifact.stat().st_mtime
     except OSError:
