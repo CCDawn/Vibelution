@@ -77,12 +77,19 @@ export function toolApprovalScopeLabel(scope: string | undefined, lang: "zh" | "
 }
 
 export function toolApprovalRiskLabel(level: string | undefined, lang: "zh" | "en") {
-  const normalized = String(level ?? "low").trim().toLowerCase();
+  const normalized = String(level ?? "").trim().toLowerCase();
+  const native: Record<string, [string, string]> = {
+    read: ["读取操作", "Read access"], write: ["写入操作", "Write access"],
+    network: ["网络访问", "Network access"], execute: ["执行代码", "Code execution"],
+    destructive: ["破坏性操作", "Destructive action"],
+  };
+  if (Object.hasOwn(native, normalized)) return native[normalized][lang === "zh" ? 0 : 1];
   if (normalized === "high") {
     return lang === "zh" ? "高风险" : "High risk";
   }
   if (normalized === "medium") {
     return lang === "zh" ? "中风险" : "Medium risk";
   }
-  return lang === "zh" ? "低风险" : "Low risk";
+  if (normalized === "low") return lang === "zh" ? "低风险" : "Low risk";
+  return lang === "zh" ? "风险未分类" : "Unclassified risk";
 }
