@@ -379,6 +379,9 @@ ELECTRON_SUPERVISOR_EVENT_CODES = {
     "electron.desktop_action.claimed",
     "electron.desktop_action.succeeded",
     "electron.desktop_action.failed",
+    "electron.human_attention_notification.delivered",
+    "electron.human_attention_notification.suppressed",
+    "electron.human_attention_notification.invalid",
 }
 WORK_RUN_HIGH_FREQUENCY_SNAPSHOT_THRESHOLD = 5
 REDACTED_FIELD_VALUE = "[redacted]"
