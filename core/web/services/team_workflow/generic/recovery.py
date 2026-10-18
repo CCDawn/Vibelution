@@ -122,6 +122,7 @@ def _scene(record: dict, state: dict, *, deployment_ref: str = "") -> str:
         "sourceRunId": record["id"], "sourceFlowId": record["flow"]["id"],
         "nodeId": state["nodeId"], "failureCode": attempts[-1].get("failureCode", ""),
         "researchSource": record["flow"]["steps"][0].get("researchSource") if service.supervised(record) else None,
+        "sessionSource": record["flow"]["steps"][0].get("sessionSource") if service.supervised(record) else None,
         "failureCount": state["failureCount"], "repairAttempt": state["repairAttempts"],
         "attemptRefs": [{key: attempt.get(key, "") for key in ("key", "sessionId", "turnId", "failureCode")}
                         for attempt in attempts[-3:]],
@@ -351,7 +352,7 @@ def _reconcile_recovery(team_id: str, run_id: str) -> None:
             return
         if state and state["status"] == "repairing":
             if service.supervised(record):
-                from .research_source import fence
+                from .source_adapter import fence
                 try:
                     reason = fence(record)
                 except Exception:

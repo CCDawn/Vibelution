@@ -16,7 +16,7 @@ const NODE_HEIGHT = 184;
 const COLUMN_GAP = 40;
 const ROW_GAP = 44;
 const INSET = 20;
-const kindIcons: Record<StepKind, typeof Bot> = { input: Inbox, agent: Bot, human: UserRound, output: FileCheck2, research: TriangleAlert };
+const kindIcons: Record<StepKind, typeof Bot> = { input: Inbox, agent: Bot, human: UserRound, output: FileCheck2, research: TriangleAlert, session: TriangleAlert };
 const states = {
     configured: { label: "已配置", icon: CheckCircle2, color: styles.text1 },
     draft: { label: "待配置", icon: Circle, color: styles.text2 },

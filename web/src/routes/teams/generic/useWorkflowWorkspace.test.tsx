@@ -48,10 +48,11 @@ it("keeps edits made while a save is in flight and adopts the saved revision", a
   expect(state.dirty).toBe(true);
 });
 
-it("keeps API-only research supervisors outside the editable workflow workspace", async () => {
+it.each(["research", "session"] as const)("keeps API-only %s supervisors outside the editable workflow workspace", async (kind) => {
   const supervisor: Flow = { ...initial, id: "supervisor", steps: [
-    { id: "source", label: "研究来源", kind: "research", owner: "", instruction: "",
-      researchSource: { runId: "research-run", nodeId: "source_finding" } },
+    { id: "source", label: "原生来源", kind, owner: "", instruction: "",
+      ...(kind === "research" ? { researchSource: { runId: "research-run", nodeId: "source_finding" } }
+        : { sessionSource: { sessionId: "session-1", turnId: "turn-1", agentId: "agent-1" } }) },
   ] };
   act(() => client.setQueryData(teamFlowKeys.flows("team-a"), {
     schemaVersion: 1, teamId: "team-a", flows: [supervisor, initial],
