@@ -156,6 +156,7 @@
 | `ChatSessionIndexToolbar` | [product/conversation.md](./product/conversation.md#chatsessionindextoolbar) |
 | `ChatSessionIndexSearch` | [product/conversation.md](./product/conversation.md#chatsessionindexsearch) |
 | `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
+| `ConversationTodoProgressButton` | [product/conversation.md](./product/conversation.md#conversationtodoprogressbutton) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
 | 本轮文件面板（`ConversationFileDeliveries`） | [product/conversation.md](./product/conversation.md#conversationfiledeliveries) |
