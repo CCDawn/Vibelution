@@ -18,7 +18,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type K
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
-import { ChatComposerBudgetDialog, type ChatComposerBudgetControl, type ChatComposerBudgetDialogLabels } from "./ChatComposerBudgetDialog";
+import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
 import styles from "./ChatComposerPlusMenu.styles";
 
@@ -49,7 +49,7 @@ export type ChatComposerPlusMenuLabels = {
   composerReferenceKnowledgeEmpty: string;
   composerBudgetEntry: string;
   composerBudgetHint: string;
-} & ChatComposerBudgetDialogLabels;
+} & ChatComposerBudgetPanelLabels;
 
 export type ChatComposerPlusMenuProps = {
   lang: "zh" | "en";
@@ -135,7 +135,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   const [referenceQuery, setReferenceQuery] = useState("");
   const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
-  const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
 
   const addReferenceSection = useMemo<SectionDescriptor>(() => ({
     id: "add-reference",
@@ -462,13 +461,35 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 disabled: capabilityDisabled,
                 onChange: onPromptSuggestionEnabledChange,
               })}
-              {budget ? renderAction({
-                id: "budget-parameters",
-                label: t("composerBudgetEntry"),
-                icon: <Gauge size={16} />,
-                disabled: capabilityDisabled,
-                onSelect: () => setBudgetDialogOpen(true),
-              }) : null}
+              {budget ? (
+                <ChatComposerBudgetPopover
+                  lang={lang}
+                  labels={resolvedLabels}
+                  sessionId={budget.sessionId}
+                  revision={budget.revision}
+                  maxCallsPerTurn={budget.maxCallsPerTurn}
+                  thinkingBudgetChars={budget.thinkingBudgetChars}
+                  loading={budget.loading}
+                  error={budget.error}
+                  pending={budget.pending}
+                  errorMessage={budget.errorMessage}
+                  onSave={budget.onSave}
+                  trigger={(
+                    <VButton
+                      type="button"
+                      role="menuitem"
+                      data-plus-menu-item="true"
+                      contentLayout="plain"
+                      className={styles.menuItem}
+                      variant="ghost"
+                      isDisabled={capabilityDisabled}
+                    >
+                      <ItemIcon><Gauge size={16} /></ItemIcon>
+                      <span className={styles.itemLabel}>{t("composerBudgetEntry")}</span>
+                    </VButton>
+                  )}
+                />
+              ) : null}
             </>
           )) : null}
           {directSession ? renderSection(companionSection, (
@@ -607,24 +628,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
           </div>
         </div>
       </VDialog>
-
-      {budget ? (
-        <ChatComposerBudgetDialog
-          open={budgetDialogOpen}
-          onOpenChange={setBudgetDialogOpen}
-          lang={lang}
-          labels={resolvedLabels}
-          sessionId={budget.sessionId}
-          revision={budget.revision}
-          maxCallsPerTurn={budget.maxCallsPerTurn}
-          thinkingBudgetChars={budget.thinkingBudgetChars}
-          loading={budget.loading}
-          error={budget.error}
-          pending={budget.pending}
-          errorMessage={budget.errorMessage}
-          onSave={budget.onSave}
-        />
-      ) : null}
     </>
   );
 }

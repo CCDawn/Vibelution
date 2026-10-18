@@ -1,22 +1,22 @@
 import { RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { VButton, VDialog, VIconButton, VNativeInput } from "../../components/vui";
-import styles from "./ChatComposerBudgetDialog.styles";
+import { VButton, VIconButton, VNativeInput, VPopover } from "../../components/vui";
+import styles from "./ChatComposerBudgetPopover.styles";
 
 /** Server validation domain for per-turn tool-call quota. */
 export const SESSION_BUDGET_MAX_CALLS_LIMITS = { min: 1, max: 200 } as const;
 /** Server validation domain for the thinking budget, in characters. */
 export const SESSION_BUDGET_THINKING_CHARS_LIMITS = { min: 50, max: 4000 } as const;
 
-/** PATCH payload the dialog hands to the workbench mutation. */
+/** PATCH payload the popover hands to the workbench mutation. */
 export type ChatComposerBudgetParametersPatch = {
   revision: number;
   maxCallsPerTurn: number | null;
   thinkingBudgetChars: number | null;
 };
 
-export type ChatComposerBudgetDialogLabels = {
+export type ChatComposerBudgetPanelLabels = {
   composerBudgetTitle: string;
   composerBudgetDescription: string;
   composerBudgetMaxCallsLabel: string;
@@ -80,11 +80,14 @@ export function validateSessionBudgetField(
   return { value: parsed, valid: true, error: "" };
 }
 
-type ChatComposerBudgetDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+type ChatComposerBudgetPopoverProps = {
   lang: "zh" | "en";
-  labels: ChatComposerBudgetDialogLabels;
+  labels: ChatComposerBudgetPanelLabels;
+  /**
+   * Menu-row trigger button rendered inside the plus menu; the popover owns
+   * its press handling, so the trigger carries no onPress of its own.
+   */
+  trigger: ReactNode;
   /** Draft scope resets when the session identity changes. */
   sessionId: string;
   /** Server revision guard; saves are blocked until it is known. */
@@ -99,16 +102,16 @@ type ChatComposerBudgetDialogProps = {
 };
 
 /**
- * Composer "budget and quota" dialog: per-session tool-call quota and thinking
- * budget with explicit draft + save semantics, modeled on
- * ConversationTurnModelControl (draft survives revision refreshes / 409s;
- * a settled successful save re-syncs the drafts from the server truth).
+ * Composer "budget and quota" side panel: opens from the plus-menu row via a
+ * right-side VPopover instead of a modal dialog. Draft + save semantics are
+ * unchanged from the dialog era (modeled on ConversationTurnModelControl):
+ * the draft survives revision refreshes / 409s and re-syncs only when the
+ * session identity changes or a settled save confirms the server truth.
  */
-export function ChatComposerBudgetDialog({
-  open,
-  onOpenChange,
+export function ChatComposerBudgetPopover({
   lang,
   labels,
+  trigger,
   sessionId,
   revision,
   maxCallsPerTurn,
@@ -118,7 +121,8 @@ export function ChatComposerBudgetDialog({
   pending = false,
   errorMessage = "",
   onSave,
-}: ChatComposerBudgetDialogProps) {
+}: ChatComposerBudgetPopoverProps) {
+  const [open, setOpen] = useState(false);
   const [maxCallsDraft, setMaxCallsDraft] = useState(() => budgetDraft(maxCallsPerTurn));
   const [thinkingDraft, setThinkingDraft] = useState(() => budgetDraft(thinkingBudgetChars));
   const [dirty, setDirty] = useState(false);
@@ -185,25 +189,114 @@ export function ChatComposerBudgetDialog({
   }, [pending, errorMessage, maxCallsPerTurn, thinkingBudgetChars]);
 
   return (
-    <VDialog
+    <VPopover
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen && !pending) {
           resetDraft();
         }
-        onOpenChange(nextOpen);
+        setOpen(nextOpen);
       }}
-      title={labels.composerBudgetTitle}
-      description={labels.composerBudgetDescription}
-      size="md"
-      data-vui="chat-composer-budget-dialog"
-      footer={(
-        <>
+      side="right"
+      align="start"
+      sideOffset={6}
+      aria-label={labels.composerBudgetTitle}
+      contentClassName={styles.panel}
+      data-vui="chat-composer-budget-popover"
+      trigger={trigger}
+    >
+      <div className={styles.body} data-testid="chat-composer-budget-popover-body">
+        <header className={styles.header}>
+          <h3 className={styles.title}>{labels.composerBudgetTitle}</h3>
+          <p className={styles.description}>{labels.composerBudgetDescription}</p>
+        </header>
+        {loading ? <p className={styles.statusLine}>{labels.composerBudgetLoading}</p> : null}
+        {error ? <p className={styles.error} role="alert">{labels.composerBudgetLoadFailed}</p> : null}
+        <div className={styles.fields}>
+          <div className={styles.field}>
+            <label className={styles.fieldLabel} htmlFor="chat-composer-budget-max-calls">
+              {labels.composerBudgetMaxCallsLabel}
+            </label>
+            <div className={styles.fieldRow}>
+              <VNativeInput
+                id="chat-composer-budget-max-calls"
+                className={styles.fieldInput}
+                type="number"
+                inputMode="numeric"
+                min={SESSION_BUDGET_MAX_CALLS_LIMITS.min}
+                max={SESSION_BUDGET_MAX_CALLS_LIMITS.max}
+                step={1}
+                placeholder={labels.composerBudgetMaxCallsPlaceholder}
+                aria-label={labels.composerBudgetMaxCallsLabel}
+                aria-invalid={Boolean(maxCallsError)}
+                disabled={pending || loading || error}
+                data-vui="chat-composer-budget-max-calls-input"
+                value={maxCallsDraft}
+                onChange={(event) => {
+                  setMaxCallsDraft(event.target.value);
+                  setDirty(true);
+                }}
+              />
+              <VIconButton
+                label={labels.composerBudgetClearMaxCalls}
+                variant="ghost"
+                className={styles.clearButton}
+                icon={<RotateCcw size={15} aria-hidden="true" />}
+                isDisabled={pending || loading || error || maxCallsDraft.trim() === ""}
+                onPress={() => {
+                  setMaxCallsDraft("");
+                  setDirty(true);
+                }}
+              />
+            </div>
+            {maxCallsError ? <span className={styles.error} role="alert">{maxCallsError}</span> : null}
+          </div>
+          <div className={styles.field}>
+            <label className={styles.fieldLabel} htmlFor="chat-composer-budget-thinking">
+              {labels.composerBudgetThinkingLabel}
+            </label>
+            <div className={styles.fieldRow}>
+              <VNativeInput
+                id="chat-composer-budget-thinking"
+                className={styles.fieldInput}
+                type="number"
+                inputMode="numeric"
+                min={SESSION_BUDGET_THINKING_CHARS_LIMITS.min}
+                max={SESSION_BUDGET_THINKING_CHARS_LIMITS.max}
+                step={1}
+                placeholder={labels.composerBudgetThinkingPlaceholder}
+                aria-label={labels.composerBudgetThinkingLabel}
+                aria-invalid={Boolean(thinkingError)}
+                disabled={pending || loading || error}
+                data-vui="chat-composer-budget-thinking-input"
+                value={thinkingDraft}
+                onChange={(event) => {
+                  setThinkingDraft(event.target.value);
+                  setDirty(true);
+                }}
+              />
+              <VIconButton
+                label={labels.composerBudgetClearThinking}
+                variant="ghost"
+                className={styles.clearButton}
+                icon={<RotateCcw size={15} aria-hidden="true" />}
+                isDisabled={pending || loading || error || thinkingDraft.trim() === ""}
+                onPress={() => {
+                  setThinkingDraft("");
+                  setDirty(true);
+                }}
+              />
+            </div>
+            {thinkingError ? <span className={styles.error} role="alert">{thinkingError}</span> : null}
+          </div>
+        </div>
+        {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
+        <div className={styles.footer}>
           <VButton
             type="button"
             variant="secondary"
             isDisabled={pending}
-            onPress={() => onOpenChange(false)}
+            onPress={() => setOpen(false)}
           >
             {labels.composerBudgetCancel}
           </VButton>
@@ -226,91 +319,9 @@ export function ChatComposerBudgetDialog({
           >
             {labels.composerBudgetSave}
           </VButton>
-        </>
-      )}
-    >
-      <div className={styles.body} data-testid="chat-composer-budget-dialog-body">
-        {loading ? <p className={styles.statusLine}>{labels.composerBudgetLoading}</p> : null}
-        {error ? <p className={styles.error} role="alert">{labels.composerBudgetLoadFailed}</p> : null}
-        <div className={styles.field}>
-          <label className={styles.fieldLabel} htmlFor="chat-composer-budget-max-calls">
-            {labels.composerBudgetMaxCallsLabel}
-          </label>
-          <div className={styles.fieldRow}>
-            <VNativeInput
-              id="chat-composer-budget-max-calls"
-              className={styles.fieldInput}
-              type="number"
-              inputMode="numeric"
-              min={SESSION_BUDGET_MAX_CALLS_LIMITS.min}
-              max={SESSION_BUDGET_MAX_CALLS_LIMITS.max}
-              step={1}
-              placeholder={labels.composerBudgetMaxCallsPlaceholder}
-              aria-label={labels.composerBudgetMaxCallsLabel}
-              aria-invalid={Boolean(maxCallsError)}
-              disabled={pending || loading || error}
-              data-vui="chat-composer-budget-max-calls-input"
-              value={maxCallsDraft}
-              onChange={(event) => {
-                setMaxCallsDraft(event.target.value);
-                setDirty(true);
-              }}
-            />
-            <VIconButton
-              label={labels.composerBudgetClearMaxCalls}
-              variant="ghost"
-              className={styles.clearButton}
-              icon={<RotateCcw size={15} aria-hidden="true" />}
-              isDisabled={pending || loading || error || maxCallsDraft.trim() === ""}
-              onPress={() => {
-                setMaxCallsDraft("");
-                setDirty(true);
-              }}
-            />
-          </div>
-          {maxCallsError ? <span className={styles.error} role="alert">{maxCallsError}</span> : null}
         </div>
-        <div className={styles.field}>
-          <label className={styles.fieldLabel} htmlFor="chat-composer-budget-thinking">
-            {labels.composerBudgetThinkingLabel}
-          </label>
-          <div className={styles.fieldRow}>
-            <VNativeInput
-              id="chat-composer-budget-thinking"
-              className={styles.fieldInput}
-              type="number"
-              inputMode="numeric"
-              min={SESSION_BUDGET_THINKING_CHARS_LIMITS.min}
-              max={SESSION_BUDGET_THINKING_CHARS_LIMITS.max}
-              step={1}
-              placeholder={labels.composerBudgetThinkingPlaceholder}
-              aria-label={labels.composerBudgetThinkingLabel}
-              aria-invalid={Boolean(thinkingError)}
-              disabled={pending || loading || error}
-              data-vui="chat-composer-budget-thinking-input"
-              value={thinkingDraft}
-              onChange={(event) => {
-                setThinkingDraft(event.target.value);
-                setDirty(true);
-              }}
-            />
-            <VIconButton
-              label={labels.composerBudgetClearThinking}
-              variant="ghost"
-              className={styles.clearButton}
-              icon={<RotateCcw size={15} aria-hidden="true" />}
-              isDisabled={pending || loading || error || thinkingDraft.trim() === ""}
-              onPress={() => {
-                setThinkingDraft("");
-                setDirty(true);
-              }}
-            />
-          </div>
-          {thinkingError ? <span className={styles.error} role="alert">{thinkingError}</span> : null}
-        </div>
-        {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
       </div>
-    </VDialog>
+    </VPopover>
   );
 }
 
