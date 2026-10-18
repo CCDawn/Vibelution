@@ -3,6 +3,7 @@ import { CircleCheck, CirclePause, ListChecks, LoaderCircle } from "lucide-react
 import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import { VButton } from "../vui";
 import type { SessionTodoChecklistProjection } from "./conversationTodoChecklistModel";
+import styles from "./ConversationTodoProgressButton.styles";
 
 export type ConversationTodoProgressButtonProps = {
   plan: SessionTodoChecklistProjection;
@@ -38,8 +39,8 @@ export function ConversationTodoProgressButton({
       type="button"
       variant="ghost"
       density="compact"
-      className="shrink-0 whitespace-nowrap tabular-nums"
-      icon={<Icon size={14} aria-hidden="true" className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined} />}
+      className={styles.button}
+      icon={<Icon size={14} aria-hidden="true" className={status === "running" ? styles.runningIcon : undefined} />}
       aria-label={label}
       aria-expanded={expanded}
       aria-controls="chat-status-pane"
@@ -49,7 +50,7 @@ export function ConversationTodoProgressButton({
       onPress={onPress}
     >
       {copy.todoProgressTitle} <span>{counter}</span>
-      {status === "paused" ? <span className="ml-1.5 hidden text-[var(--fg-tertiary)] min-[480px]:inline">{statusLabel}</span> : null}
+      {status === "paused" ? <span className={styles.pausedLabel}>{statusLabel}</span> : null}
     </VButton>
   );
 }
