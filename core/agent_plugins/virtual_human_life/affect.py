@@ -186,9 +186,40 @@ def project_affect(
     }
 
 
+WAIT_GRACE_HOURS = 6.0
+WAIT_FULL_HOURS = 30.0
+WAIT_MAX_DIP = 12
+
+
+def unanswered_wait_valence_dip(
+    delivered_at: datetime, *, now: datetime
+) -> int:
+    """Wall-clock valence dip for one delivered-but-unanswered proactive message.
+
+    Pure function of the two timestamps: deriving it twice within the same
+    second yields the same value, so heartbeat frequency cannot accelerate the
+    dip. Starts after a grace window, grows to a small cap across a day, then
+    stays flat — mild loneliness, never punishment. Callers must only pass
+    delivery-evidenced timestamps and must stop passing them once the user has
+    replied, so the wait vanishes on the next projection instead of recovering.
+    """
+    started = (
+        delivered_at.astimezone(timezone.utc) if delivered_at.tzinfo else delivered_at
+    )
+    current = now.astimezone(timezone.utc) if now.tzinfo else now
+    elapsed_hours = (current - started).total_seconds() / 3600.0
+    if elapsed_hours <= WAIT_GRACE_HOURS:
+        return 0
+    ratio = min(
+        1.0, (elapsed_hours - WAIT_GRACE_HOURS) / (WAIT_FULL_HOURS - WAIT_GRACE_HOURS)
+    )
+    return -max(1, int(round(WAIT_MAX_DIP * ratio)))
+
+
 __all__ = [
     "BASELINE_MOOD",
     "episode_from_life_event",
     "episode_from_relationship_event",
     "project_affect",
+    "unanswered_wait_valence_dip",
 ]

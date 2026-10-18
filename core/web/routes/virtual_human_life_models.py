@@ -197,3 +197,55 @@ class LegacyPetImportResponse(BaseModel):
 
     agentId: str
     sourceDigest: str
+
+
+class VirtualHumanDialogueSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speakingInitiative: Literal["restrained", "natural", "talkative"] | None = None
+    questionInitiative: Literal["few", "natural", "proactive"] | None = None
+    preferenceProposalMode: Literal["ask_first", "manual_only"] | None = None
+
+
+class VirtualHumanDialogueSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agentId: str
+    speakingInitiative: str
+    questionInitiative: str
+    preferenceProposalMode: str
+    updatedAt: str = ""
+
+
+class VirtualHumanPreferenceProposalResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    proposalId: str
+    agentId: str
+    preferenceType: Literal[
+        "verbosity", "question_initiative", "address", "humor", "proactive_contact"
+    ]
+    candidateValue: Any
+    sourceTurnId: str
+    status: Literal["pending", "accepted", "rejected", "expired"]
+    receiptId: str = ""
+    createdAt: str = ""
+    expiresAt: str = ""
+    decidedAt: str = ""
+
+
+class VirtualHumanPreferenceProposalListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agentId: str
+    proposals: list[VirtualHumanPreferenceProposalResponse] = Field(
+        default_factory=list
+    )
+
+
+class VirtualHumanPreferenceProposalDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agentId: str
+    proposal: VirtualHumanPreferenceProposalResponse
+    receipt: dict[str, Any] | None = None

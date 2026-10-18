@@ -70,6 +70,11 @@ const previewExemptDesignSections = new Set([
   // options, so its meaningful state cannot be expressed as a static preview.
   // Covered by its dialog interaction tests (open/rename/appearance/model).
   "PersonalAssistantSettings",
+  // Server-bound preference panel: dialogue settings enums and the pending
+  // proposal queue come from the companion plugin API, so its meaningful state
+  // cannot be expressed as a static preview. Covered by its settings-save,
+  // proposal accept/reject and read-failure interaction tests.
+  "PersonalAssistantDialoguePreferences",
   "DesktopAssistantReturnNotice",
   // Dual-channel human-attention surfaces bound to the native desktop bridge:
   // the notifier renders null and is driven by overview polling plus

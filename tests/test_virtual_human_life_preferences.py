@@ -106,7 +106,6 @@ def test_expression_preferences_change_style_without_expanding_question_budget()
         affect={"mood": {"valence": 18, "stability": 76}},
         energy=80,
         user_intent="small_talk",
-        turn_ordinal=3,
         preferences=expression_preferences(projected),
     )
 
@@ -397,3 +396,396 @@ def test_invalid_preference_command_fails_before_native_memory_write(
         )
 
     assert writes == []
+
+
+# ----------------------------------------------------------------------
+# Confirmable preference proposals (PRD 32.9) and dialogue settings.
+# ----------------------------------------------------------------------
+
+
+def _proposal_service(
+    tmp_path: Path,
+    *,
+    clock: list[datetime],
+    native_current: list[dict[str, object]] | None = None,
+    writer_calls: list[dict[str, object]] | None = None,
+):
+    native_current = native_current if native_current is not None else []
+    writer_calls = writer_calls if writer_calls is not None else []
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "directSessionId": "session-agent-a",
+    }
+
+    def submit_user(**payload):
+        submission = str(payload.get("client_submission_id") or "0")
+        return {
+            "accepted": True,
+            "turnId": f"turn-user-{submission.rsplit('-', 1)[-1]}",
+            "status": "running",
+        }
+
+    def writer(agent_id: str, **payload):
+        row = {
+            "agentId": agent_id,
+            "episodeId": f"episode-{len(native_current) + 1}",
+            "kind": payload.get("kind"),
+            "text": payload.get("text"),
+            "refs": list(payload.get("refs") or []),
+            "occurredAt": payload.get("occurred_at") or "",
+            "validUntil": "",
+        }
+        native_current.insert(0, row)
+        writer_calls.append(dict(payload))
+        return deepcopy(row)
+
+    def lister(agent_id: str, limit: int = 500):
+        return [
+            deepcopy(row)
+            for row in native_current
+            if row["agentId"] == agent_id and not row.get("validUntil")
+        ][:limit]
+
+    def superseder(agent_id: str, episode_id: str, *, successor_episode_id: str = ""):
+        for row in native_current:
+            if row["agentId"] == agent_id and row["episodeId"] == episode_id:
+                row["validUntil"] = "2026-09-08T02:00:00+00:00"
+                row["supersededByEpisodeId"] = successor_episode_id
+                return deepcopy(row)
+        raise AssertionError("missing episode")
+
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=submit_user,
+        episodic_writer=writer,
+        episodic_lister=lister,
+        episodic_superseder=superseder,
+        auto_mailbox_dispatch=False,
+        now_provider=lambda: clock[0],
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={"timezone": "Asia/Shanghai"},
+    )
+    return service
+
+
+def test_preference_proposal_accept_is_the_only_path_into_native_memory(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)]
+    native_current: list[dict[str, object]] = []
+    writer_calls: list[dict[str, object]] = []
+    service = _proposal_service(
+        tmp_path,
+        clock=clock,
+        native_current=native_current,
+        writer_calls=writer_calls,
+    )
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-1",
+        content="以后回复短一点",
+    )
+
+    proposed = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-1",
+        preference_type="verbosity",
+        candidate_value="brief",
+    )
+    pending = service.list_companion_preference_proposals("agent-a", status="pending")
+
+    assert proposed["proposal"]["status"] == "pending"
+    assert proposed["proposal"]["sourceTurnId"] == "turn-user-1"
+    assert [item["proposalId"] for item in pending["proposals"]] == [
+        proposed["proposal"]["proposalId"]
+    ]
+    # pending never touches the character: no native episode, no projection.
+    assert writer_calls == []
+    assert service.list_companion_preferences("agent-a")["cards"] == []
+
+    accepted = service.accept_companion_preference_proposal(
+        "agent-a",
+        proposal_id=str(proposed["proposal"]["proposalId"]),
+    )
+    projection = service.list_companion_preferences("agent-a")
+
+    assert accepted["proposal"]["status"] == "accepted"
+    assert accepted["proposal"]["receiptId"].startswith("preference-reconciliation-")
+    assert accepted["receipt"]["operation"] == "create"
+    assert projection["values"] == {"response_length": "brief"}
+    assert len(writer_calls) == 1
+
+    # Decided proposals are closed; the native memory stays the only authority.
+    with pytest.raises(VirtualHumanLifeError, match="cannot move from accepted"):
+        service.reject_companion_preference_proposal(
+            "agent-a",
+            proposal_id=str(proposed["proposal"]["proposalId"]),
+        )
+    assert service.list_companion_preferences("agent-a")["values"] == {
+        "response_length": "brief"
+    }
+
+
+def test_preference_proposal_correction_closes_with_supersede_receipt(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)]
+    native_current: list[dict[str, object]] = []
+    service = _proposal_service(tmp_path, clock=clock, native_current=native_current)
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-1",
+        content="以后回复短一点",
+    )
+    first = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-1",
+        preference_type="verbosity",
+        candidate_value="brief",
+    )
+    service.accept_companion_preference_proposal(
+        "agent-a",
+        proposal_id=str(first["proposal"]["proposalId"])
+    )
+
+    clock[0] = datetime(2026, 9, 2, 2, 0, tzinfo=timezone.utc)
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-2",
+        content="还是可以多说几句",
+    )
+    second = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-2",
+        preference_type="verbosity",
+        candidate_value="detailed",
+    )
+    accepted = service.accept_companion_preference_proposal(
+        "agent-a",
+        proposal_id=str(second["proposal"]["proposalId"]),
+    )
+
+    assert accepted["receipt"]["operation"] == "correct"
+    assert service.list_companion_preferences("agent-a")["values"] == {
+        "response_length": "detailed"
+    }
+    receipts = service.store.read_jsonl(
+        "agent-a", "memory/preference_reconciliation_receipts.jsonl"
+    )
+    assert [row["operation"] for row in receipts] == ["create", "correct"]
+
+
+def test_preference_proposal_reject_and_lazy_expiry_change_nothing(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)]
+    native_current: list[dict[str, object]] = []
+    writer_calls: list[dict[str, object]] = []
+    service = _proposal_service(
+        tmp_path,
+        clock=clock,
+        native_current=native_current,
+        writer_calls=writer_calls,
+    )
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-1",
+        content="以后叫我阿澈",
+    )
+    kept = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-1",
+        preference_type="address",
+        candidate_value="阿澈",
+    )
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-2",
+        content="别老问我问题",
+    )
+    ignored = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-2",
+        preference_type="question_initiative",
+        candidate_value="low",
+    )
+
+    rejected = service.reject_companion_preference_proposal(
+        "agent-a",
+        proposal_id=str(kept["proposal"]["proposalId"]),
+    )
+    assert rejected["proposal"]["status"] == "rejected"
+
+    clock[0] = datetime(2026, 9, 9, 2, 0, tzinfo=timezone.utc)
+    expired_view = service.list_companion_preference_proposals("agent-a")
+    statuses = {
+        item["proposalId"]: item["status"] for item in expired_view["proposals"]
+    }
+    assert statuses[str(ignored["proposal"]["proposalId"])] == "expired"
+    with pytest.raises(VirtualHumanLifeError, match="cannot move from expired"):
+        service.accept_companion_preference_proposal(
+            "agent-a",
+            proposal_id=str(ignored["proposal"]["proposalId"]),
+        )
+
+    # Rejection and ignoring never reach native memory.
+    assert writer_calls == []
+    assert service.list_companion_preferences("agent-a")["cards"] == []
+
+
+def test_preference_proposal_requires_current_user_turn_and_respects_mode(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)]
+    service = _proposal_service(tmp_path, clock=clock)
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-1",
+        content="以后回复短一点",
+    )
+
+    with pytest.raises(VirtualHumanLifeError, match="current native user Turn"):
+        service.propose_companion_preference(
+            "agent-a",
+            session_id="session-agent-a",
+            turn_id="turn-not-the-current-user-turn",
+            preference_type="verbosity",
+            candidate_value="brief",
+        )
+    with pytest.raises(VirtualHumanLifeError, match="Unsupported"):
+        service.propose_companion_preference(
+            "agent-a",
+            session_id="session-agent-a",
+            turn_id="turn-user-1",
+            preference_type="verbosity",
+            candidate_value="super_short_please",
+        )
+
+    service.update_dialogue_settings(
+        "agent-a",
+        settings={"preferenceProposalMode": "manual_only"},
+    )
+    with pytest.raises(VirtualHumanLifeError, match="manual-only"):
+        service.propose_companion_preference(
+            "agent-a",
+            session_id="session-agent-a",
+            turn_id="turn-user-1",
+            preference_type="verbosity",
+            candidate_value="brief",
+        )
+    assert service.list_companion_preference_proposals("agent-a")["proposals"] == []
+
+
+def test_preference_proposal_ledger_stores_references_not_user_text(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)]
+    service = _proposal_service(tmp_path, clock=clock)
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-1",
+        content="以后回复短一点，谢谢",
+    )
+    proposed = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-1",
+        preference_type="verbosity",
+        candidate_value="brief",
+    )
+    service.queue_conversation_message(
+        "agent-a",
+        session_id="session-agent-a",
+        client_submission_id="submission-2",
+        content="还是多说几句吧",
+    )
+    superseded = service.propose_companion_preference(
+        "agent-a",
+        session_id="session-agent-a",
+        turn_id="turn-user-2",
+        preference_type="verbosity",
+        candidate_value="detailed",
+    )
+
+    rows = service.store.read_jsonl(
+        "agent-a", "conversation/preference_proposals.jsonl"
+    )
+    serialized = json.dumps(rows, ensure_ascii=False)
+    assert "以后回复短一点" not in serialized
+    assert "还是多说几句吧" not in serialized
+    assert [row["status"] for row in rows] == ["pending", "expired", "pending"]
+    assert rows[1]["transitionReason"] == "superseded"
+    assert superseded["supersededProposalIds"] == [
+        str(proposed["proposal"]["proposalId"])
+    ]
+
+
+def test_dialogue_settings_roundtrip_and_expression_consumption(
+    tmp_path: Path,
+) -> None:
+    clock = [datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)]
+    service = _proposal_service(tmp_path, clock=clock)
+
+    defaults = service.dialogue_settings("agent-a")
+    assert defaults["speakingInitiative"] == "natural"
+    assert defaults["questionInitiative"] == "natural"
+    assert defaults["preferenceProposalMode"] == "ask_first"
+
+    with pytest.raises(VirtualHumanLifeError, match="Unsupported Companion dialogue setting"):
+        service.update_dialogue_settings(
+            "agent-a",
+            settings={"questionInitiative": "never"},
+        )
+
+    updated = service.update_dialogue_settings(
+        "agent-a",
+        settings={
+            "speakingInitiative": "restrained",
+            "questionInitiative": "few",
+        },
+    )
+    assert updated["speakingInitiative"] == "restrained"
+    assert updated["questionInitiative"] == "few"
+    assert service.dialogue_settings("agent-a")["questionInitiative"] == "few"
+
+    from core.agent_plugins.virtual_human_life.interaction_expression import (
+        build_companion_expression_decision,
+    )
+    from core.agent_plugins.virtual_human_life.companion_preferences import (
+        dialogue_settings_preferences,
+    )
+
+    decision = build_companion_expression_decision(
+        relationship={"relationshipStage": "close"},
+        affect={"mood": {"valence": 40, "stability": 70}},
+        energy=75,
+        user_intent="small_talk",
+        preferences=dialogue_settings_preferences(updated),
+    )
+    assert decision["questionBudget"] == 0
+    assert decision["initiative"] == "reply_only"
+    assert "dialogue_setting_question_initiative_few" in decision["reasonCodes"]

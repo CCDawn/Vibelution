@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 import threading
 import time
 from types import SimpleNamespace
@@ -260,7 +261,7 @@ def test_auto_review_runs_contained_workspace_command_without_prompt(monkeypatch
     assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
 
 
-def test_agent_private_memory_search_runs_without_per_call_approval(monkeypatch):
+def test_agent_private_memory_search_runs_without_per_call_approval(monkeypatch, _agent_directory_state):
     _runtime(monkeypatch, permission_preset="request_approval")
     _install(("search_agent_private_memory_tool", "never", "read"))
     calls = []
@@ -656,6 +657,74 @@ def test_exec_approval_summary_includes_command_and_cwd():
 
     assert summary["commandPreview"] == '.\\.venv\\Scripts\\python.exe -c "print(123)"'
     assert summary["cwdPreview"] == r"C:\workspace\repo"
+
+
+def test_assistant_management_approval_identifies_action_and_target_without_private_values():
+    summary = tool_approvals._argument_summary(
+        "personal_assistant_manage_tool",
+        {"action": "session_create", "arguments_json": '{"agent_id":"agent-a","title":"Acceptance test"}'},
+    )
+    assert summary["assistantAction"] == "session_create"
+    assert summary["assistantTargets"] == {"agent_id": "agent-a", "title": "Acceptance test"}
+    private = tool_approvals._argument_summary(
+        "personal_assistant_manage_tool",
+        {"action": "agent_update", "arguments_json": json.dumps({"agent_id": "agent-a", "updates_json": json.dumps({"personaProfile": "PRIVATE PROMPT", "toolPolicy": "SECRET"})})},
+    )
+    assert private["assistantTargets"] == {"agent_id": "agent-a"}
+    assert private["assistantChangedFields"] == ["personaProfile", "toolPolicy"]
+    assert "PRIVATE PROMPT" not in str(private) and "SECRET" not in str(private)
+
+
+@pytest.mark.parametrize("raw", ["{broken", "[]", '"secret"', "x" * 16001])
+def test_assistant_management_approval_rejects_unparseable_details(raw):
+    summary = tool_approvals._argument_summary(
+        "personal_assistant_manage_tool", {"action": "session_delete", "arguments_json": raw},
+    )
+    assert summary["assistantArgumentsInvalid"] is True
+    assert "assistantTargets" not in summary
+
+
+def test_assistant_management_approval_bounds_fields_and_does_not_expand_other_tools():
+    import json
+
+    summary = tool_approvals._argument_summary("personal_assistant_manage_tool", {
+        "action": "session_update", "arguments_json": json.dumps({
+            "session_id": "session-a\nspoof", "title": "a\n" + "b" * 300, "password": "SECRET",
+        }),
+    })
+    assert "session_id" not in summary["assistantTargets"]
+    assert len(summary["assistantTargets"]["title"]) <= 120
+    assert "\n" not in summary["assistantTargets"]["title"]
+    assert summary["assistantDetailsOmitted"] is True
+    assert "SECRET" not in str(summary)
+    assert "assistantAction" not in tool_approvals._argument_summary(
+        "another_tool", {"action": "session_create", "arguments_json": "{}"},
+    )
+
+
+def test_assistant_management_approval_projects_nested_workflow_roles_and_acl_defaults():
+    first = {"team_id": "team-a", "flow_id": "flow-a", "payload": {
+        "directorAgentId": "director-a", "developerAgentId": "developer-a", "reviewerAgentId": "reviewer-a",
+        "repairFlowId": "repair-a", "validForSeconds": 3600, "acknowledgeAutomaticRecovery": True,
+        "inputs": {"private": "SECRET"},
+    }}
+    summary = tool_approvals._argument_summary("personal_assistant_manage_tool", {
+        "action": "workflow_recovery_bind", "arguments_json": json.dumps(first),
+    })
+    assert summary["assistantTargets"]["payload.developerAgentId"] == "developer-a"
+    assert summary["assistantTargets"]["payload.validForSeconds"] == "3600"
+    assert summary["assistantDetailsOmitted"] and "SECRET" not in str(summary)
+    args = {"knowledge_base_id": "kb-a", "target_agent_id": "agent-a"}
+    def acl():
+        return tool_approvals._argument_summary("personal_assistant_manage_tool", {
+            "action": "knowledge_acl_grant", "arguments_json": json.dumps(args),
+        })
+    assert acl()["assistantPermissions"] == ["propose", "read"]
+    args["permissions_json"] = '["review"]'
+    assert acl()["assistantPermissions"] == ["review"]
+    args["permissions_json"] = '["SECRET"]'
+    assert acl()["assistantArgumentsInvalid"] is True
+    assert "SECRET" not in str(acl())
 
 
 def test_session_grant_is_invalidated_by_the_next_agent_config_revision(monkeypatch):

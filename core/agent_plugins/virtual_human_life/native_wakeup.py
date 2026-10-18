@@ -141,6 +141,7 @@ def ensure_session(owner_id: str) -> str:
             wake.get("requiredToolNames") or []
         )
         capabilities.discard("virtual_human_dialogue_decision_v2_tool")
+        capabilities.discard("virtual_human_preference_proposal_tool")
         # Preserve scope, access and call-budget restrictions; shrink tool names
         # to current owner permission intersected with this planned action.
         policy = deepcopy(owner.get("toolPolicy") or {})

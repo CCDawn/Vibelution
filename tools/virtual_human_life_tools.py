@@ -824,10 +824,65 @@ def virtual_human_dialogue_decision_v2_tool(
         )
 
 
+def virtual_human_preference_proposal_tool(
+    preferenceType: str,
+    candidateValue: str,
+) -> str:
+    """当用户本轮明确表达可执行的对话偏好时，登记一条待确认的偏好建议。
+
+    仅在用户清楚说出可执行偏好（如"回复短一点""以后叫我阿澈""别主动找我"）
+    时调用；含糊、玩笑或推测的偏好不要调用。preferenceType 只能是
+    verbosity | question_initiative | address | humor | proactive_contact，
+    candidateValue 只能是该类型的简短枚举值或称呼（不接收用户原话）。
+    身份、会话与来源 Turn 由当前 Agent 运行时绑定；建议在用户确认前不改变人物。
+    """
+
+    runtime = _runtime_context()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or "").strip()
+    turn_id = str(runtime.get("turnId") or runtime.get("runId") or "").strip()
+    if not agent_id or not session_id or not turn_id:
+        return _blocked(
+            "偏好建议需要已绑定的人物 Agent、Session 与当前用户 Turn。",
+            error="companion_turn_runtime_missing",
+        )
+    try:
+        result = _service().propose_companion_preference(
+            agent_id,
+            session_id=session_id,
+            turn_id=turn_id,
+            preference_type=str(preferenceType or "").strip(),
+            candidate_value=str(candidateValue or "").strip(),
+        )
+        return _result(
+            {
+                "ok": True,
+                "status": "pending",
+                "proposalId": str((result.get("proposal") or {}).get("proposalId") or ""),
+                "preferenceType": str(
+                    (result.get("proposal") or {}).get("preferenceType") or ""
+                ),
+                "supersededProposalIds": list(
+                    result.get("supersededProposalIds") or []
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 - tool boundary returns structured failure
+        return _result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+            }
+        )
+
+
 __all__ = [
     "virtual_human_activity_tool",
     "virtual_human_dialogue_decision_v2_tool",
     "virtual_human_diary_tool",
+    "virtual_human_preference_proposal_tool",
     "virtual_human_proactive_message_tool",
     "virtual_human_reflection_tool",
     "virtual_human_relationship_tool",

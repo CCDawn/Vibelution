@@ -21,6 +21,7 @@ VIRTUAL_HUMAN_TOOL_NAMES = (
     "virtual_human_reflection_tool",
     "virtual_human_proactive_message_tool",
     "virtual_human_dialogue_decision_v2_tool",
+    "virtual_human_preference_proposal_tool",
 )
 
 

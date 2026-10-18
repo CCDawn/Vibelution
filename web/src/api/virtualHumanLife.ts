@@ -11,6 +11,10 @@ import type {
   VirtualHumanLifeDraftUpdateRequest,
   VirtualHumanLifeWorldConfirmRequest,
   VirtualHumanLifeWorldConfirmResponse,
+  VirtualHumanDialogueSettings,
+  VirtualHumanDialogueSettingsUpdate,
+  VirtualHumanPreferenceProposalDecision,
+  VirtualHumanPreferenceProposalList,
   VirtualHumanRelationship,
   VirtualHumanScheduleBundle,
   VirtualHumanSnapshot,
@@ -163,4 +167,67 @@ export function fetchVirtualHumanMemories(
   return fetchJson<VirtualHumanEpisodicMemory[]>(suffix ? `${path}?${suffix}` : path, {
     signal: options?.signal,
   });
+}
+
+export function fetchVirtualHumanDialogueSettings(
+  agentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanDialogueSettings> {
+  return fetchJson<VirtualHumanDialogueSettings>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/companions/dialogue-settings`,
+    { signal: options?.signal },
+  );
+}
+
+export function updateVirtualHumanDialogueSettings(
+  agentId: string,
+  payload: VirtualHumanDialogueSettingsUpdate,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanDialogueSettings> {
+  return fetchJson<VirtualHumanDialogueSettings>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/companions/dialogue-settings`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    },
+  );
+}
+
+export function fetchVirtualHumanPreferenceProposals(
+  agentId: string,
+  options?: { status?: string; signal?: AbortSignal },
+): Promise<VirtualHumanPreferenceProposalList> {
+  const search = new URLSearchParams();
+  if (options?.status) {
+    search.set("status", options.status);
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/companions/preference-proposals`;
+  return fetchJson<VirtualHumanPreferenceProposalList>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
+}
+
+export function acceptVirtualHumanPreferenceProposal(
+  agentId: string,
+  proposalId: string,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanPreferenceProposalDecision> {
+  return fetchJson<VirtualHumanPreferenceProposalDecision>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/companions/preference-proposals/${encodeURIComponent(proposalId)}/accept`,
+    { method: "POST", signal: options?.signal },
+  );
+}
+
+export function rejectVirtualHumanPreferenceProposal(
+  agentId: string,
+  proposalId: string,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanPreferenceProposalDecision> {
+  return fetchJson<VirtualHumanPreferenceProposalDecision>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/companions/preference-proposals/${encodeURIComponent(proposalId)}/reject`,
+    { method: "POST", signal: options?.signal },
+  );
 }

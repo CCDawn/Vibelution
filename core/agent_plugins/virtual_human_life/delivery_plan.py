@@ -170,6 +170,8 @@ def build_conversation_burst_plan_v2(
         "assistantReceiptEventIds": [],
         "latestDeliveryReceiptId": "",
         "disclosedTopicKeys": [],
+        "pendingDisclosureSourceKeys": [],
+        "pendingDisclosureTopicKey": "",
         "stopReason": "",
         "createdAt": timestamp,
         "updatedAt": timestamp,
