@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 import threading
 
+import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.orchestration.turn_diagnostics import (
@@ -422,3 +423,84 @@ def test_completion_snapshot_reconciles_before_acquiring_chat_state_lock(monkeyp
 
     assert service.reconcile_lock_states == [False]
     assert snapshot["completionSource"] == "missing_conversation"
+
+
+def test_session_turn_error_uses_nested_provider_balance_reason_over_wrapper_protocol_marker():
+    from core.web.services import session_service
+
+    raw_error = (
+        "provider_protocol_error: litellm.BadRequestError: BadRequestError: OpenAIException - "
+        "b'{\"error\":{\"message\":\"Insufficient account balance\","
+        "\"type\":\"insufficient_balance\"},\"type\":\"error\"}'"
+    )
+
+    turn_error = session_service._make_session_turn_error(raw_error, lang="zh")
+
+    assert turn_error["error_type"] == "provider_error"
+    assert turn_error["reason_code"] == "quota_exhausted"
+    assert turn_error["provider_error_type"] == "insufficient_balance"
+    assert turn_error["provider_error_message"] == "Insufficient account balance"
+    assert turn_error["reason_detail"] == "Insufficient account balance"
+    assert "账户余额不足" in turn_error["reason_summary"]
+    assert "账户余额不足" in turn_error["message"]
+    assert "重复的工具调用 id" not in turn_error["message"]
+
+
+@pytest.mark.parametrize(
+    ("provider_error_type", "provider_message", "expected_reason_code"),
+    [
+        ("authentication_error", "Invalid API key", "auth_failed"),
+        ("insufficient_quota", "You exceeded your quota", "quota_exhausted"),
+        ("rate_limit_error", "Too many requests", "rate_limited"),
+        ("context_length_exceeded", "maximum context length exceeded", "context_limit"),
+    ],
+)
+def test_session_turn_error_prefers_specific_nested_provider_category(
+    provider_error_type,
+    provider_message,
+    expected_reason_code,
+):
+    from core.web.services import session_service
+
+    raw_error = (
+        "provider_protocol_error: litellm.BadRequestError: BadRequestError: OpenAIException - "
+        f"b'{{\"error\":{{\"message\":\"{provider_message}\","
+        f"\"type\":\"{provider_error_type}\"}},\"type\":\"error\"}}'"
+    )
+    turn_error = session_service._make_session_turn_error(raw_error, lang="zh")
+
+    assert turn_error["error_type"] == "provider_error"
+    assert turn_error["reason_code"] == expected_reason_code
+    assert turn_error["reason_detail"] == provider_message
+
+
+@pytest.mark.parametrize(
+    "raw_error",
+    [
+        "payload_protocol_error: duplicate tool call id",
+        "provider_protocol_error: duplicate tool call id",
+    ],
+)
+def test_session_turn_error_keeps_actual_payload_protocol_error(raw_error):
+    from core.web.services import session_service
+
+    turn_error = session_service._make_session_turn_error(raw_error, lang="zh")
+
+    assert turn_error["error_type"] == "provider_protocol_error"
+    assert turn_error["reason_code"] == "provider_protocol_error"
+    assert "违反协议" in turn_error["reason_summary"]
+
+
+@pytest.mark.parametrize(
+    "raw_error",
+    [
+        "provider_protocol_error: HTTP 400 - account balance check failed",
+        "provider_protocol_error: account balance unavailable",
+    ],
+)
+def test_session_turn_error_does_not_infer_quota_from_generic_400_or_vague_balance(raw_error):
+    from core.web.services import session_service
+
+    reason = session_service._provider_error_user_reason(raw_error, lang="zh")
+
+    assert reason["code"] != "quota_exhausted"
