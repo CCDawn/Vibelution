@@ -44,7 +44,18 @@ LEGACY_POLICY = {
     "maxCallsPerTurn": 8,
 }
 PRIVATE_V2_POLICY = {**LEGACY_POLICY, "writeScopes": ["private"]}
-TOOLS = (*_LEGACY_TOOLS, "personal_assistant_desktop_observe_tool", "personal_assistant_desktop_action_tool")
+_DESKTOP_TOOLS = ("personal_assistant_desktop_observe_tool", "personal_assistant_desktop_action_tool")
+TOOLS = (
+    *_LEGACY_TOOLS,
+    *_DESKTOP_TOOLS,
+    # Read back what the write-only memory tools persist, and keep long
+    # conversations compact without growing the toolset surface elsewhere.
+    "search_agent_private_memory_tool",
+    "compress_context_tool",
+)
+# Older provisioning toolsets that may still live in persisted snapshots; each
+# generation stays recognizable so explicit re-provisioning upgrades it to TOOLS.
+_TOOLSET_GENERATIONS = (_LEGACY_TOOLS + _DESKTOP_TOOLS, TOOLS)
 
 
 def _max_calls_per_turn() -> int:
@@ -164,22 +175,59 @@ def _owns_session(agent: dict, row: dict | None) -> bool:
     )
 
 
+def _provisioning_snapshot_bases() -> tuple[dict, ...]:
+    """Every policy shape the system has written for this profile.
+
+    ``maxCallsPerTurn`` is excluded on purpose: it snapshots the live config
+    knob at provisioning time, so a stored snapshot may carry any budget.
+    """
+    bases = [LEGACY_POLICY, PRIVATE_V2_POLICY]
+    for toolset in _TOOLSET_GENERATIONS:
+        bases.append(
+            {
+                **PRIVATE_V2_POLICY,
+                "allowedTools": list(toolset),
+                "preferredTools": list(toolset),
+            }
+        )
+    return tuple(bases)
+
+
+def _matches_provisioning_snapshot(policy: dict, base: dict, policy_id: str) -> bool:
+    """Structural equality ignoring policyVersion and the snapshotted budget."""
+    expected = directory.normalize_tool_policy(base, policy_id)
+    budget = policy.get("maxCallsPerTurn")
+    expected["maxCallsPerTurn"] = budget
+    expected.pop("policyVersion", None)
+    actual = {key: value for key, value in policy.items() if key != "policyVersion"}
+    return actual == expected
+
+
 def _needs_default_policy_upgrade(agent: dict) -> bool:
-    """Recognize only untouched private assistant provisioning snapshots."""
+    """Recognize only untouched private assistant provisioning snapshots.
+
+    Snapshots are system-written: their ``maxCallsPerTurn`` follows the config
+    knob at provisioning time, so any budget mismatch against ``current_policy``
+    (or an older toolset generation) still counts as a default snapshot that
+    explicit provisioning should refresh. Structural user edits (tool lists,
+    scopes, rules) never match and stay intact.
+    """
     policy_id = "tool-" + agent["agentId"]
     if (
         agent.get("createdBy") != "user_personal_assistant"
         or agent.get("toolPolicyId") != policy_id
     ):
         return False
-    version = (agent.get("toolPolicy") or {}).get("policyVersion")
-    pending = (agent.get("metadata") or {}).get("personalAssistantSetup") != "ready"
-    for snapshot in (LEGACY_POLICY, PRIVATE_V2_POLICY):
-        expected = directory.normalize_tool_policy(snapshot, policy_id)
-        expected["policyVersion"] = 1 if pending and version == 1 else 2
-        if agent.get("toolPolicy") == expected:
-            return True
-    return False
+    policy = agent.get("toolPolicy")
+    if not isinstance(policy, dict):
+        return False
+    if _matches_provisioning_snapshot(policy, current_policy(), policy_id):
+        # Same shape and the live budget: nothing to refresh.
+        return policy.get("maxCallsPerTurn") != current_policy()["maxCallsPerTurn"]
+    return any(
+        _matches_provisioning_snapshot(policy, base, policy_id)
+        for base in _provisioning_snapshot_bases()
+    )
 
 
 def _normalize_preferences(value: object) -> dict:
@@ -455,66 +503,86 @@ def get_personal_assistant_settings() -> dict:
 def update_personal_assistant_settings(
     *, display_name: str | None = None, preferences: dict | None = None
 ) -> dict:
-    """Partial update of the singleton's own settings; identity gate applies."""
-    agent = _active_profile_agent()
-    updates: dict = {}
-    if display_name is not None:
-        name = str(display_name or "").strip()
-        if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
-            raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
-        updates["display_name"] = name
-    if preferences is not None:
-        patch = preferences if isinstance(preferences, dict) else {}
-        unknown = set(patch) - set(PREFERENCES_FIELDS)
-        if unknown:
-            raise directory.AgentDirectoryError(
-                "个人助理偏好包含未知字段：" + "、".join(sorted(unknown))
-            )
-        if "characterId" in patch and patch["characterId"] not in APPEARANCES:
-            raise directory.AgentDirectoryError("不支持的外观，请从列表中选择。")
-        for field in ("showStatus", "showTitles", "showCompletion"):
-            if field in patch and not isinstance(patch[field], bool):
-                raise directory.AgentDirectoryError("偏好开关必须是布尔值。")
-        if "idleMessage" in patch and (
-            not isinstance(patch["idleMessage"], str) or len(patch["idleMessage"]) > 48
-        ):
-            raise directory.AgentDirectoryError("空闲提示语必须是不超过 48 字的文本。")
-        merged = _assistant_preferences(agent)
-        for field in PREFERENCES_FIELDS:
-            if field in patch:
-                merged[field] = patch[field]
-        updates["metadata"] = {PREFERENCES_METADATA_KEY: _normalize_preferences(merged)}
-    if updates:
-        directory.update_agent_instance(agent["agentId"], **updates)
-        agent = directory.get_agent(agent["agentId"], include_archived=True)
-    return {"settings": _settings_payload(agent)}
+    """Partial update of the singleton's own settings; identity gate applies.
+
+    The whole read-merge-write runs under the profile lock (same lock as
+    provisioning) so concurrent settings/model patches cannot compute merges
+    from the same stale snapshot and drop each other's writes.
+    """
+    with _LOCK:
+        agent = _active_profile_agent()
+        updates: dict = {}
+        if display_name is not None:
+            name = str(display_name or "").strip()
+            if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+                raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
+            updates["display_name"] = name
+        if preferences is not None:
+            patch = preferences if isinstance(preferences, dict) else {}
+            unknown = set(patch) - set(PREFERENCES_FIELDS)
+            if unknown:
+                raise directory.AgentDirectoryError(
+                    "个人助理偏好包含未知字段：" + "、".join(sorted(unknown))
+                )
+            if "characterId" in patch and patch["characterId"] not in APPEARANCES:
+                raise directory.AgentDirectoryError("不支持的外观，请从列表中选择。")
+            for field in ("showStatus", "showTitles", "showCompletion"):
+                if field in patch and not isinstance(patch[field], bool):
+                    raise directory.AgentDirectoryError("偏好开关必须是布尔值。")
+            if "idleMessage" in patch and (
+                not isinstance(patch["idleMessage"], str) or len(patch["idleMessage"]) > 48
+            ):
+                raise directory.AgentDirectoryError("空闲提示语必须是不超过 48 字的文本。")
+            merged = _assistant_preferences(agent)
+            for field in PREFERENCES_FIELDS:
+                if field in patch:
+                    merged[field] = patch[field]
+            updates["metadata"] = {PREFERENCES_METADATA_KEY: _normalize_preferences(merged)}
+        if updates:
+            directory.update_agent_instance(agent["agentId"], **updates)
+            agent = directory.get_agent(agent["agentId"], include_archived=True)
+        return {"settings": _settings_payload(agent)}
 
 
 def update_personal_assistant_model(model_id: str) -> dict:
-    """Rebind the dialogue slot; only whitelisted session choices are accepted."""
-    agent = _active_profile_agent()
-    normalized_model_id = str(model_id or "").strip()
-    if not normalized_model_id:
-        raise directory.AgentDirectoryError("请选择要使用的模型。")
-    session_id = str(agent.get("directSessionId") or "").strip()
-    if not session_id or not _owns_session(agent, _session_row(agent)):
-        raise directory.AgentStateConflictError(
-            "个人助理会话尚未就绪，暂时不能调整模型。"
-        )
-    try:
-        options = session_service.get_session_llm_options(session_id)
-    except Exception as exc:
-        raise directory.AgentDirectoryError(
-            "暂时无法读取可用模型列表，请稍后重试。"
-        ) from exc
-    whitelisted = {
-        str((row or {}).get("modelId") or "").strip()
-        for row in _eligible_dialogue_model_choices(options)
-    }
-    if normalized_model_id not in whitelisted:
-        raise directory.AgentDirectoryError("所选模型不在可用模型列表中。")
-    bindings = directory.normalize_agent_llm_bindings(agent.get("llmBindings"))
-    bindings["dialogue"] = {"modelId": normalized_model_id}
-    directory.update_agent_instance(agent["agentId"], llm_bindings=bindings)
-    agent = directory.get_agent(agent["agentId"], include_archived=True)
-    return {"model": _model_settings(agent)}
+    """Rebind the dialogue slot; only available whitelisted choices are accepted.
+
+    Same profile lock as settings updates; additionally the whitelist rejects
+    candidates whose provider channel is broken or key is missing, matching the
+    UI which already disables them.
+    """
+    with _LOCK:
+        agent = _active_profile_agent()
+        normalized_model_id = str(model_id or "").strip()
+        if not normalized_model_id:
+            raise directory.AgentDirectoryError("请选择要使用的模型。")
+        session_id = str(agent.get("directSessionId") or "").strip()
+        if not session_id or not _owns_session(agent, _session_row(agent)):
+            raise directory.AgentStateConflictError(
+                "个人助理会话尚未就绪，暂时不能调整模型。"
+            )
+        try:
+            options = session_service.get_session_llm_options(session_id)
+        except Exception as exc:
+            raise directory.AgentDirectoryError(
+                "暂时无法读取可用模型列表，请稍后重试。"
+            ) from exc
+        candidates = {
+            str((row or {}).get("modelId") or "").strip(): row or {}
+            for row in _eligible_dialogue_model_choices(options)
+        }
+        selected = candidates.get(normalized_model_id)
+        if selected is None:
+            raise directory.AgentDirectoryError("所选模型不在可用模型列表中。")
+        if (
+            selected.get("providerHealthy") is False
+            or bool(selected.get("missingApiKey"))
+        ):
+            raise directory.AgentDirectoryError(
+                "所选模型当前不可用（供应商通道异常或缺少密钥），请稍后重试或选择其他模型。"
+            )
+        bindings = directory.normalize_agent_llm_bindings(agent.get("llmBindings"))
+        bindings["dialogue"] = {"modelId": normalized_model_id}
+        directory.update_agent_instance(agent["agentId"], llm_bindings=bindings)
+        agent = directory.get_agent(agent["agentId"], include_archived=True)
+        return {"model": _model_settings(agent)}

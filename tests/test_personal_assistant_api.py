@@ -300,6 +300,31 @@ def test_settings_get_maps_identity_conflict_to_409(client, monkeypatch):
     assert client.get("/api/personal-assistant/settings").status_code == 409
 
 
+@pytest.mark.parametrize(
+    "method,url,payload",
+    [
+        ("patch", "/api/personal-assistant/settings", {"displayName": "改名"}),
+        ("patch", "/api/personal-assistant/settings/model", {"modelId": "whale-xl"}),
+    ],
+    ids=["settings", "model"],
+)
+def test_settings_and_model_patch_map_identity_conflict_to_409(
+    client, monkeypatch, method, url, payload
+):
+    def fail(*_args, **_kwargs):
+        raise directory.AgentStateConflictError("身份冲突")
+
+    monkeypatch.setattr(
+        service,
+        "update_personal_assistant_settings" if method == "patch" and url.endswith("settings")
+        else "update_personal_assistant_model",
+        fail,
+    )
+    response = client.patch(url, json=payload)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "身份冲突"
+
+
 def test_assistant_projection_accepts_xiaoluo_renderer(client, monkeypatch):
     row = _assistant()
     row["renderer"] = "xiaoluo"

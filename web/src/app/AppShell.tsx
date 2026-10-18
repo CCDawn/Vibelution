@@ -165,6 +165,7 @@ import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
 import { DesktopAssistantReturnNotice } from "../routes/personalAssistant/DesktopAssistantReturnNotice";
+import { HumanAttentionNotifier } from "../routes/personalAssistant/HumanAttentionNotifier";
 import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 
 const ShellProjectUtilities = lazy(() => import("./ShellProjectUtilities").then((module) => ({ default: module.ShellProjectUtilities })));
@@ -2916,6 +2917,7 @@ export function AppShell() {
       style={shellStyle}
     >
       <DesktopAssistantReturnNotice />
+      <HumanAttentionNotifier />
       {startupOverlayActive && !shutdownOpen ? (
         <div
           className={styles.startupOverlay}

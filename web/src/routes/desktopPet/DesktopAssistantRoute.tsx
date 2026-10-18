@@ -22,6 +22,7 @@ import {
   type DesktopPetWindowDragBridge,
 } from "./desktopPetWindowDrag";
 import petStyles from "./DesktopAssistantRoute.styles";
+import { HumanAttentionNoticeStack } from "./HumanAttentionNoticeStack";
 
 const COPY = {
   zh: {
@@ -246,6 +247,13 @@ export function DesktopAssistantRoute() {
     : activity.query.isPending ? copy.readingStatus : activity.statusText);
   const appearanceName = copy.names[characterId];
   const nextCharacterId = nextDesktopPetCharacter(characterId);
+  // Human-attention notice cards float over both window states; locating a
+  // target from the collapsed pet expands the chat surface first.
+  const noticeStack = <HumanAttentionNoticeStack onBeforeNavigate={async () => {
+    if (!expanded && !pending) {
+      try { await setDesktopPetExpanded(true); setExpanded(true); } catch { /* still navigate below */ }
+    }
+  }} />;
 
   if (context.isError) return <VStateSurface fill tone="error" title={copy.enableFailed}
     actions={<><VButton onClick={() => void context.refetch()}>{copy.retry}</VButton><VButton variant="secondary" onClick={() => window.close()}>{copy.closeWindow}</VButton></>}>{context.error.message}</VStateSurface>;
@@ -328,6 +336,7 @@ export function DesktopAssistantRoute() {
         {copy.chat}
       </VNativeButton>
     </div>
+    {noticeStack}
   </main>;
   return <div className={petStyles.chatWindow}
     data-vui-domain-recipe="desktop-assistant" data-assistant-chat="compact" data-expanded="true" data-tone={tone}>
@@ -347,5 +356,6 @@ export function DesktopAssistantRoute() {
       </div>
     </header>
     <div className={petStyles.chatBody}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>
+    {noticeStack}
   </div>;
 }

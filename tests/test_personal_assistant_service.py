@@ -1,7 +1,8 @@
 """Personal assistant provisioning uses isolated native Agent/Session storage."""
 
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Thread
 
 import pytest
 
@@ -483,12 +484,16 @@ def test_created_assistant_can_execute_personal_memory_tools(personal_env):
     assistant = service.create_personal_assistant()["assistant"]
     agent = directory.get_agent(assistant["agentId"])
     names = ("append_personal_memory_tool", "supersede_personal_memory_tool")
+    search_and_compact = ("search_agent_private_memory_tool", "compress_context_tool")
+    assert set(search_and_compact) <= set(service.TOOLS)
+    assert set(search_and_compact) <= set(agent["toolPolicy"]["allowedTools"])
     descriptors = [tool_catalog.build_tool_descriptor(name, args_schema={}) for name in service.TOOLS]
     policy = normalize_legacy_tool_policy(agent["toolPolicy"], registered_tool_names=service.TOOLS, policy_id=agent["toolPolicyId"])
     decision = evaluate_tool_policy(agent_id=agent["agentId"], policy=policy,
         grant=TurnToolGrant(turn_id="memory-turn", source="session", allowed_capabilities=tuple({cap for row in descriptors for cap in row.capabilities}), denied_tools=(), approval_mode="on_request"),
         descriptors=descriptors, registry_version=1, registry_fingerprint="test")
     assert set(names) <= set(decision.executable_tools)
+    assert set(search_and_compact) <= set(decision.executable_tools)
     assert agent["toolPolicy"]["writeScopes"] == ["private"]
 
 
@@ -545,6 +550,71 @@ def test_resuming_pending_setup_preserves_user_policy_and_profiles(personal_env,
     after = directory.get_agent(row["agentId"])
     assert after["toolPolicy"] == before["toolPolicy"]
     assert after["personaProfile"] == before["personaProfile"]
+
+
+def test_config_knob_change_refreshes_existing_snapshot_budget(personal_env, monkeypatch):
+    row = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    assert agent["toolPolicy"]["maxCallsPerTurn"] == service.DEFAULT_MAX_CALLS_PER_TURN
+    _set_budget_knob(monkeypatch, 32)
+    before = directory.load_state()
+    # Read path flags the stale snapshot without repairing it.
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    assert directory.load_state() == before
+    # Explicit provisioning delivers the new budget and stays idempotent.
+    assert service.create_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    assert directory.get_agent(row["agentId"])["toolPolicy"]["maxCallsPerTurn"] == 32
+    after = directory.load_state()
+    service.create_personal_assistant()
+    assert directory.load_state() == after
+
+
+def test_stale_budget_snapshot_upgrades_after_each_reprovision(personal_env, monkeypatch):
+    row = service.create_personal_assistant()["assistant"]
+    for knob in (32, 8):
+        _set_budget_knob(monkeypatch, knob)
+        assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+        service.create_personal_assistant()
+        assert (
+            directory.get_agent(row["agentId"])["toolPolicy"]["maxCallsPerTurn"]
+            == knob
+        )
+
+
+def test_pre_toolset_snapshot_upgrades_to_search_and_compress_tools(personal_env):
+    row = service.create_personal_assistant()["assistant"]
+    agent_id = row["agentId"]
+    old_tools = tuple(
+        name
+        for name in service.TOOLS
+        if name
+        not in {"search_agent_private_memory_tool", "compress_context_tool"}
+    )
+    legacy = directory.normalize_tool_policy(
+        {
+            **service.PRIVATE_V2_POLICY,
+            "allowedTools": list(old_tools),
+            "preferredTools": list(old_tools),
+            "maxCallsPerTurn": service.DEFAULT_MAX_CALLS_PER_TURN,
+        },
+        "tool-" + agent_id,
+    )
+    legacy["policyVersion"] = 2
+    _corrupt_agent(agent_id, toolPolicy=legacy)
+    state = directory.load_state()
+    state["toolPolicies"]["tool-" + agent_id] = legacy
+    directory.save_state(state)
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    assert service.create_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    upgraded = directory.get_agent(agent_id)["toolPolicy"]
+    assert upgraded["allowedTools"] == list(service.TOOLS)
+    assert {
+        "search_agent_private_memory_tool",
+        "compress_context_tool",
+    } <= set(upgraded["allowedTools"])
+    assert upgraded["writeScopes"] == ["private"]
+    # Toolset upgrade keeps the live budget rather than resetting it.
+    assert upgraded["maxCallsPerTurn"] == service.DEFAULT_MAX_CALLS_PER_TURN
 
 
 # --- Settings surface: config knob, preferences, renderer, model binding ---
@@ -766,3 +836,176 @@ def test_model_update_requires_owned_ready_session(personal_env, monkeypatch):
     session_service.delete_chat_session_lightweight(row["directSessionId"])
     with pytest.raises(directory.AgentStateConflictError):
         service.update_personal_assistant_model("assistant-model")
+
+
+def _profile_lock_is_held() -> bool:
+    """Probe the profile RLock from another thread; True means NOT held."""
+    observed = []
+
+    def probe():
+        acquired = service._LOCK.acquire(blocking=False)
+        observed.append(acquired)
+        if acquired:
+            service._LOCK.release()
+
+    thread = Thread(target=probe)
+    thread.start()
+    thread.join(timeout=5)
+    return bool(observed[0]) if observed else True
+
+
+def test_settings_and_model_writes_hold_profile_lock(personal_env, monkeypatch):
+    row = _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [
+            {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": True, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+            {"modelId": "whale-xl", "label": "大模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": False, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+        ],
+    )
+    observations = []
+    original_update = directory.update_agent_instance
+
+    def probe_update(agent_id, **kwargs):
+        observations.append(_profile_lock_is_held())
+        return original_update(agent_id, **kwargs)
+
+    monkeypatch.setattr(directory, "update_agent_instance", probe_update)
+    service.update_personal_assistant_settings(preferences={"idleMessage": "同步中"})
+    service.update_personal_assistant_model("whale-xl")
+    assert observations == [False, False]
+    agent = directory.get_agent(row["agentId"])
+    assert agent["metadata"][service.PREFERENCES_METADATA_KEY]["idleMessage"] == "同步中"
+    assert agent["llmBindings"] == {"dialogue": {"modelId": "whale-xl"}}
+
+
+def test_concurrent_patches_do_not_lose_preference_or_model_updates(
+    personal_env, monkeypatch
+):
+    row = _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [
+            {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": True, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+            {"modelId": "whale-xl", "label": "大模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": False, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+        ],
+    )
+    gate = Barrier(3)
+    failures = []
+
+    def run(worker):
+        try:
+            gate.wait(timeout=10)
+            worker()
+        except Exception as exc:  # pragma: no cover - surfaced via assertion
+            failures.append(exc)
+
+    def patch_idle_message():
+        for index in range(4):
+            service.update_personal_assistant_settings(
+                preferences={"idleMessage": f"p{index}"}
+            )
+
+    def patch_appearance():
+        for index in range(4):
+            service.update_personal_assistant_settings(
+                preferences={"characterId": "xiaoluo", "showTitles": index % 2 == 0}
+            )
+
+    def flip_model():
+        for index in range(4):
+            service.update_personal_assistant_model(
+                "whale-xl" if index % 2 == 0 else "assistant-model"
+            )
+
+    threads = [
+        Thread(target=run, args=(worker,)) for worker in (patch_idle_message, patch_appearance, flip_model)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert failures == []
+    agent = directory.get_agent(row["agentId"])
+    preferences = agent["metadata"][service.PREFERENCES_METADATA_KEY]
+    assert preferences["idleMessage"] == "p3"
+    assert preferences["characterId"] == "xiaoluo"
+    assert agent["llmBindings"]["dialogue"]["modelId"] in {
+        "assistant-model",
+        "whale-xl",
+    }
+
+
+@pytest.mark.parametrize(
+    "unhealthy",
+    [
+        {"providerHealthy": False, "missingApiKey": False},
+        {"providerHealthy": True, "missingApiKey": True},
+    ],
+    ids=["provider-broken", "missing-key"],
+)
+def test_model_update_rejects_unavailable_candidates_without_writing(
+    personal_env, monkeypatch, unhealthy
+):
+    row = _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [
+            {"modelId": "assistant-model", "label": "助理模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": True, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+            {"modelId": "sick-model", "label": "病态模型", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": False, "availability": "available", **unhealthy},
+        ],
+    )
+    before = directory.load_state()
+    with pytest.raises(directory.AgentDirectoryError, match="当前不可用"):
+        service.update_personal_assistant_model("sick-model")
+    assert directory.load_state() == before
+    assert (
+        directory.get_agent(row["agentId"])["llmBindings"]["dialogue"]["modelId"]
+        == "assistant-model"
+    )
+    # The unhealthy candidate is still listed for display; only binding is denied.
+    choices = service.get_personal_assistant_settings()["settings"]["model"]["choices"]
+    assert [choice["modelId"] for choice in choices] == ["assistant-model", "sick-model"]
+
+
+def test_llm_options_failure_degrades_read_and_blocks_model_write(
+    personal_env, monkeypatch
+):
+    row = _created_assistant(personal_env, monkeypatch)
+
+    def fail(_session_id):
+        raise RuntimeError("options unavailable")
+
+    monkeypatch.setattr(session_service, "get_session_llm_options", fail)
+    settings = service.get_personal_assistant_settings()["settings"]
+    assert settings["model"]["currentModelId"] == "assistant-model"
+    assert settings["model"]["choices"] == []
+    before = directory.load_state()
+    with pytest.raises(directory.AgentDirectoryError, match="暂时无法读取可用模型列表"):
+        service.update_personal_assistant_model("assistant-model")
+    assert directory.load_state() == before
+
+
+def test_settings_get_returns_null_for_missing_or_archived_assistant(personal_env, monkeypatch):
+    assert service.get_personal_assistant_settings() == {"settings": None}
+    row = _created_assistant(personal_env, monkeypatch)
+    assert service.get_personal_assistant_settings()["settings"]["displayName"] == "个人助理"
+    directory.update_agent_instance(row["agentId"], status="archived")
+    assert service.get_personal_assistant_settings() == {"settings": None}

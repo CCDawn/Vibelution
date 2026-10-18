@@ -7,6 +7,8 @@
 | `PersonalAssistantOverview` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantoverview) |
 | `PersonalAssistantState` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantstate) |
 | `DesktopAssistantReturnNotice` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantreturnnotice) |
+| `HumanAttentionNotifier` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnotifier) |
+| `HumanAttentionNoticeStack` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnoticestack) |
 | `PersonalAssistantSettings` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantsettings) |
 
 选型与反冗余入口。路径均为 `designs/` 相对路径。
