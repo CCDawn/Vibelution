@@ -464,7 +464,7 @@ describe("desktop conversation notifier", () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ turnId: "turn-2" }));
   });
 
-  it("reports needs_continue as ended and never as completed", () => {
+  it("reports needs_continue as awaiting the user and never as completed", () => {
     const notify = vi.fn();
     const notifier = createDesktopConversationNotifier({
       bridge: { notifyConversationCompleted: notify },
@@ -487,8 +487,8 @@ describe("desktop conversation notifier", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       terminalStatus: "needs_continue",
-      title: "对话已结束",
-      body: "「测试会话」对话已结束。",
+      title: "对话待继续",
+      body: "「测试会话」还有后续步骤，回复“继续”即可推进。",
     }));
   });
 
@@ -682,6 +682,13 @@ describe("session notification copy", () => {
     expect(buildConversationNotificationCopy({ sessionLabel: "科研助手", terminalStatus: "completed" })).toEqual({
       title: "对话已完成",
       body: "「科研助手」已完成一轮回复。",
+    });
+  });
+
+  it("reports needs_continue as awaiting the user instead of ended", () => {
+    expect(buildConversationNotificationCopy({ sessionLabel: "科研助手", terminalStatus: "needs_continue" })).toEqual({
+      title: "对话待继续",
+      body: "「科研助手」还有后续步骤，回复“继续”即可推进。",
     });
   });
 });
