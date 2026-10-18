@@ -83,7 +83,7 @@ const previewExemptDesignSections = new Set([
   // Route-owned server-bound dialog: the budget revision/values/pending state
   // comes from the session budget-parameters query and mutation. Covered by
   // its draft/validation/409 interaction tests and the isolated plus-menu preview.
-  "ChatComposerBudgetDialog",
+  "ChatComposerBudgetPopover",
 ]);
 
 function collectPreviewSources(directory: string): string {

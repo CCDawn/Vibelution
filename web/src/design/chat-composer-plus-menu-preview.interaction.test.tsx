@@ -359,8 +359,10 @@ describe("chat composer plus menu preview loop", () => {
     await act(async () => {
       budget?.click();
     });
-    const dialog = document.body.querySelector('[role="dialog"]');
-    expect(dialog?.textContent).toContain("预算与额度");
+    // The plus menu itself is a popover with role="dialog"; anchor on the
+    // budget panel's own aria-label so the two never collide.
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="预算与额度"]');
+    expect(dialog?.textContent).toContain("每回合工具调用额度");
     const maxCalls = dialog?.querySelector<HTMLInputElement>('input[aria-label="每回合工具调用额度"]');
     const thinking = dialog?.querySelector<HTMLInputElement>('input[aria-label="思考预算字数"]');
     expect(maxCalls).toBeTruthy();
@@ -380,7 +382,7 @@ describe("chat composer plus menu preview loop", () => {
         .find((button) => button.textContent?.trim() === "保存")
         ?.click();
     });
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"][aria-label="预算与额度"]')).toBeNull();
     expect(host.textContent).toContain("已模拟保存预算与额度");
     expect(host.textContent).toContain("按模型策略");
     expect(host.textContent).toContain("800 字");

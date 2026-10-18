@@ -22,7 +22,7 @@ import {
   ChatComposerPlusMenu,
   type ChatComposerSessionReferenceOption,
 } from "./ChatComposerPlusMenu";
-import type { ChatComposerBudgetControl } from "./ChatComposerBudgetDialog";
+import type { ChatComposerBudgetControl } from "./ChatComposerBudgetPopover";
 import type {
   ChatConversationComposerBridge,
   ChatConversationComposerBridgeState,

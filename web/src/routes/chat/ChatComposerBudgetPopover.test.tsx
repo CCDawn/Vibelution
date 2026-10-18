@@ -2,18 +2,18 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VuiProvider } from "../../components/vui";
+import { VButton, VuiProvider } from "../../components/vui";
 import {
-  ChatComposerBudgetDialog,
+  ChatComposerBudgetPopover,
   SESSION_BUDGET_MAX_CALLS_LIMITS,
   SESSION_BUDGET_THINKING_CHARS_LIMITS,
   validateSessionBudgetField,
-  type ChatComposerBudgetDialogLabels,
-} from "./ChatComposerBudgetDialog";
+  type ChatComposerBudgetPanelLabels,
+} from "./ChatComposerBudgetPopover";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const labels: ChatComposerBudgetDialogLabels = {
+const labels: ChatComposerBudgetPanelLabels = {
   composerBudgetTitle: "预算与额度",
   composerBudgetDescription: "按会话限制每回合工具调用次数与思考预算字数。",
   composerBudgetMaxCallsLabel: "每回合工具调用额度",
@@ -74,7 +74,11 @@ function buttonByAriaLabel(label: string): HTMLButtonElement | null {
   return document.body.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 }
 
-type DialogHarnessProps = {
+function triggerButton(): HTMLButtonElement | null {
+  return document.body.querySelector<HTMLButtonElement>('[data-testid="budget-trigger"]');
+}
+
+type PanelHarnessProps = {
   sessionId?: string;
   revision?: number;
   maxCallsPerTurn?: number | null;
@@ -84,12 +88,15 @@ type DialogHarnessProps = {
   onSave?: ReturnType<typeof vi.fn>;
 };
 
-function harnessProps(props: DialogHarnessProps) {
+function harnessProps(props: PanelHarnessProps) {
   return {
-    open: true,
-    onOpenChange: vi.fn(),
     lang: "zh" as const,
     labels,
+    trigger: (
+      <VButton type="button" data-testid="budget-trigger" variant="ghost">
+        预算与额度
+      </VButton>
+    ),
     sessionId: props.sessionId ?? "session-a",
     revision: props.revision === undefined && !("revision" in props) ? 3 : props.revision,
     maxCallsPerTurn: props.maxCallsPerTurn ?? null,
@@ -100,7 +107,7 @@ function harnessProps(props: DialogHarnessProps) {
   };
 }
 
-describe("ChatComposerBudgetDialog draft + save contract", () => {
+describe("ChatComposerBudgetPopover draft + save contract", () => {
   let root: Root | null = null;
   let container: HTMLDivElement;
 
@@ -110,22 +117,33 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
     root = null;
   });
 
-  async function renderDialog(props: DialogHarnessProps = {}) {
+  async function renderPanel(props: PanelHarnessProps = {}, { open = true }: { open?: boolean } = {}) {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
     const view = (
       <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps(props)} />
+        <ChatComposerBudgetPopover {...harnessProps(props)} />
       </VuiProvider>
     );
     await act(async () => root!.render(view));
-    return view;
+    if (open) {
+      await act(async () => triggerButton()?.click());
+    }
+    return { root: root!, view };
   }
+
+  it("opens the side panel from the menu-row trigger on click", async () => {
+    await renderPanel({}, { open: false });
+    expect(document.body.querySelector('[data-testid="chat-composer-budget-popover-body"]')).toBeNull();
+    await act(async () => triggerButton()?.click());
+    const body = document.body.querySelector('[data-testid="chat-composer-budget-popover-body"]');
+    expect(body?.textContent).toContain("预算与额度");
+  });
 
   it("seeds drafts from server values and blocks save until values change", async () => {
     const onSave = vi.fn();
-    await renderDialog({ maxCallsPerTurn: 32, thinkingBudgetChars: 500, onSave });
+    await renderPanel({ maxCallsPerTurn: 32, thinkingBudgetChars: 500, onSave });
     expect(inputByLabel("每回合工具调用额度")?.value).toBe("32");
     expect(inputByLabel("思考预算字数")?.value).toBe("500");
     expect(buttonByText("保存")?.disabled).toBe(true);
@@ -143,7 +161,7 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
 
   it("submits null for cleared fields and blocks invalid drafts", async () => {
     const onSave = vi.fn();
-    await renderDialog({ maxCallsPerTurn: 32, thinkingBudgetChars: 500, onSave });
+    await renderPanel({ maxCallsPerTurn: 32, thinkingBudgetChars: 500, onSave });
 
     await act(async () => buttonByAriaLabel("清除工具调用额度，恢复默认")?.click());
     expect(inputByLabel("每回合工具调用额度")?.value).toBe("");
@@ -163,7 +181,7 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
   });
 
   it("disables every control while a save is pending", async () => {
-    await renderDialog({ maxCallsPerTurn: 32, pending: true });
+    await renderPanel({ maxCallsPerTurn: 32, pending: true });
     expect(inputByLabel("每回合工具调用额度")?.disabled).toBe(true);
     expect(inputByLabel("思考预算字数")?.disabled).toBe(true);
     expect(buttonByText("保存")?.disabled).toBe(true);
@@ -172,8 +190,7 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
 
   it("keeps the operator draft across a 409 revision conflict and retries with the fresh revision", async () => {
     const onSave = vi.fn();
-    const view = await renderDialog({ revision: 3, maxCallsPerTurn: 32, thinkingBudgetChars: 500, onSave });
-    const rootRef = root!;
+    const { root: rootRef } = await renderPanel({ revision: 3, maxCallsPerTurn: 32, thinkingBudgetChars: 500, onSave });
 
     setInputValue(inputByLabel("每回合工具调用额度")!, "128");
 
@@ -181,12 +198,12 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
     // refreshed query pushes revision 4 with someone else's values.
     await act(async () => rootRef.render(
       <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({ revision: 3, maxCallsPerTurn: 32, thinkingBudgetChars: 500, pending: true, onSave })} />
+        <ChatComposerBudgetPopover {...harnessProps({ revision: 3, maxCallsPerTurn: 32, thinkingBudgetChars: 500, pending: true, onSave })} />
       </VuiProvider>,
     ));
     await act(async () => rootRef.render(
       <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({
+        <ChatComposerBudgetPopover {...harnessProps({
           revision: 4,
           maxCallsPerTurn: 48,
           thinkingBudgetChars: 500,
@@ -196,7 +213,6 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
         })} />
       </VuiProvider>,
     ));
-    void view;
 
     expect(document.body.textContent).toContain("配置已被其他修改更新");
     // The draft survives the revision refresh.
@@ -212,22 +228,13 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
   });
 
   it("resets drafts when the session identity changes", async () => {
-    const rootRefHolder: { root: Root | null } = { root: null };
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    rootRefHolder.root = root;
-    await act(async () => root.render(
-      <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({ sessionId: "session-a", maxCallsPerTurn: 32, thinkingBudgetChars: 500 })} />
-      </VuiProvider>,
-    ));
+    const { root: rootRef } = await renderPanel({ sessionId: "session-a", maxCallsPerTurn: 32, thinkingBudgetChars: 500 });
     setInputValue(inputByLabel("每回合工具调用额度")!, "128");
     expect(inputByLabel("每回合工具调用额度")?.value).toBe("128");
 
-    await act(async () => rootRefHolder.root!.render(
+    await act(async () => rootRef.render(
       <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({ sessionId: "session-b", maxCallsPerTurn: 8, thinkingBudgetChars: 200 })} />
+        <ChatComposerBudgetPopover {...harnessProps({ sessionId: "session-b", maxCallsPerTurn: 8, thinkingBudgetChars: 200 })} />
       </VuiProvider>,
     ));
     expect(inputByLabel("每回合工具调用额度")?.value).toBe("8");
@@ -236,27 +243,18 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
   });
 
   it("re-syncs drafts after a successful save settles", async () => {
-    const rootRefHolder: { root: Root | null } = { root: null };
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    rootRefHolder.root = root;
-    await act(async () => root.render(
-      <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({ maxCallsPerTurn: 32, thinkingBudgetChars: 500 })} />
-      </VuiProvider>,
-    ));
+    const { root: rootRef } = await renderPanel({ maxCallsPerTurn: 32, thinkingBudgetChars: 500 });
     setInputValue(inputByLabel("每回合工具调用额度")!, "64");
 
     // Pending, then the server confirms the new value without an error.
-    await act(async () => rootRefHolder.root!.render(
+    await act(async () => rootRef.render(
       <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({ maxCallsPerTurn: 32, thinkingBudgetChars: 500, pending: true })} />
+        <ChatComposerBudgetPopover {...harnessProps({ maxCallsPerTurn: 32, thinkingBudgetChars: 500, pending: true })} />
       </VuiProvider>,
     ));
-    await act(async () => rootRefHolder.root!.render(
+    await act(async () => rootRef.render(
       <VuiProvider>
-        <ChatComposerBudgetDialog {...harnessProps({ maxCallsPerTurn: 64, thinkingBudgetChars: 500, pending: false })} />
+        <ChatComposerBudgetPopover {...harnessProps({ maxCallsPerTurn: 64, thinkingBudgetChars: 500, pending: false })} />
       </VuiProvider>,
     ));
     expect(inputByLabel("每回合工具调用额度")?.value).toBe("64");
@@ -264,7 +262,7 @@ describe("ChatComposerBudgetDialog draft + save contract", () => {
   });
 
   it("blocks saving while the budget query has not resolved a revision", async () => {
-    await renderDialog({ revision: undefined, maxCallsPerTurn: 32 });
+    await renderPanel({ revision: undefined, maxCallsPerTurn: 32 });
     setInputValue(inputByLabel("每回合工具调用额度")!, "64");
     expect(buttonByText("保存")?.disabled).toBe(true);
   });
