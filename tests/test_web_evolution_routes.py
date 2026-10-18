@@ -2239,6 +2239,67 @@ def test_autonomous_self_evolution_action_route_enforces_user_actor(monkeypatch)
     ]
 
 
+def test_autonomous_local_integration_uses_trusted_http_operator(monkeypatch):
+    from core.web.services.team_workflow.research_runtime.operator_authorization import current_server_operator
+
+    calls = []
+
+    def start(payload):
+        calls.append((payload, current_server_operator()))
+        return {"runId": "local-authorized", "status": "queued"}
+
+    monkeypatch.setattr(evolution_routes, "start_autonomous_self_evolution", start)
+    request = {"goal": "bounded repair", "localIntegration": {
+        "acknowledge": True, "allowedFiles": ["core/example.py"],
+        "teamId": "existing-team", "validForSeconds": 300,
+    }}
+    response = client.post("/api/evolution/self/autonomous-runs", json=request,
+                           headers={"X-Vibelution-Operator-Id": "forged"})
+    assert response.status_code == 202
+    assert calls[0][0]["localIntegration"] == request["localIntegration"]
+    assert calls[0][1].operator_id != "forged"
+    assert current_server_operator() is None
+
+
+def test_autonomous_local_integration_rejects_client_identity_and_forbidden_operator(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import operator_authorization
+
+    def start(_payload):
+        raise PermissionError("command_forbidden")
+
+    monkeypatch.setattr(evolution_routes, "start_autonomous_self_evolution", start)
+    response = client.post("/api/evolution/self/autonomous-runs", json={
+        "goal": "repair", "localIntegration": {"acknowledge": True,
+            "allowedFiles": ["core/example.py"], "teamId": "team", "validForSeconds": 300}})
+    assert response.status_code == 403
+    assert operator_authorization.current_server_operator() is None
+
+
+def test_autonomous_local_integration_revoke_binds_operator(monkeypatch):
+    from core.web.services.team_workflow.research_runtime.operator_authorization import current_server_operator
+
+    calls = []
+
+    def revoke(run_id):
+        calls.append((run_id, current_server_operator()))
+        return {"runId": run_id, "revoked": True}
+
+    monkeypatch.setattr(evolution_routes, "revoke_autonomous_local_integration", revoke)
+    response = client.post("/api/evolution/self/autonomous-runs/local-authorized/actions",
+                           json={"action": "revoke_local_integration"})
+    assert response.status_code == 200
+    assert calls[0][0] == "local-authorized"
+    assert calls[0][1].operator_id
+
+
+@pytest.mark.parametrize("scope", ["../outside.py", "core/*.py", "/absolute.py"])
+def test_autonomous_local_integration_rejects_unsafe_scope(scope):
+    response = client.post("/api/evolution/self/autonomous-runs", json={
+        "goal": "repair", "localIntegration": {"acknowledge": True,
+            "allowedFiles": [scope], "teamId": "team", "validForSeconds": 300}})
+    assert response.status_code == 422
+
+
 def test_active_supervised_run_events_is_quiet_when_no_active_run():
     _reset_supervised_live_state()
 

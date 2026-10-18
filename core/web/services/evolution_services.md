@@ -19,7 +19,7 @@
 | Supervised **live run** 启停/暂停/推进 | `supervised_control_service.py` | 与 `supervised_worktree_evolution_service` 平行实现 lifecycle |
 | Supervised **worktree loop**（隔离 checkout + harness） | `supervised_worktree_evolution_service.py` → `scripts/evolution_harness.py` · `work_run_store` lease | 直接写本地 `main`；无 lease 开 worktree write |
 | Self **observation / worktree run** 控制 | `self_evolution_control_service.py`（route：`evolution.py` · `agents.py`） | 在 `self_evolution_service` 里 spawn agent/LLM |
-| 用户批准的 **autonomous self-evolution loop** | `self_evolution_autonomous_loop_service.py` + `self_evolution_autonomous_loop_*.py` | 绕过 user approval 扩 iteration；写 score loop 第二套 |
+| **autonomous self-evolution loop**（默认用户批准，可显式委托本地集成） | `self_evolution_autonomous_loop_service.py` + `self_evolution_local_integration.py` | 冒充 user 决策；无固定 SHA 独立验收直接合入；扩 iteration |
 | Candidate **隔离执行**（harness 协议） | `supervised_candidate_runtime_service.py` | 可见控制台 sandbox；超协议 limit 仍落盘全文 |
 | Candidate **Git 集成**（唯一晋级路） | `supervised_candidate_integration_service.py` + `evolution_promotion_lane.py` | `expected_head` 不匹配仍 force merge；Gym/live run 当第二写入者改 baseline |
 | Supervised Agent 角色对齐 | `supervised_agent_service.py`（route：`agents.py`） | 与 evolution control 双写 AgentInstance |
@@ -58,6 +58,18 @@ Domain SSOT（业务规则与持久化）
 ```
 
 触 FE Evolution 工作台时：route/recipe 在 `web/src/routes/` evolution 相关模块；改可见 UI 必须 VUI + contract + `tsc -b`。
+
+## 有限的本地集成委托
+
+`POST /evolution/self/autonomous-runs` 的 `localIntegration` 是可选对象；省略时仍停在用户审批。对象要求 `acknowledge=true`、`allowedFiles`（最多 8 个准确的仓库相对文件路径，拒绝 glob/目录/越界）、既有 `teamId` 和 `validForSeconds`（60–3600 秒）。此增量接口兼容旧客户端，不改变 `maxIterations=1`。HTTP 入口必须校验控制令牌并捕获服务器配置的 privileged operator，客户端的身份字段和 operator headers 不授予权限。
+
+委托仅存在本次 WorkRun snapshot 的 `localIntegrationAuthorization`，包含操作员、期限、文件范围、既有 Agent 绑定与权限指纹。观察、执行、验收三名 Agent 必须不同，执行和验收 Agent 已属于显式 Team；验收 Agent 保留项目现有 canonical `permissionPreset`，解析后的工具策略完整上界必须只含 catalog 的只读工具。检查也覆盖验收 Session/Turn 的临时授权和完整工具 journal：任何非只读调用尝试都拒绝验收，且至少有一次本回合成功的只读工具结果；仅返回通过 JSON 不算读取证据。该路径不会补建 Agent、发放运行工具 grants，或放宽既有审批与工具预算。阶段开始前和合入前重查授权与配置，越界计划在执行前拒绝。
+
+候选沿用受管 worktree、质量 manifest 和唯一 Git 集成服务。先冻结并验证候选，再用来源为 `self_evolution_candidate_review` 的隐藏原生 Session 独立验收；回执绑定同一 run、Session、精确 Turn、reviewer 和候选 SHA，并在 integration lease 内重读原生 journal 与授权，随后只 `ff-only` 合入验收过的 SHA。审计记录使用 `delegated_operator`，不会伪装成用户审批。
+
+`POST /evolution/self/autonomous-runs/{run_id}/actions` 新增 `revoke_local_integration`，同样要求可信 privileged operator；撤销与最终合入共用授权锁，已完成撤销后不再接纳合入。缺权限返回 403，冲突返回 409，非法授权字段返回 422。合入成功后用安全、可重试的非强制清理；已合入事实恢复与新的合入审批分开，清理失败不重复合入。部署、产品重启、远端发布和扩权仍需用户决定。
+
+本接口只接 autonomous self-evolution loop；普通 Session retry lineage、通用总监修复子流程到此接口的自动接线以及持续多轮调度仍是后续能力。源码与本地测试通过不代表正式运行实例已部署或完成原生 Session 实机验收。
 
 ---
 

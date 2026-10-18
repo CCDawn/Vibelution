@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import core.web.services.self_evolution_autonomous_loop_orchestrator as orchestrator_module
 from core.web.services.self_evolution_autonomous_loop_orchestrator import (
     SelfEvolutionAutonomousLoopOrchestrator,
@@ -21,6 +23,52 @@ class _ImmediateExecutor:
     def submit(self, callback, *args):
         self.submissions.append((callback, args))
         callback(*args)
+
+
+def test_delegated_integration_cannot_fall_back_without_guard(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(orchestrator_module, "integrate_candidate", lambda **kwargs: calls.append(kwargs))
+    dependencies = build_runtime_dependencies(project_root=tmp_path, manifest_root=tmp_path / "manifests",
+        bindings_loader=lambda: {}, role_turn_runner=lambda **kwargs: {})
+    with pytest.raises(ValueError, match="admission guard"):
+        dependencies.integrate_candidate({"localIntegrationAuthorization": {"authorizationId": "grant"}})
+    assert not calls
+
+
+def test_lost_integration_response_recovers_fact_then_finishes_governance_before_removal(tmp_path, monkeypatch):
+    calls = []
+    context = {"runId": "recovery", "localIntegrationAuthorization": {"authorizationId": "grant"},
+        "candidate": {"worktreePath": str(tmp_path / "candidate"), "baseCommit": "a" * 40,
+            "headCommit": "b" * 40, "variantId": "variant", "changedFiles": [{"path": "feature.py"}]}}
+
+    def lost_response(**kwargs):
+        calls.append("integrate")
+        raise RuntimeError("response lost after merge")
+
+    def recover(**kwargs):
+        assert "admission_guard" not in kwargs
+        assert kwargs["expected_candidate_commit"] == "b" * 40
+        calls.append("recover")
+        return {"status": "committed", "commitSha": "b" * 40, "governanceCleanup": {"status": "pending"}}
+
+    monkeypatch.setattr(orchestrator_module, "integrate_candidate", lost_response)
+    monkeypatch.setattr(orchestrator_module, "recover_candidate_integration", recover)
+    monkeypatch.setattr(orchestrator_module, "finish_candidate_integration_governance", lambda **kwargs: calls.append("finish-governance"))
+    monkeypatch.setattr(orchestrator_module, "cleanup_candidate_workspace", lambda *args, **kwargs: calls.append("remove") or {"status": "cleaned"})
+    deps = build_runtime_dependencies(project_root=tmp_path, manifest_root=tmp_path / "manifests",
+        bindings_loader=lambda: {}, role_turn_runner=lambda **kwargs: {}, integration_guard=lambda context: None)
+    integration = deps.integrate_candidate(context)
+    deps.cleanup_candidate({**context, "integration": integration})
+    assert calls == ["integrate", "recover", "finish-governance", "remove"]
+
+    def fail_governance(**kwargs):
+        raise RuntimeError("claim cleanup failed")
+
+    calls.clear()
+    monkeypatch.setattr(orchestrator_module, "finish_candidate_integration_governance", fail_governance)
+    with pytest.raises(RuntimeError, match="claim cleanup"):
+        deps.cleanup_candidate({**context, "integration": integration})
+    assert calls == []
 
 
 class _FakeService:

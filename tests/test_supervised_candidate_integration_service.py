@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from copy import deepcopy
+from contextlib import contextmanager
 from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
 from core.web.services import supervised_candidate_integration_service as service
+from scripts.task_closeout import complete_agent as _real_complete_agent, release_claim as _real_release_claim
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +44,7 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
         encoding="utf-8",
         errors="replace",
         check=False,
+        env=service.local_quality_gate.git_hook_isolated_environment(),
     )
     if check and result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
@@ -349,3 +353,414 @@ def test_revert_candidate_commit_creates_auditable_revert(tmp_path):
     assert _git(project, "status", "--porcelain=v1").stdout == ""
     assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = True\n"
     assert not (project / "tests" / "candidate_marker.py").exists()
+
+
+def _integration_args(tmp_path):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    approved = _candidate_worktree(project, candidate)
+    return dict(project_root=project, candidate_root=candidate, changed_files=_changes(),
+                expected_head=base, expected_variant_id="sha256:" + "a" * 64,
+                run_id="recovery-run", manifest_root=tmp_path / "manifests",
+                expected_candidate_commit=approved)
+
+
+def test_prepare_freezes_exact_candidate_without_integrating(tmp_path, monkeypatch):
+    from core.web.services.self_evolution_candidate_workspace import inspect_candidate_workspace
+
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    _git(project, "worktree", "add", "-b", "codex/self-evolution-prepare", str(candidate))
+    (candidate / "agent.py").write_text("BASELINE = False\n", encoding="utf-8")
+    workspace = {"worktreePath": str(candidate), "branch": "codex/self-evolution-prepare", "baseCommit": base}
+    inspected = inspect_candidate_workspace(project, workspace)
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("prepare must not merge"))
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: pytest.fail("prepare must not acquire integration"))
+
+    result = service.prepare_candidate(project_root=project, candidate_root=candidate,
+        changed_files=inspected["changedFiles"], expected_head=base,
+        expected_variant_id=inspected["variantId"], run_id="prepare-run")
+
+    assert result["headCommit"] == _git(candidate, "rev-parse", "HEAD").stdout.strip() != base
+    assert result["variantId"] == inspected["variantId"]
+    assert result["validationManifestPath"]
+    assert _git(candidate, "status", "--porcelain=v1").stdout == ""
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == base
+
+
+@pytest.mark.parametrize("drift", ["commit", "dirty"])
+def test_exact_reviewed_sha_rejects_candidate_drift_before_merge(tmp_path, monkeypatch, drift):
+    args = _integration_args(tmp_path)
+    candidate = args["candidate_root"]
+    (candidate / "agent.py").write_text("UNREVIEWED = True\n", encoding="utf-8")
+    if drift == "commit":
+        _git(candidate, "add", "agent.py")
+        _git(candidate, "commit", "-m", "unreviewed")
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("must not merge drift"))
+    with pytest.raises(service.CandidateIntegrationError, match="reviewed_candidate_changed"):
+        service.integrate_candidate(**args)
+    assert _git(args["project_root"], "rev-parse", "HEAD").stdout.strip() == args["expected_head"]
+
+
+def test_admission_denial_never_merges_or_persists_an_intent(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    released = []
+
+    @contextmanager
+    def denied():
+        raise RuntimeError("authorization revoked")
+        yield
+
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("denied guard must not merge"))
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: released.append(a[1]))
+    with pytest.raises(service.CandidateIntegrationError, match="authorization revoked"):
+        service.integrate_candidate(**args, admission_guard=denied)
+    assert released == ["integration-test"]
+    assert not service._integration_intent_path(args["project_root"], args["run_id"]).exists()
+    assert _git(args["project_root"], "rev-parse", "HEAD").stdout.strip() == args["expected_head"]
+
+
+def test_intent_is_durable_only_inside_admitted_merge(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    inside = False
+    merge = service.task_closeout.merge_ff_only
+    intent_path = service._integration_intent_path(args["project_root"], args["run_id"])
+
+    @contextmanager
+    def guard():
+        nonlocal inside
+        assert not intent_path.exists()
+        inside = True
+        try:
+            yield
+        finally:
+            inside = False
+
+    def checked_merge(*a, **kw):
+        import json
+        assert inside and intent_path.exists()
+        intent = json.loads(intent_path.read_text(encoding="utf-8"))
+        assert intent["developmentBinding"] == {"claimId": "development-test", "agentId": "test-owner",
+                                                "branch": "codex/supervised-candidate"}
+        assert intent["integrationClaimId"] == "integration-test"
+        assert kw["target_sha"] == args["expected_candidate_commit"]
+        return merge(*a, **kw)
+
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", checked_merge)
+    result = service.integrate_candidate(**args, admission_guard=guard)
+    assert result["commitSha"] == args["expected_candidate_commit"]
+    assert ":" not in Path(result["rollbackManifestPath"]).name
+
+
+@pytest.mark.parametrize("failure", ["manifest", "caller_result"])
+def test_completed_merge_recovers_without_guard_validation_or_second_merge(tmp_path, monkeypatch, failure):
+    args = _integration_args(tmp_path)
+    write_manifest = service._write_manifest
+    if failure == "manifest":
+        def fail_manifest(*a, **kw):
+            raise OSError("manifest storage unavailable")
+        monkeypatch.setattr(service, "_write_manifest", fail_manifest)
+        with pytest.raises(OSError, match="manifest storage unavailable"):
+            service.integrate_candidate(**args)
+        monkeypatch.setattr(service, "_write_manifest", write_manifest)
+    else:
+        # The caller loses its own result after this irreversible Git advance.
+        service.integrate_candidate(**args)
+    project = args["project_root"]
+    approved = args["expected_candidate_commit"]
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == approved
+    _git(project, "worktree", "remove", str(args["candidate_root"]))
+    (project / "later.txt").write_text("later owner\n", encoding="utf-8")
+    _git(project, "add", "later.txt")
+    _git(project, "commit", "-m", "later owner")
+    later = _git(project, "rev-parse", "HEAD").stdout.strip()
+    reflog_before = service._main_reflog_path(project).read_bytes()
+    monkeypatch.setattr(service, "_validate_managed_candidate", lambda *a: pytest.fail("completed fact needs no validation"))
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("must not merge twice"))
+
+    def revoked_guard():
+        pytest.fail("completed fact needs no renewed admission")
+
+    recovered = service.integrate_candidate(**args, admission_guard=revoked_guard)
+    assert recovered["commitSha"] == approved
+    assert recovered["baseCommit"] == args["expected_head"]
+    assert recovered["governanceCleanup"]["recovered"] is True
+    assert Path(recovered["rollbackManifestPath"]).is_file()
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == later
+    assert service._main_reflog_path(project).read_bytes() == reflog_before
+
+
+def test_existing_ancestor_without_this_runs_intent_is_not_recovered(tmp_path):
+    args = _integration_args(tmp_path)
+    _git(args["project_root"], "merge", "--ff-only", args["expected_candidate_commit"])
+    with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
+        service.integrate_candidate(**args)
+
+
+def test_failed_merge_intent_does_not_approve_unrelated_main_progress(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    def fail_merge(*a, **kw):
+        raise RuntimeError("merge unavailable")
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", fail_merge)
+    with pytest.raises(service.CandidateIntegrationError, match="merge unavailable"):
+        service.integrate_candidate(**args)
+    project = args["project_root"]
+    (project / "unrelated.txt").write_text("other\n", encoding="utf-8")
+    _git(project, "add", "unrelated.txt")
+    _git(project, "commit", "-m", "unrelated")
+    with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
+        service.integrate_candidate(**args)
+
+
+@pytest.mark.parametrize("field", ["expected_head", "expected_candidate_commit", "expected_variant_id", "candidate_root", "run_id", "changed_files"])
+def test_recovery_cannot_rebind_completed_intent(tmp_path, monkeypatch, field):
+    args = _integration_args(tmp_path)
+    service.integrate_candidate(**args)
+    args[field] = ({"expected_head": "b" * 40, "expected_candidate_commit": "c" * 40,
+                    "expected_variant_id": "another-variant", "candidate_root": tmp_path / "another",
+                    "run_id": "another-run", "changed_files": [{"path": "other.py"}]}[field])
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("rebinding must not merge"))
+    with pytest.raises(service.CandidateIntegrationError, match="integration_intent_mismatch|stale_main"):
+        service.integrate_candidate(**args)
+
+
+def test_recovery_rejects_a_merge_reflog_that_predates_intent(tmp_path, monkeypatch):
+    import hashlib
+    import json
+
+    args = _integration_args(tmp_path)
+    service.integrate_candidate(**args)
+    project = args["project_root"]
+    path = service._integration_intent_path(project, args["run_id"])
+    intent = json.loads(path.read_text(encoding="utf-8"))
+    prior_reflog = service._main_reflog_path(project).read_bytes()
+    intent.update(mainReflogOffset=len(prior_reflog),
+                  mainReflogPrefixDigest=hashlib.sha256(prior_reflog).hexdigest())
+    path.write_text(json.dumps(intent), encoding="utf-8")
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("ancestor alone cannot merge"))
+    with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
+        service.integrate_candidate(**args)
+
+
+def test_intent_persistence_failure_prevents_irreversible_merge(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    def unavailable(*a, **kw):
+        raise OSError("intent storage unavailable")
+    monkeypatch.setattr(service, "_write_json_atomic", unavailable)
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("no durable intent means no merge"))
+    with pytest.raises(service.CandidateIntegrationError, match="intent storage unavailable"):
+        service.integrate_candidate(**args)
+    assert _git(args["project_root"], "rev-parse", "HEAD").stdout.strip() == args["expected_head"]
+
+
+def test_guard_exit_failure_after_merge_recovers_the_completed_fact(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+
+    @contextmanager
+    def failing_exit():
+        yield
+        raise RuntimeError("guard finalization unavailable")
+
+    with pytest.raises(service.CandidateIntegrationError, match="guard finalization unavailable"):
+        service.integrate_candidate(**args, admission_guard=failing_exit)
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("completed merge must not repeat"))
+    result = service.integrate_candidate(**args, admission_guard=lambda: pytest.fail("must not readmit"))
+    assert result["commitSha"] == args["expected_candidate_commit"]
+
+
+def test_failed_merge_can_retry_while_frozen_main_is_unchanged(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    merge = service.task_closeout.merge_ff_only
+    calls = []
+    def fail_once(*a, **kw):
+        calls.append(kw["target_sha"])
+        if len(calls) == 1:
+            raise RuntimeError("transient merge failure")
+        return merge(*a, **kw)
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", fail_once)
+    with pytest.raises(service.CandidateIntegrationError, match="transient merge failure"):
+        service.integrate_candidate(**args)
+    result = service.integrate_candidate(**args)
+    assert calls == [args["expected_candidate_commit"]] * 2
+    assert result["commitSha"] == args["expected_candidate_commit"]
+
+
+def test_public_recovery_only_reconstructs_a_proven_completed_fact(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    assert service.recover_candidate_integration(**args) is None
+    service.integrate_candidate(**args)
+    project = args["project_root"]
+    (project / "user-notes.txt").write_text("ongoing user work\n", encoding="utf-8")
+    reflog_before = service._main_reflog_path(project).read_bytes()
+    monkeypatch.setattr(service, "_merge_validated_candidate", lambda *a, **kw: pytest.fail("recovery cannot merge or claim"))
+    result = service.recover_candidate_integration(**args)
+    assert result["commitSha"] == args["expected_candidate_commit"]
+    assert result["governanceCleanup"]["recovered"] is True
+    assert service._main_reflog_path(project).read_bytes() == reflog_before
+    assert (project / "user-notes.txt").read_text(encoding="utf-8") == "ongoing user work\n"
+
+
+def _install_governance_registry(args, monkeypatch):
+    """Exercise the production release/completion seams against isolated state."""
+    registry = {
+        "claims": [
+            {"id": "development-test", "agentId": "test-owner", "status": "active", "laneId": "development"},
+            {"id": "integration-test", "agentId": "test-owner", "status": "active",
+             "laneId": "integration", "scopes": ["integration/main"]},
+            {"id": "foreign-claim", "agentId": "another-owner", "status": "active", "laneId": "development"},
+        ],
+        "agents": [
+            {"id": "test-owner", "state": "active", "branch": "codex/supervised-candidate",
+             "worktree": str(args["candidate_root"])},
+            {"id": "another-owner", "state": "active", "branch": "codex/unrelated"},
+        ],
+    }
+    calls = []
+    def coordination(context, *argv):
+        assert context.main_root == args["project_root"]
+        assert context.task_root == args["candidate_root"]
+        assert context.branch == "codex/supervised-candidate"
+        calls.append(argv)
+        if argv == ("status",):
+            return deepcopy(registry)
+        if argv[0] == "release":
+            claim = next(item for item in registry["claims"] if item["id"] == argv[argv.index("--claim-id") + 1])
+            claim["status"] = argv[argv.index("--status") + 1]
+        elif argv[0] == "complete":
+            owner = argv[argv.index("--agent-id") + 1]
+            next(item for item in registry["agents"] if item["id"] == owner)["state"] = "completed"
+            # The real registry completes all live owned claims. Its shared caller
+            # must prevent this command while an unrelated owned claim remains.
+            for claim in registry["claims"]:
+                if claim["agentId"] == owner and claim["status"] in {"active", "ready", "yielded"}:
+                    claim["status"] = "completed"
+        else:
+            pytest.fail(f"unexpected coordination mutation: {argv}")
+        return {}
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", coordination)
+    monkeypatch.setattr(service.task_closeout, "release_claim", _real_release_claim)
+    monkeypatch.setattr(service.task_closeout, "complete_agent", _real_complete_agent)
+    return registry, calls
+
+
+def _lose_receipt_and_leave_recorded_claims(args, monkeypatch):
+    @contextmanager
+    def fail_after_merge():
+        yield
+        raise RuntimeError("merge receipt unavailable")
+
+    def unavailable(*a, **kw):
+        raise RuntimeError("claim release temporarily unavailable")
+
+    with monkeypatch.context() as unavailable_claims:
+        unavailable_claims.setattr(service.task_closeout, "release_claim", unavailable)
+        with pytest.raises(service.CandidateIntegrationError, match="merge receipt unavailable"):
+            service.integrate_candidate(**args, admission_guard=fail_after_merge)
+    assert _git(args["project_root"], "rev-parse", "HEAD").stdout.strip() == args["expected_candidate_commit"]
+
+
+def test_finish_releases_both_original_claims_after_lost_merge_receipt_and_is_idempotent(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    registry, calls = _install_governance_registry(args, monkeypatch)
+    _lose_receipt_and_leave_recorded_claims(args, monkeypatch)
+    calls.clear()
+    assert service.recover_candidate_integration(**args)["governanceCleanup"]["status"] == "pending"
+    assert calls == []  # Fact recovery keeps claims read-only.
+
+    cleanup = service.finish_candidate_integration_governance(**args)
+    assert cleanup == {"status": "completed", "errors": []}
+    claims = {item["id"]: item for item in registry["claims"]}
+    assert claims["development-test"]["status"] == claims["integration-test"]["status"] == "completed"
+    assert claims["foreign-claim"]["status"] == "active"
+    assert registry["agents"][0]["state"] == "completed"
+    assert registry["agents"][1]["state"] == "active"
+    assert [call[2] for call in calls if call[0] == "release"] == ["integration-test", "development-test"]
+
+    # Even reusing the recorded agent identity later must not let retry finish
+    # the new owner's work or issue a second completion command.
+    registry["agents"][0].update(state="active", branch="codex/new-task")
+    registry["claims"].append({"id": "new-task", "agentId": "test-owner", "status": "active"})
+    calls.clear()
+    assert service.finish_candidate_integration_governance(**args) == cleanup
+    assert calls == []
+    assert registry["claims"][-1]["status"] == "active"
+    assert registry["agents"][0]["state"] == "active"
+    assert service.recover_candidate_integration(**args)["governanceCleanup"]["status"] == "completed"
+
+
+def test_finish_preserves_unrelated_owned_claim_and_persists_pending_until_retry(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    registry, calls = _install_governance_registry(args, monkeypatch)
+    _lose_receipt_and_leave_recorded_claims(args, monkeypatch)
+    other = {"id": "other-owned-claim", "agentId": "test-owner", "status": "active"}
+    registry["claims"].append(other)
+    with pytest.raises(service.CandidateIntegrationError, match="governance_cleanup_pending.*agent_has_other_active_claims"):
+        service.finish_candidate_integration_governance(**args)
+    assert other["status"] == "active"
+    assert not any(call[0] == "complete" for call in calls)
+    recovered = service.recover_candidate_integration(**args)
+    assert recovered["governanceCleanup"]["status"] == "pending"
+    assert recovered["governanceCleanup"]["errors"]
+
+    other["status"] = "released"  # The unrelated owner resolves its own work.
+    calls.clear()
+    assert service.finish_candidate_integration_governance(**args)["status"] == "completed"
+    assert not any(call[0] == "release" for call in calls)  # Original claims were already released.
+    assert other["status"] == "released"
+
+
+@pytest.mark.parametrize("claim_id", ["integration-test", "development-test"])
+def test_finish_refuses_reassigned_recorded_claim_without_any_release(tmp_path, monkeypatch, claim_id):
+    args = _integration_args(tmp_path)
+    registry, calls = _install_governance_registry(args, monkeypatch)
+    _lose_receipt_and_leave_recorded_claims(args, monkeypatch)
+    next(item for item in registry["claims"] if item["id"] == claim_id)["agentId"] = "another-owner"
+    calls.clear()
+    with pytest.raises(service.CandidateIntegrationError, match="governance_binding_changed"):
+        service.finish_candidate_integration_governance(**args)
+    assert calls == [("status",)]
+    assert all(item["status"] == "active" for item in registry["claims"])
+
+
+def test_finish_requires_proven_integration_before_any_governance_mutation(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    monkeypatch.setattr(service.task_closeout, "_coordination_call", lambda *a: pytest.fail("unproven integration cannot mutate claims"))
+    with pytest.raises(service.CandidateIntegrationError, match="integration_not_proven"):
+        service.finish_candidate_integration_governance(**args)
+
+
+@pytest.mark.parametrize("changed_identity", ["lease_scope", "agent_branch", "agent_worktree"])
+def test_finish_rejects_recorded_resource_scope_or_agent_task_drift(tmp_path, monkeypatch, changed_identity):
+    args = _integration_args(tmp_path)
+    registry, calls = _install_governance_registry(args, monkeypatch)
+    _lose_receipt_and_leave_recorded_claims(args, monkeypatch)
+    if changed_identity == "lease_scope":
+        registry["claims"][1]["scopes"] = ["integration/other"]
+    elif changed_identity == "agent_branch":
+        registry["agents"][0]["branch"] = "codex/new-owner-task"
+    else:
+        registry["agents"][0]["worktree"] = str(tmp_path / "another-task")
+    calls.clear()
+    with pytest.raises(service.CandidateIntegrationError, match="governance_binding_changed"):
+        service.finish_candidate_integration_governance(**args)
+    assert calls == [("status",)]
+    assert all(item["status"] == "active" for item in registry["claims"])
+
+
+def test_finish_retries_failed_lease_release_without_releasing_development_twice(tmp_path, monkeypatch):
+    args = _integration_args(tmp_path)
+    registry, calls = _install_governance_registry(args, monkeypatch)
+    def failed_lease(context, claim_id, **kwargs):
+        if claim_id == "integration-test":
+            raise RuntimeError("lease release unavailable")
+        return _real_release_claim(context, claim_id, **kwargs)
+    with monkeypatch.context() as unavailable_lease:
+        unavailable_lease.setattr(service.task_closeout, "release_claim", failed_lease)
+        result = service.integrate_candidate(**args)
+    assert result["governanceCleanup"]["status"] == "pending"
+    assert registry["claims"][0]["status"] == "completed"
+    assert registry["claims"][1]["status"] == "active"
+    calls.clear()
+    assert service.finish_candidate_integration_governance(**args)["status"] == "completed"
+    assert [call[2] for call in calls if call[0] == "release"] == ["integration-test"]
+    assert registry["claims"][2]["status"] == "active"

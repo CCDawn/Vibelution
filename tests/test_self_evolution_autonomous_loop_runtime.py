@@ -51,6 +51,47 @@ def _snapshot(**updates):
     return payload
 
 
+def test_delegated_runtime_reuses_existing_bindings_without_provisioning_or_tool_grants(tmp_path, monkeypatch):
+    from core.web.services import agent_directory_service
+    from tests.test_agent_config_workspace_service import _use_tmp_project_root
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Existing executor")
+    agent_directory_service.update_agent_instance(agent["agentId"], tool_policy={
+        "allowedTools": ["grep_search_tool", "apply_patch_tool"], "maxCallsPerTurn": 7,
+        "approvalOverrides": {"apply_patch_tool": "always"}})
+    with agent_directory_service.active_agent_runtime(agent["agentId"], runtime_tool_grants=[]) as existing:
+        existing_policy = deepcopy(existing["toolPolicy"])
+    turns = []
+
+    def legacy_loader():
+        pytest.fail("Delegated runtime must not provision or repair Agent bindings")
+
+    def run(**kwargs):
+        turns.append(kwargs)
+        with agent_directory_service.active_agent_runtime(agent["agentId"],
+                runtime_tool_grants=kwargs["runtime_tool_grants"],
+                runtime_tool_source=kwargs["runtime_tool_source"]) as runtime:
+            assert runtime["toolPolicy"] == existing_policy
+            assert "apply_patch_tool" in runtime["toolPolicy"]["allowedTools"]
+            assert runtime["toolPolicy"]["maxCallsPerTurn"] == 7
+        return {"result": {"status": "completed", "summary": "observed", "tool_trace": []}, "carryover": {}}
+
+    deps = AutonomousLoopRuntimeDependencies(load_bindings=legacy_loader,
+        load_authorized_bindings=lambda: {"observer": {"agentId": "observer"}, "executor": {"agentId": "executor"}},
+        run_role_turn=run,
+        create_candidate=lambda context: {"worktreePath": "C:/candidate", "branch": "codex/candidate", "baseCommit": "a" * 40},
+        inspect_candidate=lambda context: {"headCommit": "b" * 40, "changedFiles": ["core/example.py"], "variantId": "variant"},
+        integrate_candidate=lambda context: {}, cleanup_candidate=lambda context: {})
+    hooks = build_autonomous_loop_hooks(deps)
+    context = _snapshot(request={"goal": "bounded repair", "localIntegration": {"acknowledge": True}})
+    hooks.observe(context)
+    hooks.evolve(context)
+    assert {turn["role"] for turn in turns} == {"observer", "executor"}
+    assert all(turn["runtime_tool_grants"] == [] for turn in turns)
+    assert all(turn["runtime_tool_source"] == "" for turn in turns)
+
+
 def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
     calls: list[tuple[str, dict]] = []
 

@@ -73,6 +73,10 @@ class AutonomousLoopHooks:
     evolve: AutonomousHook
     integrate: AutonomousHook
     cleanup: AutonomousHook
+    authorize: AutonomousHook | None = None
+    review: AutonomousHook | None = None
+    check_authorization: Callable[[dict[str, Any]], None] | None = None
+    recover_integration: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
 
 
 class SelfEvolutionAutonomousLoopService:
@@ -135,6 +139,10 @@ class SelfEvolutionAutonomousLoopService:
                 "startedAt": now,
                 "updatedAt": now,
             }
+            if normalized_request.get("localIntegration"):
+                if self._hooks.authorize is None or self._hooks.review is None or self._hooks.check_authorization is None:
+                    raise AutonomousLoopValidationError("Local integration requires scoped authorization and independent review.")
+                snapshot["localIntegrationAuthorization"] = self._hooks.authorize(_phase_context(snapshot))
             return self._persist(snapshot, active=True)
 
     def run_until_review(self, run_id: str) -> dict[str, Any]:
@@ -154,6 +162,7 @@ class SelfEvolutionAutonomousLoopService:
                 updates={"runtimeOwner": {"pid": self._process_id}},
             )
         try:
+            self._check_delegation(snapshot)
             observation = _normalize_observation(
                 self._hooks.observe(_phase_context(snapshot))
             )
@@ -164,7 +173,11 @@ class SelfEvolutionAutonomousLoopService:
             )
             if _is_restart_interrupted(snapshot):
                 return snapshot
+            self._check_delegation(snapshot)
             plan = _normalize_plan(self._hooks.plan(_phase_context(snapshot)))
+            if delegation := snapshot["request"].get("localIntegration"):
+                if not set(plan["targetFiles"]).issubset(delegation["allowedFiles"]):
+                    raise AutonomousLoopValidationError("Plan exceeds the delegated file scope.")
             snapshot = self._advance(
                 snapshot,
                 phase="evolving",
@@ -172,10 +185,11 @@ class SelfEvolutionAutonomousLoopService:
             )
             if _is_restart_interrupted(snapshot):
                 return snapshot
+            self._check_delegation(snapshot)
             candidate = _normalize_candidate(
                 self._hooks.evolve(_phase_context(snapshot))
             )
-            return self._advance(
+            snapshot = self._advance(
                 snapshot,
                 status="awaiting_user_approval",
                 phase="reporting",
@@ -188,6 +202,9 @@ class SelfEvolutionAutonomousLoopService:
                     },
                 },
             )
+            if snapshot["request"].get("localIntegration"):
+                return self.integrate_authorized(str(snapshot["runId"]))
+            return snapshot
         except Exception as exc:
             with _LOCK:
                 current = self._load_required(run_id)
@@ -203,6 +220,60 @@ class SelfEvolutionAutonomousLoopService:
         """Apply explicit user approval, integrate, and clean local candidate state."""
 
         approval = _normalize_user_decision(decision, expected="approve")
+        return self._integrate(run_id, approval=approval, actor_type="user")
+
+    def _check_delegation(self, snapshot: dict[str, Any]) -> None:
+        if snapshot.get("localIntegrationAuthorization"):
+            if self._hooks.check_authorization is None:
+                raise AutonomousLoopValidationError("Local integration authorization checker is unavailable.")
+            self._hooks.check_authorization(_phase_context(snapshot))
+
+    def integrate_authorized(self, run_id: str) -> dict[str, Any]:
+        """Independent review under an existing operator delegation, never a user impersonation."""
+        with _LOCK:
+            snapshot = self._load_required(run_id)
+            _require_phase(snapshot, "reporting", status="awaiting_user_approval")
+            if not snapshot.get("localIntegrationAuthorization") or self._hooks.review is None:
+                raise AutonomousLoopValidationError("No local integration authorization exists.")
+            snapshot = self._advance(snapshot, status="running", phase="reviewing")
+        reviewed = self._hooks.review(_phase_context(snapshot))
+        candidate = _normalize_candidate(reviewed["candidate"])
+        receipt = reviewed.get("independentReview") or {}
+        if (receipt.get("verdict") != "passed" or receipt.get("candidateCommit") != candidate["headCommit"]
+                or not all(receipt.get(key) for key in ("sessionId", "turnId", "reviewerAgentId", "evidenceRefs"))):
+            raise AutonomousLoopValidationError("Independent review does not identify the frozen candidate.")
+        with _LOCK:
+            snapshot = self._load_required(run_id)
+            if _is_restart_interrupted(snapshot):
+                return snapshot
+            if (snapshot.get("localIntegrationAuthorization") or {}).get("revoked"):
+                raise AutonomousLoopConflictError("Local integration authorization was revoked.")
+            snapshot = self._advance(snapshot, status="awaiting_user_approval", phase="reporting",
+                updates={"candidate": candidate, "independentReview": receipt})
+            authorization = snapshot["localIntegrationAuthorization"]
+        return self._integrate(run_id, approval={"decision": "approve", "actorType": "delegated_operator",
+            "actorId": authorization["operatorId"], "authorizationId": authorization["authorizationId"]},
+            actor_type="delegated_operator")
+
+    def revoke_local_integration(self, run_id: str) -> dict[str, Any]:
+        from .self_evolution_local_integration import authorization_lock
+        from .team_workflow.research_runtime.operator_authorization import current_server_operator
+        from .team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
+
+        operator = current_server_operator()
+        if not operator or not operator.operator_id or not operator_has_privileged_role(operator.roles):
+            raise PermissionError("command_forbidden")
+        with authorization_lock(self._store, run_id), _LOCK:
+            snapshot = self._load_required(run_id)
+            if (snapshot.get("integration") or {}).get("status") == "committed":
+                raise AutonomousLoopConflictError("The candidate is already integrated.")
+            grant = snapshot.get("localIntegrationAuthorization")
+            if not grant:
+                raise AutonomousLoopValidationError("No local integration authorization exists.")
+            grant["revoked"] = True
+            return self._advance(snapshot, phase=snapshot["phase"], updates={"localIntegrationAuthorization": grant})
+
+    def _integrate(self, run_id: str, *, approval: dict, actor_type: str) -> dict[str, Any]:
         with _LOCK:
             self._ensure_not_retiring()
             snapshot = self._load_required(run_id)
@@ -234,7 +305,7 @@ class SelfEvolutionAutonomousLoopService:
                     "runtimeOwner": {"pid": self._process_id},
                     "reviewGate": {
                         "status": "approved",
-                        "requiredActorType": "user",
+                        "requiredActorType": actor_type,
                         "decision": approval,
                     },
                     **(
@@ -275,6 +346,8 @@ class SelfEvolutionAutonomousLoopService:
                 self._hooks.integrate(_phase_context(snapshot)),
                 candidate=snapshot["candidate"],
             )
+            if actor_type == "delegated_operator" and integration["commitSha"] != snapshot["candidate"]["headCommit"]:
+                raise AutonomousLoopValidationError("Integrated commit differs from independently reviewed commit.")
         except Exception as exc:
             with _LOCK:
                 current = self._load_required(run_id)
@@ -528,6 +601,19 @@ class SelfEvolutionAutonomousLoopService:
                     lifecycle=True,
                 )
                 return snapshot
+            if status == "running" and phase == "integrating" and self._hooks.recover_integration:
+                # Reconcile completed Git facts without granting a fresh merge.
+                try:
+                    recovered = self._hooks.recover_integration(_phase_context(snapshot))
+                    if recovered is not None:
+                        integration = _normalize_integration(recovered, candidate=snapshot["candidate"])
+                        if snapshot.get("localIntegrationAuthorization") and integration["commitSha"] != snapshot["candidate"]["headCommit"]:
+                            raise AutonomousLoopValidationError("Recovered commit differs from the reviewed candidate.")
+                        snapshot = self._advance(snapshot, phase="cleanup_pending", updates={"integration": integration})
+                        phase = "cleanup_pending"
+                except Exception:
+                    # No proven completion means preserve the interrupted run.
+                    pass
             if (
                 status == "running"
                 and phase == "cleanup_pending"
@@ -614,12 +700,17 @@ class SelfEvolutionAutonomousLoopService:
             if _is_restart_interrupted(current):
                 result = current
             else:
+                updates = {"cleanup": cleanup}
+                integration = deepcopy(current.get("integration") or {})
+                if (integration.get("governanceCleanup") or {}).get("status") == "pending":
+                    integration["governanceCleanup"] = {"status": "completed", "errors": []}
+                    updates["integration"] = integration
                 result = self._advance(
                     current,
                     status="completed",
                     phase="completed",
                     terminal=True,
-                    updates={"cleanup": cleanup},
+                    updates=updates,
                 )
             self._finish_atomic_hook(run_id, atomic_event)
             return result
@@ -668,6 +759,9 @@ class SelfEvolutionAutonomousLoopService:
             next_snapshot["updatedAt"] = self._now()
             if updates:
                 next_snapshot.update(deepcopy(updates))
+            # Late worker updates, including stale grant fields, cannot undo revoke.
+            if current is not None and (current.get("localIntegrationAuthorization") or {}).get("revoked"):
+                next_snapshot["localIntegrationAuthorization"] = deepcopy(current["localIntegrationAuthorization"])
             if terminal:
                 next_snapshot["finishedAt"] = self._now()
             return self._persist(next_snapshot, active=not terminal)
@@ -733,10 +827,17 @@ def _normalize_request(request: dict[str, Any]) -> dict[str, Any]:
             "maxIterations must be 1 until multi-candidate iteration "
             "semantics are implemented."
         )
-    return {
+    result = {
         "goal": goal,
         "maxIterations": max_iterations,
     }
+    if request.get("localIntegration") is not None:
+        from .self_evolution_local_integration import normalize_request
+        try:
+            result["localIntegration"] = normalize_request(request["localIntegration"])
+        except ValueError as exc:
+            raise AutonomousLoopValidationError(str(exc)) from exc
+    return result
 
 
 def _normalize_observation(payload: dict[str, Any]) -> dict[str, Any]:
@@ -904,7 +1005,7 @@ def _normalize_integration(
         raise AutonomousLoopValidationError(
             "Integration changedFiles do not match the approved candidate."
         )
-    return {
+    normalized = {
         "status": "committed",
         "mechanism": _required_text(
             item.get("mechanism"),
@@ -923,6 +1024,10 @@ def _normalize_integration(
             "Integration committedAt",
         ),
     }
+    governance = item.get("governanceCleanup")
+    if isinstance(governance, dict):
+        normalized["governanceCleanup"] = _sanitize_evidence(governance)
+    return normalized
 
 
 def _normalize_cleanup(payload: dict[str, Any]) -> dict[str, Any]:

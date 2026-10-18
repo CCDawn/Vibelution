@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from starlette.responses import StreamingResponse
 
 from core.web.routes.evolution_models import (
@@ -101,6 +101,7 @@ from core.web.services.self_evolution_autonomous_loop_orchestrator import (
     get_autonomous_self_evolution_run,
     get_latest_autonomous_self_evolution_run,
     reject_autonomous_self_evolution,
+    revoke_autonomous_local_integration,
     retry_autonomous_self_evolution_cleanup,
     start_autonomous_self_evolution,
 )
@@ -760,9 +761,18 @@ def self_observation_run_action(run_id: str, payload: SelfObservationRunActionPa
 )
 def self_evolution_start_autonomous_run(
     payload: SelfEvolutionAutonomousRunStartPayload,
+    request: Request,
 ) -> dict:
     try:
-        return start_autonomous_self_evolution(payload.model_dump())
+        body = payload.model_dump(exclude_none=True)
+        if payload.localIntegration is not None:
+            from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
+
+            with server_operator_scope_from_http(request):
+                return start_autonomous_self_evolution(body)
+        return start_autonomous_self_evolution(body)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="command_forbidden") from exc
     except AutonomousLoopConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except AutonomousLoopValidationError as exc:
@@ -807,6 +817,7 @@ def self_evolution_autonomous_run(run_id: str) -> dict:
 def self_evolution_autonomous_run_action(
     run_id: str,
     payload: SelfEvolutionAutonomousRunActionPayload,
+    request: Request,
 ) -> dict:
     action = str(payload.action or "").strip().lower()
     decision = {
@@ -815,6 +826,11 @@ def self_evolution_autonomous_run_action(
         "comment": payload.comment,
     }
     try:
+        if action == "revoke_local_integration":
+            from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
+
+            with server_operator_scope_from_http(request):
+                return revoke_autonomous_local_integration(run_id)
         if action == "approve":
             return approve_autonomous_self_evolution(
                 run_id,
@@ -828,8 +844,10 @@ def self_evolution_autonomous_run_action(
         if action == "retry_cleanup":
             return retry_autonomous_self_evolution_cleanup(run_id)
         raise AutonomousLoopValidationError(
-            "Autonomous-loop action must be approve, reject, or retry_cleanup."
+            "Autonomous-loop action must be approve, reject, retry_cleanup, or revoke_local_integration."
         )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="command_forbidden") from exc
     except AutonomousLoopConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except AutonomousLoopValidationError as exc:
