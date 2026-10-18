@@ -13,6 +13,7 @@ export type DesktopPetPreferences = {
 };
 
 const KEY = "vibelution.desktop-pet.preferences.v1";
+const CHANGE_EVENT = "vibelution:assistant-preferences";
 // The unified assistant body defaults to the whale rig; Xiao Luo Live2D stays
 // a selectable appearance. Stored preferences (including xiaoluo) are honored.
 export const DEFAULT_PET_PREFERENCES: DesktopPetPreferences = {
@@ -38,6 +39,7 @@ export function readPetPreferences(storage?: Pick<Storage, "getItem">): DesktopP
 export function savePetPreferences(value: DesktopPetPreferences, storage?: Pick<Storage, "setItem">): boolean {
   try {
     (storage ?? localStorage).setItem(KEY, JSON.stringify(value));
+    if (!storage && typeof window !== "undefined") window.dispatchEvent(new Event(CHANGE_EVENT));
     return true;
   } catch {
     return false;
@@ -54,8 +56,8 @@ export async function fetchPetPreferencesFromBackend(): Promise<DesktopPetPrefer
 }
 
 /** Backend-first write; rejects with the transport error so callers can explain. */
-export async function savePetPreferencesToBackend(value: DesktopPetPreferences): Promise<DesktopPetPreferences> {
-  const response = await updatePersonalAssistantSettings({ preferences: value });
+export async function savePetPreferencesToBackend(value: DesktopPetPreferences, patch: Partial<DesktopPetPreferences> = value): Promise<DesktopPetPreferences> {
+  const response = await updatePersonalAssistantSettings({ preferences: patch });
   if (!response.settings) throw new Error("个人助理设置暂不可用。");
   return response.settings.preferences;
 }
@@ -65,16 +67,30 @@ export async function savePetPreferencesToBackend(value: DesktopPetPreferences):
  * backend-unconfigured → upload the local value once (first-run migration);
  * backend-configured → the backend value wins; missing assistant → stay local.
  */
-export async function syncPetPreferencesWithBackend(local: DesktopPetPreferences): Promise<DesktopPetPreferences> {
+export async function syncPetPreferencesWithBackend(local: DesktopPetPreferences, isCurrent: () => boolean = () => true): Promise<DesktopPetPreferences> {
   const response = await fetchPersonalAssistantSettings();
   const settings = response.settings;
   if (!settings) return local;
   if (settings.preferencesConfigured) return settings.preferences;
+  if (!isCurrent()) return local;
   try {
     return await savePetPreferencesToBackend(local);
   } catch {
     return local;
   }
+}
+
+/** Local writes notify this window; native storage events notify sibling windows. */
+export function subscribePetPreferences(listener: () => void): () => void {
+  function onStorage(event: StorageEvent) {
+    if (event.key === KEY || event.key === null) listener();
+  }
+  window.addEventListener(CHANGE_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 /** Optimistic local write plus backend-persisted write; flags report each outcome. */

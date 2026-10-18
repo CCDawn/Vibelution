@@ -61,12 +61,13 @@ describe("personal assistant native identity and presentation", () => {
     // One identity: the collapsed body is the same assistant (one Agent, one Session);
     // the visible character is an appearance preference, not a second companion.
     expect(desktopSource).toContain("DesktopPetCharacter");
-    expect(desktopSource).toContain("readPetPreferences");
+    expect(desktopSource).toContain("usePetPreferences(state.verified)");
     expect(desktopSource).toContain("nextDesktopPetCharacter");
     expect(desktopSource).not.toContain("WhaleRigCharacter");
     // The legacy pet interactions stay: IPC window drag, privacy switches, live sessions.
     expect(desktopSource).toContain("desktopPetWindowDragBridge");
-    expect(desktopSource).toContain("savePetPreferences");
+    expect(desktopSource).toContain("persistPreferences(patch)");
+    expect(desktopSource).toContain("<PersonalAssistantSettings");
     expect(desktopSource).toContain("openSessionFromDesktopPet");
     expect(desktopSource).toContain("useAssistantActivity");
     expect(desktopSource).toContain('data-assistant-chat="compact"');
