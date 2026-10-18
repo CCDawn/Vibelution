@@ -39,6 +39,8 @@ from core.web.routes.session_side_models import (
 )
 from core.web.routes.session_turn_models import (
     SessionAttachmentResponse,
+    SessionBudgetParametersPayload,
+    SessionBudgetParametersResponse,
     SessionLlmOptionsResponse,
     SessionModelParametersPayload,
     SessionTurnCommandResponse,
@@ -69,6 +71,7 @@ from core.web.services.session_service import (
     SESSION_USER_IMAGE_MAX_BYTES,
     SessionBusyError,
     SessionChatReviewCandidateExistsError,
+    SessionBudgetParametersConflictError,
     SessionIdempotencyConflictError,
     SessionIdempotencyReplayGoneError,
     SessionMessageCurationStateError,
@@ -86,6 +89,7 @@ from core.web.services.session_service import (
     edit_and_resubmit_session_message,
     fork_session_from_node,
     get_active_session_summary,
+    get_session_budget_parameters_view,
     get_session_detail,
     get_session_llm_options,
     get_session_message_curation,
@@ -112,6 +116,7 @@ from core.web.services.session_service import (
     update_chat_session_title,
     update_session_reasoning_effort,
     update_session_model_parameters,
+    update_session_budget_parameters,
     preview_session_rewind,
     apply_session_rewind,
 )
@@ -647,6 +652,47 @@ def session_model_parameters_update(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionModelParametersConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/budget-parameters",
+    response_model=SessionBudgetParametersResponse,
+)
+def session_budget_parameters_get(session_id: str) -> dict:
+    try:
+        return get_session_budget_parameters_view(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/sessions/{session_id}/budget-parameters",
+    response_model=SessionBudgetParametersResponse,
+)
+def session_budget_parameters_update(
+    session_id: str,
+    payload: SessionBudgetParametersPayload,
+) -> dict:
+    provided = payload.model_dump(exclude_unset=True)
+    field_kwargs = {}
+    if "maxCallsPerTurn" in provided:
+        field_kwargs["max_calls_per_turn"] = provided["maxCallsPerTurn"]
+    if "thinkingBudgetChars" in provided:
+        field_kwargs["thinking_budget_chars"] = provided["thinkingBudgetChars"]
+    try:
+        return update_session_budget_parameters(
+            session_id,
+            expected_revision=payload.revision,
+            **field_kwargs,
+        )
+    except SessionBudgetParametersConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

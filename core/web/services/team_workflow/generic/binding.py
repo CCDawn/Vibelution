@@ -97,6 +97,9 @@ def authorization_reason(team_id: str, source: dict) -> str:
         current = store.read(store.path(team_id, "flows", source["flow"]["id"]))
         if current.get("failureRecovery") != policy:
             return "recovery_authorization_revoked_or_changed"
+        refs = lambda flow: [step.get("researchSource") for step in flow.get("steps", []) if step["kind"] == "research"]
+        if refs(current) != refs(source["flow"]):
+            return "recovery_source_changed"
         _assistant_ready(policy["assistantAgentId"])
         for agent_id, fingerprint in policy["agentPolicyFingerprints"].items():
             if _agent_fingerprint(team_id, agent_id) != fingerprint:
@@ -123,6 +126,9 @@ def dispatch_authorization_reason(team_id: str, source: dict, attempt: dict) -> 
             return "recovery_session_policy_changed"
     except (ValueError, KeyError, OSError):
         return "recovery_authorization_unavailable"
+    if service.supervised(source):
+        from .research_source import fence
+        return fence(source)
     return ""
 
 

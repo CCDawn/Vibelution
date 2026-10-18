@@ -9,6 +9,7 @@ from core.orchestration.tool_budget_profiles import (
 )
 from core.orchestration.turn_status_bar import (
     TURN_STATUS_BAR_HEADER,
+    TurnStatusBarSnapshot,
     build_turn_status_bar_message,
     collect_turn_status_snapshot,
     collect_turn_status_tail_extras,
@@ -427,3 +428,145 @@ def test_status_bar_unwraps_message_envelopes_and_json_tool_lists():
     cleaned = strip_turn_status_bar_messages(json_messages)
     assert len(cleaned) == 1
     assert cleaned[0]["content"] == "keep"
+
+
+def test_turn_status_bar_without_token_budget_is_byte_identical_to_legacy():
+    """No token_budget payload -> exact legacy output (cache AB contract)."""
+    snapshot = collect_turn_status_snapshot(
+        iteration=2,
+        model="deepseek-chat",
+        tool_policy={"maxCallsPerTurn": 32, "maxCallsPerTurnByModelFamily": {"deepseek": 64}},
+    )
+    assert snapshot.token_budget is None
+    text = format_turn_status_bar(snapshot, config={"blocks": {"clock": False}})
+    assert "- tokens:" not in text
+    assert text == (
+        f"{TURN_STATUS_BAR_HEADER}\n"
+        "- purpose: live turn telemetry at message-list tail; do not ignore budget_status\n"
+        "- placement: tail-only (prefix-cache safe)\n"
+        "### budget\n"
+        "- tools: used 0/64, remaining 64, reserve_for_verify 3\n"
+        "- budget_profile: deepseek\n"
+        "- budget_status: ok\n"
+        "- model: deepseek-chat\n"
+        "- iteration: 2\n"
+        "- action: prefer structured tools over repeated shell retries."
+    )
+    # Explicit None must render the same bytes as an omitted payload.
+    explicit_none = collect_turn_status_snapshot(
+        iteration=2,
+        model="deepseek-chat",
+        tool_policy={"maxCallsPerTurn": 32, "maxCallsPerTurnByModelFamily": {"deepseek": 64}},
+        token_budget=None,
+    )
+    assert format_turn_status_bar(explicit_none, config={"blocks": {"clock": False}}) == text
+
+
+def test_turn_status_bar_token_budget_line_thresholds():
+    policy = {"maxCallsPerTurn": 32}
+
+    ok_snapshot = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        tool_policy=policy,
+        token_budget={"used": 1_200_000, "total": 2_000_000},
+    )
+    ok_text = format_turn_status_bar(ok_snapshot)
+    assert "- tokens: used 1.2M/2.0M (60%), budget_status: ok" in ok_text
+    assert "token budget critical" not in ok_text
+
+    # 80% boundary: exactly at -> tight, one token below -> ok.
+    tight_snapshot = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        tool_policy=policy,
+        token_budget={"used": 1_600_000, "total": 2_000_000},
+    )
+    tight_text = format_turn_status_bar(tight_snapshot)
+    assert "- tokens: used 1.6M/2.0M (80%), budget_status: tight" in tight_text
+    assert "token budget critical" not in tight_text
+    below = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        tool_policy=policy,
+        token_budget={"used": 1_599_999, "total": 2_000_000},
+    )
+    assert "- tokens: used 1.6M/2.0M (79%), budget_status: ok" in format_turn_status_bar(below)
+
+    # 95% boundary: exactly at -> critical with wrap-up action; one below -> tight.
+    critical_snapshot = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        tool_policy=policy,
+        token_budget={"used": 1_900_000, "total": 2_000_000},
+    )
+    critical_text = format_turn_status_bar(critical_snapshot)
+    assert "- tokens: used 1.9M/2.0M (95%), budget_status: critical" in critical_text
+    assert "- action: token budget critical" in critical_text
+    assert "wait for the user" in critical_text
+    near = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        tool_policy=policy,
+        token_budget={"used": 1_899_999, "total": 2_000_000},
+    )
+    assert "- tokens: used 1.9M/2.0M (94%), budget_status: tight" in format_turn_status_bar(near)
+
+    # Over-budget usage still renders (ratio > 100%) and stays critical.
+    over = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        tool_policy=policy,
+        token_budget={"used": 2_100_000, "total": 2_000_000},
+    )
+    assert "- tokens: used 2.1M/2.0M (105%), budget_status: critical" in format_turn_status_bar(over)
+
+
+def test_turn_status_bar_token_budget_payload_coercion_and_auth_fallback():
+    from types import SimpleNamespace
+
+    # Wire-style JSON string payload.
+    json_snapshot = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        token_budget='{"used": "950000", "total": "1000000"}',
+    )
+    assert json_snapshot.token_budget == (950_000, 1_000_000)
+    assert "- tokens: used 950.0K/1.0M (95%), budget_status: critical" in format_turn_status_bar(
+        json_snapshot
+    )
+
+    # Bytes payload and small counts stay human-readable.
+    bytes_snapshot = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        token_budget=b'{"used": 500, "total": 2500}',
+    )
+    assert bytes_snapshot.token_budget == (500, 2500)
+    assert "- tokens: used 500/2.5K (20%), budget_status: ok" in format_turn_status_bar(bytes_snapshot)
+
+    # Authorization-carried attachment (worker syncs live token budget state).
+    auth_snapshot = collect_turn_status_snapshot(
+        model="deepseek-chat",
+        authorization=SimpleNamespace(
+            max_calls_per_turn=32,
+            call_count=1,
+            token_budget={"used": 1_700_000, "total": 2_000_000},
+        ),
+    )
+    assert auth_snapshot.token_budget == (1_700_000, 2_000_000)
+    assert "- tokens: used 1.7M/2.0M (85%), budget_status: tight" in format_turn_status_bar(auth_snapshot)
+
+    # Direct snapshot construction with a raw payload dict renders identically.
+    direct = TurnStatusBarSnapshot(
+        iteration=1,
+        tools_used=1,
+        tools_max=32,
+        token_budget={"used": 1_900_000, "total": 2_000_000},
+    )
+    assert "- tokens: used 1.9M/2.0M (95%), budget_status: critical" in format_turn_status_bar(direct)
+
+    # Invalid / partial payloads never render a token line (legacy-compatible).
+    for payload in (
+        None,
+        {},
+        {"used": 100},
+        {"used": 5, "total": 0},
+        "not-json",
+        {"used": "bad", "total": "worse"},
+    ):
+        snap = collect_turn_status_snapshot(model="deepseek-chat", token_budget=payload)
+        assert snap.token_budget is None
+        assert "- tokens:" not in format_turn_status_bar(snap)

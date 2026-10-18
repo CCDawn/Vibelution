@@ -263,3 +263,9 @@ const graph = composeKnowledgeSideflowGraph(withHypothesisFirst, region); // reg
 依赖入口只来自真实 `graph.edges`，保留条件与跨阶段目标；卡片顺序不代表串行执行。
 全流程继续使用 React Flow/ELK，聚焦视图不写入运行、进度或布局持久化。
 renderer 内实现 `WorkflowStageView`，业务页面只使用 VUI 产品 API。
+
+## 研究故障监督兼容边界
+
+原生研究节点的故障监督通过已有 typed API 配置，不进入普通流程编辑器。
+工作区过滤含 `research` 来源步骤的定义及运行，避免把只读来源引用当成可编辑的 Agent 执行步骤。
+现有 VUI 页面结构、控件与普通流程交互保持一致；来源配置界面需单独设计验收。

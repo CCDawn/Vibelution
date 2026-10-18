@@ -5,6 +5,7 @@ import { resolveAgentToolGovernanceRequest } from "../../api/agents";
 import {
   isFetchJsonHttpError,
   resolveSessionToolApprovalDecision,
+  updateSessionBudgetParameters,
   updateSessionModelParameters,
   type SessionToolApprovalDecision,
 } from "../../api/chat";
@@ -13,6 +14,8 @@ import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentToolGovernanceRequest,
   PetActionResponse,
+  SessionBudgetParameters,
+  SessionBudgetParametersUpdate,
   SessionDetail,
   SessionLlmOptions,
   SessionModelParametersUpdate,
@@ -41,6 +44,12 @@ export type UseChatSessionDetailMutationsResult = {
     SessionLlmOptions,
     Error,
     { sessionId: string; parameters: SessionModelParametersUpdate },
+    unknown
+  >;
+  sessionBudgetParametersMutation: UseMutationResult<
+    SessionBudgetParameters,
+    Error,
+    { sessionId: string; parameters: SessionBudgetParametersUpdate },
     unknown
   >;
   loadEarlierSessionMessagesMutation: UseMutationResult<
@@ -129,6 +138,31 @@ export function useChatSessionDetailMutations({
         void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
         void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       }
+    },
+  });
+
+  const sessionBudgetParametersMutation = useMutation({
+    mutationFn: (variables: { sessionId: string; parameters: SessionBudgetParametersUpdate }) =>
+      updateSessionBudgetParameters(variables.sessionId, variables.parameters),
+    onSuccess: (payload, variables) => {
+      // Server truth replaces the cache entry immediately (keyed by the saved
+      // session, so navigation cannot smear it onto another session); the
+      // follow-up invalidation reconciles against any racing writer.
+      queryClient.setQueryData<SessionBudgetParameters>(
+        queryKeys.sessionBudgetParameters(variables.sessionId),
+        payload,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionBudgetParameters(variables.sessionId),
+      });
+    },
+    onError: (_error, variables) => {
+      // 409 revision conflicts (and any other failure) refetch so the dialog
+      // re-renders against the authoritative revision; the operator's draft
+      // survives in the dialog itself.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionBudgetParameters(variables.sessionId),
+      });
     },
   });
 
@@ -240,6 +274,7 @@ export function useChatSessionDetailMutations({
 
   return {
     sessionModelParametersMutation,
+    sessionBudgetParametersMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
