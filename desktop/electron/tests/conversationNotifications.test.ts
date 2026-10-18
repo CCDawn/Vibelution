@@ -362,4 +362,21 @@ describe("conversation notification service", () => {
     expect(second.status).toBe("notified");
     expect(second.unreadCount).toBe(1);
   });
+
+  it("reports needs_continue turns as awaiting the user instead of ended", async () => {
+    const { service, notifications } = makeService({});
+
+    const result = await service.notify(
+      completion({
+        notificationKey: "session-1:turn-3:needs_continue",
+        turnId: "turn-3",
+        terminalStatus: "needs_continue"
+      })
+    );
+
+    expect(result.status).toBe("notified");
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].title).toBe("对话待继续");
+    expect(notifications[0].body).toBe("「测试会话」还有后续步骤，回复“继续”即可推进。");
+  });
 });
