@@ -2882,15 +2882,16 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
-    def personal_assistant_overview_tool(offset: int = 0, limit: int = 100) -> str:
+    def personal_assistant_overview_tool(offset: int = 0, limit: int = 100, team_id: str = "", flow_id: str = "") -> str:
         """【个人助理平台概览】分页读取 Agent、会话及异常公开状态；不读正文或私密记忆。
 
         offset 为非负整数，limit 为 1–100（默认100）。pagination.nextOffset 非空时，
         用它继续查询，不能将首屏当成全部；翻页时比对 pagination.revision，
         变化则从 offset=0 重新读取。sessions.turnId 是当前原生轮次标识；
         停止前须读取并原样传入，过期时重新查询，不得猜测；空值表示未取得活动轮次。
+        同时提供 team_id、flow_id 时，只读查询绑定当前助理的恢复流程与最近运行摘要；不读输入或正文。
         """
-        return _personal_assistant_overview_impl(offset=offset, limit=limit)
+        return _personal_assistant_overview_impl(offset=offset, limit=limit, team_id=team_id, flow_id=flow_id)
 
     @tool
     def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
@@ -2898,6 +2899,12 @@ def _build_key_tools() -> List[BaseTool]:
 
         action 为 agent_create、agent_update、agent_archive、session_create、
         session_update、session_stop、session_delete、knowledge_acl_grant 或 restart。
+        也支持 workflow_recovery_bind、workflow_recovery_revoke、workflow_start：
+        arguments_json 仅接受 team_id、flow_id、payload 对象；绑定时助理身份由当前会话取得。
+        bind 的 payload 包含 expectedRevision、repairFlowId、directorAgentId、developerAgentId、
+        reviewerAgentId、acknowledgeAutomaticRecovery=true，可选 replaySafety、有限重试额度和有效期。
+        revoke 的 payload 为 expectedRevision；start 为 expectedRevision、idempotencyKey、values。
+        这些操作不创建 Agent、不授予工具权限，也不授权自动合入、部署或重启。
         arguments_json 使用相应原生工具的具名参数 JSON 对象；restart 仅接受 reason。
         agent_create 需要提供 display_name、primary_mode、prompt_template_id、model_id
         （或 llm_bindings_json）；模型、使用位置和提示词不自动补默认值，未知时先向用户确认。

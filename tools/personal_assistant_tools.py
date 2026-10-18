@@ -63,6 +63,11 @@ def _receipt(raw: str) -> str:
         "knowledgeBaseId",
         "targetAgentId",
         "actorAgentId",
+        "teamId",
+        "flowId",
+        "runId",
+        "bindingId",
+        "expiresAt",
     }
     return json.dumps(
         {
@@ -74,10 +79,22 @@ def _receipt(raw: str) -> str:
     )
 
 
-def personal_assistant_overview_tool(offset: int = 0, limit: int = 100) -> str:
+def personal_assistant_overview_tool(offset: int = 0, limit: int = 100, team_id: str = "", flow_id: str = "") -> str:
     """Read public platform status without private memories or transcripts."""
     try:
-        _identity()
+        runtime = _identity()
+        if team_id or flow_id:
+            if not team_id or not flow_id:
+                raise ValueError("查询恢复任务需要同时提供 team_id 和 flow_id。")
+            from core.web.services import generic_team_workflow_service as workflow
+            binding = workflow.get_recovery_binding(team_id, flow_id)
+            if binding["assistantAgentId"] != runtime["agentId"]:
+                raise ValueError("该流程未绑定当前个人助理。")
+            recent = [{"runId": row["id"], "status": row["status"], "current": row["current"],
+                       "revision": row["revision"], "recovery": row.get("recovery")}
+                      for row in workflow.list_runs(team_id, flow_id=flow_id, limit=20)["runs"]
+                      if row["flow"]["id"] == flow_id][:20]
+            return json.dumps({"ok": True, "binding": binding, "recentRuns": recent}, ensure_ascii=False)
         return json.dumps(
             {"ok": True, **service.get_platform_overview(offset=offset, limit=limit)}, ensure_ascii=False
         )
@@ -89,7 +106,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
     """Bounded governed operations; native descriptor requires approval every call.
 
     Actions: agent_create, agent_update, agent_archive, session_create,
-    session_update, session_stop, session_delete, knowledge_acl_grant, restart.
+    session_update, session_stop, session_delete, knowledge_acl_grant, restart,
+    workflow_recovery_bind, workflow_recovery_revoke, workflow_start.
     Arguments use the corresponding canonical tool's named parameters.
     No arbitrary API, command, purge, restore, or private data read is accepted.
     """
@@ -100,6 +118,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         args = json.loads(arguments_json)
         if not isinstance(args, dict):
             raise TypeError("管理参数必须是 JSON 对象。")
+        if action in {"workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start"}:
+            return _workflow_action(action, args, runtime)
         # Closed dispatch table; signature binding rejects extra fields before
         # invoking any underlying service. Approval stays in native execution.
         dispatch = {
@@ -136,3 +156,30 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         return _receipt(target(**args))
     except (ValueError, TypeError, directory.AgentDirectoryError) as exc:
         return _error(str(exc))
+
+
+def _workflow_action(action: str, args: dict, runtime: dict) -> str:
+    """Closed, approval-preserving handoff; no arbitrary API or actor field."""
+    if set(args) != {"team_id", "flow_id", "payload"} or not isinstance(args["payload"], dict):
+        raise ValueError("流程操作只接受 team_id、flow_id 和 payload 对象。")
+    from core.web.services import generic_team_workflow_service as workflow
+
+    team_id, flow_id = args["team_id"], args["flow_id"]
+    payload = dict(args["payload"])
+    if action == "workflow_recovery_bind":
+        if "assistantAgentId" in payload:
+            raise ValueError("个人助理身份由当前原生会话绑定，不能在参数中冒用。")
+        payload["assistantAgentId"] = runtime["agentId"]
+        result = workflow.bind_recovery(team_id, flow_id, payload)
+    else:
+        binding = workflow.get_recovery_binding(team_id, flow_id)
+        if binding["assistantAgentId"] != runtime["agentId"]:
+            raise ValueError("该流程未绑定当前个人助理。")
+        if action == "workflow_recovery_revoke":
+            result = workflow.revoke_recovery(team_id, flow_id, payload)
+        else:
+            if binding["status"] != "ready":
+                raise ValueError("流程的角色或授权未就绪，不能自动交办。")
+            run = workflow.start_run(team_id, flow_id, payload)
+            result = {"teamId": team_id, "flowId": flow_id, "runId": run["id"], "status": run["status"]}
+    return _receipt(json.dumps({"ok": True, **result}, ensure_ascii=False))

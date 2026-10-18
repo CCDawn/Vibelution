@@ -47,6 +47,16 @@ def freeze_repair_template(team_id: str, flow: dict) -> dict | None:
         raise store.WorkflowError("修复流程必须仅声明一个文本输入 incident。")
     if template["steps"][-1] != steps[-1] or len(steps[-1]["instruction"]) > 7000:
         raise store.WorkflowError("独立验收必须是修复流程最后一步，验收指令不能超过7000字。")
+    if steps[-1].get("resultContract", "text") != "text":
+        raise store.WorkflowError("修复验收使用专用验收结果契约，不能叠加普通步骤结果契约。")
+    if policy.get("bindingId"):
+        if template["revision"] != policy["repairFlowRevision"]:
+            raise store.Conflict("修复流程版本已变化，请重新绑定角色与授权。")
+        if {step["owner"] for step in steps[1:-1]} != {policy["developerAgentId"]}:
+            raise store.WorkflowError("修复实现步骤必须属于绑定的开发者。")
+        source_owners = {step["owner"] for step in flow["steps"] if service.executable(step)}
+        if not source_owners.issubset(policy["agentPolicyFingerprints"]):
+            raise store.WorkflowError("原任务负责人的授权指纹不完整，请重新绑定。")
     for step in steps:
         native.validate_owner(team_id, step["owner"])
     return template
@@ -92,6 +102,19 @@ def _streak(attempts: list[dict]) -> int:
     return count
 
 
+def _track_failure(record: dict, attempt: dict) -> dict:
+    node_id = attempt["nodeId"]
+    state = record.get("recovery")
+    if not state or state["nodeId"] != node_id:
+        if state:
+            record["_recoveryHistory"] = [*record.get("_recoveryHistory", []), deepcopy(state)][-60:]
+        state = RecoveryState(issueId="issue-" + service.digest([record["teamId"], record["id"], node_id])[:40],
+                              nodeId=node_id, status="tracking", sourceAttemptKey=attempt["key"]).model_dump()
+        record["recovery"] = state
+    state["failureCount"] = _streak(_attempts(record, node_id))
+    return state
+
+
 def _scene(record: dict, state: dict, *, deployment_ref: str = "") -> str:
     attempts = _attempts(record, state["nodeId"])
     return json.dumps({
@@ -126,6 +149,9 @@ def confirm_deployment(record: dict, *, evidence_ref: str) -> None:
     if (record["status"] != "failed" or record["stopRequested"] or not state
             or state["status"] != "awaiting_deployment"):
         raise store.Conflict("只有等待部署的修复可以确认部署。")
+    from .binding import authorization_reason
+    if reason := authorization_reason(record["teamId"], record):
+        raise store.Conflict(f"恢复授权不可用：{reason}")
     record["_recoveryDeploymentRef"] = evidence_ref.strip()
     record["_recoveryVerification"] = int(record.get("_recoveryVerification", 0)) + 1
     state["evidenceRefs"] = [*state["evidenceRefs"][-19:], evidence_ref.strip()]
@@ -271,6 +297,13 @@ def _advance_repair(team_id: str, record: dict, child: dict) -> None:
 
 def reconcile_recovery(team_id: str, run_id: str) -> None:
     """Called only by the owned reconciliation worker; reads never dispatch."""
+    from .binding import authorization_lock
+    target = store.path(team_id, "runs", run_id)
+    with authorization_lock(team_id, store.read(target)):
+        _reconcile_recovery(team_id, run_id)
+
+
+def _reconcile_recovery(team_id: str, run_id: str) -> None:
     from .runtime import stopping
     target = store.path(team_id, "runs", run_id)
     with store.locked(target):
@@ -282,6 +315,20 @@ def reconcile_recovery(team_id: str, run_id: str) -> None:
             return
         before = deepcopy(record)
         state = record.get("recovery")
+        if policy.get("bindingId") and (state or record["status"] == "failed") and not record["stopRequested"]:
+            from .binding import authorization_reason
+            reason = authorization_reason(team_id, record)
+            if reason:
+                attempt = service._current_attempt(record)
+                if record["status"] == "failed" and attempt and attempt["status"] == "failed":
+                    state = _track_failure(record, attempt)
+                if state and (state["status"] != "resolved" or record["status"] == "failed"):
+                    if state["status"] in {"retrying", "replaying"} and record["status"] == "running":
+                        record["stopRequested"] = True
+                    state.update(status="blocked", reason=reason)
+                    _persist(target, record, before=before)
+                    _stop_child(team_id, record)
+                    return
         if record["stopRequested"]:
             if state and state["status"] != "resolved":
                 state.update(status="cancelled", reason="source_stopped")
@@ -326,13 +373,7 @@ def reconcile_recovery(team_id: str, run_id: str) -> None:
         if record["status"] == "failed" and attempt and attempt["status"] == "failed":
             node_id = attempt["nodeId"]
             attempts = _attempts(record, node_id)
-            if not state or state["nodeId"] != node_id:
-                if state:
-                    record["_recoveryHistory"] = [*record.get("_recoveryHistory", []), deepcopy(state)][-60:]
-                state = RecoveryState(issueId="issue-" + service.digest([team_id, run_id, node_id])[:40],
-                                      nodeId=node_id, status="tracking", sourceAttemptKey=attempt["key"]).model_dump()
-                record["recovery"] = state
-            state["failureCount"] = _streak(attempts)
+            state = _track_failure(record, attempt)
             failures = {item["key"] for item in attempts if item["status"] == "failed"}
             if (len(failures) >= policy["maxAttempts"] or state["failureCount"] >= 3
                     or len(record["attempts"]) >= service.MAX_ATTEMPTS):

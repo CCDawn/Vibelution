@@ -1765,7 +1765,7 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-loop"})
     monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
     monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.1])
-    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values, 3.1))
 
     result = service._run_observation_session(
         run_id="self-observe-loop",
@@ -1810,7 +1810,7 @@ def test_self_observation_blank_mode_continues_canonical_conversation_without_us
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-blank"})
     monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
     monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.1])
-    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values, 3.1))
 
     result = service._run_observation_session(
         run_id="self-observe-blank",
@@ -1865,7 +1865,7 @@ def test_self_observation_blank_mode_chat_continuation_adds_no_synthetic_user(mo
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-lan"})
     monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
     monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.1])
-    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values, 3.1))
 
     result = service._run_observation_session(
         run_id="self-observe-lan",

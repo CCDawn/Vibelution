@@ -125,57 +125,59 @@ def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
     """Ensure supervised evolution roles are visible as persistent AgentInstances."""
 
     project_root = Path(PROJECT_ROOT).resolve()
+    # agent_directory / mode binding 走 scoped 上下文与显式传根（对齐 research
+    # 窗口收口）；session_service 尚无根参数，创建会话仍保留短暂翻转，
+    # 待 session_service ContextVar 二期一并移除。
     previous_session_root = session_service.PROJECT_ROOT
-    previous_agent_root = agent_directory_service.PROJECT_ROOT
-    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
     session_service.PROJECT_ROOT = project_root
-    agent_directory_service.PROJECT_ROOT = project_root
-    agent_mode_binding_service.PROJECT_ROOT = project_root
     original_active_session_id = _active_session_id(project_root)
     ensured: list[dict[str, Any]] = []
     changed_roles: list[str] = []
     try:
-        for role in SUPERVISED_AGENT_ROLES:
-            try:
-                agent, changed = _ensure_supervised_role(role)
-            except Exception as exc:
-                _record_supervised_agent_event(
-                    "supervised.agent_instance.sync_failed",
-                    role=role,
-                    level="warning",
-                    outcome="failed",
-                    fields={"errorType": type(exc).__name__, "message": str(exc)},
-                )
-                continue
-            if not agent:
-                continue
-            ensured.append(agent)
-            if changed:
-                changed_roles.append(role.role)
-        if changed_roles:
-            _restore_active_session(project_root, original_active_session_id)
-            try:
-                record_runtime_scene_event(
-                    "agent_directory",
-                    "agent",
-                    "supervised.agent_instance.synced",
-                    message="Supervised evolution agent instances synced",
-                    level="info",
-                    outcome="written",
-                    fields={
-                        "roleCount": len(SUPERVISED_AGENT_ROLES),
-                        "changedRoles": changed_roles,
-                        "agentIds": [str(agent.get("agentId") or "") for agent in ensured],
-                    },
-                    lifecycle=True,
-                )
-            except Exception:
-                pass
-        _sync_supervised_mode_binding(ensured, preserve_existing_slots=True)
+        with agent_directory_service.scoped_project_root(project_root):
+            for role in SUPERVISED_AGENT_ROLES:
+                try:
+                    agent, changed = _ensure_supervised_role(role)
+                except Exception as exc:
+                    _record_supervised_agent_event(
+                        "supervised.agent_instance.sync_failed",
+                        role=role,
+                        level="warning",
+                        outcome="failed",
+                        fields={"errorType": type(exc).__name__, "message": str(exc)},
+                    )
+                    continue
+                if not agent:
+                    continue
+                ensured.append(agent)
+                if changed:
+                    changed_roles.append(role.role)
+            if changed_roles:
+                _restore_active_session(project_root, original_active_session_id)
+                try:
+                    record_runtime_scene_event(
+                        "agent_directory",
+                        "agent",
+                        "supervised.agent_instance.synced",
+                        message="Supervised evolution agent instances synced",
+                        level="info",
+                        outcome="written",
+                        fields={
+                            "roleCount": len(SUPERVISED_AGENT_ROLES),
+                            "changedRoles": changed_roles,
+                            "agentIds": [str(agent.get("agentId") or "") for agent in ensured],
+                        },
+                        lifecycle=True,
+                    )
+                except Exception:
+                    pass
+            _sync_supervised_mode_binding(
+                ensured,
+                preserve_existing_slots=True,
+                project_root=project_root,
+            )
     finally:
         session_service.PROJECT_ROOT = previous_session_root
-        agent_directory_service.PROJECT_ROOT = previous_agent_root
-        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
     return ensured
 
 
@@ -745,7 +747,12 @@ def _record_supervised_binding_failure(
         )
     except Exception:
         return
-def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
+def _sync_supervised_mode_binding(
+    agents: list[dict[str, Any]],
+    *,
+    preserve_existing_slots: bool = False,
+    project_root: Path | None = None,
+) -> None:
     active_agents = [
         agent
         for agent in agents
@@ -757,7 +764,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
     excluded_slots: list[str] | None = None
     if preserve_existing_slots:
         try:
-            payload = agent_mode_binding_service.get_mode_bindings_payload()
+            payload = agent_mode_binding_service.get_mode_bindings_payload(project_root=project_root)
             mode = (payload.get("modes") or {}).get("supervised_evolution") or {}
             existing = mode.get("slots")
             if isinstance(existing, dict):
@@ -781,7 +788,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
     try:
         existing_mode: dict[str, Any] = {}
         try:
-            existing_payload = agent_mode_binding_service.get_mode_bindings_payload()
+            existing_payload = agent_mode_binding_service.get_mode_bindings_payload(project_root=project_root)
             existing_mode = (existing_payload.get("modes") or {}).get("supervised_evolution") or {}
         except Exception:
             existing_mode = {}
@@ -801,6 +808,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
             slots=slots,
             excluded_agent_ids=excluded_agent_ids,
             excluded_slots=excluded_slots,
+            project_root=project_root,
         )
     except Exception as exc:
         _record_supervised_agent_event(

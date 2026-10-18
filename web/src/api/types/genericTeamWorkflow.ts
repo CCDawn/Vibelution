@@ -12,6 +12,38 @@ export type WorkflowStep = {
   kind: "input" | "agent" | "human" | "output";
   owner: string;
   instruction: string;
+  resultContract?: "text" | "outcome_v1";
+};
+
+export type TeamFlowFailureRecoveryPolicy = {
+  repairFlowId: string;
+  directorAgentId: string;
+  reviewerAgentId: string;
+  replaySafety?: "read_only" | "idempotent" | "unknown";
+  maxAttempts?: number;
+  maxRepairAttempts?: number;
+  repairTimeoutSeconds?: number;
+  assistantAgentId?: string;
+  developerAgentId?: string;
+  bindingId?: string;
+  expiresAt?: string;
+  repairFlowRevision?: number;
+  agentPolicyFingerprints?: Record<string, string>;
+};
+
+export type TeamFlowRecoveryState = {
+  issueId: string;
+  nodeId: string;
+  status: "tracking" | "retrying" | "repairing" | "awaiting_deployment" | "awaiting_replay_decision" | "replaying" | "resolved" | "blocked" | "cancelled";
+  failureCount?: number;
+  repairAttempts?: number;
+  repairRunId?: string;
+  reason?: string;
+  evidenceRefs?: string[];
+  reviewerSessionId?: string;
+  reviewerTurnId?: string;
+  sourceAttemptKey?: string;
+  replayedAttemptKey?: string;
 };
 
 export type TeamFlow = {
@@ -22,6 +54,7 @@ export type TeamFlow = {
   steps: WorkflowStep[];
   revision: number;
   updatedAt: string;
+  failureRecovery?: TeamFlowFailureRecoveryPolicy | null;
 };
 
 export type TeamFlowRun = {
@@ -35,7 +68,18 @@ export type TeamFlowRun = {
   messages: string[];
   error?: string;
   stopRequested?: boolean;
-  attempts?: { nodeId: string; number: number; agentId: string; sessionId: string; turnId: string; status: string; key: string }[];
+  attempts?: {
+    nodeId: string;
+    number: number;
+    agentId: string;
+    sessionId: string;
+    turnId: string;
+    status: string;
+    key: string;
+    failureCode?: string;
+    failureOrigin?: "native" | "result_contract";
+  }[];
+  recovery?: TeamFlowRecoveryState | null;
 };
 
 export type TeamFlowArtifact = {
@@ -47,4 +91,41 @@ export type TeamFlowArtifact = {
   chatUrl?: string;
 };
 
-export type TeamFlowCommand = "confirm" | "revise" | "retry" | "stop";
+export type TeamFlowCommand = "confirm" | "revise" | "retry" | "stop" | "confirm_deployment";
+
+export type TeamFlowRecoveryBindingRequest = {
+  expectedRevision: number;
+  repairFlowId: string;
+  assistantAgentId: string;
+  directorAgentId: string;
+  developerAgentId: string;
+  reviewerAgentId: string;
+  acknowledgeAutomaticRecovery: boolean;
+  replaySafety?: "read_only" | "idempotent" | "unknown";
+  maxAttempts?: number;
+  maxRepairAttempts?: number;
+  repairTimeoutSeconds?: number;
+  validForSeconds?: number;
+};
+
+export type TeamFlowRecoveryBindingRevokeRequest = {
+  expectedRevision: number;
+};
+
+export type TeamFlowRecoveryBindingStatus = {
+  schemaVersion: 1;
+  teamId: string;
+  flowId: string;
+  sourceRevision: number;
+  status: "unbound" | "legacy" | "ready" | "unavailable" | "expired";
+  reason: string;
+  bindingId: string;
+  expiresAt: string;
+  assistantAgentId: string;
+  directorAgentId: string;
+  developerAgentId: string;
+  reviewerAgentId: string;
+  repairFlowId: string;
+  automaticLocalIntegration: false;
+  automaticDeployment: false;
+};

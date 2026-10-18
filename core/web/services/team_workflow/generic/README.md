@@ -6,6 +6,9 @@ The service is the sole flow/run state owner. The existing Team namespace suppli
 - `store.py`: Team authority, validated path components, atomic writes and CAS locks.
 - `service.py`: explicit run commands, sequential transitions, frozen inputs and durable dispatch receipts. An assigned output executes its configured Agent; an unassigned output delivers prior results.
 - `native.py`: existing Agent-scoped hidden workspace Sessions, stable create/submission identity, canonical completion and verified restart-resume chains. Stop targets the effective Turn. Only references and lifecycle records are stored; Session remains transcript authority.
+- `binding.py`: explicit recovery-role opt-in, live authorization checks, policy fingerprints, expiry and CAS revocation over the existing source flow.
+- `result_contract.py`: bounded validation of opt-in business outcomes after canonical native Turn success; default text results remain compatible.
+- `recovery.py`: bounded failure escalation, frozen repair recipes, child-run coordination and safe replay decisions.
 - `runtime.py`: one owned reconciliation worker. Reads do not dispatch. Startup waits for native Session recovery; delayed callbacks are fenced by the lifespan stop flag under the admission lock. Shutdown closes this producer before native Session workers.
 
 Retry may create a new attempt only after canonical evidence permits it. Unknown Session identity or active-state uncertainty fails visibly and prevents duplicate execution or false stop success. Flow/run lists remain readable while execution is warming; artifact projection waits for the owner. Membership and Agent availability are checked again before dispatch. No raw model invocation or changes to ordinary Session core are introduced.
@@ -14,13 +17,38 @@ Tests use temporary Team storage and a substituted native port. Those tests prov
 
 ## Opt-in failure recovery
 
-`Flow.failureRecovery` optionally binds a saved `repairFlowId`, `directorAgentId`,
-`reviewerAgentId`, `replaySafety` (`unknown` by default), `maxAttempts` (1–3,
+`Flow.failureRecovery` is the sole stored authorization for the new role binding;
+there is no second role registry. Binding requires the canonical, ready Personal
+Assistant and distinct existing `assistantAgentId`, `directorAgentId`,
+`developerAgentId` and `reviewerAgentId` identities. All roles and executable
+source-step owners must be available Team members with resolved tool policies.
+The binding records their policy fingerprints, a `bindingId`, expiry and the
+saved `repairFlowId` revision. Binding creates no Agent or Session and grants no
+tools, workspace scopes or permissions. `automaticLocalIntegration` and
+`automaticDeployment` remain fixed to `false`.
+
+The typed HTTP contracts share `/teams/{team_id}/workflows/{flow_id}`:
+
+| Method / suffix | Request / response | Behavior |
+| --- | --- | --- |
+| `PUT /recovery-binding` | `RecoveryBindingRequest` / `RecoveryBindingStatus` | Requires `expectedRevision` CAS and explicit `acknowledgeAutomaticRecovery=true`; validates roles and the saved repair recipe before binding |
+| `GET /recovery-binding` | No body / `RecoveryBindingStatus` | Read-only readiness, identity, expiry and reason projection; no provisioning or dispatch |
+| `POST /recovery-binding/revoke` | `RecoveryBindingRevoke` / `RecoveryBindingStatus` | Requires `expectedRevision` CAS; clears the existing source-flow binding and wakes reconciliation |
+
+The policy retains `replaySafety` (`unknown` by default), `maxAttempts` (1–3,
 default 3), `maxRepairAttempts` (1–3, default 2), and
-`repairTimeoutSeconds` (60–86400, default 1800). Existing flows retain their
-manual failure/retry behavior. This is the first source adapter for platform
-recovery: ordinary Sessions, research Ledger tasks and other evolution runs do
-not automatically acquire this policy.
+`repairTimeoutSeconds` (60–86400, default 1800). Existing flows without a policy
+retain manual failure/retry behavior. Ordinary Sessions, research Ledger tasks
+and other evolution runs do not automatically acquire this policy.
+
+The Personal Assistant exposes only the closed manage actions
+`workflow_recovery_bind`, `workflow_recovery_revoke` and `workflow_start` for this
+handoff, through its existing manage tool. Its existing approval requirement
+still applies to every call. Assistant identity comes from the canonical native
+Session, never a caller-supplied `assistantAgentId`; start requires a ready binding
+owned by that assistant, and revoke/overview cannot cross assistant ownership.
+The workflow overview returns binding status and at most 20 matching run-status
+summaries, with no input values, transcripts, private objects or secrets.
 
 The repair flow must have only one text/paragraph input, `incident`. Its first
 executable step belongs to the director; its final step belongs to an independent
@@ -29,8 +57,37 @@ step with a third Agent identity must sit between them. Human approval steps are
 not allowed inside the automatic repair child; deployment approval is owned by
 the source run. It cannot recursively opt into recovery. Source start
 validates live Team membership and freezes this definition. Dispatch and replay
-recheck membership. No tool grant, workspace scope, deployment permission, or
-candidate integration permission is added by configuring a role.
+recheck membership and, for a new binding, live authorization. Revocation,
+rebinding, expiry, assistant unavailability or a recorded role/source-owner policy
+change fences automatic child admission and replay. Changing only the saved
+repair recipe makes the binding unavailable for new source starts; existing runs
+still use their frozen recipe while the live binding remains valid. Native stop
+and settled termination continue to require native evidence.
+
+Policies without `bindingId` are reported as `legacy` and retain their frozen-run
+semantics: changing or disabling their saved definition affects future runs;
+stop the original run to cancel its in-flight recovery. Newly bound runs instead
+recheck the source flow's current binding, so revocation or rebinding also blocks
+their subsequent automatic child/replay dispatch.
+
+## Business result contracts
+
+Executable steps default to `resultContract=text`, preserving existing text
+completion behavior. `outcome_v1` opts into strict JSON validation after successful
+native completion, using the exact assistant Turn result. It accepts only
+`taskStatus` (`succeeded`/`failed`), `problemCode` and nonempty bounded `evidenceRefs`;
+duplicate or unknown fields, malformed JSON and invalid bounds fail validation.
+A failed outcome requires a bounded `problemCode`; success cannot carry a
+nonempty problem code. A declared business failure or invalid outcome becomes a
+failed attempt with `failureOrigin=result_contract` (invalid output uses
+`business_result_invalid`), allowing the same bounded recovery policy to handle
+native success whose business result failed. This validation does not assert
+that the reported effects occurred in a real application.
+The namespaced `taskStatus` avoids interpreting a business outcome as the native
+runtime's reserved top-level `status` control result. No ordinary Session
+formatting or completion semantics are changed.
+
+## Recovery execution and evidence
 
 `recovery.py` counts distinct persisted failed attempts at the original node,
 using the native `terminalProblemCode` (fallback: terminal status). A changed code
@@ -68,17 +125,38 @@ manually retried/revised outside its parent's bounded recovery budget.
 
 | Fact | Authority / writer | Readers / refresh |
 | --- | --- | --- |
-| Definition and opt-in | Team flow JSON / `service.save_flow` | Frozen by source start; later edits affect new runs |
+| Definition and execution recipe | Team flow JSON / `service.save_flow` | Frozen by source start; saved recipe edits affect new starts, while existing runs retain their frozen recipe |
+| New role binding authorization | Source flow `failureRecovery` / `binding.py` through `service.save_flow` CAS | Live checks of binding identity, expiry and policy fingerprints fence child/replay dispatch; no second registry |
+| Legacy opt-in without `bindingId` | Frozen source-run flow / existing start path | Saved-policy edits affect future runs; original run stop cancels existing recovery |
 | Issue, budget, dispatch intent, deployment decision | Parent run JSON / service + recovery under the same cross-process run lock | Existing run GET/list, owned runtime scan; no second registry |
 | Repair execution | Child run JSON / existing service executor | Parent reads exact child identity and native references |
 | Transcript and effective Turn result | Native Session Journal / native Session owner | `native.snapshot`; never copied into a parallel transcript |
 | Recovery diagnostics | Bounded runtime-scene events / recovery transitions | Derived evidence only; IDs, status, reason and counts, no prompts |
 
-Contract change is additive v1: optional flow/run fields and a new command action;
-there is no data migration or new production dependency. Disabling the policy on
-a saved definition affects new runs; use the existing original run `stop` command
-to revoke an in-flight recovery. Deployment and rollout remain operator decisions.
-Focused regressions: `tests/test_generic_team_workflows.py` and
-`tests/test_generic_workflow_recovery.py`. The test matrix owns this domain
+Contract change is additive v1: optional flow/run fields, typed binding endpoints
+and the deployment-confirmation command; there is no data migration or new
+production dependency. Deployment and rollout remain operator decisions.
+Focused regressions: `tests/test_generic_team_workflows.py`,
+`tests/test_generic_workflow_recovery.py`, `tests/test_generic_workflow_binding.py`
+and `tests/test_generic_workflow_result_contract.py`, plus
+`web/src/api/genericTeamWorkflows.test.ts` for the typed API adapter. The test matrix owns this domain
 separately from research workflows. Runtime code requires a Launcher refresh
 before formal use; unit/HTTP tests do not claim a live multi-Agent acceptance run.
+
+## Isolated native rehearsal (2026-10-18)
+
+Launcher task instance `43f3e81c` completed source run
+`run-359b9fc6d13071c5c3dc23469fcdb4fa66c873ae`: three successful native
+Turns reported the same `fixture_missing` business failure; the coordinator
+queued director, developer and independent reviewer Sessions, then replayed the
+source check. The fourth source attempt completed and recovery became `resolved`.
+All execution and review evidence remains in those native Session journals;
+the parent run holds their exact Session/Turn references. The fixture was a
+temporary marker file, not a production code change or deployment.
+
+The developer's marker write required one exact-call native approval, accepted
+by the test operator within the authorized isolated rehearsal. No durable or
+Session-wide grant was added. This proves the recovery sequence and original
+step acceptance; it does not prove unattended mutation approval, automatic Git
+integration or platform-wide failure-source coverage. The earlier denied-write
+rehearsal remained blocked after independent review, without false resolution.

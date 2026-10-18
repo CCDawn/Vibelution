@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from core.web.services import generic_team_workflow_service as service
 from core.web.services.team_workflow.generic.models import (
     ArtifactList, Command, Flow, FlowList, Run, RunList, SaveFlow, StartRun,
+    RecoveryBindingRequest, RecoveryBindingRevoke, RecoveryBindingStatus,
 )
 
 
@@ -24,6 +25,18 @@ def _call(callback: Callable, *args):
 
 
 def register_generic_team_workflow_routes(router: APIRouter) -> None:
+    @router.get("/teams/{team_id}/workflows/{flow_id}/recovery-binding", response_model=RecoveryBindingStatus)
+    def recovery_binding(team_id: str, flow_id: str):
+        return _call(service.get_recovery_binding, team_id, flow_id)
+
+    @router.put("/teams/{team_id}/workflows/{flow_id}/recovery-binding", response_model=RecoveryBindingStatus)
+    def bind_recovery(team_id: str, flow_id: str, payload: RecoveryBindingRequest):
+        return _call(service.bind_recovery, team_id, flow_id, payload.model_dump())
+
+    @router.post("/teams/{team_id}/workflows/{flow_id}/recovery-binding/revoke", response_model=RecoveryBindingStatus)
+    def revoke_recovery(team_id: str, flow_id: str, payload: RecoveryBindingRevoke):
+        return _call(service.revoke_recovery, team_id, flow_id, payload.model_dump())
+
     @router.get("/teams/{team_id}/workflows", response_model=FlowList)
     def workflows(team_id: str):
         return _call(service.list_flows, team_id)

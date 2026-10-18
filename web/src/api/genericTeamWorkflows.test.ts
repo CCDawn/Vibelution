@@ -3,7 +3,17 @@ import type { TeamFlow, TeamFlowRun } from "./types/genericTeamWorkflow";
 
 const transport = vi.hoisted(() => vi.fn());
 vi.mock("./client", () => ({ fetchJson: transport }));
-import { commandTeamFlowRun, listTeamFlowArtifacts, listTeamFlows, saveTeamFlow, startTeamFlowRun, teamFlowKeys } from "./genericTeamWorkflows";
+import {
+  commandTeamFlowRun,
+  getTeamFlowRecoveryBinding,
+  listTeamFlowArtifacts,
+  listTeamFlows,
+  revokeTeamFlowRecoveryBinding,
+  saveTeamFlow,
+  saveTeamFlowRecoveryBinding,
+  startTeamFlowRun,
+  teamFlowKeys,
+} from "./genericTeamWorkflows";
 
 const flow: TeamFlow = { id: "flow-1", name: "My flow", description: "", fields: [], steps: [], revision: 3, updatedAt: "" };
 
@@ -24,6 +34,52 @@ describe("team-scoped user workflow transport", () => {
     await listTeamFlowArtifacts("team-b", "run-2");
     expect(transport.mock.calls[1][0]).toBe("/api/teams/team-b/workflow-runs/run-2/artifacts");
     expect(teamFlowKeys.runs("team-a")).not.toEqual(teamFlowKeys.runs("team-b"));
+  });
+  it("reads the encoded recovery binding without sending a write request", async () => {
+    const signal = new AbortController().signal;
+    await getTeamFlowRecoveryBinding("team /a", "flow /b", signal);
+    expect(transport.mock.calls[0]).toEqual([
+      "/api/teams/team%20%2Fa/workflows/flow%20%2Fb/recovery-binding",
+      { signal },
+    ]);
+    expect(transport.mock.calls[0][1]).not.toHaveProperty("method");
+    expect(transport.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+  it("sends typed binding and revoke payloads to their encoded endpoints", async () => {
+    const request = {
+      expectedRevision: 4,
+      repairFlowId: "repair-flow",
+      assistantAgentId: "assistant",
+      directorAgentId: "director",
+      developerAgentId: "developer",
+      reviewerAgentId: "reviewer",
+      acknowledgeAutomaticRecovery: true,
+      replaySafety: "idempotent" as const,
+      maxAttempts: 2,
+      maxRepairAttempts: 1,
+      repairTimeoutSeconds: 600,
+      validForSeconds: 7200,
+    };
+    await saveTeamFlowRecoveryBinding("team-a", "flow/a", request);
+    expect(transport.mock.calls[0][0]).toBe("/api/teams/team-a/workflows/flow%2Fa/recovery-binding");
+    expect(transport.mock.calls[0][1].method).toBe("PUT");
+    expect(JSON.parse(transport.mock.calls[0][1].body)).toEqual(request);
+
+    await revokeTeamFlowRecoveryBinding("team-a", "flow/a", { expectedRevision: 5 });
+    expect(transport.mock.calls[1][0]).toBe("/api/teams/team-a/workflows/flow%2Fa/recovery-binding/revoke");
+    expect(transport.mock.calls[1][1].method).toBe("POST");
+    expect(JSON.parse(transport.mock.calls[1][1].body)).toEqual({ expectedRevision: 5 });
+  });
+  it("sends deployment evidence only when supplied for the new command", async () => {
+    const run = { id: "run-3", revision: 8 } as TeamFlowRun;
+    await commandTeamFlowRun("team-a", run, "confirm_deployment", "artifact://deploy/3");
+    expect(JSON.parse(transport.mock.calls[0][1].body)).toEqual({
+      action: "confirm_deployment",
+      expectedRevision: 8,
+      evidenceRef: "artifact://deploy/3",
+    });
+    await commandTeamFlowRun("team-a", run, "confirm");
+    expect(JSON.parse(transport.mock.calls[1][1].body)).toEqual({ action: "confirm", expectedRevision: 8 });
   });
   it("rejects empty team scope before transport", () => {
     expect(() => listTeamFlows("")).toThrow("请先选择团队");

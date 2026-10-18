@@ -82,7 +82,15 @@ def check_revision(record: dict, expected: int) -> None:
         raise Conflict("版本已变化，请刷新后重试。")
 
 
-def records(team_id: str, kind: str, *, limit: int = 100) -> list[dict]:
+def records(team_id: str, kind: str, *, limit: int = 100, flow_id: str = "") -> list[dict]:
     folder = root(team_id) / kind
     paths = sorted(folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return [read(path(team_id, kind, item.stem)) for item in paths[:limit]]
+    results = []
+    for item in paths:
+        record = read(path(team_id, kind, item.stem))
+        if flow_id and (record.get("flow") or {}).get("id") != flow_id:
+            continue
+        results.append(record)
+        if len(results) >= limit:
+            break
+    return results

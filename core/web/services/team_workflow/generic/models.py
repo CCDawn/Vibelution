@@ -1,6 +1,7 @@
 """Version-one public contracts and bounded input validation."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, model_validator
@@ -36,6 +37,7 @@ class Step(Contract):
     kind: Literal["input", "agent", "human", "output"]
     owner: str = Field(default="", max_length=128)
     instruction: str = Field(default="", max_length=8000)
+    resultContract: Literal["text", "outcome_v1"] = "text"
 
 
 class FailureRecoveryPolicy(Contract):
@@ -48,6 +50,78 @@ class FailureRecoveryPolicy(Contract):
     maxAttempts: int = Field(default=3, ge=1, le=3, strict=True)
     maxRepairAttempts: int = Field(default=2, ge=1, le=3, strict=True)
     repairTimeoutSeconds: int = Field(default=1800, ge=60, le=86400, strict=True)
+    assistantAgentId: str = Field(default="", max_length=128)
+    developerAgentId: str = Field(default="", max_length=128)
+    bindingId: str = Field(default="", max_length=80)
+    expiresAt: str = Field(default="", max_length=80)
+    repairFlowRevision: int = Field(default=0, ge=0, strict=True)
+    agentPolicyFingerprints: dict[str, str] = Field(default_factory=dict, max_length=64)
+
+    @model_validator(mode="after")
+    def bound_authorization(self):
+        if self.bindingId:
+            import re
+            roles = {self.assistantAgentId, self.directorAgentId, self.developerAgentId, self.reviewerAgentId}
+            if "" in roles or len(roles) != 4 or self.repairFlowRevision < 1:
+                raise ValueError("绑定需要四个不同的有效角色及固定修复流程版本。")
+            if not roles.issubset(self.agentPolicyFingerprints):
+                raise ValueError("角色授权指纹不完整。")
+            if any(not key.strip() or len(key) > 128 or not re.fullmatch(r"[0-9a-f]{64}", value)
+                   for key, value in self.agentPolicyFingerprints.items()):
+                raise ValueError("角色授权指纹无效。")
+            try:
+                expiry = datetime.fromisoformat(self.expiresAt)
+            except ValueError as exc:
+                raise ValueError("绑定需要有效的授权期限。") from exc
+            if expiry.tzinfo is None:
+                raise ValueError("授权期限需要时区。")
+        return self
+
+
+class RecoveryBindingRequest(Contract):
+    expectedRevision: int = Field(ge=1, strict=True)
+    repairFlowId: str = Field(min_length=1, max_length=80)
+    assistantAgentId: str = Field(min_length=1, max_length=128)
+    directorAgentId: str = Field(min_length=1, max_length=128)
+    developerAgentId: str = Field(min_length=1, max_length=128)
+    reviewerAgentId: str = Field(min_length=1, max_length=128)
+    acknowledgeAutomaticRecovery: StrictBool
+    replaySafety: Literal["read_only", "idempotent", "unknown"] = "unknown"
+    maxAttempts: int = Field(default=3, ge=1, le=3, strict=True)
+    maxRepairAttempts: int = Field(default=2, ge=1, le=3, strict=True)
+    repairTimeoutSeconds: int = Field(default=1800, ge=60, le=86400, strict=True)
+    validForSeconds: int = Field(default=86400, ge=60, le=604800, strict=True)
+
+    @model_validator(mode="after")
+    def intentional_binding(self):
+        if not self.acknowledgeAutomaticRecovery:
+            raise ValueError("绑定需要明确启用自动恢复。")
+        roles = (self.assistantAgentId, self.directorAgentId, self.developerAgentId, self.reviewerAgentId)
+        if any(not role.strip() for role in roles) or len(set(roles)) != 4:
+            raise ValueError("个人助理、总监、开发者和验收者必须是四个不同的 Agent。")
+        return self
+
+
+class RecoveryBindingRevoke(Contract):
+    expectedRevision: int = Field(ge=1, strict=True)
+
+
+class RecoveryBindingStatus(Contract):
+    schemaVersion: Literal[1] = 1
+    teamId: str
+    flowId: str
+    sourceRevision: int
+    status: Literal["unbound", "legacy", "ready", "unavailable", "expired"]
+    reason: str = ""
+    bindingId: str = ""
+    expiresAt: str = ""
+    assistantAgentId: str = ""
+    directorAgentId: str = ""
+    developerAgentId: str = ""
+    reviewerAgentId: str = ""
+    repairFlowId: str = ""
+    automaticLocalIntegration: Literal[False] = False
+    automaticDeployment: Literal[False] = False
 
 
 class RecoveryState(Contract):
@@ -136,6 +210,7 @@ class Attempt(Contract):
     key: str
     promptHash: str = ""
     failureCode: str = ""
+    failureOrigin: Literal["native", "result_contract"] = "native"
 
 
 class Run(Contract):
