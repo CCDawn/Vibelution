@@ -788,6 +788,21 @@ rules:
     notes:
       - "On Windows, include no-console regression coverage for runtime Git paths."
 
+  - id: generic-team-workflows
+    description: "Generic workflow native execution, opt-in failure escalation, bounded repair and safe replay."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/web/services/team_workflow/generic/**"
+      - "core/web/services/generic_team_workflow_service.py"
+      - "core/web/routes/generic_team_workflows.py"
+      - "tests/test_generic_team_workflows.py"
+      - "tests/test_generic_workflow_recovery.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_generic_team_workflows.py tests/test_generic_workflow_recovery.py -q"
+    notes:
+      - "Generic runs have a distinct state owner and native execution contract; research routes and Ledger are unchanged."
+
   - id: teams-knowledge
     description: "Teams, Team Knowledge, Challenge Cup flow, and source collection workflow."
     executionLayers:
@@ -795,6 +810,7 @@ rules:
       - "local-parallel"
       - "remote-distributed"
     excludePaths:
+      - "core/web/services/team_workflow/generic/**"
       - "core/web/services/team_workflow/research_runtime/scientific_semantic_ledger.py"
       - "core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py"
       - "core/web/services/team_workflow/research_runtime/hypothesis_first_chain_store.py"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 from . import native, store
@@ -95,6 +96,8 @@ def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
             for step in flow["steps"]:
                 if executable(step):
                     native.validate_owner(team_id, step["owner"])
+            from .recovery import freeze_repair_template
+            repair_template = freeze_repair_template(team_id, flow)
             timestamp = now()
             record = Run(
                 id=run_id, teamId=team_id, flow=flow, values=request.values,
@@ -102,6 +105,8 @@ def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
                 createdAt=timestamp, updatedAt=timestamp,
             ).model_dump()
             record["_createFingerprint"] = fingerprint
+            if repair_template:
+                record["_recoveryTemplate"] = repair_template
             store.write(target, record)
             result = public(record)
     _wake()
@@ -131,6 +136,63 @@ def _current_attempt(record: dict) -> dict | None:
     return next((item for item in reversed(record["attempts"]) if item["nodeId"] == node_id), None)
 
 
+def retry_failed_record(record: dict) -> None:
+    """Shared retry boundary. Caller holds the run lock and owns replay consent.
+
+    Native recovery proves old execution has settled; it does not prove that
+    tools in that execution had no external side effects.
+    """
+    if record["status"] != "failed" or record["stopRequested"]:
+        raise store.Conflict("只有失败的步骤可以重试。")
+    attempt = _current_attempt(record)
+    disposition = record.get("_retryDisposition", "resume_same_identity")
+    if attempt and attempt["sessionId"]:
+        disposition = native.recovery(attempt)
+        if disposition == "unknown_blocked":
+            raise store.Conflict("旧轮次是否结束尚未确认，请打开原会话核查后再重试。")
+    record["status"] = "running"
+    record["error"] = ""
+    record["_repeat"] = bool(record.get("_repeat") or disposition == "safe_new_attempt")
+    if attempt and not record["_repeat"]:
+        attempt["status"] = "running" if attempt["turnId"] else "dispatching"
+    record.pop("_retryDisposition", None)
+
+
+def create_repair_run(team_id: str, *, run_id: str, flow: dict, incident: str, parent: dict) -> dict:
+    """Queue a frozen child using the existing run store and native executor.
+
+    Parent persists the exact identity/definition before calling this function;
+    an interrupted create replays the same receipt rather than opening new work.
+    """
+    from .runtime import ensure_admission
+    ensure_admission()
+    target = store.path(team_id, "runs", run_id)
+    fingerprint = digest([flow, incident, parent])
+    created = False
+    with store.locked(target):
+        if target.exists():
+            record = store.read(target)
+            if record.get("_createFingerprint") != fingerprint or record.get("_recoveryParent") != parent:
+                raise store.Conflict("修复派发标识与已保存任务不一致。")
+        else:
+            definition = Flow.model_validate(flow).model_dump()
+            values = {"incident": incident}
+            validate_values(definition, values)
+            for step in definition["steps"]:
+                if executable(step):
+                    native.validate_owner(team_id, step["owner"])
+            timestamp = now()
+            record = Run(id=run_id, teamId=team_id, flow=definition, values=values,
+                         status="running", current=0, revision=1, messages=["总监修复任务已创建。"],
+                         createdAt=timestamp, updatedAt=timestamp).model_dump()
+            record.update(_createFingerprint=fingerprint, _recoveryParent=parent)
+            store.write(target, record)
+            created = True
+    if created:
+        _wake()
+    return public(record)
+
+
 def command_run(team_id: str, run_id: str, payload: dict) -> dict:
     from .runtime import ensure_admission
     ensure_admission()
@@ -140,16 +202,24 @@ def command_run(team_id: str, run_id: str, payload: dict) -> dict:
         record = store.read(target)
         store.check_revision(record, request.expectedRevision)
         action = request.action
+        if record.get("_recoveryParent") and action != "stop":
+            raise store.Conflict("修复子任务由原任务的有限修复流程管理，请在原任务处理裁决。")
         if action == "stop":
             if record["status"] in {"completed", "stopped"}:
                 raise store.Conflict("流程已经结束。")
             record["stopRequested"] = True
+            if record.get("recovery") and record["recovery"]["status"] != "resolved":
+                record["recovery"].update(status="cancelled", reason="source_stopped")
             attempt = _current_attempt(record)
             if not attempt or not attempt["sessionId"]:
                 record["status"] = "stopped"
             else:
                 record["status"] = "running"
             _changed(target, record, "已请求停止流程。")
+        elif action == "confirm_deployment":
+            from .recovery import confirm_deployment
+            confirm_deployment(record, evidence_ref=request.evidenceRef)
+            _changed(target, record, "已记录用户部署确认，等待独立验收重新核验效果。")
         elif action == "confirm":
             if record["status"] != "waiting":
                 raise store.Conflict("当前步骤不在等待确认。")
@@ -168,21 +238,21 @@ def command_run(team_id: str, run_id: str, payload: dict) -> dict:
             record["_repeat"] = True
             _changed(target, record, "用户要求上一Agent步骤修改。")
         else:
-            if record["status"] != "failed" or record["stopRequested"]:
-                raise store.Conflict("只有失败的步骤可以重试。")
+            recovery = record.get("recovery")
+            if recovery and recovery["status"] in {"repairing", "awaiting_deployment"}:
+                raise store.Conflict("修复或部署验收尚未完成，不能重放原步骤。")
+            if recovery:
+                from .recovery import ensure_child_settled
+                ensure_child_settled(team_id, record)
             attempt = _current_attempt(record)
-            disposition = record.get("_retryDisposition", "resume_same_identity")
-            if attempt and attempt["sessionId"]:
-                disposition = native.recovery(attempt)
-                if disposition == "unknown_blocked":
-                    raise store.Conflict("旧轮次是否结束尚未确认，请打开原会话核查后再重试。")
-            record["status"] = "running"
-            record["error"] = ""
-            record["_repeat"] = bool(record.get("_repeat") or disposition == "safe_new_attempt")
-            if attempt and not record["_repeat"]:
-                attempt["status"] = "running" if attempt["turnId"] else "dispatching"
-            record.pop("_retryDisposition", None)
+            retry_failed_record(record)
+            if recovery and recovery["status"] in {"tracking", "retrying", "awaiting_replay_decision", "blocked"}:
+                recovery.update(status="replaying" if recovery["repairAttempts"] else "retrying", reason="user_replay_decision")
+                record["_recoveryReplayAfter"] = attempt["key"] if attempt else ""
             _changed(target, record, "用户已请求重试当前步骤。")
+        if record.get("recovery"):
+            from .recovery import log_transition
+            log_transition(record)
         result = public(record)
     _wake()
     return result
@@ -238,6 +308,34 @@ def _prompt(record: dict, step: dict) -> str:
 
 
 def reconcile_run(team_id: str, run_id: str) -> None:
+    """Fence repair-child admission against the parent's cancellation lock.
+
+    All nested acquisition uses parent -> child. The parent lock covers native
+    admission too, so a completed source stop cannot race a new repair dispatch.
+    """
+    target = store.path(team_id, "runs", run_id)
+    parent = store.read(target).get("_recoveryParent")
+    if not parent:
+        return _reconcile_run(team_id, run_id)
+    parent_target = store.path(team_id, "runs", parent["runId"])
+    with store.locked(parent_target):
+        source = store.read(parent_target) if parent_target.exists() else {}
+        state = source.get("recovery") or {}
+        permitted = (not source.get("stopRequested") and source.get("status") == "failed"
+                     and state.get("status") == "repairing" and state.get("repairRunId") == run_id
+                     and state.get("issueId") == parent.get("issueId"))
+        if not permitted:
+            with store.locked(target):
+                record = store.read(target)
+                if record["status"] in {"completed", "stopped"}:
+                    return
+                if not record["stopRequested"]:
+                    record.update(stopRequested=True, status="running")
+                    _changed(target, record, "原任务已取消或不再拥有该修复任务，停止子任务。")
+        return _reconcile_run(team_id, run_id)
+
+
+def _reconcile_run(team_id: str, run_id: str) -> None:
     """Only the owned worker calls this write/dispatch path.
 
     Durable attempt identity precedes each native side effect. The run lock also
@@ -343,6 +441,9 @@ def reconcile_run(team_id: str, run_id: str) -> None:
                 _changed(target, record, f"已完成：{step['label']}。")
             else:
                 attempt["status"] = "failed"
+                # Persist only a bounded machine code, never provider text.
+                code = str(snapshot.get("terminalProblemCode") or snapshot.get("terminalStatus") or "native_step_failed")
+                attempt["failureCode"] = code if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", code) else "native_step_failed"
                 record["status"] = "failed"
                 record["error"] = "原生会话未成功完成，请打开会话查看原因后重试。"
                 _changed(target, record, "Agent步骤未完成。")
@@ -356,6 +457,7 @@ def reconcile_run(team_id: str, run_id: str) -> None:
                 record["_retryDisposition"] = "safe_new_attempt" if exc.safe_new_attempt else "unknown_blocked"
                 if exc.safe_new_attempt and attempt:
                     attempt["status"] = "failed"
+                    attempt["failureCode"] = "session_unavailable"
                 record["status"] = "stopped" if record["stopRequested"] and exc.safe_new_attempt else "failed"
             elif not record["stopRequested"]:
                 record["status"] = "failed"

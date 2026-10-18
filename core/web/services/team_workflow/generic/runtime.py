@@ -33,6 +33,8 @@ def reconcile_all() -> None:
                     target = store.path(team_id, "runs", path.stem)
                     if store.read(target).get("status") == "running":
                         service.reconcile_run(team_id, path.stem)
+                    from .recovery import reconcile_recovery
+                    reconcile_recovery(team_id, path.stem)
                 except Exception as exc:
                     logger.warning(f"Generic workflow recovery skipped a run ({type(exc).__name__})")
         except Exception as exc:
