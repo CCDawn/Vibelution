@@ -36,22 +36,32 @@ class ResearchSource(Contract):
     nodeId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_:-]*$")
 
 
+class SessionSource(Contract):
+    sessionId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    turnId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    agentId: str = Field(min_length=1, max_length=128)
+
+
 class Step(Contract):
     id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
     label: str = Field(min_length=1, max_length=160)
-    kind: Literal["input", "agent", "human", "output", "research"]
+    kind: Literal["input", "agent", "human", "output", "research", "session"]
     owner: str = Field(default="", max_length=128)
     instruction: str = Field(default="", max_length=8000)
     resultContract: Literal["text", "outcome_v1"] = "text"
     researchSource: ResearchSource | None = None
+    sessionSource: SessionSource | None = None
 
     @model_validator(mode="after")
     def explicit_research_source(self):
         if self.kind == "research":
-            if self.researchSource is None or self.owner or self.instruction or self.resultContract != "text":
+            if self.researchSource is None or self.sessionSource is not None or self.owner or self.instruction or self.resultContract != "text":
                 raise ValueError("研究监督步骤只声明原生节点引用，不声明执行者、指令或结果契约。")
-        elif self.researchSource is not None:
-            raise ValueError("只有研究监督步骤可以引用研究节点。")
+        elif self.kind == "session":
+            if self.sessionSource is None or self.researchSource is not None or self.owner or self.instruction or self.resultContract != "text":
+                raise ValueError("会话监督步骤只声明原生任务引用，不声明执行者、指令或结果契约。")
+        elif self.researchSource is not None or self.sessionSource is not None:
+            raise ValueError("只有原生监督步骤可以引用原生来源。")
         return self
 
 
@@ -180,8 +190,8 @@ class Flow(Contract):
 
     @model_validator(mode="after")
     def unique_ids(self):
-        if any(step.kind == "research" for step in self.steps) and (len(self.steps) != 1 or self.fields):
-            raise ValueError("研究监督流程只允许一个原生节点引用，不能混入执行步骤或输入。")
+        if any(step.kind in {"research", "session"} for step in self.steps) and (len(self.steps) != 1 or self.fields):
+            raise ValueError("原生监督流程只允许一个原生任务引用，不能混入执行步骤或输入。")
         if not self.name.strip() or any(not item.label.strip() for item in [*self.fields, *self.steps]):
             raise ValueError("流程名称和字段、步骤名称不能为空。")
         for items in (self.fields, self.steps):

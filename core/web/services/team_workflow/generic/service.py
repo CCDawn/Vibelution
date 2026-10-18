@@ -18,7 +18,7 @@ def executable(step: dict) -> bool:
 
 
 def supervised(record: dict) -> bool:
-    return any(step["kind"] == "research" for step in record["flow"]["steps"])
+    return any(step["kind"] in {"research", "session"} for step in record["flow"]["steps"])
 
 
 def now() -> str:
@@ -80,14 +80,17 @@ def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
     # concurrently. The lock is only an admission guard, never a task store.
     hint = Flow.model_validate(store.read(store.path(team_id, "flows", flow_id))).model_dump()
     if supervised({"flow": hint}):
-        source = hint["steps"][0]["researchSource"]
-        guard = store.path(team_id, "runs", "source-admission-" + digest(source)[:40])
+        from . import source_adapter
+        record = {"teamId": team_id, "flow": hint}
+        source = source_adapter.reference(record)
+        source_identity = source_adapter.identity(record)
+        guard = store.path(team_id, "runs", "source-admission-" + digest(source_identity)[:40])
         with store.locked(guard):
-            return _start_run(team_id, flow_id, payload, source_hint=source)
+            return _start_run(team_id, flow_id, payload, source_hint=source, source_identity=source_identity)
     return _start_run(team_id, flow_id, payload)
 
 
-def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None) -> dict:
+def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None, source_identity=None) -> dict:
     from .runtime import ensure_admission
     ensure_admission()
     request = StartRun.model_validate(payload)
@@ -107,14 +110,21 @@ def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None) -
             flow = Flow.model_validate(store.read(flow_path)).model_dump()
             store.check_revision(flow, request.expectedRevision)
             if supervised({"flow": flow}):
-                source = flow["steps"][0]["researchSource"]
+                from . import source_adapter
+                source_record = {"teamId": team_id, "flow": flow}
+                source = source_adapter.reference(source_record)
                 if source != source_hint:
-                    raise store.Conflict("研究来源已变化，请重新读取流程。")
+                    raise store.Conflict("原生来源已变化，请重新读取流程。")
+                if source_adapter.identity(source_record) != source_identity:
+                    raise store.Conflict("原生任务身份已变化，请重新读取来源。")
                 for path in (store.root(team_id) / "runs").glob("*.json"):
                     other = store.read(path)
-                    if supervised(other) and other["flow"]["steps"][0]["researchSource"] == source:
+                    if not supervised(other):
+                        continue
+                    other_identity = other.get("_sourceIdentity") or source_adapter.identity(other)
+                    if other_identity == source_identity:
                         if other["status"] not in {"completed", "stopped"}:
-                            raise store.Conflict("该研究节点已有故障监督，请使用或停止已有监督。")
+                            raise store.Conflict("该原生任务已有故障监督，请使用或停止已有监督。")
                         from .recovery import ensure_child_settled
                         ensure_child_settled(team_id, other)
             if not flow["steps"]:
@@ -137,9 +147,10 @@ def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None) -
             record["_createFingerprint"] = fingerprint
             if supervised(record):
                 if not (flow.get("failureRecovery") or {}).get("bindingId"):
-                    raise store.WorkflowError("研究故障监督需要显式绑定四角色及恢复授权。")
-                from .research_source import observe
+                    raise store.WorkflowError("原生故障监督需要显式绑定四角色及恢复授权。")
+                from .source_adapter import observe
                 observe(record)  # Validate exact native identity and Team before accepting.
+                record["_sourceIdentity"] = source_identity
             if repair_template:
                 record["_recoveryTemplate"] = repair_template
             store.write(target, record)
@@ -185,7 +196,7 @@ def retry_failed_record(record: dict) -> None:
         raise store.Conflict("只有失败的步骤可以重试。")
     if supervised(record):
         if not record.get("recovery"):
-            raise store.Conflict("研究节点重试由原生任务入口管理。")
+            raise store.Conflict("原生任务重试由原生任务入口管理。")
         from .supervision import request_replay
         request_replay(record)
         return
@@ -312,6 +323,17 @@ def artifacts(team_id: str, run_id: str) -> dict:
     record = store.read(store.path(team_id, "runs", run_id))
     labels = {item["id"]: item["label"] for item in record["flow"]["steps"]}
     projected = []
+    if supervised(record):
+        from .source_adapter import observe
+        # Source supervisors expose pointers only. Native snapshot() owns
+        # generic dispatch receipts and can repair Session state on reads.
+        for attempt in observe(record)["attempts"]:
+            if attempt.get("sessionId") and attempt.get("turnId"):
+                projected.append({"nodeId": attempt["nodeId"],
+                    "label": f"{labels[attempt['nodeId']]} · 第{attempt['number']}次",
+                    "sessionId": attempt["sessionId"], "turnId": attempt["turnId"],
+                    "content": "", "chatUrl": native.chat_url(attempt)})
+        return {"artifacts": projected}
     for attempt in record["attempts"]:
         if not attempt["sessionId"] or not attempt["turnId"]:
             continue
@@ -387,7 +409,7 @@ def _reconcile_admitted_run(team_id: str, run_id: str, parent: dict | None) -> N
         from .binding import authorization_reason
         reason = authorization_reason(team_id, source) if source else "recovery_authorization_unavailable"
         if not reason and source and supervised(source):
-            from .research_source import fence
+            from .source_adapter import fence
             try:
                 reason = fence(source)
             except Exception:

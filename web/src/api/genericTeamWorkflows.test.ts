@@ -19,6 +19,13 @@ const flow: TeamFlow = { id: "flow-1", name: "My flow", description: "", fields:
 
 describe("team-scoped user workflow transport", () => {
   beforeEach(() => transport.mockReset());
+  it("preserves an exact Session source without adding execution fields", async () => {
+    const supervisor: TeamFlow = { ...flow, steps: [{ id: "source", label: "Session task", kind: "session",
+      owner: "", instruction: "", sessionSource: { sessionId: "session-1", turnId: "turn-1", agentId: "agent-1" } }] };
+    await saveTeamFlow("team-a", supervisor);
+    expect(JSON.parse(transport.mock.calls[0][1].body).flow.steps[0]).toEqual(supervisor.steps[0]);
+    expect(JSON.parse(transport.mock.calls[0][1].body).flow.steps[0]).not.toHaveProperty("researchSource");
+  });
   it("sends saved revisions and keeps workflow/run identities separate", async () => {
     await saveTeamFlow("team-a", flow);
     const [url, request] = transport.mock.calls[0];

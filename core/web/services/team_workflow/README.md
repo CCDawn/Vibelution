@@ -198,3 +198,5 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 ## User-defined team workflows
 
 `generic/` owns sequential user-authored flow definitions, frozen run snapshots and their native Session orchestration. Public facade: `../generic_team_workflow_service.py`; thin HTTP registration: `core/web/routes/generic_team_workflows.py` on the existing Teams router. It does not reuse or rewrite research question input contracts, historical workflow definitions, ordinary Session admission or transcript authority. Details: [`generic/README.md`](generic/README.md).
+
+Explicitly bound research and ordinary Session failure sources use `generic/source_adapter.py` and the same bounded recovery coordinator. Their native Ledger/Journal remains execution authority; source observation adds no transcript, automatic Session regeneration or deployment capability.

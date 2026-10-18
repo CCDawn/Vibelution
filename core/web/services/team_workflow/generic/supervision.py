@@ -1,19 +1,19 @@
-"""Project canonical research facts into an explicitly bound repair supervisor.
+"""Project canonical native facts into an explicitly bound repair supervisor.
 
-This owns no research task state, transcript, retry budget or execution queue.
+This owns no native task state, transcript, retry budget or execution queue.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 
-from . import research_source, service, store
+from . import source_adapter, service, store
 
 
 def observe(target, record: dict) -> None:
     if record["stopRequested"] or record["status"] == "stopped":
         return
     before = deepcopy(record)
-    snapshot = research_source.observe(record)
+    snapshot = source_adapter.observe(record)
     state = record.get("recovery")
     old_key = (record.get("attempts") or [{}])[-1].get("key")
     record["attempts"] = snapshot["attempts"]
@@ -35,6 +35,10 @@ def observe(target, record: dict) -> None:
                                                   or snapshot["status"] != "failed"):
             state.update(status="blocked", reason="source_advanced_or_unavailable")
             _stop_child(record["teamId"], record)
+        elif (state["status"] == "awaiting_replay_decision" and new_key != old_key
+              and record["flow"]["steps"][0]["kind"] == "session"
+              and snapshot["reason"] not in {"source_lineage_invalid", "source_advanced"}):
+            state.update(status="replaying", reason="source_manual_retry")
     if record != before:
         service._changed(target, record)
         if state:
@@ -55,7 +59,7 @@ def request_replay(record: dict) -> None:
 def submit_replay(target, record: dict) -> None:
     if not record.get("_sourceReplayPending") or record["stopRequested"]:
         return
-    reason = research_source.replay(record)
+    reason = source_adapter.replay(record)
     record.pop("_sourceReplayPending", None)
     if reason:
         record["recovery"].update(status="awaiting_replay_decision", reason=reason)

@@ -10,6 +10,7 @@ The service is the sole flow/run state owner. The existing Team namespace suppli
 - `result_contract.py`: bounded validation of opt-in business outcomes after canonical native Turn success; default text results remain compatible.
 - `recovery.py`: bounded failure escalation, frozen repair recipes, child-run coordination and safe replay decisions.
 - `research_source.py`: read-only formal Ledger references, bounded retry lineage and native command replay; `supervision.py` projects these facts into the existing repair coordinator.
+- `session_source.py`: read-only ordinary Session task references and verified native regenerate/resume lineage; `source_adapter.py` selects the existing source contract without creating another coordinator.
 - `runtime.py`: one owned reconciliation worker. Reads do not dispatch. Startup waits for native Session recovery; delayed callbacks are fenced by the lifespan stop flag under the admission lock. Shutdown closes this producer before native Session workers.
 
 Retry may create a new attempt only after canonical evidence permits it. Unknown Session identity or active-state uncertainty fails visibly and prevents duplicate execution or false stop success. Flow/run lists remain readable while execution is warming; artifact projection waits for the owner. Membership and Agent availability are checked again before dispatch. No raw model invocation or changes to ordinary Session core are introduced.
@@ -212,7 +213,59 @@ its original owner.
 
 These contracts are covered by temporary real Ledger/CommandService tests and
 supervisor integration tests. They are local verification, not a deployed
-multi-Agent research acceptance run. Ordinary Sessions remain outside automatic
-aggregation: manual regeneration currently rewrites the original journal branch
-and provides no durable cross-retry lineage. Supporting them requires a separate
-native retry contract rather than guessing from message text or copying prompts.
+multi-Agent research acceptance run.
+
+## Ordinary Session failure supervision
+
+An additive `Step.kind=session` accepts only a `sessionSource` containing exact
+`sessionId`, anchor `turnId` and `agentId`. Like a research source, it must be the
+flow's sole step, with no inputs, owner, instruction or result contract override.
+It requires the existing explicit four-role recovery binding. Ordinary Sessions
+do not acquire supervision automatically. The current source Agent must remain
+an active member of the selected Team, and its actual Session owner must match.
+Companion bindings remain outside this ordinary-session adapter.
+
+The adapter reads native Journal and state through their existing read paths;
+it does not call completion APIs that repair stale sessions or Agent-directory
+provisioning APIs. No native admission, worker, journal, persist or projection
+code is changed. Only bounded attempt identities, failure codes and recovery
+references enter the supervisor; prompts, answer text and raw errors stay in
+the native Session. Source artifacts expose empty-content native chat pointers,
+and never call the generic dispatch completion adapter. The native Journal reader's lock sidecar remains a lock,
+not another transcript or execution authority.
+
+Persisted queued/running/stopping state and existing read-only chat-turn WorkRun
+snapshots fence old terminal events even before the local worker flag is set or
+when the worker belongs to another process. Observation never reconciles runs.
+
+Task identity follows verified native `branch_rebase` regeneration markers,
+including the first-message case where the branch view has no alias. It checks
+the real replaced turns, anchor and next native user event. Startup-resume turns
+remain part of one business attempt. A normal follow-up, edited prompt, branch
+selection, broken lineage or unsettled source cannot be counted as the same
+failure. Within one Team, duplicate supervisors from different retry anchors of
+the same logical task are rejected. Parsing is bounded to 30,000 events, 120 business attempts and
+32 resume children per attempt.
+
+The existing coordinator escalates after three consecutive same-code terminal
+failures or the binding's task `maxAttempts` is exhausted, whichever comes first.
+Repeated scans do not create attempts. Tool/provider retries within a Turn do
+not create business attempts; a model's failure wording is not a failed Turn.
+Native budget/context limits, human gates, cancellation and credential/permission
+failures remain outside automatic repair. Source movement cancels obsolete repair
+dispatch, and saved source-reference changes invalidate the original binding.
+
+Even after a valid repair verdict, this source waits at
+`awaiting_replay_decision` with `source_replay_requires_user`. Native regenerate
+deduplicates the same request key, but has no expected-Turn/head CAS and reuses
+positional API message IDs; automatically calling it could supersede a newer
+running Turn. Retry in the original Session, where the existing user action owns
+that decision. The supervisor observes the real retry and resolves only after
+the same native task completes successfully with actual assistant evidence.
+It cannot turn a changed branch's earlier success into recovery.
+
+The typed API preserves `sessionSource`; both native source kinds stay outside
+the ordinary workflow editor. Existing generic workflows and research-source
+replay keep their prior contracts. Local journal fixtures, disk read-invariance,
+coordinator and transport tests cover this adapter; formal runtime rollout still
+requires the user's deployment/restart decision.
