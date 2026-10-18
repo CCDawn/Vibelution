@@ -142,3 +142,21 @@ and `tests/test_generic_workflow_result_contract.py`, plus
 `web/src/api/genericTeamWorkflows.test.ts` for the typed API adapter. The test matrix owns this domain
 separately from research workflows. Runtime code requires a Launcher refresh
 before formal use; unit/HTTP tests do not claim a live multi-Agent acceptance run.
+
+## Isolated native rehearsal (2026-10-18)
+
+Launcher task instance `43f3e81c` completed source run
+`run-359b9fc6d13071c5c3dc23469fcdb4fa66c873ae`: three successful native
+Turns reported the same `fixture_missing` business failure; the coordinator
+queued director, developer and independent reviewer Sessions, then replayed the
+source check. The fourth source attempt completed and recovery became `resolved`.
+All execution and review evidence remains in those native Session journals;
+the parent run holds their exact Session/Turn references. The fixture was a
+temporary marker file, not a production code change or deployment.
+
+The developer's marker write required one exact-call native approval, accepted
+by the test operator within the authorized isolated rehearsal. No durable or
+Session-wide grant was added. This proves the recovery sequence and original
+step acceptance; it does not prove unattended mutation approval, automatic Git
+integration or platform-wide failure-source coverage. The earlier denied-write
+rehearsal remained blocked after independent review, without false resolution.
