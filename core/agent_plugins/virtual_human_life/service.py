@@ -27,6 +27,7 @@ from .affect import (
     episode_from_life_event,
     episode_from_relationship_event,
     project_affect,
+    unanswered_wait_valence_dip,
 )
 from .calendar import (
     append_calendar_change,
@@ -136,7 +137,12 @@ from .reflection import (
     transition_reflection_proposal,
     validate_reflection_proposal,
 )
-from .relationship_events import make_relationship_event, project_relationships
+from .relationship_events import (
+    clamp_relationship_feedback_deltas,
+    make_relationship_event,
+    project_relationships,
+    relationship_tone_guidance,
+)
 from .reunion import project_reunion_context, project_shared_experiences
 from .rhythms import (
     apply_completed_activity_to_rhythm,
@@ -2607,7 +2613,9 @@ class VirtualHumanLifeService:
             affect_projection = project_affect(
                 self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
                 now=current,
-                baseline_mood=affect_baseline,
+                baseline_mood=self._unanswered_wait_baseline(
+                    agent_id, now=current, baseline=affect_baseline
+                ),
             )
             self.store.write_json(agent_id, "affect/state.json", affect_projection)
             state["mood"] = deepcopy(affect_projection["mood"])
@@ -3505,7 +3513,11 @@ class VirtualHumanLifeService:
         affect = project_affect(
             self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
             now=now,
-            baseline_mood=self._affect_baseline(agent_id),
+            baseline_mood=self._unanswered_wait_baseline(
+                agent_id,
+                now=now,
+                baseline=self._affect_baseline(agent_id),
+            ),
         )
         open_loops = project_open_loops(
             self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"),
@@ -3533,6 +3545,14 @@ class VirtualHumanLifeService:
             artifact_receipts=self.store.read_jsonl(agent_id, "artifacts/receipts.jsonl"),
         )
         relationships = self.list_relationships(agent_id)
+        user_relationship = next(
+            (
+                item
+                for item in relationships
+                if isinstance(item, dict) and str(item.get("targetId") or "") == "user"
+            ),
+            {},
+        )
         expression_payload = self.store.read_json(agent_id, "expression/rules.json") or {}
         expression = project_expression_rules(
             [
@@ -3567,6 +3587,10 @@ class VirtualHumanLifeService:
             "drives": drives,
             "affect": affect,
             "relationships": relationships,
+            "relationshipTone": relationship_tone_guidance(
+                user_relationship.get("intimacy", 50),
+                user_relationship.get("trust", 50),
+            ),
             "openLoops": open_loops,
             "proactiveCandidates": self.list_proactive_candidates(agent_id),
             "reflections": {
@@ -3647,7 +3671,11 @@ class VirtualHumanLifeService:
             else project_affect(
                 self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
                 now=now,
-                baseline_mood=self._affect_baseline(agent_id),
+                baseline_mood=self._unanswered_wait_baseline(
+                    agent_id,
+                    now=now,
+                    baseline=self._affect_baseline(agent_id),
+                ),
             )
         )
         environment_projection = (
@@ -6108,16 +6136,33 @@ class VirtualHumanLifeService:
                 if command_id
                 else f"relationship:{target_id}:{current.isoformat()}"
             )
+            events = self.store.read_jsonl(agent_id, "relationships/events.jsonl")
+            # Boundary-setting and one-off misunderstandings are healthy
+            # feedback, not relationship damage: negative deltas for them are
+            # clamped before the ledger ever sees a drop.
+            recent_cutoff = current - timedelta(days=7)
+            recent_kinds = [
+                str(item.get("kind") or "")
+                for item in events
+                if str(item.get("targetId") or "") == target_id
+                and (_parse_datetime(item.get("occurredAt")) or current)
+                >= recent_cutoff
+            ]
+            clamped_intimacy, clamped_trust = clamp_relationship_feedback_deltas(
+                str(arguments.get("kind") or "interaction"),
+                intimacy_delta=_clamp(arguments.get("intimacyDelta"), -20, 20, 0),
+                trust_delta=_clamp(arguments.get("trustDelta"), -20, 20, 0),
+                recent_kinds=recent_kinds,
+            )
             relationship_event = make_relationship_event(
                 event_id=interaction_id,
                 target_id=target_id,
                 kind=str(arguments.get("kind") or "interaction")[:120],
-                intimacy_delta=_clamp(arguments.get("intimacyDelta"), -20, 20, 0),
-                trust_delta=_clamp(arguments.get("trustDelta"), -20, 20, 0),
+                intimacy_delta=clamped_intimacy,
+                trust_delta=clamped_trust,
                 occurred_at=current,
                 source_turn_id=str(arguments.get("sourceTurnId") or "")[:200],
             )
-            events = self.store.read_jsonl(agent_id, "relationships/events.jsonl")
             if not any(
                 str(item.get("eventId") or "") == interaction_id for item in events
             ):
@@ -7354,6 +7399,44 @@ class VirtualHumanLifeService:
         if isinstance(mood, dict):
             return deepcopy(mood)
         return deepcopy(BASELINE_MOOD)
+
+    def _unanswered_wait_baseline(
+        self,
+        agent_id: str,
+        *,
+        now: datetime,
+        baseline: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Shift the projection baseline by the oldest unanswered proactive wait.
+
+        Wall-clock only and re-derived at every projection: identical elapsed
+        time yields an identical dip no matter how many heartbeats ran, and a
+        user reply (userRepliedAt) removes the wait on the next projection.
+        Only delivery-evidenced candidates count; a "selected" candidate with
+        no delivery receipt never starts a wait.
+        """
+        adjusted = dict(baseline if isinstance(baseline, Mapping) else BASELINE_MOOD)
+        rows = self.store.read_jsonl(agent_id, "proactive/candidates.jsonl")
+        cutoff = now.astimezone(timezone.utc) - timedelta(days=3)
+        wait_started: datetime | None = None
+        for row in rows:
+            if str(row.get("status") or "") != "delivered":
+                continue
+            if str(row.get("userRepliedAt") or ""):
+                continue
+            delivered_at = _parse_datetime(row.get("deliveredAt"))
+            if delivered_at is None or delivered_at < cutoff:
+                continue
+            if wait_started is None or delivered_at < wait_started:
+                wait_started = delivered_at
+        if wait_started is None:
+            return adjusted
+        dip = unanswered_wait_valence_dip(wait_started, now=now)
+        if dip:
+            adjusted["valence"] = max(
+                -100, int(adjusted.get("valence") or 0) + dip
+            )
+        return adjusted
 
     def _require_enabled_binding(self, agent_id: str) -> dict[str, Any]:
         binding = self.binding_for(agent_id)

@@ -143,4 +143,83 @@ def project_relationships(
     return sorted(by_target.values(), key=lambda item: str(item.get("targetId") or ""))
 
 
-__all__ = ["make_relationship_event", "project_relationships"]
+BOUNDARY_FEEDBACK_TOKENS = (
+    "boundary",
+    "边界",      # 边界
+    "别打扰",  # 别打扰
+    "不要打扰",  # 不要打扰
+    "先不",      # 先不
+    "需要空间",  # 需要空间
+    "不想聊",   # 不想聊
+    "not_now",
+    "leave me alone",
+)
+MISUNDERSTANDING_TOKENS = (
+    "misunderstand",
+    "误解",      # 误解
+    "会错意",   # 会错意
+    "理解错",   # 理解错
+    "听错",      # 听错
+    "误以为",   # 误以为
+)
+
+
+def _matches_tokens(kind: str, tokens: tuple[str, ...]) -> bool:
+    lowered = str(kind or "").strip().lower()
+    return any(token in lowered for token in tokens)
+
+
+def clamp_relationship_feedback_deltas(
+    kind: str,
+    *,
+    intimacy_delta: int,
+    trust_delta: int,
+    recent_kinds: list[str] | None = None,
+) -> tuple[int, int]:
+    """Guard feedback the user did not mean as relationship damage.
+
+    Normal boundary-setting (a healthy "not right now") never drops intimacy
+    or trust, and a single one-off misunderstanding never drops intimacy — only
+    a repeated misunderstanding pattern may, once it already appears in the
+    recent event kinds. Positive deltas always pass through untouched.
+    """
+    intimacy = int(intimacy_delta)
+    trust = int(trust_delta)
+    if _matches_tokens(kind, BOUNDARY_FEEDBACK_TOKENS):
+        return max(0, intimacy), max(0, trust)
+    if _matches_tokens(kind, MISUNDERSTANDING_TOKENS):
+        prior = [
+            str(item or "")
+            for item in (recent_kinds or [])
+            if _matches_tokens(str(item), MISUNDERSTANDING_TOKENS)
+        ]
+        if not prior:
+            return max(0, intimacy), trust
+    return intimacy, trust
+
+
+def relationship_tone_guidance(intimacy: object, trust: object) -> str:
+    """Deterministic tone guidance for proactive content by relationship band.
+
+    The model still writes the message; this only conditions register and
+    closeness so content tracks the relationship dimensions instead of a fixed
+    personality regardless of history.
+    """
+    try:
+        intimacy_value = int(intimacy)
+    except (TypeError, ValueError):
+        intimacy_value = 50
+    try:
+        trust_value = int(trust)
+    except (TypeError, ValueError):
+        trust_value = 50
+    if intimacy_value >= 70 and trust_value >= 60:
+        return "关系亲近：可以用熟悉的口吻自然聊天，偶尔开玩笑或用昵称，但仍尊重对方的边界。"
+    if intimacy_value < 35:
+        return "关系尚浅：保持礼貌与克制，多用请句、少用昵称，主动分享点到为止。"
+    if trust_value < 35:
+        return "信任正在建立：表达稳妥可靠，少开玩笑，重要的事说清楚，不追问私人话题。"
+    return "关系自然：像熟识的朋友一样交流，语气放松但有分寸。"
+
+
+__all__ = ["clamp_relationship_feedback_deltas", "make_relationship_event", "project_relationships", "relationship_tone_guidance"]
