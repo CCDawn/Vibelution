@@ -52,7 +52,7 @@ import {
 import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VDenseOpsPage, VStateSurface, VTabs, VTooltip } from "../components/vui";
-import { useShellI18n } from "../i18n/useShellI18n";
+import { useLauncherLanguage } from "../i18n/useLauncherLanguage";
 import { launcherToolsRouteStyles as styles } from "./LauncherToolsRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
@@ -927,7 +927,7 @@ function controlPlaneHasCommandType(
 
 export function LauncherToolsRoute() {
   const [searchParams] = useSearchParams();
-  const { lang } = useShellI18n({ configEnabled: false });
+  const lang = useLauncherLanguage();
   const queryClient = useQueryClient();
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const locale = lang === "zh" ? "zh-CN" : "en-US";

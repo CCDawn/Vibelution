@@ -7,7 +7,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { listVirtualHumanCompanions } from "../../api/agentPlugins";
+import type { VirtualHumanCompanion } from "../../api/types";
+import { CompanionPersonRail } from "./CompanionPersonRail";
 import { CompanionChatRouteGate } from "./CompanionChatRouteGate";
+
+const shellI18n = vi.hoisted(() => ({ lang: "zh" as "zh" | "en" }));
+
+vi.mock("../../i18n/useShellI18n", () => ({
+  useShellI18n: () => ({ lang: shellI18n.lang }),
+}));
 
 vi.mock("../../api/agentPlugins", () => ({
   listVirtualHumanCompanions: vi.fn(),
@@ -18,6 +26,17 @@ vi.mock("../../api/agentPlugins", () => ({
 let container: HTMLDivElement;
 let root: Root;
 
+const railCompanion = {
+  agentId: "agent-luo",
+  agentCode: "luo",
+  displayName: "Luo",
+  directSessionId: "session-luo",
+  avatarImageUrl: "",
+  personaProfile: {},
+  status: "online",
+  snapshot: { state: null } as VirtualHumanCompanion["snapshot"],
+} satisfies VirtualHumanCompanion;
+
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -27,6 +46,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  shellI18n.lang = "zh";
   vi.clearAllMocks();
 });
 
@@ -74,6 +94,38 @@ describe("CompanionChatRouteGate", () => {
     await flushQuery();
     expect(container.textContent).toContain("companion lobby");
     expect(container.textContent).not.toContain("private companion transcript");
+  });
+
+  it("uses English accessible names for companion verification and the person rail", async () => {
+    shellI18n.lang = "en";
+    let resolveCompanions: ((value: unknown[]) => void) | undefined;
+    vi.mocked(listVirtualHumanCompanions).mockReturnValue(new Promise((resolve) => {
+      resolveCompanions = resolve;
+    }) as ReturnType<typeof listVirtualHumanCompanions>);
+
+    await renderGate("/chat?session=session-companion&companion=agent-companion");
+    expect(container.querySelector('[aria-label="Verifying companion identity"]')).toBeTruthy();
+    expect(container.querySelector('[aria-label="正在验证人物身份"]')).toBeNull();
+    await act(async () => resolveCompanions?.([]));
+    await flushQuery();
+
+    await act(async () => root.render(
+      <MemoryRouter>
+        <CompanionPersonRail
+          className=""
+          collapsed={false}
+          overlayOpen={false}
+          companion={railCompanion}
+          state="loading"
+          lang="en"
+          onCollapse={() => undefined}
+        />
+      </MemoryRouter>,
+    ));
+    const labels = [...container.querySelectorAll<HTMLElement>("[aria-label]")]
+      .map((element) => element.getAttribute("aria-label") || "");
+    expect(labels).toContain("Luo person rail");
+    expect(labels.join(" ")).not.toMatch(/[\u3400-\u9fff]/);
   });
 
   it("mounts Chat only for the exact Agent and direct Session pair", async () => {

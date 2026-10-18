@@ -5,9 +5,11 @@ import { Navigate, useLocation } from "react-router-dom";
 import { listVirtualHumanCompanions } from "../../api/agentPlugins";
 import { queryKeys } from "../../api/queryKeys";
 import { ChatRouteLoadingShell } from "../../app/ChatRouteLoadingShell";
+import { useShellI18n } from "../../i18n/useShellI18n";
 import { companionRouteBindingIsVerified } from "./companionChatRouteIsolation";
 
 export function CompanionChatRouteGate({ children }: { children: ReactNode }) {
+  const { lang } = useShellI18n();
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const requestedCompanionId = String(params.get("companion") || "").trim();
@@ -25,7 +27,7 @@ export function CompanionChatRouteGate({ children }: { children: ReactNode }) {
 
   if (!companionRouteRequested) return children;
   if (companionsQuery.isPending && !companionsQuery.data) {
-    return <ChatRouteLoadingShell label="正在验证人物身份" />;
+    return <ChatRouteLoadingShell label={lang === "zh" ? "正在验证人物身份" : "Verifying companion identity"} />;
   }
   return companionRouteBindingIsVerified(
     companionsQuery.data,

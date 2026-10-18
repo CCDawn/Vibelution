@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchPersonalAssistantOverview } from "../../api/personalAssistant";
+import { queryKeys } from "../../api/queryKeys";
 import { PersonalAssistantOverview } from "./PersonalAssistantOverview";
 import routerSource from "../../app/router.tsx?raw";
 
@@ -19,6 +20,8 @@ beforeEach(() => {
     counts: { agents: 1, sessions: 1, running: 1, waiting: 0, failed: 0 }, agents: [], attention: [],
     sessions: [{ id: "worker-session", agentId: "worker-agent", title: "平台任务", status: "running", currentPhase: "tooling" }] });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  client.setQueryDefaults(queryKeys.configPublic(), { staleTime: Infinity });
+  client.setQueryData(queryKeys.configPublic(), { language: "zh" });
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
@@ -29,6 +32,49 @@ async function render(desktop = false, showTitles = true) {
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
 describe("personal assistant management shortcuts", () => {
+  it("updates interface copy and statuses when language changes without translating user titles", async () => {
+    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "", counts: { agents: 1, sessions: 9, running: 1, waiting: 0, failed: 0 },
+      agents: [{ id: "custom-agent", displayName: "我的智能体", status: "idle" }], attention: [],
+      sessions: Array.from({ length: 9 }, (_, i) => ({ id: `s-${i}`, agentId: "custom-agent", title: `用户自定义 ${i}`, status: "running", currentPhase: "tooling" })) });
+    await render();
+    expect(container.querySelector("h2")?.textContent).toBe("平台概览");
+    await act(async () => { client.setQueryData(queryKeys.configPublic(), { language: "en" }); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(container.querySelector("h2")?.textContent).toBe("Platform overview");
+    expect(container.querySelector('[aria-label="Refresh platform overview"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/agents"]')?.textContent).toBe("Agents");
+    expect(container.querySelector('[role="tab"][id$="attention"]')?.textContent).toBe("Attention 0");
+    await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    expect(container.querySelector('input[aria-label="Search sessions"]')?.getAttribute("placeholder")).toBe("Search sessions…");
+    expect(container.textContent).toContain("Page 1 / 2");
+    expect(container.textContent).toContain("9 items");
+    expect(container.querySelector("li")?.textContent).toContain("用户自定义 0Using tools");
+    expect([...container.querySelectorAll("button")].some(button => button.textContent === "Next")).toBe(true);
+    await act(async () => { client.setQueryData(queryKeys.configPublic(), { language: "zh" }); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(container.querySelector("h2")?.textContent).toBe("平台概览");
+    expect(container.querySelector('input[aria-label="搜索会话"]')?.getAttribute("placeholder")).toBe("搜索会话…");
+    expect(container.textContent).toContain("第 1 / 2 页");
+    expect(container.querySelector("li")?.textContent).toContain("用户自定义 0操作工具中");
+    expect([...container.querySelectorAll("button")].some(button => button.textContent === "下一页")).toBe(true);
+    await act(async () => (container.querySelector('[role="tab"][id$="agents"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await act(async () => { client.setQueryData(queryKeys.configPublic(), { language: "en" }); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(container.querySelector("li")?.textContent).toContain("我的智能体Idle");
+    expect(container.querySelector('input[aria-label="Search Agents"]')).not.toBeNull();
+  });
+
+  it("localizes hidden titles and attention statuses while preserving Session navigation", async () => {
+    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "", counts: { agents: 0, sessions: 1, running: 0, waiting: 1, failed: 0 },
+      agents: [], attention: [{ id: "attention", title: "私人待办", kind: "approval", sessionId: "worker-session" }],
+      sessions: [{ id: "worker-session", agentId: "a", title: "私人任务", status: "ready", currentPhase: "ready" }] });
+    client.setQueryData(queryKeys.configPublic(), { language: "en" });
+    await render(true, false);
+    expect(container.textContent).not.toMatch(/私人待办|私人任务/);
+    expect(container.querySelector("li")?.textContent).toContain("Item 1Awaiting confirmation");
+    await act(async () => container.querySelector<HTMLButtonElement>("li button")?.click());
+    expect(openSession).toHaveBeenCalledWith("worker-session");
+    await act(async () => (container.querySelector('[role="tab"][id$="sessions"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    expect(container.querySelector("li")?.textContent).toContain("Session 1Ready");
+  });
+
   it("links all platform management entry points to registered owner pages", async () => {
     await render();
     const links = [...container.querySelectorAll("a")].map(link => [link.textContent, link.getAttribute("href")]);

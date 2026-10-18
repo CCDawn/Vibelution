@@ -63,7 +63,7 @@ export function MemoryKnowledgeBaseSidebar({
         <span className={styles.countPill}>{bases.length}</span>
       </div>
       <VTooltip content={toolVisibilityTooltip} width="wide">
-        <section className={styles.governanceMiniPanel} tabIndex={0} aria-label={`${copy.toolVisibility}说明`}>
+        <section className={styles.governanceMiniPanel} tabIndex={0} aria-label={copy.toolVisibility}>
           <strong>{copy.toolVisibility}</strong>
           <VStatusChip tone="success">
             {copy.yes}: {visibleTools.length}

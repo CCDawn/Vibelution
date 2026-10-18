@@ -9,7 +9,7 @@ import {
   onLauncherStateChanged,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import { useShellI18n } from "../i18n/useShellI18n";
+import { useLauncherLanguage } from "../i18n/useLauncherLanguage";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
@@ -22,7 +22,7 @@ import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
 
 export function LauncherShell() {
   const routeContent = useMemo(() => <Outlet />, []);
-  const { lang } = useShellI18n({ configEnabled: false });
+  const lang = useLauncherLanguage();
   const [theme] = useState(() => readStoredWorkbenchTheme());
   const queryClient = useQueryClient();
   const stateBridgeAvailable = hasLauncherStateBridge();
@@ -42,6 +42,7 @@ export function LauncherShell() {
       void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
     };
     const unsubscribe = onLauncherStateChanged(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       invalidateBranchInstances();
     });
 

@@ -18,6 +18,7 @@ const launcherBridge = vi.hoisted(() => {
   return {
     listeners,
     getLauncherBranchInstances: vi.fn(),
+    getLauncherStatus: vi.fn(),
     getLauncherState: vi.fn(),
     hasLauncherStateBridge: vi.fn(),
     onLauncherStateChanged: vi.fn((listener: Listener) => {
@@ -54,6 +55,7 @@ describe("LauncherShell launcher state synchronization", () => {
   beforeEach(() => {
     launcherBridge.listeners.clear();
     launcherBridge.getLauncherBranchInstances.mockReset();
+    launcherBridge.getLauncherStatus.mockResolvedValue({});
     launcherBridge.getLauncherState.mockReset();
     launcherBridge.getLauncherState.mockReturnValue(new Promise(() => undefined));
     launcherBridge.hasLauncherStateBridge.mockReturnValue(true);

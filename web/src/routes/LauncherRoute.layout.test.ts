@@ -104,8 +104,9 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("uses shell language state without loading the full app dictionary", () => {
-    expect(routeSource).toContain("useShellI18n");
-    expect(routeSource).toContain("const { lang } = useShellI18n({ configEnabled: false })");
+    expect(routeSource).toContain("const lang = useLauncherLanguage()");
+    expect(homeRouteSource).toContain("const lang = useLauncherLanguage()");
+    expect(routeSource).not.toContain("useShellI18n");
     expect(routeSource).not.toContain("useAppI18n");
     expect(routeSource).not.toContain("../i18n/dictionary");
     expect(routeSource).not.toContain("../i18n/useAppI18n");

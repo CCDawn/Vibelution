@@ -49,7 +49,7 @@ export function CompanionPersonRail({
       className={`${VUI_WORKBENCH_RAIL_CLASS} ${className} ${styles.personRail}`}
       aria-hidden={collapsed}
       role={overlayOpen ? "dialog" : undefined}
-      aria-label={companion ? `${companion.displayName} 人物栏` : unavailableTitle}
+      aria-label={companion ? `${companion.displayName} ${lang === "zh" ? "人物栏" : "person rail"}` : unavailableTitle}
       data-companion-person-rail="true"
     >
       <div className={styles.paneHeader}>

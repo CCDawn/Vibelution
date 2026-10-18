@@ -18,7 +18,7 @@ import { useWorkbenchLifecycleActions } from "../app/useWorkbenchLifecycleAction
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VConfirmDialog, VDenseOpsPage, VStateSurface } from "../components/vui";
 import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
-import { useShellI18n } from "../i18n/useShellI18n";
+import { useLauncherLanguage } from "../i18n/useLauncherLanguage";
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
 import {
   acceptLifecycleIntent,
@@ -110,7 +110,7 @@ export function LauncherRoute() {
   useStableBeforeUnload((event) => {
     if (settingsDirty) { event.preventDefault(); event.returnValue = ""; }
   });
-  const { lang } = useShellI18n({ configEnabled: false });
+  const lang = useLauncherLanguage();
   const queryClient = useQueryClient();
   const { request: requestWorkbenchLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const [selectedInstanceId, setSelectedInstanceId] = useState("");

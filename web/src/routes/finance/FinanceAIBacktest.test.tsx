@@ -80,12 +80,23 @@ async function chooseSelectOption(ariaLabel: string, label: string) {
   if (!option) throw new Error(`Select option not found: ${label}`);
   await act(async () => option!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
-async function render(currentStock = stock) {
-  await act(async () => root.render(<QueryClientProvider client={client}><FinanceAIBacktest agentId="a" stock={currentStock} zh disabled={false} /></QueryClientProvider>));
+async function render(currentStock = stock, zh = true) {
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceAIBacktest agentId="a" stock={currentStock} zh={zh} disabled={false} /></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 15)));
 }
 beforeEach(() => { vi.resetAllMocks(); node = document.createElement("div"); document.body.append(node); root = createRoot(node); client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }); vi.mocked(api.fetchAIBacktests).mockResolvedValue({ items: [], nextCursor: null }); vi.mocked(agentsApi.fetchAgentConfigWorkspace).mockResolvedValue(selectableModels); });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
+
+it("keeps backtest accessibility labels English in English mode", async () => {
+  await render(stock, false);
+  await chooseSelectOption("AI backtest price limit rules", "Import daily limits");
+  const labels = [...node.querySelectorAll<HTMLElement>("[aria-label]")]
+    .map((element) => element.getAttribute("aria-label") || "");
+  expect(labels).toContain("AI backtest historical data source");
+  expect(labels).toContain("AI backtest start date");
+  expect(labels).toContain("AI backtest daily limit file");
+  expect(labels.join(" ")).not.toMatch(/[\u3400-\u9fff]/);
+});
 
 it("previews without a model call and refuses to start blocked corporate-action data", async () => {
   vi.mocked(api.previewAIBacktest).mockResolvedValue({ ...preview, canStart: false, actionsStatus: "blocked", blockReason: "区间内含公司行动" });

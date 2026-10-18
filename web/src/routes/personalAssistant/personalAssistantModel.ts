@@ -25,11 +25,13 @@ export function personalAssistantSessionMatches(
     && !session.agentMissing && (!session.sessionKind || session.sessionKind === "main"));
 }
 
-export function assistantStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    running: "运行中", active: "就绪", ready: "就绪", idle: "空闲", waiting: "等待处理", waiting_approval: "等待确认",
-    failed: "失败", error: "异常", completed: "已完成", stopped: "已停止", cancelled: "已取消",
-    thinking: "思考中", tooling: "操作工具中", answering: "回复中", verifying: "验证中", reading: "读取中", queued: "排队中", failed_runtime: "运行异常", failed_provider: "模型异常",
+export function assistantStatusLabel(status: string, lang: "zh" | "en" = "zh"): string {
+  const labels: Record<string, readonly [string, string]> = {
+    running: ["运行中", "Running"], active: ["就绪", "Ready"], ready: ["就绪", "Ready"], idle: ["空闲", "Idle"],
+    waiting: ["等待处理", "Waiting"], waiting_approval: ["等待确认", "Awaiting confirmation"],
+    failed: ["失败", "Failed"], error: ["异常", "Error"], completed: ["已完成", "Completed"], stopped: ["已停止", "Stopped"], cancelled: ["已取消", "Cancelled"],
+    thinking: ["思考中", "Thinking"], tooling: ["操作工具中", "Using tools"], answering: ["回复中", "Responding"], verifying: ["验证中", "Verifying"],
+    reading: ["读取中", "Reading"], queued: ["排队中", "Queued"], failed_runtime: ["运行异常", "Runtime error"], failed_provider: ["模型异常", "Model error"],
   };
-  return labels[status] ?? status;
+  return labels[status]?.[lang === "zh" ? 0 : 1] ?? status;
 }

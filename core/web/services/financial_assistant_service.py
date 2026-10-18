@@ -13,6 +13,7 @@ import threading
 from core.web.services import agent_directory_service as directory
 from core.web.services import session_service
 from core.web.services import team_knowledge_service as knowledge
+from core.web.services.i18n import get_web_language
 from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
 from core.web.services.session_archive_service import conversation_is_archived
 from tools.financial_report_tools import financial_report_availability
@@ -96,6 +97,20 @@ COMPOSER_STARTERS: tuple[dict[str, str], ...] = (
         "command": "先问清我的期限和能接受的亏损，再列出研究时必须核对的风险。不要建议下单。",
     },
 )
+_EN_COMPOSER_STARTERS: tuple[dict[str, str], ...] = (
+    {
+        "heading": "News reference",
+        "command": "Find recent public news about a company and explain what can be used as reference and what cannot be cited.",
+    },
+    {
+        "heading": "Financial report evidence",
+        "command": "Find financial report evidence for a company and reporting period. If the library has none, state that there is insufficient evidence. Do not invent numbers.",
+    },
+    {
+        "heading": "Risk boundaries",
+        "command": "First ask about my time horizon and acceptable losses, then list the risks that must be checked during research. Do not suggest placing orders.",
+    },
+)
 
 
 def composer_starters_for_agent(agent_id: str) -> list[dict[str, str]] | None:
@@ -113,7 +128,8 @@ def composer_starters_for_agent(agent_id: str) -> list[dict[str, str]] | None:
     profile = (agent.get("metadata") or {}).get("financialAssistantProfile")
     if profile != PROFILE:
         return None
-    return [dict(item) for item in COMPOSER_STARTERS]
+    starters = _EN_COMPOSER_STARTERS if get_web_language() == "en" else COMPOSER_STARTERS
+    return [dict(item) for item in starters]
 
 
 def _agents() -> list[dict]:

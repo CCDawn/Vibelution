@@ -30,7 +30,7 @@ vi.mock("../app/useWorkbenchLifecycleActions", () => ({
   useWorkbenchLifecycleActions: () => ({ request: apiMocks.requestWorkbenchLifecycle }),
 }));
 
-vi.mock("../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
+vi.mock("../i18n/useLauncherLanguage", () => ({ useLauncherLanguage: () => "zh" }));
 
 vi.mock("../components/vui", () => ({
   VButton: ({ children, onPress }: { children?: ReactNode; onPress?: () => void }) => (
