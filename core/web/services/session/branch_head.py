@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.chat.conversation_branches import resolve_head_leaf
+from .admission_lock import session_has_active_work_run
 
 
 def _service():
@@ -45,7 +46,7 @@ def switch_session_head(session_id: str, node_id: str) -> dict[str, Any]:
                 s.text_for(lang, zh="未找到当前会话。", en="Session not found.")
             )
         s._ensure_session_mutable(conversation_id, conversation=conversation)
-        if s._is_session_running(conversation_id):
+        if s._is_session_running(conversation_id) or session_has_active_work_run(s, conversation_id):
             raise s.SessionBusyError(
                 s.text_for(
                     lang,

@@ -606,6 +606,9 @@ def test_queued_submit_retry_after_drain_reuses_the_accepted_turn(tmp_path: Path
         assert queued["status"] == queued_retry["status"] == "queued"
         assert queued["queuedTurnId"] == queued_retry["queuedTurnId"]
 
+        # Simulate the worker's durable settlement before releasing its runtime slot.
+        append_conversation_event(tmp_path, session_id, active["turnId"], EVENT_TURN_COMPLETED, status="completed")
+        session_service._persist_chat_turn_work_run(session_id=session_id, turn_id=active["turnId"], status="completed")
         session_service._set_session_running(session_id, False, turn_id=active["turnId"])
         session_service._clear_session_turn_control(session_id, turn_id=active["turnId"])
         assert queued_turns.drain_session_queued_turns(session_id) is True

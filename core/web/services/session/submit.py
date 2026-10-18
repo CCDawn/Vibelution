@@ -14,9 +14,8 @@ import base64
 import binascii
 import hashlib
 import json
-import threading
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 from core.chat.turn_journal import TERMINAL_EVENTS, TurnJournalPostTerminalWriteError
@@ -24,6 +23,8 @@ from core.chat.turn_journal import TERMINAL_EVENTS, TurnJournalPostTerminalWrite
 from . import conversation_references
 from . import document_attachments
 from . import journal_bridge
+from .admission_lock import SessionAdmissionLock, session_has_active_work_run
+from .retry import validate_safe_retry, with_retry_receipt
 from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
@@ -112,24 +113,14 @@ def _challenge_deadline_at_ms_for_submit(message_metadata: Mapping[str, Any] | N
     return None
 
 
-_SESSION_SUBMIT_ADMIT_LOCKS_GUARD = threading.Lock()
-_SESSION_SUBMIT_ADMIT_LOCKS: dict[str, threading.Lock] = {}
+def _session_submit_admit_lock(session_id: str) -> SessionAdmissionLock:
+    """Serialize admission across threads and backends for this project/session."""
 
-
-def _session_submit_admit_lock(session_id: str) -> threading.Lock:
-    """Serialize admit for one session without blocking other sessions."""
-
-    normalized = str(session_id or "").strip()
-    with _SESSION_SUBMIT_ADMIT_LOCKS_GUARD:
-        lock = _SESSION_SUBMIT_ADMIT_LOCKS.get(normalized)
-        if lock is None:
-            lock = threading.Lock()
-            _SESSION_SUBMIT_ADMIT_LOCKS[normalized] = lock
-        return lock
+    return SessionAdmissionLock(_service().PROJECT_ROOT, str(session_id or "").strip())
 
 
 @contextmanager
-def _release_acquired_lock(lock: threading.Lock) -> Iterator[threading.Lock]:
+def _release_acquired_lock(lock: SessionAdmissionLock) -> Iterator[SessionAdmissionLock]:
     try:
         yield lock
     finally:
@@ -1406,7 +1397,9 @@ def submit_session_message(
             admit_lock.release()
             admit_lock_held = False
 
-    submit_timing_fields["chatStateLockWaitMs"] = s._elapsed_ms(admit_lock_wait_started_at)
+    submit_timing_fields["sessionAdmissionLockWaitMs"] = s._elapsed_ms(admit_lock_wait_started_at)
+    # This path acquires session admission, not the global chat-state lock.
+    submit_timing_fields["chatStateLockWaitMs"] = 0
     prepared_agent: dict[str, Any] | None = None
     prepared_agent_id = ""
     prepared_context_limit_ok = False
@@ -1434,7 +1427,12 @@ def submit_session_message(
             if replay is not None:
                 release_admit_lock()
                 return replay
-        if s._is_session_running(conversation_id):
+        foreign_work_running = (
+            normalized_message_source != "hot_restart_resume"
+            and not s._is_session_running(conversation_id)
+            and session_has_active_work_run(s, conversation_id)
+        )
+        if s._is_session_running(conversation_id) or foreign_work_running:
             if queue_if_busy:
                 raise _SessionTurnQueued(
                     _enqueue_busy_session_turn(
@@ -1629,7 +1627,7 @@ def submit_session_message(
                 s.text_for(lang, zh="请输入本轮消息、添加图片或引用会话后再发送。", en="Enter a message, attach an image, or reference a session before sending.")
             )
 
-        if s._is_session_running(conversation_id):
+        if s._is_session_running(conversation_id) or foreign_work_running:
             if queue_if_busy:
                 queued_payload = _enqueue_busy_session_turn(
                     s,
@@ -2355,6 +2353,7 @@ def _resubmit_session_user_message(
     operation: str,
     base_message_id: str = "",
     attachment_ids: list[str] | None = None,
+    _safe_retry_expected: dict[str, Any] | None = None,
 ) -> dict:
     """Shared edit/regenerate body: truncate from the target user message and rerun it."""
 
@@ -2366,7 +2365,7 @@ def _resubmit_session_user_message(
     normalized_base_message_id = str(base_message_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
     is_regenerate = str(operation or "").strip() == "regenerate"
-    rerun_request_fingerprint = hashlib.sha256(json.dumps({
+    rerun_request_payload = {
         "operation": operation,
         "messageId": target_message_id,
         "baseMessageId": normalized_base_message_id,
@@ -2378,7 +2377,11 @@ def _resubmit_session_user_message(
         "turnStatusTail": turn_status_tail,
         "turnMode": turn_mode,
         "writeIntent": write_intent,
-    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    }
+    if _safe_retry_expected is not None:
+        rerun_request_payload["safeRetry"] = _safe_retry_expected
+    rerun_request_fingerprint = hashlib.sha256(json.dumps(
+        rerun_request_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     rerun_prepared = False
     message = "" if is_regenerate else _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
@@ -2399,258 +2402,270 @@ def _resubmit_session_user_message(
     admit_lock = _session_submit_admit_lock(conversation_id)
     admit_lock.acquire()
     try:
-        if normalized_client_submission_id:
-            accepted_events = journal_bridge.load_session_conversation_events_by_correlation(
-                conversation_id, event_type=s.EVENT_USER_MESSAGE,
-                correlation_id=normalized_client_submission_id, project_root=s.PROJECT_ROOT,
+        with (s._CHAT_STATE_LOCK if _safe_retry_expected is not None else nullcontext()):
+            if normalized_client_submission_id:
+                accepted_events = journal_bridge.load_session_conversation_events_by_correlation(
+                    conversation_id, event_type=s.EVENT_USER_MESSAGE,
+                    correlation_id=normalized_client_submission_id, project_root=s.PROJECT_ROOT,
+                )
+                if accepted_events:
+                    accepted_metadata = (accepted_events[-1].payload or {}).get("metadata") or {}
+                    if accepted_metadata.get("rerunRequestFingerprint") != rerun_request_fingerprint:
+                        _raise_submission_identity_conflict(s, lang)
+                    detail = s.get_session_detail(conversation_id) or {}
+                    return (with_retry_receipt(s, conversation_id, detail, normalized_client_submission_id)
+                            if _safe_retry_expected is not None else detail)
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
+            if conversation is None:
+                raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+            s._ensure_session_mutable(
+                conversation_id,
+                conversation=conversation,
             )
-            if accepted_events:
-                accepted_metadata = (accepted_events[-1].payload or {}).get("metadata") or {}
-                if accepted_metadata.get("rerunRequestFingerprint") != rerun_request_fingerprint:
-                    _raise_submission_identity_conflict(s, lang)
-                return s.get_session_detail(conversation_id) or {}
-        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
-        if conversation is None:
-            raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-        s._ensure_session_mutable(
-            conversation_id,
-            conversation=conversation,
-        )
-        s._ensure_conversation_workspace_metadata(conversation)
+            if _safe_retry_expected is not None:
+                validate_safe_retry(s, conversation_id, conversation, _safe_retry_expected, normalized_base_message_id)
+            if _safe_retry_expected is None:
+                s._ensure_conversation_workspace_metadata(conversation)
 
-        previous_messages = s._session_ledger_visible_messages(conversation_id)
-        if normalized_base_message_id:
-            events = s._load_session_conversation_events_cached(conversation_id)
-            branch_view = s.analyze_conversation_branches(events)
-            target_user_node_id = s.resolve_active_user_node_id(branch_view, normalized_base_message_id)
-            if not target_user_node_id:
-                raise s.SessionBusyError(
-                    s.text_for(
-                        lang,
-                        zh="该消息不在当前对话分支上，请刷新后重试。",
-                        en="That message is not on the active conversation branch; refresh and try again.",
+            previous_messages = s._session_ledger_visible_messages(conversation_id)
+            if normalized_base_message_id:
+                events = s._load_session_conversation_events_cached(conversation_id)
+                branch_view = s.analyze_conversation_branches(events)
+                target_user_node_id = s.resolve_active_user_node_id(branch_view, normalized_base_message_id)
+                if not target_user_node_id:
+                    raise s.SessionBusyError(
+                        s.text_for(
+                            lang,
+                            zh="该消息不在当前对话分支上，请刷新后重试。",
+                            en="That message is not on the active conversation branch; refresh and try again.",
+                        )
                     )
-                )
-            target_node = branch_view.nodes[target_user_node_id]
-            target_index = -1
-            for index, item in enumerate(previous_messages):
-                item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-                item_node_id = str(item.get("nodeId") or "").strip() or str(item_metadata.get("eventId") or "").strip()
-                if item_node_id in {target_user_node_id, target_node.event_id}:
-                    target_index = index
-                    break
-            if target_index < 0:
-                raise s.SessionValidationError(
-                    s.text_for(
-                        lang,
-                        zh="找不到要重新编辑的消息，请刷新后重试。",
-                        en="The message to edit was not found; refresh and try again.",
+                target_node = branch_view.nodes[target_user_node_id]
+                target_index = -1
+                for index, item in enumerate(previous_messages):
+                    item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                    item_node_id = str(item.get("nodeId") or "").strip() or str(item_metadata.get("eventId") or "").strip()
+                    if item_node_id in {target_user_node_id, target_node.event_id}:
+                        target_index = index
+                        break
+                if target_index < 0:
+                    raise s.SessionValidationError(
+                        s.text_for(
+                            lang,
+                            zh="找不到要重新编辑的消息，请刷新后重试。",
+                            en="The message to edit was not found; refresh and try again.",
+                        )
                     )
-                )
-        else:
-            target_index = s._find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
-            if target_index < 0:
-                raise s.SessionValidationError(
-                    s.text_for(
-                        lang,
-                        zh="只能重新生成最新一条用户消息的回答。",
-                        en="Only the latest user message answer can be regenerated.",
+            else:
+                target_index = s._find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
+                if target_index < 0:
+                    raise s.SessionValidationError(
+                        s.text_for(
+                            lang,
+                            zh="只能重新生成最新一条用户消息的回答。",
+                            en="Only the latest user message answer can be regenerated.",
+                        )
+                        if is_regenerate
+                        else s.text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
                     )
-                    if is_regenerate
-                    else s.text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
+                latest_user_index = s._latest_user_message_index(previous_messages)
+                if target_index != latest_user_index:
+                    latest_message_id = ""
+                    if latest_user_index >= 0:
+                        latest_message_id = str(previous_messages[latest_user_index].get("id") or "").strip()
+                    s._record_session_message_edit_resubmit_rejected_event(
+                        conversation_id,
+                        target_message_id=target_message_id,
+                        reason="not_latest_user_message",
+                        latest_message_id=latest_message_id,
+                        target_preview=previous_messages[target_index].get("content") or "",
+                        operation=operation,
+                    )
+                    raise s.SessionValidationError(
+                        s.text_for(
+                            lang,
+                            zh="只能重新生成最新一条用户消息的回答。",
+                            en="Only the latest user message answer can be regenerated.",
+                        )
+                        if is_regenerate
+                        else s.text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
+                    )
+
+            attachments: list[dict[str, Any]] = []
+            session_references: list[dict[str, Any]] = []
+            if is_regenerate:
+                message = str(previous_messages[target_index].get("content") or "").strip()
+                stored_attachments = previous_messages[target_index].get("attachments")
+                if isinstance(stored_attachments, list):
+                    attachments = s._normalize_message_attachments(stored_attachments)
+                stored_references = previous_messages[target_index].get("references")
+                if isinstance(stored_references, list):
+                    session_references = [
+                        *s._normalize_session_references(stored_references),
+                        *conversation_references.normalize_knowledge_file_references(stored_references),
+                    ]
+                if not message and not attachments:
+                    raise s.SessionValidationError(
+                        s.text_for(
+                            lang,
+                            zh="找不到可重新生成的用户消息。",
+                            en="No user message is available to regenerate.",
+                        )
+                    )
+                s._validate_user_message_not_encoding_replacement(message, lang=lang)
+            else:
+                edit_image_ids, edit_document_ids = document_attachments.partition_session_attachment_ids(
+                    conversation,
+                    attachment_ids or [],
                 )
-            latest_user_index = s._latest_user_message_index(previous_messages)
-            if target_index != latest_user_index:
-                latest_message_id = ""
-                if latest_user_index >= 0:
-                    latest_message_id = str(previous_messages[latest_user_index].get("id") or "").strip()
-                s._record_session_message_edit_resubmit_rejected_event(
+                attachments = [
+                    *s._resolve_session_image_attachments(
+                        conversation_id,
+                        edit_image_ids,
+                        conversation=conversation,
+                    ),
+                    *document_attachments._resolve_session_document_attachments(
+                        conversation_id,
+                        edit_document_ids,
+                        conversation=conversation,
+                    ),
+                ]
+                if not message and not attachments:
+                    raise s.SessionValidationError(
+                        s.text_for(
+                            lang,
+                            zh="请输入重新发送的消息或图片。",
+                            en="Enter the edited message or attach an image before sending.",
+                        )
+                    )
+            skill_command = s.parse_skill_slash_command(message)
+            skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
+
+            active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
+            if not s._is_task_tool_backed_active_task(active_task):
+                active_task = None
+            requested_leases = s.infer_chat_turn_leases(
+                {
+                    "content": message,
+                    "mode": turn_mode,
+                    "writeIntent": write_intent,
+                    "activeTask": active_task,
+                }
+            )
+            lease_decision = s._check_chat_turn_lease_decision(requested_leases)
+            if not lease_decision.allowed:
+                localized_reason = s._localize_lease_conflict(lease_decision.reason, lang=lang)
+                if _safe_retry_expected is not None:
+                    raise s.SessionBusyError(localized_reason)
+                s._persist_session_preflight_rejection(
+                    conversation,
+                    message=message,
+                    reason=localized_reason,
+                    error_type="resource_lease_conflict",
+                    http_status=409,
+                    source="conversation.turn.lease_conflict",
+                    requested_leases=requested_leases,
+                    lease_conflicts=lease_decision.conflicts,
+                    lang=lang,
+                )
+                s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
+                raise s.SessionBusyError(localized_reason)
+
+            if not s._is_session_running(conversation_id) and session_has_active_work_run(s, conversation_id):
+                raise _session_still_running_error(s, lang)
+            if _safe_retry_expected is not None:
+                s._ensure_conversation_workspace_metadata(conversation)
+            s._ensure_conversation_agent_metadata(conversation)
+            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+            rerun_agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+            accepted_model_parameters = capture_model_parameters(s, conversation, agent=rerun_agent)
+            rerun_agent = pin_agent_model_parameters(rerun_agent, accepted_model_parameters)
+            original_entry = dict(previous_messages[target_index])
+            history_before_target = previous_messages[:target_index]
+            original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
+            original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
+            superseded_turn_id = ""
+            if s._is_session_running(conversation_id):
+                superseded_turn_id = s._supersede_active_session_turn_for_edit(
                     conversation_id,
-                    target_message_id=target_message_id,
-                    reason="not_latest_user_message",
-                    latest_message_id=latest_message_id,
-                    target_preview=previous_messages[target_index].get("content") or "",
+                    lang=lang,
                     operation=operation,
                 )
-                raise s.SessionValidationError(
-                    s.text_for(
-                        lang,
-                        zh="只能重新生成最新一条用户消息的回答。",
-                        en="Only the latest user message answer can be regenerated.",
-                    )
-                    if is_regenerate
-                    else s.text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
-                )
-
-        attachments: list[dict[str, Any]] = []
-        session_references: list[dict[str, Any]] = []
-        if is_regenerate:
-            message = str(previous_messages[target_index].get("content") or "").strip()
-            stored_attachments = previous_messages[target_index].get("attachments")
-            if isinstance(stored_attachments, list):
-                attachments = s._normalize_message_attachments(stored_attachments)
-            stored_references = previous_messages[target_index].get("references")
-            if isinstance(stored_references, list):
-                session_references = [
-                    *s._normalize_session_references(stored_references),
-                    *conversation_references.normalize_knowledge_file_references(stored_references),
-                ]
-            if not message and not attachments:
-                raise s.SessionValidationError(
-                    s.text_for(
-                        lang,
-                        zh="找不到可重新生成的用户消息。",
-                        en="No user message is available to regenerate.",
-                    )
-                )
-            s._validate_user_message_not_encoding_replacement(message, lang=lang)
-        else:
-            edit_image_ids, edit_document_ids = document_attachments.partition_session_attachment_ids(
-                conversation,
-                attachment_ids or [],
+            turn_control = s._create_session_turn_control(conversation_id)
+            active_skill_contract = (
+                s._active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
+                if skill_invocation
+                else s._active_skill_contract_from_conversation(conversation)
             )
-            attachments = [
-                *s._resolve_session_image_attachments(
-                    conversation_id,
-                    edit_image_ids,
-                    conversation=conversation,
-                ),
-                *document_attachments._resolve_session_document_attachments(
-                    conversation_id,
-                    edit_document_ids,
-                    conversation=conversation,
-                ),
-            ]
-            if not message and not attachments:
-                raise s.SessionValidationError(
-                    s.text_for(
-                        lang,
-                        zh="请输入重新发送的消息或图片。",
-                        en="Enter the edited message or attach an image before sending.",
-                    )
-                )
-        skill_command = s.parse_skill_slash_command(message)
-        skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
-
-        active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
-        if not s._is_task_tool_backed_active_task(active_task):
-            active_task = None
-        requested_leases = s.infer_chat_turn_leases(
-            {
-                "content": message,
-                "mode": turn_mode,
-                "writeIntent": write_intent,
-                "activeTask": active_task,
-            }
-        )
-        lease_decision = s._check_chat_turn_lease_decision(requested_leases)
-        if not lease_decision.allowed:
-            localized_reason = s._localize_lease_conflict(lease_decision.reason, lang=lang)
-            s._persist_session_preflight_rejection(
-                conversation,
-                message=message,
-                reason=localized_reason,
-                error_type="resource_lease_conflict",
-                http_status=409,
-                source="conversation.turn.lease_conflict",
-                requested_leases=requested_leases,
-                lease_conflicts=lease_decision.conflicts,
-                lang=lang,
+            user_metadata = {}
+            user_metadata["rerunRequestFingerprint"] = rerun_request_fingerprint
+            if accepted_model_parameters:
+                user_metadata["modelParameters"] = dict(accepted_model_parameters)
+            if normalized_client_submission_id:
+                user_metadata["clientSubmissionId"] = normalized_client_submission_id
+            if skill_invocation:
+                user_metadata["slashSkillCommand"] = {
+                    "command": skill_invocation.get("command", ""),
+                    "skillName": skill_invocation.get("skillName", ""),
+                    "skillHash": skill_invocation.get("skillHash", ""),
+                }
+                if active_skill_contract is not None:
+                    conversation["active_skill_contract"] = active_skill_contract
+            elif original_was_slash_skill:
+                active_skill_contract = None
+                conversation.pop("active_skill_contract", None)
+                conversation.pop("activeSkillContract", None)
+            user_metadata.setdefault("turnId", turn_control.turn_id)
+            user_entry = s._make_chat_message(
+                "user",
+                message,
+                metadata=user_metadata,
+                attachments=attachments,
+                references=session_references,
             )
+            conversation.pop("messages", None)
+            conversation.pop("last_turn_error", None)
+            conversation.pop("lastTurnError", None)
+            conversation["last_turn_status"] = "running"
+            conversation["updated_at"] = user_entry["timestamp"]
             s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
-            raise s.SessionBusyError(localized_reason)
-
-        s._ensure_conversation_agent_metadata(conversation)
-        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        rerun_agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
-        accepted_model_parameters = capture_model_parameters(s, conversation, agent=rerun_agent)
-        rerun_agent = pin_agent_model_parameters(rerun_agent, accepted_model_parameters)
-        original_entry = dict(previous_messages[target_index])
-        history_before_target = previous_messages[:target_index]
-        original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
-        original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
-        superseded_turn_id = ""
-        if s._is_session_running(conversation_id):
-            superseded_turn_id = s._supersede_active_session_turn_for_edit(
-                conversation_id,
-                lang=lang,
-                operation=operation,
-            )
-        turn_control = s._create_session_turn_control(conversation_id)
-        active_skill_contract = (
-            s._active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
-            if skill_invocation
-            else s._active_skill_contract_from_conversation(conversation)
-        )
-        user_metadata = {}
-        user_metadata["rerunRequestFingerprint"] = rerun_request_fingerprint
-        if accepted_model_parameters:
-            user_metadata["modelParameters"] = dict(accepted_model_parameters)
-        if normalized_client_submission_id:
-            user_metadata["clientSubmissionId"] = normalized_client_submission_id
-        if skill_invocation:
-            user_metadata["slashSkillCommand"] = {
-                "command": skill_invocation.get("command", ""),
-                "skillName": skill_invocation.get("skillName", ""),
-                "skillHash": skill_invocation.get("skillHash", ""),
-            }
-            if active_skill_contract is not None:
-                conversation["active_skill_contract"] = active_skill_contract
-        elif original_was_slash_skill:
-            active_skill_contract = None
-            conversation.pop("active_skill_contract", None)
-            conversation.pop("activeSkillContract", None)
-        user_metadata.setdefault("turnId", turn_control.turn_id)
-        user_entry = s._make_chat_message(
-            "user",
-            message,
-            metadata=user_metadata,
-            attachments=attachments,
-            references=session_references,
-        )
-        conversation.pop("messages", None)
-        conversation.pop("last_turn_error", None)
-        conversation.pop("lastTurnError", None)
-        conversation["last_turn_status"] = "running"
-        conversation["updated_at"] = user_entry["timestamp"]
-        s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
-        s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
-        # Acceptance window (resubmit): the turn is already flagged running
-        # here, so any failure before the worker is scheduled (journal lock
-        # timeout, disk I/O, ...) must settle the turn exactly like the
-        # schedule-failure handler below; otherwise running is never cleared
-        # and the session looks stuck until the stale-turn sweeper reaps it.
-        acceptance_stage = "work_run_running"
-        try:
-            s._persist_chat_turn_work_run(
-                session_id=conversation_id,
-                turn_id=turn_control.turn_id,
-                status="running",
-                agent_id=agent_id,
-                leases=requested_leases,
-                user_message=message,
-                started_at=user_entry["timestamp"],
-                updated_at=user_entry["timestamp"],
-            )
-            acceptance_stage = "branch_rebase_event"
-            s._append_session_branch_rebase_event(
-                conversation_id,
-                original_entry,
-                operation=operation,
-                turn_id=turn_control.turn_id,
-                base_message_id=normalized_base_message_id or target_message_id,
-            )
-        except Exception as exc:
-            _settle_session_submit_admission_failure(
-                session_id=conversation_id,
-                turn_id=turn_control.turn_id,
-                leases=requested_leases,
-                user_message=message,
-                exc=exc,
-                stage=acceptance_stage,
-            )
-            raise
-        rerun_prepared = True
+            s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
+            # Acceptance window (resubmit): the turn is already flagged running
+            # here, so any failure before the worker is scheduled (journal lock
+            # timeout, disk I/O, ...) must settle the turn exactly like the
+            # schedule-failure handler below; otherwise running is never cleared
+            # and the session looks stuck until the stale-turn sweeper reaps it.
+            acceptance_stage = "work_run_running"
+            try:
+                s._persist_chat_turn_work_run(
+                    session_id=conversation_id,
+                    turn_id=turn_control.turn_id,
+                    status="running",
+                    agent_id=agent_id,
+                    leases=requested_leases,
+                    user_message=message,
+                    started_at=user_entry["timestamp"],
+                    updated_at=user_entry["timestamp"],
+                )
+                acceptance_stage = "branch_rebase_event"
+                s._append_session_branch_rebase_event(
+                    conversation_id,
+                    original_entry,
+                    operation=operation,
+                    turn_id=turn_control.turn_id,
+                    base_message_id=normalized_base_message_id or target_message_id,
+                )
+            except Exception as exc:
+                _settle_session_submit_admission_failure(
+                    session_id=conversation_id,
+                    turn_id=turn_control.turn_id,
+                    leases=requested_leases,
+                    user_message=message,
+                    exc=exc,
+                    stage=acceptance_stage,
+                )
+                raise
+            rerun_prepared = True
     finally:
         if not rerun_prepared:
             admit_lock.release()
@@ -2818,23 +2833,14 @@ def _resubmit_session_user_message(
     try:
         s._schedule_session_turn(context)
     except Exception as exc:
-        s._persist_chat_turn_work_run(
-            session_id=conversation_id,
-            turn_id=turn_control.turn_id,
-            status="failed",
-            leases=requested_leases,
-            user_message=message,
-            summary=f"{type(exc).__name__}: {exc}",
+        _settle_session_submit_admission_failure(
+            session_id=conversation_id, turn_id=turn_control.turn_id,
+            leases=requested_leases, user_message=message, exc=exc, stage="scheduling",
         )
-        # Persist while this turn is still current: both clearing the turn
-        # control and flagging the session not-running drop the active-turn
-        # identity the runtime-state commit gate requires.
-        s._persist_session_turn_failure(conversation_id, context, exc)
-        s._set_session_running(conversation_id, False)
-        s._clear_session_turn_control(conversation_id)
-        s._publish_session_detail_snapshot(conversation_id)
         raise
-    return s.get_session_detail(conversation_id) or {}
+    detail = s.get_session_detail(conversation_id) or {}
+    return (with_retry_receipt(s, conversation_id, detail, normalized_client_submission_id)
+            if _safe_retry_expected is not None else detail)
 
 def _resolve_user_message_content(content: str, *, content_utf8_base64: str = "") -> str:
     encoded = str(content_utf8_base64 or "").strip()
