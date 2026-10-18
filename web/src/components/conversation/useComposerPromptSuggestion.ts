@@ -14,6 +14,7 @@ import {
 
 export type ComposerPromptSuggestionInput = {
   sessionId: string;
+  language?: "zh" | "en";
   /** Per-session AI ghost suggestion toggle; deterministic starters ignore it. */
   suggestionEnabled: boolean;
   /** Starters only need a usable composer, not the AI suggestion opt-in. */
@@ -41,7 +42,7 @@ export function useComposerPromptSuggestion(
   input: ComposerPromptSuggestionInput,
   onAccept: (suggestion: string) => void,
 ): ComposerPromptSuggestionState {
-  const { sessionId, suggestionEnabled, starterEnabled, busy, draft, hasConversation } = input;
+  const { sessionId, language = "zh", suggestionEnabled, starterEnabled, busy, draft, hasConversation } = input;
   const [suggestion, setSuggestion] = useState("");
   const [dismissed, setDismissed] = useState(false);
   const [exampleCommand, setExampleCommand] = useState("");
@@ -120,26 +121,29 @@ export function useComposerPromptSuggestion(
   }, [busy, dismissed, draft, hasConversation, sessionId, suggestionEnabled]);
 
   useEffect(() => {
+    setExampleCommand("");
+    setStarters([]);
     if (!shouldLoadComposerExample({ enabled: starterEnabled, sessionId, hasConversation })) {
-      setExampleCommand("");
-      setStarters([]);
       return;
     }
     const controller = new AbortController();
     fetchSessionComposerExample(sessionId, { signal: controller.signal })
       .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
         const resolved = resolveComposerStarters(response ?? {});
         setStarters(resolved);
         setExampleCommand(resolved[0]?.command ?? "");
       })
       .catch((error) => {
-        if (!isFetchAbortError(error)) {
+        if (!controller.signal.aborted && !isFetchAbortError(error)) {
           setExampleCommand("");
           setStarters([]);
         }
       });
     return () => controller.abort();
-  }, [hasConversation, sessionId, starterEnabled]);
+  }, [hasConversation, language, sessionId, starterEnabled]);
 
   const acceptGhost = useCallback(() => {
     if (!suggestion || dismissed) {
