@@ -9,6 +9,7 @@ export * from "./types/evolution";
 export * from "./types/config";
 export * from "./types/hypothesisFirst";
 export * from "./types/virtualHumanLife";
+export * from "./types/personalAffairs";
 export * from "./types/teamBundles";
 export * from "./types/financialMarket";
 export * from "./types/financialResearch";
