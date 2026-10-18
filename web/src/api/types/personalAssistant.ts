@@ -51,6 +51,15 @@ export type PersonalAssistantOverview = {
   counts: { agents: number; sessions: number; running: number; waiting: number; failed: number };
   agents: Array<{ id: string; displayName: string; status: string }>;
   sessions: Array<{ id: string; agentId: string; title: string; status: string; currentPhase: string; turnId?: string }>;
-  attention: Array<{ id: string; kind: string; title: string; sessionId?: string }>;
+  attention: Array<{
+    id: string;
+    kind: string;
+    title: string;
+    sessionId?: string;
+    /** Human-attention kinds (knowledge_review/anomaly) carry severity/body/targetUrl. */
+    severity?: string;
+    body?: string;
+    targetUrl?: string;
+  }>;
   pagination?: { offset: number; limit: number; nextOffset: number | null; revision?: string };
 };

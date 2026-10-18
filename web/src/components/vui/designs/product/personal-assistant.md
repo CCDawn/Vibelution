@@ -107,3 +107,37 @@ VDialog size=sm + 纵向表单行；读取中 VStateSurface loading 骨架，读
 `routes/personalAssistant/PersonalAssistantSettings.tsx`（组合 VDialog/VInput/VStringSelect/VButton/VStateSurface）。
 ### 反冗余
 复用 VUI 表单原语与既有 settings API，不新建第二套选择器；模型白名单与治理全部在后端 choices，前端不另建模型清单。
+
+## HumanAttentionNotifier
+
+### 功能
+主工作台的“双通道人工注意”触发链：轮询个人助理 overview 的 attention 列表（复用既有 query key 与 5s 节奏，不新建后端路径），发现 `kind` 为 knowledge_review/anomaly 且当日未通知过的新条目 id，即调用壳层桥 `notifyHumanAttention(payload)`——助理悬浮窗开着时由壳层把通知投递进助理窗口，没开时壳层发 Windows 系统通知；收到壳层 `onHumanAttentionOpened` 打开回调时按 targetUrl（或 kind 默认路由）在工作台内导航。
+### 适用范围
+仅 AppShell 主工作台层挂载一次；可见通知卡归助理窗口（HumanAttentionNoticeStack），本组件不渲染任何界面。助理窗口自身不挂载（/desktop-assistant 不进 AppShell），不会双重触发。
+### 使用方式
+`<HumanAttentionNotifier />` 渲染为 null。去重 id 按本地日（localStorage `vibelution.human-attention.notified.v1`，day key 为本地日期，上限 400 条）持久化，页面刷新不重弹；桥不存在（非桌面环境）时静默跳过且不标记 id。payload 字段与壳层契约为 `id/kind/severity/title/body?/targetUrl?`；打开回调按 targetUrl 优先、否则用最近通知过的 id→kind 映射落到默认路由（knowledge_review→`/memory/knowledge`，anomaly→`/teams?researchView=workflow`）。
+### 非职责
+不创建 attention 数据（后端 overview 权威）、不做可见 UI、不改普通会话通知链（chatDesktopNotifications 保持独立）、不聚焦或移动窗口（壳层职责）。
+### 视觉与状态
+无界面；桥调用失败静默（at-most-once 语义优先）。
+### 实现落点
+`routes/personalAssistant/HumanAttentionNotifier.tsx`、纯逻辑 `routes/personalAssistant/humanAttentionNotifications.ts`。
+### 反冗余
+复用 `queryKeys.personalAssistantOverview`、`fetchPersonalAssistantOverview`、`globalThis.vibelutionLauncher` 桥读取模式与 DesktopAssistantReturnNotice 的订阅骨架，不新建第二条 overview 请求或第二套桥发现。
+
+## HumanAttentionNoticeStack
+
+### 功能
+助理浮动窗内的“人工注意”通知卡堆叠：监听壳层经 preload 暴露的投递订阅（`onHumanAttentionOpened`，通道 `launcher:human-attention-opened`），把完整 payload 渲染为窗口内通知卡——标题 + 正文（两行截断）+ severity（critical/high/medium）边框与图标着色 + 分类角标；点击卡片按 targetUrl（或 kind 默认路由）窗内导航并关卡，右上角可手动关闭，12s 自动消失、hover 暂停计时，最多堆叠 3 张（超出丢最旧，同 id 重复投递刷新为一张置顶）。
+### 适用范围
+仅 DesktopAssistantRoute（/desktop-assistant 浮动助理窗，收起与展开两态都覆盖，fixed 定位浮于舞台/聊天窗之上）。裸 `{ id, targetUrl? }` 打开事件不建卡、直接窗内导航。主工作台不挂载本组件。
+### 使用方式
+`<HumanAttentionNoticeStack onBeforeNavigate={...} />`；收起态点击定位前先经 onBeforeNavigate 展开窗口（失败仍继续导航）。组件用 VNativeButton 承载卡片主体（可聚焦、可回车），VIconButton 承载关闭；导航用窗内 react-router `navigate`，不可达目标（无 targetUrl 且 kind 未知）不动作。
+### 非职责
+不触发通知（触发链归 HumanAttentionNotifier）、不与系统通知竞争（壳层决定通道）、不持有 attention 数据副本、不写后端。
+### 视觉与状态
+severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-surface-panel` 的 color-mix 令牌着色（对齐 VStateSurface error/unavailable 口径）；桥缺失时渲染 null；hover 暂停与自动消失遵循 prefers-reduced-motion（过渡禁用）。文案 zh/en 双语。
+### 实现落点
+`routes/desktopPet/HumanAttentionNoticeStack.tsx`、`routes/desktopPet/HumanAttentionNoticeStack.styles.ts`、`design/route-css/desktop-pet.tailwind.css`（@source 登记）。
+### 反冗余
+复用 humanAttentionNotifications 的桥发现/解析/target 解析与 VUI 原语（VNativeButton/VIconButton），不新建弹窗体系；与 VDialog 的模态确认（session-tab-close-confirm）职责不同，本卡是非模态瞬时通知。
