@@ -60,6 +60,10 @@ const previewExemptDesignSections = new Set([
   "PersonalAssistantRoute",
   "DesktopAssistantRoute",
   "PersonalAssistantOverview",
+  // Route-owned operator control: window choices and one-shot confirmations
+  // require live consent state, not a static standalone VUI export. Covered
+  // by its interaction/authorization tests and the approved isolated CUA preview.
+  "PersonalAssistantComputerPanel",
   "PersonalAssistantState",
   // Server-bound product dialog: settings payload and whitelisted model
   // choices come from the personal-assistant settings API and session LLM
