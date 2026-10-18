@@ -162,6 +162,8 @@
 | 本轮文件面板（`ConversationFileDeliveries`） | [product/conversation.md](./product/conversation.md#conversationfiledeliveries) |
 | 用户消息折叠（`AgentUserContentSectionView`） | [product/conversation.md](./product/conversation.md#agentusercontentsectionview-用户消息折叠) |
 | Composer 引用候选（@ type-ahead） | [product/conversation.md](./product/conversation.md#composer-引用候选-type-ahead) |
+| `ChatComposerPlusMenu` | [product/conversation.md](./product/conversation.md#chatcomposerplusmenu) |
+| `ChatComposerBudgetPopover` | [product/conversation.md](./product/conversation.md#chatcomposerbudgetpopover) |
 | Composer 图片附件上传失败态与重试 | [product/conversation.md](./product/conversation.md#composer-图片附件上传失败态与重试) |
 | 轮次导航 rail 悬停预览 | [product/conversation.md](./product/conversation.md#轮次导航-rail-悬停预览) |
 | 时间线信封分隔线（压缩/模型切换/分叉） | [product/conversation.md](./product/conversation.md#时间线信封分隔线) |

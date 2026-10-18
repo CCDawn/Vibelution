@@ -363,9 +363,12 @@ def _max_calls_per_turn(agent_tool_policy: dict | None) -> int:
     policy = _as_mapping(agent_tool_policy)
     if not policy:
         return 0
-    return _coerce_nonnegative_int(
-        _mapping_get(policy, "maxCallsPerTurn", "max_calls_per_turn")
-    )
+    # 授权层按「会话覆盖 > 模型家族 > 策略 base」执行；目标包写进 prompt
+    # 的额度数字必须读同一终值，否则文案与执行额度自相矛盾。
+    from core.orchestration.tool_budget_text import resolve_current_runtime_max_calls_per_turn
+
+    max_calls, _family = resolve_current_runtime_max_calls_per_turn(policy)
+    return max_calls
 
 
 def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:

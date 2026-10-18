@@ -30,6 +30,9 @@ class TurnStatusBarSnapshot:
     tools_max: int = 0
     tools_remaining: int = 0
     reserve_for_verify: int = 0
+    # Optional (used, total) token budget from the worker data flow; None keeps
+    # the rendered bar byte-identical to the legacy payload.
+    token_budget: tuple[int, int] | None = None
     budget_profile: str = "default"
     budget_status: str = "unknown"  # unknown | ok | tight | exhausted | unlimited
     model: str = ""
@@ -206,6 +209,49 @@ def _budget_status(*, used: int, max_calls: int, remaining: int, reserve: int) -
     return "ok"
 
 
+def _coerce_token_budget(value: Any) -> tuple[int, int] | None:
+    """Coerce a worker-supplied ``token_budget`` payload ({"used", "total"}).
+
+    Absent / invalid payloads (empty mapping, non-positive total) return None so
+    the budget section stays byte-identical to the legacy output.
+    """
+    parsed = _maybe_json(value)
+    if isinstance(parsed, Mapping):
+        used = _coerce_nonnegative_int(_mapping_get(parsed, "used", "usedTokens", "used_tokens"))
+        total = _coerce_nonnegative_int(
+            _mapping_get(parsed, "total", "totalTokens", "total_tokens", "limit", "max")
+        )
+    elif isinstance(parsed, (tuple, list)) and len(parsed) == 2:
+        used = _coerce_nonnegative_int(parsed[0])
+        total = _coerce_nonnegative_int(parsed[1])
+    else:
+        return None
+    if total <= 0:
+        return None
+    return (used, total)
+
+
+def _format_token_count(value: int) -> str:
+    if value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.1f}B"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    return str(value)
+
+
+def _token_budget_status(*, used: int, total: int) -> str:
+    if total <= 0:
+        return "ok"
+    percent = used * 100 // total
+    if percent >= 95:
+        return "critical"
+    if percent >= 80:
+        return "tight"
+    return "ok"
+
+
 def collect_turn_status_snapshot(
     *,
     iteration: int = 0,
@@ -216,6 +262,7 @@ def collect_turn_status_snapshot(
     authorization: Any | None = None,
     mental_enabled: bool = False,
     mental_model: Any | None = None,
+    token_budget: Any | None = None,
 ) -> TurnStatusBarSnapshot:
     """Build a live snapshot from authorization context + model identity."""
 
@@ -252,6 +299,12 @@ def collect_turn_status_snapshot(
     auth_profile = _coerce_text(getattr(auth, "budget_profile", "")).strip() if auth is not None else ""
     budget_profile = family or auth_profile
 
+    # Optional token budget from the worker data flow ({"used": int, "total": int});
+    # fall back to a live authorization attachment when not passed explicitly.
+    token_budget_payload = token_budget
+    if token_budget_payload is None and auth is not None:
+        token_budget_payload = getattr(auth, "token_budget", None)
+
     mental_state = ""
     mental_intervention = ""
     mental_on = _coerce_bool(mental_enabled, default=False)
@@ -278,6 +331,7 @@ def collect_turn_status_snapshot(
         tools_max=tools_max,
         tools_remaining=remaining,
         reserve_for_verify=reserve,
+        token_budget=_coerce_token_budget(token_budget_payload),
         budget_profile=budget_profile or detect_model_family(
             model=_coerce_text(model),
             provider=_coerce_text(provider),
@@ -301,6 +355,8 @@ def collect_turn_status_snapshot(
 
 
 def _append_budget_section(lines: list[str], snapshot: TurnStatusBarSnapshot) -> None:
+    token_budget = _coerce_token_budget(snapshot.token_budget)
+    token_status = ""
     if snapshot.tools_max > 0:
         budget_line = (
             f"- tools: used {snapshot.tools_used}/{snapshot.tools_max}, "
@@ -309,14 +365,17 @@ def _append_budget_section(lines: list[str], snapshot: TurnStatusBarSnapshot) ->
         )
     else:
         budget_line = f"- tools: used {snapshot.tools_used}, max unlimited"
-    lines.extend(
-        [
-            "### budget",
-            budget_line,
-            f"- budget_profile: {snapshot.budget_profile or 'default'}",
-            f"- budget_status: {snapshot.budget_status}",
-        ]
-    )
+    lines.append("### budget")
+    lines.append(budget_line)
+    if token_budget is not None:
+        used, total = token_budget
+        token_status = _token_budget_status(used=used, total=total)
+        lines.append(
+            f"- tokens: used {_format_token_count(used)}/{_format_token_count(total)} "
+            f"({used * 100 // total}%), budget_status: {token_status}"
+        )
+    lines.append(f"- budget_profile: {snapshot.budget_profile or 'default'}")
+    lines.append(f"- budget_status: {snapshot.budget_status}")
     if snapshot.model or snapshot.provider or snapshot.profile_id:
         model_bits = [part for part in (snapshot.model, snapshot.provider, snapshot.profile_id) if part]
         lines.append(f"- model: {' · '.join(model_bits)}")
@@ -344,6 +403,11 @@ def _append_budget_section(lines: list[str], snapshot: TurnStatusBarSnapshot) ->
         )
     elif snapshot.budget_status == "ok":
         lines.append("- action: prefer structured tools over repeated shell retries.")
+    if token_status == "critical":
+        lines.append(
+            "- action: token budget critical — wrap up the current step and wait for the user; "
+            "do not start new exploration branches or write a long wrap-up."
+        )
 
 
 def _append_clock_section(lines: list[str], extras: Mapping[str, Any] | None) -> None:

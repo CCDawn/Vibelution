@@ -8,6 +8,7 @@ import {
   Check,
   ChevronLeft,
   FileText,
+  Gauge,
   HeartHandshake,
   ImagePlus,
   MessageCircleHeart,
@@ -58,6 +59,8 @@ type PlusMenuItem = {
   icon: ReactNode;
   toggle?: boolean;
   active?: boolean;
+  /** Opens a right-side panel anchored to this row instead of a plain action. */
+  sidePanel?: boolean;
   onSelect?: () => void;
 };
 
@@ -182,6 +185,9 @@ export function ChatComposerPlusMenuPreviewApp() {
   const [references, setReferences] = useState<ReferenceItem[]>([]);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState(GROUP_META.name);
+  const [budgetPanelOpen, setBudgetPanelOpen] = useState(false);
+  const [budgetMaxCallsDraft, setBudgetMaxCallsDraft] = useState("32");
+  const [budgetThinkingDraft, setBudgetThinkingDraft] = useState("");
   const [feedback, setFeedback] = useState("");
 
   const plusMenuRef = useRef<HTMLDivElement | null>(null);
@@ -276,6 +282,9 @@ export function ChatComposerPlusMenuPreviewApp() {
     setFeedback("");
     setDraft("");
     setGroupNameDraft(GROUP_META.name);
+    setBudgetPanelOpen(false);
+    setBudgetMaxCallsDraft("32");
+    setBudgetThinkingDraft("");
     if (next === "direct") {
       setSessionBusy(true);
       setMentalEnabled(true);
@@ -318,6 +327,17 @@ export function ChatComposerPlusMenuPreviewApp() {
   function openGroupManage() {
     setGroupDialogOpen(true);
     setPlusOpen(false);
+  }
+
+  function applyMockBudget() {
+    const maxCallsLine = budgetMaxCallsDraft.trim() === ""
+      ? "按模型策略"
+      : `${budgetMaxCallsDraft.trim()} 次/回合`;
+    const thinkingLine = budgetThinkingDraft.trim() === ""
+      ? "默认 500 字"
+      : `${budgetThinkingDraft.trim()} 字`;
+    setBudgetPanelOpen(false);
+    setFeedback(`已模拟保存预算与额度：工具调用 ${maxCallsLine}，思考预算 ${thinkingLine}`);
   }
 
   function openReferencePicker(kind: ReferenceKind) {
@@ -427,6 +447,13 @@ export function ChatComposerPlusMenuPreviewApp() {
           active: runtimeEnabled,
           onSelect: toggleRuntime,
         },
+        {
+          id: "budget-parameters",
+          label: "预算与额度",
+          hint: "每回合工具调用与思考字数",
+          icon: <Gauge size={15} />,
+          sidePanel: true,
+        },
       ],
     },
     {
@@ -490,6 +517,106 @@ export function ChatComposerPlusMenuPreviewApp() {
   ];
 
   function renderPlusItem(item: PlusMenuItem) {
+    if (item.sidePanel) {
+      return (
+        <VPopover
+          key={item.id}
+          open={budgetPanelOpen}
+          onOpenChange={(open) => {
+            setBudgetPanelOpen(open);
+            if (!open) {
+              setFeedback("已收起预算与额度，未保存修改");
+            }
+          }}
+          side="right"
+          align="start"
+          sideOffset={6}
+          aria-label="预算与额度"
+          contentClassName={styles.budgetPanel}
+          trigger={(
+            <VButton
+              role="menuitem"
+              aria-label={item.label}
+              data-plus-menu-item="true"
+              className={styles.menuItem}
+              contentLayout="plain"
+              variant="ghost"
+              icon={item.icon}
+            >
+              <span className={styles.menuItemCopy}>
+                <strong>{item.label}</strong>
+                {item.hint ? <small className={styles.menuItemHint}>{item.hint}</small> : null}
+              </span>
+            </VButton>
+          )}
+        >
+          <div className={styles.groupDialog}>
+            <div className={styles.groupFieldRow}>
+              <span className={styles.groupFieldLabel}>每回合工具调用额度</span>
+              <VNativeInput
+                className={styles.groupNameField}
+                type="number"
+                min={1}
+                max={200}
+                step={1}
+                value={budgetMaxCallsDraft}
+                aria-label="每回合工具调用额度"
+                placeholder="未配置=按模型策略，常见 32"
+                onChange={(event) => setBudgetMaxCallsDraft(event.target.value)}
+              />
+              <VButton
+                isIconOnly
+                variant="ghost"
+                density="compact"
+                aria-label="清除工具调用额度，恢复默认"
+                icon={<RotateCcw size={13} />}
+                isDisabled={budgetMaxCallsDraft.trim() === ""}
+                onPress={() => setBudgetMaxCallsDraft("")}
+              />
+            </div>
+            <div className={styles.groupFieldRow}>
+              <span className={styles.groupFieldLabel}>思考预算字数</span>
+              <VNativeInput
+                className={styles.groupNameField}
+                type="number"
+                min={50}
+                max={4000}
+                step={1}
+                value={budgetThinkingDraft}
+                aria-label="思考预算字数"
+                placeholder="未配置=默认 500"
+                onChange={(event) => setBudgetThinkingDraft(event.target.value)}
+              />
+              <VButton
+                isIconOnly
+                variant="ghost"
+                density="compact"
+                aria-label="清除思考预算，恢复默认"
+                icon={<RotateCcw size={13} />}
+                isDisabled={budgetThinkingDraft.trim() === ""}
+                onPress={() => setBudgetThinkingDraft("")}
+              />
+            </div>
+            <p className={styles.railNote}>保存按会话生效；清除输入框后保存即恢复默认策略。</p>
+            <div className={styles.budgetPanelFooter}>
+              <VButton
+                variant="secondary"
+                density="compact"
+                onPress={() => {
+                  setBudgetPanelOpen(false);
+                  setFeedback("已收起预算与额度，未保存修改");
+                }}
+              >
+                取消
+              </VButton>
+              <VButton variant="primary" density="compact" onPress={applyMockBudget}>
+                保存
+              </VButton>
+            </div>
+          </div>
+        </VPopover>
+      );
+    }
     if (item.toggle) {
       const active = item.active ?? false;
       return (
@@ -950,6 +1077,7 @@ export function ChatComposerPlusMenuPreviewApp() {
         cancelLabel="取消"
         onConfirm={() => confirmDestructive("reset")}
       />
+
 
       <VConfirmDialog
         open={confirmDeleteOpen}

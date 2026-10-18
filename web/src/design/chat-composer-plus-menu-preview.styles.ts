@@ -63,6 +63,8 @@ export const chatComposerPlusMenuPreviewStyles = {
   menuItemHint: "plus-menu-preview-menu-item-hint",
   menuCheck: "plus-menu-preview-menu-check",
   groupDialog: "plus-menu-preview-group-dialog",
+  budgetPanel: "plus-menu-preview-budget-panel",
+  budgetPanelFooter: "plus-menu-preview-budget-panel-footer",
   groupFieldRow: "plus-menu-preview-group-field-row",
   groupFieldLabel: "plus-menu-preview-group-field-label",
   groupFieldValue: "plus-menu-preview-group-field-value",

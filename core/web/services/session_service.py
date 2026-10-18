@@ -569,6 +569,11 @@ from core.web.services.session.agent_runtime import (
     _record_session_agent_missing_index_event,
     _record_session_agent_missing_index_batch_event,
 )
+from core.web.services.session.budget_parameters import (
+    SessionBudgetParametersConflictError,
+    get_session_budget_parameters_view,
+    update_session_budget_parameters,
+)
 from core.web.services.session.agent_runtime_retirement import (
     retire_uncached_session_agent,
     retry_retired_session_agents as _retry_retired_session_agents,

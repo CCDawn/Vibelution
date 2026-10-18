@@ -75,6 +75,15 @@ const previewExemptDesignSections = new Set([
   // click/close/stack and 12s hover-pause interaction tests.
   "HumanAttentionNotifier",
   "HumanAttentionNoticeStack",
+  // Route-owned composer composition: the plus menu's meaningful state comes
+  // from workbench-injected attachment/reference/capability/budget props. It
+  // has an approved isolated preview (design/chat-composer-plus-menu-preview)
+  // plus menu and dialog interaction tests.
+  "ChatComposerPlusMenu",
+  // Route-owned server-bound dialog: the budget revision/values/pending state
+  // comes from the session budget-parameters query and mutation. Covered by
+  // its draft/validation/409 interaction tests and the isolated plus-menu preview.
+  "ChatComposerBudgetPopover",
 ]);
 
 function collectPreviewSources(directory: string): string {
