@@ -6,8 +6,9 @@ other workbenches. Prefer editing a **pure module or turn panel** over growing
 
 `ConversationView.tsx` remains the **shell**: props wiring, expansion state,
 virtual timeline window, and turn composition. Stick-bottom scroll lives in
-`useConversationTimelineFollow.ts`. Pure presentation, timeline projection, and
-tool rendering should live outside the shell.
+`useConversationTimelineFollow.ts`. The turn-navigator directory and live
+current-turn index live in `useConversationTurnNav.ts`. Pure presentation,
+timeline projection, and tool rendering should live outside the shell.
 
 ## 30-second routing (Agent reading map)
 
@@ -15,6 +16,7 @@ tool rendering should live outside the shell.
 |-------------------|------------|
 | Virtual window / history window policy | `conversationHistoryWindow.ts` |
 | Stick-bottom / follow-tail scroll | `useConversationTimelineFollow.ts`, `conversationTimelineFollowState.ts` |
+| Turn navigator directory / current turn | `useConversationTurnNav.ts`, `conversationTurnNavigation.ts` |
 | Scroll signals / anchor helpers | `conversationTimelineScrollSignals.ts`, `timelineScrollAnchor.ts` |
 | Timeline rows / process projection | `agentMessageTimeline*.ts`, `timelineMessageProcessProjection.ts` |
 | Operation groups / ReAct items | `agentMessageOperations.ts`, `conversationReActOperationItems.ts` |
@@ -37,6 +39,7 @@ tool rendering should live outside the shell.
 | Composer shortcuts / slash commands | `composerShortcuts.ts`, `conversationSlashCommandSuggestions.ts` |
 | Image artifacts / preview dialog | `ConversationImageArtifactView.tsx`, `ConversationImagePreviewDialog.tsx` |
 | Turn file deliveries / recorded patches | `ConversationFileDeliveries.tsx`, `conversationFileDeliveryModel.ts`; successful native tool calls only, no session-level changed-file attribution. Content is a turn snapshot, patches are ordered operations rather than a net filesystem diff. HTML uses the shared static sandbox preview. |
+| Turn navigator rail | `ConversationTurnNavigator.tsx`, `useConversationTurnNav.ts`, `conversationTurnNavigation.ts` |
 | Turn avatar / header compaction | `conversationTurnAvatar.ts`, `ConversationTurnAvatarContent.tsx` |
 | Agent thread bridge / projection hooks | `useAgentThread.ts`, `useAgentMessageTimelineProjection.ts` |
 | Prefetch (idle warm, no mount) | `prefetchConversationView.ts`, `LazyConversationView.tsx` |
@@ -54,6 +57,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Row memo equality | `ConversationTurnRow` props compare | keep shell-local unless shared |
 | Virtual range + heights | measured heights, prefix sums, min tail | `conversationHistoryWindow.ts` + shell measure |
 | Stick-bottom follow | rAF follow / user scroll break | `useConversationTimelineFollow.ts` + `conversationTimelineFollowState.ts` |
+| Turn navigator | preview text, directory, current-turn index | `useConversationTurnNav.ts` + `conversationTurnNavigation.ts` |
 | Timeline projection | agent timeline items / codex cells | pure timeline modules |
 | Process / operation expansion | process disclosure state | `ConversationProcessDisclosure.tsx` + pure state |
 | Response streaming render | streaming segments / markdown | streaming + markdown modules |
@@ -72,6 +76,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Markdown / tool renderers | dedicated renderer modules | re-inlining into shell |
 | Prefetch without mount | `prefetchConversationView.ts` | mounting ConversationView early |
 | Timeline text-selection quote | `useConversationSelectionQuote.tsx` | stick-bottom / history-load scroll |
+| Turn navigator directory | `useConversationTurnNav.ts` | inlining preview maps back into the shell |
 
 ## Structure program
 
