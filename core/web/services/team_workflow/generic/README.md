@@ -182,6 +182,9 @@ retryable problem code, or exhaustion of the native retry allowance, queue one
 existing director/developer/reviewer repair child. Different problem codes do
 not count as the same failure. Unknown problems, human decisions, invalid budget
 contracts and unsettled executions are excluded from automatic repair/replay.
+The shared research archive switch also blocks repair admission and replay,
+including when archive mode is enabled after the native runtime was configured;
+success/cancellation observations remain read-only.
 
 Before the repair threshold, the native research scheduler continues owning its
 retries. After independent repair verification, safe replay uses the existing
