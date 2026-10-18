@@ -16,8 +16,12 @@ import threading
 
 import psutil
 
+from config.paths import PROJECT_ROOT
 from core.infrastructure.cua_driver_client import CuaDriverClient
 from core.infrastructure.file_lock import locked_sidecar
+from vibelution_storage import (
+    ProjectIdentityError, ProjectStorageMigrationStateError, resolve_active_project_storage_paths,
+)
 from .i18n import get_web_language, text_for
 
 
@@ -35,7 +39,11 @@ def driver_binary() -> Path:
         raise ComputerBlocked("电脑操作目前仅支持 Windows。", "Computer control currently supports Windows only.")
     raw = os.environ.get("VIBELUTION_COMPUTER_CUA_DRIVER", "")
     if not raw:
-        home = Path(os.environ.get("VIBELUTION_DATA_HOME", ""))
+        data_home = os.environ.get("VIBELUTION_DATA_HOME", "")
+        try:
+            home = Path(data_home) if data_home else resolve_active_project_storage_paths(PROJECT_ROOT).data
+        except (ProjectIdentityError, ProjectStorageMigrationStateError):
+            raise ComputerBlocked("当前实例存储尚未就绪，请检查存储配置后重试。", "The current instance storage is not ready. Check the storage configuration and try again.") from None
         candidates = [home / "runtime" / "computer-cua-driver.json"] if home.is_absolute() else []
         legacy = os.environ.get("VIBELUTION_DESKTOP_CUA_CONFIG", "")
         if legacy:
