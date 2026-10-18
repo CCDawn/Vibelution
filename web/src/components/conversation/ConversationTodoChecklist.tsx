@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Circle, CircleCheck, LoaderCircle, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Circle, CircleCheck, CirclePause, LoaderCircle, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { VNativeButton } from "../vui";
@@ -9,8 +9,10 @@ import styles from "./ConversationTodoChecklist.styles";
 export type ConversationTodoChecklistProps = {
   snapshot: TodoChecklistSnapshot;
   lang: "zh" | "en" | string;
-  /** Settled (history) turns render read-only and collapsed by default. */
+  /** Settled turns show unfinished work as paused, never as a running spinner. */
   turnSettled: boolean;
+  /** Inline snapshots stay compact; the plan panel exposes the full list. */
+  presentation?: "inline" | "panel";
 };
 
 /**
@@ -24,9 +26,10 @@ export function ConversationTodoChecklist({
   snapshot,
   lang,
   turnSettled,
+  presentation = "inline",
 }: ConversationTodoChecklistProps) {
   const langKey = lang === "en" ? "en" : "zh";
-  const [expanded, setExpanded] = useState(!turnSettled);
+  const [expanded, setExpanded] = useState(presentation === "panel");
   const copy = dictionaryChat[langKey];
   const counter = `${snapshot.completedCount}/${snapshot.total}`;
   const showWarning = turnSettled && snapshot.hasUnfinished;
@@ -76,13 +79,15 @@ export function ConversationTodoChecklist({
             >
               {item.status === "completed" ? (
                 <CircleCheck className={styles.checkIcon} size={14} aria-hidden="true" />
+              ) : item.status === "in_progress" && turnSettled ? (
+                <CirclePause className={styles.pendingIcon} size={14} aria-hidden="true" />
               ) : item.status === "in_progress" ? (
                 <LoaderCircle className={styles.spinnerIcon} size={14} aria-hidden="true" />
               ) : (
                 <Circle className={styles.pendingIcon} size={14} aria-hidden="true" />
               )}
               <span className={styles.itemText}>
-                {item.status === "in_progress" ? item.activeForm : item.content}
+                {item.status === "in_progress" && !turnSettled ? item.activeForm : item.content}
               </span>
             </li>
           ))}

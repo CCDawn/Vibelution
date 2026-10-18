@@ -4,6 +4,8 @@ export type ChatRightRailOpenRequest = {
   sessionId: string;
   kind: Extract<ChatRightRailKind, "subagent" | "directory" | "file" | "plan" | "workflow" | "trajectory" | "bash">;
   title: string;
+  /** Explicit entry points can restore a utility moved into the center. */
+  host?: "rail";
   targetId?: string;
   filePath?: string;
 };

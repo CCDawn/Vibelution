@@ -3,10 +3,12 @@
  * The workbench keeps layout state and passes it in; this module owns the strip JSX.
  */
 import { List, PanelLeftOpen } from "lucide-react";
-import { lazy, type Dispatch, type SetStateAction } from "react";
+import { lazy, useMemo, type Dispatch, type SetStateAction } from "react";
 
 import type { AgentInstance, ConversationMessage, SessionSummary, Team, VirtualHumanCompanion } from "../../api/types";
 import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
+import { ConversationTodoProgressButton } from "../../components/conversation/ConversationTodoProgressButton";
+import { deriveSessionTodoChecklist } from "../../components/conversation/conversationTodoChecklistModel";
 import { VIconButton } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { AgentSessionTabStrip, type AgentSessionTabStripProps, type SessionBarRailTab } from "../AgentSessionTabStrip";
@@ -15,6 +17,8 @@ import styles from "../ChatCodingRoute.styles";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { cliAgentRunTabId, type CliAgentRunView } from "./cliAgentRunModel";
 import type { PaneDockPayload, SessionBarDockChip } from "./chatPaneDock";
+import { chatRightRailKindLabel } from "./chatRightRailModel";
+import { requestChatRightRailOpen } from "./chatRightRailRequests";
 
 const ChatFileWorkspaceTabs = lazy(() =>
   import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
@@ -44,6 +48,7 @@ export type ChatCodingCenterTabsProps = {
   conversationIndexOverlayOpen: boolean;
   ordinaryChangeRail: boolean;
   changeRailVisible: boolean;
+  taskPlanOpen?: boolean;
   statusRailOverlayOpen: boolean;
   toggleChangeRail: () => void;
   setResponsiveOverlayPane: Dispatch<SetStateAction<"left" | "right" | null>>;
@@ -112,6 +117,7 @@ export function ChatCodingCenterTabs({
   conversationIndexOverlayOpen,
   ordinaryChangeRail,
   changeRailVisible,
+  taskPlanOpen = false,
   statusRailOverlayOpen,
   toggleChangeRail,
   setResponsiveOverlayPane,
@@ -155,6 +161,12 @@ export function ChatCodingCenterTabs({
   onRailRowTabSelect,
   onRailRowTabClose,
 }: ChatCodingCenterTabsProps) {
+  const taskPlan = useMemo(() => (
+    ordinaryChangeRail && !financeSurface && !verifiedCompanionMode && !groupPanelActive
+      && activeSessionId && conversationModel?.sessionId === activeSessionId
+      ? deriveSessionTodoChecklist(conversationModel.messages)
+      : undefined
+  ), [ordinaryChangeRail, financeSurface, verifiedCompanionMode, groupPanelActive, activeSessionId, conversationModel]);
   return (
     <ChatCenterTabStrip
       styles={styles}
@@ -202,6 +214,26 @@ export function ChatCodingCenterTabs({
         presentation="menu"
         isDisabled={conversationModel.messages.length === 0}
       /> : undefined}
+      taskProgressControl={taskPlan && activeSessionId ? (
+        <ConversationTodoProgressButton
+          plan={taskPlan}
+          lang={lang}
+          expanded={taskPlanOpen}
+          onPress={() => {
+            if (taskPlanOpen) {
+              toggleChangeRail();
+              return;
+            }
+            setSessionBrowserOpen(false);
+            requestChatRightRailOpen({
+              sessionId: activeSessionId,
+              kind: "plan",
+              title: chatRightRailKindLabel("plan", lang),
+              host: "rail",
+            });
+          }}
+        />
+      ) : undefined}
       leftOverlayVisible={leftOverlayVisible}
       rightOverlayVisible={rightOverlayVisible}
       conversationIndexOverlayOpen={conversationIndexOverlayOpen}
