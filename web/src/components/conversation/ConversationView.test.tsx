@@ -32,6 +32,8 @@ import conversationTimelineRowsSource from "./conversationTimelineRows.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import conversationTimelineFollowSource from "./useConversationTimelineFollow.ts?raw";
 import conversationProcessExpansionSource from "./useConversationProcessExpansion.ts?raw";
+import conversationTurnNavSource from "./useConversationTurnNav.ts?raw";
+import conversationTurnNavigationSource from "./conversationTurnNavigation.ts?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
@@ -2678,8 +2680,9 @@ describe("conversation turn navigator contract", () => {
     // ConversationView wires the navigator to the same row plan the
     // virtualizer renders, and keeps the gate in the navigator module.
     expect(conversationViewSource).toContain('from "./ConversationTurnNavigator"');
-    expect(conversationViewSource).toContain("buildConversationTurnNavDirectory");
-    expect(conversationViewSource).toContain("resolveConversationTurnNavCurrentIndex");
+    expect(conversationViewSource).toContain("useConversationTurnNav({");
+    expect(conversationTurnNavSource).toContain("buildConversationTurnNavDirectory");
+    expect(conversationTurnNavSource).toContain("resolveConversationTurnNavCurrentIndex");
     expect(conversationViewSource).toContain("<ConversationTurnNavigator");
     expect(conversationTimelineFollowSource).toContain("scrollToIndex(entry.anchorRowIndex");
     expect(conversationViewSource).toContain("handleTurnNavigate");
@@ -2689,11 +2692,12 @@ describe("conversation turn navigator contract", () => {
   });
 
   it("feeds the rail's hover cards through the markdown-free preview map", () => {
-    expect(conversationViewSource).toContain("timelineTurnNavPreviewTextByRowKey");
-    expect(conversationViewSource).toContain("previewTextByRowKey: timelineTurnNavPreviewTextByRowKey");
-    expect(conversationViewSource).toContain("function turnNavPlainPreviewText");
+    expect(conversationViewSource).toContain("useConversationTurnNav({");
+    expect(conversationTurnNavSource).toContain("timelineTurnNavPreviewTextByRowKey");
+    expect(conversationTurnNavSource).toContain("previewTextByRowKey: timelineTurnNavPreviewTextByRowKey");
+    expect(conversationTurnNavigationSource).toContain("function turnNavPlainPreviewText");
     // Previews are markdown-free: fences, images, emphasis markers stripped.
-    expect(conversationViewSource).toContain('.replace(/```[\\s\\S]*?```/g, " ")');
+    expect(conversationTurnNavigationSource).toContain('.replace(/```[\\s\\S]*?```/g, " ")');
     expect(navigatorSource).toContain("<VHoverCard");
     expect(navigatorStylesSource).toContain("line-clamp-2");
     expect(navigatorStylesSource).toContain("line-clamp-3");
