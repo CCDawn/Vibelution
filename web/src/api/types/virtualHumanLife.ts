@@ -786,3 +786,60 @@ export type AgentPluginBindingUpdate = {
   expectedVersion: number;
   config: Record<string, unknown>;
 };
+
+export type VirtualHumanDialogueSettingsField =
+  | "speakingInitiative"
+  | "questionInitiative"
+  | "preferenceProposalMode";
+
+export type VirtualHumanDialogueSettings = {
+  agentId: string;
+  speakingInitiative: "restrained" | "natural" | "talkative";
+  questionInitiative: "few" | "natural" | "proactive";
+  preferenceProposalMode: "ask_first" | "manual_only";
+  updatedAt?: string;
+};
+
+export type VirtualHumanDialogueSettingsUpdate = Partial<
+  Pick<
+    VirtualHumanDialogueSettings,
+    "speakingInitiative" | "questionInitiative" | "preferenceProposalMode"
+  >
+>;
+
+export type VirtualHumanPreferenceProposalType =
+  | "verbosity"
+  | "question_initiative"
+  | "address"
+  | "humor"
+  | "proactive_contact";
+
+export type VirtualHumanPreferenceProposalStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "expired";
+
+export type VirtualHumanPreferenceProposal = {
+  proposalId: string;
+  agentId: string;
+  preferenceType: VirtualHumanPreferenceProposalType;
+  candidateValue: unknown;
+  sourceTurnId: string;
+  status: VirtualHumanPreferenceProposalStatus;
+  receiptId?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  decidedAt?: string;
+};
+
+export type VirtualHumanPreferenceProposalList = {
+  agentId: string;
+  proposals: VirtualHumanPreferenceProposal[];
+};
+
+export type VirtualHumanPreferenceProposalDecision = {
+  agentId: string;
+  proposal: VirtualHumanPreferenceProposal;
+  receipt?: Record<string, unknown> | null;
+};
