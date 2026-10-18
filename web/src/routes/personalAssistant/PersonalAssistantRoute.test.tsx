@@ -24,8 +24,13 @@ vi.mock("../../api/personalAssistant", () => ({ createPersonalAssistant: vi.fn()
 }));
 vi.mock("../../api/desktopPet", () => ({ getDesktopAssistantContext: vi.fn(), setDesktopPetExpanded: vi.fn(), controlDesktopAssistant: vi.fn() }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
+vi.mock("../../api/personalAssistantComputer", () => ({ fetchPersonalAssistantComputer: vi.fn(async () => ({
+  available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
+})) }));
 vi.mock("../ChatCodingRoute", () => ({ ChatCodingRoute: () => <div data-native-session-chat="true" /> }));
 vi.mock("./PersonalAssistantOverview", () => ({ PersonalAssistantOverview: () => <div>真实概览入口</div> }));
+vi.mock("./PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: ({ active, onCollapse }: { active: boolean; onCollapse: () => void }) =>
+  <div data-computer-panel={String(active)}><button onClick={onCollapse}>收起电脑操作栏</button></div> }));
 vi.mock("../desktopPet/WhaleRigCharacter", () => ({ WhaleRigCharacter: ({ tone, animationState }: { tone: string; animationState: string }) => <span data-whale-tone={tone} data-whale-animation={animationState}>大肥鲸</span> }));
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -42,10 +47,13 @@ beforeEach(() => {
   vi.mocked(getDesktopAssistantContext).mockResolvedValue({ role: "desktop-assistant", mode: "assistant" });
   vi.mocked(setDesktopPetExpanded).mockResolvedValue({ expanded: true, width: 760, height: 600 });
   vi.mocked(fetchPetActivity).mockResolvedValue({ schemaVersion: 1, aggregateTone: "idle", animationState: "idle", activeCount: 0, attentionCount: 0, generatedAt: "", sessions: [] });
+  Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+  vi.spyOn(window, "matchMedia").mockImplementation(query => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null } as MediaQueryList));
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); vi.restoreAllMocks(); });
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 25))); }
 async function render(path: string, desktop = false) {
   await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>
@@ -65,6 +73,32 @@ describe("personal assistant page admission", () => {
     await act(async () => button.click()); await settle();
     expect(document.querySelector('input[aria-label="助理名称"]')).not.toBeNull();
     expect(document.body.textContent).toContain("对话模型");
+  });
+  it("switches the right rail to computer controls while preserving native chat and character", async () => {
+    await render("/personal-assistant");
+    expect(container.querySelector("[data-computer-panel]")).toBeNull();
+    await act(async () => (container.querySelector('[role="tab"][id$="computer"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await settle();
+    expect(container.querySelector('[data-computer-panel="true"]')).not.toBeNull();
+    expect(container.querySelector("[data-native-session-chat]")).not.toBeNull();
+    expect(container.querySelector('aside[aria-label="个人助理角色"]')).not.toBeNull();
+    await act(async () => ([...container.querySelectorAll("button")].find(row => row.textContent === "收起电脑操作栏") as HTMLButtonElement).click());
+    await settle();
+    expect(container.querySelector('[aria-label="展开平台概览"]')).not.toBeNull();
+    expect(container.querySelector("[data-native-session-chat]")).not.toBeNull();
+  });
+  it("opens computer controls in a narrow dialog and retains its top entry after collapse", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    vi.mocked(window.matchMedia).mockImplementation(query => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null } as MediaQueryList));
+    await render("/personal-assistant");
+    const open = [...container.querySelectorAll("button")].find(row => row.textContent === "电脑操作")!;
+    await act(async () => open.click()); await settle();
+    expect(document.querySelector('[role="dialog"] [data-computer-panel="true"]')).not.toBeNull();
+    await act(async () => ([...document.querySelectorAll('[role="dialog"] button')].find(row => row.textContent === "收起电脑操作栏") as HTMLButtonElement).click()); await settle();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector("[data-native-session-chat]")).not.toBeNull();
+    expect(open.isConnected).toBe(true);
   });
   it("bootstraps a bare entry to the same canonical session and mounts the native host", async () => {
     await render("/personal-assistant");
