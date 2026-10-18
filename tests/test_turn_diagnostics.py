@@ -425,6 +425,35 @@ def test_completion_snapshot_reconciles_before_acquiring_chat_state_lock(monkeyp
     assert snapshot["completionSource"] == "missing_conversation"
 
 
+def test_session_turn_error_preserves_deprecated_parameter_reason_after_prefix_normalization():
+    from core.web.services import session_service
+
+    raw_error = "provider_protocol_error: invalid_request_error: `temperature` is deprecated for this model."
+    turn_error = session_service._make_session_turn_error(raw_error, lang="zh")
+
+    assert turn_error["error_type"] == "provider_error"
+    assert turn_error["reason_code"] == "deprecated_sampling_parameter"
+    assert "模型不接受当前采样参数，例如 temperature" in turn_error["message"]
+    assert "`temperature` is deprecated for this model." in turn_error["message"]
+
+
+@pytest.mark.parametrize(
+    "raw_error",
+    [
+        "provider_error: unknown failure",
+        "not_invalid_request_error: unknown failure",
+        "invalid_request_error_suffix: unknown failure",
+        "worker_gone: invalid_request_error: worker process exited",
+    ],
+)
+def test_provider_text_recognition_keeps_unknown_and_lifecycle_errors_out(raw_error):
+    from core.web.services import session_service
+
+    assert session_service._looks_like_provider_error_text(raw_error) is False
+    summary = session_service._user_visible_failure_summary(raw_error, lang="zh")
+    assert "网页工作台这一轮执行失败" in summary
+
+
 def test_session_turn_error_uses_nested_provider_balance_reason_over_wrapper_protocol_marker():
     from core.web.services import session_service
 

@@ -87,11 +87,11 @@ _NON_PROVIDER_LLM_CATEGORIES = frozenset(
 )
 
 # ``classify_exception``'s catch-all reuses "provider_protocol_error" for
-# unknown errors; only explicit bad-request/400 evidence is a genuine provider
-# protocol rejection. Mirrors the classifier's own keyword set so the two stay
-# consistent without modifying the frozen classifier.
+# unknown errors; require explicit bad-request/400 evidence or the provider's
+# invalid_request_error type token for a genuine protocol rejection. A bare
+# provider_protocol_error prefix is not enough to widen unknown errors.
 _GENUINE_PROVIDER_PROTOCOL_PATTERN = re.compile(
-    r"bad_request|bad request|invalid params|400",
+    r"bad_request|bad request|invalid params|400|\binvalid_request_error\b",
     re.IGNORECASE,
 )
 
@@ -154,7 +154,7 @@ def _is_provider_family(exc: Exception, category: str, raw_error: str) -> bool:
 
     Explicit categories decide; the classifier's catch-all reuse of
     ``provider_protocol_error`` only counts as provider when the raw text
-    carries genuine bad-request/400 evidence. LLMError instances are trusted
+    carries explicit protocol-rejection evidence. LLMError instances are trusted
     as provider verdicts (the LLM stack raised them deliberately), except the
     budget/interrupt family which is never provider.
     """
