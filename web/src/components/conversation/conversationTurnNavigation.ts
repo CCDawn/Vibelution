@@ -2,9 +2,14 @@
  * Turn navigation directory for the conversation timeline minimap (pattern:
  * zai-org/ZCode ConversationTurnNavigator, Apache-2.0). Pure row-plan logic:
  * grouping timeline rows into turns, resolving the current turn from scroll
- * geometry, and label compaction. The component shell lives in
- * ConversationTurnNavigator.tsx; nothing here touches the DOM.
+ * geometry, label compaction, and preview-text extraction. The component
+ * shell lives in ConversationTurnNavigator.tsx; the derived directory and
+ * live current-turn index live in useConversationTurnNav.ts. Nothing here
+ * touches the DOM.
  */
+
+import type { ConversationMessage } from "../../api/types";
+import { assistantFinalAnswerText } from "../../routes/chatTurnProtocol";
 
 export const CONVERSATION_TURN_NAV_MIN_TURNS = 6;
 export const CONVERSATION_TURN_NAV_LABEL_MAX_CHARS = 48;
@@ -86,6 +91,38 @@ export function conversationTurnNavLabel(previewText: string, fallback: string):
     return fallback;
   }
   return singleLine.slice(0, CONVERSATION_TURN_NAV_LABEL_MAX_CHARS);
+}
+
+/** Turn navigator label source: the user's prompt, else the assistant answer. */
+export function turnNavPreviewText(message: ConversationMessage | undefined): string {
+  if (!message) {
+    return "";
+  }
+  if (message.role === "user") {
+    return String((message as { content?: string }).content ?? "");
+  }
+  return assistantFinalAnswerText(message);
+}
+
+/**
+ * Markdown-free single-line preview for the turn rail hover cards: same
+ * extraction as the nav label, then fences/images/links/emphasis/headings
+ * reduced to plain words so the card never shows raw markdown punctuation.
+ */
+export function turnNavPlainPreviewText(message: ConversationMessage | undefined): string {
+  const raw = turnNavPreviewText(message);
+  if (!raw) {
+    return "";
+  }
+  return raw
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\*\*|__|~~|`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Collapsed, single-line preview clipped to the turn-list cap. */
