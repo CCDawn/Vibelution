@@ -49,6 +49,7 @@ describe("ChatCenterTabStrip return navigation", () => {
           showSessionTabs
           sessionTabs={<span>原会话标签</span>}
           sessionBrowserControl={<button type="button" aria-label="浏览会话">浏览会话</button>}
+          taskProgressControl={<button type="button" aria-label="任务清单 1/3">任务 1/3</button>}
           sessionActionsControl={<button type="button" aria-label="会话操作">会话操作</button>}
         />
       </MemoryRouter>,
@@ -60,6 +61,7 @@ describe("ChatCenterTabStrip return navigation", () => {
 
     const controlsRow = html.match(/<div class="overlay-controls"[^>]*>([\s\S]*?)<\/div>/)?.[1] ?? "";
     expect(controlsRow).toContain('aria-label="浏览会话"');
+    expect(controlsRow).toContain('aria-label="任务清单 1/3"');
     expect(controlsRow).toContain('aria-label="会话操作"');
   });
 

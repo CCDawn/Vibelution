@@ -103,8 +103,8 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     expect(html).toContain("任务清单");
-    expect(html).toContain("正在补齐回归测试");
-    expect(html).toContain("animate-spin");
+    expect(html).not.toContain('data-testid="todo-checklist-items"');
+    expect(html).toContain('data-testid="todo-checklist-toggle"');
     expect(html).toContain(">1/2<");
     expect(html).not.toContain('data-testid="todo-checklist-warning"');
   });

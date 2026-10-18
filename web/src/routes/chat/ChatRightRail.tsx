@@ -972,6 +972,7 @@ export function ChatRightRail({
                 snapshot={planProjection.snapshot}
                 lang={lang}
                 turnSettled={planProjection.turnSettled}
+                presentation="panel"
               />
             </div>
           ) : (

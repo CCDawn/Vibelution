@@ -20,13 +20,19 @@ function snapshot(overrides: Partial<TodoChecklistSnapshot> = {}): TodoChecklist
   };
 }
 
-function renderCard(turnSettled: boolean, snap = snapshot(), lang: "zh" | "en" = "zh") {
+function renderCard(turnSettled: boolean, snap = snapshot(), lang: "zh" | "en" = "zh", presentation: "inline" | "panel" = "panel") {
   return renderToStaticMarkup(
-    <ConversationTodoChecklist snapshot={snap} lang={lang} turnSettled={turnSettled} />,
+    <ConversationTodoChecklist snapshot={snap} lang={lang} turnSettled={turnSettled} presentation={presentation} />,
   );
 }
 
 describe("ConversationTodoChecklist", () => {
+  it("collapses active inline snapshots while keeping the progress count", () => {
+    const html = renderCard(false, snapshot(), "zh", "inline");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain(">1/3<");
+    expect(html).not.toContain('data-testid="todo-checklist-items"');
+  });
   it("renders an expanded active card with spinner on the current activeForm row", () => {
     const html = renderCard(false);
 
@@ -55,13 +61,21 @@ describe("ConversationTodoChecklist", () => {
   });
 
   it("warns on settled turns with unfinished items and collapses history by default", () => {
-    const html = renderCard(true);
+    const html = renderCard(true, snapshot(), "zh", "inline");
 
     expect(html).toContain('data-todo-checklist-settled="true"');
     expect(html).toContain('data-testid="todo-checklist-warning"');
     expect(html).toContain(dictionaryChat.zh.todoChecklistUnfinishedWarning);
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('data-testid="todo-checklist-items"');
+  });
+
+  it("keeps a settled plan expanded in the panel without claiming work is running", () => {
+    const html = renderCard(true);
+    expect(html).toContain('data-testid="todo-checklist-items"');
+    expect(html).toContain("补齐回归测试");
+    expect(html).not.toContain("正在补齐回归测试");
+    expect(html).not.toContain("animate-spin");
   });
 
   it("omits the warning once every item completed, even on settled turns", () => {
