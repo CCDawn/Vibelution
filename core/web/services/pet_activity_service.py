@@ -239,6 +239,11 @@ def _safe_session_title(raw: Any, *, session_id: str, agent_name: Any) -> str:
     return f"会话 {short_id}" if short_id else "当前会话"
 
 
+def safe_session_title(raw: Any, *, session_id: str, agent_name: Any) -> str:
+    """Public wrapper so cross-service projections avoid the private symbol."""
+    return _safe_session_title(raw, session_id=session_id, agent_name=agent_name)
+
+
 def _normalize_display_text(value: Any, *, limit: int) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if len(text) > limit:

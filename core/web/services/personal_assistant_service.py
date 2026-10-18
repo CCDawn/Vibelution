@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 
 from core.web.services import agent_directory_service as directory
 from core.web.services import pet_activity_service, session_service
 from core.web.services.session_archive_service import conversation_is_archived
+
+logger = logging.getLogger(__name__)
 
 PROFILE = "personal_assistant_v1"
 ROLE = "personal_assistant"
@@ -71,6 +74,11 @@ def _max_calls_per_turn() -> int:
             )
         )
     except Exception:
+        logger.warning(
+            "personal_assistant_max_calls_per_turn config read failed; using default %s",
+            DEFAULT_MAX_CALLS_PER_TURN,
+            exc_info=True,
+        )
         return DEFAULT_MAX_CALLS_PER_TURN
     return value if value >= 1 else DEFAULT_MAX_CALLS_PER_TURN
 
@@ -118,7 +126,11 @@ COMPOSER_STARTERS = (
 def composer_starters_for_agent(
     agent_id: str, session_id: str
 ) -> list[dict[str, str]] | None:
-    """Presentation override only for this profile's canonical direct Session."""
+    """Presentation override only for this profile's canonical direct Session.
+
+    The cheap ``get_agent`` pre-read keeps unrelated agents from tripping the
+    singleton conflict path; only profile-tagged callers pay the full scan.
+    """
     candidate = directory.get_agent(agent_id)
     if (
         not candidate
@@ -278,10 +290,16 @@ def get_personal_assistant() -> dict:
     }
 
 
-def create_personal_assistant(display_name: str = "个人助理") -> dict:
+def _validated_display_name(display_name: str) -> str:
+    """Single name gate for create and settings rename (1–80 chars, one line)."""
     name = str(display_name or "").strip()
     if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
         raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
+    return name
+
+
+def create_personal_assistant(display_name: str = "个人助理") -> dict:
+    name = _validated_display_name(display_name)
     with _LOCK:
         agent = _profile_agent()
         created = agent is None
@@ -390,13 +408,13 @@ def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
             {
                 "id": row["id"],
                 "agentId": str(row.get("agentId") or ""),
-                "title": pet_activity_service._safe_session_title(
+                "title": pet_activity_service.safe_session_title(
                     row.get("title"),
                     session_id=row["id"],
                     agent_name=row.get("agentDisplayName"),
                 ),
                 "status": str(row.get("status") or ""),
-                "turnId": session_service._current_session_turn_id(row["id"]),
+                "turnId": session_service.current_session_turn_id(row["id"]),
                 "currentPhase": str(
                     live.get(row["id"], {}).get("phase")
                     or row.get("currentPhase")
@@ -463,6 +481,11 @@ def _model_settings(agent: dict) -> dict:
         try:
             options = session_service.get_session_llm_options(session_id)
         except Exception:
+            # Fail-open to an empty choices list; the read stays pure.
+            logger.warning(
+                "session llm options read failed for assistant settings projection",
+                exc_info=True,
+            )
             options = {}
         for row in _eligible_dialogue_model_choices(options):
             model_id = str((row or {}).get("modelId") or "").strip()
@@ -513,10 +536,7 @@ def update_personal_assistant_settings(
         agent = _active_profile_agent()
         updates: dict = {}
         if display_name is not None:
-            name = str(display_name or "").strip()
-            if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
-                raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
-            updates["display_name"] = name
+            updates["display_name"] = _validated_display_name(display_name)
         if preferences is not None:
             patch = preferences if isinstance(preferences, dict) else {}
             unknown = set(patch) - set(PREFERENCES_FIELDS)
@@ -541,6 +561,11 @@ def update_personal_assistant_settings(
         if updates:
             directory.update_agent_instance(agent["agentId"], **updates)
             agent = directory.get_agent(agent["agentId"], include_archived=True)
+        if agent.get("status") != "active":
+            # Archive can race in from Agent management (outside this lock).
+            raise directory.AgentStateConflictError(
+                "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+            )
         return {"settings": _settings_payload(agent)}
 
 
@@ -585,4 +610,9 @@ def update_personal_assistant_model(model_id: str) -> dict:
         bindings["dialogue"] = {"modelId": normalized_model_id}
         directory.update_agent_instance(agent["agentId"], llm_bindings=bindings)
         agent = directory.get_agent(agent["agentId"], include_archived=True)
+        if agent.get("status") != "active":
+            # Archive can race in from Agent management (outside this lock).
+            raise directory.AgentStateConflictError(
+                "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+            )
         return {"model": _model_settings(agent)}
