@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from core.llm.agent_model_parameters import (
     AgentModelParametersError,
     merge_agent_model_parameter_entry,
     validate_agent_model_parameters,
+)
+from core.orchestration.session_budget_resolve import (
+    SESSION_BUDGET_PARAMETERS_METADATA_KEY,
+    normalize_session_budget_parameters,
 )
 from ..agent_config_authority import materialize_agent_config_identity
 
@@ -162,4 +166,84 @@ def update_agent_model_parameters_if_current(
     return dict(agent)
 
 
-__all__ = ["update_agent_model_parameters_if_current"]
+def update_agent_budget_parameters_if_current(
+    agent_id: str,
+    *,
+    expected_config_revision: int,
+    values: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Atomically replace one Agent's session budget override block.
+
+    ``values`` is the fully merged override mapping (an empty/``None`` mapping
+    clears the override back to defaults). Mirrors the model-parameters CAS:
+    stale revisions raise ``AgentStateConflictError``; the caller validates
+    ranges before calling. Budget overrides are not part of the canonical
+    config hash, so the revision is incremented explicitly to keep
+    compare-and-swap collisions between two budget edits detectable.
+    """
+    s = _service()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentModelParametersError("Agent id is required.")
+    if isinstance(expected_config_revision, bool) or not isinstance(expected_config_revision, int):
+        raise AgentModelParametersError("expectedConfigRevision must be an integer.")
+    if expected_config_revision < 0:
+        raise AgentModelParametersError("expectedConfigRevision must be non-negative.")
+
+    normalized_parameters = normalize_session_budget_parameters(values)
+    payload = (
+        {}
+        if normalized_parameters is None
+        else normalized_parameters.as_storage_payload()
+    )
+    with s._STATE_LOCK:
+        state = s.load_state()
+        agent = s._find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise s.AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        current_revision = max(0, int(agent.get("configRevision") or 0))
+        if current_revision != expected_config_revision:
+            raise s.AgentStateConflictError("Agent configuration changed. Refresh and retry.")
+        if str(agent.get("status") or "active").strip().lower() == "archived":
+            raise s.AgentArchivedError("Archived Agent budget parameters cannot be changed.")
+
+        metadata = dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {}
+        if payload:
+            metadata[SESSION_BUDGET_PARAMETERS_METADATA_KEY] = dict(payload)
+        else:
+            metadata.pop(SESSION_BUDGET_PARAMETERS_METADATA_KEY, None)
+        agent["metadata"] = metadata
+        materialize_agent_config_identity(agent)
+        # Explicit bump: the canonical config hash does not cover this metadata
+        # key, so without it concurrent budget edits would never collide.
+        agent["configRevision"] = max(1, int(agent.get("configRevision") or 0)) + 1
+        materialize_agent_config_identity(agent)
+        agent["updatedAt"] = s.utc_now_iso()
+        s.save_state(state)
+
+    s._record_agent_event("agent.budget_parameters.updated", agent)
+    try:
+        s.record_runtime_scene_event(
+            "agent_directory",
+            "agent_budget_parameters",
+            "agent.budget_parameters.updated",
+            level="info",
+            outcome="updated",
+            message="Agent session budget parameters were updated.",
+            fields={
+                "agentId": normalized_agent_id,
+                "configRevision": int(agent.get("configRevision") or 0),
+                "maxCallsPerTurn": payload.get("maxCallsPerTurn"),
+                "thinkingBudgetChars": payload.get("thinkingBudgetChars"),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+    return dict(agent)
+
+
+__all__ = [
+    "update_agent_budget_parameters_if_current",
+    "update_agent_model_parameters_if_current",
+]

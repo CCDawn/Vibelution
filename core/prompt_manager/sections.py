@@ -362,6 +362,29 @@ def make_reading_rules_section() -> SystemPromptSection:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _turn_budget_hint_line() -> str:
+    """回合预算提示行：数字必须来自授权层同一解析链，解析不到不给数字。"""
+
+    max_calls = 0
+    try:
+        from core.orchestration.tool_budget_text import (
+            resolve_current_runtime_max_calls_per_turn,
+        )
+
+        max_calls, _family = resolve_current_runtime_max_calls_per_turn()
+    except Exception:
+        max_calls = 0
+    if max_calls > 0:
+        return (
+            f"- 回合预算: 工具调用有额度上限（本回合 {max_calls} 次）；"
+            "探查失败不得耗尽额度，至少预留 2–3 次给验证。"
+        )
+    return (
+        "- 回合预算: 工具调用额度以授权层执行为准（未解析到固定数值）；"
+        "探查失败不得耗尽额度，至少预留 2–3 次给验证。"
+    )
+
+
 def make_env_info_section(project_root: Path) -> SystemPromptSection:
     """环境信息 — 时间以 5 分钟粒度稳定，保持缓存友好。"""
 
@@ -376,7 +399,7 @@ def make_env_info_section(project_root: Path) -> SystemPromptSection:
         ]
         budget = [
             "- 命令入口: 默认 `cli_tool`/`exec_command`（同一 shell 路由）；定位优先结构化工具。",
-            "- 回合预算: 工具调用有额度上限（常见 32 次）；探查失败不得耗尽额度，至少预留 2–3 次给验证。",
+            _turn_budget_hint_line(),
             "- 大结果: 输出超过约 4KB 时只保留结论，勿整段回灌。",
         ]
         return [*budget, *dialect_lines]
@@ -660,6 +683,17 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
                 max_calls = int(getattr(packet, "max_calls_per_turn", 0) or 0)
             except (TypeError, ValueError):
                 max_calls = 0
+        if max_calls <= 0:
+            # 目标包未带终值时按授权层同一链路兜底解析一次；解析不到就
+            # 不给数字，绝不回退写死「常见 32 次」。
+            try:
+                from core.orchestration.tool_budget_text import (
+                    resolve_current_runtime_max_calls_per_turn,
+                )
+
+                max_calls, _family = resolve_current_runtime_max_calls_per_turn()
+            except Exception:
+                max_calls = 0
         if max_calls > 0:
             budget_rule = (
                 f"- 本回合工具额度 **{max_calls}** 次（maxCallsPerTurn）；"
@@ -667,8 +701,8 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
             )
         else:
             budget_rule = (
-                "- 工具额度以 Agent 策略为准（常见 32 次）；"
-                "用尽即停，下一用户消息重新计数。"
+                "- 工具额度以授权层执行为准（未解析到固定数值）；"
+                "若授权层设限，用尽即停，下一用户消息重新计数。"
             )
         common = [
             "- 默认中文；代码、命令、路径、协议字段、必要报错可保留原文。",

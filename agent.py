@@ -681,6 +681,21 @@ class AgentRuntime:
             "cache_hint": dict(cache_hint) if isinstance(cache_hint, dict) else None,
         }
 
+    def set_session_token_budget(self, *, used: int = 0, total: int = 0) -> None:
+        """Session token-fuse counters for the Turn Status Bar payload.
+
+        The worker owns the cumulative session-token counter and refreshes
+        these values before every continuation-loop invocation so each
+        iteration's status-bar payload carries the freshest used/total pair.
+        """
+        try:
+            self._session_token_budget = {
+                "used": max(0, int(used or 0)),
+                "total": max(0, int(total or 0)),
+            }
+        except (TypeError, ValueError):
+            self._session_token_budget = {"used": 0, "total": 0}
+
     def set_runtime_status_enabled_override(self, enabled: Optional[bool]) -> None:
         """Override runtime-status inject for this agent instance / turn request."""
 
@@ -750,6 +765,19 @@ class AgentRuntime:
         except Exception:
             tool_policy = None
         mental_enabled = self.is_mental_model_enabled_for_turn()
+        # Session token fuse (used = cumulative session tokens, total = the
+        # circuit-breaker line); the worker refreshes it before every
+        # continuation-loop invocation so each iteration's bar stays fresh.
+        token_budget_payload = None
+        token_budget = getattr(self, "_session_token_budget", None)
+        if isinstance(token_budget, dict):
+            try:
+                token_budget_payload = {
+                    "used": max(0, int(token_budget.get("used") or 0)),
+                    "total": max(0, int(token_budget.get("total") or 0)),
+                }
+            except (TypeError, ValueError):
+                token_budget_payload = None
         snapshot = collect_turn_status_snapshot(
             iteration=iteration,
             model=model_name,
@@ -758,6 +786,7 @@ class AgentRuntime:
             tool_policy=tool_policy,
             mental_enabled=mental_enabled,
             mental_model=self.mental_model if mental_enabled else None,
+            token_budget=token_budget_payload,
         )
         tail_config = getattr(self, "_turn_status_tail_config", None)
         tail_ctx = getattr(self, "_turn_status_tail_context", None)
@@ -801,6 +830,10 @@ class AgentRuntime:
             )
         except Exception:
             extras = {}
+        if token_budget_payload is not None:
+            # Keep the same facts available on the extras payload for tail
+            # sections; the snapshot copy above feeds the budget renderer.
+            extras["token_budget"] = dict(token_budget_payload)
         return upsert_turn_status_bar_message(
             messages,
             build_turn_status_bar_message(snapshot, config=cfg, extras=extras),

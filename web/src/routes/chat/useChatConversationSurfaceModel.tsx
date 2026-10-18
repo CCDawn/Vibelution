@@ -22,6 +22,7 @@ import {
   ChatComposerPlusMenu,
   type ChatComposerSessionReferenceOption,
 } from "./ChatComposerPlusMenu";
+import type { ChatComposerBudgetControl } from "./ChatComposerBudgetDialog";
 import type {
   ChatConversationComposerBridge,
   ChatConversationComposerBridgeState,
@@ -154,6 +155,7 @@ export type ChatConversationSurfaceModelInput = {
   agentPrimaryDirectSessionId: string;
   cacheDetailAvailable: boolean;
   companionConversationComposer: ChatConversationComposerBridgeState;
+  composerBudgetControl: ChatComposerBudgetControl | undefined;
   composerContextRing: ComposerContextRingModel | null;
   composerFocusRequest: { sessionId: string; signal: string };
   composerKnowledgeReferenceOptions: ChatComposerSessionReferenceOption[];
@@ -243,6 +245,7 @@ export function useChatConversationSurfaceModel({
   agentPrimaryDirectSessionId,
   cacheDetailAvailable,
   companionConversationComposer,
+  composerBudgetControl,
   composerContextRing,
   composerFocusRequest,
   composerKnowledgeReferenceOptions,
@@ -369,6 +372,20 @@ export function useChatConversationSurfaceModel({
             composerReferenceKnowledgeDescription: t("composerReferenceKnowledgeDescription"),
             composerReferenceKnowledgeSearch: t("composerReferenceKnowledgeSearch"),
             composerReferenceKnowledgeEmpty: t("composerReferenceKnowledgeEmpty"),
+            composerBudgetEntry: t("composerBudgetEntry"),
+            composerBudgetHint: t("composerBudgetHint"),
+            composerBudgetTitle: t("composerBudgetTitle"),
+            composerBudgetDescription: t("composerBudgetDescription"),
+            composerBudgetMaxCallsLabel: t("composerBudgetMaxCallsLabel"),
+            composerBudgetMaxCallsPlaceholder: t("composerBudgetMaxCallsPlaceholder"),
+            composerBudgetClearMaxCalls: t("composerBudgetClearMaxCalls"),
+            composerBudgetThinkingLabel: t("composerBudgetThinkingLabel"),
+            composerBudgetThinkingPlaceholder: t("composerBudgetThinkingPlaceholder"),
+            composerBudgetClearThinking: t("composerBudgetClearThinking"),
+            composerBudgetSave: t("composerBudgetSave"),
+            composerBudgetCancel: t("composerBudgetCancel"),
+            composerBudgetLoading: t("composerBudgetLoading"),
+            composerBudgetLoadFailed: t("composerBudgetLoadFailed"),
           }}
           mentalModelEnabled={mentalModelEnabledForNextTurn}
           runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
@@ -377,6 +394,7 @@ export function useChatConversationSurfaceModel({
           onMentalModelEnabledChange={handleMentalModelEnabledChange}
           onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
           onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
+          budget={composerBudgetControl ?? null}
           directSession={!financeSurface && agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
             id: agentPrimaryDirectSessionId,
             label: sessionBindingMismatchLine,
@@ -501,6 +519,7 @@ export function useChatConversationSurfaceModel({
       agentPermissionPresetMutation,
       agentPrimaryDirectSessionId,
       cacheDetailAvailable,
+      composerBudgetControl,
       composerContextRing,
       composerFocusRequest,
       composerKnowledgeReferenceOptions,

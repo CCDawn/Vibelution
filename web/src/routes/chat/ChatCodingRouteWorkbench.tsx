@@ -68,6 +68,7 @@ import { ConversationRerunFileChoiceDialog } from "../../components/conversation
 import { ChatCodingWorkbenchDialogs } from "./ChatCodingWorkbenchDialogs";
 import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
+import { isFetchJsonHttpError } from "../../api/chat";
 import {
   AgentInstance,
   ChatRoomDetail,
@@ -173,6 +174,7 @@ import { ChatCodingStatusRail } from "./ChatCodingStatusRail";
 import { recordConversationStreamingFramePaint } from "./recordConversationStreamingFramePaint";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu";
+import type { ChatComposerBudgetControl } from "./ChatComposerBudgetDialog";
 import {
   describeChatRouteError as describeError,
   isBusyPhase,
@@ -1109,6 +1111,7 @@ export function ChatCodingRouteWorkbench() {
   const {
     sessionDetailQuery,
     sessionLlmOptionsQuery,
+    sessionBudgetParametersQuery,
     activeRootSessionId,
     childSessionsQuery,
   } = useChatSessionDetailQueries({
@@ -1240,6 +1243,7 @@ export function ChatCodingRouteWorkbench() {
 
   const {
     sessionModelParametersMutation,
+    sessionBudgetParametersMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
@@ -1945,7 +1949,17 @@ export function ChatCodingRouteWorkbench() {
   );
   const modelParametersControlPending = Boolean(
     modelParametersSavePending
-      || (!financeSurface && !verifiedCompanionMode && sessionModelParametersMutation.isPending),
+    || (!financeSurface && !verifiedCompanionMode && sessionModelParametersMutation.isPending),
+  );
+  // Budget-parameter saves block the saved session's composer through the
+  // bridge state below (the model-parameters gate line and its submit-actions
+  // pass-through are locked verbatim by CompanionChatReuse.contract.test.ts).
+  const budgetParametersSavePending = Boolean(
+    !financeSurface
+    && !verifiedCompanionMode
+    && activeSessionId
+    && sessionBudgetParametersMutation.isPending
+    && sessionBudgetParametersMutation.variables?.sessionId === activeSessionId,
   );
   const composerDisabledDuringModelParametersSave = companionComposerDisabled || modelParametersSavePending;
   const companionConversationComposer = useMemo(
@@ -1964,7 +1978,7 @@ export function ChatCodingRouteWorkbench() {
         pending: submitPending,
         };
       }
-      if (!modelParametersSavePending) return conversationComposer;
+      if (!modelParametersSavePending && !budgetParametersSavePending) return conversationComposer;
       return {
         ...conversationComposer,
         actionDisabled: conversationComposer.actionMode === "stop"
@@ -1975,7 +1989,7 @@ export function ChatCodingRouteWorkbench() {
         editUserMessageDisabled: true,
       };
     },
-    [companionComposerDisabled, companionMode, conversationComposer, modelParametersSavePending, sessionBusy, submitPending],
+    [budgetParametersSavePending, companionComposerDisabled, companionMode, conversationComposer, modelParametersSavePending, sessionBusy, submitPending],
   );
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
@@ -2188,6 +2202,54 @@ export function ChatCodingRouteWorkbench() {
       });
     },
   } : undefined;
+  // Composer plus-menu budget dialog state. Ordinary direct sessions only —
+  // finance/companion surfaces and group rooms keep their existing surfaces.
+  const composerBudgetControl: ChatComposerBudgetControl | undefined = (
+    activeSessionId
+    && !financeSurface
+    && !verifiedCompanionMode
+    && !standardGroupRoomActive
+  )
+    ? {
+        sessionId: activeSessionId,
+        revision: sessionBudgetParametersQuery.data?.revision,
+        maxCallsPerTurn: sessionBudgetParametersQuery.data?.maxCallsPerTurn ?? null,
+        thinkingBudgetChars: sessionBudgetParametersQuery.data?.thinkingBudgetChars ?? null,
+        loading: sessionBudgetParametersQuery.isLoading,
+        error: sessionBudgetParametersQuery.isError,
+        pending: budgetParametersSavePending,
+        errorMessage: sessionBudgetParametersMutation.isError
+          && sessionBudgetParametersMutation.variables?.sessionId === activeSessionId
+          ? (
+              isFetchJsonHttpError(sessionBudgetParametersMutation.error)
+              && sessionBudgetParametersMutation.error.status === 409
+                ? (lang === "zh"
+                    ? "配置已被其他修改更新，已刷新为最新值，请基于新值重试"
+                    : "Settings changed elsewhere; refreshed to the latest values, please retry")
+                : describeError(
+                    sessionBudgetParametersMutation.error,
+                    lang === "zh" ? "预算配置保存失败" : "Failed to save budget settings",
+                  )
+            )
+          : "",
+        onSave: (parameters) => {
+          if (
+            !activeSessionId
+            || sessionBudgetParametersMutation.isPending
+            || financeSurface
+            || verifiedCompanionMode
+            || standardGroupRoomActive
+            || typeof parameters.revision !== "number"
+          ) {
+            return;
+          }
+          sessionBudgetParametersMutation.mutate({
+            sessionId: activeSessionId,
+            parameters,
+          });
+        },
+      }
+    : undefined;
 
   useEffect(() => {
     if (!activeSessionId || !activeAgentImageInputUnsupported || !activeImageAttachments.length) {
@@ -3061,6 +3123,7 @@ export function ChatCodingRouteWorkbench() {
     switchHeadMutation,
     t,
     turnModelControl,
+    composerBudgetControl,
     verifiedCompanionMode,
   });
 

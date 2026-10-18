@@ -6,7 +6,7 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
-import { fetchSessionLlmOptions, listSessionChildSessions } from "../../api/chat";
+import { fetchSessionBudgetParameters, fetchSessionLlmOptions, listSessionChildSessions } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { ChatRoomDetail, SessionDetail, SessionSummary } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
@@ -125,6 +125,21 @@ export function useChatSessionDetailQueries({
     // Re-read the Agent binding when returning from Agent management.
     refetchOnMount: "always",
   });
+  // Per-session budget parameters feed the composer plus-menu budget dialog.
+  // Finance surfaces keep their own assistant pipeline, so they skip the fetch.
+  const sessionBudgetParametersQuery = useQuery({
+    queryKey: queryKeys.sessionBudgetParameters(activeSessionId ?? "none"),
+    enabled: (
+      secondaryChatDataEnabled
+      && !financeSurface
+      && Boolean(activeSessionId)
+      && !isTempSessionId(activeSessionId)
+    ),
+    queryFn: () => fetchSessionBudgetParameters(activeSessionId ?? ""),
+    staleTime: 30_000,
+    // Revisions move with every save; always re-read on surface entry.
+    refetchOnMount: "always",
+  });
   // Explicit missing/archived session keeps its URL and renders the blocking
   // unavailable surface. Background misses must never fall back to another
   // session and must never navigate.
@@ -241,6 +256,7 @@ export function useChatSessionDetailQueries({
   return {
     sessionDetailQuery,
     sessionLlmOptionsQuery,
+    sessionBudgetParametersQuery,
     activeRootSessionId,
     childSessionsQuery,
   };
