@@ -789,7 +789,7 @@ rules:
       - "On Windows, include no-console regression coverage for runtime Git paths."
 
   - id: generic-team-workflows
-    description: "Generic workflow native execution, opt-in failure escalation, bounded repair and safe replay."
+    description: "Generic workflow native execution, role binding, business outcomes, bounded repair and safe replay."
     executionLayers:
       - "focused"
     paths:
@@ -798,8 +798,14 @@ rules:
       - "core/web/routes/generic_team_workflows.py"
       - "tests/test_generic_team_workflows.py"
       - "tests/test_generic_workflow_recovery.py"
+      - "tests/test_generic_workflow_binding.py"
+      - "tests/test_generic_workflow_result_contract.py"
+      - "web/src/api/genericTeamWorkflows.ts"
+      - "web/src/api/genericTeamWorkflows.test.ts"
+      - "web/src/api/types/genericTeamWorkflow.ts"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_generic_team_workflows.py tests/test_generic_workflow_recovery.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_generic_team_workflows.py tests/test_generic_workflow_recovery.py tests/test_generic_workflow_binding.py tests/test_generic_workflow_result_contract.py -q"
+      - "node web/node_modules/vitest/vitest.mjs run src/api/genericTeamWorkflows.test.ts --root web"
     notes:
       - "Generic runs have a distinct state owner and native execution contract; research routes and Ledger are unchanged."
 

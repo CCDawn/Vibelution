@@ -118,7 +118,7 @@ def recovery(attempt: dict) -> str:
             result = snapshot(attempt)
             succeeded = (result.get("terminalStatus") in {"ready", "completed", "done", "success", "succeeded"}
                          and result.get("assistantTurnId") == result.get("turnId") and result.get("assistantText"))
-            if result.get("terminal") and not succeeded:
+            if result.get("terminal") and (not succeeded or attempt.get("failureOrigin") == "result_contract"):
                 return "safe_new_attempt"
         return "resume_same_identity"
     except SessionUnavailable as exc:
