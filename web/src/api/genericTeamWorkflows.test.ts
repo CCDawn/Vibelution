@@ -32,7 +32,25 @@ describe("team-scoped user workflow transport", () => {
     expect(url).toBe("/api/teams/team-a/workflows/flow-1");
     expect(JSON.parse(request.body)).toEqual({ flow, expectedRevision: 3 });
     await startTeamFlowRun("team-a", flow, { custom: "value" }, "stable-submit");
-    expect(JSON.parse(transport.mock.calls[1][1].body)).toEqual({ values: { custom: "value" }, expectedRevision: 3, idempotencyKey: "stable-submit" });
+    const legacyRunBody = JSON.parse(transport.mock.calls[1][1].body);
+    expect(legacyRunBody).toEqual({ values: { custom: "value" }, expectedRevision: 3, idempotencyKey: "stable-submit" });
+    expect(legacyRunBody).not.toHaveProperty("localIntegration");
+  });
+  it("sends local integration consent only when provided and preserves encoded run paths", async () => {
+    const integration = {
+      acknowledge: true as const,
+      allowedFiles: ["src/feature.ts", "tests/feature.test.ts"],
+      teamId: "team /a",
+      validForSeconds: 900,
+    };
+    await startTeamFlowRun("team /a", { ...flow, id: "flow /b" }, {}, "stable-submit", integration);
+    expect(transport.mock.calls[0][0]).toBe("/api/teams/team%20%2Fa/workflows/flow%20%2Fb/runs");
+    expect(JSON.parse(transport.mock.calls[0][1].body)).toEqual({
+      values: {},
+      expectedRevision: 3,
+      idempotencyKey: "stable-submit",
+      localIntegration: integration,
+    });
   });
   it("uses exact run revision for commands and scopes artifact reads to the team", async () => {
     await commandTeamFlowRun("team-b", { id: "run-2", revision: 7 } as TeamFlowRun, "stop");

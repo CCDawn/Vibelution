@@ -97,7 +97,10 @@ def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None, s
     store.token(flow_id)
     run_id = "run-" + digest([flow_id, request.idempotencyKey])[:40]
     target = store.path(team_id, "runs", run_id)
-    fingerprint = digest([flow_id, request.expectedRevision, request.values])
+    identity = [flow_id, request.expectedRevision, request.values]
+    if request.localIntegration is not None:
+        identity.append(request.localIntegration.model_dump())
+    fingerprint = digest(identity)
     flow_path = store.path(team_id, "flows", flow_id)
     # Flow revision and run creation share one lock; edits cannot cross the freeze.
     with store.locked(flow_path), store.locked(target):
@@ -153,6 +156,9 @@ def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None, s
                 record["_sourceIdentity"] = source_identity
             if repair_template:
                 record["_recoveryTemplate"] = repair_template
+            if request.localIntegration is not None:
+                from .code_repair import authorize
+                authorize(record, request.localIntegration.model_dump())
             store.write(target, record)
             result = public(record)
     _wake()
@@ -420,6 +426,7 @@ def _reconcile_admitted_run(team_id: str, run_id: str, parent: dict | None) -> N
             from .recovery import log_transition
             log_transition(source)
         permitted = (not source.get("stopRequested") and source.get("status") == "failed"
+                     and not state.get("codeRepairRunId")
                      and not reason
                      and state.get("status") == "repairing" and state.get("repairRunId") == run_id
                      and state.get("issueId") == parent.get("issueId"))

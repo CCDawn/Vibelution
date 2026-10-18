@@ -141,7 +141,12 @@ def _queue_repair(record: dict, *, verification_only: bool = False) -> None:
     identity = [state["issueId"], state["repairAttempts"], record.get("_recoveryVerification", 0)]
     state.update(status="repairing", repairRunId="repair-" + service.digest(identity)[:40],
                  reason="deployment_verification" if verification_only else "retry_exhausted")
+    state["codeRepairRunId"] = ("code-" + service.digest(identity)[:40]
+                                if record.get("_codeRepairAuthorization") and not verification_only else "")
     record["_recoveryChildMode"] = "verify" if verification_only else "repair"
+    if state["codeRepairRunId"]:
+        from .code_repair import reference
+        record["_codeRepairSource"] = reference(record)
     record["_recoveryQueuedAt"] = service.now()
     record["_recoveryScene"] = _scene(record, state, deployment_ref=record.get("_recoveryDeploymentRef", ""))
 
@@ -174,6 +179,10 @@ def _ensure_child(team_id: str, record: dict) -> dict:
 
 
 def _stop_child(team_id: str, record: dict) -> None:
+    if (record.get("recovery") or {}).get("codeRepairRunId"):
+        from .code_repair import cancel
+        cancel(record)
+        return
     child_id = (record.get("recovery") or {}).get("repairRunId")
     if not child_id:
         return
@@ -203,6 +212,11 @@ def child_settled(child: dict) -> bool:
 
 
 def ensure_child_settled(team_id: str, record: dict) -> None:
+    if (record.get("recovery") or {}).get("codeRepairRunId"):
+        from .code_repair import child_settled as code_child_settled
+        if not code_child_settled(record):
+            raise store.Conflict("代码修复执行者尚未确认结束，不能重放原任务。")
+        return
     child_id = (record.get("recovery") or {}).get("repairRunId")
     if child_id:
         target = store.path(team_id, "runs", child_id)
@@ -373,8 +387,15 @@ def _reconcile_recovery(team_id: str, run_id: str) -> None:
                 for step in record["_recoveryTemplate"]["steps"]:
                     if service.executable(step):
                         native.validate_owner(team_id, step["owner"])
-                child = _ensure_child(team_id, record)
-                _advance_repair(team_id, record, child)
+                if state.get("codeRepairRunId"):
+                    from .code_repair import advance
+                    # The id and authorization must be durable before queueing.
+                    _persist(target, record, before=before)
+                    before = deepcopy(record)
+                    advance(record)
+                else:
+                    child = _ensure_child(team_id, record)
+                    _advance_repair(team_id, record, child)
             except store.WorkflowError:
                 if stopping():
                     return  # Preserve the intent for the next admitted lifespan.
@@ -383,7 +404,8 @@ def _reconcile_recovery(team_id: str, run_id: str) -> None:
             if state["status"] == "blocked":
                 _stop_child(team_id, record)
             # New retry intent must be durable before child creation.
-            if state["status"] == "repairing" and state["repairRunId"] != before["recovery"]["repairRunId"]:
+            if (state["status"] == "repairing" and state["repairRunId"] != before["recovery"]["repairRunId"]
+                    and not state.get("codeRepairRunId")):
                 _ensure_child(team_id, record)
             return
         attempt = service._current_attempt(record)
@@ -406,5 +428,6 @@ def _reconcile_recovery(team_id: str, run_id: str) -> None:
             elif policy["replaySafety"] != "unknown" and not service.supervised(record):
                 _retry_source(record)
         _persist(target, record, before=before)
-        if (record.get("recovery") or {}).get("status") == "repairing":
+        if ((record.get("recovery") or {}).get("status") == "repairing"
+                and not record["recovery"].get("codeRepairRunId")):
             _ensure_child(team_id, record)

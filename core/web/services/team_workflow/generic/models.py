@@ -1,6 +1,8 @@
 """Version-one public contracts and bounded input validation."""
 from __future__ import annotations
 
+from core.web.services.self_evolution_local_integration import LocalIntegrationRequest
+
 from datetime import datetime
 from typing import Literal
 
@@ -157,6 +159,7 @@ class RecoveryState(Contract):
     failureCount: int = 0
     repairAttempts: int = 0
     repairRunId: str = ""
+    codeRepairRunId: str = ""
     reason: str = ""
     evidenceRefs: list[str] = Field(default_factory=list, max_length=20)
     reviewerSessionId: str = ""
@@ -209,6 +212,7 @@ class StartRun(Contract):
     values: dict[str, StrictStr] = Field(default_factory=dict, max_length=40)
     expectedRevision: int = Field(ge=1)
     idempotencyKey: str = Field(min_length=1, max_length=160)
+    localIntegration: LocalIntegrationRequest | None = None
 
 
 class Command(Contract):

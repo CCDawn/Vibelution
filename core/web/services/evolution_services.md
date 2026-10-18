@@ -69,7 +69,7 @@ Domain SSOT（业务规则与持久化）
 
 `POST /evolution/self/autonomous-runs/{run_id}/actions` 新增 `revoke_local_integration`，同样要求可信 privileged operator；撤销与最终合入共用授权锁，已完成撤销后不再接纳合入。缺权限返回 403，冲突返回 409，非法授权字段返回 422。合入成功后用安全、可重试的非强制清理；已合入事实恢复与新的合入审批分开，清理失败不重复合入。部署、产品重启、远端发布和扩权仍需用户决定。
 
-本接口只接 autonomous self-evolution loop；普通 Session retry lineage、通用总监修复子流程到此接口的自动接线以及持续多轮调度仍是后续能力。源码与本地测试通过不代表正式运行实例已部署或完成原生 Session 实机验收。
+通用总监修复可通过启动来源 Run 时的可选 `localIntegration` 有限委托接入此候选链路，详见 [generic code repair](team_workflow/generic/README.md#scoped-code-repair-through-the-existing-candidate-owner)。父 Run 保留授权和确定子任务引用，WorkRun 继续拥有候选执行及集成事实；后台不伪造 operator，不扩大文件范围或延长期限。代码合入后仍等待用户部署及独立效果验收。持续多轮调度仍是后续能力；源码与本地测试通过不代表正式运行实例已部署或完成原生 Session 实机验收。
 
 ---
 

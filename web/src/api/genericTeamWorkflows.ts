@@ -3,6 +3,7 @@ import type {
   TeamFlow,
   TeamFlowArtifact,
   TeamFlowCommand,
+  TeamFlowLocalIntegrationRequest,
   TeamFlowRecoveryBindingRequest,
   TeamFlowRecoveryBindingRevokeRequest,
   TeamFlowRecoveryBindingStatus,
@@ -36,9 +37,16 @@ export function listTeamFlowRuns(teamId: string, signal?: AbortSignal) {
   return fetchJson<{ teamId: string; runs: TeamFlowRun[] }>(`${teamPath(teamId)}/workflow-runs`, { signal });
 }
 
-export function startTeamFlowRun(teamId: string, flow: TeamFlow, values: Record<string, string>, idempotencyKey: string) {
+export function startTeamFlowRun(
+  teamId: string,
+  flow: TeamFlow,
+  values: Record<string, string>,
+  idempotencyKey: string,
+  localIntegration?: TeamFlowLocalIntegrationRequest,
+) {
   return fetchJson<TeamFlowRun>(`${teamPath(teamId)}/workflows/${encodeURIComponent(flow.id)}/runs`, {
-    method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ values, expectedRevision: flow.revision, idempotencyKey }),
+    method: "POST", headers: JSON_HEADERS,
+    body: JSON.stringify({ values, expectedRevision: flow.revision, idempotencyKey, ...(localIntegration === undefined ? {} : { localIntegration }) }),
   });
 }
 
