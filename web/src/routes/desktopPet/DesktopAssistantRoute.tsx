@@ -11,7 +11,9 @@ import { useAssistantActivity } from "../personalAssistant/useAssistantActivity"
 import { usePersonalAssistant } from "../personalAssistant/usePersonalAssistant";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import { nextDesktopPetCharacter } from "./desktopPetCharacterModel";
-import { readPetPreferences, savePetPreferences, type DesktopPetPreferences } from "./desktopPetPreferences";
+import type { DesktopPetPreferences } from "./desktopPetPreferences";
+import { usePetPreferences } from "./usePetPreferences";
+import { PersonalAssistantSettings } from "../personalAssistant/PersonalAssistantSettings";
 import { openSessionFromDesktopPet } from "./desktopPetModel";
 import {
   beginDesktopPetDrag,
@@ -35,6 +37,8 @@ const COPY = {
     idleMessage: "空闲提示语",
     idleHint: "留空使用默认提示",
     saveFailed: "设置仅本次生效：无法保存到本机",
+    syncFailed: "设置已暂存本机，尚未同步到助理",
+    fullSettings: "名称、外观与模型",
     chat: "聊一聊",
     expand: "展开个人助理聊天",
     collapse: "收起个人助理聊天",
@@ -60,6 +64,8 @@ const COPY = {
     idleMessage: "Idle message",
     idleHint: "Leave blank for the default",
     saveFailed: "Settings apply this time only: local storage unavailable",
+    syncFailed: "Settings saved locally; not yet synced to the assistant",
+    fullSettings: "Name, appearance and model",
     chat: "Chat",
     expand: "Open the assistant chat",
     collapse: "Collapse the assistant chat",
@@ -93,8 +99,9 @@ export function DesktopAssistantRoute() {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [fullSettingsOpen, setFullSettingsOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [preferences, setPreferences] = useState(readPetPreferences);
+  const { preferences, updatePreferences: persistPreferences } = usePetPreferences(state.verified);
   const activity = useAssistantActivity({
     enabled: context.isSuccess,
     assistant: state.verified ? state.assistant : undefined,
@@ -166,10 +173,9 @@ export function DesktopAssistantRoute() {
     setFeedback(copy.openFailed);
   }
 
-  function updatePreferences(patch: Partial<DesktopPetPreferences>) {
-    const next = { ...preferences, ...patch };
-    setPreferences(next);
-    setFeedback(savePetPreferences(next) ? "" : copy.saveFailed);
+  async function updatePreferences(patch: Partial<DesktopPetPreferences>) {
+    const result = await persistPreferences(patch);
+    setFeedback(!result.local ? copy.saveFailed : !result.backend ? copy.syncFailed : "");
   }
 
   function beginCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -301,6 +307,7 @@ export function DesktopAssistantRoute() {
         <section className={petStyles.hud} aria-label={copy.settings}>
           <header className={petStyles.hudHeader}><strong>{copy.settings}</strong></header>
           <div className={petStyles.hudList}>
+            <VButton variant="ghost" onClick={() => { setSettingsOpen(false); setFullSettingsOpen(true); }}>{copy.fullSettings}</VButton>
             <VCheckbox isSelected={preferences.showStatus} onChange={(showStatus) => updatePreferences({ showStatus })}><span className={petStyles.settingsLabel}>{copy.showStatus}</span></VCheckbox>
             <VCheckbox isSelected={preferences.showTitles} onChange={(showTitles) => updatePreferences({ showTitles })}><span className={petStyles.settingsLabel}>{copy.showTitles}</span></VCheckbox>
             <VCheckbox isSelected={preferences.showCompletion} onChange={(showCompletion) => updatePreferences({ showCompletion })}><span className={petStyles.settingsLabel}>{copy.showCompletion}</span></VCheckbox>
@@ -314,6 +321,7 @@ export function DesktopAssistantRoute() {
         </section>
       ) : null}
 
+      <PersonalAssistantSettings open={fullSettingsOpen} onOpenChange={setFullSettingsOpen} />
       <VNativeButton
         className={petStyles.characterButton}
         aria-label={copy.expand}
