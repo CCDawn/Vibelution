@@ -697,7 +697,7 @@ describe("chat right rail interaction", () => {
     expect(host.textContent).not.toContain("进行中");
   });
 
-  it("shows the live todo checklist in the plan tab from the session messages", async () => {
+  it("does not duplicate the floating todo checklist in the legacy plan tab", async () => {
     const client: ChatRightRailSideClient = {
       createChild: async () => ({ childSessionId: "unused", parentSessionId: "parent-1" }),
       submit: async () => undefined,
@@ -752,9 +752,9 @@ describe("chat right rail interaction", () => {
       );
     });
     await act(async () => { await Promise.resolve(); });
-    expect(host.textContent).toContain("对齐过程行");
-    expect(host.textContent).toContain("接上计划页签");
-    expect(host.textContent).toContain("1/2");
+    expect(host.querySelector('[data-testid="todo-checklist-items"]')).toBeNull();
+    expect(host.textContent).not.toContain("对齐过程行");
+    expect(host.textContent).not.toContain("接上计划页签");
     await act(async () => railRoot.unmount());
     host.remove();
   });

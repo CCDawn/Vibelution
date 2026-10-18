@@ -619,6 +619,15 @@ def compress_turn_messages(
         except Exception:
             pass
 
+    # Recover from uncompressed journal facts before measuring the resulting
+    # payload, so restored checklist data cannot bypass the hard input budget.
+    if mode_text == AgentMode.CHAT and project_root and session_id and turn_id:
+        from core.chat.todo_checklist import restore_todo_context_from_journal
+
+        compressed = restore_todo_context_from_journal(
+            compressed, project_root=project_root, session_id=session_id, turn_id=turn_id,
+        )
+
     # 日志
     after_tokens = _coerce_nonnegative_int(estimator(compressed))
     token_saved = current_tokens - after_tokens

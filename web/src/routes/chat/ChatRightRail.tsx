@@ -21,8 +21,6 @@ import { auxTaskStatusLabel } from "../auxConversations/auxTaskPresentation";
 import { assistantTurnIsInFlight } from "../chatTurnProtocol";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { ChatChangeRail } from "./ChatChangeRail";
-import { ConversationTodoChecklist } from "../../components/conversation/ConversationTodoChecklist";
-import { deriveSessionTodoChecklist } from "../../components/conversation/conversationTodoChecklistModel";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 import { encodeUtf8Base64 } from "./chatComposerSubmitModel";
 import {
@@ -683,10 +681,6 @@ export function ChatRightRail({
   const launcher = chatRightRailLauncherKinds(sessionKind).filter((kind) => Boolean(sessionId) || isProjectUtilityKind(kind));
   const matches = searchChatRightRailTabs(model, searchQuery);
   const devtoolsView = projectChatRightRailDevtools(devtools, lang);
-  const planProjection = useMemo(
-    () => deriveSessionTodoChecklist(devtools?.messages),
-    [devtools?.messages],
-  );
   const browserUrl = active?.kind === "browser" ? normalizeChatRightRailBrowserUrl(active.url || "") : null;
   const activate = (kind: ChatRightRailKind) => {
     if (kind === "side") {
@@ -966,18 +960,7 @@ export function ChatRightRail({
           </div>
         ) : null}
         {active?.kind === "plan" ? (
-          planProjection ? (
-            <div className={styles.plain}>
-              <ConversationTodoChecklist
-                snapshot={planProjection.snapshot}
-                lang={lang}
-                turnSettled={planProjection.turnSettled}
-                presentation="panel"
-              />
-            </div>
-          ) : (
-            <VEmptyState title={copy.contextualEmpty} />
-          )
+          <VEmptyState title={copy.contextualEmpty} />
         ) : null}
         {active && (active.kind === "workflow" || active.kind === "trajectory" || active.kind === "bash" || (active.kind === "subagent" && !active.targetId)) ? (
           <VEmptyState title={copy.contextualEmpty} />

@@ -60,7 +60,11 @@ function normalizeTodoItem(raw: unknown): TodoChecklistItem | undefined {
 }
 
 function parseTodoSnapshot(item: SessionTurnItem): TodoChecklistSnapshot | undefined {
-  const input = parseToolCallInput((item as Extract<SessionTurnItem, { type: "tool_call" }>).input);
+  const call = item as Extract<SessionTurnItem, { type: "tool_call" }>;
+  if (call.status === "failed" || parseToolCallInput(call.output)?.status === "error") {
+    return undefined;
+  }
+  const input = parseToolCallInput(call.input);
   const rawTodos = input?.todos;
   if (!Array.isArray(rawTodos)) {
     return undefined;
@@ -72,7 +76,9 @@ function parseTodoSnapshot(item: SessionTurnItem): TodoChecklistSnapshot | undef
       items.push(normalized);
     }
   }
-  if (items.length === 0) {
+  // An explicit empty array clears the checklist. Invalid non-empty payloads
+  // remain ignorable so partially streamed or malformed calls do not flicker.
+  if (rawTodos.length > 0 && items.length === 0) {
     return undefined;
   }
   const completedCount = items.filter((item) => item.status === "completed").length;
@@ -90,7 +96,7 @@ function parseTodoSnapshot(item: SessionTurnItem): TodoChecklistSnapshot | undef
  * (still streaming, malformed) fall back to the previous valid snapshot so
  * the card never flickers away mid-stream.
  */
-export function deriveLatestTodoChecklist(
+function deriveLatestTodoSnapshot(
   turnItems: readonly SessionTurnItem[] | undefined,
 ): TodoChecklistSnapshot | undefined {
   const canonical = consolidateSessionTurnItemsV2(turnItems);
@@ -107,6 +113,14 @@ export function deriveLatestTodoChecklist(
   return latest;
 }
 
+/** Empty snapshots hide the card while remaining a barrier to older state. */
+export function deriveLatestTodoChecklist(
+  turnItems: readonly SessionTurnItem[] | undefined,
+): TodoChecklistSnapshot | undefined {
+  const snapshot = deriveLatestTodoSnapshot(turnItems);
+  return snapshot?.total ? snapshot : undefined;
+}
+
 export type SessionTodoChecklistProjection = {
   snapshot: TodoChecklistSnapshot;
   turnSettled: boolean;
@@ -114,8 +128,8 @@ export type SessionTodoChecklistProjection = {
 };
 
 /**
- * Session-level projection for surfaces outside the turn body (e.g. the right
- * rail plan tab): the newest assistant turn that ever produced a valid
+ * Session-level projection for surfaces outside the turn body (e.g. the task
+ * popover): the newest assistant turn that ever produced a valid
  * checklist wins, so a plan started in an older turn stays visible while
  * later turns stream. Returns undefined when no turn carried one.
  */
@@ -127,8 +141,11 @@ export function deriveSessionTodoChecklist(
     if (message.role !== "assistant") {
       continue;
     }
-    const snapshot = deriveLatestTodoChecklist(message.turnItems);
+    const snapshot = deriveLatestTodoSnapshot(message.turnItems);
     if (snapshot) {
+      if (snapshot.total === 0) {
+        return undefined;
+      }
       return {
         snapshot,
         turnSettled: hasTerminalCanonicalTurnOutcome(message),

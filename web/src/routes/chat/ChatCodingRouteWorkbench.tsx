@@ -3231,7 +3231,6 @@ export function ChatCodingRouteWorkbench() {
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
             ordinaryChangeRail={ordinaryChangeRail}
             changeRailVisible={changeRailVisible}
-            taskPlanOpen={!sessionBrowserVisible && (changeRailVisible || statusRailOverlayOpen) && !projectRail.selected && activeRailTab?.kind === "plan" && activeRailTab.host !== "center"}
             statusRailOverlayOpen={statusRailOverlayOpen}
             toggleChangeRail={toggleChangeRail}
             setResponsiveOverlayPane={setResponsiveOverlayPane}

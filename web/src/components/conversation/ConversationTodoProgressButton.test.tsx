@@ -13,7 +13,7 @@ const plan: SessionTodoChecklistProjection = {
   },
 };
 const render = (projection = plan, lang: "zh" | "en" = "zh") => renderToStaticMarkup(
-  <ConversationTodoProgressButton plan={projection} lang={lang} expanded={false} onPress={() => {}} />,
+  <ConversationTodoProgressButton plan={projection} lang={lang} />,
 );
 
 describe("ConversationTodoProgressButton", () => {
@@ -22,7 +22,9 @@ describe("ConversationTodoProgressButton", () => {
     expect(html).toContain('data-todo-progress-status="running"');
     expect(html).toContain("animate-spin");
     expect(html).toContain('aria-label="任务清单 0/1 · 进行中"');
-    expect(html).toContain('aria-controls="chat-status-pane"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('aria-controls="chat-status-pane"');
     expect(html).not.toMatch(/\sdisabled(?:=|[ >])/);
   });
 
