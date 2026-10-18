@@ -651,7 +651,11 @@ def test_overview_route_appends_new_sources_without_touching_existing_rows(
 
     ]
 
-    assert "humanAttention" not in offset_body
+    # 人类关注通道与分页无关：每一页携带同一份列表，前端读模型缝合多页时
+
+    # 只保留末页附加字段，扩展不能只挂第一页（129 会话 >100 必分页场景）。
+
+    assert offset_body["humanAttention"] == human
 
 
 

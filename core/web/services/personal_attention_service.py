@@ -669,31 +669,35 @@ def collect_anomaly_attention(
 
 def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
-    """Attach human-attention entries to a first-page overview payload.
+    """Attach human-attention entries to every overview page.
 
 
     Composition point used by the overview route (keeps the collector wiring
 
     out of the assistant service itself). The collected entries land in a
 
-    separate ``humanAttention`` lane on the first page only (offset == 0);
+    separate ``humanAttention`` lane carried on EVERY page: the workbench
 
-    the session-derived ``attention`` list keeps its original pagination and
+    read model keeps only the last page's extra fields when it stitches
 
-    counts invariant (attention rows === waiting + failed). Any collector
+    paginated session rows together, so a first-page-only lane would be
 
-    failure is swallowed — the overview must never break because an attention
+    dropped whenever sessions span multiple pages. The list itself is page
 
-    source is unavailable.
+    independent (same entries on each page); the session-derived
+
+    ``attention`` list keeps its original pagination and counts invariant
+
+    (attention rows === waiting + failed). Any collector failure is
+
+    swallowed — the overview must never break because an attention source
+
+    is unavailable.
 
     """
 
 
     if not isinstance(payload, dict):
-
-        return payload
-
-    if int(payload.get("pagination", {}).get("offset") or 0) != 0:
 
         return payload
 
