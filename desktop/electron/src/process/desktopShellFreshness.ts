@@ -168,6 +168,12 @@ export function shouldDeferWorkbenchOpenUntilLifecycleStart(lifecycleCommand: st
   return REFRESH_BEFORE_LIFECYCLE.has(String(lifecycleCommand || "").trim().toLowerCase());
 }
 
+export function shouldInspectDesktopShellBeforeLifecycle(operation: string, isPackaged: boolean): boolean {
+  // A stop never loads a new shell or frontend, so hashing build inputs cannot
+  // change its outcome. Keep that work on the launch side of the same gate.
+  return isPackaged && REFRESH_BEFORE_LIFECYCLE.has(String(operation || "").trim().toLowerCase());
+}
+
 export function shouldRefreshBeforeLifecycle(
   operation: string,
   input: { isPackaged: boolean; launchBlocking: boolean }

@@ -9,10 +9,10 @@ import {
   resetFrontendBuildStateForTests,
   runWithFrontendBuildGate
 } from "../src/lifecycle/frontendBuildState.js";
-import { shouldRefreshBeforeLifecycle } from "../src/process/desktopShellFreshness.js";
+import { shouldInspectDesktopShellBeforeLifecycle, shouldRefreshBeforeLifecycle } from "../src/process/desktopShellFreshness.js";
 import type { RunWorkbenchLifecycleInput } from "../src/process/workbenchLifecycle.js";
 
-function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
+function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?: boolean } = {}) {
   // Run the real Electron adapter without starting Electron or any process.
   const source = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
   const begin = source.indexOf("async function orchestrateLauncherLifecycle(");
@@ -26,6 +26,8 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
   const opened = vi.fn(async () => undefined);
   const notify = vi.fn();
   const trayNotify = vi.fn();
+  const inspect = vi.fn(async () => ({ stale: true, launchBlocking: true }));
+  const closed = vi.fn(async () => undefined);
   const promote = vi.fn(async () => ({
     schemaVersion: 1,
     accepted: true,
@@ -35,7 +37,9 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
   const lifecycle = vi.fn(async (input: RunWorkbenchLifecycleInput) => {
     // The backend invokes this callback at its startup boundary, with its
     // execution signal. Preserve that contract in this process-free harness.
-    await input.ensureFrontend?.({ force: input.operation === "rebuild-and-start", signal: input.signal });
+    if (["start", "restart", "rebuild-and-start"].includes(input.operation)) {
+      await input.ensureFrontend?.({ force: input.operation === "rebuild-and-start", signal: input.signal });
+    }
     return { schemaVersion: 1, accepted: true, operation: input.operation, commandId: "test-command" };
   });
   const sandbox: Record<string, unknown> = {
@@ -44,10 +48,11 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
     authorizeLauncherForceLifecycle: async () => null,
     desktopEnvironment: () => ({ VIBELUTION_PYTHON_PATH: "pythonw.exe" }),
     normalizeSupervisedLifecycleOperation: (operation: string) => operation,
-    desiredStateForLifecycleOperation: () => "open",
+    desiredStateForLifecycleOperation: (operation: string) => ["start", "restart", "rebuild-and-start"].includes(operation) ? "open" : "closed",
     createDesktopPathsForApp: () => ({ workspaceRoot: "C:/frontend-preflight-test" }),
-    app: { isPackaged: false },
-    windowProvider: {},
+    app: { isPackaged: options.packaged ?? false },
+    windowProvider: { approveWorkbenchCloseOnce: closed },
+    shouldDeferOrchestratedWindowClose: () => false,
     mainLineBackendIsReachable: reachable,
     mainLineBackendIsReusable: reusable,
     inspectWorkbenchServingVersion: async () => ({ ok: true }),
@@ -55,9 +60,11 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
     runWithFrontendBuildGate,
     updateLauncherWindowTruth: notify,
     inspectUnpackagedShell: async () => ({ stale: false }),
+    inspectCurrentDesktopShell: inspect,
     // Real routing decision so the unpackaged rebuild-and-start promotion lane
     // is exercised end to end without Electron.
     shouldRefreshBeforeLifecycle,
+    shouldInspectDesktopShellBeforeLifecycle,
     notifyDesktopTray: trayNotify,
     restartLauncherToLatestBuild: promote,
     joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false, joinInFlightRestart: false }),
@@ -81,7 +88,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
     { compilerOptions: { target: ScriptTarget.ES2022 } }
   ).outputText, sandbox);
   return {
-    ensure, reachable, reusable, opened, notify, trayNotify, promote, lifecycle, supervisor,
+    ensure, reachable, reusable, opened, closed, inspect, notify, trayNotify, promote, lifecycle, supervisor,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -91,6 +98,24 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
 afterEach(resetFrontendBuildStateForTests);
 
 describe("main-line frontend startup preflight", () => {
+  it.each(["stop", "force-stop", "shutdown"])("executes packaged %s without inspecting or building a release", async (operation) => {
+    const h = harness({ packaged: true });
+    h.inspect.mockImplementation(() => new Promise(() => undefined));
+    await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: true });
+    expect(h.inspect).not.toHaveBeenCalled();
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation }));
+    expect(h.closed).toHaveBeenCalledOnce();
+  });
+
+  it.each(["start", "restart", "rebuild-and-start"])("retains the packaged version gate for %s", async (operation) => {
+    const h = harness({ packaged: true });
+    await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: true });
+    expect(h.inspect).toHaveBeenCalled();
+    expect(h.promote).toHaveBeenCalledWith(operation === "restart", operation, { shellKind: "packaged" });
+    expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
   it.each(["start", "restart"])("verifies once at the startup boundary for %s", async (operation) => {
     const h = harness();
     await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: true });

@@ -36,7 +36,7 @@ export function createDesktopShellExitDeadline(
 export type ApprovedDesktopShellShutdownInput = {
   decision: ShutdownDecision;
   closeDesktopSession: (signal: AbortSignal) => Promise<void>;
-  recordEvent: (event: RuntimeSceneElectronEvent) => Promise<void>;
+  recordEvent: (event: RuntimeSceneElectronEvent) => void | Promise<void>;
   stopManagedRuntime: (signal: AbortSignal) => Promise<void>;
   stopPythonLauncher: (signal: AbortSignal) => Promise<LauncherServiceStopResult>;
   approveShutdown: () => void;
@@ -175,49 +175,79 @@ export async function executeApprovedDesktopShellShutdown(
 
   const ownsDeadline = input.deadline === undefined;
   const deadline = input.deadline ?? createDesktopShellExitDeadline();
-  const record = async (event: RuntimeSceneElectronEvent): Promise<void> => {
-    await withDesktopShellExitTimeout(() => input.recordEvent(event), deadline, event.eventCode).catch(() => undefined);
+  const startedAt = Date.now();
+  let closeSessionMs = 0;
+  let managedRuntimeMs = 0;
+  let launcherStopMs = 0;
+  const record = (event: RuntimeSceneElectronEvent): void => {
+    // Main persists shutdown events locally before returning. An asynchronous
+    // observer must not hold up the processes whose backend it reports to.
+    try {
+      void Promise.resolve(input.recordEvent({
+        ...event,
+        fields: {
+          ...event.fields,
+          elapsedMs: Math.max(0, Date.now() - startedAt),
+          budgetRemainingMs: deadline.remainingMs(),
+          closeSessionMs,
+          managedRuntimeMs,
+          launcherStopMs
+        }
+      })).catch(() => undefined);
+    } catch {
+      // Evidence failures cannot change the verified runtime stop outcome.
+    }
   };
   try {
+    const sessionStartedAt = Date.now();
     try {
       await withDesktopShellExitTimeout(input.closeDesktopSession, deadline, "close desktop session");
     } catch {
       // Fail-open: session close must not block Electron from quitting.
     }
+    closeSessionMs = Math.max(0, Date.now() - sessionStartedAt);
 
     let stopResult: LauncherServiceStopResult | null = null;
     let stopError = "";
     let managedRuntimeError = "";
-    await record({
+    record({
       eventCode: "electron.runtime.stop_requested",
       message: "Managed project process tree stop requested before desktop shell quit.",
       fields: {}
     });
+    const managedStartedAt = Date.now();
     try {
       await withDesktopShellExitTimeout(input.stopManagedRuntime, deadline, "stop managed runtime");
     } catch (error: unknown) {
       managedRuntimeError = error instanceof Error ? error.message : String(error);
-      await record({
+      managedRuntimeMs = Math.max(0, Date.now() - managedStartedAt);
+      record({
         eventCode: "electron.runtime.stop_failed",
         message: "Managed project process tree stop failed before shell quit.",
         fields: { error: managedRuntimeError.slice(0, 500) }
       });
+    } finally {
+      managedRuntimeMs = Math.max(0, Date.now() - managedStartedAt);
     }
     if (input.decision.stopPythonLauncher) {
-      await record({
+      record({
         eventCode: "electron.launcher_service.stop_requested",
         message: "Owned Python launcher service stop requested.",
         fields: {}
       });
+      const launcherStartedAt = Date.now();
       try {
         stopResult = await withDesktopShellExitTimeout(input.stopPythonLauncher, deadline, "stop python launcher");
       } catch (error: unknown) {
         stopError = error instanceof Error ? error.message : String(error);
-        await record({
+        launcherStopMs = Math.max(0, Date.now() - launcherStartedAt);
+        record({
           eventCode: "electron.launcher_service.stop_failed",
           message: "Owned Python launcher service stop failed before shell quit.",
           fields: { error: stopError.slice(0, 500) }
         });
+      } finally {
+        launcherStopMs = Math.max(0, Date.now() - launcherStartedAt);
       }
     }
 
@@ -231,7 +261,7 @@ export async function executeApprovedDesktopShellShutdown(
     };
 
     if ((managedRuntimeError || stopError) && !input.forceExitOnStopFailure) {
-      await record({
+      record({
         eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
         message: "Desktop shell exit was cancelled because managed processes did not stop cleanly.",
         fields: {
@@ -242,7 +272,7 @@ export async function executeApprovedDesktopShellShutdown(
       return result;
     }
 
-    await record({
+    record({
       eventCode: "electron.launcher_service.exited",
       message: "Electron desktop shell exit approved.",
       fields: {

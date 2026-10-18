@@ -9,6 +9,21 @@ const closeStoreSource = readFileSync(
 );
 
 describe("Electron main transactional Workbench close", () => {
+  it("persists close evidence locally instead of awaiting the backend being stopped", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const request = source.slice(source.indexOf("async function requestTransactionalWorkbenchClose("), source.indexOf("async function stopWorkbenchBackend("));
+    const settlement = source.slice(source.indexOf("async function acknowledgeTransactionalWorkbenchClose("), source.indexOf("function writeWorkbenchCloseCanarySummary("));
+    const failureStart = source.indexOf("async function handleTransactionalWorkbenchCloseFailure(");
+    const failure = source.slice(failureStart, source.indexOf("\nasync function ", failureStart + 1));
+    for (const closeSource of [request, settlement, failure]) {
+      expect(closeSource).toContain("recordSupervisorEventFallbackLocally({");
+      expect(closeSource).not.toContain("await recordElectronSupervisorEvent(");
+    }
+    expect(request).toContain("activeWorkProbeMs");
+    expect(request).toContain("backendStopMs");
+    expect(settlement).toContain("elapsedMs");
+  });
+
   it("advertises the Electron close capability instead of reusing only Launcher capabilities", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
