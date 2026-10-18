@@ -1734,6 +1734,61 @@ def start_research_project_agent_task(
     return _task_response(task, idempotent_replay=False)
 
 
+def _registry_row_accepts_business_terminal(row: dict[str, Any], session_id: str) -> bool:
+    """是否允许把业务终态直写进该注册表行（kind 与 sourceSessionId 必须一致）。"""
+
+    return bool(
+        session_id
+        and str(row.get("kind") or "") == runtime_tasks.KIND_RESEARCH_TASK
+        and str(row.get("sourceSessionId") or "") == session_id
+    )
+
+
+def _backstop_registry_row_terminal(
+    store: runtime_tasks.RuntimeTaskStore,
+    team_id: str,
+    project_id: str,
+    task: dict[str, Any],
+    row: dict[str, Any],
+) -> bool:
+    """终态兜底：投影未落盘时直接把业务终态写进注册表行。
+
+    覆盖投影 update_task 抛异常，或身份不完全一致（如 turn 漂移）被静默
+    跳过的路径。kind 或 sourceSessionId 不符的陌生行不强写，只记 workflow
+    event；兜底自身的异常同样吞住并记事件，绝不打断账本主流程。
+    """
+
+    task_id = _text(task.get("taskId"))
+    status = _text(task.get("status"))
+    if not _registry_row_accepts_business_terminal(row, _text(task.get("sessionId"))):
+        _service()._record_workflow_event(
+            "research_project_agent_task_registry_sync_failed", team_id,
+            fields={"researchProjectId": project_id, "taskId": task_id,
+                    "status": status, "backstop": "identity_mismatch_skipped"},
+            outcome="failed", level="warning",
+        )
+        return False
+    fields = {"researchProjectId": project_id, "taskId": task_id, "status": status}
+    try:
+        landed = store.mark_task_terminal(
+            task_id, status=status, reason="research_task_completion_backstop",
+        )
+    except Exception as exc:
+        _service()._record_workflow_event(
+            "research_project_agent_task_registry_sync_failed", team_id,
+            fields={**fields, "errorType": type(exc).__name__,
+                    "backstop": "research_task_completion_backstop"},
+            outcome="failed", level="warning",
+        )
+        return False
+    _service()._record_workflow_event(
+        "research_project_agent_task_registry_sync_failed", team_id,
+        fields={**fields, "backstop": "research_task_completion_backstop"},
+        outcome="accepted",
+    )
+    return bool(landed)
+
+
 def _publish_runtime_task_status(team_id: str, project_id: str, task: dict[str, Any]) -> bool:
     """Publish persisted business facts to an existing, identity-matched registry row.
 
@@ -1767,17 +1822,28 @@ def _publish_runtime_task_status(team_id: str, project_id: str, task: dict[str, 
         changed = True
         return {**snapshot, **projection}
 
+    projection_failed = False
+    store = runtime_tasks.default_store()
     try:
-        runtime_tasks.default_store().update_task(task_id, publish)
+        store.update_task(task_id, publish)
     except Exception as exc:
+        projection_failed = True
         _service()._record_workflow_event(
             "research_project_agent_task_registry_sync_failed", team_id,
             fields={"researchProjectId": project_id, "taskId": task_id,
                     "status": status, "errorType": type(exc).__name__},
             outcome="failed", level="warning",
         )
-        return False
-    return changed
+    # 终态兜底：账本已是终态而注册表行仍卡在非终态（投影抛异常，或身份
+    # 不完全一致被静默跳过）时直接收口，避免注册表冻结在 running 的僵尸行。
+    if runtime_tasks.is_terminal_status(status):
+        try:
+            row = store.get_task(task_id)
+            if row and not runtime_tasks.is_terminal_status(str(row.get("status") or "")):
+                _backstop_registry_row_terminal(store, team_id, project_id, task, row)
+        except Exception:
+            pass
+    return False if projection_failed else changed
 
 
 def update_research_project_agent_task_status(

@@ -243,6 +243,36 @@ def test_terminal_update_leaves_active_index_and_notifies_waiter(tmp_path):
     assert store.wait_for_terminal("child-term-1", timeout_seconds=0.1)["status"] == "completed"
 
 
+def test_mark_task_terminal_stale_leaves_active_index(tmp_path):
+    """B 层 stale 收口依赖的既有语义：终态写入后行必须离开 active index。"""
+    store = _store(tmp_path)
+    store.register_task(
+        registry.new_snapshot(
+            kind=registry.KIND_RESEARCH_TASK,
+            task_id="research-stale-1",
+            status="running",
+            source_session_id="session-stale",
+        )
+    )
+    assert store.active_task_ids() == ["research-stale-1"]
+
+    terminal = store.mark_task_terminal(
+        "research-stale-1", status="stale", reason="registry_stale_reconcile"
+    )
+
+    assert terminal["status"] == "stale"
+    assert terminal["terminalReason"] == "registry_stale_reconcile"
+    assert terminal["completedAt"]
+    assert store.active_task_ids() == []
+    assert store.has_active_tasks() is False
+    # 幂等：重复收口不复活 active 成员资格。
+    again = store.mark_task_terminal(
+        "research-stale-1", status="stale", reason="registry_stale_reconcile"
+    )
+    assert again["status"] == "stale"
+    assert store.active_task_ids() == []
+
+
 def test_wait_for_terminal_unblocks_when_saved_terminal(tmp_path):
     store = _store(tmp_path)
     store.register_task(

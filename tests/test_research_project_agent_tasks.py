@@ -1993,3 +1993,132 @@ def test_reconcile_stamped_result_refs_take_precedence_over_session_final_turn(
     assert status["tasks"][0]["status"] == "completed"
     assert status["tasks"][0]["resultRefs"] == ["plan-stamped"]
     assert status["tasks"][0]["resultSource"] == ""
+
+
+def _backstop_test_env(tmp_path, monkeypatch):
+    """场景 a 公共环境：真实 workspace + 隔离的 runtime_tasks 注册表。"""
+    from core.web.services import runtime_task_registry
+
+    registry_store = runtime_task_registry.RuntimeTaskStore(tmp_path / "runtime-tasks")
+    monkeypatch.setattr(runtime_task_registry, "default_store", lambda: registry_store)
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    events = []
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_record_workflow_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+    return registry_store, team, project, agents, events
+
+
+def _sync_failed_events(events):
+    return [
+        item for item in events
+        if item[0][0] == "research_project_agent_task_registry_sync_failed"
+    ]
+
+
+def test_terminal_projection_failure_backstops_registry_row(tmp_path, monkeypatch):
+    """场景 a（异常路径）：投影 update_task 抛异常时兜底直写终态并留事件。"""
+    registry_store, team, project, _agents, events = _backstop_test_env(
+        tmp_path, monkeypatch,
+    )
+    started = start_research_project_agent_task(
+        team["teamId"], project["projectId"],
+        {"taskKind": "experiment_design", "idempotencyKey": "design-backstop-1"},
+    )
+    task_id = started["task"]["taskId"]
+    assert registry_store.get_task(task_id)["status"] == "running"
+
+    update = registry_store.update_task
+    attempts = []
+
+    def flaky_update(task_id_arg, mutator):
+        attempts.append(task_id_arg)
+        if len(attempts) == 1:
+            raise OSError("transient registry write failure")
+        return update(task_id_arg, mutator)
+
+    monkeypatch.setattr(registry_store, "update_task", flaky_update)
+
+    updated = update_research_project_agent_task_status(
+        team["teamId"], project["projectId"], task_id,
+        status="completed", result_refs=["plan-backstop-1"],
+    )
+
+    assert updated["status"] == "completed"
+    row = registry_store.get_task(task_id)
+    assert row["status"] == "completed"
+    assert row["terminalReason"] == "research_task_completion_backstop"
+    assert registry_store.active_task_states() == []
+    sync_events = _sync_failed_events(events)
+    assert any(item[1].get("outcome") == "failed" for item in sync_events)
+    assert any(
+        item[1].get("outcome") == "accepted"
+        and item[1].get("fields", {}).get("backstop") == "research_task_completion_backstop"
+        for item in sync_events
+    )
+
+
+def test_terminal_projection_turn_drift_backstops_registry_row(tmp_path, monkeypatch):
+    """场景 a（mismatch 路径）：turn 漂移被静默跳过时兜底直写业务终态。"""
+    registry_store, team, project, _agents, events = _backstop_test_env(
+        tmp_path, monkeypatch,
+    )
+    started = start_research_project_agent_task(
+        team["teamId"], project["projectId"],
+        {"taskKind": "experiment_design", "idempotencyKey": "design-backstop-2"},
+    )
+    task_id = started["task"]["taskId"]
+    row = registry_store.get_task(task_id)
+    assert row["status"] == "running"
+    assert row["sourceTurnId"] == "turn-1"
+    # 模拟注册表行冻结在旧 turn：账本新 turn 的终态投影会因 turn 不一致被跳过。
+    registry_store.update_task(
+        task_id, lambda state: {**state, "sourceTurnId": "turn-stale"},
+    )
+
+    updated = update_research_project_agent_task_status(
+        team["teamId"], project["projectId"], task_id,
+        status="completed", result_refs=["plan-backstop-2"],
+    )
+
+    assert updated["status"] == "completed"
+    row = registry_store.get_task(task_id)
+    assert row["status"] == "completed"
+    assert row["terminalReason"] == "research_task_completion_backstop"
+    assert registry_store.active_task_states() == []
+    assert any(
+        item[1].get("outcome") == "accepted"
+        and item[1].get("fields", {}).get("backstop") == "research_task_completion_backstop"
+        for item in _sync_failed_events(events)
+    )
+
+
+def test_terminal_backstop_never_writes_foreign_session_row(tmp_path, monkeypatch):
+    """身份完全不匹配（sourceSessionId 不符）时只记事件，不强写陌生行。"""
+    registry_store, team, project, _agents, events = _backstop_test_env(
+        tmp_path, monkeypatch,
+    )
+    started = start_research_project_agent_task(
+        team["teamId"], project["projectId"],
+        {"taskKind": "experiment_design", "idempotencyKey": "design-backstop-3"},
+    )
+    task_id = started["task"]["taskId"]
+    registry_store.update_task(
+        task_id, lambda state: {**state, "sourceSessionId": "foreign-session"},
+    )
+
+    update_research_project_agent_task_status(
+        team["teamId"], project["projectId"], task_id,
+        status="completed", result_refs=["plan-backstop-3"],
+    )
+
+    row = registry_store.get_task(task_id)
+    assert row["status"] == "running"
+    assert registry_store.active_task_states() != []
+    assert any(
+        item[1].get("fields", {}).get("backstop") == "identity_mismatch_skipped"
+        for item in _sync_failed_events(events)
+    )
