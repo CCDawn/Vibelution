@@ -17,6 +17,10 @@ def executable(step: dict) -> bool:
     return step["kind"] == "agent" or (step["kind"] == "output" and bool(step["owner"].strip()))
 
 
+def supervised(record: dict) -> bool:
+    return any(step["kind"] == "research" for step in record["flow"]["steps"])
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -72,6 +76,18 @@ def _wake() -> None:
 
 
 def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
+    # Different request keys or flows cannot supervise the same native node
+    # concurrently. The lock is only an admission guard, never a task store.
+    hint = Flow.model_validate(store.read(store.path(team_id, "flows", flow_id))).model_dump()
+    if supervised({"flow": hint}):
+        source = hint["steps"][0]["researchSource"]
+        guard = store.path(team_id, "runs", "source-admission-" + digest(source)[:40])
+        with store.locked(guard):
+            return _start_run(team_id, flow_id, payload, source_hint=source)
+    return _start_run(team_id, flow_id, payload)
+
+
+def _start_run(team_id: str, flow_id: str, payload: dict, *, source_hint=None) -> dict:
     from .runtime import ensure_admission
     ensure_admission()
     request = StartRun.model_validate(payload)
@@ -90,6 +106,17 @@ def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
         else:
             flow = Flow.model_validate(store.read(flow_path)).model_dump()
             store.check_revision(flow, request.expectedRevision)
+            if supervised({"flow": flow}):
+                source = flow["steps"][0]["researchSource"]
+                if source != source_hint:
+                    raise store.Conflict("研究来源已变化，请重新读取流程。")
+                for path in (store.root(team_id) / "runs").glob("*.json"):
+                    other = store.read(path)
+                    if supervised(other) and other["flow"]["steps"][0]["researchSource"] == source:
+                        if other["status"] not in {"completed", "stopped"}:
+                            raise store.Conflict("该研究节点已有故障监督，请使用或停止已有监督。")
+                        from .recovery import ensure_child_settled
+                        ensure_child_settled(team_id, other)
             if not flow["steps"]:
                 raise store.WorkflowError("请先添加流程步骤。")
             validate_values(flow, request.values)
@@ -108,6 +135,11 @@ def start_run(team_id: str, flow_id: str, payload: dict) -> dict:
                 createdAt=timestamp, updatedAt=timestamp,
             ).model_dump()
             record["_createFingerprint"] = fingerprint
+            if supervised(record):
+                if not (flow.get("failureRecovery") or {}).get("bindingId"):
+                    raise store.WorkflowError("研究故障监督需要显式绑定四角色及恢复授权。")
+                from .research_source import observe
+                observe(record)  # Validate exact native identity and Team before accepting.
             if repair_template:
                 record["_recoveryTemplate"] = repair_template
             store.write(target, record)
@@ -151,6 +183,12 @@ def retry_failed_record(record: dict) -> None:
     """
     if record["status"] != "failed" or record["stopRequested"]:
         raise store.Conflict("只有失败的步骤可以重试。")
+    if supervised(record):
+        if not record.get("recovery"):
+            raise store.Conflict("研究节点重试由原生任务入口管理。")
+        from .supervision import request_replay
+        request_replay(record)
+        return
     attempt = _current_attempt(record)
     disposition = record.get("_retryDisposition", "resume_same_identity")
     if attempt and attempt["sessionId"]:
@@ -348,6 +386,12 @@ def _reconcile_admitted_run(team_id: str, run_id: str, parent: dict | None) -> N
         state = source.get("recovery") or {}
         from .binding import authorization_reason
         reason = authorization_reason(team_id, source) if source else "recovery_authorization_unavailable"
+        if not reason and source and supervised(source):
+            from .research_source import fence
+            try:
+                reason = fence(source)
+            except Exception:
+                reason = "source_observation_unavailable"
         if reason and state and state["status"] != "resolved" and (state["status"] != "blocked" or state.get("reason") != reason):
             state.update(status="blocked", reason=reason)
             _changed(parent_target, source, "恢复授权不可用，停止自动派发。")
@@ -379,6 +423,18 @@ def _reconcile_run(team_id: str, run_id: str, *, recovery_source: dict | None = 
     target = store.path(team_id, "runs", run_id)
     with store.locked(target):
         record = store.read(target)
+        if supervised(record):
+            from .supervision import observe, submit_replay
+            from .binding import authorization_reason
+            if record.get("_sourceReplayPending"):
+                if reason := authorization_reason(team_id, record):
+                    record.pop("_sourceReplayPending", None)
+                    record["recovery"].update(status="blocked", reason=reason)
+                    _changed(target, record)
+                elif not stopping():
+                    submit_replay(target, record)
+            observe(target, record)
+            return
         if record["status"] != "running":
             return
         recovery = record.get("recovery") or {}
