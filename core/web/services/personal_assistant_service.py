@@ -9,9 +9,15 @@ import threading
 
 from core.web.services import agent_directory_service as directory
 from core.web.services import pet_activity_service, session_service
+from core.web.services.i18n import get_web_language, text_for
 from core.web.services.session_archive_service import conversation_is_archived
 
 logger = logging.getLogger(__name__)
+
+
+def _text(zh: str, en: str) -> str:
+    return text_for(get_web_language(), zh=zh, en=en)
+
 
 PROFILE = "personal_assistant_v1"
 ROLE = "personal_assistant"
@@ -126,6 +132,20 @@ COMPOSER_STARTERS = (
         "command": "和我一起确定近期目标，并拆出今天可以完成的一步。",
     },
 )
+_EN_COMPOSER_STARTERS = (
+    {
+        "heading": "Platform overview",
+        "command": "Check which platform tasks are running, awaiting confirmation or in error, and suggest what to do. Observe first; do not perform any actions.",
+    },
+    {
+        "heading": "Plan my day",
+        "command": "Help me organize today's tasks by importance and time.",
+    },
+    {
+        "heading": "Follow up on goals",
+        "command": "Help me define my near-term goals and identify one step I can complete today.",
+    },
+)
 
 
 def composer_starters_for_agent(
@@ -150,7 +170,8 @@ def composer_starters_for_agent(
         or agent.get("directSessionId") != session_id
     ):
         return None
-    return [dict(row) for row in COMPOSER_STARTERS]
+    starters = _EN_COMPOSER_STARTERS if get_web_language() == "en" else COMPOSER_STARTERS
+    return [dict(row) for row in starters]
 
 
 def _profile_agent() -> dict | None:
@@ -161,14 +182,14 @@ def _profile_agent() -> dict | None:
     ]
     if len(matches) > 1:
         raise directory.AgentStateConflictError(
-            "多个个人助理身份需要在 Agent 管理中核对。"
+            _text("多个个人助理身份需要在 Agent 管理中核对。", "Multiple personal assistant identities need review in Agent management.")
         )
     agent = matches[0] if matches else None
     if agent and (
         agent.get("roleKey") != ROLE or agent.get("primaryMode") != "general"
     ):
         raise directory.AgentStateConflictError(
-            "个人助理身份配置已更改，请在 Agent 管理中核对。"
+            _text("个人助理身份配置已更改，请在 Agent 管理中核对。", "The personal assistant identity configuration has changed. Review it in Agent management.")
         )
     return agent
 
@@ -299,7 +320,7 @@ def _validated_display_name(display_name: str) -> str:
     """Single name gate for create and settings rename (1–80 chars, one line)."""
     name = str(display_name or "").strip()
     if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
-        raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
+        raise directory.AgentDirectoryError(_text("请输入 1–80 字的单行名称。", "Enter a single-line name of 1–80 characters."))
     return name
 
 
@@ -326,12 +347,12 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
             )
         if agent.get("status") != "active":
             raise directory.AgentStateConflictError(
-                "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+                _text("个人助理已归档，请在 Agent 管理中确认是否恢复。", "The personal assistant is archived. Confirm whether to restore it in Agent management.")
             )
         row = _session_row(agent)
         if row and not _owns_session(agent, row):
             raise directory.AgentStateConflictError(
-                "个人助理会话已归档或属于其他 Agent，请先核对绑定。"
+                _text("个人助理会话已归档或属于其他 Agent，请先核对绑定。", "The personal assistant session is archived or belongs to another Agent. Review the binding first.")
             )
         pending = (agent.get("metadata") or {}).get("personalAssistantSetup") != "ready"
         if pending and created:
@@ -382,7 +403,7 @@ def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
         or type(limit) is not int
         or not 1 <= limit <= 100
     ):
-        raise ValueError("概览 offset 必须为非负整数，limit 必须为 1–100。")
+        raise ValueError(_text("概览 offset 必须为非负整数，limit 必须为 1–100。", "Overview offset must be a non-negative integer and limit must be between 1 and 100."))
     agents = directory.list_agents(detail="summary")
     sessions = session_service.list_sessions()
     activity = pet_activity_service.get_pet_activity()
@@ -457,10 +478,10 @@ def _active_profile_agent() -> dict:
     """Identity gate for settings mutations; conflicts fail closed like reads."""
     agent = _profile_agent()
     if agent is None:
-        raise directory.AgentDirectoryError("个人助理尚未创建，请先完成初始化。")
+        raise directory.AgentDirectoryError(_text("个人助理尚未创建，请先完成初始化。", "The personal assistant has not been created. Complete setup first."))
     if agent.get("status") != "active":
         raise directory.AgentStateConflictError(
-            "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+            _text("个人助理已归档，请在 Agent 管理中确认是否恢复。", "The personal assistant is archived. Confirm whether to restore it in Agent management.")
         )
     return agent
 
@@ -551,17 +572,18 @@ def update_personal_assistant_settings(
             unknown = set(patch) - set(PREFERENCES_FIELDS)
             if unknown:
                 raise directory.AgentDirectoryError(
-                    "个人助理偏好包含未知字段：" + "、".join(sorted(unknown))
+                    _text("个人助理偏好包含未知字段：", "Personal assistant preferences contain unknown fields: ")
+                    + _text("、", ", ").join(sorted(unknown))
                 )
             if "characterId" in patch and patch["characterId"] not in APPEARANCES:
-                raise directory.AgentDirectoryError("不支持的外观，请从列表中选择。")
+                raise directory.AgentDirectoryError(_text("不支持的外观，请从列表中选择。", "Unsupported appearance. Choose one from the list."))
             for field in ("showStatus", "showTitles", "showCompletion"):
                 if field in patch and not isinstance(patch[field], bool):
-                    raise directory.AgentDirectoryError("偏好开关必须是布尔值。")
+                    raise directory.AgentDirectoryError(_text("偏好开关必须是布尔值。", "Preference switches must be boolean values."))
             if "idleMessage" in patch and (
                 not isinstance(patch["idleMessage"], str) or len(patch["idleMessage"]) > 48
             ):
-                raise directory.AgentDirectoryError("空闲提示语必须是不超过 48 字的文本。")
+                raise directory.AgentDirectoryError(_text("空闲提示语必须是不超过 48 字的文本。", "The idle message must be text of at most 48 characters."))
             merged = _assistant_preferences(agent)
             for field in PREFERENCES_FIELDS:
                 if field in patch:
@@ -573,7 +595,7 @@ def update_personal_assistant_settings(
         if agent.get("status") != "active":
             # Archive can race in from Agent management (outside this lock).
             raise directory.AgentStateConflictError(
-                "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+                _text("个人助理已归档，请在 Agent 管理中确认是否恢复。", "The personal assistant is archived. Confirm whether to restore it in Agent management.")
             )
         return {"settings": _settings_payload(agent)}
 
@@ -589,17 +611,17 @@ def update_personal_assistant_model(model_id: str) -> dict:
         agent = _active_profile_agent()
         normalized_model_id = str(model_id or "").strip()
         if not normalized_model_id:
-            raise directory.AgentDirectoryError("请选择要使用的模型。")
+            raise directory.AgentDirectoryError(_text("请选择要使用的模型。", "Select a model to use."))
         session_id = str(agent.get("directSessionId") or "").strip()
         if not session_id or not _owns_session(agent, _session_row(agent)):
             raise directory.AgentStateConflictError(
-                "个人助理会话尚未就绪，暂时不能调整模型。"
+                _text("个人助理会话尚未就绪，暂时不能调整模型。", "The personal assistant session is not ready. Its model cannot be changed yet.")
             )
         try:
             options = session_service.get_session_llm_options(session_id)
         except Exception as exc:
             raise directory.AgentDirectoryError(
-                "暂时无法读取可用模型列表，请稍后重试。"
+                _text("暂时无法读取可用模型列表，请稍后重试。", "Could not read the available models. Please try again later.")
             ) from exc
         candidates = {
             str((row or {}).get("modelId") or "").strip(): row or {}
@@ -607,13 +629,13 @@ def update_personal_assistant_model(model_id: str) -> dict:
         }
         selected = candidates.get(normalized_model_id)
         if selected is None:
-            raise directory.AgentDirectoryError("所选模型不在可用模型列表中。")
+            raise directory.AgentDirectoryError(_text("所选模型不在可用模型列表中。", "The selected model is not in the available model list."))
         if (
             selected.get("providerHealthy") is False
             or bool(selected.get("missingApiKey"))
         ):
             raise directory.AgentDirectoryError(
-                "所选模型当前不可用（供应商通道异常或缺少密钥），请稍后重试或选择其他模型。"
+                _text("所选模型当前不可用（供应商通道异常或缺少密钥），请稍后重试或选择其他模型。", "The selected model is currently unavailable because the provider has an issue or an API key is missing. Try again later or choose another model.")
             )
         bindings = directory.normalize_agent_llm_bindings(agent.get("llmBindings"))
         bindings["dialogue"] = {"modelId": normalized_model_id}
@@ -622,6 +644,6 @@ def update_personal_assistant_model(model_id: str) -> dict:
         if agent.get("status") != "active":
             # Archive can race in from Agent management (outside this lock).
             raise directory.AgentStateConflictError(
-                "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+                _text("个人助理已归档，请在 Agent 管理中确认是否恢复。", "The personal assistant is archived. Confirm whether to restore it in Agent management.")
             )
         return {"model": _model_settings(agent)}
