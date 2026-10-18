@@ -17,6 +17,8 @@ export const IPC_CHANNELS = {
   showLauncherWindow: "launcher:show-window",
   notifyConversationCompleted: "launcher:notify-conversation-completed",
   conversationNotificationOpened: "launcher:conversation-notification-opened",
+  notifyHumanAttention: "launcher:notify-human-attention",
+  humanAttentionOpened: "launcher:human-attention-opened",
   getLauncherState: "launcher:get-state",
   refreshLauncherState: "launcher:refresh-state",
   launcherStateChanged: "launcher:state-changed",

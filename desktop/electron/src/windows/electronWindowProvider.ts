@@ -2,7 +2,7 @@ import type { DesktopPaths } from "../paths.js";
 import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
 import { isExternalOpenableUrl } from "../security/externalOpenPolicy.js";
-import { desktopPetWindowUrl } from "./petWindow.js";
+import { desktopPetWindowUrl, isDesktopPetWindowUrl } from "./petWindow.js";
 import { isWorkbenchErrorPageUrl, workbenchErrorPageDataUrl } from "./workbenchErrorPage.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
@@ -541,6 +541,29 @@ export class ElectronWindowProvider {
       presentElectronWindow(window);
       if (!matchesOrigin(window, readyUrl)) return false;
       window.webContents.send!(channel, payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Deliver a message to the live pet/assistant surface (the unified
+   * /desktop-assistant window). Returns false when the surface is closed,
+   * still loading, or its webContents cannot receive, so callers can route to
+   * their fallback channel. A send failure is swallowed and reported as a
+   * non-delivery instead of surfacing in the main process.
+   */
+  sendToPet(channel: string, payload: unknown): boolean {
+    const window = this.petWindow;
+    if (!window || window.isDestroyed() || this.petReadyUrl === null) {
+      return false;
+    }
+    if (!isDesktopPetWindowUrl(this.petReadyUrl) || typeof window.webContents.send !== "function") {
+      return false;
+    }
+    try {
+      window.webContents.send(channel, payload);
       return true;
     } catch {
       return false;
