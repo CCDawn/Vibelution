@@ -336,6 +336,32 @@ def _deny_rules_from_decision(decision: Any) -> tuple[tuple[str, str, str], ...]
     return tuple(rules)
 
 
+def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
+    """Session-configured maxCallsPerTurn override (session > family > base).
+
+    Best-effort: unknown sessions, missing bindings, and read failures keep the
+    family/base resolution already computed by the caller.
+    """
+
+    session_id = _coerce_text(runtime.get("sessionId")).strip()
+    if not session_id:
+        agent = _as_mapping(runtime.get("agent"))
+        session_id = _coerce_text(agent.get("directSessionId")).strip()
+    if not session_id:
+        return 0
+    try:
+        from core.orchestration.session_budget_resolve import get_session_budget_parameters
+
+        parameters = get_session_budget_parameters(session_id)
+    except Exception:  # noqa: BLE001 - override lookup must never break install
+        return 0
+    value = parameters.maxCallsPerTurn if parameters is not None else None
+    try:
+        return int(value) if value else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def install_execution_authorization(report: AuthorizationReport) -> ToolExecutionAuthorizationContext:
     from core.orchestration.tool_budget_profiles import resolve_max_calls_per_turn
     from core.web.services.agent_directory_service import current_agent_runtime
@@ -354,6 +380,11 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
         provider=provider,
         profile_id=profile_id,
     )
+    # Session-configured override wins over the family/base resolution; the
+    # installed cap is the one the Turn Status Bar displays as the final value.
+    session_max_calls = _session_override_max_calls_per_turn(runtime)
+    if session_max_calls > 0:
+        max_calls_per_turn = session_max_calls
     context = ToolExecutionAuthorizationContext(
         agent_id=_coerce_text(decision.agent_id).strip(),
         turn_id=_coerce_text(decision.turn_id).strip(),

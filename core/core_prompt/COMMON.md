@@ -21,7 +21,7 @@
 - 定位代码优先 `code_symbol_tool` / `grep_search_tool` / `glob_tool`；读取文件内容用 `read_file_tool`；`cli_tool`/`exec_command` 用于执行与验证（git、测试、编译）。
 - `cli_tool` 与 `exec_command` 共用 shell 路由：Windows 默认勿混用 bash/PowerShell/cmd 探路；Unix 管道片段需显式 `bash -c`。
 - 同类 shell 失败 **1 次**后立即换结构化工具或不同策略，禁止同意图连撞。
-- 本回合工具调用有额度上限（常见 32 次）：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
+- 本回合工具调用有额度上限（具体数值以授权层执行为准，运行时摘要会写明当前回合额度）：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
 - 大工具结果只消费结论（状态/关键行/错误码），不要整段回灌上下文。
 - 开始任务前先写最小完成标准；额度将尽时先收束验证，再开新支线。
 

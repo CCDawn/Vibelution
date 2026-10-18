@@ -152,6 +152,27 @@ export type SessionModelSelection = {
   reasoningEffort?: string;
 };
 
+/**
+ * Per-session budget parameters. `revision` is the server-side
+ * optimistic-concurrency guard; null fields follow the model/session defaults.
+ */
+export type SessionBudgetParameters = {
+  revision: number;
+  maxCallsPerTurn: number | null;
+  thinkingBudgetChars: number | null;
+};
+
+/**
+ * PATCH payload for session budget parameters. `revision` must match the
+ * server's current revision (409 otherwise). Omitted or null fields clear the
+ * override back to defaults.
+ */
+export type SessionBudgetParametersUpdate = {
+  revision: number;
+  maxCallsPerTurn?: number | null;
+  thinkingBudgetChars?: number | null;
+};
+
 /** In-conversation SFT dataset curation decision for one assistant answer. */
 export type SessionMessageCurationAction = "include" | "exclude";
 
