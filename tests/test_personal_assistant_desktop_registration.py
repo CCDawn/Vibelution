@@ -115,7 +115,10 @@ def test_explicit_setup_upgrades_only_exact_old_policies(personal_env, private):
 
 
 @pytest.mark.parametrize("policy", [{"allowedTools": [], "preferredTools": []},
-    {"allowedTools": list(OLD_TOOLS), "preferredTools": list(OLD_TOOLS), "maxCallsPerTurn": 5}])
+    # Structurally custom: preferredTools differ from any provisioning snapshot.
+    # A budget-only deviation no longer counts as custom because snapshot
+    # budgets follow the live config knob and are system-written.
+    {"allowedTools": list(OLD_TOOLS), "preferredTools": [], "maxCallsPerTurn": 5}])
 def test_get_and_repeated_setup_preserve_custom_zero_tool_policies(personal_env, policy):
     row = service.create_personal_assistant()["assistant"]
     directory.update_agent_instance(row["agentId"], tool_policy=policy)
