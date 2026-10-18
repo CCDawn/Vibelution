@@ -3150,6 +3150,17 @@ class AgentRuntime:
             extend_cacheable_prefix_fn=extend_system_message_cacheable_prefix,
         )
         messages = assembled_turn_messages.messages
+        if policy.mode == AgentMode.CHAT:
+            ledger_identity = self._chat_ledger_identity()
+            if ledger_identity is not None:
+                from core.chat.todo_checklist import restore_todo_context_from_journal
+
+                journal_root, journal_session_id, journal_turn_id = ledger_identity
+                messages = restore_todo_context_from_journal(
+                    messages, project_root=journal_root,
+                    session_id=journal_session_id, turn_id=journal_turn_id,
+                    user_prompt=user_prompt,
+                )
         resumed_messages = assembled_turn_messages.resumed
         cacheable_prefix_merged = assembled_turn_messages.cacheable_prefix_merged
         if assembled_turn_messages.static_context_inserted:

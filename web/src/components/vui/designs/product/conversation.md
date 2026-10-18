@@ -53,7 +53,7 @@
 ## ConversationTodoChecklist
 
 ### 功能
-回合级 todo 清单：正文中默认折叠保存快照；右侧计划面板默认展开，完成项勾选、运行项展示 activeForm + spinner、待办空心圈，头部带「已完成/总数」计数。回合结束后的进行中项改用暂停图标与任务内容，并给一行未完成提示（仅呈现，不阻断）。
+回合级 todo 清单：正文中默认折叠保存快照；顶栏任务入口的独立悬浮卡片默认展开，完成项勾选、运行项展示 activeForm + spinner、待办空心圈，头部带「已完成/总数」计数。回合结束后的进行中项改用暂停图标与任务内容，并给一行未完成提示（仅呈现，不阻断）。
 
 ### 适用范围
 - **适用**：直连会话时间线内的 assistant 回合（活跃轮实时、历史轮只读回放），快照从 journal 回放的 turnItems 派生。
@@ -62,7 +62,7 @@
 | 场景 | 选择 |
 | --- | --- |
 | 正文内的活跃轮和历史轮 | 默认折叠，可手动展开只读快照 |
-| 右侧计划面板 | `presentation="panel"` 默认展开；运行中当前项 activeForm + spinner |
+| 顶栏入口的悬浮卡片 | `presentation="panel"` 默认展开；运行中当前项 activeForm + spinner |
 | 历史轮（turn 已有终态） | 默认折叠，可展开；只读，无交互承诺 |
 | 回合结束 + 快照仍有 pending/in_progress | 头部下方一行警示文案（`todoChecklistUnfinishedWarning`） |
 
@@ -78,7 +78,7 @@
 | snapshot | 最新有效清单快照（items/completedCount/total/hasUnfinished） | 由 `conversationTodoChecklistModel.ts` 派生，组件不自取数据 |
 | lang | 语言 | 文案一律走 `dictionaryChat`（todoChecklist*） |
 | turnSettled | 回合是否已有终态 | 决定暂停/运行图标与警示行；不改变回合状态判定 |
-| presentation | `inline`（默认）或 `panel` | 正文折叠，计划面板展开；只影响初始展开状态 |
+| presentation | `inline`（默认）或 `panel` | 正文折叠，悬浮卡片展开；只影响初始展开状态 |
 
 ### 非职责
 - 不落盘、不回写清单状态；journal 是唯一事实源，卡片只消费 turnItems。
@@ -103,19 +103,19 @@
 ## ConversationTodoProgressButton
 
 ### 功能
-会话顶栏右侧的紧凑任务入口，显示任务图标和完成数，点击打开现有右侧「计划」页签；已打开时可收起。正文保留折叠快照，详情由计划面板承载。
+会话顶栏右侧的紧凑任务入口，显示任务图标和完成数，点击在入口下方打开独立悬浮卡片；不占右栏、不挤压正文。正文保留折叠快照，右栏不重复展示该清单。
 
 ### 适用范围
-普通直连会话且存在有效 `todo_write` 快照时显示；无清单、外来会话占位、Companion、群聊与嵌入式面不显示。只消费 `deriveSessionTodoChecklist` 的最近有效清单投影，不新增存储或事件通道。
+普通直连会话且存在有效 `todo_write` 快照时显示；无清单、外来会话占位、Companion、群聊与嵌入式面不显示。只消费 `deriveSessionTodoChecklist` 的最近有效清单投影，不新增存储或事件通道。明确空快照隐藏入口并阻止旧清单回退；明确失败调用不覆盖上一份有效清单。
 
 ### 使用方式
-组合 `VButton`（ghost / compact），传入 `plan`、`lang`、`expanded` 和 `onPress`。入口嵌入 `ChatCenterTabStrip.taskProgressControl`，由 `ChatCodingCenterTabs` 使用已有 `requestChatRightRailOpen` 打开计划；宽屏沿用共享侧栏宽度记忆，窄屏沿用右栏浮层。
+组合 `VButton`（ghost / compact）、`VPopover` 和 `ConversationTodoChecklist`，传入 `plan`、`lang`。入口嵌入 `ChatCenterTabStrip.taskProgressControl`，组件自管展开；`ChatCodingCenterTabs` 以会话 key 重建组件，切换会话时关闭旧卡片。复用 VPopover 的外部点击、Escape、焦点恢复与视口碰撞处理。
 
 ### 视觉与状态
-运行中显示转动图标，完成显示勾选；已有终态但清单未完成时显示暂停图标和「待继续」，窄屏隐藏状态文字以保留任务入口。无进行中项时显示待开始。`aria-label` 包含清单名称、计数和状态；`aria-expanded` 对应当前计划面板的可见性。更新计数不自动展开或抢占文件/差异页签。
+卡片默认宽 344px、圆角 12px，与入口间隔 8px、右边对齐，复用 VPopover 表面与阴影；窄屏宽度不超过视口减 24px，长内容换行并限高滚动。运行中显示转动图标，完成显示勾选；已有终态但清单未完成时显示暂停图标和「待继续」，窄屏隐藏状态文字以保留任务入口。无进行中项时显示待开始。`aria-label` 包含清单名称、计数和状态；`aria-expanded` 对应独立浮层可见性。更新计数不自动展开或抢占文件/差异页签。
 
 ### 实现落点与边界
-`components/conversation/ConversationTodoProgressButton.tsx`；顶栏只读展示与导航，不修改普通 Session admission、Journal、worker、persist、projection 或 SSE，也不介入 Companion 会话。
+`components/conversation/ConversationTodoProgressButton.tsx`；顶栏只读展示与展开控制，不修改普通 Session admission、Journal、worker、persist、projection 或 SSE，也不介入 Companion 会话。
 
 ## ConversationActiveTurnStatusNote
 

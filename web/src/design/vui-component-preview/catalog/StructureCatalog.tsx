@@ -267,8 +267,6 @@ export function StructureCatalog() {
         <ConversationTodoProgressButton
           plan={{ snapshot: conversationTodoChecklistPreviewSnapshot, turnSettled: false, messageId: "preview-plan" }}
           lang="zh"
-          expanded={false}
-          onPress={() => undefined}
         />
       </VuiPreviewCard>
 <VuiPreviewCard name="ConversationTodoChecklist" className="col-span-full min-h-0">

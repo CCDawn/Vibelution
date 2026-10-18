@@ -17,8 +17,6 @@ import styles from "../ChatCodingRoute.styles";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { cliAgentRunTabId, type CliAgentRunView } from "./cliAgentRunModel";
 import type { PaneDockPayload, SessionBarDockChip } from "./chatPaneDock";
-import { chatRightRailKindLabel } from "./chatRightRailModel";
-import { requestChatRightRailOpen } from "./chatRightRailRequests";
 
 const ChatFileWorkspaceTabs = lazy(() =>
   import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
@@ -48,7 +46,6 @@ export type ChatCodingCenterTabsProps = {
   conversationIndexOverlayOpen: boolean;
   ordinaryChangeRail: boolean;
   changeRailVisible: boolean;
-  taskPlanOpen?: boolean;
   statusRailOverlayOpen: boolean;
   toggleChangeRail: () => void;
   setResponsiveOverlayPane: Dispatch<SetStateAction<"left" | "right" | null>>;
@@ -117,7 +114,6 @@ export function ChatCodingCenterTabs({
   conversationIndexOverlayOpen,
   ordinaryChangeRail,
   changeRailVisible,
-  taskPlanOpen = false,
   statusRailOverlayOpen,
   toggleChangeRail,
   setResponsiveOverlayPane,
@@ -216,22 +212,9 @@ export function ChatCodingCenterTabs({
       /> : undefined}
       taskProgressControl={taskPlan && activeSessionId ? (
         <ConversationTodoProgressButton
+          key={activeSessionId}
           plan={taskPlan}
           lang={lang}
-          expanded={taskPlanOpen}
-          onPress={() => {
-            if (taskPlanOpen) {
-              toggleChangeRail();
-              return;
-            }
-            setSessionBrowserOpen(false);
-            requestChatRightRailOpen({
-              sessionId: activeSessionId,
-              kind: "plan",
-              title: chatRightRailKindLabel("plan", lang),
-              host: "rail",
-            });
-          }}
         />
       ) : undefined}
       leftOverlayVisible={leftOverlayVisible}
