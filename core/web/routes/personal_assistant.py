@@ -244,6 +244,9 @@ class OverviewResponse(BaseModel):
 
     attention: list[Attention]
 
+    # 人类关注行（复核停靠/异常升级）独立通道：会话派生 attention 不变量保持不变。
+    humanAttention: list[Attention] = []
+
     pagination: OverviewPagination
 
 

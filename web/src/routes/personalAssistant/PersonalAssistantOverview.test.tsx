@@ -52,6 +52,16 @@ describe("personal assistant management shortcuts", () => {
     expect(openSession).toHaveBeenCalledWith("worker-session");
     expect(container.textContent).toContain("操作工具中");
   });
+  it("routes human-attention rows without a session to their target page", async () => {
+    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "",
+      counts: { agents: 0, sessions: 0, running: 0, waiting: 0, failed: 0 }, agents: [], sessions: [], attention: [],
+      humanAttention: [{ id: "escalation:stagetask-1", title: "研究异常已升级", kind: "anomaly", severity: "critical", targetUrl: "/teams?researchView=workflow" }] });
+    await render();
+    const row = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("研究异常已升级"))!;
+    await act(async () => row.click());
+    expect(openSession).not.toHaveBeenCalled();
+    expect(container.querySelector("output")?.textContent).toBe("/teams");
+  });
   it("hides private titles and Agent names throughout the desktop overview without breaking navigation", async () => {
     vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue({ generatedAt: "",
       counts: { agents: 1, sessions: 1, running: 1, waiting: 1, failed: 0 },

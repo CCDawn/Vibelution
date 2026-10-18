@@ -669,22 +669,22 @@ def collect_anomaly_attention(
 
 def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
-    """Append human-attention entries to a first-page overview payload.
+    """Attach human-attention entries to a first-page overview payload.
 
 
     Composition point used by the overview route (keeps the collector wiring
 
-    out of the assistant service itself). The extension entries join after the
+    out of the assistant service itself). The collected entries land in a
 
-    existing approval/error rows on the first page only (offset == 0) so they
+    separate ``humanAttention`` lane on the first page only (offset == 0);
 
-    stay a summary dock instead of repeating across pages; pagination keeps
+    the session-derived ``attention`` list keeps its original pagination and
 
-    its original meaning over the existing rows. Any collector failure is
+    counts invariant (attention rows === waiting + failed). Any collector
 
-    swallowed — the overview must never break because an attention source is
+    failure is swallowed — the overview must never break because an attention
 
-    unavailable.
+    source is unavailable.
 
     """
 
@@ -697,9 +697,7 @@ def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
         return payload
 
-    attention = payload.get("attention")
-
-    if not isinstance(attention, list):
+    if not isinstance(payload.get("attention"), list):
 
         return payload
 
@@ -715,6 +713,12 @@ def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
             continue
 
-    attention.extend(extension)
+    if extension:
+
+        # 人类关注行走独立通道：会话派生 attention 与 counts 的旧不变量
+
+        # （行数 === waiting + failed）原样保留，前端分页校验不受影响。
+
+        payload["humanAttention"] = extension
 
     return payload

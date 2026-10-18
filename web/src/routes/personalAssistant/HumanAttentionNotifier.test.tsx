@@ -13,13 +13,14 @@ vi.mock("../../api/personalAssistant", () => ({ fetchPersonalAssistantOverview: 
 
 type AttentionRow = PersonalAssistantOverview["attention"][number];
 
-function overviewWith(attention: AttentionRow[]): PersonalAssistantOverview {
+function overviewWith(humanAttention: AttentionRow[]): PersonalAssistantOverview {
   return {
     generatedAt: "2026-10-18T00:00:00Z",
-    counts: { agents: 0, sessions: 0, running: 0, waiting: attention.length, failed: 0 },
+    counts: { agents: 0, sessions: 0, running: 0, waiting: 0, failed: 0 },
     agents: [],
     sessions: [],
-    attention,
+    attention: [],
+    humanAttention,
   };
 }
 

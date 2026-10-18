@@ -619,15 +619,21 @@ def test_overview_route_appends_new_sources_without_touching_existing_rows(
 
     rows = body["attention"]
 
-    assert len(rows) == 5
+    assert rows == [
 
-    assert rows[0] == {"id": "approval", "kind": "approval", "title": "等待批准", "sessionId": "approval"}
+        {"id": "approval", "kind": "approval", "title": "等待批准", "sessionId": "approval"},
 
-    assert rows[1] == {"id": "failed", "kind": "error", "title": "执行失败", "sessionId": "failed"}
+        {"id": "failed", "kind": "error", "title": "执行失败", "sessionId": "failed"},
 
-    assert [row["kind"] for row in rows[2:]] == ["knowledge_review", "anomaly", "anomaly"]
+    ]
 
-    assert all(set(row) == _NEW_ENTRY_FIELDS for row in rows[2:])
+    # 人类关注行走独立通道：attention 与 counts 不变量原样保留。
+
+    human = body["humanAttention"]
+
+    assert [row["kind"] for row in human] == ["knowledge_review", "anomaly", "anomaly"]
+
+    assert all(set(row) == _NEW_ENTRY_FIELDS for row in human)
 
     # counts/pagination 语义不被新源改写
 
@@ -637,11 +643,15 @@ def test_overview_route_appends_new_sources_without_touching_existing_rows(
 
     # 翻页页不再重复扩展条目（扩展只进第一页概览）
 
-    assert client.get("/api/personal-assistant/overview?offset=1").json()["attention"] == [
+    offset_body = client.get("/api/personal-assistant/overview?offset=1").json()
+
+    assert offset_body["attention"] == [
 
         {"id": "failed", "kind": "error", "title": "执行失败", "sessionId": "failed"}
 
     ]
+
+    assert "humanAttention" not in offset_body
 
 
 
@@ -689,6 +699,10 @@ def test_missing_stores_and_broken_collectors_never_break_the_overview(
     attached = attention.attach_attention_to_overview(payload)
 
     assert [row["id"] for row in attached["attention"]] == ["approval"]
+
+    # 空扩展不落键：旧 wire 形状在无人类关注事项时保持不变。
+
+    assert "humanAttention" not in attached
 
 
 

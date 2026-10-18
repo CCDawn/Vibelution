@@ -61,5 +61,7 @@ export type PersonalAssistantOverview = {
     body?: string;
     targetUrl?: string;
   }>;
+  /** Human-attention lane (knowledge_review/anomaly), separate so session-derived attention keeps its counts invariant. */
+  humanAttention?: Array<{ id: string; kind: string; title: string; sessionId?: string; severity?: string; body?: string; targetUrl?: string }>;
   pagination?: { offset: number; limit: number; nextOffset: number | null; revision?: string };
 };

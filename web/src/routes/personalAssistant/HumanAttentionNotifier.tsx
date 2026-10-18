@@ -42,7 +42,7 @@ export function HumanAttentionNotifier() {
   });
 
   useEffect(() => {
-    const rows = overview.data?.attention;
+    const rows = overview.data?.humanAttention;
     if (!rows) {
       return;
     }

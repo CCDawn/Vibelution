@@ -35,12 +35,14 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false, show
     if (["running", "thinking", "reading", "tooling", "answering", "verifying", "queued", "planning", "editing", "stopping"].includes(status)) return "running";
     return "idle";
   }
-  const rows = !data ? [] : tab === "attention" ? data.attention.map((row, i) => ({ id: row.id,
-    title: showTitles ? row.title : `事项 ${i + 1}`, status: row.kind === "approval" ? "等待确认" : "需要查看", sessionId: row.sessionId }))
+  // 会话派生 attention 行 + 独立 humanAttention 通道（复核停靠/异常升级）合并展示。
+  const attentionRows = data ? [...data.attention, ...(data.humanAttention ?? [])] : [];
+  const rows = !data ? [] : tab === "attention" ? attentionRows.map((row, i) => ({ id: row.id,
+    title: showTitles ? row.title : `事项 ${i + 1}`, status: row.kind === "approval" ? "等待确认" : "需要查看", sessionId: row.sessionId, targetUrl: row.targetUrl }))
     : tab === "agents" ? data.agents.map((row, i) => ({ id: row.id, title: showTitles ? row.displayName || row.id : `智能体 ${i + 1}`,
-      status: assistantStatusLabel(row.status), sessionId: undefined }))
+      status: assistantStatusLabel(row.status), sessionId: undefined, targetUrl: undefined }))
       : data.sessions.filter(row => filter === "all" || sessionGroup(row.id, row.currentPhase || row.status) === filter).map((row, i) => ({ id: row.id,
-        title: showTitles ? row.title || "未命名会话" : `会话 ${i + 1}`, status: assistantStatusLabel(row.currentPhase || row.status), sessionId: row.id }));
+        title: showTitles ? row.title || "未命名会话" : `会话 ${i + 1}`, status: assistantStatusLabel(row.currentPhase || row.status), sessionId: row.id, targetUrl: undefined }));
   const filtered = rows.filter(row => row.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages);
@@ -60,7 +62,7 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false, show
       ] as const).map(([id, label, count]) => <VButton key={id} variant="ghost" contentLayout="plain" className={styles.status}
         onClick={() => selectStatus(id)}><i className={styles.dot} data-status={id} />{label} <strong>{count}</strong></VButton>)}</div> : null}
       <VTabs className={styles.tabs} value={tab} onValueChange={choose} aria-label="概览内容" items={[
-        { id: "attention", label: `需关注 ${data?.attention.length ?? 0}` }, { id: "sessions", label: `会话 ${data?.counts.sessions ?? 0}` },
+        { id: "attention", label: `需关注 ${data ? attentionRows.length : 0}` }, { id: "sessions", label: `会话 ${data?.counts.sessions ?? 0}` },
         { id: "agents", label: `智能体 ${data?.counts.agents ?? 0}` },
       ]} />
       {tab !== "attention" ? <div className={styles.controls}><div className={styles.search}><Search size={13} /><VInput aria-label={tab === "sessions" ? "搜索会话" : "搜索智能体"}
@@ -74,6 +76,8 @@ export function PersonalAssistantOverview({ onOpenSession, desktop = false, show
         {tab !== "attention" ? <p className={styles.summary}>{filtered.length} 项</p> : null}
         {visible.length ? <ul className={styles.list}>{visible.map(row => <li key={row.id}>{row.sessionId ? <VButton variant="ghost" contentLayout="plain" className={styles.row}
           onClick={() => onOpenSession(row.sessionId!)}>{tab === "attention" ? <CircleAlert size={15} /> : <MessageSquare size={14} />}<span className={styles.rowCopy}><strong title={row.title}>{row.title}</strong><span>{row.status}</span></span><ArrowRight size={13} /></VButton>
+          : row.targetUrl ? <VButton variant="ghost" contentLayout="plain" className={styles.row}
+          onClick={() => navigate(row.targetUrl!)}><CircleAlert size={15} /><span className={styles.rowCopy}><strong title={row.title}>{row.title}</strong><span>{row.status}</span></span><ArrowRight size={13} /></VButton>
           : <div className={styles.agent}><Bot size={14} /><span className={styles.rowCopy}><strong title={row.title}>{row.title}</strong><span>{row.status}</span></span></div>}</li>)}</ul>
           : <div className={styles.empty}><CheckCircle2 size={23} /><strong>{tab === "attention" ? "当前没有待处理事项" : "没有匹配的结果"}</strong></div>}
         {pages > 1 ? <div className={styles.pagination}><span>第 {currentPage} / {pages} 页</span><div><VButton variant="ghost" isDisabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>上一页</VButton><VButton variant="ghost" isDisabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>下一页</VButton></div></div> : null}
