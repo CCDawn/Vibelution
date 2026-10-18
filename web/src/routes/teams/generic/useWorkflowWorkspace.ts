@@ -5,7 +5,7 @@ import {
 } from "../../../api/genericTeamWorkflows";
 import type { TeamFlowCommand } from "../../../api/types/genericTeamWorkflow";
 import { usePageVisibility } from "../../../app/pollingPolicy";
-import { mergeSavedFlows, sameFlowContent, type Flow, type Run } from "./workflowModel";
+import { isEditableWorkflow, mergeSavedFlows, sameFlowContent, type Flow, type Run } from "./workflowModel";
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : "操作未完成，请重试。";
 
@@ -34,13 +34,15 @@ export function useWorkflowWorkspace(teamId: string) {
   });
   useEffect(() => {
     if (definitions.data) {
-      setFlows(current => mergeSavedFlows(current, definitions.data.flows, dirtyIds));
-      setFlowId(current => current || definitions.data.flows[0]?.id || "");
+      const editable = definitions.data.flows.filter(isEditableWorkflow);
+      setFlows(current => mergeSavedFlows(current.filter(isEditableWorkflow), editable, dirtyIds));
+      setFlowId(current => definitions.data.flows.some(item => item.id === current && !isEditableWorkflow(item))
+        ? editable[0]?.id || "" : current || editable[0]?.id || "");
     }
   }, [definitions.data, dirtyIds]);
 
   const flow = flows.find(item => item.id === flowId) ?? flows[0];
-  const runs = executions.data?.runs ?? [];
+  const runs = (executions.data?.runs ?? []).filter(item => isEditableWorkflow(item.flow));
   const run = runs.find(item => item.id === runId && item.flow.id === flow?.id);
 
   function selectFlow(id: string) { setFlowId(id); setRunId(null); setError(""); }

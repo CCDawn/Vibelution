@@ -7,7 +7,9 @@ export type Step = WorkflowStep;
 export type StepKind = WorkflowStep["kind"];
 export type Run = TeamFlowRun;
 export type WorkflowMember = { id: string; name: string; initial: string; detail: string; available: boolean };
-export const KIND_LABEL: Record<StepKind, string> = { input: "用户输入", agent: "Agent 任务", human: "人工确认", output: "交付结果" };
+export const KIND_LABEL: Record<StepKind, string> = { input: "用户输入", agent: "Agent 任务", human: "人工确认", output: "交付结果", research: "研究故障监督" };
+// Source supervision is configured through the typed API, not this editor.
+export const isEditableWorkflow = (flow: Flow): boolean => !flow.steps.some(step => step.kind === "research");
 export const copyFlow = (flow: Flow): Flow => structuredClone(flow);
 export const memberName = (id: string, members: WorkflowMember[]) => members.find(member => member.id === id)?.name || id || "未分配";
 

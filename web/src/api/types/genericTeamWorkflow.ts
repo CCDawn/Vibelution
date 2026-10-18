@@ -9,10 +9,11 @@ export type WorkflowInput = {
 export type WorkflowStep = {
   id: string;
   label: string;
-  kind: "input" | "agent" | "human" | "output";
+  kind: "input" | "agent" | "human" | "output" | "research";
   owner: string;
   instruction: string;
   resultContract?: "text" | "outcome_v1";
+  researchSource?: { runId: string; nodeId: string } | null;
 };
 
 export type TeamFlowFailureRecoveryPolicy = {
