@@ -305,7 +305,8 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
                     raise adapter.ComputerBlocked("目标控件编号无效，请重新观察。")
                 _pending = {"id": secrets.token_urlsafe(24), "action": action,
                             "targetLabel": f"{window['appName']} · {old['targets'][int(element_id)]}" if action != "scroll" else window["appName"],
-                            "text": text or None, "expires": time.monotonic() + CONFIRM_SECONDS,
+                            "text": text if action in {"set_value", "type_text"} else text or None,
+                            "expires": time.monotonic() + CONFIRM_SECONDS,
                             "event": threading.Event(), "approved": False}
                 pending = _pending
                 _status, _message = "waiting_confirmation", "请核对具体动作；确认只允许执行这一步。"
