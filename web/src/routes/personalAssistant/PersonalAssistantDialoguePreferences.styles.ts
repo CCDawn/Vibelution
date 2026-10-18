@@ -1,0 +1,22 @@
+const styles = {
+  root: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden text-sm",
+  pinned: "shrink-0 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
+  header: "flex items-center justify-between gap-2 px-4 pb-3 pt-4 [&_h2]:text-sm [&_h2]:font-medium",
+  headerActions: "ml-auto flex shrink-0 items-center gap-1",
+  subtitle: "mt-1 text-[10px] text-[var(--fg-secondary)]",
+  content: "min-h-0 flex-1 overflow-y-auto px-4 py-3 [scrollbar-width:thin]",
+  error: "mb-3 rounded-[6px] border border-[var(--vui-border-subtle)] px-3 py-2 text-xs text-[var(--state-error)]",
+  fields: "grid gap-3",
+  field: "grid gap-1.5 rounded-[6px] border border-[var(--vui-border-subtle)] px-3 py-2.5",
+  fieldLabel: "text-xs font-medium",
+  hint: "text-[10px] text-[var(--fg-secondary)]",
+  sectionTitle: "mt-4 px-1 text-[11px] font-medium text-[var(--fg-secondary)]",
+  list: "mt-2 space-y-1.5",
+  proposal: "flex min-w-0 items-start justify-between gap-2 rounded-[6px] border border-[var(--vui-border-subtle)] px-3 py-2.5",
+  rowCopy: "grid min-w-0 flex-1 gap-1 [&>strong]:text-xs [&>strong]:font-medium [&>span]:text-[10px] [&>span]:text-[var(--fg-secondary)]",
+  proposalActions: "flex shrink-0 items-center gap-1",
+  decidedRow: "flex min-w-0 items-center gap-2 rounded-[6px] border border-[var(--vui-border-subtle)] px-3 py-2",
+  decidedBadge: "shrink-0 rounded-[4px] bg-[var(--vui-surface-panel)] px-1.5 py-0.5 text-[10px] text-[var(--fg-secondary)]",
+  empty: "flex flex-col items-center gap-3 py-8 text-center text-xs text-[var(--fg-secondary)] [&_strong]:font-normal",
+} as const;
+export default styles;

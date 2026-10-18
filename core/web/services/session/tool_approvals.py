@@ -1023,6 +1023,8 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
     summary: dict[str, Any] = {
         "argumentKeys": sorted(str(key) for key in args if str(key) != "_cancel_checker")[:24],
     }
+    if tool_name == "personal_assistant_manage_tool":
+        return {**summary, **_assistant_management_summary(args)}
     if tool_name in {"cli_tool", "exec_command"}:
         command = str(args.get("cmd") or args.get("command") or "").strip()
         if command:
@@ -1047,6 +1049,85 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
         summary["pathPreview"] = path[:300]
         summary["pathTruncated"] = len(path) > 300
     return summary
+
+
+def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
+    """Approval-only projection; never expose nested prompt/policy values."""
+    actions = {
+        "agent_create", "agent_update", "agent_archive", "session_create",
+        "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
+        "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
+    }
+    action = args.get("action")
+    if not isinstance(action, str) or action not in actions:
+        return {"assistantArgumentsInvalid": True}
+    result: dict[str, Any] = {"assistantAction": action}
+    raw = args.get("arguments_json")
+    try:
+        if not isinstance(raw, str) or len(raw) > 16000:
+            raise ValueError("invalid management arguments")
+        values = json.loads(raw)
+        if not isinstance(values, dict):
+            raise ValueError("management arguments must be an object")
+    except (ValueError, TypeError, RecursionError):
+        return {**result, "assistantArgumentsInvalid": True}
+    targets = {}
+    for key in ("agent_id", "session_id", "turn_id", "team_id", "flow_id", "binding_id",
+                "director_agent_id", "developer_agent_id", "reviewer_agent_id", "repair_flow_id",
+                "knowledge_base_id", "target_agent_id"):
+        value = values.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", value):
+            targets[key] = value
+    for key in ("title", "display_name"):
+        value = values.get(key)
+        if isinstance(value, str):
+            targets[key] = " ".join(value.split())[:120]
+    result["assistantTargets"] = targets
+    if action.startswith("workflow_"):
+        payload = values.get("payload")
+        if not isinstance(payload, dict):
+            result["assistantArgumentsInvalid"] = True
+        else:
+            for key in ("directorAgentId", "developerAgentId", "reviewerAgentId", "repairFlowId"):
+                value = payload.get(key)
+                if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", value):
+                    targets[f"payload.{key}"] = value
+            for key in ("expectedRevision", "maxAttempts", "maxRepairAttempts", "repairTimeoutSeconds", "validForSeconds"):
+                value = payload.get(key)
+                if type(value) is int and 0 < value <= 604800:
+                    targets[f"payload.{key}"] = str(value)
+            if payload.get("replaySafety") in ("read_only", "idempotent", "unknown"):
+                targets["payload.replaySafety"] = payload["replaySafety"]
+            if type(payload.get("acknowledgeAutomaticRecovery")) is bool:
+                targets["payload.acknowledgeAutomaticRecovery"] = str(payload["acknowledgeAutomaticRecovery"]).lower()
+    if action == "knowledge_acl_grant":
+        try:
+            permissions = json.loads(values.get("permissions_json", '["read", "propose"]'))
+            if (not isinstance(permissions, list) or not permissions or len(permissions) > 3
+                    or any(not isinstance(value, str) or value not in {"read", "propose", "review"} for value in permissions)):
+                raise ValueError("invalid knowledge permissions")
+            result["assistantPermissions"] = sorted(set(permissions))
+        except (ValueError, TypeError, RecursionError):
+            result["assistantArgumentsInvalid"] = True
+    if action == "agent_update":
+        # A curated display allowlist, not a second update validator.
+        display_fields = {
+            "displayName", "llmBindings", "primaryMode", "roleKey", "promptTemplateId",
+            "toolPolicyId", "memoryPolicyId", "toolPolicy", "memoryPolicy", "contextCompressionPolicy",
+            "delegationPolicy", "supervisionPolicy", "reasoningEffortBySlot", "permissionPreset",
+            "personaProfile", "taskProfile", "metadata",
+        }
+        try:
+            updates = json.loads(values.get("updates_json", ""))
+            if not isinstance(updates, dict):
+                raise ValueError("invalid updates")
+            result["assistantChangedFields"] = sorted(display_fields.intersection(updates))
+        except (ValueError, TypeError, RecursionError):
+            result["assistantArgumentsInvalid"] = True
+    result["assistantDetailsOmitted"] = bool(set(values).difference(targets)) or any(
+        targets.get(key) != values[key] for key in ("title", "display_name") if key in targets
+    )
+    return result
 
 
 def _session_grant_scope(

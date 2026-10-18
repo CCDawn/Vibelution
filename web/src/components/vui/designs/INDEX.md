@@ -11,6 +11,7 @@
 | `HumanAttentionNotifier` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnotifier) |
 | `HumanAttentionNoticeStack` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnoticestack) |
 | `PersonalAssistantSettings` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantsettings) |
+| `PersonalAssistantDialoguePreferences` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantdialoguepreferences) |
 
 选型与反冗余入口。路径均为 `designs/` 相对路径。
 

@@ -190,10 +190,26 @@ def test_missing_decision_and_empty_novelty_fail_closed_without_a_fixed_count() 
     assert "turnOrdinal" not in repr(no_new_information)
 
 
-def test_v1_expression_remains_available_while_v2_runtime_is_registered() -> None:
+def test_expression_projection_carries_no_mechanical_cadence_into_v2() -> None:
     assert EXPRESSION_DECISION_VERSION == "companion_expression.v1"
-    assert build_companion_expression_decision(turn_ordinal=3)["followup"] is True
+    small_talk = build_companion_expression_decision(
+        relationship={"relationshipStage": "friend"},
+        affect={"mood": {"valence": 8, "stability": 72}},
+        energy=70,
+        user_intent="small_talk",
+    )
+    # The V2 chain consumes persona state, intent and reviewed preferences;
+    # no arrival ordinal, modulo cadence or fixed second-bubble target may
+    # appear in the projection the model sees.
+    assert "followup" not in small_talk
+    assert small_talk["questionBudget"] in {0, 1}
+    import inspect
+
+    assert "turn_ordinal" not in inspect.signature(
+        build_companion_expression_decision
+    ).parameters
     assert "virtual_human_dialogue_decision_v2_tool" in VIRTUAL_HUMAN_TOOL_NAMES
+    assert "virtual_human_preference_proposal_tool" in VIRTUAL_HUMAN_TOOL_NAMES
     assert "13_companion_dialogue_v2_draft.md" in PROMPT_PACK_FILES
     assert "12_companion_followup_delivery.md" not in PROMPT_PACK_FILES
 

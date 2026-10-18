@@ -6,6 +6,7 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDialog, VIconButton, VSplitWorkspace, VTabs } from "../components/vui";
 import { ChatCodingRoute } from "./ChatCodingRoute";
 import { PersonalAssistantOverview } from "./personalAssistant/PersonalAssistantOverview";
+import { PersonalAssistantDialoguePreferences } from "./personalAssistant/PersonalAssistantDialoguePreferences";
 import { PersonalAssistantState } from "./personalAssistant/PersonalAssistantState";
 import { usePersonalAssistant } from "./personalAssistant/usePersonalAssistant";
 import { useAssistantNarrowLayout } from "./personalAssistant/useAssistantNarrowLayout";
@@ -27,7 +28,9 @@ export function PersonalAssistantRoute() {
   const [overviewCollapsed, setOverviewCollapsed] = useState(false);
   const [rightTab, setRightTab] = useState("overview");
   const [computerOpen, setComputerOpen] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
+  const assistantAgentId = state.assistant?.agentId ?? "";
   const [desktopPending, setDesktopPending] = useState(false);
   const [desktopError, setDesktopError] = useState<DesktopError | null>(null);
   const desktopErrorText = desktopError && ("key" in desktopError ? copy[desktopError.key] : desktopError.message);
@@ -45,6 +48,7 @@ export function PersonalAssistantRoute() {
     {narrow ? <div className={styles.narrowActions} aria-label={copy.assistantActions}>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setOverviewOpen(true)}>{copy.overview}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setComputerOpen(true)}>{copy.computerControl}</VButton>
+      <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setPreferencesOpen(true)}>{copy.dialoguePreferences}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>{copy.desktopMode}</VButton>
     </div> : null}
     {desktopErrorText ? <p className={styles.error} role="alert">{desktopErrorText}</p> : null}
@@ -62,6 +66,9 @@ export function PersonalAssistantRoute() {
             onOpenSession={id => state.route.openSession(id, { surface: "chat", replace: false })} /> },
           { id: "computer", label: copy.computerControl, content: <PersonalAssistantComputerPanel active={!overviewCollapsed && rightTab === "computer"}
             onCollapse={() => setOverviewCollapsed(true)} /> },
+          { id: "preferences", label: copy.dialoguePreferences, content: <PersonalAssistantDialoguePreferences agentId={assistantAgentId}
+            headerAction={<VIconButton variant="ghost" label={copy.collapseOverview}
+              icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />} /> },
         ]} /> : undefined} />
     <VDialog open={narrow && overviewOpen} onOpenChange={setOverviewOpen} title={copy.overview} size="sm">
       <div className={styles.narrowOverview}><PersonalAssistantOverview onOpenSession={id => {
@@ -71,6 +78,9 @@ export function PersonalAssistantRoute() {
     <VDialog open={narrow && computerOpen && state.verified} onOpenChange={setComputerOpen} title={copy.computerControl} size="sm">
       <div className={styles.narrowOverview}><PersonalAssistantComputerPanel active={narrow && computerOpen}
         onCollapse={() => setComputerOpen(false)} /></div>
+    </VDialog>
+    <VDialog open={narrow && preferencesOpen && state.verified} onOpenChange={setPreferencesOpen} title={copy.dialoguePreferences} size="sm">
+      <div className={styles.narrowOverview}><PersonalAssistantDialoguePreferences agentId={assistantAgentId} /></div>
     </VDialog>
   </div>;
 }

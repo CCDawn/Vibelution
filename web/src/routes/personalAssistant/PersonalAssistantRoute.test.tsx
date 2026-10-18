@@ -73,6 +73,7 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector('[aria-label="Assistant sidebar"]')).not.toBeNull();
     expect(container.querySelector('[role="tab"][id$="overview"]')?.textContent).toContain("Platform overview");
     expect(container.querySelector('[role="tab"][id$="computer"]')?.textContent).toContain("Computer control");
+    expect(container.querySelector('[role="tab"][id$="preferences"]')?.textContent).toContain("Dialogue preferences");
     expect(container.querySelector('[aria-label="Collapse platform overview"]')).not.toBeNull();
     expect(container.querySelector("[data-native-session-chat]")).toBe(chat);
     expect(container.querySelector("output")?.textContent).toContain("session=assistant-session");

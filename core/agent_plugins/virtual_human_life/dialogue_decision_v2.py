@@ -1,8 +1,10 @@
-"""Pure Companion Dialogue V2 draft validation; intentionally not runtime-wired.
+"""Pure Companion Dialogue V2 draft validation for the runtime decision tool.
 
 The model owns only a bounded next-act declaration.  Native Session identity is
-injected by the caller, source references are allow-listed for the current
-turn, and this module persists neither transcript text nor delivery state.
+injected by the caller (``VirtualHumanLifeService.record_dialogue_decision_v2``
+via the ``virtual_human_dialogue_decision_v2_tool`` structured tool), source
+references are allow-listed for the current turn, and this module persists
+neither transcript text nor delivery state.
 """
 
 from __future__ import annotations
@@ -225,8 +227,9 @@ def resolve_companion_dialogue_decision_calls_v2(
     """Validate and fold one Turn's V2 decision calls without persistence.
 
     Exact replays are idempotent, semantically identical calls collapse, and
-    any conflict fails closed to ``stop``.  The returned draft is not a delivery
-    plan and is not terminal-ready until a later runtime task binds a receipt.
+    any conflict fails closed to ``stop``.  The returned draft is not a
+    delivery plan; the delivery runtime promotes it only after the assistant
+    terminal receipt of the current bubble is reconciled.
     """
 
     if not tool_calling_supported:
