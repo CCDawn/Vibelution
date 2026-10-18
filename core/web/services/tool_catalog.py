@@ -39,6 +39,7 @@ _CATEGORY_SCOPES = {
     "media_research": ("media",),
     "custom_generated": ("custom",),
     "virtual_life": ("agent",),
+    "personal_affairs": ("agent",),
 }
 _DESTRUCTIVE_RISK_TAGS = {"delete_or_cleanup", "project_rollback"}
 _EXECUTE_RISK_TAGS = {
@@ -194,6 +195,7 @@ CATEGORY_LABELS = {
     "media_research": "Media and knowledge",
     "custom_generated": "Custom generated",
     "virtual_life": "Virtual human life",
+    "personal_affairs": "Personal affairs",
     "uncategorized": "Uncategorized",
 }
 
@@ -1106,6 +1108,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["plugin_state_write"],
         "permissionTier": MEDIUM_PERMISSION_TIER,
     },
+    "personal_affairs_tool": {
+        "category": "personal_affairs",
+        "capabilityTags": ["personal_affairs", "todo_schedule_goal", "agent_scoped_state"],
+        "riskTags": ["plugin_state_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
 }
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
@@ -1144,6 +1152,14 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "virtual_human_dialogue_decision_v2_tool",
             "virtual_human_preference_proposal_tool",
         ],
+    },
+    {
+        "bundleId": "personal_affairs",
+        "label": "个人事务工具包",
+        "description": "管理当前用户的待办、日程与目标：新增、完成、取消与调整截止时间；数据按 Agent 隔离存储。",
+        "category": "personal_affairs",
+        "toolNames": ["personal_affairs_tool"],
+        "preferredToolNames": ["personal_affairs_tool"],
     },
     {
         "bundleId": "pure_chat",

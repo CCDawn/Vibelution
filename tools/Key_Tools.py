@@ -193,6 +193,9 @@ from tools.virtual_human_life_tools import (
     virtual_human_schedule_tool as _virtual_human_schedule_impl,
     virtual_human_status_tool as _virtual_human_status_impl,
 )
+from tools.personal_affairs_tools import (
+    personal_affairs_tool as _personal_affairs_impl,
+)
 
 class _PersonalAssistantDesktopObserveArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -336,6 +339,7 @@ def _build_key_tools() -> List[BaseTool]:
     """
 
     virtual_human_status_tool = StructuredTool.from_function(_virtual_human_status_impl)
+    personal_affairs_tool = StructuredTool.from_function(_personal_affairs_impl)
     virtual_human_schedule_tool = StructuredTool.from_function(_virtual_human_schedule_impl)
     virtual_human_activity_tool = StructuredTool.from_function(_virtual_human_activity_impl)
     virtual_human_dialogue_decision_v2_tool = StructuredTool.from_function(
@@ -3823,6 +3827,8 @@ def _build_key_tools() -> List[BaseTool]:
         knowledge_rating_suggestion_tool,
         # 可信第一方虚拟人生活插件（最终可见性仍受 Agent 绑定与 ToolPolicy 交集约束）
         virtual_human_status_tool,
+        # 个人事务（待办/日程/目标，Agent 隔离存储）
+        personal_affairs_tool,
         virtual_human_schedule_tool,
         virtual_human_activity_tool,
         virtual_human_dialogue_decision_v2_tool,
