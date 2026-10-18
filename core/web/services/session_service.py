@@ -1066,6 +1066,11 @@ from core.web.services.session.publish import (
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
+def current_session_turn_id(session_id: str) -> str:
+    """Public wrapper so cross-service projections avoid the private symbol."""
+    return _current_session_turn_id(session_id)
+
+
 class _ChatStateMutationLock:
     """Serialize every facade-level chat-state mutation across processes.
 
