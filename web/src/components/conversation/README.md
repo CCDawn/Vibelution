@@ -4,10 +4,12 @@ Agent-oriented map for the transcript / composer surface used by Chat and
 other workbenches. Prefer editing a **pure module or turn panel** over growing
 `ConversationView.tsx` when possible.
 
-`ConversationView.tsx` remains the **shell**: props wiring, expansion state,
-virtual timeline window, and turn composition. Stick-bottom scroll lives in
-`useConversationTimelineFollow.ts`. Pure presentation, timeline projection, and
-tool rendering should live outside the shell.
+`ConversationView.tsx` remains the **shell**: props wiring, virtual timeline
+window, and turn composition. Stick-bottom scroll lives in
+`useConversationTimelineFollow.ts`. Process/response expansion state, the
+segment parse cache, and prewarm live in `useConversationProcessExpansion.ts`.
+Pure presentation, timeline projection, and tool rendering should live outside
+the shell.
 
 ## 30-second routing (Agent reading map)
 
@@ -15,6 +17,7 @@ tool rendering should live outside the shell.
 |-------------------|------------|
 | Virtual window / history window policy | `conversationHistoryWindow.ts` |
 | Stick-bottom / follow-tail scroll | `useConversationTimelineFollow.ts`, `conversationTimelineFollowState.ts` |
+| Process / response expansion, segment cache, prewarm | `useConversationProcessExpansion.ts`, `conversationExpansionDefaults.ts`, `conversationResponseSegmentCache.ts` |
 | Scroll signals / anchor helpers | `conversationTimelineScrollSignals.ts`, `timelineScrollAnchor.ts` |
 | Timeline rows / process projection | `agentMessageTimeline*.ts`, `timelineMessageProcessProjection.ts` |
 | Operation groups / ReAct items | `agentMessageOperations.ts`, `conversationReActOperationItems.ts` |
@@ -56,7 +59,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Virtual range + heights | measured heights, prefix sums, min tail | `conversationHistoryWindow.ts` + shell measure |
 | Stick-bottom follow | rAF follow / user scroll break | `useConversationTimelineFollow.ts` + `conversationTimelineFollowState.ts` |
 | Timeline projection | agent timeline items / codex cells | pure timeline modules |
-| Process / operation expansion | process disclosure state | `ConversationProcessDisclosure.tsx` + pure state |
+| Process / response expansion | expanded tail, section defaults, segment cache, prewarm | `useConversationProcessExpansion.ts` |
 | Response streaming render | streaming segments / markdown | streaming + markdown modules |
 | Tool activity strip | tool lifecycle UI | `ConversationToolActivity.tsx` |
 | Composer | draft, attachments, slash, submit keys | composer pure modules + Chat route hooks |
@@ -75,6 +78,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Prefetch without mount | `prefetchConversationView.ts` | mounting ConversationView early |
 | Timeline text-selection quote | `useConversationSelectionQuote.tsx` | stick-bottom / history-load scroll |
 | Branch fork dialog state | `useConversationForkSession.ts` | route API call, or moving `ConversationForkSessionDialog` out of the shell |
+| Process / response expansion state | `useConversationProcessExpansion.ts` | inlining section defaults back into the shell |
 
 ## Structure program
 
