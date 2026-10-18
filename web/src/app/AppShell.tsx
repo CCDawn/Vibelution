@@ -30,7 +30,8 @@ import {
 import { fetchPublicConfig } from "../api/config";
 import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
-import { childSessionHref, listRuntimeTasksRevisionAware, type RuntimeTaskCard, type RuntimeTaskListPayload } from "../api/runtimeTasks";
+import { listRuntimeTasksRevisionAware, type RuntimeTaskListPayload } from "../api/runtimeTasks";
+import { runtimeTaskMenuItem, type RuntimeTaskMenuItem } from "./runtimeTaskMenu";
 import {
   agentBroadcastEventTimeMs,
   readStoredAgentBroadcastReadAtMs,
@@ -232,22 +233,6 @@ function systemToneToDotClass(tone: SystemStatusTone): string {
   if (tone === "caution") return styles.status_caution;
   if (tone === "failed") return styles.status_failed;
   return styles.status_muted;
-}
-
-function runtimeTaskMenuItem(task: RuntimeTaskCard): ActiveWorkIndicatorItem {
-  const label = String(task.title || "").trim() || String(task.taskId || "").trim();
-  const summary = String(task.summary || "").trim();
-  return {
-    kind: "chat",
-    label,
-    summary,
-    fullSummary: summary,
-    status: String(task.status || "running"),
-    runId: String(task.taskId || ""),
-    href: childSessionHref(String(task.childSessionId || "")),
-    detail: label,
-    tone: "running",
-  };
 }
 
 function shellPrimaryNavClass(pathname: string, to: string) {
@@ -2875,7 +2860,7 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.backendHealth() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
   }, [emitBrowserTelemetry, queryClient]);
-  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem, index: number) => {
+  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem | RuntimeTaskMenuItem, index: number) => {
     const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
     const detailCopy = (
       <div className={styles.activeWorkDetailCopy}>

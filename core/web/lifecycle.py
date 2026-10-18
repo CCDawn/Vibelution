@@ -223,6 +223,22 @@ def shutdown_session_catalog_on_shutdown(*, deadline: float | None = None) -> di
     return {"closed": not failed_owners, "failedOwners": failed_owners}
 
 
+def _start_research_task_recovery_job(startup_jobs: StartupJobGroup, session_recovery: Any):
+    # Other lifespan tests must never repair the operator's live task store.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    from .services.team_workflow.research_runtime.archive_mode import challenge_archive_mode_enabled
+
+    if challenge_archive_mode_enabled():
+        return None
+    from .services.research_task_recovery import run_research_task_recovery
+
+    return startup_jobs.start_async(
+        "research-task-recovery",
+        run_research_task_recovery(startup_jobs=startup_jobs, session_recovery=session_recovery),
+    )
+
+
 def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
     """Recover and reconcile durable external task projections once."""
 
@@ -577,6 +593,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         _recover_interrupted_session_turns_on_startup,
         stop_keyword="should_stop",
     )
+    startup_research_task_recovery = _start_research_task_recovery_job(
+        startup_jobs, startup_session_recovery_task,
+    )
     startup_challenge_fence_validation_task = startup_jobs.start_thread(
         "startup-challenge-fence-validation", _validate_challenge_fence_config_on_startup
     )
@@ -690,6 +709,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="External Agent task reconciliation stopped unexpectedly."
         )
     )
+    if startup_research_task_recovery is not None:
+        startup_research_task_recovery.add_done_callback(
+            lambda task: consume_startup_task_result(
+                task, message="Research task recovery stopped unexpectedly."
+            )
+        )
     startup_perception_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent perception scheduler startup failed.")
     )
@@ -734,6 +759,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                     "chat_room_round_recovery",
                     "command_attempt_recovery",
                     "session_recovery_sweep",
+                    "research_task_recovery",
                     "generic_team_workflows",
                     "challenge_fence_config_validation",
                     "external_agent_task_reconcile",

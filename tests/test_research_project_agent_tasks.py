@@ -858,6 +858,10 @@ def test_task_status_read_is_side_effect_free(tmp_path, monkeypatch):
 def test_task_status_reconciles_ready_session_with_created_experiment_plan(
     tmp_path, monkeypatch
 ):
+    from core.web.services import runtime_task_registry
+
+    registry = runtime_task_registry.RuntimeTaskStore(tmp_path / "runtime-tasks")
+    monkeypatch.setattr(runtime_task_registry, "default_store", lambda: registry)
     team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
     _accepted_submitter(monkeypatch)
     started = start_research_project_agent_task(
@@ -925,6 +929,8 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
     assert status["tasks"][0]["taskId"] == task_id
     assert status["tasks"][0]["status"] == "completed"
     assert status["tasks"][0]["resultRefs"] == ["plan-reconciled"]
+    assert registry.get_task(task_id)["status"] == "completed"
+    assert registry.active_task_states() == []
 
 
 def test_task_status_reconciles_needs_continue_session_as_stopped(

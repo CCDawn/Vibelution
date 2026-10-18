@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchPersonalAssistantSettings,
@@ -10,6 +10,7 @@ import type { PersonalAssistantModelChoice } from "../../api/types/personalAssis
 import { VButton, VDialog, VInput, VStateSurface, VStringSelect } from "../../components/vui";
 import styles from "./PersonalAssistantSettings.styles";
 import { useShellI18n } from "../../i18n/useShellI18n";
+import { readPetPreferences, savePetPreferences } from "../desktopPet/desktopPetPreferences";
 
 /** Local settings key shares the personal-assistant query prefix for prefix invalidation. */
 export const assistantSettingsKey = ["personal-assistant", "settings"] as const;
@@ -67,9 +68,10 @@ export function assistantModelChoiceLabel(choice: PersonalAssistantModelChoice, 
  Luo Live2D — the same assistant, appearance only), and the whitelisted
  * dialogue model. Backend owns every value; nothing is provisioned here.
  */
-export function PersonalAssistantSettings({ open, onOpenChange }: {
+export function PersonalAssistantSettings({ open, onOpenChange, children }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  children?: ReactNode;
 }) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
@@ -115,7 +117,8 @@ export function PersonalAssistantSettings({ open, onOpenChange }: {
     setAppearancePending(true);
     setFeedback("");
     try {
-      await updatePersonalAssistantSettings({ preferences: { characterId } });
+      const response = await updatePersonalAssistantSettings({ preferences: { characterId } });
+      if (response.settings) savePetPreferences({ ...readPetPreferences(), characterId: response.settings.preferences.characterId });
       await queryClient.invalidateQueries({ queryKey: queryKeys.personalAssistant() });
       await queryClient.invalidateQueries({ queryKey: assistantSettingsKey });
       setFeedback(copy.saved);
@@ -179,6 +182,7 @@ export function PersonalAssistantSettings({ open, onOpenChange }: {
               }))} />
               : <p className={styles.caption}>{copy.modelUnavailable}</p>}
           </label>
+          {children}
           {feedback ? <p role="status" className={styles.caption}>{feedback}</p> : null}
         </div>}
   </VDialog>;

@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionDetail } from "../../api/chat";
-import { createPersonalAssistant, fetchPersonalAssistant } from "../../api/personalAssistant";
+import { createPersonalAssistant, fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
 import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { fetchPetActivity } from "../../api/pet";
 import { queryKeys } from "../../api/queryKeys";
@@ -17,7 +17,11 @@ import { DesktopAssistantRoute } from "../desktopPet/DesktopAssistantRoute";
 
 vi.mock("../../api/chat", () => ({ fetchSessionDetail: vi.fn() }));
 vi.mock("../../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
-vi.mock("../../api/personalAssistant", () => ({ createPersonalAssistant: vi.fn(), fetchPersonalAssistant: vi.fn() }));
+vi.mock("../../api/personalAssistant", () => ({ createPersonalAssistant: vi.fn(), fetchPersonalAssistant: vi.fn(),
+  fetchPersonalAssistantSettings: vi.fn().mockResolvedValue({ settings: null }),
+  updatePersonalAssistantSettings: vi.fn().mockResolvedValue({ settings: null }),
+  updatePersonalAssistantModel: vi.fn(),
+}));
 vi.mock("../../api/desktopPet", () => ({ getDesktopAssistantContext: vi.fn(), setDesktopPetExpanded: vi.fn(), controlDesktopAssistant: vi.fn() }));
 vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../ChatCodingRoute", () => ({ ChatCodingRoute: () => <div data-native-session-chat="true" /> }));
@@ -33,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchPersonalAssistant).mockResolvedValue({ assistant });
   vi.mocked(createPersonalAssistant).mockResolvedValue({ assistant });
+  vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue({ settings: null });
   vi.mocked(fetchSessionDetail).mockResolvedValue({ id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main" } as SessionDetail);
   vi.mocked(getDesktopAssistantContext).mockResolvedValue({ role: "desktop-assistant", mode: "assistant" });
   vi.mocked(setDesktopPetExpanded).mockResolvedValue({ expanded: true, width: 760, height: 600 });
@@ -49,6 +54,18 @@ async function render(path: string, desktop = false) {
   await settle(); await settle();
 }
 describe("personal assistant page admission", () => {
+  it("opens the existing name/model settings from the real workbench entry", async () => {
+    vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue({ settings: {
+      displayName: "个人助理", preferencesConfigured: true,
+      preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "" },
+      model: { currentModelId: "", choices: [] },
+    } });
+    await render("/personal-assistant");
+    const button = [...container.querySelectorAll("button")].find(node => node.textContent?.includes("助理设置"))!;
+    await act(async () => button.click()); await settle();
+    expect(document.querySelector('input[aria-label="助理名称"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("对话模型");
+  });
   it("bootstraps a bare entry to the same canonical session and mounts the native host", async () => {
     await render("/personal-assistant");
     expect(container.querySelector("output")?.textContent).toBe("/personal-assistant?session=assistant-session");
