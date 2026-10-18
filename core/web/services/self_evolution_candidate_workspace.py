@@ -183,7 +183,8 @@ def cleanup_candidate_workspace(
                 "Candidate branch contains commits outside the verified integration."
             )
     if candidate_path.exists():
-        if _git_bytes(candidate_path, "status", "--porcelain=v1", "--ignored", "-z"):
+        if (_git_bytes(candidate_path, "status", "--porcelain=v1", "-z")
+                or _has_unknown_ignored_files(candidate_path)):
             raise CandidateWorkspaceError("Candidate cleanup requires a clean candidate worktree.")
         remove_result = _run_git(root, "worktree", "remove", str(candidate_path))
         if remove_result.returncode != 0:
@@ -214,6 +215,51 @@ def cleanup_candidate_workspace(
         "worktreeRemoved": True,
         "localBranchDeleted": True,
     }
+
+
+def _has_unknown_ignored_files(candidate: Path) -> bool:
+    """Permit only recognizable, regenerable validation caches in a task tree."""
+    import importlib.util
+    import sys
+    from core.infrastructure.branch_workspace import _is_reparse_point
+
+    raw = _git_bytes(candidate, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    tracked = {record.decode("utf-8", errors="replace")
+               for record in _git_bytes(candidate, "ls-files", "-z").split(b"\0") if record}
+    pytest_files = {".gitignore", "CACHEDIR.TAG", "README.md", "v/cache/nodeids",
+                    "v/cache/lastfailed", "v/cache/stepwise"}
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        relative = _normalize_relative_path(record.decode("utf-8", errors="replace"))
+        parts = PurePosixPath(relative).parts
+        target = candidate.joinpath(*parts)
+        if not target.resolve().is_relative_to(candidate) or not target.is_file():
+            return True
+        # A cache-shaped link or junction is not a disposable cache directory.
+        if any(_is_reparse_point(path)
+               for path in (target, *target.parents) if path != candidate and path.is_relative_to(candidate)):
+            return True
+        if len(parts) >= 2 and parts[-2] == "__pycache__" and parts[-1].endswith(".pyc"):
+            tag = re.escape(str(sys.implementation.cache_tag or ""))
+            match = re.fullmatch(rf"(.+)\.{tag}(?:\.opt-[012]|-pytest-[0-9.]+)?\.pyc", parts[-1])
+            source_relative = PurePosixPath(*parts[:-2], f"{match[1]}.py").as_posix() if match else ""
+            source = candidate / source_relative
+            if not match or source_relative not in tracked or not source.is_file() or source.is_symlink():
+                return True
+            with target.open("rb") as stream:
+                if stream.read(4) == importlib.util.MAGIC_NUMBER:
+                    continue
+            return True
+        if parts[0] == ".pytest_cache" and "/".join(parts[1:]) in pytest_files:
+            continue
+        if parts[0] == ".ruff_cache" and (
+            "/".join(parts[1:]) in {".gitignore", "CACHEDIR.TAG"}
+            or (len(parts) == 3 and re.fullmatch(r"[0-9.]+", parts[1]) and re.fullmatch(r"[0-9]+", parts[2]))
+        ):
+            continue
+        return True
+    return False
 
 
 def _candidate_changes(
