@@ -155,6 +155,7 @@ import { VStateSurface } from "@/components/vui";
 | --- | --- | --- |
 | tone | loading/error/empty/unavailable | 与文案匹配 |
 | fill | 占满父级区域 | 无业务几何时用 |
+| busy / skeletonLines | 加载语义与骨架数量 | 默认只在 loading 时显示骨架；busy 显式覆盖加载状态，fill 只控制占位几何；空、失败和不可用不画骨架 |
 | density / facts | compact 横幅；键值 facts | 中断横幅用 compact |
 | actions | 诊断恢复等次要操作 | 用 `VButton` compact/secondary；不要把杀进程放进状态面 |
 
