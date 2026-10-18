@@ -23,6 +23,16 @@ def test_electron_supervisor_catalog_accepts_workbench_navigation_outcomes() -> 
     }.issubset(facade.ELECTRON_SUPERVISOR_EVENT_CODES)
 
 
+def test_electron_supervisor_catalog_accepts_human_attention_notification_outcomes() -> None:
+    # 壳侧双通道通知的投递/去重/拒绝事件必须能落场景；漏登记会让 launcher
+    # 端点 ValueError，事件被静默丢弃（live 实弹踩过）。
+    assert {
+        "electron.human_attention_notification.delivered",
+        "electron.human_attention_notification.suppressed",
+        "electron.human_attention_notification.invalid",
+    }.issubset(facade.ELECTRON_SUPERVISOR_EVENT_CODES)
+
+
 def test_facade_reexports_query_pack() -> None:
     assert facade.list_runtime_scenes is query.list_runtime_scenes
     assert facade.get_runtime_scene_detail is query.get_runtime_scene_detail
