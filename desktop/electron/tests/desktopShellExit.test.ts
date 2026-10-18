@@ -8,6 +8,69 @@ import {
 } from "../src/shutdown/desktopShellExit.js";
 
 describe("executeApprovedDesktopShellShutdown", () => {
+  it("records elapsed stage times on failure before reporting the stop outcome", async () => {
+    vi.useFakeTimers();
+    const events: { eventCode: string; fields: Record<string, string | number | boolean> }[] = [];
+    const quitApp = vi.fn();
+    try {
+      const pending = executeApprovedDesktopShellShutdown({
+        decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: true },
+        closeDesktopSession: async () => undefined,
+        recordEvent: (event) => { events.push(event); },
+        stopManagedRuntime: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 7));
+          throw new Error("managed stop failed");
+        },
+        stopPythonLauncher: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          throw new Error("launcher stop failed");
+        },
+        approveShutdown: vi.fn(),
+        stopDesktopActionLoop: vi.fn(),
+        quitApp
+      });
+      await vi.advanceTimersByTimeAsync(9);
+      await expect(pending).resolves.toMatchObject({ stopManagedRuntime: false, stopStatus: "failed" });
+      expect(quitApp).not.toHaveBeenCalled();
+      expect(events.find((event) => event.eventCode === "electron.runtime.stop_failed")?.fields.managedRuntimeMs).toBe(7);
+      expect(events.find((event) => event.eventCode === "electron.launcher_service.stop_failed")?.fields.launcherStopMs).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finishes shutdown without waiting for an unavailable telemetry backend", async () => {
+    vi.useFakeTimers();
+    const events: { eventCode: string; fields: Record<string, string | number | boolean> }[] = [];
+    const quitApp = vi.fn();
+    let settled = false;
+    try {
+      const pending = executeApprovedDesktopShellShutdown({
+        decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
+        closeDesktopSession: async () => { await new Promise((resolve) => setTimeout(resolve, 10)); },
+        recordEvent: (event) => {
+          events.push(event);
+          return new Promise<void>(() => undefined);
+        },
+        stopManagedRuntime: async () => { await new Promise((resolve) => setTimeout(resolve, 20)); },
+        stopPythonLauncher: async () => { throw new Error("not requested"); },
+        approveShutdown: vi.fn(),
+        stopDesktopActionLoop: vi.fn(),
+        quitApp
+      }).then((result) => { settled = true; return result; });
+      await vi.advanceTimersByTimeAsync(30);
+      expect(settled).toBe(true);
+      expect(quitApp).toHaveBeenCalledOnce();
+      await expect(pending).resolves.toMatchObject({ stopManagedRuntime: true, stopError: "" });
+      expect(events.at(-1)).toMatchObject({
+        eventCode: "electron.launcher_service.exited",
+        fields: { elapsedMs: 30, closeSessionMs: 10, managedRuntimeMs: 20, launcherStopMs: 0 }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops the owned Python Launcher before quitting the desktop shell", async () => {
     const calls: string[] = [];
 

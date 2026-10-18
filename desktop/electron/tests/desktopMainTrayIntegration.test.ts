@@ -5,6 +5,16 @@ import { describe, expect, it } from "vitest";
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
 describe("Electron main tray integration", () => {
+  it("skips shell inspection before stop and writes approved-exit events locally", () => {
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle(");
+    const lifecycle = mainSource.slice(lifecycleStart, mainSource.indexOf("async function ", lifecycleStart + 1));
+    expect(lifecycleStart).toBeGreaterThan(-1);
+    expect(lifecycle).toContain("if (shouldInspectDesktopShellBeforeLifecycle(lifecycleOperation, app.isPackaged))");
+    const normalQuit = mainSource.slice(mainSource.indexOf("async function requestDesktopShellExit("), mainSource.indexOf("function notifyDesktopTray("));
+    expect(normalQuit).toContain("recordSupervisorEventFallbackLocally({");
+    expect(normalQuit).not.toContain("await recordElectronSupervisorEvent(");
+  });
+
   it("keeps the desktop pet closed on workbench startup and exposes settings control", () => {
     const workbenchOpenStart = mainSource.indexOf("async function openWorkbenchAtCurrentLauncherUrl");
     const workbenchOpenEnd = mainSource.indexOf("\nasync function ", workbenchOpenStart + 1);
