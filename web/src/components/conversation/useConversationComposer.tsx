@@ -280,6 +280,7 @@ export function useConversationComposer({
   const composerPromptSuggestion = useComposerPromptSuggestion(
     {
       sessionId,
+      language: lang,
       suggestionEnabled: promptSuggestionEnabled && !composerDisabled && !editingMessageId,
       starterEnabled: !composerDisabled && !editingMessageId,
       busy: resolvedActionMode === "stop" || composerPending,
