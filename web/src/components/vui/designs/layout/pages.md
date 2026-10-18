@@ -538,3 +538,5 @@ import { VSplitWorkspace } from "@/components/vui";
 角色复用 `DesktopPetCharacter`、现有 `PetActivity` 与原生 Session 的只读消息窗口。待确认、近期异常优先；新消息用原生 `turnId` + 逻辑 `itemId` 去重，首次历史快照不提醒，界面只保存有界 ID 与查看标记。未读提醒短暂播放后恢复，未读数保留到实际查看；减少动态效果时保留静态提示。
 
 桌面模式点击角色切换为 400×530 的聊天窗口，顶栏保留身份、状态、返回工作台、收起和关闭。正文继续挂载同一原生 `ChatCodingRoute`，不展示平台概览和会话列表，不另建 transcript、composer 或 SSE。窗口尺寸仍由 Electron 预设限定并夹紧到屏幕工作区；权限审批与错误保留在原生聊天中。
+
+桌面聊天正文以窗口剩余高度为边界，内嵌聊天布局与中心栏各占一个 `minmax(0, 1fr)` 行。隐藏原工作台顶栏后不保留空轨道，输入框贴近窗口底部；这些覆盖只作用于 `data-assistant-chat="compact"`，不改变普通会话布局。
