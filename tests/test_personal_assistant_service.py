@@ -177,6 +177,23 @@ def test_default_computer_tools_are_executable_but_network_denial_stays_custom(p
     assert "personal_assistant_computer_observe_tool" not in decision(restricted).executable_tools
 
 
+@pytest.mark.parametrize("custom_task", [False, True])
+def test_pre_computer_upgrade_refreshes_only_untouched_normalized_task_profile(personal_env, custom_task):
+    row = service.create_personal_assistant()["assistant"]
+    legacy_task = {**service.TASK, "constraints": service._LEGACY_DESKTOP_CONSTRAINTS}
+    if custom_task:
+        legacy_task["mission"] = "用户自己的任务"
+    directory.update_agent_instance(row["agentId"], task_profile=legacy_task,
+        tool_policy={**service.PRIVATE_V2_POLICY, "allowedTools": list(service._PRE_COMPUTER_TOOLS),
+                     "preferredTools": list(service._PRE_COMPUTER_TOOLS)})
+    stored_task = directory.get_agent(row["agentId"])["taskProfile"]
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    service.create_personal_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert after["taskProfile"] == (stored_task if custom_task else directory.normalize_task_profile(service.TASK))
+    assert after["toolPolicy"]["allowedTools"] == list(service.TOOLS)
+
+
 def test_ready_get_never_repairs_or_rewrites_native_rows(personal_env, monkeypatch):
     row = service.create_personal_assistant()["assistant"]
     before_directory = directory.load_state()

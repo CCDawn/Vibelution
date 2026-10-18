@@ -344,7 +344,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
             )
         elif _needs_default_policy_upgrade(agent):
             # Explicit provisioning upgrades only the unmodified legacy policy.
-            # User-authored policies and all persona/task fields remain intact.
+            # User-authored policies and profiles remain intact.
             directory.update_agent_instance(
                 agent["agentId"],
                 tool_policy=current_policy(),
@@ -352,7 +352,9 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                     agent["toolPolicy"]
                 ),
             )
-            if agent.get("taskProfile") == {**TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}:
+            if agent.get("taskProfile") == directory.normalize_task_profile(
+                {**TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}
+            ):
                 directory.update_agent_instance(agent["agentId"], task_profile=TASK)
         if not row:
             # Native service owns unbinding/recreation of deleted direct Sessions.
