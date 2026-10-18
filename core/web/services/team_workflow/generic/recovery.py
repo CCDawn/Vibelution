@@ -121,6 +121,7 @@ def _scene(record: dict, state: dict, *, deployment_ref: str = "") -> str:
         "schemaVersion": 1, "issueId": state["issueId"], "teamId": record["teamId"],
         "sourceRunId": record["id"], "sourceFlowId": record["flow"]["id"],
         "nodeId": state["nodeId"], "failureCode": attempts[-1].get("failureCode", ""),
+        "researchSource": record["flow"]["steps"][0].get("researchSource") if service.supervised(record) else None,
         "failureCount": state["failureCount"], "repairAttempt": state["repairAttempts"],
         "attemptRefs": [{key: attempt.get(key, "") for key in ("key", "sessionId", "turnId", "failureCode")}
                         for attempt in attempts[-3:]],
@@ -211,6 +212,10 @@ def ensure_child_settled(team_id: str, record: dict) -> None:
 def _retry_source(record: dict) -> None:
     state = record["recovery"]
     last = _attempts(record, state["nodeId"])[-1]
+    if service.supervised(record):
+        from .supervision import request_replay
+        request_replay(record)
+        return
     if len(record["attempts"]) >= service.MAX_ATTEMPTS:
         state.update(status="blocked", reason="source_attempts_exhausted")
         return
@@ -345,6 +350,17 @@ def _reconcile_recovery(team_id: str, run_id: str) -> None:
                 _stop_child(team_id, record)
             return
         if state and state["status"] == "repairing":
+            if service.supervised(record):
+                from .research_source import fence
+                try:
+                    reason = fence(record)
+                except Exception:
+                    reason = "source_observation_unavailable"
+                if reason:
+                    state.update(status="blocked", reason=reason)
+                    _persist(target, record, before=before)
+                    _stop_child(team_id, record)
+                    return
             queued_at = record.get("_recoveryQueuedAt")
             if queued_at and (datetime.now(timezone.utc) - datetime.fromisoformat(queued_at)).total_seconds() >= policy["repairTimeoutSeconds"]:
                 state.update(status="blocked", reason="repair_timeout")
@@ -374,14 +390,19 @@ def _reconcile_recovery(team_id: str, run_id: str) -> None:
             node_id = attempt["nodeId"]
             attempts = _attempts(record, node_id)
             state = _track_failure(record, attempt)
+            if service.supervised(record) and not record.get("_sourceEligible"):
+                state.update(status="blocked", reason=record.get("_sourceReason") or "source_not_repairable")
+                _persist(target, record, before=before)
+                return
             failures = {item["key"] for item in attempts if item["status"] == "failed"}
-            if (len(failures) >= policy["maxAttempts"] or state["failureCount"] >= 3
-                    or len(record["attempts"]) >= service.MAX_ATTEMPTS):
+            exhausted = (record.get("_sourceRetryExhausted", False) if service.supervised(record) else
+                         len(failures) >= policy["maxAttempts"] or len(record["attempts"]) >= service.MAX_ATTEMPTS)
+            if exhausted or state["failureCount"] >= 3:
                 if state["repairAttempts"] >= policy["maxRepairAttempts"]:
                     state.update(status="blocked", reason="repair_attempts_exhausted")
                 else:
                     _queue_repair(record)
-            elif policy["replaySafety"] != "unknown":
+            elif policy["replaySafety"] != "unknown" and not service.supervised(record):
                 _retry_source(record)
         _persist(target, record, before=before)
         if (record.get("recovery") or {}).get("status") == "repairing":

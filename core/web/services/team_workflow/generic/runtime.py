@@ -31,7 +31,8 @@ def reconcile_all() -> None:
                     return
                 try:
                     target = store.path(team_id, "runs", path.stem)
-                    if store.read(target).get("status") == "running":
+                    record = store.read(target)
+                    if record.get("status") == "running" or service.supervised(record):
                         service.reconcile_run(team_id, path.stem)
                     from .recovery import reconcile_recovery
                     reconcile_recovery(team_id, path.stem)

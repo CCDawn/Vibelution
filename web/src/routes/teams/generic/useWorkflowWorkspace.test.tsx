@@ -48,6 +48,19 @@ it("keeps edits made while a save is in flight and adopts the saved revision", a
   expect(state.dirty).toBe(true);
 });
 
+it("keeps API-only research supervisors outside the editable workflow workspace", async () => {
+  const supervisor: Flow = { ...initial, id: "supervisor", steps: [
+    { id: "source", label: "研究来源", kind: "research", owner: "", instruction: "",
+      researchSource: { runId: "research-run", nodeId: "source_finding" } },
+  ] };
+  act(() => client.setQueryData(teamFlowKeys.flows("team-a"), {
+    schemaVersion: 1, teamId: "team-a", flows: [supervisor, initial],
+  }));
+  await flush();
+  expect(state.flows.map(item => item.id)).toEqual([initial.id]);
+  expect(state.flow?.id).toBe(initial.id);
+});
+
 it("retains the draft and exposes a stale-revision save failure", async () => {
   api.save.mockRejectedValue(new Error("版本已变化，请刷新后重试。"));
   act(() => state.editFlow(flow => ({ ...flow, name: "本地草稿" })));
