@@ -65,6 +65,9 @@ export const queryKeys = {
   groupExpandedSession: (id: string) => ["sessions", id, "group-expanded"] as const,
   sessionToolApprovals: (id: string) => ["sessions", id, "tool-approvals"] as const,
   sessionLlmOptions: (id: string) => ["sessions", id, "llm-options"] as const,
+  // Per-session budget parameters (tool-call quota, thinking budget chars).
+  // Nested under session(id) so session-scoped invalidations reach it by prefix.
+  sessionBudgetParameters: (id: string) => ["sessions", id, "budget-parameters"] as const,
   sessionMessageCuration: (id: string) => ["sessions", id, "message-curation"] as const,
   sessionChildSessions: (id: string) => ["sessions", id, "child-sessions"] as const,
   sessionRightRail: (id: string) => ["sessions", id, "right-rail"] as const,

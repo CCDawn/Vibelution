@@ -12,6 +12,8 @@ import type {
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
   SessionBulkDeleteResponse,
+  SessionBudgetParameters,
+  SessionBudgetParametersUpdate,
   SessionDetail,
   SessionExportHtmlPayload,
   SessionExportHtmlResponse,
@@ -376,6 +378,32 @@ export function updateSessionModelParameters(
 ): Promise<SessionLlmOptions> {
   return fetchJson<SessionLlmOptions>(
     `/api/sessions/${encodeURIComponent(sessionId)}/model-parameters`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(parameters),
+    },
+  );
+}
+
+/** Per-session budget limits (tool calls per turn, thinking budget characters). */
+export function fetchSessionBudgetParameters(sessionId: string): Promise<SessionBudgetParameters> {
+  return fetchJson<SessionBudgetParameters>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/budget-parameters`,
+  );
+}
+
+/**
+ * Patches per-session budget limits. A 409 means the client's `revision`
+ * fell behind the server; refetch and retry against the fresh revision.
+ * Validation failures come back as 422.
+ */
+export function updateSessionBudgetParameters(
+  sessionId: string,
+  parameters: SessionBudgetParametersUpdate,
+): Promise<SessionBudgetParameters> {
+  return fetchJson<SessionBudgetParameters>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/budget-parameters`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

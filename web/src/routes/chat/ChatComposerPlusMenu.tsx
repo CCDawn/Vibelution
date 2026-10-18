@@ -4,6 +4,7 @@ import {
   BookOpen,
   BrainCircuit,
   Check,
+  Gauge,
   ImagePlus,
   MessageCircleHeart,
   MessageSquare,
@@ -17,6 +18,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type K
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
+import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
 import styles from "./ChatComposerPlusMenu.styles";
 
@@ -45,7 +47,9 @@ export type ChatComposerPlusMenuLabels = {
   composerReferenceKnowledgeDescription: string;
   composerReferenceKnowledgeSearch: string;
   composerReferenceKnowledgeEmpty: string;
-};
+  composerBudgetEntry: string;
+  composerBudgetHint: string;
+} & ChatComposerBudgetPanelLabels;
 
 export type ChatComposerPlusMenuProps = {
   lang: "zh" | "en";
@@ -65,6 +69,8 @@ export type ChatComposerPlusMenuProps = {
   onMentalModelEnabledChange: (enabled: boolean) => void;
   onRuntimeStatusEnabledChange: (enabled: boolean) => void;
   onPromptSuggestionEnabledChange: (enabled: boolean) => void;
+  /** Per-session budget/quota control; omitted surfaces get no menu entry. */
+  budget?: ChatComposerBudgetControl | null;
   directSession?: {
     id: string;
     label: string;
@@ -115,6 +121,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     onMentalModelEnabledChange,
     onRuntimeStatusEnabledChange,
     onPromptSuggestionEnabledChange,
+    budget,
     directSession,
     group,
   } = props;
@@ -318,6 +325,20 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         composerReferenceKnowledgeDescription: "把知识库、知识条目或本会话文件作为本轮上下文引用。",
         composerReferenceKnowledgeSearch: "搜索知识与文件",
         composerReferenceKnowledgeEmpty: "没有匹配的知识或文件。",
+        composerBudgetEntry: "预算与额度",
+        composerBudgetHint: "每回合工具调用与思考字数",
+        composerBudgetTitle: "预算与额度",
+        composerBudgetDescription: "按会话限制每回合工具调用次数与思考预算字数；清除后回到默认策略。",
+        composerBudgetMaxCallsLabel: "每回合工具调用额度",
+        composerBudgetMaxCallsPlaceholder: "未配置=按模型策略，常见 32",
+        composerBudgetClearMaxCalls: "清除工具调用额度，恢复默认",
+        composerBudgetThinkingLabel: "思考预算字数",
+        composerBudgetThinkingPlaceholder: "未配置=默认 500",
+        composerBudgetClearThinking: "清除思考预算，恢复默认",
+        composerBudgetSave: "保存",
+        composerBudgetCancel: "取消",
+        composerBudgetLoading: "读取预算配置…",
+        composerBudgetLoadFailed: "预算配置读取失败",
       }
     : {
         composerAttachFiles: "Attach files",
@@ -327,6 +348,20 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         composerReferenceKnowledgeDescription: "Attach knowledge bases, entries, or session files as context for this turn.",
         composerReferenceKnowledgeSearch: "Search knowledge and files",
         composerReferenceKnowledgeEmpty: "No matching knowledge or files.",
+        composerBudgetEntry: "Budget and quota",
+        composerBudgetHint: "Per-turn tool calls and thinking chars",
+        composerBudgetTitle: "Budget and quota",
+        composerBudgetDescription: "Limit per-turn tool calls and the thinking budget for this session; clearing restores defaults.",
+        composerBudgetMaxCallsLabel: "Tool calls per turn",
+        composerBudgetMaxCallsPlaceholder: "Unset = model policy, commonly 32",
+        composerBudgetClearMaxCalls: "Clear tool-call quota, restore default",
+        composerBudgetThinkingLabel: "Thinking budget characters",
+        composerBudgetThinkingPlaceholder: "Unset = default 500",
+        composerBudgetClearThinking: "Clear thinking budget, restore default",
+        composerBudgetSave: "Save",
+        composerBudgetCancel: "Cancel",
+        composerBudgetLoading: "Loading budget settings…",
+        composerBudgetLoadFailed: "Failed to load budget settings",
       };
   const resolvedLabels = { ...defaultLabels, ...labels };
   const t = (key: keyof ChatComposerPlusMenuLabels) => resolvedLabels[key];
@@ -426,6 +461,35 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 disabled: capabilityDisabled,
                 onChange: onPromptSuggestionEnabledChange,
               })}
+              {budget ? (
+                <ChatComposerBudgetPopover
+                  lang={lang}
+                  labels={resolvedLabels}
+                  sessionId={budget.sessionId}
+                  revision={budget.revision}
+                  maxCallsPerTurn={budget.maxCallsPerTurn}
+                  thinkingBudgetChars={budget.thinkingBudgetChars}
+                  loading={budget.loading}
+                  error={budget.error}
+                  pending={budget.pending}
+                  errorMessage={budget.errorMessage}
+                  onSave={budget.onSave}
+                  trigger={(
+                    <VButton
+                      type="button"
+                      role="menuitem"
+                      data-plus-menu-item="true"
+                      contentLayout="plain"
+                      className={styles.menuItem}
+                      variant="ghost"
+                      isDisabled={capabilityDisabled}
+                    >
+                      <ItemIcon><Gauge size={16} /></ItemIcon>
+                      <span className={styles.itemLabel}>{t("composerBudgetEntry")}</span>
+                    </VButton>
+                  )}
+                />
+              ) : null}
             </>
           )) : null}
           {directSession ? renderSection(companionSection, (

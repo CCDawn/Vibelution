@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VuiProvider } from "../../components/vui";
 import { ChatComposerPlusMenu, ChatComposerSessionReferencesContext, type ChatComposerPlusMenuProps } from "./ChatComposerPlusMenu";
+import type { ChatComposerBudgetControl } from "./ChatComposerBudgetPopover";
 
 import source from "./ChatComposerPlusMenu.tsx?raw";
 import stylesSource from "./ChatComposerPlusMenu.styles.ts?raw";
@@ -74,9 +75,74 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).not.toContain('role="listbox"');
     expect(source).not.toContain('role="option"');
   });
+
+  it("gates the budget entry on the injected control and opens it as a side popover", () => {
+    expect(source).toContain("<ChatComposerBudgetPopover");
+    expect(source).toContain('data-plus-menu-item="true"');
+    // Entry presence is prop-gated (group/companion/finance surfaces pass nothing).
+    expect(source).toContain("{budget ? (");
+  });
 });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+describe("composer budget entry interaction", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement;
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+  const budgetControl: ChatComposerBudgetControl = {
+    sessionId: "session-budget",
+    revision: 7,
+    maxCallsPerTurn: 32,
+    thinkingBudgetChars: null,
+    onSave: vi.fn(),
+  };
+  function baseProps(budget?: ChatComposerBudgetControl, capabilityDisabled = false): ChatComposerPlusMenuProps {
+    return {
+      lang: "zh", attachmentDisabled: false, sessionReferences: [], mentalModelEnabled: false,
+      runtimeStatusEnabled: true, promptSuggestionEnabled: true,
+      capabilityDisabled, onMentalModelEnabledChange: vi.fn(),
+      onRuntimeStatusEnabledChange: vi.fn(), onPromptSuggestionEnabledChange: vi.fn(),
+      budget,
+    };
+  }
+  async function renderMenu(budget?: ChatComposerBudgetControl, capabilityDisabled = false) {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(
+      <VuiProvider><ChatComposerPlusMenu {...baseProps(budget, capabilityDisabled)} /></VuiProvider>,
+    ));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+  }
+  function budgetEntry(): HTMLButtonElement | undefined {
+    return [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')]
+      .find((button) => button.textContent?.includes("预算与额度"));
+  }
+  it("renders no budget entry without the budget control", async () => {
+    await renderMenu(undefined);
+    expect(budgetEntry()).toBeUndefined();
+  });
+  it("opens the budget side popover from the capabilities section when the control is present", async () => {
+    await renderMenu(budgetControl);
+    const entry = budgetEntry();
+    expect(entry).toBeDefined();
+    expect(entry?.disabled).toBe(false);
+    const capabilities = document.body.querySelector('[data-testid="chat-composer-plus-conversation-capabilities"]');
+    expect(capabilities?.textContent).toContain("预算与额度");
+    await act(async () => entry!.click());
+    const panel = document.body.querySelector('[data-testid="chat-composer-budget-popover-body"]');
+    expect(panel?.textContent).toContain("预算与额度");
+  });
+  it("keeps the budget entry disabled while the session capability gate is off", async () => {
+    await renderMenu(budgetControl, true);
+    expect(budgetEntry()?.disabled).toBe(true);
+  });
+});
+
 describe("composer reference context interaction", () => {
   let root: Root | null = null;
   let container: HTMLDivElement;
