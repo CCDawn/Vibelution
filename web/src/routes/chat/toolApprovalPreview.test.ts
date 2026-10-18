@@ -9,6 +9,17 @@ import {
 } from "./toolApprovalPreview";
 
 describe("toolApprovalPreview", () => {
+  it("shows the assistant operation and concrete target in both languages", () => {
+    const summary = { assistantAction: "session_create", assistantTargets: { agent_id: "agent-a", title: "Acceptance" } };
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh"))
+      .toBe("创建会话\nagent_id: agent-a\ntitle: Acceptance");
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en"))
+      .toContain("Create session");
+    expect(toolApprovalActionPreview({ assistantAction: "session_delete", assistantArgumentsInvalid: true }, "personal_assistant_manage_tool", "zh"))
+      .toContain("参数无法核对");
+    expect(toolApprovalActionPreview({ assistantAction: "agent_update", assistantChangedFields: ["tool_policy_json"], assistantDetailsOmitted: true }, "personal_assistant_manage_tool", "en"))
+      .toContain("Values omitted");
+  });
   it("prefers command preview for shell tools like Codex", () => {
     expect(toolApprovalActionPreview({
       commandPreview: "curl https://example.com",

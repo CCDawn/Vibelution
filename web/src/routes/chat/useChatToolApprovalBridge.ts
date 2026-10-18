@@ -88,7 +88,7 @@ export function useChatToolApprovalBridge({
   const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
 
   const pendingToolApprovalActionPreview = pendingSessionToolApproval
-    ? toolApprovalActionPreview(pendingSessionToolApproval.argumentSummary, pendingSessionToolApproval.toolName)
+    ? toolApprovalActionPreview(pendingSessionToolApproval.argumentSummary, pendingSessionToolApproval.toolName, lang)
     : pendingToolApprovalLabels.map((item) => item.label).join(" · ");
 
   const pendingToolApprovalScope = pendingSessionToolApproval
