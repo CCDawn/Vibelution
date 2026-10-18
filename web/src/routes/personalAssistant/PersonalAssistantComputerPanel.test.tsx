@@ -11,6 +11,8 @@ import { PersonalAssistantComputerPanel } from "./PersonalAssistantComputerPanel
 
 vi.mock("../../api/personalAssistantComputer", () => ({ confirmPersonalAssistantComputer: vi.fn(), controlPersonalAssistantComputer: vi.fn(),
   fetchPersonalAssistantComputer: vi.fn(), fetchPersonalAssistantComputerWindows: vi.fn(), grantPersonalAssistantComputer: vi.fn() }));
+let mockLang: "zh" | "en" = "zh";
+vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: mockLang }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const target = { selectionId: "selection", title: "今天的计划.txt", appName: "记事本" };
 const idle: ComputerState = { available: true, status: "idle", message: "请选择窗口", grantId: null, window: null, pending: null };
@@ -19,6 +21,7 @@ let root: Root, container: HTMLDivElement, client: QueryClient;
 const collapse = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
+  mockLang = "zh";
   vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(idle);
   vi.mocked(fetchPersonalAssistantComputerWindows).mockResolvedValue({ windows: [target] });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
@@ -92,6 +95,42 @@ describe("single-window personal assistant controls", () => {
     expect(container.textContent).toContain("正在操作指定窗口");
     expect(container.textContent).not.toContain("已暂停");
   });
+  it("switches fixed copy with shell language and preserves window metadata and control values", async () => {
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    vi.mocked(controlPersonalAssistantComputer).mockResolvedValue(ready);
+    await render();
+    expect(container.querySelector('section[aria-label="电脑操作"]')).not.toBeNull();
+    mockLang = "en";
+    await render();
+    expect(container.querySelector('section[aria-label="Computer controls"]')).not.toBeNull();
+    expect(container.textContent).toContain("记事本");
+    expect(container.textContent).toContain("今天的计划.txt");
+    await click("Take control");
+    expect(controlPersonalAssistantComputer).toHaveBeenCalledWith({ grantId: "grant", action: "takeover" });
+  });
+  it("localizes the fallback mutation error when the shell language changes", async () => {
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    vi.mocked(controlPersonalAssistantComputer).mockRejectedValue("unavailable");
+    await render();
+    await click("暂停电脑操作");
+    expect(container.textContent).toContain("操作未成功，请重试。");
+    mockLang = "en";
+    await render();
+    expect(container.textContent).toContain("The operation failed. Please try again.");
+    expect(container.textContent).not.toContain("操作未成功，请重试。");
+  });
+  it("localizes known pending actions while preserving target and input text", async () => {
+    const waiting: ComputerState = { ...ready, status: "waiting_confirmation", pending: { id: "pending", action: "type_text", targetLabel: "收件人 小王", text: "今天的计划" } };
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(waiting);
+    vi.mocked(confirmPersonalAssistantComputer).mockResolvedValue({ ...ready, status: "paused" });
+    mockLang = "en";
+    await render();
+    expect(container.querySelector("dl")?.textContent).toContain("Type text");
+    expect(container.querySelector("dl")?.textContent).toContain("收件人 小王");
+    expect(container.querySelector("pre")?.textContent).toBe("今天的计划");
+    await click("Confirm action");
+    expect(confirmPersonalAssistantComputer).toHaveBeenCalledWith({ grantId: "grant", pendingId: "pending", approved: true });
+  });
   it.each([["确认执行", true], ["取消操作", false]] as const)("shows the exact action, target and input before %s", async (label, approved) => {
     const waiting: ComputerState = { ...ready, status: "waiting_confirmation", pending: { id: "pending", action: "发送", targetLabel: "收件人 小王", text: "今天的计划\n明天跟进" } };
     vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(waiting);
@@ -103,6 +142,16 @@ describe("single-window personal assistant controls", () => {
     expect(confirmPersonalAssistantComputer).not.toHaveBeenCalled();
     await click(label);
     expect(confirmPersonalAssistantComputer).toHaveBeenCalledWith({ grantId: "grant", pendingId: "pending", approved });
+  });
+  it("shows a localized placeholder for empty input and still allows explicit confirmation", async () => {
+    const waiting: ComputerState = { ...ready, status: "waiting_confirmation", pending: { id: "pending", action: "set_value", targetLabel: "搜索框", text: "" } };
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(waiting);
+    vi.mocked(confirmPersonalAssistantComputer).mockResolvedValue({ ...ready, status: "paused" });
+    await render();
+    expect(container.querySelector("pre")?.textContent).toBe("（空文本）");
+    expect(container.querySelector("dl")?.textContent).toContain("设置内容");
+    await click("确认执行");
+    expect(confirmPersonalAssistantComputer).toHaveBeenCalledWith({ grantId: "grant", pendingId: "pending", approved: true });
   });
   it("ends the grant before returning to selection and clears prior consent", async () => {
     vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);

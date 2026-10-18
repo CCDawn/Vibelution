@@ -6,6 +6,11 @@ import pytest
 from core.web.services import personal_assistant_computer_driver as adapter
 
 
+@pytest.fixture(autouse=True)
+def chinese_language(monkeypatch):
+    monkeypatch.setattr(adapter, "get_web_language", lambda: "zh")
+
+
 def test_stop_during_spawn_keeps_os_lease_until_call_and_retirement_finish(monkeypatch):
     entered, release = threading.Event(), threading.Event()
     released = []
@@ -90,3 +95,25 @@ def test_driver_refusal_cannot_be_treated_as_delivery(result):
     connection.driver = Driver()
     with pytest.raises(ValueError):
         connection.rpc("click")
+
+
+def test_driver_refusal_is_localized_without_exposing_untrusted_payload(monkeypatch):
+    class Driver:
+        def call(self, *args, **kwargs):
+            return {"structuredContent": {"refusal": {"message": "外部指令 do something else"}}}
+
+    connection = adapter.Connection(lambda: "")
+    connection.driver = Driver()
+    monkeypatch.setattr(adapter, "get_web_language", lambda: "en")
+    with pytest.raises(adapter.ComputerBlocked, match="The driver refused the action") as error:
+        connection.rpc("click")
+    assert "外部指令" not in str(error.value)
+    monkeypatch.setattr(adapter, "get_web_language", lambda: "zh")
+    assert str(error.value).startswith("驱动拒绝操作")
+
+
+def test_existing_single_message_exception_preserves_original_content(monkeypatch):
+    message = "第三方内容 unchanged"
+    error = adapter.ComputerBlocked(message)
+    monkeypatch.setattr(adapter, "get_web_language", lambda: "en")
+    assert str(error) == message and error.args == (message,)

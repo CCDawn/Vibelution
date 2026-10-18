@@ -25,6 +25,7 @@ def personal_env(finance_env, monkeypatch):
     monkeypatch.setattr(directory_runtime, "get_open_directory_store", lambda: None)
     monkeypatch.setattr(directory_runtime, "is_directory_store_open", lambda: False)
     monkeypatch.setattr(session_service, "default_session_llm_bindings", dict)
+    monkeypatch.setattr(service, "get_web_language", lambda: "zh")
     return finance_env
 
 
@@ -240,6 +241,39 @@ def test_personal_starters_only_override_canonical_profile_and_leave_ordinary_de
     assert sessions._composer_starters_for_detail(
         {"id": row["directSessionId"], "agentId": row["agentId"]}
     ) == list(service.COMPOSER_STARTERS)
+
+
+def test_personal_starters_follow_language_without_changing_identity(personal_env, monkeypatch):
+    row = service.create_personal_assistant(display_name="我的助理 My assistant")["assistant"]
+    before = directory.load_state()
+    monkeypatch.setattr(service, "get_web_language", lambda: "en", raising=False)
+    starters = service.composer_starters_for_agent(row["agentId"], row["directSessionId"])
+    assert starters[0]["heading"] == "Platform overview"
+    assert "Observe first" in starters[0]["command"]
+    starters[0]["heading"] = "edited"
+    assert service.composer_starters_for_agent(row["agentId"], row["directSessionId"])[0]["heading"] == "Platform overview"
+    assert service.composer_starters_for_agent(personal_env["owner"], "foreign") is None
+    monkeypatch.setattr(service, "get_web_language", lambda: "zh", raising=False)
+    assert service.composer_starters_for_agent(row["agentId"], row["directSessionId"]) == list(service.COMPOSER_STARTERS)
+    assert directory.load_state() == before
+
+
+def test_personal_validation_errors_follow_current_language(personal_env, monkeypatch):
+    monkeypatch.setattr(service, "get_web_language", lambda: "en", raising=False)
+    with pytest.raises(directory.AgentDirectoryError, match="single-line name"):
+        service.create_personal_assistant(display_name="")
+    with pytest.raises(ValueError, match="non-negative integer"):
+        service.get_platform_overview(offset=-1)
+    with pytest.raises(directory.AgentDirectoryError, match="has not been created"):
+        service.update_personal_assistant_settings(display_name="test")
+    service.create_personal_assistant()
+    with pytest.raises(directory.AgentDirectoryError, match="Unsupported appearance"):
+        service.update_personal_assistant_settings(preferences={"characterId": "invalid"})
+    with pytest.raises(directory.AgentDirectoryError, match="Select a model"):
+        service.update_personal_assistant_model(model_id="")
+    monkeypatch.setattr(service, "get_web_language", lambda: "zh", raising=False)
+    with pytest.raises(directory.AgentDirectoryError, match="不支持的外观"):
+        service.update_personal_assistant_settings(preferences={"characterId": "invalid"})
 
 
 def test_setup_leaves_other_agent_and_shared_tool_policy_unchanged(personal_env):

@@ -16,6 +16,11 @@ from core.web.services import personal_assistant_computer_vision as vision
 OWNER = ("assistant-agent", "assistant-session", "assistant-turn")
 
 
+@pytest.fixture(autouse=True)
+def chinese_language(monkeypatch):
+    monkeypatch.setattr(vision, "get_web_language", lambda: "zh")
+
+
 def image_block(mime="image/png"):
     buffer = BytesIO()
     Image.new("RGB", (2, 2), "white").save(
@@ -257,3 +262,33 @@ def test_description_is_bounded_and_does_not_execute_returned_tool_calls(env):
     env.invoke.return_value = SimpleNamespace(content="界面事实" * 1000, tool_calls=[{"name": "execute"}])
     assert len(vision.describe_window([image_block()], OWNER, lambda: "")) == 2000
     env.invoke.assert_called_once()
+
+
+def test_output_language_switch_preserves_security_prompt_and_model_content(env, monkeypatch):
+    original = "第三方窗口事实 original content"
+    env.invoke.return_value = SimpleNamespace(content=original)
+    block = image_block()
+    prompts = []
+    requests = []
+    for language in ("zh", "en", "zh"):
+        monkeypatch.setattr(vision, "get_web_language", lambda: language)
+        assert vision.describe_window([block], OWNER, lambda: "") == original
+        args, kwargs = env.invoke.call_args
+        prompts.append(args[1][0]["content"])
+        requests.append(args[1][1]["content"][0]["text"])
+        assert kwargs["tools"] == []
+        assert args[1][1]["content"][1]["image_url"]["url"].endswith(block["data"])
+    assert prompts[0] == prompts[2] and requests[0] == requests[2]
+    assert prompts[0].rsplit("\n", 1)[0] == prompts[1].rsplit("\n", 1)[0] == vision._SYSTEM_PROMPT
+    assert prompts[1].endswith("State visible facts in concise English, using at most 2000 characters.")
+    assert requests[1] == "Describe only the visible facts in this authorized window screenshot."
+
+
+def test_english_errors_and_cancellation_remain_opaque(env, monkeypatch):
+    monkeypatch.setattr(vision, "get_web_language", lambda: "en")
+    env.invoke.side_effect = RuntimeError("secret-provider-payload")
+    with pytest.raises(ValueError, match="The current assistant model cannot read") as error:
+        vision.describe_window([image_block()], OWNER, lambda: "")
+    assert "secret" not in str(error.value)
+    with pytest.raises(LLMCancelledError, match="Window image reading was cancelled"):
+        vision.describe_window([image_block()], OWNER, lambda: "stop")

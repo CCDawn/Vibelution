@@ -18,6 +18,7 @@ from core.llm.client import LLMCancelledError
 from . import personal_assistant_computer_driver as adapter
 from . import personal_assistant_service as assistant
 from . import agent_directory_service as directory
+from .i18n import get_web_language, text_for
 
 _lock = threading.RLock()
 _execution = threading.Lock()
@@ -28,33 +29,37 @@ _active = None
 _quarantine = None
 _epoch = 0
 _status = "idle"
-_message = "请选择单个窗口并授权，助理才可以读取和操作。"
+_message = ("请选择单个窗口并授权，助理才可以读取和操作。", "Select and authorize a single window before the assistant can read or control it.")
 _pending: dict | None = None
 GRANT_SECONDS = 1200
 OBSERVATION_SECONDS = 90
 CONFIRM_SECONDS = 60
 
 
+def _text(zh: str, en: str) -> str:
+    return text_for(get_web_language(), zh=zh, en=en)
+
+
 def _canonical() -> dict:
     row = assistant.get_personal_assistant().get("assistant")
     if not row or row.get("setupStatus") != "ready":
-        raise adapter.ComputerBlocked("请先初始化并打开个人助理会话。")
+        raise adapter.ComputerBlocked("请先初始化并打开个人助理会话。", "Initialize and open the personal assistant session first.")
     return row
 
 
 def _configuration(agent_id: str) -> tuple:
     agent = directory.get_agent(agent_id)
     if not agent or agent.get("status") != "active" or not agent.get("configHash"):
-        raise adapter.ComputerBlocked("助理配置身份无法确认。")
+        raise adapter.ComputerBlocked("助理配置身份无法确认。", "The assistant configuration identity could not be verified.")
     return agent.get("configRevision"), agent["configHash"]
 
 
 def _owner(owner: tuple[str, str, str]) -> None:
     if not isinstance(owner, tuple) or len(owner) != 3 or not all(isinstance(v, str) and v for v in owner):
-        raise adapter.ComputerBlocked("缺少个人助理原生轮次身份。")
+        raise adapter.ComputerBlocked("缺少个人助理原生轮次身份。", "The personal assistant native turn identity is missing.")
     row = _canonical()
     if (row["agentId"], row["directSessionId"]) != owner[:2]:
-        raise adapter.ComputerBlocked("电脑操作只允许当前个人助理原生会话使用。")
+        raise adapter.ComputerBlocked("电脑操作只允许当前个人助理原生会话使用。", "Computer control is only available to the current personal assistant native session.")
 
 
 def _event(action: str, outcome: str) -> None:
@@ -68,7 +73,7 @@ def _public_window(window: dict) -> dict:
     return {key: window[key] for key in ("selectionId", "title", "appName")}
 
 
-def _invalidate(status: str, message: str, *, end: bool = False) -> None:
+def _invalidate(status: str, message: tuple[str, str], *, end: bool = False) -> None:
     global _status, _message, _epoch, _pending, _grant
     _epoch += 1
     _status, _message = status, message
@@ -104,7 +109,7 @@ def _check_grant() -> None:
         except Exception:
             invalid = True
         if invalid:
-            _invalidate("ended", "窗口、助理配置或授权期限已变化，请重新选择。", end=True)
+            _invalidate("ended", ("窗口、助理配置或授权期限已变化，请重新选择。", "The window, assistant configuration, or authorization period has changed. Select the window again."), end=True)
 
 
 def get_state() -> dict:
@@ -112,9 +117,9 @@ def get_state() -> dict:
         _check_grant()
         try:
             adapter.driver_binary()
-            available, reason = True, _message
+            available, reason = True, _text(*_message)
         except (ValueError, OSError, TypeError):
-            available, reason = False, "电脑操作驱动尚未就绪，请配置固定版 cua-driver 0.36.0。"
+            available, reason = False, _text("电脑操作驱动尚未就绪，请配置固定版 cua-driver 0.36.0。", "The computer control driver is not ready. Configure the pinned cua-driver 0.36.0.")
         return {"available": available, "status": _status, "message": reason,
                 "grantId": _grant["id"] if _grant else None,
                 "window": _public_window(_grant["window"]) if _grant else None,
@@ -126,7 +131,7 @@ def list_windows() -> dict:
     _canonical()
     with _lock:
         if _quarantine is not None:
-            raise adapter.ComputerBlocked("上次输入执行器未确认退出，请先结束授权。")
+            raise adapter.ComputerBlocked("上次输入执行器未确认退出，请先结束授权。", "The previous input executor has not been confirmed to have exited. End the authorization first.")
     with adapter.Connection(lambda: "") as connection:
         windows = connection.windows()
     choices = {}
@@ -163,10 +168,10 @@ def grant_window(selection_id: str, allow_vision: bool) -> dict:
         window = _selection.get(selection_id)
         if (allow_vision is not True or not window or time.monotonic() - window["created"] > 120
                 or not _window_alive(window) or _execution.locked() or _active is not None or _quarantine is not None):
-            raise adapter.ComputerBlocked("授权未生效：请重新选择仍打开的窗口，并同意读取窗口画面。")
+            raise adapter.ComputerBlocked("授权未生效：请重新选择仍打开的窗口，并同意读取窗口画面。", "Authorization was not granted. Select an open window again and consent to reading its image.")
         adapter.driver_binary()
         configuration = _configuration(row["agentId"])
-        _invalidate("ready", "已授权此窗口，收到任务后开始；所有输入前都会显示具体操作供你确认。")
+        _invalidate("ready", ("已授权此窗口，收到任务后开始；所有输入前都会显示具体操作供你确认。", "This window is authorized. The assistant will start when given a task; each input action will be shown for your confirmation."))
         _grant = {"id": secrets.token_urlsafe(24), "window": window, "agentId": row["agentId"],
                   "sessionId": row["directSessionId"], "expires": time.monotonic() + GRANT_SECONDS,
                   "configuration": configuration}
@@ -186,20 +191,20 @@ def control(grant_id: str, action: str) -> dict:
             connection = _active
         if not _grant or _grant["id"] != grant_id:
             if not (action == "end" and _quarantine is not None):
-                raise adapter.ComputerBlocked("授权已变化，请刷新后重试。")
+                raise adapter.ComputerBlocked("授权已变化，请刷新后重试。", "The authorization has changed. Refresh and try again.")
         if action == "pause":
-            _invalidate("paused", "已暂停输入；继续后须重新观察。")
+            _invalidate("paused", ("已暂停输入；继续后须重新观察。", "Input is paused. The window must be observed again after resuming."))
         elif action == "takeover":
-            _invalidate("manual", "控制权已交给你，助理不会继续输入。")
+            _invalidate("manual", ("控制权已交给你，助理不会继续输入。", "You have control. The assistant will not send further input."))
         elif action in {"resume", "return"}:
             if (_status not in {"paused", "manual"} or _quarantine is not None
                     or _active is not None or _execution.locked()):
-                raise adapter.ComputerBlocked("输入执行器尚未停止，暂时不能交回。")
-            _invalidate("ready", "已交回助理，下一步将重新观察窗口。")
+                raise adapter.ComputerBlocked("输入执行器尚未停止，暂时不能交回。", "The input executor has not stopped. Control cannot be returned yet.")
+            _invalidate("ready", ("已交回助理，下一步将重新观察窗口。", "Control has been returned to the assistant. It will observe the window again next."))
         elif action == "end":
-            _invalidate("ended", "本次授权已结束，窗口与未保存内容保留。", end=True)
+            _invalidate("ended", ("本次授权已结束，窗口与未保存内容保留。", "This authorization has ended. The window and unsaved content are preserved."), end=True)
         else:
-            raise adapter.ComputerBlocked("不支持该控制操作。")
+            raise adapter.ComputerBlocked("不支持该控制操作。", "This control action is not supported.")
     if connection is not None:
         try:
             connection.__exit__(None, None, None)
@@ -211,7 +216,7 @@ def control(grant_id: str, action: str) -> dict:
                 _quarantine = connection
                 # Retain the operator's cleanup handle even when end failed.
                 _grant = previous_grant
-                _invalidate("error", "执行器退出尚未确认，已拒绝继续输入；请再次结束授权。")
+                _invalidate("error", ("执行器退出尚未确认，已拒绝继续输入；请再次结束授权。", "The executor has not been confirmed to have exited. Further input is blocked; end the authorization again."))
     _event(action, "accepted")
     return get_state()
 
@@ -221,7 +226,7 @@ def confirm(grant_id: str, pending_id: str, approved: bool) -> dict:
         _check_grant()
         if (not _grant or _grant["id"] != grant_id or not _pending or _pending["id"] != pending_id
                 or _pending["event"].is_set() or time.monotonic() >= _pending["expires"]):
-            raise adapter.ComputerBlocked("这次确认已失效，没有执行操作，请让助理重新观察。")
+            raise adapter.ComputerBlocked("这次确认已失效，没有执行操作，请让助理重新观察。", "This confirmation has expired. No action was taken; ask the assistant to observe again.")
         _pending["approved"] = approved is True
         _pending["event"].set()
     return get_state()
@@ -232,31 +237,31 @@ def _checker(owner, epoch, cancel_checker, input_tick=None):
         try:
             reason = cancel_checker()
             if reason:
-                return "原生轮次已停止。"
+                return _text("原生轮次已停止。", "The native turn has stopped.")
             _owner(owner)
             with _lock:
                 _check_grant()
                 if _epoch != epoch or not _grant or _status not in {"ready", "working", "waiting_confirmation"}:
-                    return "窗口控制已暂停或授权变化。"
+                    return _text("窗口控制已暂停或授权变化。", "Window control is paused or the authorization has changed.")
                 if input_tick is not None and adapter.last_input_tick() != input_tick:
-                    _invalidate("manual", "检测到鼠标或键盘操作，已交还控制；完成后可交回助理。")
-                    return "人工接管。"
+                    _invalidate("manual", ("检测到鼠标或键盘操作，已交还控制；完成后可交回助理。", "Mouse or keyboard activity was detected, and control has been returned to you. Return it to the assistant when finished."))
+                    return _text("人工接管。", "Manual takeover.")
             return ""
         except Exception:
-            return "无法核对当前身份或控制状态。"
+            return _text("无法核对当前身份或控制状态。", "The current identity or control state could not be verified.")
     return check
 
 
 def _require(check):
     if check():
-        raise CuaDriverCancelledError("电脑操作已停止。")
+        raise CuaDriverCancelledError(_text("电脑操作已停止。", "Computer control has stopped."))
 
 
 def _observe(owner, snapshot, window):
     token = secrets.token_urlsafe(24)
     _observations[token] = {"owner": owner, "epoch": _epoch, "created": time.monotonic(),
                             "fingerprint": snapshot["fingerprint"],
-                            "targets": [str(row.get("label") or row.get("role") or "未命名控件")[:240]
+                            "targets": [str(row.get("label") or row.get("role") or _text("未命名控件", "Unnamed control"))[:240]
                                         for row in snapshot["elements"]]}
     while len(_observations) > 32:
         _observations.popitem(last=False)
@@ -273,24 +278,24 @@ def _observe(owner, snapshot, window):
 def execute(owner, *, action="observe", observation_id="", element_id="", text="", cancel_checker=None) -> dict:
     global _active, _quarantine, _pending, _status, _message, _grant
     if not _execution.acquire(blocking=False):
-        return {"ok": False, "status": "blocked", "message": "已有电脑操作正在等待或执行。"}
+        return {"ok": False, "status": "blocked", "message": _text("已有电脑操作正在等待或执行。", "A computer action is already waiting or running.")}
     connection = None
     grant_ref = None
     try:
         _owner(owner)
         if not callable(cancel_checker):
-            raise adapter.ComputerBlocked("缺少原生轮次停止检查器。")
+            raise adapter.ComputerBlocked("缺少原生轮次停止检查器。", "The native turn stop checker is missing.")
         if action not in {"observe", "click", "set_value", "type_text", "scroll"}:
-            raise adapter.ComputerBlocked("不支持该电脑操作。")
+            raise adapter.ComputerBlocked("不支持该电脑操作。", "This computer action is not supported.")
         if not isinstance(text, str) or len(text) > 2000 or any(ord(c) < 32 and c not in "\n\r\t" for c in text):
-            raise adapter.ComputerBlocked("输入限 2000 字普通文本。")
+            raise adapter.ComputerBlocked("输入限 2000 字普通文本。", "Input is limited to 2000 characters of plain text.")
         if action == "scroll" and text not in {"up", "down", "left", "right"}:
-            raise adapter.ComputerBlocked("滚动方向无效。")
+            raise adapter.ComputerBlocked("滚动方向无效。", "The scroll direction is invalid.")
         with _lock:
             _check_grant()
             if (not _grant or (_grant["agentId"], _grant["sessionId"]) != owner[:2]
                     or _status != "ready" or _quarantine is not None):
-                raise adapter.ComputerBlocked("请先授权窗口，或等待你交回控制。")
+                raise adapter.ComputerBlocked("请先授权窗口，或等待你交回控制。", "Authorize a window first, or return control to the assistant.")
             epoch, window = _epoch, dict(_grant["window"])
             grant_ref = _grant
             old = None
@@ -298,31 +303,31 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
                 old = _observations.pop(observation_id, None)
                 if (not old or old["owner"] != owner or old["epoch"] != epoch
                         or time.monotonic() - old["created"] > OBSERVATION_SECONDS):
-                    raise adapter.ComputerBlocked("观察凭据已过期、已用或不属于本轮，请重新观察。")
+                    raise adapter.ComputerBlocked("观察凭据已过期、已用或不属于本轮，请重新观察。", "The observation token has expired, was already used, or belongs to another turn. Observe again.")
                 if action != "scroll" and (not isinstance(element_id, str) or not element_id.isdecimal()):
-                    raise adapter.ComputerBlocked("请使用本次观察返回的控件编号。")
+                    raise adapter.ComputerBlocked("请使用本次观察返回的控件编号。", "Use a control ID returned by this observation.")
                 if action != "scroll" and int(element_id) >= len(old["targets"]):
-                    raise adapter.ComputerBlocked("目标控件编号无效，请重新观察。")
+                    raise adapter.ComputerBlocked("目标控件编号无效，请重新观察。", "The target control ID is invalid. Observe again.")
                 _pending = {"id": secrets.token_urlsafe(24), "action": action,
                             "targetLabel": f"{window['appName']} · {old['targets'][int(element_id)]}" if action != "scroll" else window["appName"],
                             "text": text if action in {"set_value", "type_text"} else text or None,
                             "expires": time.monotonic() + CONFIRM_SECONDS,
                             "event": threading.Event(), "approved": False}
                 pending = _pending
-                _status, _message = "waiting_confirmation", "请核对具体动作；确认只允许执行这一步。"
+                _status, _message = "waiting_confirmation", ("请核对具体动作；确认只允许执行这一步。", "Check the specific action. Confirmation authorizes only this step.")
         check = _checker(owner, epoch, cancel_checker)
         if action != "observe":
             while not pending["event"].wait(.05):
                 _require(check)
                 if time.monotonic() >= pending["expires"]:
-                    raise adapter.ComputerBlocked("确认超时，没有发送输入。")
+                    raise adapter.ComputerBlocked("确认超时，没有发送输入。", "Confirmation timed out. No input was sent.")
             _require(check)
             if not pending["approved"]:
-                raise adapter.ComputerBlocked("你已取消这一步，没有发送输入。")
+                raise adapter.ComputerBlocked("你已取消这一步，没有发送输入。", "You cancelled this step. No input was sent.")
         with _lock:
             _require(check)
             _pending = None
-            _status, _message = "working", "正在观察并核对已授权窗口。"
+            _status, _message = "working", ("正在观察并核对已授权窗口。", "Observing and checking the authorized window.")
         check = _checker(owner, epoch, cancel_checker, adapter.last_input_tick())
         _require(check)
         connection = adapter.Connection(check)
@@ -335,7 +340,7 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
         if action == "observe":
             images = before["images"]
             if not images:
-                raise adapter.ComputerBlocked("窗口画面未能安全读取，没有向模型提供其他窗口。")
+                raise adapter.ComputerBlocked("窗口画面未能安全读取，没有向模型提供其他窗口。", "The window image could not be read safely. No other window was provided to the model.")
             # Release the desktop lease during model perception. No input is
             # admitted until its result and the current grant are rechecked.
             connection.__exit__(None, None, None)
@@ -347,11 +352,11 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
             with _lock:
                 _require(check)
                 result = _observe(owner, before, window)
-                _status, _message = "ready", "已完成本次观察；下一步仍需核对窗口。"
+                _status, _message = "ready", ("已完成本次观察；下一步仍需核对窗口。", "This observation is complete. The window must still be checked before the next step.")
             result.update(modality="window_screenshot_and_uia", visualDescription=description)
         else:
             if before["fingerprint"] != old["fingerprint"] or before["incomplete"]:
-                raise adapter.ComputerBlocked("窗口内容已变化或控件信息不完整，没有执行，请重新观察。")
+                raise adapter.ComputerBlocked("窗口内容已变化或控件信息不完整，没有执行，请重新观察。", "The window content has changed or control information is incomplete. No action was taken; observe again.")
             element = None if action == "scroll" else before["elements"][int(element_id)]
             expected = connection.act(window, action, element, text)
             _require(check)
@@ -364,23 +369,23 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
             with _lock:
                 _require(check)
                 result = _observe(owner, after, window)
-                _status, _message = "ready", "本次输入已结束；下一步仍需核对窗口。"
+                _status, _message = "ready", ("本次输入已结束；下一步仍需核对窗口。", "This input has finished. The window must still be checked before the next step.")
             result.update(status="completed" if verified else "unverified", verified=verified,
-                          message="文本已读取核对。" if verified else "输入已送达，业务效果仍须根据窗口重新核对；未自动重试。")
+                          message=_text("文本已读取核对。", "The text was read back and verified.") if verified else _text("输入已送达，业务效果仍须根据窗口重新核对；未自动重试。", "Input was delivered. Its effect must still be checked against the window; no automatic retry was attempted."))
         _event(action, result["status"])
         return result
     except (CuaDriverCancelledError, LLMCancelledError):
         with _lock:
             if _status in {"working", "waiting_confirmation"}:
-                _invalidate("paused", "电脑操作已停止；已送达的输入需要重新核对。")
-        return {"ok": False, "status": "cancelled", "message": "电脑操作已停止，未自动重试。"}
+                _invalidate("paused", ("电脑操作已停止；已送达的输入需要重新核对。", "Computer control has stopped. Any input already delivered must be checked again."))
+        return {"ok": False, "status": "cancelled", "message": _text("电脑操作已停止，未自动重试。", "Computer control has stopped. No automatic retry was attempted.")}
     except (ValueError, OSError, IndexError, KeyError, TypeError, TimeoutError, CuaDriverError) as exc:
-        message = str(exc) if isinstance(exc, adapter.ComputerBlocked) else "电脑操作未确认完成，已停止；请重新观察，勿盲目重试。"
+        message = exc.message_pair if isinstance(exc, adapter.ComputerBlocked) else ("电脑操作未确认完成，已停止；请重新观察，勿盲目重试。", "Computer control could not be confirmed complete and has stopped. Observe again before retrying.")
         with _lock:
             if _status in {"working", "waiting_confirmation"}:
                 _invalidate("paused", message)
         _event(action, "blocked")
-        return {"ok": False, "status": "blocked", "message": message}
+        return {"ok": False, "status": "blocked", "message": _text(*message)}
     finally:
         retirement_failed = False
         with _lock:
@@ -393,9 +398,9 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
                 with _lock:
                     _quarantine = connection
                     _grant = grant_ref
-                    _invalidate("error", "输入执行器未确认退出，拒绝继续输入；请结束授权重试清理。")
+                    _invalidate("error", ("输入执行器未确认退出，拒绝继续输入；请结束授权重试清理。", "The input executor has not been confirmed to have exited. Further input is blocked; end the authorization to retry cleanup."))
         with _lock:
             _active = None
         _execution.release()
         if retirement_failed:
-            return {"ok": False, "status": "unknown", "message": "执行器退出尚未确认；已保留桌面锁并拒绝新输入，请结束授权重试清理。"}
+            return {"ok": False, "status": "unknown", "message": _text("执行器退出尚未确认；已保留桌面锁并拒绝新输入，请结束授权重试清理。", "The executor has not been confirmed to have exited. The desktop lock is retained and new input is blocked; end the authorization to retry cleanup.")}
