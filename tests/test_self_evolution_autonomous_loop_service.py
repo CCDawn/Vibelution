@@ -164,6 +164,7 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     )
 
     assert [name for name, _ in calls] == ["observe", "plan", "evolve"]
+
     assert result["status"] == "awaiting_user_approval"
     assert result["phase"] == "reporting"
     assert result["reviewGate"] == {
@@ -195,6 +196,141 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     assert "judge" not in result
     assert "score" not in result
     assert service.load("self-loop-001") == result
+
+
+def test_delegated_local_integration_requires_authorization_and_independent_review(tmp_path):
+    def authorize(context):
+        return {"authorizationId": "grant-1", "operatorId": "operator-1", "revoked": False}
+    def review(context):
+        return {"candidate": {**context["candidate"], "headCommit": "d" * 40},
+                "independentReview": {"verdict": "passed", "candidateCommit": "d" * 40,
+                    "reviewerAgentId": "reviewer-1", "sessionId": "review-session", "turnId": "review-turn",
+                    "evidenceRefs": ["test:independent-review"]}}
+    service, calls = _build_service(tmp_path, hook_overrides={"authorize": authorize, "review": review,
+                                                           "check_authorization": lambda _context: None})
+    result = service.start({"goal": "只修复指定文件", "localIntegration": {
+        "acknowledge": True, "allowedFiles": ["core/example.py", "tests/test_example.py"],
+        "teamId": "team-a", "validForSeconds": 300}})
+    assert result["status"] == "completed"
+    assert [name for name, _ in calls] == ["observe", "plan", "evolve", "integrate", "cleanup"]
+    integration = next(context for name, context in calls if name == "integrate")
+    assert integration["approval"]["actorType"] == "delegated_operator"
+    assert integration["approval"]["authorizationId"] == "grant-1"
+    assert integration["independentReview"]["candidateCommit"] == integration["candidate"]["headCommit"]
+
+
+def test_opt_in_cannot_silently_fall_back_to_manual_hooks(tmp_path):
+    service, calls = _build_service(tmp_path)
+    with pytest.raises(AutonomousLoopValidationError):
+        service.queue({"goal": "修复", "localIntegration": {
+            "acknowledge": True, "allowedFiles": ["core/example.py"], "teamId": "team-a", "validForSeconds": 300}})
+    assert not calls
+
+
+def _delegated_service(tmp_path, **overrides):
+    def review(context):
+        return {"candidate": {**context["candidate"], "headCommit": "d" * 40},
+                "independentReview": {"verdict": "passed", "candidateCommit": "d" * 40,
+                    "reviewerAgentId": "reviewer", "sessionId": "session", "turnId": "turn",
+                    "evidenceRefs": ["independent:review"]}}
+
+    def check(context):
+        if context["localIntegrationAuthorization"].get("revoked"):
+            raise ValueError("revoked")
+
+    return _build_service(tmp_path, hook_overrides={
+        "authorize": lambda _context: {"authorizationId": "grant", "operatorId": "operator", "revoked": False},
+        "review": review, "check_authorization": check, **overrides})
+
+
+def _delegated_request():
+    return {"goal": "bounded repair", "localIntegration": {"acknowledge": True,
+        "allowedFiles": ["core/example.py", "tests/test_example.py"],
+        "teamId": "team", "validForSeconds": 300}}
+
+
+def test_delegated_plan_outside_scope_stops_before_executor(tmp_path):
+    service, calls = _delegated_service(tmp_path, plan=lambda _context: {
+        "summary": "unsafe plan", "steps": ["write"], "targetFiles": ["core/outside.py"]})
+    result = service.start(_delegated_request())
+    assert result["status"] == "failed"
+    assert "scope" in result["error"]["message"]
+    assert not any(name in {"evolve", "integrate", "cleanup"} for name, _ in calls)
+
+
+def test_delegated_review_wrong_sha_never_integrates(tmp_path):
+    service, calls = _delegated_service(tmp_path, review=lambda context: {
+        "candidate": {**context["candidate"], "headCommit": "d" * 40},
+        "independentReview": {"verdict": "passed", "candidateCommit": "e" * 40,
+            "reviewerAgentId": "reviewer", "sessionId": "session", "turnId": "turn", "evidenceRefs": ["evidence"]}})
+    result = service.start(_delegated_request())
+    assert result["status"] == "failed"
+    assert not any(name in {"integrate", "cleanup"} for name, _ in calls)
+
+
+def test_delegated_revoke_during_review_preserves_revocation_and_stops_merge(tmp_path):
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+
+    def review(context):
+        with server_operator_scope("operator", roles=("operator",)):
+            service.revoke_local_integration(context["runId"])
+        return {"candidate": {**context["candidate"], "headCommit": "d" * 40},
+                "independentReview": {"verdict": "passed", "candidateCommit": "d" * 40,
+                    "reviewerAgentId": "reviewer", "sessionId": "session", "turnId": "turn", "evidenceRefs": ["evidence"]}}
+
+    service, calls = _delegated_service(tmp_path, review=review)
+    result = service.start(_delegated_request())
+    assert result["status"] == "failed"
+    assert result["localIntegrationAuthorization"]["revoked"] is True
+    assert not any(name in {"integrate", "cleanup"} for name, _ in calls)
+
+
+def test_delegated_revoke_requires_server_operator(tmp_path):
+    service, _calls = _delegated_service(tmp_path)
+    queued = service.queue(_delegated_request())
+    with pytest.raises(PermissionError):
+        service.revoke_local_integration(queued["runId"])
+    assert service.load(queued["runId"])["localIntegrationAuthorization"]["revoked"] is False
+
+
+def test_delegated_expired_check_stops_before_any_agent_work(tmp_path):
+    def expired(_context):
+        raise ValueError("expired authorization")
+
+    service, calls = _delegated_service(tmp_path, check_authorization=expired)
+    result = service.start(_delegated_request())
+    assert result["status"] == "failed"
+    assert not calls
+
+
+def test_startup_recovers_committed_fact_and_only_cleans_up_even_after_revoke(tmp_path):
+    service, calls = _delegated_service(tmp_path)
+    queued = service.queue(_delegated_request())
+    candidate = service._hooks.evolve(queued)
+    candidate["headCommit"] = "d" * 40
+    service._advance(queued, phase="integrating", status="running", updates={"candidate": candidate,
+        "localIntegrationAuthorization": {**queued["localIntegrationAuthorization"], "revoked": True}})
+    receipt = {"status": "committed", "mechanism": "git_merge_ff", "baseCommit": "a" * 40,
+        "commitSha": "d" * 40, "candidateVariantId": "variant-001",
+        "changedFiles": ["core/example.py", "tests/test_example.py"],
+        "rollbackManifestPath": "C:/manifest.json", "committedAt": "2026-08-01T00:00:00+00:00"}
+    restarted, resumed_calls = _delegated_service(tmp_path, recover_integration=lambda context: receipt)
+    result = restarted.reconcile_interrupted_on_startup()
+    assert result["status"] == "completed"
+    assert result["integration"]["commitSha"] == "d" * 40
+    assert result["localIntegrationAuthorization"]["revoked"] is True
+    assert [name for name, _ in resumed_calls] == ["cleanup"]
+
+
+def test_startup_without_completion_proof_never_retries_merge(tmp_path):
+    service, _calls = _delegated_service(tmp_path)
+    queued = service.queue(_delegated_request())
+    service._advance(queued, phase="integrating", status="running")
+    restarted, calls = _delegated_service(tmp_path, recover_integration=lambda context: None)
+    result = restarted.reconcile_interrupted_on_startup()
+    assert result["status"] == "failed"
+    assert result["phase"] == "integrating_interrupted"
+    assert not calls
 
 
 def test_run_rejects_unimplemented_multi_candidate_iteration_contract(tmp_path):

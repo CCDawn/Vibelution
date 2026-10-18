@@ -150,17 +150,20 @@ def cleanup_candidate_workspace(
     *,
     integration: dict[str, Any],
 ) -> dict[str, Any]:
-    """Remove only the locally owned candidate after a verified Git commit."""
+    """Retry cleanup of a clean owned candidate absorbed by the integration."""
 
     root = Path(project_root).resolve()
+    _require_git_root(root)
     if str(integration.get("status") or "").strip() != "committed":
         raise CandidateWorkspaceError(
             "Candidate cleanup requires a committed integration."
         )
     commit_sha = str(integration.get("commitSha") or "").strip()
-    if not commit_sha or _git_text(root, "rev-parse", "HEAD") != commit_sha:
+    if not commit_sha or _run_git(
+        root, "merge-base", "--is-ancestor", commit_sha, "HEAD"
+    ).returncode != 0:
         raise CandidateWorkspaceError(
-            "Candidate cleanup requires the integration commit at main HEAD."
+            "Candidate cleanup requires the integration commit in main history."
         )
     if _git_text(root, "branch", "--show-current") != "main":
         raise CandidateWorkspaceError(
@@ -171,30 +174,37 @@ def cleanup_candidate_workspace(
             "Candidate cleanup requires a clean integrated main."
         )
 
-    candidate_path, branch = _require_owned_workspace(root, workspace)
-    remove_result = _run_git(
-        root,
-        "worktree",
-        "remove",
-        "--force",
-        str(candidate_path),
-    )
-    if remove_result.returncode != 0:
-        detail = str(remove_result.stderr or remove_result.stdout or "").strip()
-        raise CandidateWorkspaceError(
-            f"Candidate worktree removal failed: {detail or 'unknown error'}"
-        )
+    candidate_path, branch = _require_owned_workspace(root, workspace, allow_removed=True)
+    branch_head = ""
+    if _branch_exists(root, branch):
+        branch_head = _git_text(root, "rev-parse", f"refs/heads/{branch}")
+        if _run_git(root, "merge-base", "--is-ancestor", branch_head, commit_sha).returncode != 0:
+            raise CandidateWorkspaceError(
+                "Candidate branch contains commits outside the verified integration."
+            )
     if candidate_path.exists():
-        raise CandidateWorkspaceError(
-            "Candidate worktree still exists after Git removal."
-        )
+        if _git_bytes(candidate_path, "status", "--porcelain=v1", "--ignored", "-z"):
+            raise CandidateWorkspaceError("Candidate cleanup requires a clean candidate worktree.")
+        remove_result = _run_git(root, "worktree", "remove", str(candidate_path))
+        if remove_result.returncode != 0:
+            detail = str(remove_result.stderr or remove_result.stdout or "").strip()
+            raise CandidateWorkspaceError(
+                f"Candidate worktree removal failed: {detail or 'unknown error'}"
+            )
+        if candidate_path.exists():
+            raise CandidateWorkspaceError(
+                "Candidate worktree still exists after Git removal."
+            )
 
-    branch_result = _run_git(root, "branch", "-D", branch)
-    if branch_result.returncode != 0:
-        detail = str(branch_result.stderr or branch_result.stdout or "").strip()
-        raise CandidateWorkspaceError(
-            f"Candidate local branch deletion failed: {detail or 'unknown error'}"
-        )
+    if _branch_exists(root, branch):
+        if _git_text(root, "rev-parse", f"refs/heads/{branch}") != branch_head:
+            raise CandidateWorkspaceError("Candidate branch changed during cleanup.")
+        branch_result = _run_git(root, "branch", "-d", branch)
+        if branch_result.returncode != 0:
+            detail = str(branch_result.stderr or branch_result.stdout or "").strip()
+            raise CandidateWorkspaceError(
+                f"Candidate local branch deletion failed: {detail or 'unknown error'}"
+            )
     if _branch_exists(root, branch):
         raise CandidateWorkspaceError(
             "Candidate local branch still exists after deletion."
@@ -257,6 +267,8 @@ def _candidate_changes(
 def _require_owned_workspace(
     root: Path,
     workspace: dict[str, Any],
+    *,
+    allow_removed: bool = False,
 ) -> tuple[Path, str]:
     branch = str(workspace.get("branch") or "").strip()
     if not branch.startswith(BRANCH_PREFIX):
@@ -276,6 +288,13 @@ def _require_owned_workspace(
             "Candidate worktree must stay in the in-repo branch pool or a dedicated external root."
         )
     registered = _registered_worktrees(root)
+    if allow_removed and any(
+        path != candidate_path and registered_branch == branch
+        for path, registered_branch in registered.items()
+    ):
+        raise CandidateWorkspaceError("Candidate branch is registered to another worktree.")
+    if allow_removed and candidate_path not in registered and not candidate_path.exists():
+        return candidate_path, branch
     registered_branch = registered.get(candidate_path)
     if registered_branch != branch:
         raise CandidateWorkspaceError(

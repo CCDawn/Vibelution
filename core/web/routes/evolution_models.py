@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.web.services.self_evolution_local_integration import LocalIntegrationRequest
+
 
 class SupervisedRunStartPayload(BaseModel):
     sourceKind: str = ""
@@ -72,6 +74,7 @@ class SelfObservationRunActionPayload(BaseModel):
 class SelfEvolutionAutonomousRunStartPayload(BaseModel):
     goal: str = ""
     maxIterations: int = 1
+    localIntegration: LocalIntegrationRequest | None = None
 
 
 class SelfEvolutionAutonomousRunActionPayload(BaseModel):

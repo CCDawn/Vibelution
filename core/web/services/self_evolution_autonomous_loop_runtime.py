@@ -88,6 +88,8 @@ class AutonomousLoopRuntimeDependencies:
     inspect_candidate: RuntimeCallable
     integrate_candidate: RuntimeCallable
     cleanup_candidate: RuntimeCallable
+    load_authorized_bindings: BindingsCallable | None = None
+    recover_integration: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
 
 
 def build_autonomous_loop_hooks(
@@ -99,13 +101,25 @@ def build_autonomous_loop_hooks(
     carryovers: dict[str, dict[str, Any]] = {}
     bindings_by_run: dict[str, dict[str, dict[str, Any]]] = {}
 
+    def runtime_tools(context: dict[str, Any], tools) -> list[str]:
+        # Delegation authorizes integration only; it never grants extra tools.
+        return [] if (context.get("request") or {}).get("localIntegration") else list(tools)
+
+    def runtime_source(context: dict[str, Any]) -> str:
+        # The legacy source replaces allowedTools and relaxes approvals/budget.
+        return "" if (context.get("request") or {}).get("localIntegration") else AUTONOMOUS_RUNTIME_TOOL_SOURCE
+
     def bindings_for(context: dict[str, Any]) -> dict[str, dict[str, Any]]:
         run_id = _run_id(context)
         with state_lock:
             cached = bindings_by_run.get(run_id)
             if cached is not None:
                 return deepcopy(cached)
-            bindings = dependencies.load_bindings()
+            loader = (dependencies.load_authorized_bindings if (context.get("request") or {}).get("localIntegration")
+                      else dependencies.load_bindings)
+            if loader is None:
+                raise AutonomousLoopRuntimeError("Authorized role bindings are unavailable.")
+            bindings = loader()
             if not isinstance(bindings, dict):
                 raise AutonomousLoopRuntimeError(
                     "Self-evolution Agent bindings are unavailable."
@@ -136,8 +150,8 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             prompt=_observation_prompt(context),
             carryover=None,
-            runtime_tool_grants=list(OBSERVER_RUNTIME_TOOLS),
-            runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            runtime_tool_grants=runtime_tools(context, OBSERVER_RUNTIME_TOOLS),
+            runtime_tool_source=runtime_source(context),
             max_iterations=OBSERVER_MAX_ITERATIONS,
             disable_tools=False,
         )
@@ -163,8 +177,8 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             prompt=_planning_prompt(context),
             carryover=carryover,
-            runtime_tool_grants=list(OBSERVER_RUNTIME_TOOLS),
-            runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            runtime_tool_grants=runtime_tools(context, OBSERVER_RUNTIME_TOOLS),
+            runtime_tool_source=runtime_source(context),
             max_iterations=PLANNER_MAX_ITERATIONS,
             disable_tools=False,
         )
@@ -190,7 +204,7 @@ def build_autonomous_loop_hooks(
                 ),
                 carryover=deepcopy(turn.get("carryover") or {}),
                 runtime_tool_grants=[],
-                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                runtime_tool_source=runtime_source(context),
                 max_iterations=1,
                 disable_tools=True,
             )
@@ -247,8 +261,8 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             prompt=_evolution_prompt(context),
             carryover=None,
-            runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
-            runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            runtime_tool_grants=runtime_tools(context, EXECUTOR_RUNTIME_TOOLS),
+            runtime_tool_source=runtime_source(context),
             max_iterations=EXECUTOR_MAX_ITERATIONS,
             allowed_target_paths=allowed_target_paths,
         )
@@ -296,8 +310,8 @@ def build_autonomous_loop_hooks(
                     ),
                 ),
                 carryover=deepcopy(turn.get("carryover") or {}),
-                runtime_tool_grants=list(EXECUTOR_MUTATION_TOOLS),
-                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                runtime_tool_grants=runtime_tools(context, EXECUTOR_MUTATION_TOOLS),
+                runtime_tool_source=runtime_source(context),
                 max_iterations=EXECUTOR_MUTATION_MAX_ITERATIONS,
                 allowed_target_paths=allowed_target_paths,
             )
@@ -338,8 +352,8 @@ def build_autonomous_loop_hooks(
                         changed_files=changed_files,
                     ),
                     carryover=validation_carryover,
-                    runtime_tool_grants=validation_tools,
-                    runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                    runtime_tool_grants=runtime_tools(context, validation_tools),
+                    runtime_tool_source=runtime_source(context),
                     max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
                     allowed_target_paths=allowed_target_paths,
                 ),
@@ -402,6 +416,7 @@ def build_autonomous_loop_hooks(
         evolve=evolve,
         integrate=integrate,
         cleanup=cleanup,
+        recover_integration=dependencies.recover_integration,
     )
 
 
@@ -518,7 +533,7 @@ def _run_bounded_analysis_turn(
         prompt=_analysis_finalization_prompt(phase),
         carryover=deepcopy(turn.get("carryover") or {}),
         runtime_tool_grants=[],
-        runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+        runtime_tool_source=str(kwargs.get("runtime_tool_source") or ""),
         max_iterations=ANALYSIS_FINALIZATION_MAX_ITERATIONS,
         disable_tools=True,
     )
