@@ -25,6 +25,7 @@ from core.web.services.session.timebase import parse_timestamp_utc
 from core.web.services.session.turn_failure_classification import (
     BUDGET_EXHAUSTED_PROBLEM_CODE,
     TERMINAL_STATUS_FAILURE_DISPOSITION,
+    classify_turn_failure,
     derive_failure_disposition,
     normalize_disposition,
 )
@@ -2303,7 +2304,13 @@ def _looks_like_provider_error_text(text: Any) -> bool:
     value = str(text or "").strip()
     if not value:
         return False
-    return bool(s._PROVIDER_ERROR_PATTERN.search(value))
+    return bool(s._PROVIDER_ERROR_PATTERN.search(value)) or (
+        # Prefix normalization can replace provider_protocol_error with the
+        # generic provider_error. Retain this explicit provider rejection type
+        # without accepting that generic prefix or worker lifecycle failures.
+        bool(re.search(r"\binvalid_request_error\b", value, re.IGNORECASE))
+        and classify_turn_failure(value).provider_family
+    )
 
 
 def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> dict[str, str]:

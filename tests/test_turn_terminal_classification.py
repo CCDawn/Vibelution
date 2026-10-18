@@ -178,6 +178,36 @@ def test_classification_fails_closed_when_classifier_raises(monkeypatch):
     assert classification.disposition == "permanent"
 
 
+@pytest.mark.parametrize(
+    "raw_error",
+    [
+        "provider_protocol_error: invalid_request_error: `temperature` is deprecated for this model.",
+        "invalid_request_error: request schema rejected",
+        "INVALID_REQUEST_ERROR: request schema rejected",
+    ],
+)
+def test_invalid_request_error_is_a_permanent_provider_rejection(raw_error):
+    classification = classify_turn_failure(raw_error)
+    assert classification.provider_family is True
+    assert classification.disposition == "permanent"
+
+
+@pytest.mark.parametrize(
+    "raw_error",
+    [
+        "provider_protocol_error: unknown failure",
+        "provider_protocol_error: `temperature` is deprecated for this model.",
+        "not_invalid_request_error: unknown failure",
+        "invalid_request_error_suffix: unknown failure",
+        "worker_gone: invalid_request_error: worker process exited",
+    ],
+)
+def test_protocol_prefix_or_lookalike_token_does_not_widen_provider_family(raw_error):
+    classification = classify_turn_failure(raw_error)
+    assert classification.provider_family is False
+    assert classification.disposition == "permanent"
+
+
 def test_disposition_vocabulary_is_the_frozen_three_value_domain():
     assert set(TERMINAL_STATUS_FAILURE_DISPOSITION.values()) <= {
         "transient",
