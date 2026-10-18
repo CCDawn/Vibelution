@@ -4,6 +4,11 @@ The native Agent episodic event remains the only preference authority. This
 module validates a closed, versioned envelope, derives bounded projections and
 coordinates native supersede operations plus value-free reconciliation
 receipts. It does not own a second preference store and never calls an LLM.
+
+The same module owns the confirmable preference-proposal state machine and the
+Agent-scoped dialogue settings. Proposals store references only (no user text
+copy); only an accepted proposal may reach native episodic memory through the
+existing manager, and rejected/ignored proposals never change the character.
 """
 
 from __future__ import annotations
@@ -26,6 +31,27 @@ PREFERENCE_ORDER = (
     "interests",
     "privacy",
 )
+
+PREFERENCE_PROPOSAL_SCHEMA_VERSION = 1
+PREFERENCE_PROPOSAL_STATUSES = ("pending", "accepted", "rejected", "expired")
+PREFERENCE_PROPOSAL_PENDING_TTL_DAYS = 7
+PREFERENCE_PROPOSAL_LEDGER_LIMIT = 20
+# Dialogue preference settings surface (PRD 32.11): stable backend enums the
+# Companion UI maps to human behaviour words; the words never enter storage.
+COMPANION_DIALOGUE_SETTINGS_SCHEMA_VERSION = 1
+SPEAKING_INITIATIVES = ("restrained", "natural", "talkative")
+QUESTION_INITIATIVES = ("few", "natural", "proactive")
+PREFERENCE_PROPOSAL_MODES = ("ask_first", "manual_only")
+
+# Proposal types (PRD 32.9 closed enum) mapped onto the reviewed native
+# preference kinds they may finalize into once the user accepts.
+PREFERENCE_PROPOSAL_TYPE_TO_KIND = {
+    "verbosity": "response_length",
+    "question_initiative": "question_tolerance",
+    "address": "address",
+    "humor": "humor",
+    "proactive_contact": "proactive_frequency",
+}
 
 _ENUM_VALUES = {
     "response_length": {"brief", "compact", "balanced", "detailed"},
@@ -191,6 +217,251 @@ def expression_preferences(projection: Mapping[str, Any] | None) -> dict[str, An
         "humorAllowed": humor != "off",
         "memoryMentionsAllowed": privacy != "never_mention_memory",
         "proactiveFrequency": proactive_frequency,
+    }
+
+
+def normalize_companion_preference_proposal(
+    preference_type: str,
+    candidate_value: object,
+) -> tuple[str, Any]:
+    """Validate one proposal candidate against its closed native target."""
+
+    normalized_type = str(preference_type or "").strip().lower()
+    if normalized_type not in PREFERENCE_PROPOSAL_TYPE_TO_KIND:
+        raise CompanionPreferenceError(
+            f"Unsupported Companion preference proposal type: {preference_type}"
+        )
+    native_kind = PREFERENCE_PROPOSAL_TYPE_TO_KIND[normalized_type]
+    try:
+        value = normalize_companion_preference_value(native_kind, candidate_value)
+    except CompanionPreferenceError as exc:
+        raise CompanionPreferenceError(
+            f"Unsupported candidate value for Companion preference proposal "
+            f"{normalized_type}: {candidate_value}"
+        ) from exc
+    return normalized_type, value
+
+
+def _proposal_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(row, Mapping):
+        return None
+    proposal_id = str(row.get("proposalId") or "").strip()
+    agent_id = str(row.get("agentId") or "").strip()
+    preference_type = str(row.get("preferenceType") or "").strip().lower()
+    status = str(row.get("status") or "").strip().lower()
+    if (
+        not proposal_id
+        or not agent_id
+        or preference_type not in PREFERENCE_PROPOSAL_TYPE_TO_KIND
+        or status not in PREFERENCE_PROPOSAL_STATUSES
+    ):
+        return None
+    try:
+        _, value = normalize_companion_preference_proposal(
+            preference_type, row.get("candidateValue")
+        )
+    except CompanionPreferenceError:
+        return None
+    return {
+        "proposalId": proposal_id,
+        "agentId": agent_id,
+        "preferenceType": preference_type,
+        "candidateValue": deepcopy(value),
+        "sourceTurnId": str(row.get("sourceTurnId") or "").strip(),
+        "status": status,
+        "receiptId": str(row.get("receiptId") or "").strip(),
+        "createdAt": str(row.get("createdAt") or "").strip(),
+        "expiresAt": str(row.get("expiresAt") or "").strip(),
+        "decidedAt": str(row.get("decidedAt") or "").strip(),
+        "updatedAt": str(row.get("updatedAt") or "").strip(),
+        "transitionReason": str(row.get("transitionReason") or "").strip(),
+    }
+
+
+def _iso_timestamp(value: object) -> str:
+    from datetime import datetime
+
+    text = str(value or "").strip().replace("Z", "+00:00")
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=None)
+    return parsed.isoformat()
+
+
+def _proposal_expired(row: Mapping[str, Any], *, now_iso: str) -> bool:
+    if str(row.get("status") or "") != "pending":
+        return False
+    expires_at = _iso_timestamp(row.get("expiresAt"))
+    if not expires_at or not now_iso:
+        return False
+    return str(now_iso) >= expires_at
+
+
+def project_companion_preference_proposals(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    agent_id: str,
+    now_iso: str = "",
+) -> dict[str, Any]:
+    """Fold the append-only proposal ledger into its latest-row projection.
+
+    Later rows win per ``proposalId``; stale ``pending`` rows are reported as
+    ``expired`` (lazily, without rewriting history). The projection contains
+    references and bounded enum values only - never user text.
+    """
+
+    normalized_agent_id = str(agent_id or "").strip()
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        decoded = _proposal_row(row)
+        if decoded is None or decoded["agentId"] != normalized_agent_id:
+            continue
+        latest[decoded["proposalId"]] = decoded
+    proposals: list[dict[str, Any]] = []
+    expired_ids: list[str] = []
+    for proposal in latest.values():
+        if _proposal_expired(proposal, now_iso=now_iso):
+            expired_ids.append(proposal["proposalId"])
+            proposals.append({**proposal, "status": "expired", "transitionReason": "ignored"})
+        else:
+            proposals.append(deepcopy(proposal))
+    proposals.sort(key=lambda item: (item["status"] != "pending", item["createdAt"]))
+    return {
+        "schemaVersion": PREFERENCE_PROPOSAL_SCHEMA_VERSION,
+        "proposals": proposals[:PREFERENCE_PROPOSAL_LEDGER_LIMIT],
+        "lazilyExpiredProposalIds": expired_ids,
+    }
+
+
+def new_companion_preference_proposal_row(
+    agent_id: str,
+    *,
+    preference_type: str,
+    candidate_value: object,
+    source_turn_id: str,
+    now_iso: str,
+    ttl_days: int = PREFERENCE_PROPOSAL_PENDING_TTL_DAYS,
+) -> dict[str, Any]:
+    """Build one pending proposal row; callers append it to the ledger."""
+
+    from datetime import datetime, timedelta
+
+    normalized_type, value = normalize_companion_preference_proposal(
+        preference_type, candidate_value
+    )
+    normalized_turn_id = str(source_turn_id or "").strip()
+    if not normalized_turn_id:
+        raise CompanionPreferenceError(
+            "Companion preference proposals require the native user Turn."
+        )
+    created = _iso_timestamp(now_iso)
+    if not created:
+        raise CompanionPreferenceError(
+            "Companion preference proposals require an ISO timestamp."
+        )
+    parsed = datetime.fromisoformat(created)
+    expires = parsed + timedelta(days=max(1, int(ttl_days)))
+    if parsed.tzinfo is not None:
+        expires = expires.astimezone(parsed.tzinfo)
+    return {
+        "proposalId": f"companion-preference-proposal:{uuid.uuid4().hex[:20]}",
+        "agentId": str(agent_id or "").strip(),
+        "preferenceType": normalized_type,
+        "candidateValue": deepcopy(value),
+        "sourceTurnId": normalized_turn_id,
+        "status": "pending",
+        "receiptId": "",
+        "createdAt": created,
+        "expiresAt": expires.isoformat(),
+        "decidedAt": "",
+        "updatedAt": created,
+        "transitionReason": "",
+    }
+
+
+def companion_preference_proposal_transition_row(
+    proposal: Mapping[str, Any],
+    *,
+    status: str,
+    now_iso: str,
+    receipt_id: str = "",
+    transition_reason: str = "",
+) -> dict[str, Any]:
+    """Build the ledger row for one proposal state transition."""
+
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in PREFERENCE_PROPOSAL_STATUSES:
+        raise CompanionPreferenceError(
+            f"Unsupported Companion preference proposal status: {status}"
+        )
+    current = str(proposal.get("status") or "").strip().lower()
+    allowed = {
+        "pending": {"accepted", "rejected", "expired"},
+        "accepted": set(),
+        "rejected": set(),
+        "expired": set(),
+    }
+    if normalized_status == current:
+        raise CompanionPreferenceError(
+            "Companion preference proposal is already decided."
+        )
+    if normalized_status not in allowed.get(current, set()):
+        raise CompanionPreferenceError(
+            f"Companion preference proposal cannot move from {current} to {normalized_status}."
+        )
+    return {
+        **deepcopy(dict(proposal)),
+        "status": normalized_status,
+        "receiptId": str(receipt_id or proposal.get("receiptId") or "").strip(),
+        "decidedAt": (
+            str(now_iso) if normalized_status in {"accepted", "rejected"} else ""
+        ),
+        "updatedAt": str(now_iso),
+        "transitionReason": str(transition_reason or "")[:120],
+    }
+
+
+def normalize_companion_dialogue_settings(
+    payload: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Normalize the three Agent-scoped dialogue settings with defaults."""
+
+    source = payload if isinstance(payload, Mapping) else {}
+    speaking = str(source.get("speakingInitiative") or "natural").strip().lower()
+    question = str(source.get("questionInitiative") or "natural").strip().lower()
+    proposal_mode = str(
+        source.get("preferenceProposalMode") or "ask_first"
+    ).strip().lower()
+    return {
+        "schemaVersion": COMPANION_DIALOGUE_SETTINGS_SCHEMA_VERSION,
+        "speakingInitiative": (
+            speaking if speaking in SPEAKING_INITIATIVES else "natural"
+        ),
+        "questionInitiative": (
+            question if question in QUESTION_INITIATIVES else "natural"
+        ),
+        "preferenceProposalMode": (
+            proposal_mode if proposal_mode in PREFERENCE_PROPOSAL_MODES else "ask_first"
+        ),
+        "updatedAt": str(source.get("updatedAt") or "").strip(),
+    }
+
+
+def dialogue_settings_preferences(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Map dialogue settings onto the bounded expression contract inputs."""
+
+    normalized = normalize_companion_dialogue_settings(settings)
+    question = normalized["questionInitiative"]
+    speaking = normalized["speakingInitiative"]
+    return {
+        "questionsAllowed": question != "few",
+        "questionInitiative": question,
+        "speakingInitiative": speaking,
     }
 
 
@@ -361,13 +632,28 @@ class CompanionPreferenceManager:
 
 
 __all__ = [
+    "COMPANION_DIALOGUE_SETTINGS_SCHEMA_VERSION",
+    "PREFERENCE_ENVELOPE_PREFIX",
+    "PREFERENCE_ORDER",
+    "PREFERENCE_PROPOSAL_LEDGER_LIMIT",
+    "PREFERENCE_PROPOSAL_MODES",
+    "PREFERENCE_PROPOSAL_PENDING_TTL_DAYS",
+    "PREFERENCE_PROPOSAL_SCHEMA_VERSION",
+    "PREFERENCE_PROPOSAL_STATUSES",
+    "PREFERENCE_PROPOSAL_TYPE_TO_KIND",
+    "QUESTION_INITIATIVES",
+    "SPEAKING_INITIATIVES",
     "CompanionPreferenceError",
     "CompanionPreferenceManager",
     "CompanionPreferencePersistenceError",
-    "PREFERENCE_ENVELOPE_PREFIX",
-    "PREFERENCE_ORDER",
+    "companion_preference_proposal_transition_row",
+    "dialogue_settings_preferences",
     "encode_companion_preference_episode",
     "expression_preferences",
+    "new_companion_preference_proposal_row",
+    "normalize_companion_dialogue_settings",
+    "normalize_companion_preference_proposal",
     "normalize_companion_preference_value",
+    "project_companion_preference_proposals",
     "project_companion_preferences",
 ]

@@ -29,3 +29,13 @@ Never submit `agentId`, `sessionId`, `turnId`, `generation`,
 `bindingRevision`, or `toolCallId`; the system binds those identities. The
 decision tool writes metadata only. It never writes or pre-generates a future
 Companion message.
+
+When the user explicitly states an actionable conversation preference this
+turn (for example "回复短一点", "可以多说几句", "别总问我", "以后叫我阿澈"),
+call `virtual_human_preference_proposal_tool` once with the bounded
+`preferenceType` (`verbosity`, `question_initiative`, `address`, `humor`,
+`proactive_contact`) and a short `candidateValue` enum. Do not call it for
+vague, joking or speculative statements, never paste the user's words as the
+value, and at most once per stated preference. The proposal only becomes part
+of you after the user accepts it in the Companion UI; a rejected or ignored
+proposal changes nothing.

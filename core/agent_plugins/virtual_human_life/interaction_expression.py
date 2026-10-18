@@ -47,6 +47,42 @@ _ACKNOWLEDGEMENT = re.compile(
     r"^(?:嗯+[，, ]*)?(?:嗯+|好(?:的|呀|啊)?|知道了|明白了|收到|可以|行|哈哈+|谢(?:谢|啦))(?:[呀啊呢哦哈～~！!。.]*)$",
     re.IGNORECASE,
 )
+_MISUNDERSTOOD_MARKERS = (
+    "你误会",
+    "误会了",
+    "不是这个意思",
+    "你没听懂",
+    "你理解错",
+    "你搞错我的意思",
+    "我是说",
+)
+_RESTATE_MARKERS = (
+    "再说一遍",
+    "再讲一遍",
+    "再解释一下",
+    "没听懂",
+    "没明白",
+    "什么意思",
+    "你刚说的是什么",
+)
+_IMPATIENT_MARKERS = (
+    "别问了",
+    "你烦不烦",
+    "说了几遍",
+    "说了多少遍",
+    "啰嗦",
+    "别啰嗦",
+    "说重点",
+    "我不想重复",
+)
+_END_TOPIC_MARKERS = (
+    "这个话题就到这",
+    "不聊这个",
+    "换个话题",
+    "跳过这个",
+    "别说这个",
+    "到此为止",
+)
 _CORRECTION_MARKERS = (
     "不对",
     "不是",
@@ -93,7 +129,6 @@ class CompanionExpressionDecision:
     contractVersion: str
     responseLength: str
     questionBudget: int
-    followup: bool
     initiative: str
     validationStyle: str
     selfDisclosure: str
@@ -130,6 +165,17 @@ def classify_companion_user_intent(value: object) -> str:
     compact = text.lower().strip(" ，,。.!！?？~～")
     if not compact:
         return "small_talk"
+    # Misunderstanding-repair intents are checked before the shorter factual
+    # correction/end markers so e.g. "不是这个意思" stays a misunderstanding
+    # and "不聊这个了" stays a topic close.
+    if any(marker in compact for marker in _MISUNDERSTOOD_MARKERS):
+        return "misunderstanding"
+    if any(marker in compact for marker in _RESTATE_MARKERS):
+        return "restate_request"
+    if any(marker in compact for marker in _IMPATIENT_MARKERS):
+        return "user_impatient"
+    if any(marker in compact for marker in _END_TOPIC_MARKERS):
+        return "end_topic"
     if any(marker in compact for marker in _CORRECTION_MARKERS):
         return "correction"
     if any(marker in compact for marker in _SUPPORT_MARKERS):
@@ -179,10 +225,17 @@ def build_companion_expression_decision(
     affect: Mapping[str, Any] | None = None,
     energy: object = 70,
     user_intent: str = "small_talk",
-    turn_ordinal: object = 0,
     preferences: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return one immutable-by-convention Companion-only expression projection."""
+    """Return one immutable-by-convention Companion-only expression projection.
+
+    ``questionBudget`` is a per-turn resource bound (at most one natural
+    question this turn when stage, intent, affect and reviewed preferences all
+    allow it). It is never a cadence: no arrival ordinal, modulo or fixed
+    message-count target participates in this projection, and whether a next
+    adjacent bubble is worth sending is decided separately by the Companion
+    Dialogue V2 decision tool on the current turn.
+    """
 
     stage = _relationship_stage(relationship)
     defaults = dict(_STAGE_DEFAULTS[stage])
@@ -190,13 +243,16 @@ def build_companion_expression_decision(
     valence = _bounded_int(mood.get("valence"), 0, -100, 100)
     stability = _bounded_int(mood.get("stability"), 70, 0, 100)
     energy_value = _bounded_int(energy, 70, 0, 100)
-    ordinal = _bounded_int(turn_ordinal, 0, 0, 1_000_000_000)
     intent = str(user_intent or "small_talk").strip().lower()
     if intent not in {
         "acknowledgement",
         "correction",
-        "support",
+        "misunderstanding",
+        "restate_request",
+        "user_impatient",
         "end",
+        "end_topic",
+        "support",
         "help_request",
         "small_talk",
         "proactive",
@@ -206,12 +262,8 @@ def build_companion_expression_decision(
     reasons = [f"relationship_stage:{stage}", f"user_intent:{intent}"]
     response_length = "compact"
     question_budget = int(
-        intent == "small_talk"
-        and bool(defaults["questionEligible"])
-        and ordinal > 0
-        and ordinal % 3 == 0
+        intent == "small_talk" and bool(defaults["questionEligible"])
     )
-    followup = question_budget == 1
     validation_style = "respond_directly"
     pacing = "natural"
     directness = "natural"
@@ -222,29 +274,34 @@ def build_companion_expression_decision(
     intent_overrides = {
         "acknowledgement": ("brief", "acknowledge", "direct"),
         "correction": ("compact", "acknowledge_then_correct", "direct"),
+        # Misunderstanding-repair intents (PRD 32.10): acknowledge briefly,
+        # restate the current understanding or close the topic. They never
+        # continue an old self-disclosure, joke or question chain, and a
+        # single misunderstanding never becomes a relationship penalty.
+        "misunderstanding": ("compact", "acknowledge_then_restate", "direct"),
+        "restate_request": ("compact", "restate_current_understanding", "direct"),
+        "user_impatient": ("brief", "acknowledge_then_stop", "direct"),
+        "end_topic": ("brief", "respectful_close", "direct"),
         "support": ("compact", "validate_then_support", "gentle_direct"),
         "end": ("brief", "respectful_close", "direct"),
     }
     if intent in intent_overrides:
         response_length, validation_style, directness = intent_overrides[intent]
         question_budget = 0
-        followup = False
         defaults["initiative"] = "reply_only"
         defaults["topicInitiative"] = "reply_only"
         defaults["selfDisclosure"] = "none"
         defaults["memoryMention"] = "none"
-        reasons.append("priority_intent_suppressed_followup")
+        reasons.append("priority_intent_suppressed_initiative")
     elif intent == "help_request":
         validation_style = "acknowledge_then_help"
         directness = "direct"
         question_budget = 0
-        followup = False
         defaults["topicInitiative"] = "reply_only"
         defaults["selfDisclosure"] = "none"
     elif intent == "proactive":
         response_length = "brief"
         question_budget = 0
-        followup = False
         validation_style = "share_without_pressure"
 
     low_state = energy_value < 35 or valence <= -25 or stability < 35
@@ -252,7 +309,6 @@ def build_companion_expression_decision(
     if low_state:
         response_length = "brief"
         question_budget = 0
-        followup = False
         pacing = "slow"
         defaults["humorMode"] = "off"
         defaults["topicInitiative"] = "reply_only"
@@ -277,8 +333,19 @@ def build_companion_expression_decision(
         reasons.append("preference_response_length_applied")
     if prefs.get("questionsAllowed") is False:
         question_budget = 0
-        followup = False
         reasons.append("preference_questions_disabled")
+    if str(prefs.get("questionInitiative") or "") == "few":
+        question_budget = 0
+        reasons.append("dialogue_setting_question_initiative_few")
+    if str(prefs.get("speakingInitiative") or "") == "restrained":
+        defaults["initiative"] = "reply_only"
+        reasons.append("dialogue_setting_speaking_initiative_restrained")
+    elif (
+        str(prefs.get("speakingInitiative") or "") == "talkative"
+        and defaults["initiative"] != "reply_only"
+    ):
+        defaults["initiative"] = "warm" if stage == "close" else "natural"
+        reasons.append("dialogue_setting_speaking_initiative_talkative")
     if prefs.get("humorAllowed") is False:
         defaults["humorMode"] = "off"
         reasons.append("preference_humor_disabled")
@@ -293,7 +360,6 @@ def build_companion_expression_decision(
         contractVersion=EXPRESSION_DECISION_VERSION,
         responseLength=response_length,
         questionBudget=question_budget,
-        followup=followup,
         initiative=str(defaults["initiative"]),
         validationStyle=validation_style,
         selfDisclosure=str(defaults["selfDisclosure"]),

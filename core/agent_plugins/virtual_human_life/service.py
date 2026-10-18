@@ -36,9 +36,18 @@ from .calendar import (
 from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
 from .commitments import apply_commitment_action, project_commitments
 from .companion_preferences import (
+    PREFERENCE_PROPOSAL_LEDGER_LIMIT,
+    PREFERENCE_PROPOSAL_MODES,
+    PREFERENCE_PROPOSAL_TYPE_TO_KIND,
+    QUESTION_INITIATIVES,
+    SPEAKING_INITIATIVES,
     CompanionPreferenceError,
     CompanionPreferenceManager,
     CompanionPreferencePersistenceError,
+    companion_preference_proposal_transition_row,
+    new_companion_preference_proposal_row,
+    normalize_companion_dialogue_settings,
+    project_companion_preference_proposals,
     project_companion_preferences,
 )
 from .conversation_continuity import (
@@ -59,6 +68,11 @@ from .dialogue_context import (
     interaction_context_for_turn,
     project_companion_dialogue_context,
     record_interaction_receipt,
+)
+from .dialogue_memory_recall import (
+    RECALL_SUMMARY_MAX_CHARS,
+    dialogue_followup_matches,
+    select_dialogue_memory_recalls,
 )
 from .domain import (
     apply_completed_event_to_state,
@@ -292,6 +306,11 @@ class VirtualHumanLifeService:
         self.self_wake_canceller = self_wake_canceller
         self._agent_locks_guard = threading.Lock()
         self._agent_locks: dict[str, threading.RLock] = {}
+        # Single-slot, in-memory-only cache of the current turn's user message
+        # per direct Session. Mailbox commands are scrubbed once the native
+        # Turn completes, so recall reads this instead of keeping a second
+        # copy of user text anywhere persistent.
+        self._current_turn_user_messages: dict[tuple[str, str], str] = {}
         self._mailbox_dispatch_threads_guard = threading.Lock()
         self._mailbox_dispatch_threads: dict[str, threading.Thread] = {}
         self.self_continuity = SelfContinuity(self)
@@ -414,6 +433,11 @@ class VirtualHumanLifeService:
                         followup,
                         reason="user_interjected",
                     )
+                # A user message that asks about a freshly disclosed topic
+                # re-enables it for a later self-disclosure (PRD 32.10).
+                self._reset_disclosures_for_user_followup(
+                    normalized_agent_id, normalized_content
+                )
             else:
                 generation = int(entry.get("generation") or 0)
             mailbox, entry = enqueue_mailbox_entry(
@@ -428,6 +452,9 @@ class VirtualHumanLifeService:
             self.store.write_json(
                 normalized_agent_id, "conversation/mailbox.json", mailbox
             )
+            self._current_turn_user_messages[
+                (normalized_agent_id, normalized_session_id)
+            ] = normalized_content[:500]
         self.dispatch_conversation_mailbox_once(
             normalized_agent_id,
             session_id=normalized_session_id,
@@ -943,6 +970,12 @@ class VirtualHumanLifeService:
         direct_session = str((self._agent(agent_id, include_archived=False) or {}).get("directSessionId") or "")
         if direct_session:
             keys.update(str(row["sourceKey"]) for row in self._shared_continuity_projection(agent_id, direct_session))
+            for recall in self._dialogue_memory_recalls(
+                agent_id, session_id=direct_session
+            ):
+                source_key = str(recall.get("sourceKey") or "").strip()
+                if source_key:
+                    keys.add(source_key)
         for row in self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"):
             if str(row.get("status") or "") == "open":
                 topic_key = str(row.get("topicKey") or "").strip()
@@ -2240,6 +2273,11 @@ class VirtualHumanLifeService:
                 session_id=session_id, now=self._now(),
             )
             dialogue_context["sharedExperiences"] = self._shared_continuity_projection(agent_id, session_id)
+            dialogue_context["recalledMemories"] = self._dialogue_memory_recalls(
+                agent_id,
+                session_id=session_id,
+                proactive_delivery_kind=str((trigger or {}).get("deliveryKind") or ""),
+            )
         remaining = [
             {
                 "activityId": str(item.get("activityId") or ""),
@@ -2479,6 +2517,7 @@ class VirtualHumanLifeService:
                 )
             if life_runtime.get("kind") == "self_wake":
                 allowed_tools.discard("virtual_human_dialogue_decision_v2_tool")
+                allowed_tools.discard("virtual_human_preference_proposal_tool")
             # ``names`` has already been intersected with the Agent ToolPolicy.
             # This second boundary keeps ordinary companion dialogue on the
             # dedicated plugin bundle while allowing a scheduled tool activity
@@ -3809,6 +3848,450 @@ class VirtualHumanLifeService:
             ),
             now_iso=lambda: _iso(self._now()),
         )
+
+    # ------------------------------------------------------------------
+    # Confirmable preference proposals (PRD 32.9) and Agent-scoped dialogue
+    # settings (PRD 32.11). The proposal ledger stores references and bounded
+    # enum values only - never a copy of what the user wrote. Only an accepted
+    # proposal may reach native episodic memory through the existing manager.
+    # ------------------------------------------------------------------
+
+    def _preference_proposal_rows(self, agent_id: str) -> list[dict[str, Any]]:
+        with self._lock_for(agent_id):
+            rows = self.store.read_jsonl(
+                agent_id, "conversation/preference_proposals.jsonl"
+            )
+            if len(rows) > 4 * PREFERENCE_PROPOSAL_LEDGER_LIMIT:
+                # Bounded compaction of long-decided proposal history.
+                rows = rows[-2 * PREFERENCE_PROPOSAL_LEDGER_LIMIT :]
+                self.store.write_jsonl(
+                    agent_id, "conversation/preference_proposals.jsonl", rows
+                )
+            return rows
+
+    def list_companion_preference_proposals(
+        self,
+        agent_id: str,
+        *,
+        status: str = "",
+    ) -> dict[str, Any]:
+        self.require_agent(agent_id)
+        normalized_status = str(status or "").strip().lower()
+        projection = project_companion_preference_proposals(
+            self._preference_proposal_rows(agent_id),
+            agent_id=str(agent_id).strip(),
+            now_iso=_iso(self._now()),
+        )
+        proposals = list(projection.get("proposals") or [])
+        if normalized_status:
+            proposals = [
+                item
+                for item in proposals
+                if str(item.get("status") or "") == normalized_status
+            ]
+        return {
+            "schemaVersion": projection.get("schemaVersion"),
+            "proposals": proposals,
+        }
+
+    def propose_companion_preference(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        turn_id: str,
+        preference_type: str,
+        candidate_value: object,
+    ) -> dict[str, Any]:
+        """Record one pending proposal from the current Companion user Turn.
+
+        The structured tool on the character model is the only writer; this
+        method binds the proposal to the bound direct Session and to the
+        native user Turn that just arrived, so a proposal can only exist when
+        the user actually spoke this turn. Vague turns never reach this path
+        because the tool is model-driven and this boundary is turn-bound.
+        """
+
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
+        normalized_turn_id = str(turn_id or "").strip()
+        with self._lock_for(normalized_agent_id):
+            binding = self._require_enabled_binding(normalized_agent_id)
+            agent = self._agent(normalized_agent_id, include_archived=False) or {}
+            direct_session_id = str(
+                agent.get("directSessionId") or agent.get("direct_session_id") or ""
+            ).strip()
+            if direct_session_id != normalized_session_id:
+                raise VirtualHumanLifeError(
+                    "Companion preference proposals must target the bound direct Session."
+                )
+            settings = normalize_companion_dialogue_settings(
+                self.store.read_json(
+                    normalized_agent_id, "conversation/dialogue_settings.json"
+                )
+            )
+            if settings["preferenceProposalMode"] == "manual_only":
+                raise VirtualHumanLifeError(
+                    "Companion preference proposals are set to manual-only."
+                )
+            interaction = interaction_context_for_turn(
+                self.store,
+                normalized_agent_id,
+                session_id=normalized_session_id,
+                run_id=normalized_turn_id,
+            )
+            if (
+                str(interaction.get("turnId") or "") != normalized_turn_id
+                or str(interaction.get("sourceKind") or "user") != "user"
+            ):
+                raise VirtualHumanLifeError(
+                    "Companion preference proposals require the current native user Turn."
+                )
+            try:
+                proposal_row = new_companion_preference_proposal_row(
+                    normalized_agent_id,
+                    preference_type=preference_type,
+                    candidate_value=candidate_value,
+                    source_turn_id=normalized_turn_id,
+                    now_iso=_iso(self._now()),
+                )
+            except CompanionPreferenceError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            rows = self._preference_proposal_rows(normalized_agent_id)
+            projection = project_companion_preference_proposals(
+                rows,
+                agent_id=normalized_agent_id,
+                now_iso=_iso(self._now()),
+            )
+            appended: list[dict[str, Any]] = []
+            for existing in list(projection.get("proposals") or []):
+                if (
+                    str(existing.get("status") or "") != "pending"
+                    or str(existing.get("preferenceType") or "")
+                    != proposal_row["preferenceType"]
+                ):
+                    continue
+                try:
+                    appended.append(
+                        companion_preference_proposal_transition_row(
+                            existing,
+                            status="expired",
+                            now_iso=_iso(self._now()),
+                            transition_reason="superseded",
+                        )
+                    )
+                except CompanionPreferenceError as exc:
+                    raise VirtualHumanLifeError(str(exc)) from exc
+            appended.append(proposal_row)
+            for append_row in appended:
+                self.store.append_jsonl(
+                    normalized_agent_id,
+                    "conversation/preference_proposals.jsonl",
+                    append_row,
+                )
+            return {
+                "proposal": deepcopy(proposal_row),
+                "supersededProposalIds": [
+                    str(item.get("proposalId") or "") for item in appended[:-1]
+                ],
+            }
+
+    def _decide_companion_preference_proposal(
+        self,
+        agent_id: str,
+        *,
+        proposal_id: str,
+        decision: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_proposal_id = str(proposal_id or "").strip()
+        with self._lock_for(normalized_agent_id):
+            self._require_enabled_binding(normalized_agent_id)
+            rows = self._preference_proposal_rows(normalized_agent_id)
+            projection = project_companion_preference_proposals(
+                rows,
+                agent_id=normalized_agent_id,
+                now_iso=_iso(self._now()),
+            )
+            proposal = next(
+                (
+                    item
+                    for item in list(projection.get("proposals") or [])
+                    if str(item.get("proposalId") or "") == normalized_proposal_id
+                ),
+                None,
+            )
+            if proposal is None:
+                raise VirtualHumanLifeError(
+                    "Companion preference proposal does not exist."
+                )
+            # Validate the state transition BEFORE any native write so a
+            # decided/expired proposal can never leave an orphan episode.
+            transition_reason = (
+                "user_accepted" if decision == "accepted" else "user_rejected"
+            )
+            try:
+                companion_preference_proposal_transition_row(
+                    proposal,
+                    status=decision,
+                    now_iso=_iso(self._now()),
+                    transition_reason=transition_reason,
+                )
+            except CompanionPreferenceError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            receipt: dict[str, Any] = {}
+            if decision == "accepted":
+                manager = self._companion_preference_manager()
+                try:
+                    native = manager.upsert(
+                        normalized_agent_id,
+                        preference_kind=PREFERENCE_PROPOSAL_TYPE_TO_KIND[
+                            str(proposal["preferenceType"])
+                        ],
+                        value=proposal["candidateValue"],
+                    )
+                except (
+                    CompanionPreferenceError,
+                    CompanionPreferencePersistenceError,
+                ) as exc:
+                    raise VirtualHumanLifeError(str(exc)) from exc
+                receipt = dict(native.get("receipt") or {})
+            try:
+                transition = companion_preference_proposal_transition_row(
+                    proposal,
+                    status=decision,
+                    now_iso=_iso(self._now()),
+                    receipt_id=str(receipt.get("receiptId") or ""),
+                    transition_reason=transition_reason,
+                )
+            except CompanionPreferenceError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+            self.store.append_jsonl(
+                normalized_agent_id,
+                "conversation/preference_proposals.jsonl",
+                transition,
+            )
+            return deepcopy(transition), receipt
+
+    def accept_companion_preference_proposal(
+        self,
+        agent_id: str,
+        *,
+        proposal_id: str,
+    ) -> dict[str, Any]:
+        """Accept one pending proposal and write the native preference."""
+
+        transition, receipt = self._decide_companion_preference_proposal(
+            agent_id,
+            proposal_id=proposal_id,
+            decision="accepted",
+        )
+        return {"proposal": transition, "receipt": receipt}
+
+    def reject_companion_preference_proposal(
+        self,
+        agent_id: str,
+        *,
+        proposal_id: str,
+    ) -> dict[str, Any]:
+        """Reject one pending proposal without touching native memory."""
+
+        transition, _ = self._decide_companion_preference_proposal(
+            agent_id,
+            proposal_id=proposal_id,
+            decision="rejected",
+        )
+        return {"proposal": transition}
+
+    def dialogue_settings(self, agent_id: str) -> dict[str, Any]:
+        self.require_agent(agent_id)
+        return normalize_companion_dialogue_settings(
+            self.store.read_json(
+                str(agent_id).strip(), "conversation/dialogue_settings.json"
+            )
+        )
+
+    def update_dialogue_settings(
+        self,
+        agent_id: str,
+        *,
+        settings: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized_agent_id = str(agent_id or "").strip()
+        with self._lock_for(normalized_agent_id):
+            self._require_enabled_binding(normalized_agent_id)
+            source = dict(settings or {})
+            for field, allowed in (
+                ("speakingInitiative", SPEAKING_INITIATIVES),
+                ("questionInitiative", QUESTION_INITIATIVES),
+                ("preferenceProposalMode", PREFERENCE_PROPOSAL_MODES),
+            ):
+                if field not in source:
+                    continue
+                if str(source.get(field) or "").strip().lower() not in allowed:
+                    raise VirtualHumanLifeError(
+                        f"Unsupported Companion dialogue setting {field}: {source.get(field)}"
+                    )
+            normalized = normalize_companion_dialogue_settings(source)
+            normalized["updatedAt"] = _iso(self._now())
+            self.store.write_json(
+                normalized_agent_id,
+                "conversation/dialogue_settings.json",
+                normalized,
+            )
+            return deepcopy(normalized)
+
+    # ------------------------------------------------------------------
+    # Native memory recall (PRD 32.9): read-only, Agent-scoped, receipt-backed
+    # episodic summaries for the current turn. Recall failures degrade to an
+    # empty list and never block the conversation.
+    # ------------------------------------------------------------------
+
+    def _dialogue_memory_recalls(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        proactive_delivery_kind: str = "",
+    ) -> list[dict[str, Any]]:
+        normalized_agent_id = str(agent_id or "").strip()
+        if str(proactive_delivery_kind or "").strip() in {"proactive", "self_wake"}:
+            # Recall ranks memories against the current user message; a turn
+            # without one has nothing honest to rank against.
+            return []
+        try:
+            agent = self._agent(normalized_agent_id, include_archived=False) or {}
+            direct_session_id = str(
+                agent.get("directSessionId") or agent.get("direct_session_id") or ""
+            ).strip()
+            if not direct_session_id or direct_session_id != str(session_id or "").strip():
+                return []
+            interaction = interaction_context_for_turn(
+                self.store,
+                normalized_agent_id,
+                session_id=direct_session_id,
+                run_id="",
+            )
+            message = str(
+                self._current_turn_user_messages.get(
+                    (normalized_agent_id, direct_session_id), ""
+                )
+            )
+            if not message:
+                # Mailbox commands only survive while the entry is in flight;
+                # this fallback covers the window before completion scrubs it.
+                entry_id = str(interaction.get("entryId") or "")
+                if entry_id:
+                    mailbox = normalize_mailbox(
+                        self.store.read_json(
+                            normalized_agent_id, "conversation/mailbox.json"
+                        )
+                    )
+                    entry = next(
+                        (
+                            item
+                            for item in mailbox["entries"]
+                            if str(item.get("entryId") or "") == entry_id
+                        ),
+                        {},
+                    )
+                    command = (
+                        entry.get("command")
+                        if isinstance(entry.get("command"), dict)
+                        else {}
+                    )
+                    message = str(command.get("content") or "")
+            recalls = select_dialogue_memory_recalls(
+                self.list_memories(normalized_agent_id, limit=100),
+                current_message=message,
+                user_intent=str(interaction.get("userIntent") or ""),
+                now=self._now(),
+                agent_id=normalized_agent_id,
+            )
+            return [
+                {
+                    "sourceKey": str(item["sourceKey"]),
+                    "summary": str(item["summary"])[:RECALL_SUMMARY_MAX_CHARS],
+                    "occurredAt": str(item.get("occurredAt") or ""),
+                    "sourceKind": str(item.get("sourceKind") or "unknown"),
+                }
+                for item in recalls
+            ]
+        except Exception as exc:  # noqa: BLE001 - recall must never block dialogue
+            logger.warning(
+                "Companion memory recall failed for agent=%s (%s).",
+                normalized_agent_id,
+                type(exc).__name__,
+            )
+            return []
+
+    def _reset_disclosures_for_user_followup(
+        self,
+        agent_id: str,
+        message: str,
+    ) -> list[str]:
+        """Re-enable freshly disclosed topics the user asked about again."""
+
+        normalized_agent_id = str(agent_id or "").strip()
+        try:
+            fresh_keys = self.delivery_runtime.fresh_disclosure_source_keys(
+                normalized_agent_id, now=self._now()
+            )
+            if not fresh_keys:
+                return []
+            match_texts: dict[str, str] = {}
+            for source_key in sorted(fresh_keys):
+                kind, _, reference = source_key.partition(":")
+                if kind == "life-event" and reference:
+                    event = next(
+                        (
+                            item
+                            for item in self._all_recorded_events(normalized_agent_id)
+                            if str(item.get("eventId") or "") == reference
+                        ),
+                        None,
+                    )
+                    if event is not None:
+                        outcome = (
+                            event.get("outcome")
+                            if isinstance(event.get("outcome"), dict)
+                            else {}
+                        )
+                        match_texts[source_key] = (
+                            f"{event.get('title') or ''} {outcome.get('summary') or ''}"
+                        )
+                elif kind == "memory" and reference:
+                    episode = next(
+                        (
+                            item
+                            for item in self._list_current_episodic_events(
+                                normalized_agent_id
+                            )
+                            if str(item.get("episodeId") or "") == reference
+                        ),
+                        None,
+                    )
+                    if episode is not None:
+                        match_texts[source_key] = str(episode.get("text") or "")
+            matched = [
+                source_key
+                for source_key, text in match_texts.items()
+                if dialogue_followup_matches(message, text)
+            ]
+            if matched:
+                self.delivery_runtime.reset_disclosures(
+                    normalized_agent_id,
+                    source_keys=matched,
+                    now=self._now(),
+                )
+            return matched
+        except Exception as exc:  # noqa: BLE001 - disclosure reset is best effort
+            logger.warning(
+                "Companion disclosure reset failed for agent=%s (%s).",
+                normalized_agent_id,
+                type(exc).__name__,
+            )
+            return []
 
     def _health_projection(
         self,

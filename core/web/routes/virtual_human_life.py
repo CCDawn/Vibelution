@@ -20,26 +20,35 @@ from core.web.routes.virtual_human_life_models import (
     VirtualHumanConversationMessageRequest,
     VirtualHumanConversationMessageResponse,
     VirtualHumanDiaryEntryResponse,
+    VirtualHumanDialogueSettingsRequest,
+    VirtualHumanDialogueSettingsResponse,
     VirtualHumanEventResponse,
     VirtualHumanMemoryResponse,
     VirtualHumanLifeDraftResponse,
     VirtualHumanLifeDraftUpdateRequest,
     VirtualHumanLifeWorldConfirmRequest,
     VirtualHumanLifeWorldConfirmResponse,
+    VirtualHumanPreferenceProposalDecisionResponse,
+    VirtualHumanPreferenceProposalListResponse,
     VirtualHumanRelationshipResponse,
     VirtualHumanScheduleResponse,
     VirtualHumanSnapshotResponse,
 )
 from core.web.services.virtual_human_life_service import (
+    accept_virtual_human_preference_proposal,
     execute_virtual_human_command,
     import_legacy_pet,
     preview_legacy_pet_import,
     queue_virtual_human_conversation_message,
     confirm_virtual_human_life_world,
+    reject_virtual_human_preference_proposal,
+    update_virtual_human_dialogue_settings,
     update_virtual_human_life_draft,
+    virtual_human_dialogue_settings,
     virtual_human_diary,
     virtual_human_events,
     virtual_human_memories,
+    virtual_human_preference_proposals,
     virtual_human_relationships,
     virtual_human_schedule,
     virtual_human_snapshot,
@@ -269,6 +278,88 @@ def life_import_legacy_pet(agent_id: str, payload: LegacyPetImportRequest) -> di
             agent_id,
             expected_source_digest=payload.expectedSourceDigest,
             idempotency_key=payload.idempotencyKey,
+        )
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.get(
+    "/agents/{agent_id}/plugins/virtual-human-life/companions/dialogue-settings",
+    response_model=VirtualHumanDialogueSettingsResponse,
+    response_model_exclude_unset=True,
+)
+def life_dialogue_settings(agent_id: str) -> dict:
+    try:
+        return virtual_human_dialogue_settings(agent_id)
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.put(
+    "/agents/{agent_id}/plugins/virtual-human-life/companions/dialogue-settings",
+    response_model=VirtualHumanDialogueSettingsResponse,
+    response_model_exclude_unset=True,
+)
+def life_dialogue_settings_update(
+    agent_id: str,
+    payload: VirtualHumanDialogueSettingsRequest,
+) -> dict:
+    try:
+        return update_virtual_human_dialogue_settings(
+            agent_id,
+            settings=payload.model_dump(exclude_none=True),
+        )
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.get(
+    "/agents/{agent_id}/plugins/virtual-human-life/companions/preference-proposals",
+    response_model=VirtualHumanPreferenceProposalListResponse,
+    response_model_exclude_unset=True,
+)
+def life_preference_proposals(
+    agent_id: str,
+    status: Annotated[str, Query(max_length=16)] = "",
+) -> dict:
+    try:
+        return virtual_human_preference_proposals(agent_id, status=status)
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.post(
+    "/agents/{agent_id}/plugins/virtual-human-life/companions/preference-proposals/"
+    "{proposal_id}/accept",
+    response_model=VirtualHumanPreferenceProposalDecisionResponse,
+    response_model_exclude_unset=True,
+)
+def life_preference_proposal_accept(agent_id: str, proposal_id: str) -> dict:
+    try:
+        return accept_virtual_human_preference_proposal(
+            agent_id,
+            proposal_id=proposal_id,
+        )
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.post(
+    "/agents/{agent_id}/plugins/virtual-human-life/companions/preference-proposals/"
+    "{proposal_id}/reject",
+    response_model=VirtualHumanPreferenceProposalDecisionResponse,
+    response_model_exclude_unset=True,
+)
+def life_preference_proposal_reject(agent_id: str, proposal_id: str) -> dict:
+    try:
+        return reject_virtual_human_preference_proposal(
+            agent_id,
+            proposal_id=proposal_id,
         )
     except Exception as exc:
         _raise_life_http_error(exc)
