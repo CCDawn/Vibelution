@@ -1087,6 +1087,10 @@ def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path,
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    # team 侧成员修复经 seeded_sandbox_workspace_path 读 agents.json；不钉根时
+    # 会按仓库 checkout 的 .vibelution/project.json 身份路由进真实实例库，
+    # 与上面四个 tmp 根的 org/agent 写入永不相交（members 恒空）。
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     default_canvas = research_service.get_research_flow_canvas()
     assert default_canvas["path"].endswith("flow_canvas.json")
     assert default_canvas["organizationPath"].replace("\\", "/").endswith("workspace/research/organization_graph.json")
@@ -1110,8 +1114,11 @@ def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path,
     assert {node["agentId"] for node in canvas_graph["agents"]} == active_org_agent_ids
     research_team = team_service.get_team("research-team")
     assert research_team["teamId"] == "research-team"
-    assert {member["agentId"] for member in research_team["members"]} == active_org_agent_ids
-    assert {node["agentId"] for node in research_team["canvas"]["nodes"]} == active_org_agent_ids
+    # 自 9600daa73 起 Team.members 与 Team 画布归 PATCH 聚合入口所有：
+    # org 同步只保证 team 壳存在，不再物化成员/画布（与 test_team_service.py
+    # 的 ensure_research_team_from_organization 契约断言一致）。此处仅锁 org 侧投影。
+    assert research_team["members"] == []
+    assert [node for node in research_team["canvas"]["nodes"] if node.get("type") == "agent"] == []
     assert all("agentInboxMessages" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
     assert all("workspaceTerritory" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
     assert {
@@ -2077,7 +2084,7 @@ def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance
             "provider_id": base_config.llm.profiles["primary"].provider_id,
             "model": "research-live-runtime",
             "streaming": False,
-            "tool_calling_mode": "disabled",
+            "tool_calling_mode": "auto",
         }
         agent = agent_directory_service.create_agent_instance(
             display_name="统一科研 Agent",
@@ -2178,7 +2185,7 @@ def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config
             "provider_id": base_config.llm.profiles["primary"].provider_id,
             "model": "research-mode-bound-runtime",
             "streaming": False,
-            "tool_calling_mode": "disabled",
+            "tool_calling_mode": "auto",
         }
         agent = agent_directory_service.create_agent_instance(
             display_name="ModeBinding 广搜 Agent",
