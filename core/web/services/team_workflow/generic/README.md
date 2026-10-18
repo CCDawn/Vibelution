@@ -269,3 +269,45 @@ the ordinary workflow editor. Existing generic workflows and research-source
 replay keep their prior contracts. Local journal fixtures, disk read-invariance,
 coordinator and transport tests cover this adapter; formal runtime rollout still
 requires the user's deployment/restart decision.
+
+## Scoped code repair through the existing candidate owner
+
+`POST /teams/{team_id}/workflows/{flow_id}/runs` accepts optional
+`localIntegration` with `acknowledge=true`, 1–8 exact `allowedFiles`, matching
+`teamId`, and `validForSeconds` of 60–3600. Omission preserves ordinary recovery.
+The source needs an existing four-role binding. Configured self-evolution slots
+must already match director/observer, developer/executor and reviewer/reviewer.
+No roles, tools or permissions are provisioned. Binding readiness alone still
+does not authorize local integration.
+
+Only the trusted HTTP control operator can issue this run-scoped delegation;
+client operator headers do not grant it. The source Run privately freezes the
+grant, with an expiry no later than the recovery binding. Its request scope is
+part of the start idempotency fingerprint. Background work derives the same
+scope and deadline, without manufacturing an operator context or renewing it.
+
+At the existing failure threshold, the parent persists one deterministic
+`codeRepairRunId` and frozen source reference before dispatch. This mode enters
+the existing autonomous candidate pipeline instead of also executing the generic
+repair recipe. Its director observes/plans, developer edits an isolated candidate,
+and independent reviewer verifies the frozen candidate through the existing native
+Session receipt and quality gate before the sole Git integration owner merges.
+Only bounded native references and problem codes enter the goal; original inputs,
+prompts and answers are not copied into another transcript.
+
+Duplicate scans and lost responses reuse the exact WorkRun. A busy candidate
+owner waits within the parent repair timeout. Final merge holds flow, parent Run,
+then child-grant locks and rechecks the source, binding, policies and deadline.
+Stop/revoke/source movement fences new admission. Cancellation preserves actual
+integration/cleanup receipts; a stopped snapshot does not prove an executing
+developer returned. Source retry and replacement supervision wait for its exact
+execution-settled evidence. An authoritative missing child after dispatch has
+been blocked is safe; an unreadable/quarantined snapshot remains blocked.
+
+Actual integration moves the parent to `awaiting_deployment`, including when
+candidate cleanup is pending. This is a Git fact, not runtime-effect evidence.
+Existing user `confirm_deployment` then schedules only the existing reviewer,
+whose real effect verdict controls safe replay. Ordinary Session replay still
+requires its native user action. Failed/interrupted code execution blocks rather
+than starting another potentially overlapping candidate. Persistent multi-round
+evolution and a supervision configuration UI remain separate capabilities.

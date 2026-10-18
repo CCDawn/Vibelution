@@ -110,6 +110,25 @@ class SelfEvolutionAutonomousLoopService:
 
     def queue(self, request: dict[str, Any]) -> dict[str, Any]:
         """Persist a queued run without blocking on Agent execution."""
+        return self._queue(request)
+
+    def queue_recovery(self, request: dict[str, Any], *, source: dict, run_id: str) -> dict[str, Any]:
+        """Internal exact-id admission; HTTP input cannot supply this link."""
+        from core.runtime_manager.work_run_store import normalize_run_id
+        run_id = normalize_run_id(run_id)
+        normalized = _normalize_request(request)
+        if not normalized.get("localIntegration"):
+            raise AutonomousLoopValidationError("Recovery requires an existing scoped delegation.")
+        with _LOCK:
+            previous = self.get_recovery(run_id, source=source)
+            if previous is not None:
+                if previous.get("request") != normalized or previous.get("_recoverySource") != source:
+                    raise AutonomousLoopConflictError("Recovery id already belongs to a different request.")
+                return previous
+            return self._queue(request, recovery_source=source, recovery_run_id=run_id)
+
+    def _queue(self, request: dict[str, Any], *, recovery_source: dict | None = None,
+               recovery_run_id: str = "") -> dict[str, Any]:
 
         normalized_request = _normalize_request(request)
         with _LOCK:
@@ -119,7 +138,7 @@ class SelfEvolutionAutonomousLoopService:
                 raise AutonomousLoopConflictError(
                     "An active self-evolution autonomous loop already exists."
                 )
-            run_id = str(self._run_id_factory() or "").strip()
+            run_id = recovery_run_id or str(self._run_id_factory() or "").strip()
             if not run_id:
                 raise AutonomousLoopValidationError("run_id_factory returned an empty run id.")
             now = self._now()
@@ -139,13 +158,74 @@ class SelfEvolutionAutonomousLoopService:
                 "startedAt": now,
                 "updatedAt": now,
             }
+            if recovery_source is not None:
+                snapshot["_recoverySource"] = deepcopy(recovery_source)
+                snapshot["_recoveryExecutionSettled"] = True
             if normalized_request.get("localIntegration"):
                 if self._hooks.authorize is None or self._hooks.review is None or self._hooks.check_authorization is None:
                     raise AutonomousLoopValidationError("Local integration requires scoped authorization and independent review.")
                 snapshot["localIntegrationAuthorization"] = self._hooks.authorize(_phase_context(snapshot))
             return self._persist(snapshot, active=True)
 
+    def cancel_recovery(self, run_id: str, *, source: dict) -> dict | None:
+        """Cancel exactly one owned child, without retiring the shared service."""
+        with _LOCK:
+            snapshot = self._store.load_snapshot(RUN_KIND, run_id)
+            if snapshot is None:
+                return None
+            if snapshot.get("_recoverySource") != source:
+                raise AutonomousLoopConflictError("Recovery cancellation source mismatch.")
+            if snapshot.get("status") in {"completed", "stopped", "failed", "rejected"}:
+                return snapshot
+            self._restart_requests[run_id] = "recovery_source_cancelled"
+            if run_id in self._inflight_atomic_hooks:
+                # The owner may already have merged. It must save its receipt
+                # before settling cancellation; never wait while parent locks
+                # are held, as the hook may still need the source merge guard.
+                return self._advance(snapshot, phase=snapshot["phase"], updates={"stopRequested": True})
+            return self._mark_interrupted(snapshot, "recovery_source_cancelled")
+
+    def get_recovery(self, run_id: str, *, source: dict) -> dict | None:
+        from core.runtime_manager.work_run_store import normalize_run_id
+        run_id = normalize_run_id(run_id)
+        with _LOCK:
+            snapshot = self._store.load_snapshot(RUN_KIND, run_id)
+            if snapshot is None:
+                path = self._store.runs_dir(RUN_KIND) / f"{run_id}.json"
+                if path.exists() or any(path.parent.glob(path.name + ".corrupt-*")):
+                    raise AutonomousLoopValidationError("Recovery snapshot is unreadable.")
+                index = self._store.load_run_index(RUN_KIND)
+                known = [*(index.get("activeRunIds") or []), *(index.get("recentRunIds") or []),
+                         index.get("activeRunId"), index.get("latestRunId")]
+                if run_id in known:
+                    raise AutonomousLoopValidationError("Known recovery snapshot is missing.")
+                return None
+            if snapshot.get("_recoverySource") != source:
+                raise AutonomousLoopConflictError("Recovery source mismatch.")
+            return snapshot
+
     def run_until_review(self, run_id: str) -> dict[str, Any]:
+        with _LOCK:
+            snapshot = self._load_required(run_id)
+            recovery = bool(snapshot.get("_recoverySource"))
+            if recovery:
+                if _is_restart_interrupted(snapshot):
+                    return snapshot
+                if (snapshot.get("_recoveryExecutionSettled") is False
+                        or (snapshot.get("runtimeOwner") or {}).get("pid") != self._process_id):
+                    raise AutonomousLoopConflictError("Recovery execution already belongs to another worker.")
+                snapshot["_recoveryExecutionSettled"] = False
+                self._persist(snapshot, active=True)
+        try:
+            return self._run_until_review(run_id)
+        finally:
+            if recovery:
+                with _LOCK:
+                    current = self._load_required(run_id)
+                    current["_recoveryExecutionSettled"] = True
+                    self._persist(current, active=current.get("status") in {"queued", "running", "awaiting_user_approval"})
+
+    def _run_until_review(self, run_id: str) -> dict[str, Any]:
         """Resume one queued run through the user-approval boundary."""
 
         with _LOCK:
@@ -712,6 +792,8 @@ class SelfEvolutionAutonomousLoopService:
                     terminal=True,
                     updates=updates,
                 )
+                if current.get("_recoverySource") and (reason := self._restart_requests.get(run_id)):
+                    result = self._mark_interrupted(result, reason)
             self._finish_atomic_hook(run_id, atomic_event)
             return result
 
