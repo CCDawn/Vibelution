@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import dialogSource from "./ConversationForkSessionDialog.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import forkSessionSource from "./useConversationForkSession.ts?raw";
 
 describe("ConversationForkSessionDialog", () => {
   it("composes VConfirmDialog and VSelect without a hand-rolled overlay", () => {
@@ -27,8 +28,12 @@ describe("ConversationForkSessionDialog", () => {
   it("stays mounted from ConversationView with route-owned confirm flow", () => {
     expect(conversationViewSource).toContain('from "./ConversationForkSessionDialog"');
     expect(conversationViewSource).toContain("<ConversationForkSessionDialog");
-    expect(conversationViewSource).toContain("onForkSessionFromNode");
+    expect(conversationViewSource).toContain("useConversationForkSession({");
+    expect(conversationViewSource).toContain("onConfirm={confirmForkSession}");
+    expect(conversationViewSource).toContain("onCancel={closeForkDialog}");
+    expect(forkSessionSource).toContain("onForkSessionFromNode");
     // Confirm executes through the route handler; failures keep the dialog open.
-    expect(conversationViewSource).toContain("Promise.resolve(onForkSessionFromNode(message, forkScope))");
+    expect(forkSessionSource).toContain("Promise.resolve(onForkSessionFromNode(message, forkScope))");
+    expect(forkSessionSource).toContain(".catch(() => undefined)");
   });
 });
