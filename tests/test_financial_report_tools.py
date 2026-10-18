@@ -4,6 +4,7 @@ import copy
 import json
 from http.client import IncompleteRead
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.error import HTTPError, URLError
 
@@ -544,7 +545,8 @@ def test_invalid_unicode_from_upstream_is_not_returned(configured, monkeypatch, 
 def test_response_reading_has_a_total_deadline(configured, monkeypatch):
     mock_http(monkeypatch)
     clock = iter([0, 0, 13])
-    monkeypatch.setattr(finance.time, "monotonic", lambda: next(clock))
+    # Keep the finite clock local to the adapter; pytest teardown also uses time.
+    monkeypatch.setattr(finance, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     assert ask()["status"] == "timeout"
 
 
