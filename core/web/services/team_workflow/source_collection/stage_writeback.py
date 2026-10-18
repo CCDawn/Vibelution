@@ -1002,8 +1002,12 @@ def writeback_source_collection_stage_session_task(
             ) from exc
     # Compliant (accepted) writeback: clear any stale remediation contract so
     # the next deterministic rejection of any kind starts a fresh one-shot
-    # cycle — the same lifecycle shape as the quote-anchor marker above.
+    # cycle — the same lifecycle shape as the quote-anchor marker above.  The
+    # planner directive is consumed the same way: a compliant (completed)
+    # writeback proves the directive landed, so it must not leak into later
+    # context reads of the same task.
     task.pop("writebackRemediationContract", None)
+    task.pop("plannerDirective", None)
     task["status"] = status
     task["summary"] = writeback["summary"] or s._trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
@@ -1395,6 +1399,18 @@ def get_source_collection_stage_task_context(
     active_remediation = active_writeback_remediation(task)
     if active_remediation:
         context["writebackRemediation"] = active_remediation
+    # Unconsumed planner directive: after the LLM failure-review planner
+    # judged a self-blocked task actionable, the task carries the directive
+    # until a compliant writeback consumes it (cleared at the same point as
+    # the one-shot remediation contract above).  Inject it verbatim so the
+    # retried agent starts from the planner's exact repair instruction.
+    planner_directive = (
+        task.get("plannerDirective")
+        if isinstance(task.get("plannerDirective"), dict)
+        else {}
+    )
+    if planner_directive:
+        context["plannerDirective"] = planner_directive
     if retry_focus:
         context["retryFocus"] = retry_focus
         context["usage"]["retryInstruction"] = s._trim_text(retry_focus.get("retryInstruction"), max_length=1000)

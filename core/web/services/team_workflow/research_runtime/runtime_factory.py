@@ -68,6 +68,15 @@ FAILURE_COMPACTION_INTERVAL_MS = 6 * 60 * 60 * 1000
 _LAST_FAILURE_COMPACTION_MS: int | None = None
 _FAILURE_COMPACTION_LOCK = threading.Lock()
 
+# Stage-failure planner sweep cadence: one LLM review call per due tick with
+# limit=1 (same self-throttle shape as the auto-advance sweep).  The planner
+# call itself is fenced by min(120s, review-channel timeout) inside the
+# planner module so the serial maintenance loop cannot stall behind it.
+STAGE_PLANNER_SWEEP_INTERVAL_MS = 300_000
+STAGE_PLANNER_SWEEP_INTERVAL_ENV = "VIBELUTION_STAGE_PLANNER_SWEEP_INTERVAL_MS"
+_LAST_STAGE_PLANNER_SWEEP_MS: int | None = None
+_STAGE_PLANNER_SWEEP_LOCK = threading.Lock()
+
 
 def _auto_advance_sweep_interval_ms() -> int:
     raw = str(os.environ.get(AUTO_ADVANCE_SWEEP_INTERVAL_ENV) or "").strip()
@@ -111,6 +120,28 @@ def _failure_compaction_due(now_ms: int) -> bool:
         return True
 
 
+def _stage_planner_sweep_interval_ms() -> int:
+    raw = str(os.environ.get(STAGE_PLANNER_SWEEP_INTERVAL_ENV) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return STAGE_PLANNER_SWEEP_INTERVAL_MS
+        if value > 0:
+            return max(value, 1000)
+    return STAGE_PLANNER_SWEEP_INTERVAL_MS
+
+
+def _stage_planner_sweep_due(now_ms: int) -> bool:
+    global _LAST_STAGE_PLANNER_SWEEP_MS
+    with _STAGE_PLANNER_SWEEP_LOCK:
+        last = _LAST_STAGE_PLANNER_SWEEP_MS
+        if last is not None and now_ms - last < _stage_planner_sweep_interval_ms():
+            return False
+        _LAST_STAGE_PLANNER_SWEEP_MS = now_ms
+        return True
+
+
 def reset_failure_compaction_throttle_for_tests() -> None:
     """Test seam: forget the last compaction run so the next tick executes."""
     global _LAST_FAILURE_COMPACTION_MS
@@ -123,6 +154,13 @@ def reset_auto_advance_sweep_throttle_for_tests() -> None:
     global _LAST_AUTO_ADVANCE_SWEEP_MS
     with _AUTO_ADVANCE_SWEEP_LOCK:
         _LAST_AUTO_ADVANCE_SWEEP_MS = None
+
+
+def reset_stage_planner_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last planner sweep so the next tick executes."""
+    global _LAST_STAGE_PLANNER_SWEEP_MS
+    with _STAGE_PLANNER_SWEEP_LOCK:
+        _LAST_STAGE_PLANNER_SWEEP_MS = None
 
 
 def workflow_worker_count() -> int:
@@ -214,6 +252,7 @@ class WorkflowRuntime:
         self._recover_dead_turn_knowledge_children_best_effort(limit=limit)
         self._recover_failed_knowledge_invocations_best_effort(limit=limit)
         self._recover_blocked_quote_anchor_extractions_best_effort(limit=limit)
+        self._plan_stage_task_failure_remediation_best_effort(limit=limit)
         self._heal_formal_lineage_stale_leaves_best_effort()
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
@@ -354,6 +393,45 @@ class WorkflowRuntime:
                 )
         except Exception:  # noqa: BLE001 - recovery must never break maintenance
             logger.exception("knowledge sideflow quote-anchor recovery sweep failed")
+
+    def _plan_stage_task_failure_remediation_best_effort(
+        self, *, limit: int
+    ) -> None:
+        """LLM-review self-blocked source-collection stage tasks (one per tick).
+
+        Second failure-remediation layer after the deterministic writeback
+        contract: detect a first blocked stage-task attempt past the grace
+        window, have the review-channel planner judge the bounded failure
+        scene, then land exactly one verdict — directive + idempotent
+        RETRY_NODE, directive only, or the frozen human-required escalation.
+        Self-throttled (default 300s, env override), limit=1 per due tick,
+        and the same peek + never-raises discipline as the quote-anchor
+        recovery: any failure is swallowed after logging.  Archive mode
+        (封存模式) never reaches here — no maintenance thread exists.
+        """
+        if not _stage_planner_sweep_due(int(time.time() * 1000)):
+            return
+        try:
+            from .stage_failure_planner import plan_stage_task_failure_remediation
+
+            summary = plan_stage_task_failure_remediation(
+                self.store,
+                self.command_service,
+                limit=1,
+            )
+            if int(summary.get("planned") or 0) or int(
+                summary.get("escalated") or 0
+            ) or int(summary.get("degraded") or 0):
+                logger.info(
+                    "stage failure planner planned %s directive(s), retried %s, "
+                    "escalated %s, degraded %s",
+                    summary.get("planned"),
+                    summary.get("retried"),
+                    summary.get("escalated"),
+                    summary.get("degraded"),
+                )
+        except Exception:  # noqa: BLE001 - planner must never break maintenance
+            logger.exception("stage failure planner sweep failed")
 
     def _heal_formal_lineage_stale_leaves_best_effort(self) -> None:
         """Archive stale CANCELLED leaves behind a formal lineage conflict.

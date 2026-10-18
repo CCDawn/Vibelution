@@ -3,7 +3,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from core.web.services import personal_assistant_service as service
 from core.web.services.agent_directory_service import (
@@ -20,7 +20,7 @@ class Assistant(BaseModel):
     directSessionId: str
     status: Literal["active"]
     setupStatus: Literal["ready", "session_missing", "setup_required"]
-    renderer: Literal["whale"]
+    renderer: Literal["whale", "xiaoluo"]
     profile: Literal["personal_assistant_v1"]
 
 
@@ -31,6 +31,66 @@ class AssistantResponse(BaseModel):
 class CreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     displayName: str = Field(default="个人助理", min_length=1, max_length=80)
+
+
+class PreferencesPayload(BaseModel):
+    """Partial patch; only known flat preference keys are accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+    characterId: Literal["dafeiyu", "xiaoluo"] | None = None
+    showStatus: StrictBool | None = None
+    showTitles: StrictBool | None = None
+    showCompletion: StrictBool | None = None
+    idleMessage: str | None = Field(default=None, max_length=48)
+
+
+class SettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    displayName: str | None = Field(default=None, min_length=1, max_length=80)
+    preferences: PreferencesPayload | None = None
+
+
+class ModelUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    modelId: str = Field(min_length=1, max_length=200)
+
+
+class Preferences(BaseModel):
+    characterId: Literal["dafeiyu", "xiaoluo"]
+    showStatus: StrictBool
+    showTitles: StrictBool
+    showCompletion: StrictBool
+    idleMessage: str = Field(max_length=48)
+
+
+class ModelChoice(BaseModel):
+    modelId: str
+    label: str
+    providerLabel: str
+    isDefault: StrictBool
+    providerHealthy: StrictBool
+    missingApiKey: StrictBool
+    availability: str
+
+
+class ModelSettings(BaseModel):
+    currentModelId: str
+    choices: list[ModelChoice]
+
+
+class Settings(BaseModel):
+    displayName: str
+    preferences: Preferences
+    preferencesConfigured: StrictBool
+    model: ModelSettings
+
+
+class SettingsResponse(BaseModel):
+    settings: Settings | None
+
+
+class ModelResponse(BaseModel):
+    model: ModelSettings
 
 
 class Counts(BaseModel):
@@ -103,3 +163,38 @@ def overview(
     limit: int = Query(default=100, ge=1, le=100),
 ) -> dict:
     return service.get_platform_overview(offset=offset, limit=limit)
+
+
+@router.get("/personal-assistant/settings", response_model=SettingsResponse)
+def get_settings() -> dict:
+    try:
+        return service.get_personal_assistant_settings()
+    except AgentStateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.patch("/personal-assistant/settings", response_model=SettingsResponse)
+def update_settings(payload: SettingsUpdateRequest) -> dict:
+    try:
+        return service.update_personal_assistant_settings(
+            display_name=payload.displayName,
+            preferences=payload.preferences.model_dump(exclude_none=True)
+            if payload.preferences
+            else None,
+        )
+    except AgentStateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/personal-assistant/settings/model", response_model=ModelResponse
+)
+def update_model(payload: ModelUpdateRequest) -> dict:
+    try:
+        return service.update_personal_assistant_model(payload.modelId)
+    except AgentStateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

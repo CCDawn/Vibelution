@@ -109,6 +109,9 @@ def initialize_builtin_agent_catalog() -> dict[str, Any]:
     if phase not in {"idle", "ready", "degraded"}:
         raise RuntimeError("Session storage is not ready for bundled Agent initialization")
     result = ensure_builtin_agents()
+    from .public_presets import ensure_public_agent_presets
+
+    result["publicPresetAgentIds"] = ensure_public_agent_presets()["publicPresetAgentIds"]
     # Reuse the existing owner for other system Teams, rather than a second seed
     # catalog for their Agent configuration or a write through list/get APIs.
     team_service.request_system_team_bootstrap(reason="deployment_startup", allow_sync_check=False)

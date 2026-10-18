@@ -449,6 +449,18 @@ _DEFAULT_RETRY_TAXONOMY_ENTRIES: tuple[RetryTaxonomyEntry, ...] = (
         "test_research_workflow_retry_taxonomy.py",
         human_actions=(HumanActionFamily.RETRY_NODE, HumanActionFamily.RECONCILE_RUN),
     ),
+    _entry(
+        "stage_task_planner_escalation",
+        RetryOutcomeClass.HUMAN_REQUIRED,
+        RetryOutcomeOwner.OPERATOR,
+        "research_runtime/stage_failure_planner.py: the LLM failure-review "
+        "planner judged a self-blocked source-collection stage task not "
+        "actionable (or its review call failed) after the deterministic "
+        "one-shot writeback contract layer; no automatic path may keep "
+        "looping on the same blocked attempt, so a human retry_node decision "
+        "is the only way forward; contract test test_stage_failure_planner.py",
+        human_actions=(HumanActionFamily.RETRY_NODE,),
+    ),
     # -- terminal: never retried ------------------------------------------
     _entry(
         "session_cancelled",

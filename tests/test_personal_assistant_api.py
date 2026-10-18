@@ -193,3 +193,116 @@ def test_response_models_reject_invalid_types_or_closed_values(
         )
         url = "/api/personal-assistant"
     assert client.get(url).status_code == 500
+
+
+def test_settings_get_returns_typed_envelope(client):
+    created = client.post("/api/personal-assistant", json={})
+    assert created.status_code == 200
+    response = client.get("/api/personal-assistant/settings")
+    assert response.status_code == 200, response.text
+    settings = response.json()["settings"]
+    assert set(settings) == {
+        "displayName",
+        "preferences",
+        "preferencesConfigured",
+        "model",
+    }
+    assert set(settings["preferences"]) == {
+        "characterId",
+        "showStatus",
+        "showTitles",
+        "showCompletion",
+        "idleMessage",
+    }
+    assert set(settings["model"]) == {"currentModelId", "choices"}
+    assert settings["preferences"]["characterId"] == "dafeiyu"
+    assert settings["preferencesConfigured"] is False
+
+
+def test_settings_patch_roundtrip_updates_name_and_preferences(client):
+    created = client.post("/api/personal-assistant", json={})
+    assert created.status_code == 200
+    payload = {
+        "displayName": "小洛管家",
+        "preferences": {"characterId": "xiaoluo", "showTitles": False},
+    }
+    patched = client.patch("/api/personal-assistant/settings", json=payload)
+    assert patched.status_code == 200, patched.text
+    settings = patched.json()["settings"]
+    assert settings["displayName"] == "小洛管家"
+    assert settings["preferences"]["characterId"] == "xiaoluo"
+    assert settings["preferences"]["showTitles"] is False
+    assert settings["preferencesConfigured"] is True
+    assistant = client.get("/api/personal-assistant").json()["assistant"]
+    assert assistant["renderer"] == "xiaoluo"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"displayName": ""},
+        {"displayName": "a" * 81},
+        {"preferences": {"characterId": "hacker"}},
+        {"preferences": {"showStatus": "yes"}},
+        {"preferences": {"idleMessage": "x" * 49}},
+        {"preferences": {"unknown": True}},
+        {"modelId": "whatever"},
+        {"renderer": "xiaoluo"},
+    ],
+)
+def test_settings_patch_rejects_unsafe_payloads_before_service(client, monkeypatch, payload):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("invalid payload reached the service")
+
+    monkeypatch.setattr(
+        service, "update_personal_assistant_settings", forbidden
+    )
+    assert (
+        client.patch("/api/personal-assistant/settings", json=payload).status_code
+        == 422
+    )
+
+
+def test_settings_model_update_validates_and_maps_errors(client, monkeypatch):
+    calls = []
+
+    def update(model_id):
+        calls.append(model_id)
+        if model_id != "whale-xl":
+            raise directory.AgentDirectoryError("所选模型不在可用模型列表中。")
+        return {"model": {"currentModelId": "whale-xl", "choices": []}}
+
+    monkeypatch.setattr(service, "update_personal_assistant_model", update)
+    ok = client.patch(
+        "/api/personal-assistant/settings/model", json={"modelId": "whale-xl"}
+    )
+    assert ok.status_code == 200 and ok.json() == {
+        "model": {"currentModelId": "whale-xl", "choices": []}
+    }
+    rejected = client.patch(
+        "/api/personal-assistant/settings/model", json={"modelId": "not-listed"}
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == "所选模型不在可用模型列表中。"
+    assert calls == ["whale-xl", "not-listed"]
+    for payload in ({"modelId": ""}, {"modelId": 5}, {}):
+        assert (
+            client.patch("/api/personal-assistant/settings/model", json=payload).status_code
+            == 422
+        )
+
+
+def test_settings_get_maps_identity_conflict_to_409(client, monkeypatch):
+    def fail():
+        raise directory.AgentStateConflictError("身份冲突")
+
+    monkeypatch.setattr(service, "get_personal_assistant_settings", fail)
+    assert client.get("/api/personal-assistant/settings").status_code == 409
+
+
+def test_assistant_projection_accepts_xiaoluo_renderer(client, monkeypatch):
+    row = _assistant()
+    row["renderer"] = "xiaoluo"
+    monkeypatch.setattr(service, "get_personal_assistant", lambda: {"assistant": row})
+    response = client.get("/api/personal-assistant")
+    assert response.status_code == 200 and response.json()["assistant"]["renderer"] == "xiaoluo"

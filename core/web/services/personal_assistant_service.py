@@ -12,6 +12,24 @@ from core.web.services.session_archive_service import conversation_is_archived
 
 PROFILE = "personal_assistant_v1"
 ROLE = "personal_assistant"
+APPEARANCES = ("dafeiyu", "xiaoluo")
+RENDERER_BY_APPEARANCE = {"dafeiyu": "whale", "xiaoluo": "xiaoluo"}
+PREFERENCES_METADATA_KEY = "personalAssistantPreferences"
+PREFERENCES_FIELDS = (
+    "characterId",
+    "showStatus",
+    "showTitles",
+    "showCompletion",
+    "idleMessage",
+)
+DEFAULT_PREFERENCES = {
+    "characterId": "dafeiyu",
+    "showStatus": True,
+    "showTitles": True,
+    "showCompletion": True,
+    "idleMessage": "",
+}
+DEFAULT_MAX_CALLS_PER_TURN = 16
 _LEGACY_TOOLS = (
     "personal_assistant_overview_tool",
     "personal_assistant_manage_tool",
@@ -27,7 +45,35 @@ LEGACY_POLICY = {
 }
 PRIVATE_V2_POLICY = {**LEGACY_POLICY, "writeScopes": ["private"]}
 TOOLS = (*_LEGACY_TOOLS, "personal_assistant_desktop_observe_tool", "personal_assistant_desktop_action_tool")
-POLICY = {**PRIVATE_V2_POLICY, "allowedTools": list(TOOLS), "preferredTools": list(TOOLS)}
+
+
+def _max_calls_per_turn() -> int:
+    """Config knob with fallback: web_chat.personal_assistant_max_calls_per_turn."""
+    try:
+        from config.settings import get_config
+
+        value = int(
+            getattr(
+                getattr(get_config(), "web_chat", None),
+                "personal_assistant_max_calls_per_turn",
+                DEFAULT_MAX_CALLS_PER_TURN,
+            )
+        )
+    except Exception:
+        return DEFAULT_MAX_CALLS_PER_TURN
+    return value if value >= 1 else DEFAULT_MAX_CALLS_PER_TURN
+
+
+def current_policy() -> dict:
+    """Provisioning policy; maxCallsPerTurn follows the live config knob."""
+    return {
+        **PRIVATE_V2_POLICY,
+        "allowedTools": list(TOOLS),
+        "preferredTools": list(TOOLS),
+        "maxCallsPerTurn": _max_calls_per_turn(),
+    }
+
+
 PERSONA = {
     "personality": "温和、可靠，尊重用户的偏好和注意力。",
     "communicationStyle": "用中文先讲结论，说明观察依据和需要用户决定的事项。",
@@ -136,9 +182,29 @@ def _needs_default_policy_upgrade(agent: dict) -> bool:
     return False
 
 
+def _normalize_preferences(value: object) -> dict:
+    """Tolerant normalization; persisted corruption falls back per-field."""
+    raw = value if isinstance(value, dict) else {}
+    character_id = str(raw.get("characterId") or "").strip()
+    return {
+        **DEFAULT_PREFERENCES,
+        "characterId": character_id if character_id in APPEARANCES else DEFAULT_PREFERENCES["characterId"],
+        "showStatus": raw.get("showStatus") is not False,
+        "showTitles": raw.get("showTitles") is not False,
+        "showCompletion": raw.get("showCompletion") is not False,
+        "idleMessage": str(raw.get("idleMessage") or "").strip()[:48],
+    }
+
+
+def _assistant_preferences(agent: dict) -> dict:
+    stored = (agent.get("metadata") or {}).get(PREFERENCES_METADATA_KEY)
+    return _normalize_preferences(stored)
+
+
 def _project(agent: dict) -> dict:
     ready = (agent.get("metadata") or {}).get("personalAssistantSetup") == "ready"
     valid = _owns_session(agent, _session_row(agent))
+    preferences = _assistant_preferences(agent)
     return {
         "agentId": agent["agentId"],
         "displayName": agent["displayName"],
@@ -149,7 +215,7 @@ def _project(agent: dict) -> dict:
         else "session_missing"
         if ready and not valid
         else "setup_required",
-        "renderer": "whale",
+        "renderer": RENDERER_BY_APPEARANCE[preferences["characterId"]],
         "profile": PROFILE,
     }
 
@@ -178,7 +244,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 role_key=ROLE,
                 prompt_template_id="prompt-chat-default",
                 created_by="user_personal_assistant",
-                initial_tool_policy=POLICY,
+                initial_tool_policy=current_policy(),
                 llm_bindings=session_service.default_session_llm_bindings(),
                 metadata={
                     "personalAssistantProfile": PROFILE,
@@ -202,7 +268,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 agent["agentId"],
                 persona_profile=PERSONA,
                 task_profile=TASK,
-                tool_policy=POLICY,
+                tool_policy=current_policy(),
                 delegation_policy={"allowSubagents": False, "allowWakeMessages": False},
             )
         elif _needs_default_policy_upgrade(agent):
@@ -210,7 +276,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
             # User-authored policies and all persona/task fields remain intact.
             directory.update_agent_instance(
                 agent["agentId"],
-                tool_policy=POLICY,
+                tool_policy=current_policy(),
                 expected_tool_policy_fingerprint=directory.tool_policy_fingerprint(
                     agent["toolPolicy"]
                 ),
@@ -310,3 +376,145 @@ def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
             "nextOffset": end if end < max(len(agents), len(sessions), len(attention)) else None,
         },
     }
+
+
+def _active_profile_agent() -> dict:
+    """Identity gate for settings mutations; conflicts fail closed like reads."""
+    agent = _profile_agent()
+    if agent is None:
+        raise directory.AgentDirectoryError("个人助理尚未创建，请先完成初始化。")
+    if agent.get("status") != "active":
+        raise directory.AgentStateConflictError(
+            "个人助理已归档，请在 Agent 管理中确认是否恢复。"
+        )
+    return agent
+
+
+def _eligible_dialogue_model_choices(options: dict) -> list[dict]:
+    """Project only pinned, enabled candidates allowed for the dialogue slot."""
+    choices = []
+    for row in options.get("choices") or []:
+        if not isinstance(row, dict) or row.get("runtimeSelectable") is not True:
+            continue
+        compatibility = row.get("slotCompatibility")
+        dialogue = compatibility.get("dialogue") if isinstance(compatibility, dict) else None
+        if not isinstance(dialogue, dict) or dialogue.get("allowed") is not True:
+            continue
+        if str(row.get("modelId") or "").strip():
+            choices.append(row)
+    return choices
+
+
+def _model_settings(agent: dict) -> dict:
+    """Bound dialogue model plus the whitelisted session model choices."""
+    bindings = directory.normalize_agent_llm_bindings(agent.get("llmBindings"))
+    current_model_id = str(bindings.get("dialogue", {}).get("modelId") or "").strip()
+    choices: list[dict] = []
+    session_id = str(agent.get("directSessionId") or "").strip()
+    if session_id and _owns_session(agent, _session_row(agent)):
+        try:
+            options = session_service.get_session_llm_options(session_id)
+        except Exception:
+            options = {}
+        for row in _eligible_dialogue_model_choices(options):
+            model_id = str((row or {}).get("modelId") or "").strip()
+            choices.append(
+                {
+                    "modelId": model_id,
+                    "label": str((row or {}).get("label") or model_id),
+                    "providerLabel": str((row or {}).get("providerLabel") or ""),
+                    "isDefault": bool((row or {}).get("isDefault")),
+                    "providerHealthy": (row or {}).get("providerHealthy") is not False,
+                    "missingApiKey": bool((row or {}).get("missingApiKey")),
+                    "availability": str((row or {}).get("availability") or ""),
+                }
+            )
+    return {"currentModelId": current_model_id, "choices": choices}
+
+
+def _settings_payload(agent: dict) -> dict:
+    metadata = agent.get("metadata") or {}
+    return {
+        "displayName": agent["displayName"],
+        "preferences": _assistant_preferences(agent),
+        "preferencesConfigured": isinstance(
+            metadata.get(PREFERENCES_METADATA_KEY), dict
+        ),
+        "model": _model_settings(agent),
+    }
+
+
+def get_personal_assistant_settings() -> dict:
+    """Pure read; settings never provision or repair the singleton."""
+    agent = _profile_agent()
+    if agent is None or agent.get("status") != "active":
+        return {"settings": None}
+    return {"settings": _settings_payload(agent)}
+
+
+def update_personal_assistant_settings(
+    *, display_name: str | None = None, preferences: dict | None = None
+) -> dict:
+    """Partial update of the singleton's own settings; identity gate applies."""
+    agent = _active_profile_agent()
+    updates: dict = {}
+    if display_name is not None:
+        name = str(display_name or "").strip()
+        if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+            raise directory.AgentDirectoryError("请输入 1–80 字的单行名称。")
+        updates["display_name"] = name
+    if preferences is not None:
+        patch = preferences if isinstance(preferences, dict) else {}
+        unknown = set(patch) - set(PREFERENCES_FIELDS)
+        if unknown:
+            raise directory.AgentDirectoryError(
+                "个人助理偏好包含未知字段：" + "、".join(sorted(unknown))
+            )
+        if "characterId" in patch and patch["characterId"] not in APPEARANCES:
+            raise directory.AgentDirectoryError("不支持的外观，请从列表中选择。")
+        for field in ("showStatus", "showTitles", "showCompletion"):
+            if field in patch and not isinstance(patch[field], bool):
+                raise directory.AgentDirectoryError("偏好开关必须是布尔值。")
+        if "idleMessage" in patch and (
+            not isinstance(patch["idleMessage"], str) or len(patch["idleMessage"]) > 48
+        ):
+            raise directory.AgentDirectoryError("空闲提示语必须是不超过 48 字的文本。")
+        merged = _assistant_preferences(agent)
+        for field in PREFERENCES_FIELDS:
+            if field in patch:
+                merged[field] = patch[field]
+        updates["metadata"] = {PREFERENCES_METADATA_KEY: _normalize_preferences(merged)}
+    if updates:
+        directory.update_agent_instance(agent["agentId"], **updates)
+        agent = directory.get_agent(agent["agentId"], include_archived=True)
+    return {"settings": _settings_payload(agent)}
+
+
+def update_personal_assistant_model(model_id: str) -> dict:
+    """Rebind the dialogue slot; only whitelisted session choices are accepted."""
+    agent = _active_profile_agent()
+    normalized_model_id = str(model_id or "").strip()
+    if not normalized_model_id:
+        raise directory.AgentDirectoryError("请选择要使用的模型。")
+    session_id = str(agent.get("directSessionId") or "").strip()
+    if not session_id or not _owns_session(agent, _session_row(agent)):
+        raise directory.AgentStateConflictError(
+            "个人助理会话尚未就绪，暂时不能调整模型。"
+        )
+    try:
+        options = session_service.get_session_llm_options(session_id)
+    except Exception as exc:
+        raise directory.AgentDirectoryError(
+            "暂时无法读取可用模型列表，请稍后重试。"
+        ) from exc
+    whitelisted = {
+        str((row or {}).get("modelId") or "").strip()
+        for row in _eligible_dialogue_model_choices(options)
+    }
+    if normalized_model_id not in whitelisted:
+        raise directory.AgentDirectoryError("所选模型不在可用模型列表中。")
+    bindings = directory.normalize_agent_llm_bindings(agent.get("llmBindings"))
+    bindings["dialogue"] = {"modelId": normalized_model_id}
+    directory.update_agent_instance(agent["agentId"], llm_bindings=bindings)
+    agent = directory.get_agent(agent["agentId"], include_archived=True)
+    return {"model": _model_settings(agent)}

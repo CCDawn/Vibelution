@@ -199,6 +199,10 @@ def _purpose_max_output_tokens(purpose: str) -> int | None:
         "hypothesis_pairwise",
         "hypothesis_pareto",
         "hypothesis_metareview",
+        # The stage-failure planner answers one bounded verdict JSON; the
+        # review-channel clamp keeps a verbose model from spending the
+        # maintenance-thread call budget on prose.
+        "stage_failure_planning",
     }:
         return review_json_max_output_tokens()
     if normalized == "hypothesis_revision":
@@ -370,6 +374,32 @@ _REVIEW_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "rationale",
             "riskNotes",
             "accepted",
+        ],
+        "additionalProperties": False,
+    },
+    # Stage-failure planner verdict: one bounded remediation decision for a
+    # self-blocked source-collection stage task.  ``targetFix`` stays an open
+    # object (the fixable surface differs per stage/task) while the verdict
+    # fields are frozen; an invalid or unverifiable verdict is treated as
+    # not-actionable by the planner module, never silently retried.
+    "stage_failure_planning": {
+        "type": "object",
+        "properties": {
+            "actionable": {"type": "boolean"},
+            "recommendation": {
+                "type": "string",
+                "enum": ["retry_task", "rerun_source_finding", "escalate_human"],
+            },
+            "directive": {"type": "string"},
+            "targetFix": {"type": "object"},
+            "justification": {"type": "string"},
+        },
+        "required": [
+            "actionable",
+            "recommendation",
+            "directive",
+            "targetFix",
+            "justification",
         ],
         "additionalProperties": False,
     },
@@ -2063,16 +2093,19 @@ def _pin_digest_drafter_thinking_disabled(resolved: Mapping[str, Any]) -> None:
     usage event, no error, reproduced 1:1 out of process), the watchdog
     fenced ``summary_draft_stuck``, and the meeting stayed ``summarizing``
     forever — candidates, discussion items and the digest all stayed empty.
-    ``thinking_type="disabled"`` rides the qwen thinking-parameter channel:
-    qwen-shaped routes emit the top-level toggle, openai-compatible wires
-    pass it through litellm ``extra_body``; models without a declared
-    thinking contract simply keep their provider default with no parameter
-    emitted beyond this drafter's calls.  A declared reasoning-effort
-    contract (qwen3.8-max ships ``reasoning_effort=xhigh``) is cleared on
-    the same isolated runtime profile: with thinking disabled, a requested
-    thinking depth is meaningless at best and a provider-rejection risk at
-    worst, and the digest payload stays deterministic-shaped.  The pin only
-    ever mutates the drafter's own isolated client profile (each
+    Delegates to the shared isolated-profile pin (see
+    ``_pin_profile_thinking_disabled``).
+    """
+
+    _pin_profile_thinking_disabled(resolved)
+
+
+def _pin_profile_thinking_disabled(resolved: Mapping[str, Any]) -> None:
+    """Disable provider-side thinking on an isolated review profile.
+
+    Shared core of the digest-drafter and stage-failure-planner pins: both are
+    bounded auxiliary calls that must not pay an open-ended thinking pass.
+    The pin only ever mutates the caller's own isolated client profile (each
     ``resolve_review_llm`` call deep-copies the operator config), so the
     review runners keep their own thinking and reasoning contracts.
     """
@@ -2083,7 +2116,7 @@ def _pin_digest_drafter_thinking_disabled(resolved: Mapping[str, Any]) -> None:
     profile.thinking_type = "disabled"
     # ``resolve_reasoning_effort_request`` returns an empty payload for an
     # empty requested value, so this removes the ``reasoning_effort`` /
-    # ``reasoning`` body field entirely for drafter calls.  Fail-safe: a
+    # ``reasoning`` body field entirely for the pinned calls.  Fail-safe: a
     # profile object without the attribute keeps working unchanged.
     from contextlib import suppress
 
@@ -2224,6 +2257,134 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
         }
 
     return drafter
+
+
+_STAGE_FAILURE_PLANNING_SYSTEM_PROMPT = """你是科研流水线的失败审查规划师（stage failure planner）。source_collection 的阶段任务被执行代理自行停靠（blocked / needs_review 举手提问）后，你审查失败现场，判定能否用一条明确指令把任务救回闭环。
+
+输入是一次失败现场的 JSON 概要：任务状态、代理停靠时的写回摘要、结构化失败标记、既有一次性补救契约、允许的 canonical 证据引用与证据绑定卡、候选计数。只能依据输入事实判断，不要编造输入之外的证据或引用。
+
+判定规则：
+- 现场信息足以给出可执行修复指令时 actionable=true，并按实际情况给 recommendation：
+  - "retry_task"：任务本身可按指令修复后重试。典型：问题的答案就在代理已读过的上下文里（引用映射错误、字段名/结构缺失、quote 锚未逐字复制、把记录 id 当证据引用等），directive 逐条指出要改什么、改成什么。
+  - "rerun_source_finding"：证据面本身不足（如 allowedEvidenceRefs 为空、缺少反证/独立基线来源），需要补充来源后重跑资料搜集；directive 写明缺什么证据面。
+- 现场显示只有人能处置（预算/权限/外部故障/指令相互矛盾/两次补救已耗尽）时 actionable=false 且 recommendation="escalate_human"。
+- directive 是修复指令：actionable 时写给执行代理，具体到字段与替换值，可逐条执行；escalate_human 时写给人看的原因摘要。
+- targetFix 用对象给出机器可读的修复定位（如 {"field": "...", "expectation": "..."}），无可定位修复时给 {}。
+- justification 用中文一句话说明判定依据。
+
+严格输出单个 JSON 对象：{"actionable": bool, "recommendation": "retry_task" | "rerun_source_finding" | "escalate_human", "directive": str, "targetFix": {}, "justification": str}"""
+
+
+#: Bounded wall-clock budget for one planner call on the maintenance thread:
+#: the serial maintenance loop must never wait out a full review-channel
+#: fence (300-600s) behind one auxiliary planning call.
+STAGE_FAILURE_PLANNING_DEADLINE_CAP_MS = 120_000
+
+
+def stage_failure_planning_deadline_ms() -> int:
+    """Absolute call deadline: ``min(120s, review-channel timeout)`` from now."""
+
+    budget_ms = min(
+        STAGE_FAILURE_PLANNING_DEADLINE_CAP_MS,
+        int(review_llm_call_timeout_seconds() * 1000),
+    )
+    return int(time.time() * 1000) + max(10_000, budget_ms)
+
+
+_STAGE_FAILURE_RECOMMENDATIONS = frozenset(
+    {"retry_task", "rerun_source_finding", "escalate_human"}
+)
+_STAGE_FAILURE_DIRECTIVE_MAX_CHARS = 4000
+_STAGE_FAILURE_JUSTIFICATION_MAX_CHARS = 2000
+
+
+def _validate_stage_failure_planning_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Normalize one planner verdict; raise ``ContractValidationError`` if bad."""
+
+    if not isinstance(payload, Mapping):
+        raise ContractValidationError(
+            "stage failure planning verdict must be a JSON object"
+        )
+    actionable = payload.get("actionable")
+    if not isinstance(actionable, bool):
+        raise ContractValidationError(
+            "stage failure planning verdict requires a boolean actionable"
+        )
+    recommendation = str(payload.get("recommendation") or "").strip()
+    if recommendation not in _STAGE_FAILURE_RECOMMENDATIONS:
+        raise ContractValidationError(
+            "stage failure planning recommendation must be one of "
+            "retry_task / rerun_source_finding / escalate_human"
+        )
+    directive = str(payload.get("directive") or "").strip()
+    if not directive:
+        raise ContractValidationError(
+            "stage failure planning verdict requires a non-empty directive"
+        )
+    if actionable and recommendation == "escalate_human":
+        # The two fields contradict: an actionable verdict never escalates.
+        raise ContractValidationError(
+            "actionable verdicts must recommend retry_task or "
+            "rerun_source_finding, not escalate_human"
+        )
+    if not actionable and recommendation != "escalate_human":
+        raise ContractValidationError(
+            "non-actionable verdicts must recommend escalate_human"
+        )
+    target_fix = payload.get("targetFix")
+    if not isinstance(target_fix, Mapping):
+        raise ContractValidationError(
+            "stage failure planning targetFix must be a JSON object"
+        )
+    justification = str(payload.get("justification") or "").strip()
+    return {
+        "actionable": actionable,
+        "recommendation": recommendation,
+        "directive": directive[:_STAGE_FAILURE_DIRECTIVE_MAX_CHARS],
+        "targetFix": dict(target_fix),
+        "justification": justification[:_STAGE_FAILURE_JUSTIFICATION_MAX_CHARS],
+    }
+
+
+def build_failure_review_planner(llm: Mapping[str, Any] | None = None):
+    """Return the real-LLM stage-failure planner, or ``None`` if unavailable.
+
+    One auxiliary review-channel call per planning attempt (no provider
+    receipt required): the planner inspects a bounded failure-scene payload
+    for a self-blocked source-collection stage task and returns the frozen
+    verdict contract above.  Any invalid or contradictory verdict raises
+    ``ContractValidationError`` — the caller treats that as fail-open
+    (no retry, no escalation) rather than guessing.
+    """
+
+    resolved = dict(llm) if isinstance(llm, Mapping) and llm else resolve_review_llm()
+    if not resolved:
+        return None
+    # Same bounded-call pin as the digest drafter: the planner runs on the
+    # serial maintenance thread behind a 120s deadline, so an open-ended
+    # provider thinking pass is both a budget and a liveness risk.
+    _pin_profile_thinking_disabled(resolved)
+
+    def planner(scene: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(scene, Mapping) or not scene:
+            raise ContractValidationError(
+                "stage failure planning requires a failure-scene payload"
+            )
+        produced = _invoke_review_llm(
+            resolved,
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
+            purpose="stage_failure_planning",
+            system_prompt=_STAGE_FAILURE_PLANNING_SYSTEM_PROMPT,
+            user_payload=dict(scene),
+            session_id=str(scene.get("teamId") or "") or "team",
+            deadline_at_ms=stage_failure_planning_deadline_ms(),
+            response_mode="json_object",
+        )
+        return _validate_stage_failure_planning_payload(produced)
+
+    return planner
 
 
 # ---------------------------------------------------------------------------

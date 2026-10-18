@@ -1,12 +1,20 @@
-import type { PersonalAssistant } from "../../api/types/personalAssistant";
+import type { PersonalAssistant, PersonalAssistantAppearance } from "../../api/types/personalAssistant";
 
 export function personalAssistantReturnTarget(sessionId: string): { pathname: string; search: string } {
   return { pathname: "/personal-assistant", search: `?${new URLSearchParams({ session: sessionId }).toString()}` };
 }
 
+/** Renderer contract whitelist: whale rig and Xiao Luo Live2D. */
+export const PERSONAL_ASSISTANT_RENDERERS = ["whale", "xiaoluo"] as const;
+
+export function personalAssistantAppearance(renderer: string): PersonalAssistantAppearance {
+  return renderer === "xiaoluo" ? "xiaoluo" : "dafeiyu";
+}
+
 export function validPersonalAssistant(assistant: PersonalAssistant | null | undefined): assistant is PersonalAssistant {
   return Boolean(assistant?.agentId && assistant.directSessionId && assistant.status === "active"
-    && assistant.setupStatus === "ready" && assistant.profile === "personal_assistant_v1" && assistant.renderer === "whale");
+    && assistant.setupStatus === "ready" && assistant.profile === "personal_assistant_v1"
+    && PERSONAL_ASSISTANT_RENDERERS.includes(assistant.renderer));
 }
 
 export function personalAssistantSessionMatches(
