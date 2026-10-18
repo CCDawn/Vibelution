@@ -45,7 +45,7 @@ const HUMAN_ATTENTION_KINDS = new Set<string>(["knowledge_review", "anomaly"]);
 const SEVERITIES = new Set<string>(["critical", "high", "medium"]);
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 400;
-const MAX_TARGET_LENGTH = 512;
+const MAX_TARGET_LENGTH = 500;
 const TARGET_PATTERN = /^\/(?!\/)[A-Za-z0-9\-._~!$&'()*+,;=:@/?%]*$/;
 
 const NOTIFIED_STORAGE_KEY = "vibelution.human-attention.notified.v1";
