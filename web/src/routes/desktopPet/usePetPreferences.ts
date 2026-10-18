@@ -7,7 +7,7 @@ import {
 // All consumers in this renderer share one order: migration, edits and focus
 // refreshes cannot overtake one another or replay an older backend snapshot.
 let operations: Promise<unknown> = Promise.resolve();
-function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+export function enqueuePetPreferenceOperation<T>(operation: () => Promise<T>): Promise<T> {
   const next = operations.then(operation);
   operations = next.catch(() => undefined);
   return next;
@@ -32,7 +32,7 @@ export function usePetPreferences(enabled = true) {
       const version = revision.current;
       const isCurrent = () => !disposed && version === revision.current;
       try {
-        await enqueue(async () => {
+        await enqueuePetPreferenceOperation(async () => {
           if (!isCurrent()) return;
           const next = await syncPetPreferencesWithBackend(current.current, isCurrent);
           if (!isCurrent()) return;
@@ -53,7 +53,7 @@ export function usePetPreferences(enabled = true) {
     current.current = next;
     setPreferences(next);
     const local = savePetPreferences(next);
-    const operation = enqueue(async () => {
+    const operation = enqueuePetPreferenceOperation(async () => {
       try {
         await savePetPreferencesToBackend(next, patch);
         return { local, backend: true };

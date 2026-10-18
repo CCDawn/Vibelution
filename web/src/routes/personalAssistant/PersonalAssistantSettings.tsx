@@ -11,6 +11,7 @@ import { VButton, VDialog, VInput, VStateSurface, VStringSelect } from "../../co
 import styles from "./PersonalAssistantSettings.styles";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { readPetPreferences, savePetPreferences } from "../desktopPet/desktopPetPreferences";
+import { enqueuePetPreferenceOperation } from "../desktopPet/usePetPreferences";
 
 /** Local settings key shares the personal-assistant query prefix for prefix invalidation. */
 export const assistantSettingsKey = ["personal-assistant", "settings"] as const;
@@ -117,8 +118,10 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
     setAppearancePending(true);
     setFeedback("");
     try {
-      const response = await updatePersonalAssistantSettings({ preferences: { characterId } });
-      if (response.settings) savePetPreferences({ ...readPetPreferences(), characterId: response.settings.preferences.characterId });
+      await enqueuePetPreferenceOperation(async () => {
+        const response = await updatePersonalAssistantSettings({ preferences: { characterId } });
+        if (response.settings) savePetPreferences({ ...readPetPreferences(), characterId: response.settings.preferences.characterId });
+      });
       await queryClient.invalidateQueries({ queryKey: queryKeys.personalAssistant() });
       await queryClient.invalidateQueries({ queryKey: assistantSettingsKey });
       setFeedback(copy.saved);
