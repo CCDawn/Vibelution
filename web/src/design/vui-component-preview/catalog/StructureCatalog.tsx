@@ -24,6 +24,7 @@ import { ConversationFollowupQueueBar } from "../../../components/conversation/C
 import { ConversationToolActivity } from "../../../components/conversation/ConversationToolActivity";
 import { createCodexTranscriptToolActivity } from "../../../components/conversation/conversationToolActivityModel";
 import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
+import { ConversationTodoProgressButton } from "../../../components/conversation/ConversationTodoProgressButton";
 import { ConversationFileDeliveries } from "../../../components/conversation/ConversationFileDeliveries";
 import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
 import conversationViewStyles from "../../../components/conversation/ConversationView.styles";
@@ -261,6 +262,14 @@ export function StructureCatalog() {
             truncation={null}
           />
         </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationTodoProgressButton" className="min-h-0">
+        <ConversationTodoProgressButton
+          plan={{ snapshot: conversationTodoChecklistPreviewSnapshot, turnSettled: false, messageId: "preview-plan" }}
+          lang="zh"
+          expanded={false}
+          onPress={() => undefined}
+        />
       </VuiPreviewCard>
 <VuiPreviewCard name="ConversationTodoChecklist" className="col-span-full min-h-0">
         <div className="w-full max-w-[520px] rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">
