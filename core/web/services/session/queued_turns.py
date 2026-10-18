@@ -214,7 +214,7 @@ def enqueue_session_queued_turn(
     normalized_client_submission_id = str(client_submission_id or "").strip()
     requested_steer_id = str(steer_id or "").strip()
     created = False
-    with s._CHAT_STATE_LOCK:
+    with s._session_submit_admit_lock(normalized_session_id), s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             raise s.SessionNotFoundError(
@@ -511,6 +511,10 @@ def remove_session_queued_turn(
         if len(remaining) == len(rows):
             raise s.SessionValidationError(
                 s.text_for(lang, zh="该排队消息已不在队列中。", en="That queued message is no longer in the queue.")
+            )
+        if any(row["id"] == normalized_turn_id and row["status"] == "starting" for row in rows):
+            raise s.SessionBusyError(
+                s.text_for(lang, zh="该消息正在发送，请稍后再试。", en="That message is starting; try again shortly.")
             )
         _write_queued_turn_rows(s, normalized_session_id, conversation, remaining)
         normalized_rows = session_queued_turn_rows(conversation)
@@ -1055,7 +1059,7 @@ def _claim_next_queued_turn(session_id: str) -> dict[str, Any] | None:
     s = _service()
     reset_stale = False
     item: dict[str, Any] | None = None
-    with s._CHAT_STATE_LOCK:
+    with s._session_submit_admit_lock(session_id), s._CHAT_STATE_LOCK:
         if s._is_session_running(session_id):
             return None
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
@@ -1093,7 +1097,7 @@ def _claim_drain_batch(session_id: str) -> list[dict[str, Any]]:
     s = _service()
     claimed: list[dict[str, Any]] = []
     changed = False
-    with s._CHAT_STATE_LOCK:
+    with s._session_submit_admit_lock(session_id), s._CHAT_STATE_LOCK:
         if s._is_session_running(session_id):
             return []
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
@@ -1217,155 +1221,157 @@ def drain_session_queued_turns(session_id: str) -> bool:
             return False
         _DRAINING_SESSIONS.add(normalized_session_id)
     try:
-        batch = _claim_drain_batch(normalized_session_id)
-        if not batch:
-            return False
-        head = batch[0]
-        kind = _row_kind(head)
-        if kind == KIND_CONTROL_NOTICE:
-            queued_turn_id = str(head.get("id") or "").strip()
-            try:
-                _journal_control_notice_row(normalized_session_id, head)
-            except Exception as exc:  # noqa: BLE001 - a control row must fail visibly
-                _settle_claimed_queued_turn(
-                    normalized_session_id,
-                    queued_turn_id,
-                    error=exc,
-                    keep_queued=False,
-                )
-            else:
-                _settle_claimed_queued_turn(
-                    normalized_session_id,
-                    queued_turn_id,
-                    error=None,
-                    keep_queued=False,
-                )
-            return True
-        queued_turn_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "").strip()]
-        batch_kinds: list[str] = []
-        for item in batch:
-            item_kind = _row_kind(item)
-            if item_kind not in batch_kinds:
-                batch_kinds.append(item_kind)
-        if kind == KIND_TASK_NOTIFICATION and batch_kinds == [KIND_TASK_NOTIFICATION]:
-            content = "\n\n".join(
-                str(item.get("content") or "").strip()
-                for item in batch
-                if str(item.get("content") or "").strip()
-            )
-            message_source = KIND_TASK_NOTIFICATION
-            message_metadata = {
-                "kind": KIND_TASK_NOTIFICATION,
-                "sourceIds": [str(item.get("sourceId") or "") for item in batch],
-                "taskIds": [str(item.get("taskId") or "") for item in batch if str(item.get("taskId") or "").strip()],
-            }
-            submit_kwargs = {
-                "write_intent": False,
-                "message_metadata": message_metadata,
-            }
-        elif kind == KIND_SUBAGENT_MESSAGE and len(batch) == 1:
-            content = str(head.get("content") or "")
-            message_source = KIND_SUBAGENT_MESSAGE
-            submit_kwargs = {
-                "write_intent": False,
-                "message_metadata": {
-                    "kind": KIND_SUBAGENT_MESSAGE,
-                    "sourceId": str(head.get("sourceId") or ""),
-                    "childSessionId": str(head.get("childSessionId") or ""),
-                },
-            }
-        elif kind in RUNTIME_NOTICE_KINDS:
-            # Mixed machine-notice run: task results and child returns are
-            # both background bookkeeping, so they report in one model turn,
-            # keeping queue order. ``merged_kinds`` audits which kinds rode
-            # together.
-            content = "\n\n".join(
-                str(item.get("content") or "").strip()
-                for item in batch
-                if str(item.get("content") or "").strip()
-            )
-            message_source = DRAINED_NOTICE_BATCH_SOURCE
-            message_metadata = {
-                "kind": DRAINED_NOTICE_BATCH_SOURCE,
-                "merged_kinds": batch_kinds,
-                "sourceIds": [str(item.get("sourceId") or "") for item in batch],
-                "taskIds": [str(item.get("taskId") or "") for item in batch if str(item.get("taskId") or "").strip()],
-                "childSessionIds": [
-                    str(item.get("childSessionId") or "")
+        # Keep the claim valid until submit/settlement, including cross-process TTL recovery.
+        with s._session_submit_admit_lock(normalized_session_id):
+            batch = _claim_drain_batch(normalized_session_id)
+            if not batch:
+                return False
+            head = batch[0]
+            kind = _row_kind(head)
+            if kind == KIND_CONTROL_NOTICE:
+                queued_turn_id = str(head.get("id") or "").strip()
+                try:
+                    _journal_control_notice_row(normalized_session_id, head)
+                except Exception as exc:  # noqa: BLE001 - a control row must fail visibly
+                    _settle_claimed_queued_turn(
+                        normalized_session_id,
+                        queued_turn_id,
+                        error=exc,
+                        keep_queued=False,
+                    )
+                else:
+                    _settle_claimed_queued_turn(
+                        normalized_session_id,
+                        queued_turn_id,
+                        error=None,
+                        keep_queued=False,
+                    )
+                return True
+            queued_turn_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "").strip()]
+            batch_kinds: list[str] = []
+            for item in batch:
+                item_kind = _row_kind(item)
+                if item_kind not in batch_kinds:
+                    batch_kinds.append(item_kind)
+            if kind == KIND_TASK_NOTIFICATION and batch_kinds == [KIND_TASK_NOTIFICATION]:
+                content = "\n\n".join(
+                    str(item.get("content") or "").strip()
                     for item in batch
-                    if str(item.get("childSessionId") or "").strip()
-                ],
-            }
-            submit_kwargs = {
-                "write_intent": False,
-                "message_metadata": message_metadata,
-            }
-        else:
-            content = str(head.get("content") or "")
-            message_source = DRAINED_TURN_MESSAGE_SOURCE
-            drained_model_selection = head.get("modelSelection")
-            submit_kwargs = {
-                "client_submission_id": str(head.get("dispatchClientSubmissionId") or head.get("clientSubmissionId") or ""),
-                "_client_submission_fingerprint": str(head.get("dispatchClientSubmissionFingerprint") or head.get("clientSubmissionFingerprint") or ""),
-                "_client_submission_fingerprint_base": str(head.get("clientSubmissionFingerprintBase") or ""),
-                "attachment_ids": [
-                    str(attachment.get("artifactId") or "")
-                    for attachment in list(head.get("attachments") or [])
-                    if str(attachment.get("artifactId") or "").strip()
-                ],
-                "references": [
-                    dict(reference)
-                    for reference in list(head.get("references") or [])
-                    if isinstance(reference, dict)
-                ],
-                "mental_model_enabled": head.get("mentalModelEnabled"),
-                "runtime_status_enabled": head.get("runtimeStatusEnabled"),
-                "turn_mode": str(head.get("turnMode") or ""),
-                "write_intent": head.get("writeIntent"),
-                "model_selection": (
-                    dict(drained_model_selection)
-                    if isinstance(drained_model_selection, dict) and drained_model_selection
-                    else None
-                ),
-                "_model_parameters_snapshot": head.get("modelParameters"),
-                "turn_steer_promotion": {
-                    "steerId": str(head.get("id") or "").strip(),
-                    "delivery": "queue",
-                },
-            }
-        try:
-            s.submit_session_message(
-                normalized_session_id,
-                content,
-                message_source=message_source,
-                **submit_kwargs,
-            )
-        except s.SessionBusyError:
-            # Another turn won the race: keep the item queued for the next settle.
-            for queued_turn_id in queued_turn_ids:
-                _settle_claimed_queued_turn(
-                    normalized_session_id,
-                    queued_turn_id,
-                    error=None,
-                    keep_queued=True,
+                    if str(item.get("content") or "").strip()
                 )
-        except Exception as exc:  # noqa: BLE001 - a queued turn must fail visibly
-            for queued_turn_id in queued_turn_ids:
-                _settle_claimed_queued_turn(
-                    normalized_session_id,
-                    queued_turn_id,
-                    error=exc,
-                    keep_queued=False,
+                message_source = KIND_TASK_NOTIFICATION
+                message_metadata = {
+                    "kind": KIND_TASK_NOTIFICATION,
+                    "sourceIds": [str(item.get("sourceId") or "") for item in batch],
+                    "taskIds": [str(item.get("taskId") or "") for item in batch if str(item.get("taskId") or "").strip()],
+                }
+                submit_kwargs = {
+                    "write_intent": False,
+                    "message_metadata": message_metadata,
+                }
+            elif kind == KIND_SUBAGENT_MESSAGE and len(batch) == 1:
+                content = str(head.get("content") or "")
+                message_source = KIND_SUBAGENT_MESSAGE
+                submit_kwargs = {
+                    "write_intent": False,
+                    "message_metadata": {
+                        "kind": KIND_SUBAGENT_MESSAGE,
+                        "sourceId": str(head.get("sourceId") or ""),
+                        "childSessionId": str(head.get("childSessionId") or ""),
+                    },
+                }
+            elif kind in RUNTIME_NOTICE_KINDS:
+                # Mixed machine-notice run: task results and child returns are
+                # both background bookkeeping, so they report in one model turn,
+                # keeping queue order. ``merged_kinds`` audits which kinds rode
+                # together.
+                content = "\n\n".join(
+                    str(item.get("content") or "").strip()
+                    for item in batch
+                    if str(item.get("content") or "").strip()
                 )
-        else:
-            for queued_turn_id in queued_turn_ids:
-                _settle_claimed_queued_turn(
+                message_source = DRAINED_NOTICE_BATCH_SOURCE
+                message_metadata = {
+                    "kind": DRAINED_NOTICE_BATCH_SOURCE,
+                    "merged_kinds": batch_kinds,
+                    "sourceIds": [str(item.get("sourceId") or "") for item in batch],
+                    "taskIds": [str(item.get("taskId") or "") for item in batch if str(item.get("taskId") or "").strip()],
+                    "childSessionIds": [
+                        str(item.get("childSessionId") or "")
+                        for item in batch
+                        if str(item.get("childSessionId") or "").strip()
+                    ],
+                }
+                submit_kwargs = {
+                    "write_intent": False,
+                    "message_metadata": message_metadata,
+                }
+            else:
+                content = str(head.get("content") or "")
+                message_source = DRAINED_TURN_MESSAGE_SOURCE
+                drained_model_selection = head.get("modelSelection")
+                submit_kwargs = {
+                    "client_submission_id": str(head.get("dispatchClientSubmissionId") or head.get("clientSubmissionId") or ""),
+                    "_client_submission_fingerprint": str(head.get("dispatchClientSubmissionFingerprint") or head.get("clientSubmissionFingerprint") or ""),
+                    "_client_submission_fingerprint_base": str(head.get("clientSubmissionFingerprintBase") or ""),
+                    "attachment_ids": [
+                        str(attachment.get("artifactId") or "")
+                        for attachment in list(head.get("attachments") or [])
+                        if str(attachment.get("artifactId") or "").strip()
+                    ],
+                    "references": [
+                        dict(reference)
+                        for reference in list(head.get("references") or [])
+                        if isinstance(reference, dict)
+                    ],
+                    "mental_model_enabled": head.get("mentalModelEnabled"),
+                    "runtime_status_enabled": head.get("runtimeStatusEnabled"),
+                    "turn_mode": str(head.get("turnMode") or ""),
+                    "write_intent": head.get("writeIntent"),
+                    "model_selection": (
+                        dict(drained_model_selection)
+                        if isinstance(drained_model_selection, dict) and drained_model_selection
+                        else None
+                    ),
+                    "_model_parameters_snapshot": head.get("modelParameters"),
+                    "turn_steer_promotion": {
+                        "steerId": str(head.get("id") or "").strip(),
+                        "delivery": "queue",
+                    },
+                }
+            try:
+                s.submit_session_message(
                     normalized_session_id,
-                    queued_turn_id,
-                    error=None,
-                    keep_queued=False,
+                    content,
+                    message_source=message_source,
+                    **submit_kwargs,
                 )
-        return True
+            except s.SessionBusyError:
+                # Another turn won the race: keep the item queued for the next settle.
+                for queued_turn_id in queued_turn_ids:
+                    _settle_claimed_queued_turn(
+                        normalized_session_id,
+                        queued_turn_id,
+                        error=None,
+                        keep_queued=True,
+                    )
+            except Exception as exc:  # noqa: BLE001 - a queued turn must fail visibly
+                for queued_turn_id in queued_turn_ids:
+                    _settle_claimed_queued_turn(
+                        normalized_session_id,
+                        queued_turn_id,
+                        error=exc,
+                        keep_queued=False,
+                    )
+            else:
+                for queued_turn_id in queued_turn_ids:
+                    _settle_claimed_queued_turn(
+                        normalized_session_id,
+                        queued_turn_id,
+                        error=None,
+                        keep_queued=False,
+                    )
+            return True
     finally:
         with _DRAIN_LOCK:
             _DRAINING_SESSIONS.discard(normalized_session_id)

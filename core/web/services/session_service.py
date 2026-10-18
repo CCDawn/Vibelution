@@ -217,6 +217,7 @@ from .session.live_output import (
 )
 from .session.branch_head import switch_session_head
 from .session.fork_session import FORK_SCOPES, fork_session_from_node
+from .session.retry import retry_session_message
 from .session.rewind import apply_session_rewind, preview_session_rewind
 from .session import journal_bridge as _journal_bridge
 from .session.submit import (

@@ -12072,6 +12072,9 @@ def test_submit_while_running_queues_turn_and_drains_after_settle(tmp_path, monk
     assert edited.status_code == 200
     assert edited.json()["queuedTurns"][0]["content"] == "第二轮改过"
 
+    # Complete the mocked worker durably before releasing its runtime slot.
+    append_conversation_event(tmp_path, "session-live", active_turn_id, "turn_completed", status="completed")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=active_turn_id, status="completed")
     session_service._set_session_running("session-live", False, turn_id=active_turn_id)
     session_service._clear_session_turn_control("session-live")
 
@@ -12135,6 +12138,9 @@ def test_queued_turn_withdraw_and_drain_failure_stays_visible(tmp_path, monkeypa
     requeued_turn_id = requeued.json()["queuedTurnId"]
 
     fail_next_schedule["value"] = True
+    # Complete the mocked worker durably before releasing its runtime slot.
+    append_conversation_event(tmp_path, "session-live", active_turn_id, "turn_completed", status="completed")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=active_turn_id, status="completed")
     session_service._set_session_running("session-live", False, turn_id=active_turn_id)
     session_service._clear_session_turn_control("session-live")
 
@@ -12356,6 +12362,9 @@ def test_queued_turn_drain_skips_paused_and_all_paused_holds(tmp_path, monkeypat
     assert paused.status_code == 200
 
     # The head row is paused, so drain takes the next queued row instead.
+    # Complete the mocked worker durably before releasing its runtime slot.
+    append_conversation_event(tmp_path, "session-live", active_turn_id, "turn_completed", status="completed")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=active_turn_id, status="completed")
     session_service._set_session_running("session-live", False, turn_id=active_turn_id)
     session_service._clear_session_turn_control("session-live")
     assert len(scheduled_contexts) == 2
@@ -12374,6 +12383,9 @@ def test_queued_turn_drain_skips_paused_and_all_paused_holds(tmp_path, monkeypat
     assert paused_c.status_code == 200
 
     # Every row paused: the settle drain starts nothing and keeps the queue.
+    # Complete the mocked worker durably before releasing its runtime slot.
+    append_conversation_event(tmp_path, "session-live", second_turn_id, "turn_completed", status="completed")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=second_turn_id, status="completed")
     session_service._set_session_running("session-live", False, turn_id=second_turn_id)
     session_service._clear_session_turn_control("session-live")
     assert len(scheduled_contexts) == 2

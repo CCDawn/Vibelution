@@ -16,6 +16,7 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 | You are changing… | Open first |
 |-------------------|------------|
 | Submit / guidance / edit-resubmit | `submit.py` |
+| Failed native Turn CAS retry / cross-process admission | `retry.py` + `admission_lock.py` |
 | Session plan / build / edit / yolo mode | `collaboration_mode.py` |
 | Trusted plugin proactive turn without a user message | `proactive.py` |
 | Turn schedule / executor handoff | `schedule.py` |
@@ -69,6 +70,43 @@ writing after the Agent or its model binding changes. UI submission actions wait
 for an in-flight parameter save to settle; unsuccessful saves retain the prior
 effective values. A smaller window constrains future prompt assembly and the
 existing compression policy without deleting conversation history.
+
+## Safe failed-turn retry
+
+`POST /api/sessions/{id}/messages/retry` is additive; manual `/messages/regenerate`
+retains its supersede behavior within the owning backend. Retry requires all of
+`clientSubmissionId`, `expectedTurnId`, `expectedHeadId`, `expectedLedgerSeq`,
+`expectedAgentId`, and stable `baseMessageId` (not a positional message id).
+The head and ledger watermark come from the same detail snapshot; the expected
+Turn is its current native failed Turn. A changed watermark also rejects head
+A→B→A, new admissions, and other intervening journal changes. Startup-resume
+failures may reference their proven original user anchor; synthetic resume text
+is never replayed as the business request.
+
+Only an ordinary, mutable Session with a native `turn_failed`, the exact current
+user anchor, and no open Turn, active WorkRun, or queued item is accepted.
+Companion and virtual-human bindings are rejected. Under the project/session
+cross-process admission lock, retry holds the existing chat-state transaction
+through validation and running/WorkRun/branch preparation. Queue drain holds
+admission from claim through dispatch/settlement; a starting row cannot be
+withdrawn. Machine notices use the existing chat-state transaction and remain
+ordered without introducing an inverse admission lock dependency.
+
+An identical key and fingerprint replays the Journal user-event receipt before
+checking current state, even after later Turns. Different expectations with the
+same key return 422; stale/busy preconditions return 409 without changing Session
+state or Journal. Missing/invalid inputs return 422, missing Session 404. Accepted
+responses return 202 full detail plus typed `retryReceipt` with `turnId`,
+`clientSubmissionId`, `journalEventId`, and `journalSequence`; this identifies
+the accepted Turn independently of the current detail. Branch events remain
+`operation="regenerate"`, preserving the native fold and sole transcript.
+
+Admission reads durable WorkRuns so another backend cannot overwrite a running
+Turn with a normal submit, regenerate, or head switch.
+Trusted startup `hot_restart_resume` retains its existing stale-run recovery
+path. Retry captures current model parameters and preserves attachments and
+references through the existing resubmit path. Automatic recovery coordinator
+and frontend retry controls are not connected to this endpoint here.
 
 ## Ownership map (claim scopes)
 

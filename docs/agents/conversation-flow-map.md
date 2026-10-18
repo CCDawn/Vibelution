@@ -18,6 +18,14 @@
 
 ## 稳定入口
 
+普通 Session 的受控失败重试入口为 `POST /api/sessions/{id}/messages/retry`，
+由 `session/retry.py` 校验当前失败 Turn、Agent、稳定用户消息、head 与 `ledgerSeq`，
+再在同一个跨进程 admission 临界区复用 `submit.py` 的 regenerate 接纳路径。
+有新 Turn、排队项、活跃 WorkRun 或会话版本变化时返回 409，拒绝过程不写会话或 Journal。
+相同 `clientSubmissionId` 与参数复用 Journal 回执，不重复调度；
+`retryReceipt.turnId` 标识实际接纳的 Turn，不能用返回 detail 的当前 Turn 代替。
+普通手动 regenerate 保持原接口；该安全入口尚未接入自动恢复 coordinator。
+
 | 层 | 入口 | 职责 |
 | --- | --- | --- |
 | 前端提交 | `web/src/routes/ChatCodingRoute.tsx` | 发送 `POST /api/sessions/{sessionId}/messages`，带 `Prefer: respond-async`；先乐观更新 UI，再通过 stream/cache 校准。 |
