@@ -531,7 +531,7 @@ import { VSplitWorkspace } from "@/components/vui";
 
 ### 个人助理工作台与桌面聊天
 
-`PersonalAssistantRoute` 复用 `VSplitWorkspace`：左栏角色、中央原生会话、右栏平台概览。两侧宽度只由 `WORKBENCH_LAYOUT_IDS.personalAssistant` 记忆；右栏收起按钮位于自身顶栏最右侧。窄屏通过现有 `VDialog` 打开概览，不挤压原生输入区。
+`PersonalAssistantRoute` 复用 `VSplitWorkspace`：左栏角色、中央原生会话、右栏平台概览。桌面端直接进入三栏正文，不增加重复的页面标题或宣传语行。两侧宽度只由 `WORKBENCH_LAYOUT_IDS.personalAssistant` 记忆；右栏收起按钮位于自身顶栏最右侧。窄屏仅保留紧凑的概览、桌面模式操作入口，通过现有 `VDialog` 打开概览，不挤压原生输入区。
 
 概览固定顶部管理入口、状态条与 `VTabs`，正文只保留一个滚动区域。默认关注事项；会话和智能体独立搜索，每页八条；其余管理入口由 `VDropdownMenu` 保留。读取失败直接显示，旧缓存不可表示为刚刚更新的成功状态。
 
