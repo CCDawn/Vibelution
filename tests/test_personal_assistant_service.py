@@ -148,6 +148,35 @@ def test_concurrent_setup_creates_one_agent_and_one_session(personal_env):
     assert after_sessions - before_sessions == {rows[0]["directSessionId"]}
 
 
+def test_default_computer_tools_are_executable_but_network_denial_stays_custom(personal_env):
+    from core.authorization.tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_policy
+    from core.authorization.tool_policy_models import TurnToolGrant
+    from core.web.services import tool_catalog
+
+    row = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    names = {"personal_assistant_computer_observe_tool", "personal_assistant_computer_action_tool"}
+    descriptors = [tool_catalog.build_tool_descriptor(name, args_schema={}) for name in service.TOOLS]
+    grant = TurnToolGrant(turn_id="computer-turn", source="session",
+        allowed_capabilities=tuple({cap for item in descriptors for cap in item.capabilities}),
+        denied_tools=(), approval_mode="on_request")
+
+    def decision(policy):
+        return evaluate_tool_policy(agent_id=row["agentId"],
+            policy=normalize_legacy_tool_policy(policy, registered_tool_names=service.TOOLS, policy_id=agent["toolPolicyId"]),
+            grant=grant, descriptors=descriptors, registry_version=1, registry_fingerprint="test")
+
+    assert agent["toolPolicy"]["networkAccess"] == "restricted"
+    assert names <= set(decision(agent["toolPolicy"]).executable_tools)
+    # An operator's deliberate network restriction must not become a legacy
+    # provisioning snapshot and be silently broadened by setup retries.
+    directory.update_agent_instance(row["agentId"], tool_policy={**agent["toolPolicy"], "networkAccess": "none"})
+    restricted = directory.get_agent(row["agentId"])["toolPolicy"]
+    service.create_personal_assistant()
+    assert directory.get_agent(row["agentId"])["toolPolicy"] == restricted
+    assert "personal_assistant_computer_observe_tool" not in decision(restricted).executable_tools
+
+
 def test_ready_get_never_repairs_or_rewrites_native_rows(personal_env, monkeypatch):
     row = service.create_personal_assistant()["assistant"]
     before_directory = directory.load_state()
