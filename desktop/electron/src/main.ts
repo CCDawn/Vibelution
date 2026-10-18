@@ -67,6 +67,10 @@ import {
   type DesktopConversationCompletionNotification,
   type DesktopConversationNotificationResult
 } from "./notifications/conversationNotifications.js";
+import {
+  createHumanAttentionNotificationService,
+  type HumanAttentionNotificationService
+} from "./notifications/humanAttentionNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import { planProjectSlot, projectSlotWindowAction } from "./protocol/applyProjectSlot.js";
@@ -374,6 +378,7 @@ const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
   console.warn(error instanceof Error ? error.message : String(error));
 });
 let conversationNotificationService: ConversationNotificationService | null = null;
+let humanAttentionNotificationService: HumanAttentionNotificationService | null = null;
 const desktopLaunchArgv = process.argv.slice(1);
 const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
 const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(desktopLaunchArgv, process.env);
@@ -824,6 +829,38 @@ function resolveConversationNotificationService(): ConversationNotificationServi
     }
   });
   return conversationNotificationService;
+}
+
+function resolveHumanAttentionNotificationService(): HumanAttentionNotificationService {
+  if (humanAttentionNotificationService !== null) {
+    return humanAttentionNotificationService;
+  }
+  humanAttentionNotificationService = createHumanAttentionNotificationService({
+    // The bridge reads the current window provider lazily, so a rebuilt
+    // provider never strands the service on a stale window set.
+    windowBridge: {
+      sendToAssistantWindow: (channel, payload) =>
+        windowProvider?.sendToPet(channel, payload) === true,
+      sendToWorkbench: (channel, payload) =>
+        windowProvider?.sendToWorkbench(channel, payload) === true,
+      focusWorkbench: () => windowProvider?.focusWorkbench() ?? Promise.resolve(),
+      setWorkbenchAttention: (attention) => windowProvider?.setWorkbenchAttention(attention)
+    },
+    notificationSupported: () => Notification.isSupported(),
+    createNotification: ({ title, body, onClick }) => {
+      const notification = new Notification({ title, body, silent: false });
+      notification.on("click", onClick);
+      return notification;
+    },
+    openedChannel: IPC_CHANNELS.humanAttentionOpened,
+    recordEvent: async (event) => {
+      await recordElectronSupervisorEvent(launcherBootstrap, {
+        ...event,
+        fields: normalizeRuntimeSceneFields(event.fields)
+      });
+    }
+  });
+  return humanAttentionNotificationService;
 }
 
 async function bootstrapMainOwnedLauncher(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
@@ -3391,6 +3428,13 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
     return failedConversationNotificationResult(payload);
   }
   return await service.notify(payload);
+});
+
+ipcMain.handle(IPC_CHANNELS.notifyHumanAttention, async (event, payload: unknown) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  // The service validates the payload and returns a structured error instead
+  // of throwing, so a malformed renderer request cannot reject here.
+  return await resolveHumanAttentionNotificationService().notify(payload);
 });
 
 ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {

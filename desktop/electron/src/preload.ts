@@ -27,6 +27,15 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       ipcRenderer.removeListener(IPC_CHANNELS.conversationNotificationOpened, wrapped);
     };
   },
+  notifyHumanAttention: (payload: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.notifyHumanAttention, payload),
+  onHumanAttentionOpened: (listener: (payload: unknown) => void) => {
+    const wrapped = (_event: unknown, payload: unknown) => listener(payload);
+    ipcRenderer.on(IPC_CHANNELS.humanAttentionOpened, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.humanAttentionOpened, wrapped);
+    };
+  },
   getLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherState),
   /** 从拖拽/文件输入得到的 Web File 解析真实本地路径（Electron 32+ 需经 preload webUtils） */
   getPathForFile: (file: unknown): string | null => {

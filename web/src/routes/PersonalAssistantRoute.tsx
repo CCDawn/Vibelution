@@ -31,11 +31,10 @@ export function PersonalAssistantRoute() {
     finally { setDesktopPending(false); }
   }
   return <div className={styles.root} data-vui-domain-recipe="personal-assistant">
-    <header className={styles.header}><div><h1 className={styles.title}>{state.assistant?.displayName || "个人助理"}</h1>
-      <p className={styles.caption}>大肥鲸 · 帮你管理 Vibelution</p></div><div className={styles.actions}>
-      {narrow ? <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setOverviewOpen(true)}>平台概览</VButton> : null}
-      {narrow ? <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>桌面模式</VButton> : null}
-    </div></header>
+    {narrow ? <div className={styles.narrowActions} aria-label="个人助理操作">
+      <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setOverviewOpen(true)}>平台概览</VButton>
+      <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>桌面模式</VButton>
+    </div> : null}
     {desktopError ? <p className={styles.error} role="alert">{desktopError}</p> : null}
     <VSplitWorkspace className={styles.split} chrome="workbench" resize={{ layoutId: WORKBENCH_LAYOUT_IDS.personalAssistant,
       sidebar: { defaultWidth: 176, minWidth: 148, maxWidth: 220 },

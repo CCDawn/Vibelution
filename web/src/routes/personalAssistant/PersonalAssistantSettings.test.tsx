@@ -82,6 +82,22 @@ describe("assistant settings dialog", () => {
     expect(document.body.textContent).toContain("已保存");
   });
 
+  it("confirms an appearance save with the shared saved feedback", async () => {
+    vi.mocked(updatePersonalAssistantSettings).mockResolvedValue({ settings: { ...settings, preferences: { ...settings.preferences, characterId: "xiaoluo" } } });
+    await render(true);
+    const trigger = document.querySelector('button[role="combobox"][aria-label="默认外观"]') as HTMLButtonElement;
+    await act(async () => trigger.click());
+    const option = await vi.waitFor(() => {
+      const found = [...document.body.querySelectorAll('[role="option"]')].find(node => node.textContent === "小洛");
+      if (!found) throw new Error("appearance options not rendered yet");
+      return found as HTMLElement;
+    });
+    await act(async () => option.click());
+    await settle();
+    expect(updatePersonalAssistantSettings).toHaveBeenCalledWith({ preferences: { characterId: "xiaoluo" } });
+    expect(document.body.textContent).toContain("已保存");
+  });
+
   it("keeps the rename button disabled until the draft changes", async () => {
     await render(true);
     const save = [...document.querySelectorAll("button")].find(button => button.textContent === "保存名称") as HTMLButtonElement;
