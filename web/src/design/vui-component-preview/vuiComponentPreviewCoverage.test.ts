@@ -67,6 +67,14 @@ const previewExemptDesignSections = new Set([
   // Covered by its dialog interaction tests (open/rename/appearance/model).
   "PersonalAssistantSettings",
   "DesktopAssistantReturnNotice",
+  // Dual-channel human-attention surfaces bound to the native desktop bridge:
+  // the notifier renders null and is driven by overview polling plus
+  // notifyHumanAttention/onHumanAttentionOpened; the notice stack's cards only
+  // arrive through the Electron preload delivery channel inside the floating
+  // assistant window. Covered by their trigger-chain, dedup, card render,
+  // click/close/stack and 12s hover-pause interaction tests.
+  "HumanAttentionNotifier",
+  "HumanAttentionNoticeStack",
 ]);
 
 function collectPreviewSources(directory: string): string {
