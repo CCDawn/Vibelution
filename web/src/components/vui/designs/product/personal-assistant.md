@@ -162,3 +162,20 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 `routes/personalAssistant/PersonalAssistantComputerPanel.tsx` 与 `.styles.ts`；transport 为 `api/personalAssistantComputer.ts`，DTO 为 `api/types/personalAssistantComputer.ts`。
 ### 反冗余
 复用 VUI 控件、React Query 缓存和现有 VSplitWorkspace 的 personalAssistant 宽度记忆；不引入截图预览、第二套控制状态或额外布局持久化。
+
+## PersonalAssistantDialoguePreferences
+
+### 功能
+个人助理的对话偏好评议面板：三组对话设置（说话主动性 restrained/natural/talkative、提问主动性 few/natural/proactive、偏好建议模式 ask_first/manual_only）即时保存；待确认的偏好提案（verbosity/question_initiative/address/humor/proactive_contact）逐条「采纳/保留原样」，并展示最近已处理记录。全部数据以后端 Companion 插件 API 为权威，前端只映射受控枚举到行为词语，词语不落盘。
+### 适用范围
+`/personal-assistant` 工作台右侧 VTabs 的「对话偏好」标签（宽屏）与窄屏 VDialog 入口；窄屏不渲染侧栏时仍可从顶部操作条打开。不承担角色形象/模型切换（归 PersonalAssistantSettings）、不创建提案（提案只能由绑定直连会话内的结构化工具在真实用户回合产生）。
+### 使用方式
+`<PersonalAssistantDialoguePreferences agentId headerAction? />`。设置组每行 VStringSelect（选项为后端封闭枚举），选择即 PUT `dialogue-settings`，成功后失效设置 query；失败 role=alert 行内提示并保持服务端值。提案列表 GET `preference-proposals`（5s 轮询，与 overview 节奏一致），待确认行展示类型/建议值（枚举值映射为中文行为词，自由文本直显）+ 采纳/保留原样（互斥 pending，决策后同时失效提案与设置缓存）；已处理仅保留最近 6 条。读取失败 VStateSurface error + 重试。文案 zh/en 双语。
+### 非职责
+不写 Agent 目录、不绕过提案状态机直接改偏好情节记忆（采纳走后端 accept 及其回执）、不做提案的催办/通知（归双通道通知链）、不在组件内持久化任何本地缓存。
+### 视觉与状态
+面板结构对齐 PersonalAssistantOverview（pinned header + 滚动 content）；设置行卡片化（field 边框卡 + 标签 + 提示语）；提案行左文案右操作；空态复用 empty 图标+文案模式；保存/决策中按钮 isPending 且兄弟按钮禁用。
+### 实现落点
+`routes/personalAssistant/PersonalAssistantDialoguePreferences.tsx`（组合 VStringSelect/VButton/VStateSurface）+ 同名 `.styles.ts`；API 客户端 `api/virtualHumanLife.ts`，query key `virtualHumanDialogueSettings/virtualHumanPreferenceProposals`。
+### 反冗余
+复用 VUI 表单原语与 virtualHumanLife 既有客户端模式，不新建第二套 select/设置通道；提案候选值标签只在展示层映射，不在前端维护第二份偏好状态。
