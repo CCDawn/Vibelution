@@ -24,6 +24,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.agent_plugins",
     "core.web.routes.financial_assistant",
     "core.web.routes.personal_assistant",
+    "core.web.routes.personal_assistant_computer",
     "core.web.routes.financial_evidence",
     "core.web.routes.financial_research",
     "core.web.routes.financial_paper",

@@ -3,6 +3,7 @@
 | Component | Design |
 | --- | --- |
 | `PersonalAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantroute) |
+| `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
 | `DesktopAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#desktopassistantroute) |
 | `PersonalAssistantOverview` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantoverview) |
 | `PersonalAssistantState` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantstate) |

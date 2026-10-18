@@ -20,7 +20,7 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 ## PersonalAssistantRoute
 
 ### 功能
-独立个人助理入口，提供原生聊天与平台管理概览；桌面模式沿用同一个 Agent、Session 与记忆。
+独立个人助理入口，提供原生聊天、平台管理概览与单窗口电脑操作；桌面模式沿用同一个 Agent、Session 与记忆。
 ### 适用范围
 仅 `/personal-assistant`，与炒股智能体、虚拟人入口并列；普通会话与虚拟人保留原有页面。
 ### 使用方式
@@ -28,7 +28,7 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 ### 非职责
 不持有 transcript、composer、记忆副本或执行进度；原生 Session/SSE 与审批持有权威。
 ### 视觉与状态
-聊天为主体，可调整、可收起的概览侧栏；加载、错误与身份冲突用 VStateSurface；窄屏可收起概览。页面根节点在横向 VWorkbenchFrame 中占满可用宽度并参与伸展，避免按内容宽度缩成左侧窄列。
+聊天为主体，右栏用 VTabs 切换平台概览与电脑操作，沿用可调整与可收起侧栏；加载、错误与身份冲突用 VStateSurface；窄屏顶栏分别打开概览和电脑操作 VDialog，收起后入口保留。页面根节点在横向 VWorkbenchFrame 中占满可用宽度并参与伸展，避免按内容宽度缩成左侧窄列。
 ### 实现落点
 `routes/PersonalAssistantRoute.tsx`、`routes/personalAssistant/*`。
 ### 反冗余
@@ -145,3 +145,20 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 `routes/desktopPet/HumanAttentionNoticeStack.tsx`、`routes/desktopPet/HumanAttentionNoticeStack.styles.ts`、`design/route-css/desktop-pet.tailwind.css`（@source 登记）。
 ### 反冗余
 复用 humanAttentionNotifications 的桥发现/解析/target 解析与 VUI 原语（VNativeButton/VIconButton），不新建弹窗体系；与 VDialog 的模态确认（session-tab-close-confirm）职责不同，本卡是非模态瞬时通知。
+
+## PersonalAssistantComputerPanel
+
+### 功能
+在个人助理右栏提供单窗口授权、暂停与继续、人工接管与交回、具体操作确认和结束重选。
+### 适用范围
+仅个人助理工作台右栏与窄屏电脑操作 VDialog。普通聊天、Companion 和桌面浮动窗不挂载。
+### 使用方式
+`<PersonalAssistantComputerPanel active onCollapse={...} />`。组合 VButton、VIconButton、VCheckbox、VSurface 与 VStateSurface。打开页或手动刷新才读取窗口列表，普通状态一秒轮询且隐藏时停止。用户选定窗口、勾选画面许可后提交授权。顶部保留收起、暂停或继续、交给我或交回助理；结束撤销授权后重新选择。
+### 非职责
+不读取截图、不发送鼠标键盘输入、不持有消息或执行历史；不修改原生聊天语义，不以 UI 状态替代服务端授权与确认。
+### 视觉与状态
+授权前列出应用名和窗口标题，明确画面交给当前助理模型，并固定提交、发送、删除前确认。授权后展示唯一窗口、服务端状态和待确认动作、目标、完整输入；确认与取消分别提交 approved。失窗、结束和错误使用后端状态与原因，不伪造进度。mutation 失败保留原因与原状态，加载、不可用、空窗口和刷新失败均独立显示。长标题与输入换行，面板内容滚动，顶部控制与底部边界说明保持可见。
+### 实现落点
+`routes/personalAssistant/PersonalAssistantComputerPanel.tsx` 与 `.styles.ts`；transport 为 `api/personalAssistantComputer.ts`，DTO 为 `api/types/personalAssistantComputer.ts`。
+### 反冗余
+复用 VUI 控件、React Query 缓存和现有 VSplitWorkspace 的 personalAssistant 宽度记忆；不引入截图预览、第二套控制状态或额外布局持久化。

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSessionDetail } from "../../api/chat";
 import { fetchPetActivity } from "../../api/pet";
+import { fetchPersonalAssistantComputer } from "../../api/personalAssistantComputer";
 import { queryKeys } from "../../api/queryKeys";
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
@@ -18,6 +19,8 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
   const query = useQuery({ queryKey: queryKeys.petActivity(), queryFn: fetchPetActivity, enabled,
     refetchInterval: q => petActivityRefetchInterval(q.state.data), refetchIntervalInBackground: false, retry: false });
   const sessionId = assistant?.directSessionId ?? "";
+  const computer = useQuery({ queryKey: queryKeys.personalAssistantComputer(), queryFn: ({ signal }) => fetchPersonalAssistantComputer({ signal }),
+    enabled: enabled && Boolean(assistant), refetchInterval: 1000, refetchIntervalInBackground: false, retry: false });
   const replies = useQuery({ queryKey: queryKeys.personalAssistantReplies(assistant?.agentId ?? "", sessionId),
     queryFn: ({ signal }) => fetchSessionDetail(sessionId, { signal, transcriptScope: "window", messageLimit: 12, includeSecondary: false }),
     enabled: enabled && Boolean(assistant), refetchInterval: 3000, refetchIntervalInBackground: false, retry: false });
@@ -68,10 +71,17 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
   else if (animationState === "celebrating" && (!showCompletion || reduced || completionUntil <= Date.now())) animationState = "idle";
   if (tone === "completed" && !showCompletion && !unreadCount) tone = "idle";
   const phaseLabel = base?.sessions.find(session => session.tone === base.aggregateTone)?.phase;
-  const statusText = unavailable ? (lang === "zh" ? "暂时无法读取平台状态" : "Platform status is unavailable")
+  let statusText = unavailable ? (lang === "zh" ? "暂时无法读取平台状态" : "Platform status is unavailable")
     : !base ? (lang === "zh" ? "正在读取平台状态…" : "Reading platform status…")
       : !attention && unreadCount > 0 ? (lang === "zh" ? `有 ${unreadCount} 条新消息` : `${unreadCount} new messages`)
         : tone === "running" && phaseLabel ? petPhaseLabel(phaseLabel, lang)
           : tone === "idle" && idleMessage.trim() ? idleMessage : petToneLabel(tone, lang);
+  if (enabled && !unavailable && !attention && !computer.isError && computer.data?.grantId) {
+    const state = computer.data;
+    if (state.status === "working") { tone = "running"; animationState = reduced ? "idle" : "tooling"; statusText = lang === "zh" ? "正在操作已授权窗口" : "Working in the authorized window"; }
+    else if (state.status === "waiting_confirmation") { tone = "approval"; animationState = "waiting"; statusText = lang === "zh" ? "电脑操作等待你确认" : "Computer action needs your confirmation"; }
+    else if (state.status === "paused" || state.status === "manual") { tone = "idle"; animationState = "idle"; statusText = lang === "zh" ? state.status === "manual" ? "你正在操作电脑" : "电脑操作已暂停" : "Computer control is paused"; }
+    else if (state.status === "error") { tone = "error"; animationState = "alert"; statusText = state.message; }
+  }
   return { query, tone, animationState, statusText, unreadCount, unavailable: Boolean(unavailable), markRead: store.markRead };
 }

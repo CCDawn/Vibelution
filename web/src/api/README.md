@@ -55,6 +55,7 @@
 | `logs.ts` | `/api/logs/*`, runtime scene list/detail/delete |
 | `memory.ts` | `/api/memory/*` (do not merge with `knowledge.ts`) |
 | `pet.ts` | `/api/pet/*` |
+| `personalAssistantComputer.ts` | `/api/personal-assistant/computer/*`, explicit single-window selection, vision grant, controls and action confirmation; UI owns visibility polling and cache invalidation |
 | `projectAgentBus.ts` | Project agent bus |
 | `researchLoop.ts` | Research loop substrate |
 | `researchProjectAgentTasks.ts` | Research project agent tasks |

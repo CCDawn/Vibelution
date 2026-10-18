@@ -584,12 +584,8 @@ def test_stale_budget_snapshot_upgrades_after_each_reprovision(personal_env, mon
 def test_pre_toolset_snapshot_upgrades_to_search_and_compress_tools(personal_env):
     row = service.create_personal_assistant()["assistant"]
     agent_id = row["agentId"]
-    old_tools = tuple(
-        name
-        for name in service.TOOLS
-        if name
-        not in {"search_agent_private_memory_tool", "compress_context_tool"}
-    )
+    # Frozen historical generation, not today's toolset minus selected names.
+    old_tools = service._LEGACY_TOOLS + service._DESKTOP_TOOLS
     legacy = directory.normalize_tool_policy(
         {
             **service.PRIVATE_V2_POLICY,
