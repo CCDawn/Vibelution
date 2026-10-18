@@ -20,6 +20,10 @@ from core.agent_plugins.virtual_human_life.storage import VirtualHumanLifeStore
     [
         ("acknowledgement", "acknowledge"),
         ("correction", "acknowledge_then_correct"),
+        ("misunderstanding", "acknowledge_then_restate"),
+        ("restate_request", "restate_current_understanding"),
+        ("user_impatient", "acknowledge_then_stop"),
+        ("end_topic", "respectful_close"),
         ("support", "validate_then_support"),
         ("end", "respectful_close"),
     ],
@@ -33,12 +37,29 @@ def test_priority_intents_never_add_a_companion_question(
         affect={"mood": {"valence": 68, "stability": 82}},
         energy=92,
         user_intent=intent,
-        turn_ordinal=3,
     )
 
     assert decision["questionBudget"] == 0
-    assert decision["followup"] is False
     assert decision["validationStyle"] == expected_validation
+    assert decision["initiative"] == "reply_only"
+    assert decision["selfDisclosure"] == "none"
+
+
+def test_misunderstanding_intents_close_the_topic_without_disclosure_or_humor() -> None:
+    for intent in ("misunderstanding", "restate_request", "user_impatient", "end_topic"):
+        decision = build_companion_expression_decision(
+            relationship={"relationshipStage": "close"},
+            affect={"mood": {"valence": 60, "stability": 80}},
+            energy=85,
+            user_intent=intent,
+        )
+        assert decision["questionBudget"] == 0
+        assert decision["selfDisclosure"] == "none"
+        assert decision["topicInitiative"] == "reply_only"
+        # A single misunderstanding never punishes the relationship stage or
+        # changes long-term style; it only tightens this one reply.
+        assert "relationship_stage:close" in decision["reasonCodes"]
+        assert decision["responseLength"] in {"brief", "compact"}
 
 
 def test_relationship_stage_caps_address_memory_humor_and_disclosure() -> None:
@@ -47,14 +68,12 @@ def test_relationship_stage_caps_address_memory_humor_and_disclosure() -> None:
         affect={"mood": {"valence": 70, "stability": 80}},
         energy=88,
         user_intent="small_talk",
-        turn_ordinal=3,
     )
     close = build_companion_expression_decision(
         relationship={"relationshipStage": "close"},
         affect={"mood": {"valence": 70, "stability": 80}},
         energy=88,
         user_intent="small_talk",
-        turn_ordinal=3,
     )
 
     assert initial["addressStyle"] == "neutral_or_name"
@@ -76,7 +95,6 @@ def test_low_energy_and_negative_unstable_affect_only_tighten_expression() -> No
         },
         energy=18,
         user_intent="small_talk",
-        turn_ordinal=3,
     )
 
     assert decision["responseLength"] == "brief"
@@ -86,20 +104,27 @@ def test_low_energy_and_negative_unstable_affect_only_tighten_expression() -> No
     assert decision["emotionalAttribution"] == "not_user_responsibility"
 
 
-def test_question_budget_allows_only_two_or_three_of_eight_small_talk_turns() -> None:
-    budgets = [
-        build_companion_expression_decision(
-            relationship={"relationshipStage": "friend"},
-            affect={"mood": {"valence": 8, "stability": 72}},
-            energy=70,
-            user_intent="small_talk",
-            turn_ordinal=turn,
-        )["questionBudget"]
-        for turn in range(1, 9)
-    ]
+def test_question_budget_is_a_per_turn_bound_without_any_cadence() -> None:
+    eligible = build_companion_expression_decision(
+        relationship={"relationshipStage": "friend"},
+        affect={"mood": {"valence": 8, "stability": 72}},
+        energy=70,
+        user_intent="small_talk",
+    )
+    capped = build_companion_expression_decision(
+        relationship={"relationshipStage": "getting_to_know"},
+        affect={"mood": {"valence": -40, "stability": 20}},
+        energy=20,
+        user_intent="small_talk",
+    )
 
-    assert all(budget in {0, 1} for budget in budgets)
-    assert 2 <= sum(budgets) <= 3
+    # Retired mechanical rhythm: the budget no longer depends on any arrival
+    # ordinal or modulo cadence. It stays a 0/1 resource bound driven by
+    # stage, intent, affect and reviewed preferences, so "no mechanical
+    # rhythm" never degrades into unbounded questioning.
+    assert eligible["questionBudget"] == 1
+    assert capped["questionBudget"] == 0
+    assert "followup" not in eligible
 
 
 @pytest.mark.parametrize(
@@ -111,6 +136,14 @@ def test_question_budget_allows_only_two_or_three_of_eight_small_talk_turns() ->
         ("先聊到这里吧，晚安", "end"),
         ("你能帮我整理一下吗", "help_request"),
         ("今天路边的花开了", "small_talk"),
+        ("你误会了，我是说周五的演出", "misunderstanding"),
+        ("我不是这个意思", "misunderstanding"),
+        ("你刚才说的我没听懂，再说一遍", "restate_request"),
+        ("什么意思，再解释一下", "restate_request"),
+        ("别问了，你烦不烦", "user_impatient"),
+        ("我都说了几遍了，说重点", "user_impatient"),
+        ("这个话题就到这吧", "end_topic"),
+        ("不聊这个了，换个话题", "end_topic"),
     ],
 )
 def test_user_intent_classifier_is_bounded_and_deterministic(

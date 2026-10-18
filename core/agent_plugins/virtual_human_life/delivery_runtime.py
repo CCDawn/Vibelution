@@ -27,6 +27,9 @@ from .storage import VirtualHumanLifeStore
 _PLANS_PATH = "conversation/delivery_plans.jsonl"
 _ATTEMPTS_PATH = "proactive/deliveries.jsonl"
 _MAILBOX_PATH = "conversation/mailbox.json"
+_DISCLOSURES_PATH = "conversation/disclosures.jsonl"
+_DISCLOSURE_LEDGER_READ_LIMIT = 100
+DISCLOSURE_FRESHNESS_DAYS = 7
 _COMPANION_CONTINUATION_DELIVERY_KINDS = frozenset(
     {"followup", "burst_continuation"}
 )
@@ -52,6 +55,19 @@ def _iso(value: datetime) -> str:
         value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
     )
     return normalized.astimezone(timezone.utc).isoformat()
+
+
+def _parse_iso(value: object) -> datetime | None:
+    text = str(value or "").strip().replace("Z", "+00:00")
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class CompanionDeliveryRuntime:
@@ -232,6 +248,25 @@ class CompanionDeliveryRuntime:
         ]
         plan["latestDeliveryReceiptId"] = normalized_receipt
         plan["deliveredCount"] = int(plan.get("deliveredCount") or 0) + 1
+        # The bubble that just received its terminal receipt may itself be the
+        # self-disclosure planned by the previous hop. Only a reconciled
+        # receipt may mark a source as disclosed (PRD 32.10); a repeated
+        # receipt replay is idempotent inside ``record_disclosures``.
+        pending_disclosure_keys = [
+            str(item or "").strip()
+            for item in list(plan.get("pendingDisclosureSourceKeys") or [])
+            if str(item or "").strip()
+        ]
+        if pending_disclosure_keys:
+            self.record_disclosures(
+                agent_id,
+                source_keys=pending_disclosure_keys,
+                topic_key=str(plan.get("pendingDisclosureTopicKey") or ""),
+                receipt_event_id=normalized_receipt,
+                now=self.now_provider(),
+            )
+        plan["pendingDisclosureSourceKeys"] = []
+        plan["pendingDisclosureTopicKey"] = ""
         draft = plan.get("decisionDraft")
         draft_status = str(plan.get("decisionDraftStatus") or "missing")
         effective_act = (
@@ -263,14 +298,33 @@ class CompanionDeliveryRuntime:
         topic_key = str((draft or {}).get("topicKey") or "")
         disclosed = list(plan.get("disclosedTopicKeys") or [])
         if reason_code == "self_disclosure":
-            if disclosed and topic_key not in disclosed:
+            source_keys = [
+                str(item or "").strip()
+                for item in list((draft or {}).get("referencedSourceKeys") or [])
+                if str(item or "").strip()
+            ]
+            if topic_key and topic_key in disclosed:
                 self._finish_v2_plan(
                     plan, status="completed", stop_reason="self_disclosure_limit"
                 )
                 self.store.write_jsonl(agent_id, _PLANS_PATH, rows)
                 return deepcopy(plan), None
+            fresh_keys = self.fresh_disclosure_source_keys(
+                agent_id, now=self.now_provider()
+            )
+            if any(source_key in fresh_keys for source_key in source_keys):
+                # The same event/memory is already disclosed inside the
+                # freshness window (across bursts) and the user has not asked
+                # about it again; stop instead of repeating the topic.
+                self._finish_v2_plan(
+                    plan, status="completed", stop_reason="self_disclosure_freshness"
+                )
+                self.store.write_jsonl(agent_id, _PLANS_PATH, rows)
+                return deepcopy(plan), None
             if topic_key and topic_key not in disclosed:
                 disclosed.append(topic_key)
+            plan["pendingDisclosureSourceKeys"] = source_keys
+            plan["pendingDisclosureTopicKey"] = topic_key
         plan["disclosedTopicKeys"] = disclosed
         next_ordinal = int(plan.get("currentBubbleOrdinal") or 0) + 1
         suffix = self._burst_hop_suffix(str(plan["planId"]), next_ordinal)
@@ -394,6 +448,115 @@ class CompanionDeliveryRuntime:
         import hashlib
 
         return hashlib.sha256(f"{plan_id}\x1f{ordinal}".encode()).hexdigest()[:24]
+
+    # ------------------------------------------------------------------
+    # Self-disclosure freshness (PRD 32.10): the plugin ledger stores only
+    # ``sourceKey + disclosedAt + deliveryReceiptId`` (plus reset rows). It
+    # never copies assistant text. Freshness spans bursts, so the same Life
+    # Event or memory is not re-disclosed inside the window unless the user
+    # asked about it again. A disclosure row is written only when the native
+    # assistant terminal receipt for the disclosing bubble is reconciled;
+    # failed, cancelled or unreceipted deliveries never consume freshness.
+    # ------------------------------------------------------------------
+
+    def _disclosure_rows(self, agent_id: str) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in self.store.read_jsonl(agent_id, _DISCLOSURES_PATH)[
+                -_DISCLOSURE_LEDGER_READ_LIMIT:
+            ]
+            if isinstance(row, dict)
+        ]
+
+    def fresh_disclosure_source_keys(self, agent_id: str, *, now: datetime) -> set[str]:
+        """Return source keys disclosed inside the window and not re-enabled."""
+
+        window_start = now - timedelta(days=DISCLOSURE_FRESHNESS_DAYS)
+        # Ledger rows are append-ordered, so the latest row per source key
+        # decides: a reset after a fresh disclosure re-enables the topic.
+        fresh: dict[str, bool] = {}
+        for row in self._disclosure_rows(agent_id):
+            source_key = str(row.get("sourceKey") or "").strip()
+            if not source_key:
+                continue
+            if str(row.get("recordType") or "disclosure") == "reset":
+                fresh[source_key] = False
+                continue
+            stamp = _parse_iso(row.get("disclosedAt"))
+            fresh[source_key] = stamp is not None and stamp >= window_start
+        return {source_key for source_key, is_fresh in fresh.items() if is_fresh}
+
+    def record_disclosures(
+        self,
+        agent_id: str,
+        *,
+        source_keys: list[str],
+        topic_key: str,
+        receipt_event_id: str,
+        now: datetime,
+    ) -> list[dict[str, Any]]:
+        """Persist receipt-confirmed disclosure rows idempotently per receipt."""
+
+        normalized_receipt = str(receipt_event_id or "").strip()
+        if not normalized_receipt:
+            return []
+        existing = {
+            (
+                str(row.get("deliveryReceiptId") or "").strip(),
+                str(row.get("sourceKey") or "").strip(),
+            )
+            for row in self._disclosure_rows(agent_id)
+            if str(row.get("recordType") or "disclosure") == "disclosure"
+        }
+        appended: list[dict[str, Any]] = []
+        rows = self.store.read_jsonl(agent_id, _DISCLOSURES_PATH)
+        for raw_key in source_keys:
+            source_key = str(raw_key or "").strip()
+            if not source_key or (normalized_receipt, source_key) in existing:
+                continue
+            appended.append(
+                {
+                    "recordType": "disclosure",
+                    "disclosureId": f"companion-disclosure:{source_key}:{normalized_receipt}",
+                    "agentId": str(agent_id).strip(),
+                    "sourceKey": source_key,
+                    "topicKey": str(topic_key or "").strip()[:120],
+                    "deliveryReceiptId": normalized_receipt,
+                    "disclosedAt": _iso(now),
+                }
+            )
+        if appended:
+            self.store.write_jsonl(agent_id, _DISCLOSURES_PATH, [*rows, *appended])
+        return appended
+
+    def reset_disclosures(
+        self,
+        agent_id: str,
+        *,
+        source_keys: list[str],
+        now: datetime,
+        reason: str = "user_followup",
+    ) -> list[dict[str, Any]]:
+        """Re-enable disclosure topics the user explicitly asked about again."""
+
+        appended: list[dict[str, Any]] = []
+        rows = self.store.read_jsonl(agent_id, _DISCLOSURES_PATH)
+        for raw_key in source_keys:
+            source_key = str(raw_key or "").strip()
+            if not source_key:
+                continue
+            appended.append(
+                {
+                    "recordType": "reset",
+                    "agentId": str(agent_id).strip(),
+                    "sourceKey": source_key,
+                    "reason": str(reason or "user_followup")[:120],
+                    "resetAt": _iso(now),
+                }
+            )
+        if appended:
+            self.store.write_jsonl(agent_id, _DISCLOSURES_PATH, [*rows, *appended])
+        return appended
 
     def _ensure_v2_attempt(
         self,
@@ -807,6 +970,7 @@ class CompanionDeliveryRuntime:
 
 
 __all__ = [
+    "DISCLOSURE_FRESHNESS_DAYS",
     "CompanionDeliveryRuntime",
     "companion_delivery_kind_from_entry",
     "is_companion_continuation_delivery_kind",

@@ -1999,10 +1999,73 @@ def _record_scene(
         return
 
 
+def virtual_human_dialogue_settings(agent_id: str) -> dict[str, Any]:
+    service = get_virtual_human_life_service()
+    settings = service.dialogue_settings(agent_id)
+    return {"agentId": str(agent_id or "").strip(), **settings}
+
+
+def update_virtual_human_dialogue_settings(
+    agent_id: str,
+    *,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    service = get_virtual_human_life_service()
+    updated = service.update_dialogue_settings(agent_id, settings=settings or {})
+    return {"agentId": str(agent_id or "").strip(), **updated}
+
+
+def virtual_human_preference_proposals(
+    agent_id: str,
+    *,
+    status: str = "",
+) -> dict[str, Any]:
+    service = get_virtual_human_life_service()
+    projection = service.list_companion_preference_proposals(agent_id, status=status)
+    return {
+        "agentId": str(agent_id or "").strip(),
+        "proposals": list(projection.get("proposals") or []),
+    }
+
+
+def accept_virtual_human_preference_proposal(
+    agent_id: str,
+    *,
+    proposal_id: str,
+) -> dict[str, Any]:
+    service = get_virtual_human_life_service()
+    result = service.accept_companion_preference_proposal(
+        agent_id,
+        proposal_id=proposal_id,
+    )
+    return {
+        "agentId": str(agent_id or "").strip(),
+        "proposal": result.get("proposal") or {},
+        "receipt": result.get("receipt") or None,
+    }
+
+
+def reject_virtual_human_preference_proposal(
+    agent_id: str,
+    *,
+    proposal_id: str,
+) -> dict[str, Any]:
+    service = get_virtual_human_life_service()
+    result = service.reject_companion_preference_proposal(
+        agent_id,
+        proposal_id=proposal_id,
+    )
+    return {
+        "agentId": str(agent_id or "").strip(),
+        "proposal": result.get("proposal") or {},
+    }
+
+
 __all__ = [
     "PLUGIN_ID",
     "VirtualHumanLifeError",
     "_default_agent_persona_initializer",
+    "accept_virtual_human_preference_proposal",
     "build_virtual_human_prompt_segments",
     "commit_virtual_human_agent_purge",
     "execute_virtual_human_command",
@@ -2015,15 +2078,19 @@ __all__ = [
     "preview_legacy_pet_import",
     "proactive_context_is_current",
     "queue_virtual_human_conversation_message",
+    "reject_virtual_human_preference_proposal",
     "rollback_virtual_human_agent_archive",
     "run_virtual_human_life_runtime",
     "set_virtual_human_life_service_for_tests",
     "stop_virtual_human_life_runtime",
     "update_virtual_human_binding",
+    "update_virtual_human_dialogue_settings",
     "virtual_human_binding",
     "virtual_human_diary",
+    "virtual_human_dialogue_settings",
     "virtual_human_events",
     "virtual_human_memories",
+    "virtual_human_preference_proposals",
     "virtual_human_relationships",
     "virtual_human_schedule",
     "virtual_human_snapshot",

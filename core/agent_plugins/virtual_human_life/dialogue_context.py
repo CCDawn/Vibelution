@@ -11,7 +11,11 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
-from .companion_preferences import expression_preferences
+from .companion_preferences import (
+    dialogue_settings_preferences,
+    expression_preferences,
+    normalize_companion_dialogue_settings,
+)
 from .interaction_expression import (
     build_companion_expression_decision,
     classify_companion_user_intent,
@@ -20,6 +24,7 @@ from .life_provenance import event_provenance, is_verified_experience
 from .storage import VirtualHumanLifeStore
 
 _INTERACTION_CONTEXT_PATH = "conversation/interaction_context.json"
+_DIALOGUE_SETTINGS_PATH = "conversation/dialogue_settings.json"
 _LOCAL_WEEKDAYS = (
     "monday",
     "tuesday",
@@ -164,7 +169,6 @@ def interaction_context_for_turn(
         "entryId": str(context.get("entryId") or "")[:200],
         "sourceKind": str(context.get("sourceKind") or "user")[:40],
         "arrivalSequence": int(context.get("arrivalSequence") or 0),
-        "turnOrdinal": int(context.get("turnOrdinal") or 0),
         "generation": int(context.get("generation") or 0),
         "userIntent": str(context.get("userIntent") or "small_talk")[:40],
         "turnId": recorded_turn_id,
@@ -337,6 +341,18 @@ def project_companion_expression_for_turn(
         if isinstance(item, Mapping)
         and str(item.get("episodeId") or "") in active_episode_ids
     ][:8]
+    preference_projection = expression_preferences(
+        causal.get("companionPreferences")
+        if isinstance(causal.get("companionPreferences"), Mapping)
+        else {}
+    )
+    preference_projection.update(
+        dialogue_settings_preferences(
+            normalize_companion_dialogue_settings(
+                store.read_json(agent_id, _DIALOGUE_SETTINGS_PATH)
+            )
+        )
+    )
     return {
         "interactionContext": interaction_context,
         "expressionDecision": build_companion_expression_decision(
@@ -347,12 +363,7 @@ def project_companion_expression_for_turn(
                 str(user_intent_override or "").strip()
                 or str(interaction_context.get("userIntent") or "small_talk")
             ),
-            turn_ordinal=interaction_context.get("turnOrdinal"),
-            preferences=expression_preferences(
-                causal.get("companionPreferences")
-                if isinstance(causal.get("companionPreferences"), Mapping)
-                else {}
-            ),
+            preferences=preference_projection,
         ),
     }
 
