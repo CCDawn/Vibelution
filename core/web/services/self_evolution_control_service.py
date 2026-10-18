@@ -671,25 +671,26 @@ def ensure_self_evolution_agent_instances() -> list[dict[str, Any]]:
     """Ensure self-evolution fixed roles are persistent AgentInstances."""
 
     project_root = Path(PROJECT_ROOT).resolve()
+    # 与 supervised 同形收口：agent_directory / mode binding 走 scoped 上下文与
+    # 显式传根；session_service 翻转保留至 ContextVar 二期。
     previous_session_root = session_service.PROJECT_ROOT
-    previous_agent_root = agent_directory_service.PROJECT_ROOT
-    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
     session_service.PROJECT_ROOT = project_root
-    agent_directory_service.PROJECT_ROOT = project_root
-    agent_mode_binding_service.PROJECT_ROOT = project_root
     ensured: list[dict[str, Any]] = []
     try:
-        for role in SELF_EVOLUTION_AGENT_ROLES:
-            agent = _ensure_self_evolution_role(role)
-            if agent:
-                ensured.append(agent)
-        _retire_stale_self_evolution_roles()
-        _sync_self_evolution_mode_binding(ensured, preserve_existing_slots=True)
-        return ensured
+        with agent_directory_service.scoped_project_root(project_root):
+            for role in SELF_EVOLUTION_AGENT_ROLES:
+                agent = _ensure_self_evolution_role(role)
+                if agent:
+                    ensured.append(agent)
+            _retire_stale_self_evolution_roles()
+            _sync_self_evolution_mode_binding(
+                ensured,
+                preserve_existing_slots=True,
+                project_root=project_root,
+            )
+            return ensured
     finally:
         session_service.PROJECT_ROOT = previous_session_root
-        agent_directory_service.PROJECT_ROOT = previous_agent_root
-        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
 
 
 def self_evolution_agent_bindings() -> dict[str, dict[str, Any]]:
@@ -986,7 +987,12 @@ def _retire_stale_self_evolution_roles() -> None:
             continue
 
 
-def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
+def _sync_self_evolution_mode_binding(
+    agents: list[dict[str, Any]],
+    *,
+    preserve_existing_slots: bool = False,
+    project_root: Path | None = None,
+) -> None:
     active_agents = [
         agent
         for agent in agents
@@ -997,7 +1003,7 @@ def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_
     slots: dict[str, str] = {}
     if preserve_existing_slots:
         try:
-            payload = agent_mode_binding_service.get_mode_bindings_payload()
+            payload = agent_mode_binding_service.get_mode_bindings_payload(project_root=project_root)
             existing = ((payload.get("modes") or {}).get("self_evolution") or {}).get("slots")
             if isinstance(existing, dict):
                 slots.update(
@@ -1022,6 +1028,7 @@ def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_
         default_agent_id=active_agent_ids[0],
         available_agent_ids=active_agent_ids,
         slots=slots,
+        project_root=project_root,
     )
 
 
