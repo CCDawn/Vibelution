@@ -59,7 +59,7 @@ _PRE_COMPUTER_TOOLS = (
 TOOLS = (*_PRE_COMPUTER_TOOLS, "personal_assistant_computer_observe_tool", "personal_assistant_computer_action_tool")
 # Older provisioning toolsets that may still live in persisted snapshots; each
 # generation stays recognizable so explicit re-provisioning upgrades it to TOOLS.
-_TOOLSET_GENERATIONS = (_LEGACY_TOOLS + _DESKTOP_TOOLS, _PRE_COMPUTER_TOOLS, TOOLS)
+_TOOLSET_GENERATIONS = (_LEGACY_TOOLS + _DESKTOP_TOOLS, _PRE_COMPUTER_TOOLS)
 
 
 def _max_calls_per_turn() -> int:
@@ -88,6 +88,9 @@ def current_policy() -> dict:
     """Provisioning policy; maxCallsPerTurn follows the live config knob."""
     return {
         **PRIVATE_V2_POLICY,
+        # Only explicitly assigned tools are visible. Screenshot perception uses
+        # the current dialogue provider after separate single-window consent.
+        "networkAccess": "restricted",
         "allowedTools": list(TOOLS),
         "preferredTools": list(TOOLS),
         "maxCallsPerTurn": _max_calls_per_turn(),
