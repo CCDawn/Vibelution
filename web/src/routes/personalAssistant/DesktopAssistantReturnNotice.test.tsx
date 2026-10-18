@@ -9,6 +9,8 @@ import { DesktopAssistantReturnNotice } from "./DesktopAssistantReturnNotice";
 
 vi.mock("../../api/personalAssistant", () => ({ fetchPersonalAssistant: vi.fn(), createPersonalAssistant: vi.fn() }));
 vi.mock("../../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
+let mockLang: "zh" | "en" = "zh";
+vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: mockLang }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const assistant: PersonalAssistant = { agentId: "agent", directSessionId: "personal-session", displayName: "个人助理",
   status: "active", setupStatus: "ready", profile: "personal_assistant_v1", renderer: "whale" };
@@ -16,6 +18,7 @@ let listener: (value: unknown) => void, root: Root, container: HTMLDivElement, r
 function Host() { const location = useLocation(); return <><DesktopAssistantReturnNotice /><output>{location.pathname}{location.search}</output></>; }
 beforeEach(async () => {
   vi.clearAllMocks();
+  mockLang = "zh";
   vi.mocked(fetchPersonalAssistant).mockResolvedValue({ assistant });
   vi.stubGlobal("vibelutionLauncher", { onConversationNotificationOpened: (callback: (value: unknown) => void) => { listener = callback; return () => undefined; } });
   router = createMemoryRouter([{ path: "*", element: <Host /> }], { initialEntries: ["/agents"] });
@@ -65,5 +68,16 @@ describe("main workbench assistant return", () => {
     await act(async () => old.resolve({ assistant })); await settle();
     expect(router.state.location.pathname).toBe("/chat");
     expect(router.state.location.search).toBe("?session=ordinary-session");
+  });
+  it("localizes the failure dialog to the active shell language", async () => {
+    mockLang = "en";
+    vi.mocked(fetchPersonalAssistant).mockRejectedValueOnce(new Error("identity offline"));
+    await act(async () => root.render(<RouterProvider router={router} />));
+    await opened("personal-session");
+    expect(document.body.textContent).toContain("Could not open the session");
+    const retry = [...document.querySelectorAll("button")].find(button => button.textContent === "Retry");
+    expect(retry).toBeDefined();
+    const close = [...document.querySelectorAll("button")].find(button => button.textContent === "Close");
+    expect(close).toBeDefined();
   });
 });

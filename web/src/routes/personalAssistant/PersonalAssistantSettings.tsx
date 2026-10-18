@@ -118,6 +118,7 @@ export function PersonalAssistantSettings({ open, onOpenChange }: {
       await updatePersonalAssistantSettings({ preferences: { characterId } });
       await queryClient.invalidateQueries({ queryKey: queryKeys.personalAssistant() });
       await queryClient.invalidateQueries({ queryKey: assistantSettingsKey });
+      setFeedback(copy.saved);
     } catch (error) {
       setFeedback(copy.saveFailed + (error instanceof Error ? error.message : ""));
     } finally {
