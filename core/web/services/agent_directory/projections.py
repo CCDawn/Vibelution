@@ -338,16 +338,20 @@ def build_agent_runtime_context_block(
         if isinstance(agent.get("toolPolicy"), dict)
         else s.resolve_tool_policy_for_agent(str(agent.get("agentId") or "").strip())
     )
-    max_calls = 0
     allowed_tools: list[str] = []
     if isinstance(tool_policy, dict):
-        try:
-            max_calls = int(tool_policy.get("maxCallsPerTurn") or 0)
-        except (TypeError, ValueError):
-            max_calls = 0
         raw_allowed = tool_policy.get("allowedTools")
         if isinstance(raw_allowed, list):
             allowed_tools = [str(item or "") for item in raw_allowed]
+    # 额度数字必须与授权层一致：会话覆盖 > 模型家族 > 策略 base，
+    # 不再直接引用 toolPolicy 的 base 值。
+    from core.orchestration.tool_budget_text import resolve_agent_scoped_max_calls_per_turn
+
+    max_calls, _budget_family = resolve_agent_scoped_max_calls_per_turn(
+        agent,
+        tool_policy if isinstance(tool_policy, dict) else None,
+        agent_id=str(agent.get("agentId") or agent_id or "").strip(),
+    )
     budget_lines = _runtime_tool_budget_lines(max_calls, allowed_tools)
     lines = [
         "## Agent Runtime Context",

@@ -71,3 +71,25 @@ class SessionModelParametersPayload(BaseModel):
     expectedConfigRevision: StrictInt = Field(ge=0)
     contextWindow: StrictInt = Field(gt=0)
     reasoningEffort: str = Field(max_length=40)
+
+
+class SessionBudgetParametersResponse(BaseModel):
+    """Per-session budget overrides; null fields fall back to default resolution."""
+
+    revision: int = Field(ge=0)
+    maxCallsPerTurn: int | None = None
+    thinkingBudgetChars: int | None = None
+
+
+class SessionBudgetParametersPayload(BaseModel):
+    """CAS update for per-session budget overrides.
+
+    ``revision`` must match the current revision (409 otherwise). Omitted or
+    null fields clear the override back to defaults.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    revision: StrictInt = Field(ge=0)
+    maxCallsPerTurn: StrictInt | None = None
+    thinkingBudgetChars: StrictInt | None = None

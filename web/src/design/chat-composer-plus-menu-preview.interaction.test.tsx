@@ -344,6 +344,48 @@ describe("chat composer plus menu preview loop", () => {
     expect(refRowAfterRemove?.textContent).not.toContain("代码审查 · 今天");
   });
 
+  it("opens the budget dialog from the capabilities section and mocks a save", async () => {
+    const host = await mountPreview();
+
+    await act(async () => {
+      buttonByLabel("更多操作")?.click();
+    });
+
+    const budget = buttonByLabel("预算与额度");
+    expect(budget).toBeTruthy();
+    const capabilities = document.body.querySelector('[role="group"][aria-label="对话能力"]');
+    expect(capabilities?.textContent).toContain("预算与额度");
+
+    await act(async () => {
+      budget?.click();
+    });
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("预算与额度");
+    const maxCalls = dialog?.querySelector<HTMLInputElement>('input[aria-label="每回合工具调用额度"]');
+    const thinking = dialog?.querySelector<HTMLInputElement>('input[aria-label="思考预算字数"]');
+    expect(maxCalls).toBeTruthy();
+    expect(maxCalls?.value).toBe("32");
+    expect(thinking?.value).toBe("");
+
+    await act(async () => {
+      setInputValue(thinking!, "800");
+    });
+    await act(async () => {
+      buttonByLabel("清除工具调用额度，恢复默认")?.click();
+    });
+    expect(maxCalls?.value).toBe("");
+
+    await act(async () => {
+      Array.from(dialog?.querySelectorAll("button") ?? [])
+        .find((button) => button.textContent?.trim() === "保存")
+        ?.click();
+    });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(host.textContent).toContain("已模拟保存预算与额度");
+    expect(host.textContent).toContain("按模型策略");
+    expect(host.textContent).toContain("800 字");
+  });
+
   it("opens the inline slash palette from composer typing and never from the plus menu", async () => {
     const host = await mountPreview();
     const textarea = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="发送消息"]');

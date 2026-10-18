@@ -9,6 +9,7 @@ The service is the sole flow/run state owner. The existing Team namespace suppli
 - `binding.py`: explicit recovery-role opt-in, live authorization checks, policy fingerprints, expiry and CAS revocation over the existing source flow.
 - `result_contract.py`: bounded validation of opt-in business outcomes after canonical native Turn success; default text results remain compatible.
 - `recovery.py`: bounded failure escalation, frozen repair recipes, child-run coordination and safe replay decisions.
+- `research_source.py`: read-only formal Ledger references, bounded retry lineage and native command replay; `supervision.py` projects these facts into the existing repair coordinator.
 - `runtime.py`: one owned reconciliation worker. Reads do not dispatch. Startup waits for native Session recovery; delayed callbacks are fenced by the lifespan stop flag under the admission lock. Shutdown closes this producer before native Session workers.
 
 Retry may create a new attempt only after canonical evidence permits it. Unknown Session identity or active-state uncertainty fails visibly and prevents duplicate execution or false stop success. Flow/run lists remain readable while execution is warming; artifact projection waits for the owner. Membership and Agent availability are checked again before dispatch. No raw model invocation or changes to ordinary Session core are introduced.
@@ -160,3 +161,58 @@ Session-wide grant was added. This proves the recovery sequence and original
 step acceptance; it does not prove unattended mutation approval, automatic Git
 integration or platform-wide failure-source coverage. The earlier denied-write
 rehearsal remained blocked after independent review, without false resolution.
+
+## Explicit research-node supervision
+
+An additive `research` step declares `researchSource: {runId, nodeId}`. A source
+supervisor flow has exactly this one step, no fields, owner, instruction or
+business-result contract. Save it through the existing flow API, bind the four
+roles through the existing recovery-binding endpoint, then start it with empty
+values and a stable idempotency key. Unbound or legacy opt-in cannot supervise a
+research node. The ordinary workflow editor excludes these API-only recipes and
+their runs; no source-authoring UI or platform-wide automatic opt-in is added.
+
+The native formal Ledger is the source task authority. A supervisor stores only
+derived attempt identities, problem codes and repair state, with no second
+transcript or source-task writer. It observes only the exact Team/run/node,
+walks the native `retry_of_node_run_id` chain (maximum 120 attempts), and rejects
+disconnected or corrupt lineages. Repeated scans do not create attempts or
+consume retry budget. Three consecutive distinct attempts with the same known
+retryable problem code, or exhaustion of the native retry allowance, queue one
+existing director/developer/reviewer repair child. Different problem codes do
+not count as the same failure. Unknown problems, human decisions, invalid budget
+contracts and unsettled executions are excluded from automatic repair/replay.
+The shared research archive switch also blocks repair admission and replay,
+including when archive mode is enabled after the native runtime was configured;
+success/cancellation observations remain read-only.
+
+Before the repair threshold, the native research scheduler continues owning its
+retries. After independent repair verification, safe replay uses the existing
+formal `RETRY_NODE` command with a durable attempt-scoped key, exact run-version
+CAS, and native readiness/resource-budget checks. The adapter separately checks
+the retry-count allowance because the canonical command handler does not enforce
+that count. It reads the frozen `input_snapshot_json.budgetPolicy` and the
+operator's widening `safety_limits_json` delta; legacy limits are dual-read.
+Infrastructure ancestry is uncharged only when the existing taxonomy says so.
+Missing limits do not grant capacity. Exhausted allowance waits for an existing
+native operator budget decision; recovery never refunds, extends or relabels it.
+An explicit retry of the supervisor retries admission after that decision. It
+cannot override an `unknown` replay-safety classification.
+
+Replay intent is durable before native submission. An interrupted response
+recovers the same native command receipt, including after the source has moved.
+The source is checked at repair admission and immediately before each native
+repair Turn submission. If the native scheduler advances independently, the
+obsolete child is stopped; a successful source node resolves the issue. A repair
+verdict or command receipt alone cannot resolve it. Only one live supervisor per
+native source is accepted across flows/request keys, and a stopped predecessor's
+repair execution must settle before a replacement is admitted. Stopping the
+supervisor stops its repair child, while the native research task remains under
+its original owner.
+
+These contracts are covered by temporary real Ledger/CommandService tests and
+supervisor integration tests. They are local verification, not a deployed
+multi-Agent research acceptance run. Ordinary Sessions remain outside automatic
+aggregation: manual regeneration currently rewrites the original journal branch
+and provides no durable cross-retry lineage. Supporting them requires a separate
+native retry contract rather than guessing from message text or copying prompts.

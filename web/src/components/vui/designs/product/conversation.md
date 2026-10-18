@@ -372,12 +372,33 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ### 功能
 桌面端 Chat composer 的统一扩展入口。单栏纵向分组菜单：每个分组带小节标题，动作行单行紧凑，能力开关行以内联勾选态直接展示；不出现二级面板或第三级菜单。打开后焦点落在首个可用项，↑/↓/Home/End 在可用项间循环，Escape 关闭。
 
+### 适用范围
+- **适用**：直连 Agent 会话与群聊房间的 composer 左下角扩展入口（群聊仅保留分组资料动作，能力开关整体禁用）。
+- **不适用**：陪伴模式（无 plus menu）；斜杠指令（输入框内联建议负责）；模型/权限/上下文用量（composer 工具栏负责）。
+
 ### 信息架构
 - `添加与引用`：文件附件（图片、文档）、会话引用；禁用行用 `disabledReason` 说明原因。
-- `对话能力`：心智模型、运行状态注入；行尾勾选标记表示 `开启`，无标记表示 `关闭`（`role="menuitemcheckbox"` + `aria-checked`）。
+- `对话能力`：心智模型、运行状态注入、输入建议开关；行尾勾选标记表示 `开启`，无标记表示 `关闭`（`role="menuitemcheckbox"` + `aria-checked`）。预算与额度入口（`budget-parameters`）也在本组：传入 `budget` 控制对象即渲染动作行，点击打开 `ChatComposerBudgetDialog` 弹窗（不出现二级面板）。
 - `会话与陪伴`：仅当存在直接会话绑定时出现，当前提供打开直接会话。
 - `群聊与团队`：管理群聊、打开团队（团队归属可用时）。
 - `引用工作区文件`、陪伴投喂/聊天/关怀只在设计预览中保留，生产数据通路未就绪前不渲染，避免给出无动作的入口。
+
+### 使用方式
+```tsx
+// 注入点在 useChatConversationSurfaceModel 的 composerLeadingControl；
+// budget 控制对象由 workbench 组装（query+mutation），未传即无入口。
+<ChatComposerPlusMenu
+  lang={lang}
+  labels={{ ...t 合成的文案契约, composerBudgetEntry: t("composerBudgetEntry") }}
+  budget={composerBudgetControl ?? null}
+  /* …既有附件/引用/能力开关 props… */
+/>
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| budget | `ChatComposerBudgetControl \| null` | 提供 `sessionId/revision/两个限额/存取状态/onSave`；群聊与陪伴面不传 |
+| capabilityDisabled | 会话级禁用 | 与能力开关同一门：无 activeSession 时禁用预算入口 |
 
 ### 边界
 - 斜杠指令仍由输入框内联建议负责，不进入加号菜单。
@@ -395,6 +416,58 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ### 反冗余
 - 不重新引入悬停聚类 + 右侧二级面板或两栏等高外壳。
 - 不替代 composer 工具栏或斜杠内联建议。
+
+## ChatComposerBudgetDialog
+
+### 功能
+Composer 加号菜单「预算与额度」入口打开的会话级预算配置弹窗：两个数字输入——每回合工具调用额度（1–200）与思考预算字数（50–4000）。完整复用 `ConversationTurnModelControl` 的 draft+dirty+校验+显式保存范式：草稿只在会话切换或保存落地时重置；revision 刷新（含 409 冲突）不冲掉操作者草稿；输入为空即「清除/恢复默认」，保存时提交 `null`。
+
+### 适用范围
+- **适用**：直连 Agent 会话（普通会话面）的预算参数查看与修改；保存走 `PATCH /api/sessions/{id}/budget-parameters`，revision 冲突时经失效刷新拿最新值并提示重试。
+- **不适用**：群聊房间（能力开关整体禁用，无入口）、陪伴模式、金融面（查询在 workbench 层即关闭）；不承担模型上下文/思考强度配置（`ConversationTurnModelControl` 负责）。
+
+### 使用方式
+```tsx
+// 由 ChatComposerPlusMenu 内部渲染；budget 控制对象来自
+// ChatCodingRouteWorkbench 的 sessionBudgetParametersQuery/Mutation。
+<ChatComposerBudgetDialog
+  open={budgetDialogOpen}
+  onOpenChange={setBudgetDialogOpen}
+  lang={lang}
+  labels={resolvedLabels}
+  sessionId={budget.sessionId}
+  revision={budget.revision}
+  maxCallsPerTurn={budget.maxCallsPerTurn}
+  thinkingBudgetChars={budget.thinkingBudgetChars}
+  loading={budget.loading}
+  error={budget.error}
+  pending={budget.pending}
+  errorMessage={budget.errorMessage}
+  onSave={budget.onSave}
+/>
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| revision | 服务端乐观锁版本 | 未取到前保存禁用；409 后经失效刷新拿新值重试 |
+| maxCallsPerTurn / thinkingBudgetChars | `number \| null` | null=按默认策略；空输入在保存时提交 null |
+| pending / errorMessage | 保存态与错误文案 | pending 时输入、清除、取消、保存全部禁用；保存期间 composer 同步禁用 |
+
+### 行为
+- 校验域与服务端 422 对齐：maxCallsPerTurn ∈ [1,200]、thinkingBudgetChars ∈ [50,4000]，非整数/越界即时报错且禁用保存；空串合法=清除。
+- 每字段带「清除，恢复默认」按钮（RotateCcw 图标），等价于把输入清空。
+- 保存成功（pending 回落且无错误）后草稿重置为服务端真值；关闭弹窗丢弃未保存草稿。
+
+### 实现落点
+- 源码：`web/src/routes/chat/ChatComposerBudgetDialog.tsx`（校验函数 `validateSessionBudgetField` 与限额常量一并导出供测试）
+- 样式：`web/src/routes/chat/ChatComposerBudgetDialog.styles.ts`
+- API：`web/src/api/chat.ts` 的 `fetchSessionBudgetParameters` / `updateSessionBudgetParameters`；类型在 `web/src/api/types/chat.ts`
+- 隔离预览：`web/src/design/chat-composer-plus-menu-preview.tsx`（mock 保存，不调真实 API）
+
+### 反冗余
+- 不新建第二套数字校验或弹窗骨架；draft+409 语义照抄 `ConversationTurnModelControl`，不另立「自动保存」。
+- 不把预算配置塞回工具栏或状态栏；入口只有加号菜单一处。
+
 
 ## Composer 引用候选（@ type-ahead）
 

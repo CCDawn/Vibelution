@@ -2587,6 +2587,24 @@ def _session_turn_token_budget_line(
     return DEFAULT_SESSION_TOKEN_BUDGET, "session_default"
 
 
+def _sync_agent_turn_status_token_budget(agent: Any, *, used: int, total: int) -> None:
+    """Push the session token-fuse counters into the agent's status-bar payload.
+
+    The Turn Status Bar payload is rebuilt inside every agent iteration; the
+    worker owns the cumulative session-token counter, so it refreshes the
+    agent-side values before each continuation-loop invocation. Failures stay
+    soft: the bar must never break the turn.
+    """
+
+    setter = getattr(agent, "set_session_token_budget", None)
+    if not callable(setter):
+        return
+    try:
+        setter(used=max(0, int(used or 0)), total=max(0, int(total or 0)))
+    except Exception:  # noqa: BLE001 - status-bar data path is best-effort
+        return
+
+
 def _run_session_continuation_loop(
     agent: Any,
     *,
@@ -2842,6 +2860,13 @@ def _run_session_continuation_loop(
                 # Rebinding per iteration: run_single_turn clears turn-local
                 # callbacks in its finally block after every agent call.
                 guidance_configurer(guidance_provider if callable(guidance_provider) else None)
+            # Refresh the token_budget fields (used/total) the agent's Turn
+            # Status Bar payload carries into every iteration of this call.
+            _sync_agent_turn_status_token_budget(
+                agent,
+                used=cumulative_session_tokens,
+                total=token_budget_line,
+            )
             result = s.run_existing_agent_single_turn(
                 agent,
                 initial_prompt=prompt,

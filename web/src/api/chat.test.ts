@@ -103,6 +103,23 @@ describe("Chat session tool approval API", () => {
     expect(mutationSource).not.toContain("/reasoning-effort");
   });
 
+  it("owns session budget parameter transports outside the chat route layer", () => {
+    expect(apiSource).toContain("export function fetchSessionBudgetParameters");
+    expect(apiSource).toContain("export function updateSessionBudgetParameters");
+    expect(apiSource).toContain("/budget-parameters");
+    expect(apiSource).toContain("parameters: SessionBudgetParametersUpdate");
+    expect(chatTypesSource).toContain("export type SessionBudgetParameters = {");
+    expect(chatTypesSource).toContain("export type SessionBudgetParametersUpdate = {");
+    expect(detailQueriesSource).toContain("fetchSessionBudgetParameters");
+    expect(detailQueriesSource).toContain("sessionBudgetParametersQuery");
+    expect(mutationSource).toContain("updateSessionBudgetParameters");
+    expect(mutationSource).toContain("sessionBudgetParametersMutation");
+    // The workbench composes the query/mutation hooks; it never builds the URL.
+    expect(routeSource).toContain("sessionBudgetParametersQuery");
+    expect(routeSource).toContain("sessionBudgetParametersMutation");
+    expect(routeSource).not.toContain("/budget-parameters");
+  });
+
   it("owns branch head and base-message transport outside the render layer", () => {
     expect(apiSource).toContain("export function switchSessionHead");
     expect(apiSource).toContain("/head");
