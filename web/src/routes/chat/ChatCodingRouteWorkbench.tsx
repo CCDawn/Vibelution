@@ -174,7 +174,7 @@ import { ChatCodingStatusRail } from "./ChatCodingStatusRail";
 import { recordConversationStreamingFramePaint } from "./recordConversationStreamingFramePaint";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import { ChatComposerPlusMenu, type ChatComposerSessionReferenceOption } from "./ChatComposerPlusMenu";
-import type { ChatComposerBudgetControl } from "./ChatComposerBudgetDialog";
+import type { ChatComposerBudgetControl } from "./ChatComposerBudgetPopover";
 import {
   describeChatRouteError as describeError,
   isBusyPhase,

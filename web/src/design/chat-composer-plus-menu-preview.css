@@ -697,6 +697,18 @@ body {
   gap: 12px;
 }
 
+.plus-menu-preview-budget-panel {
+  width: 320px;
+  max-width: calc(100vw - 1.5rem);
+}
+
+.plus-menu-preview-budget-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .plus-menu-preview-group-field-row {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);

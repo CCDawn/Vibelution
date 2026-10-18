@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VuiProvider } from "../../components/vui";
 import { ChatComposerPlusMenu, ChatComposerSessionReferencesContext, type ChatComposerPlusMenuProps } from "./ChatComposerPlusMenu";
-import type { ChatComposerBudgetControl } from "./ChatComposerBudgetDialog";
+import type { ChatComposerBudgetControl } from "./ChatComposerBudgetPopover";
 
 import source from "./ChatComposerPlusMenu.tsx?raw";
 import stylesSource from "./ChatComposerPlusMenu.styles.ts?raw";
@@ -76,11 +76,11 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).not.toContain('role="option"');
   });
 
-  it("gates the budget entry on the injected control and opens it as a dialog", () => {
-    expect(source).toContain('id: "budget-parameters"');
-    expect(source).toContain("<ChatComposerBudgetDialog");
+  it("gates the budget entry on the injected control and opens it as a side popover", () => {
+    expect(source).toContain("<ChatComposerBudgetPopover");
+    expect(source).toContain('data-plus-menu-item="true"');
     // Entry presence is prop-gated (group/companion/finance surfaces pass nothing).
-    expect(source).toContain("budget ? renderAction({");
+    expect(source).toContain("{budget ? (");
   });
 });
 
@@ -126,7 +126,7 @@ describe("composer budget entry interaction", () => {
     await renderMenu(undefined);
     expect(budgetEntry()).toBeUndefined();
   });
-  it("opens the budget dialog from the capabilities section when the control is present", async () => {
+  it("opens the budget side popover from the capabilities section when the control is present", async () => {
     await renderMenu(budgetControl);
     const entry = budgetEntry();
     expect(entry).toBeDefined();
@@ -134,8 +134,8 @@ describe("composer budget entry interaction", () => {
     const capabilities = document.body.querySelector('[data-testid="chat-composer-plus-conversation-capabilities"]');
     expect(capabilities?.textContent).toContain("预算与额度");
     await act(async () => entry!.click());
-    const dialog = document.body.querySelector('[role="dialog"]');
-    expect(dialog?.textContent).toContain("预算与额度");
+    const panel = document.body.querySelector('[data-testid="chat-composer-budget-popover-body"]');
+    expect(panel?.textContent).toContain("预算与额度");
   });
   it("keeps the budget entry disabled while the session capability gate is off", async () => {
     await renderMenu(budgetControl, true);
