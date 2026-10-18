@@ -74,4 +74,19 @@ describe("personal assistant overview transport", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(last)));
     await expect(fetchPersonalAssistantOverview()).rejects.toThrow("分页期间已变化");
   });
+  it("accepts additive knowledge/anomaly docks without treating them as Session approvals", async () => {
+    seedControlTokenForTests();
+    const overview = page(0, null);
+    overview.counts.waiting = 1;
+    overview.attention = [
+      { id: "approval-1", kind: "approval", title: "待审批" },
+      { id: "review-1", kind: "knowledge_review", title: "待复核" },
+      { id: "anomaly-1", kind: "anomaly", title: "异常" },
+    ];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(overview)));
+    expect((await fetchPersonalAssistantOverview()).attention).toHaveLength(3);
+    overview.attention = overview.attention.filter(row => row.kind !== "approval");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(overview)));
+    await expect(fetchPersonalAssistantOverview()).rejects.toThrow("不完整");
+  });
 });

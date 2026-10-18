@@ -6,6 +6,7 @@ import json
 import re
 import threading
 import uuid
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -1632,7 +1633,7 @@ def start_research_project_agent_task(
                     source_session_id=str(task.get("sessionId") or ""),
                     label=str(contract.get("title") or ""),
                     output=str(task.get("taskTitle") or ""),
-                )
+                ) | {"teamId": normalized_team_id, "researchProjectId": normalized_project_id}
             )
         except Exception:
             pass
@@ -1706,21 +1707,7 @@ def start_research_project_agent_task(
         stored["failureCode"] = failure_code
         stored["updatedAt"] = s.utc_now_iso()
         _write_store(normalized_team_id, normalized_project_id, store)
-        # Mirror the post-submit status into the runtime task registry;
-        # blocked/failed leave the active index, running stays watched.
-        try:
-            registry_store = runtime_tasks.default_store()
-            if registry_store.get_task(task_id):
-                registry_store.update_task(
-                    task_id,
-                    lambda snapshot: {
-                        **snapshot,
-                        "status": next_status,
-                        "updatedAt": stored["updatedAt"],
-                    },
-                )
-        except Exception:
-            pass
+        _publish_runtime_task_status(normalized_team_id, normalized_project_id, stored)
         task = stored
 
     s._record_workflow_event(
@@ -1745,6 +1732,52 @@ def start_research_project_agent_task(
         reason="first_experiment_task",
     )
     return _task_response(task, idempotent_replay=False)
+
+
+def _publish_runtime_task_status(team_id: str, project_id: str, task: dict[str, Any]) -> bool:
+    """Publish persisted business facts to an existing, identity-matched registry row.
+
+    The project task remains authoritative. Missing rows are never recreated;
+    periodic recovery retries failed publication without changing the verdict.
+    """
+    task_id = _text(task.get("taskId"))
+    session_id = _text(task.get("sessionId"))
+    turn_id = _text((task.get("turn") or {}).get("turnId"))
+    status = _text(task.get("status"))
+    projection = {
+        "status": status,
+        "teamId": team_id,
+        "researchProjectId": project_id,
+        "sourceTurnId": turn_id,
+        "resultSummary": ";".join(task.get("resultRefs") or [])[:400],
+        "failureCode": _text(task.get("failureCode"), limit=120),
+        "updatedAt": _text(task.get("updatedAt")),
+        "completedAt": _text(task.get("updatedAt")) if runtime_tasks.is_terminal_status(status) else "",
+    }
+    changed = False
+
+    def publish(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+        nonlocal changed
+        if (snapshot.get("kind") != runtime_tasks.KIND_RESEARCH_TASK
+                or snapshot.get("sourceSessionId") != session_id
+                or (snapshot.get("sourceTurnId") and snapshot["sourceTurnId"] != turn_id)):
+            return None
+        if all(snapshot.get(key, "") == value for key, value in projection.items()):
+            return None
+        changed = True
+        return {**snapshot, **projection}
+
+    try:
+        runtime_tasks.default_store().update_task(task_id, publish)
+    except Exception as exc:
+        _service()._record_workflow_event(
+            "research_project_agent_task_registry_sync_failed", team_id,
+            fields={"researchProjectId": project_id, "taskId": task_id,
+                    "status": status, "errorType": type(exc).__name__},
+            outcome="failed", level="warning",
+        )
+        return False
+    return changed
 
 
 def update_research_project_agent_task_status(
@@ -1795,23 +1828,7 @@ def update_research_project_agent_task_status(
         task["failureCode"] = _text(failure_code, limit=120)
         task["updatedAt"] = s.utc_now_iso()
         _write_store(normalized_team_id, normalized_project_id, store)
-        # Mirror trusted reconciler status updates into the runtime task
-        # registry when the task is registered there (update-if-present:
-        # pre-registry tasks are not backfilled).
-        try:
-            registry_store = runtime_tasks.default_store()
-            if registry_store.get_task(normalized_task_id):
-                registry_store.update_task(
-                    normalized_task_id,
-                    lambda snapshot: {
-                        **snapshot,
-                        "status": normalized_status,
-                        "resultSummary": ";".join(normalized_refs)[:400],
-                        "updatedAt": task["updatedAt"],
-                    },
-                )
-        except Exception:
-            pass
+        _publish_runtime_task_status(normalized_team_id, normalized_project_id, task)
         return _public_task(task)
 
 
@@ -1878,6 +1895,8 @@ def _task_needs_session_reconciliation(task: dict[str, Any]) -> bool:
 def reconcile_research_project_agent_task_statuses(
     team_id: str,
     research_project_id: str,
+    *,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> dict[str, Any]:
     """Explicit maintenance entry: align active tasks with session truth.
 
@@ -1908,6 +1927,8 @@ def reconcile_research_project_agent_task_statuses(
         with _TASK_LOCK:
             store = _read_store(normalized_team_id, normalized_project_id)
             for target_id in target_ids:
+                if should_stop():
+                    break
                 task = next(
                     (
                         item
@@ -1978,7 +1999,13 @@ def reconcile_research_project_agent_task_statuses(
                 else:
                     outcomes.append({"taskId": target_id, "action": "unchanged"})
             if changed:
+                if should_stop():
+                    return {"checked": len(target_ids), "reconciled": 0,
+                            "failedSessionUnreadable": [], "outcomes": []}
                 _write_store(normalized_team_id, normalized_project_id, store)
+                for item in store["tasks"]:
+                    if item.get("taskId") in target_ids:
+                        _publish_runtime_task_status(normalized_team_id, normalized_project_id, item)
     failed_unreadable = [
         item["taskId"]
         for item in outcomes
