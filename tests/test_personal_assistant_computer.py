@@ -72,10 +72,10 @@ def observe():
     return result["observationId"]
 
 
-def pending_action(token, **kwargs):
+def pending_action(token, text="hello", **kwargs):
     result = []
     worker = threading.Thread(target=lambda: result.append(service.execute(
-        OWNER, action="set_value", observation_id=token, element_id="0", text="hello", cancel_checker=lambda: "", **kwargs)))
+        OWNER, action="set_value", observation_id=token, element_id="0", text=text, cancel_checker=lambda: "", **kwargs)))
     worker.start()
     deadline = time.monotonic() + 2
     while service.get_state()["pending"] is None:
@@ -84,17 +84,21 @@ def pending_action(token, **kwargs):
     return worker, result, service.get_state()["pending"]["id"]
 
 
-def test_every_action_waits_for_operator_and_one_shot_confirm(computer):
+@pytest.mark.parametrize("text", ["hello", ""])
+def test_every_action_waits_for_operator_and_one_shot_confirm(computer, text):
     grant_id, _, calls, _ = computer
     token = observe()
-    worker, result, confirmation = pending_action(token)
+    worker, result, confirmation = pending_action(token, text=text)
     assert calls == []
     assert "内容" in service.get_state()["pending"]["targetLabel"]
+    pending_text = service.get_state()["pending"]["text"]
     service.confirm(grant_id, confirmation, True)
     worker.join(2)
     assert not worker.is_alive()
+    # Clearing a field is a text operation too, not a missing text parameter.
+    assert pending_text == text
     assert result[0]["verified"] is True
-    assert calls[0][:2] == ("set_value", "hello")
+    assert calls[0][:2] == ("set_value", text)
     with pytest.raises(ValueError):
         service.confirm(grant_id, confirmation, True)
     assert not service.execute(OWNER, action="set_value", observation_id=token, element_id="0", text="again", cancel_checker=lambda: "")["ok"]
