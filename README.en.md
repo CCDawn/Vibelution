@@ -28,6 +28,7 @@ Assign planning, development, and review to different Agents. See their responsi
 | --- | --- |
 | [Start a conversation or coding task](#conversation) | Organize sessions by Agent and team; inspect tool activity and workspace artifacts. |
 | [Work as a team](#teams) | Define member roles and coordinate through the canvas, group chat, and member sessions. |
+| [Get help from a personal assistant](#personal-assistant) | Organize daily tasks and goals, check platform status, and manage Agents and sessions through authorized tools. |
 | [Keep material for next time](#knowledge) | Manage private memory and formal knowledge; browse topics and trace sources. |
 | [Improve through verification](#evolution) | Follow baselines, candidates, reevaluation, review, and runtime activation. |
 | [Conduct financial research](#finance) | Organize research, market data, simulated assets, and reports in a dedicated workspace. |
@@ -129,6 +130,22 @@ Continue everyday conversations in character scenes. Configure identity, schedul
 *The screenshot shows the conversation interface. Proactive scheduling and animated presentation depend on runtime support. Character names and third-party assets belong to their respective rights holders.*
 
 [Virtual-human plugin](core/agent_plugins/virtual_human_life/README.md)
+
+<a id="personal-assistant"></a>
+## 06 / A personal assistant for your tasks and goals
+
+Bring daily tasks, near-term goals, and work across the platform into one conversation. Your first visit to the **Personal assistant** page initializes a dedicated Agent and session. Configure a model to start chatting.
+
+| What you can ask for | Available capabilities |
+| --- | --- |
+| Organize tasks and goals | Discuss your to-do list, break down the next step, and record preferences and goals in the assistant's own private memory. |
+| Check platform status | View Agents, sessions, activity, and items awaiting confirmation; filter by status and open the relevant session. |
+| Manage on request | Create, update, or archive Agents; create, stop, or delete sessions. Management actions go through the platform's tool approval flow. |
+| Keep chatting on the desktop | Use a floating window on Windows. The page and desktop mode share one assistant identity, session, and memory. |
+
+Try asking: **"Check which tasks are running, awaiting confirmation, or in an error state, and suggest what I should do. Observe first; do not make changes."**
+
+The floating window requires the Windows desktop workbench. [Model configuration](docs/ops/config/INDEX.md) · [Tool authorization](docs/agents/tool-authorization-entrypoints.md)
 
 ## Configure the workbench your way
 
