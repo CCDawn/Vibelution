@@ -1,0 +1,720 @@
+"""Human-attention sources aggregated into the assistant overview feed.
+
+
+双通道人工注意通知的后端聚合层：把「需要人工注意」的停靠项投影成
+
+overview ``attention`` 条目。只做轮询聚合（overview GET 已有轮询），不加
+
+推送通道。两类来源都以阶段任务存储为权威（纯文件只读，任何进程可读）：
+
+
+- ``knowledge_review`` —— 知识入库复核停靠（阶段任务 ``stageId ==
+
+  ingestion`` 且 ``status == needs_review``，即入库提案已完成、停在治理
+
+  复核门）。真实停靠形态是阶段任务记录（writeback closureSummary 的
+
+  ``knowledge_review_pending``），不是候选存储状态——候选店里的
+
+  ``steward_pending_*`` 状态属于另一条源审查链，不在此重复投影。
+
+- ``anomaly`` —— 人工升级项（阶段任务带非空 ``anomalyEscalation``，如
+
+  失败规划师的 escalate_human 裁决），加上 state-v2 异常收件箱投影的
+
+  critical/high 条目（``anomaly_inbox_service.build_anomaly_inbox`` 合同
+
+  投影；需要进程内 formal read runtime，未配置时整源静默跳过，不阻塞）。
+
+
+同一条任务既停靠复核又带升级时只按 ``anomaly`` 报一次，避免一条停靠弹
+
+两个通知。
+
+
+severity 只使用异常收件合同冻结的 ``ANOMALY_SEVERITY_*`` 值；
+
+``knowledge_review`` 固定映射为 ``high``（流程停在人工复核门，等待人决
+
+定）。防爆炸：两类新源各自设上限并按 severity 降序；单团队/单文件/单题
+
+目读取失败降级为跳过该范围，绝不阻塞 overview 主路径。条目字段对既有
+
+approval/error 条目只增不改：``id``（任务 id / anomaly 键，跨轮询稳
+
+定）、``kind``、``severity``、``title``、``targetUrl``（前端路由路
+
+径）、可选 ``body``。
+
+"""
+
+
+from __future__ import annotations
+
+
+import json
+
+from pathlib import Path
+
+from typing import Any, Iterator
+
+from urllib.parse import urlencode
+
+
+from core.research.workflow.contracts.anomaly_inbox import (
+
+    ANOMALY_SEVERITY_CRITICAL,
+
+    ANOMALY_SEVERITY_HIGH,
+
+    ANOMALY_SEVERITY_RANK,
+
+)
+
+
+ATTENTION_KIND_KNOWLEDGE_REVIEW = "knowledge_review"
+
+ATTENTION_KIND_ANOMALY = "anomaly"
+
+
+MAX_KNOWLEDGE_REVIEW_ITEMS = 20
+
+MAX_ANOMALY_ITEMS = 20
+
+
+_STAGE_ID_INGESTION = "ingestion"
+
+_STAGE_STATUS_NEEDS_REVIEW = "needs_review"
+
+_MAX_TASK_STORES_PER_TEAM = 500
+
+_NOTIFIED_SEVERITIES = frozenset({ANOMALY_SEVERITY_CRITICAL, ANOMALY_SEVERITY_HIGH})
+
+_TITLE_LIMIT = 80
+
+_TEAM_NAME_LIMIT = 48
+
+_CHALLENGE_CUP_WORKFLOW_ID = "challenge-cup-research"
+
+
+
+def _clip(value: Any, *, limit: int) -> str:
+
+    text = " ".join(str(value or "").split())
+
+    if len(text) > limit:
+
+        return f"{text[: limit - 1]}…"
+
+    return text
+
+
+
+def _active_teams() -> list[dict[str, str]]:
+
+    """Read-only team references (no canvas or chat-room hydration)."""
+
+
+    from core.web.services import team_service
+
+
+    try:
+
+        listing = team_service.list_team_graph_references()
+
+    except Exception:  # noqa: BLE001 - an unavailable team index is not an attention error
+
+        return []
+
+    teams: list[dict[str, str]] = []
+
+    for row in listing.get("teams") or []:
+
+        if not isinstance(row, dict):
+
+            continue
+
+        team_id = str(row.get("teamId") or "").strip()
+
+        if not team_id:
+
+            continue
+
+        teams.append(
+
+            {
+
+                "teamId": team_id,
+
+                "teamName": _clip(row.get("name") or team_id, limit=_TEAM_NAME_LIMIT),
+
+            }
+
+        )
+
+    return teams
+
+
+
+def _research_workspace_url(
+
+    team_id: str, extra: dict[str, str] | None = None
+
+) -> str:
+
+    params = {
+
+        "teamId": team_id,
+
+        "researchView": "workflow",
+
+        "workflowId": _CHALLENGE_CUP_WORKFLOW_ID,
+
+        **(extra or {}),
+
+    }
+
+    return "/teams?" + urlencode(params)
+
+
+
+def _task_summary_text(task: dict[str, Any]) -> str:
+
+    summary = str(task.get("summary") or "").strip()
+
+    if summary:
+
+        return summary
+
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+
+    closure = (
+
+        writeback.get("closureSummary")
+
+        if isinstance(writeback.get("closureSummary"), dict)
+
+        else {}
+
+    )
+
+    return str(closure.get("message") or "").strip()
+
+
+
+def _iter_stage_tasks(team_id: str) -> Iterator[tuple[str, dict[str, Any]]]:
+
+    """Yield ``(research_project_id, task)`` from a team's stage task stores.
+
+
+    Pure file reads over ``research_projects/*/workspace/
+
+    source_collection_runs/*/stage_session_tasks.json``; one unreadable store
+
+    is skipped, never raised. Bounded so a runaway directory cannot stall the
+
+    overview poll.
+
+    """
+
+
+    from core.web.services.team_workflow.research_projects import (
+
+        formal_team_workspace_root,
+
+    )
+
+
+    try:
+
+        projects_root = formal_team_workspace_root(team_id) / "research_projects"
+
+        if not projects_root.is_dir():
+
+            return
+
+        run_stores = sorted(
+
+            projects_root.glob(
+
+                "*/workspace/source_collection_runs/*/stage_session_tasks.json"
+
+            )
+
+        )
+
+    except Exception:  # noqa: BLE001 - path resolution failure is not an attention error
+
+        return
+
+    for store_path in run_stores[:_MAX_TASK_STORES_PER_TEAM]:
+
+        try:
+
+            payload = json.loads(store_path.read_text(encoding="utf-8"))
+
+        except (OSError, ValueError):
+
+            continue
+
+        tasks = payload.get("tasks") if isinstance(payload, dict) else None
+
+        if not isinstance(tasks, list):
+
+            continue
+
+        try:
+
+            relative = store_path.relative_to(projects_root)
+
+            project_id = relative.parts[0]
+
+        except ValueError:
+
+            continue
+
+        for task in tasks:
+
+            if isinstance(task, dict):
+
+                yield project_id, task
+
+
+
+def _escalation_severity(task: dict[str, Any]) -> str:
+
+    escalation = task.get("anomalyEscalation")
+
+    if not isinstance(escalation, dict):
+
+        return ANOMALY_SEVERITY_CRITICAL
+
+    items = escalation.get("items")
+
+    best = ""
+
+    if isinstance(items, list):
+
+        for item in items:
+
+            if not isinstance(item, dict):
+
+                continue
+
+            severity = str(item.get("severity") or "").strip()
+
+            if severity in ANOMALY_SEVERITY_RANK and (
+
+                not best or ANOMALY_SEVERITY_RANK[severity] < ANOMALY_SEVERITY_RANK[best]
+
+            ):
+
+                best = severity
+
+    return best or ANOMALY_SEVERITY_CRITICAL
+
+
+
+def collect_stage_task_attention(
+
+    *,
+
+    knowledge_review_limit: int = MAX_KNOWLEDGE_REVIEW_ITEMS,
+
+    anomaly_limit: int = MAX_ANOMALY_ITEMS,
+
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+
+    """Aggregate stage-task docks into (knowledge_review, anomaly) entries."""
+
+
+    knowledge_review: list[dict[str, str]] = []
+
+    anomaly: list[dict[str, str]] = []
+
+    for team in _active_teams():
+
+        for project_id, task in _iter_stage_tasks(team["teamId"]):
+
+            task_id = str(task.get("taskId") or "").strip()
+
+            if not task_id:
+
+                continue
+
+            target = _research_workspace_url(
+
+                team["teamId"],
+
+                {"researchProjectId": project_id, "panel": "progress"},
+
+            )
+
+            if isinstance(task.get("anomalyEscalation"), dict) and task["anomalyEscalation"]:
+
+                # Escalated docks report once as anomaly, never duplicated as
+
+                # knowledge_review even when they also sit at the review gate.
+
+                anomaly.append(
+
+                    {
+
+                        "id": f"escalation:{task_id}",
+
+                        "kind": ATTENTION_KIND_ANOMALY,
+
+                        "severity": _escalation_severity(task),
+
+                        "title": _clip(
+
+                            task.get("title") or "阶段任务等待人工处理",
+
+                            limit=_TITLE_LIMIT,
+
+                        ),
+
+                        "targetUrl": target,
+
+                        "body": _clip(
+
+                            f"{team['teamName']} · {project_id} · {_task_summary_text(task)}",
+
+                            limit=_TITLE_LIMIT,
+
+                        ),
+
+                    }
+
+                )
+
+                continue
+
+            if (
+
+                str(task.get("stageId") or "") == _STAGE_ID_INGESTION
+
+                and str(task.get("status") or "").strip().lower()
+
+                == _STAGE_STATUS_NEEDS_REVIEW
+
+            ):
+
+                knowledge_review.append(
+
+                    {
+
+                        "id": f"review:{task_id}",
+
+                        "kind": ATTENTION_KIND_KNOWLEDGE_REVIEW,
+
+                        "severity": ANOMALY_SEVERITY_HIGH,
+
+                        "title": _clip(
+
+                            task.get("title") or "知识入库复核",
+
+                            limit=_TITLE_LIMIT,
+
+                        ),
+
+                        "targetUrl": target,
+
+                        "body": _clip(
+
+                            f"{team['teamName']} · 入库提案已完成，等待治理复核。",
+
+                            limit=_TITLE_LIMIT,
+
+                        ),
+
+                    }
+
+                )
+
+    knowledge_review.sort(key=lambda row: ANOMALY_SEVERITY_RANK.get(row["severity"], 99))
+
+    anomaly.sort(key=lambda row: ANOMALY_SEVERITY_RANK.get(row["severity"], 99))
+
+    return (
+
+        knowledge_review[: max(0, knowledge_review_limit)],
+
+        anomaly[: max(0, anomaly_limit)],
+
+    )
+
+
+
+def collect_knowledge_review_attention(
+
+    *, limit: int = MAX_KNOWLEDGE_REVIEW_ITEMS
+
+) -> list[dict[str, str]]:
+
+    """Steward knowledge-review docks as attention entries."""
+
+
+    return collect_stage_task_attention(knowledge_review_limit=limit, anomaly_limit=0)[0]
+
+
+
+def _question_ids_with_state(team_id: str) -> list[str]:
+
+    """Distinct question ids that own chain records for one team (read-only)."""
+
+
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    from core.web.services.team_workflow.storage_durability import read_jsonl_cached
+
+
+    try:
+
+        path = hypothesis_first_chain._storage_path(team_id)
+
+        if not path.exists():
+
+            return []
+
+        records = read_jsonl_cached(path)
+
+    except Exception:  # noqa: BLE001 - an unreadable chain ledger degrades to no signal
+
+        return []
+
+    seen: list[str] = []
+
+    for record in records:
+
+        if not isinstance(record, dict):
+
+            continue
+
+        question_id = str(record.get("questionId") or "").strip().upper()
+
+        if question_id and question_id not in seen:
+
+            seen.append(question_id)
+
+    return sorted(seen)
+
+
+
+def _team_question_inbox(team_id: str, question_id: str):
+
+    """Contract inbox for one (team, question) scope; None on any read failure."""
+
+
+    from core.web.services.team_workflow.research_runtime import (
+
+        anomaly_inbox_service,
+
+        hypothesis_first_state_v2,
+
+    )
+
+
+    try:
+
+        snapshot = hypothesis_first_state_v2.project_hypothesis_first_state_v2(
+
+            team_id, question_id
+
+        )
+
+        return anomaly_inbox_service.build_anomaly_inbox(
+
+            snapshot,
+
+            gate_waits=anomaly_inbox_service.derive_gate_waits(snapshot),
+
+        )
+
+    except Exception:  # noqa: BLE001 - one broken scope must not hide the other scopes
+
+        return None
+
+
+
+def _state_v2_anomaly_entries() -> list[dict[str, str]]:
+
+    """Critical/high anomaly-inbox items projected from state-v2 snapshots."""
+
+
+    entries: list[dict[str, str]] = []
+
+    for team in _active_teams():
+
+        for question_id in _question_ids_with_state(team["teamId"]):
+
+            inbox = _team_question_inbox(team["teamId"], question_id)
+
+            if inbox is None:
+
+                continue
+
+            for item in inbox.items:
+
+                if item.severity not in _NOTIFIED_SEVERITIES:
+
+                    continue
+
+                scope = item.scope
+
+                scoped_question = scope.questionId or question_id
+
+                entries.append(
+
+                    {
+
+                        "id": "anomaly:"
+
+                        + "|".join(
+
+                            (
+
+                                scope.teamId or team["teamId"],
+
+                                scoped_question,
+
+                                scope.runId,
+
+                                scope.nodeId,
+
+                                scope.meetingRoundId,
+
+                                item.kind,
+
+                            )
+
+                        ),
+
+                        "kind": ATTENTION_KIND_ANOMALY,
+
+                        "severity": item.severity,
+
+                        "title": _clip(item.summary, limit=_TITLE_LIMIT),
+
+                        "targetUrl": _research_workspace_url(
+
+                            team["teamId"],
+
+                            {"questionId": scoped_question, "panel": "progress"},
+
+                        ),
+
+                        "body": _clip(
+
+                            f"{team['teamName']} · {scoped_question}",
+
+                            limit=_TITLE_LIMIT,
+
+                        ),
+
+                    }
+
+                )
+
+    entries.sort(key=lambda row: ANOMALY_SEVERITY_RANK.get(row["severity"], 99))
+
+    return entries
+
+
+
+def collect_anomaly_attention(
+
+    *, limit: int = MAX_ANOMALY_ITEMS
+
+) -> list[dict[str, str]]:
+
+    """Escalated stage tasks plus critical/high state-v2 inbox items."""
+
+
+    entries: list[dict[str, str]] = []
+
+    seen_ids: set[str] = set()
+
+    for source in (
+
+        lambda: collect_stage_task_attention(knowledge_review_limit=0)[1],
+
+        _state_v2_anomaly_entries,
+
+    ):
+
+        try:
+
+            produced = source()
+
+        except Exception:  # noqa: BLE001 - one anomaly source must not hide the other
+
+            continue
+
+        for entry in produced:
+
+            if entry["id"] in seen_ids:
+
+                continue
+
+            seen_ids.add(entry["id"])
+
+            entries.append(entry)
+
+    entries.sort(key=lambda row: ANOMALY_SEVERITY_RANK.get(row["severity"], 99))
+
+    return entries[: max(0, limit)]
+
+
+
+def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
+
+    """Append human-attention entries to a first-page overview payload.
+
+
+    Composition point used by the overview route (keeps the collector wiring
+
+    out of the assistant service itself). The extension entries join after the
+
+    existing approval/error rows on the first page only (offset == 0) so they
+
+    stay a summary dock instead of repeating across pages; pagination keeps
+
+    its original meaning over the existing rows. Any collector failure is
+
+    swallowed — the overview must never break because an attention source is
+
+    unavailable.
+
+    """
+
+
+    if not isinstance(payload, dict):
+
+        return payload
+
+    if int(payload.get("pagination", {}).get("offset") or 0) != 0:
+
+        return payload
+
+    attention = payload.get("attention")
+
+    if not isinstance(attention, list):
+
+        return payload
+
+    extension: list[dict[str, str]] = []
+
+    for collector in (collect_knowledge_review_attention, collect_anomaly_attention):
+
+        try:
+
+            extension.extend(collector())
+
+        except Exception:  # noqa: BLE001 - one attention source must not break the overview
+
+            continue
+
+    attention.extend(extension)
+
+    return payload

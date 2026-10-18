@@ -754,6 +754,62 @@ def test_settings_update_requires_active_assistant(personal_env, monkeypatch):
         service.update_personal_assistant_settings(display_name="改名")
 
 
+def test_settings_update_fails_closed_when_archive_races_the_write(
+    personal_env, monkeypatch
+):
+    row = _created_assistant(personal_env, monkeypatch)
+    real_get_agent = directory.get_agent
+
+    def archived_after_write(agent_id, *args, **kwargs):
+        agent = real_get_agent(agent_id, *args, **kwargs)
+        if kwargs.get("include_archived"):
+            # Simulate Agent management archiving right after our write.
+            return {**agent, "status": "archived"}
+        return agent
+
+    monkeypatch.setattr(directory, "get_agent", archived_after_write)
+    with pytest.raises(directory.AgentStateConflictError):
+        service.update_personal_assistant_settings(display_name="改名")
+
+
+def test_model_update_fails_closed_when_archive_races_the_write(
+    personal_env, monkeypatch
+):
+    row = _created_assistant(personal_env, monkeypatch)
+    _llm_options(
+        monkeypatch,
+        [
+            {"modelId": "other-model", "label": "其他", "providerLabel": "测试",
+             "runtimeSelectable": True, "slotCompatibility": {"dialogue": {"allowed": True}},
+             "isDefault": False, "providerHealthy": True, "missingApiKey": False,
+             "availability": "available"},
+        ],
+    )
+    real_get_agent = directory.get_agent
+
+    def archived_after_write(agent_id, *args, **kwargs):
+        agent = real_get_agent(agent_id, *args, **kwargs)
+        if kwargs.get("include_archived"):
+            return {**agent, "status": "archived"}
+        return agent
+
+    monkeypatch.setattr(directory, "get_agent", archived_after_write)
+    with pytest.raises(directory.AgentStateConflictError):
+        service.update_personal_assistant_model("other-model")
+
+
+def test_budget_config_fallback_logs_warning(monkeypatch, caplog):
+    import config.settings as settings_module
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr(settings_module, "get_config", broken)
+    with caplog.at_level("WARNING", logger="core.web.services.personal_assistant_service"):
+        assert service.current_policy()["maxCallsPerTurn"] == 16
+    assert any("personal_assistant_max_calls_per_turn" in record.message for record in caplog.records)
+
+
 def test_preferences_corruption_falls_back_to_safe_defaults(personal_env, monkeypatch):
     row = _created_assistant(personal_env, monkeypatch)
     _corrupt_agent(

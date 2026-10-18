@@ -964,18 +964,14 @@ def save_research_agent_binding(
             preserve_generated_display_name=True,
         )
     else:
-        previous_session_root = session_service.PROJECT_ROOT
-        previous_agent_root = agent_directory_service.PROJECT_ROOT
         project_root = _project_root_for_workspace(workspace)
-        session_service.PROJECT_ROOT = project_root
-        agent_directory_service.PROJECT_ROOT = project_root
-        try:
-            session_detail = session_service.create_chat_session(
-                title=next_label,
-                llm_bindings=session_service.llm_bindings_for_profile_id(selected_profile_id),
-                created_by="research_agent_pool",
-            )
-            created_agent_id = str(session_detail.get("agentId") or "").strip()
+        session_detail = session_service.create_chat_session(
+            title=next_label,
+            llm_bindings=session_service.llm_bindings_for_profile_id(selected_profile_id),
+            created_by="research_agent_pool",
+        )
+        created_agent_id = str(session_detail.get("agentId") or "").strip()
+        with agent_directory_service.scoped_project_root(project_root):
             agent_instance = agent_directory_service.update_agent_instance(
                 created_agent_id,
                 display_name=next_label,
@@ -994,9 +990,6 @@ def save_research_agent_binding(
                 status="active" if next_enabled else None,
                 preserve_generated_display_name=True,
             )
-        finally:
-            session_service.PROJECT_ROOT = previous_session_root
-            agent_directory_service.PROJECT_ROOT = previous_agent_root
 
     updated = existing_agent is not None
     research_agent_record = {
@@ -1614,27 +1607,20 @@ def _sync_research_flow_canvas_mode_binding(canvas: dict[str, Any], agent_config
 def _read_research_mode_binding_for_workspace() -> dict[str, Any]:
     workspace = get_workspace()
     project_root = _project_root_for_workspace(workspace)
-    previous_agent_root = agent_directory_service.PROJECT_ROOT
-    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
-    agent_directory_service.PROJECT_ROOT = project_root
-    agent_mode_binding_service.PROJECT_ROOT = project_root
     try:
         load_bindings = getattr(agent_mode_binding_service, "_load_mode_bindings", None)
-        payload = load_bindings() if callable(load_bindings) else {}
+        payload = load_bindings(project_root=project_root) if callable(load_bindings) else {}
         bindings = payload.get("bindings") if isinstance(payload, dict) else []
         if isinstance(bindings, list):
             for item in bindings:
                 if isinstance(item, dict) and str(item.get("mode") or "").strip() == "research":
                     return dict(item)
-        payload = agent_mode_binding_service.get_mode_bindings_payload()
+        payload = agent_mode_binding_service.get_mode_bindings_payload(project_root=project_root)
         modes = payload.get("modes") if isinstance(payload.get("modes"), dict) else {}
         research = modes.get("research") if isinstance(modes.get("research"), dict) else {}
         return dict(research)
     except Exception:
         return {}
-    finally:
-        agent_directory_service.PROJECT_ROOT = previous_agent_root
-        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
 
 
 def _update_research_mode_binding_for_workspace(
@@ -1646,21 +1632,14 @@ def _update_research_mode_binding_for_workspace(
 ) -> None:
     workspace = get_workspace()
     project_root = _project_root_for_workspace(workspace)
-    previous_agent_root = agent_directory_service.PROJECT_ROOT
-    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
-    agent_directory_service.PROJECT_ROOT = project_root
-    agent_mode_binding_service.PROJECT_ROOT = project_root
-    try:
-        agent_mode_binding_service.update_mode_binding(
-            "research",
-            default_agent_id=default_agent_id,
-            available_agent_ids=available_agent_ids,
-            pool=pool,
-            flow_bindings=flow_bindings,
-        )
-    finally:
-        agent_directory_service.PROJECT_ROOT = previous_agent_root
-        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+    agent_mode_binding_service.update_mode_binding(
+        "research",
+        default_agent_id=default_agent_id,
+        available_agent_ids=available_agent_ids,
+        pool=pool,
+        flow_bindings=flow_bindings,
+        project_root=project_root,
+    )
 
 
 def _remove_research_agent_from_mode_binding(agent_key: str, agent_id: str) -> None:
@@ -2275,57 +2254,53 @@ def _project_root_for_workspace(workspace: Any) -> Path:
 def _load_research_agent_config() -> dict[str, Any]:
     workspace = get_workspace()
     project_root = _project_root_for_workspace(workspace)
-    previous_root = agent_directory_service.PROJECT_ROOT
-    agent_directory_service.PROJECT_ROOT = project_root
-    try:
-        records: list[dict[str, Any]] = []
-        seen_keys: set[str] = set()
-        for agent in agent_directory_service.list_agents(
-            include_archived=False,
-            detail="full",
-        ):
-            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-            if str(metadata.get("challengeCupTeamId") or "").strip():
-                continue
-            role_key = str(agent.get("roleKey") or "").strip()
-            key = str(metadata.get("researchAgentKey") or "").strip()
-            if not key and role_key.startswith("research_"):
-                key = role_key.removeprefix("research_")
-            if not key:
-                continue
-            if key in seen_keys:
-                raise ValueError(
-                    f"Research AgentDirectory binding is duplicated: {key}"
-                )
-            seen_keys.add(key)
-            prompt_filename = str(metadata.get("researchPromptFilename") or "").strip()
-            records.append(
-                {
-                    "key": key,
-                    "label": str(agent.get("displayName") or key).strip(),
-                    "promptFilename": prompt_filename,
-                    "templateId": str(metadata.get("researchTemplateId") or "").strip(),
-                    "profileId": str(metadata.get("researchProfileId") or "").strip(),
-                    "roleKey": role_key,
-                    "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
-                    "enabled": True,
-                    "agentId": str(agent.get("agentId") or "").strip(),
-                    "agentInstanceId": str(agent.get("agentId") or "").strip(),
-                    "directSessionId": str(agent.get("directSessionId") or "").strip(),
-                    "primaryMode": str(agent.get("primaryMode") or "").strip(),
-                    "llmBindings": agent_directory_service.normalize_agent_llm_bindings(
-                        agent.get("llmBindings")
-                    ),
-                }
+    records: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for agent in agent_directory_service.list_agents(
+        include_archived=False,
+        detail="full",
+        project_root=project_root,
+    ):
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if str(metadata.get("challengeCupTeamId") or "").strip():
+            continue
+        role_key = str(agent.get("roleKey") or "").strip()
+        key = str(metadata.get("researchAgentKey") or "").strip()
+        if not key and role_key.startswith("research_"):
+            key = role_key.removeprefix("research_")
+        if not key:
+            continue
+        if key in seen_keys:
+            raise ValueError(
+                f"Research AgentDirectory binding is duplicated: {key}"
             )
-        records.sort(key=lambda item: str(item.get("key") or ""))
-        return {
-            "schemaVersion": 1,
-            "agents": records,
-            "configPath": str(agent_directory_service.registry_path()),
-        }
-    finally:
-        agent_directory_service.PROJECT_ROOT = previous_root
+        seen_keys.add(key)
+        prompt_filename = str(metadata.get("researchPromptFilename") or "").strip()
+        records.append(
+            {
+                "key": key,
+                "label": str(agent.get("displayName") or key).strip(),
+                "promptFilename": prompt_filename,
+                "templateId": str(metadata.get("researchTemplateId") or "").strip(),
+                "profileId": str(metadata.get("researchProfileId") or "").strip(),
+                "roleKey": role_key,
+                "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+                "enabled": True,
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentInstanceId": str(agent.get("agentId") or "").strip(),
+                "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                "primaryMode": str(agent.get("primaryMode") or "").strip(),
+                "llmBindings": agent_directory_service.normalize_agent_llm_bindings(
+                    agent.get("llmBindings")
+                ),
+            }
+        )
+    records.sort(key=lambda item: str(item.get("key") or ""))
+    return {
+        "schemaVersion": 1,
+        "agents": records,
+        "configPath": str(agent_directory_service.registry_path(project_root=project_root)),
+    }
 
 
 def _list_llm_config_options() -> list[dict[str, Any]]:

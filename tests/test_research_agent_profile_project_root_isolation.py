@@ -41,6 +41,18 @@ class _RootWorkspace:
         return f"fallback prompt {filename}"
 
 
+@pytest.fixture(autouse=True)
+def _unpin_data_home(monkeypatch: pytest.MonkeyPatch):
+    """摘掉 conftest 对全部测试钉的 ``VIBELUTION_DATA_HOME``。
+
+    该 env 会把身份路由与无身份回落压到同一 data home，跨根隔离断言因此
+    全部失真（本文件 5 例预存红的根因：root-a/root-b 被钉到同一存储）。
+    """
+
+    monkeypatch.delenv("VIBELUTION_DATA_HOME", raising=False)
+    yield
+
+
 def _seed_project_root(tmp_path: Path, slug: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Build one fully isolated workspace root with registry/binding/template."""
 

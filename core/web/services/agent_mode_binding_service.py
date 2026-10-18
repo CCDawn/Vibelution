@@ -17,6 +17,7 @@ from .agent_directory_service import (
     SESSION_AGENT_VISIBILITY_PENDING,
     get_agent,
     list_agents,
+    scoped_project_root,
     session_agent_visibility,
 )
 from .runtime_scene_service import record_runtime_scene_event
@@ -103,35 +104,44 @@ def update_mode_binding(
     slots: dict[str, str] | None = None,
     excluded_agent_ids: list[str] | None = None,
     excluded_slots: list[str] | None = None,
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Update one mode binding record and return the repaired payload."""
+    """Update one mode binding record and return the repaired payload.
+
+    ``project_root`` 为显式解析根；缺省回落模块级 ``PROJECT_ROOT``，保持既有
+    调用方行为不变。并发调用方（如 research binding sync）应始终显式传参，
+    禁止再依赖模块级 save-swap-restore。
+    """
 
     normalized_mode = _normalize_mode(mode)
-    payload = repair_mode_bindings()
+    payload = repair_mode_bindings(project_root=project_root)
     bindings = list(payload.get("bindings") or [])
     index = next((idx for idx, item in enumerate(bindings) if item.get("mode") == normalized_mode), -1)
     if index < 0:
         bindings.append(_normalize_binding({"mode": normalized_mode}))
         index = len(bindings) - 1
     record = copy.deepcopy(bindings[index])
-    if default_agent_id is not None:
-        record["defaultAgentId"] = _validate_agent_reference(default_agent_id, allow_blank=True)
-    if available_agent_ids is not None:
-        record["availableAgentIds"] = _normalize_agent_list(available_agent_ids)
-    if pool is not None:
-        record["pool"] = _normalize_agent_list(pool)
-    if flow_bindings is not None:
-        record["flowBindings"] = _normalize_agent_map(flow_bindings)
-    if slots is not None:
-        record["slots"] = _filter_slots_for_mode(normalized_mode, _normalize_agent_map(slots))
-    if excluded_agent_ids is not None:
-        record["excludedAgentIds"] = _normalize_agent_list(excluded_agent_ids)
-    if excluded_slots is not None:
-        record["excludedSlots"] = _safe_key_list(excluded_slots)
-    record["updatedAt"] = _now()
-    bindings[index] = _normalize_binding(record)
+    # 归一化链（_validate_agent_reference 等）经 agent_directory 门面查 Agent；
+    # 显式根只存在 ContextVar 作用域里才能贯穿这些内部读取口。
+    with scoped_project_root(project_root):
+        if default_agent_id is not None:
+            record["defaultAgentId"] = _validate_agent_reference(default_agent_id, allow_blank=True)
+        if available_agent_ids is not None:
+            record["availableAgentIds"] = _normalize_agent_list(available_agent_ids)
+        if pool is not None:
+            record["pool"] = _normalize_agent_list(pool)
+        if flow_bindings is not None:
+            record["flowBindings"] = _normalize_agent_map(flow_bindings)
+        if slots is not None:
+            record["slots"] = _filter_slots_for_mode(normalized_mode, _normalize_agent_map(slots))
+        if excluded_agent_ids is not None:
+            record["excludedAgentIds"] = _normalize_agent_list(excluded_agent_ids)
+        if excluded_slots is not None:
+            record["excludedSlots"] = _safe_key_list(excluded_slots)
+        record["updatedAt"] = _now()
+        bindings[index] = _normalize_binding(record)
     payload["bindings"] = bindings
-    _save_mode_bindings(payload)
+    _save_mode_bindings(payload, project_root=project_root)
     _record_mode_binding_event(
         "mode_binding.updated",
         normalized_mode,
@@ -145,7 +155,7 @@ def update_mode_binding(
             "excludedSlotCount": len(record.get("excludedSlots") or []),
         },
     )
-    return get_mode_bindings_payload()
+    return get_mode_bindings_payload(project_root=project_root)
 
 
 def update_agent_mode_membership(
