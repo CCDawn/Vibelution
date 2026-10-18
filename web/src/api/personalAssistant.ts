@@ -58,8 +58,11 @@ export async function fetchPersonalAssistantOverview(options?: { signal?: AbortS
     page.attention.forEach(row => attention.set(row.id, row));
     const next = page.pagination?.nextOffset;
     if (next === null || next === undefined) {
+      // counts.waiting/failed describe native Session approval/error rows.
+      // The first-page knowledge/anomaly dock is an additive extension.
+      const sessionAttentionCount = [...attention.values()].filter(row => row.kind === "approval" || row.kind === "error").length;
       if (agents.size !== page.counts.agents || sessions.size !== page.counts.sessions
-        || attention.size !== page.counts.waiting + page.counts.failed) {
+        || sessionAttentionCount !== page.counts.waiting + page.counts.failed) {
         throw new Error("平台概览列表不完整或已变化，请刷新后重试。");
       }
       const { pagination: _pagination, ...overview } = page;

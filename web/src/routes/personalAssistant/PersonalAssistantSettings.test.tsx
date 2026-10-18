@@ -10,6 +10,7 @@ import {
 } from "../../api/personalAssistant";
 import type { PersonalAssistantSettings } from "../../api/types/personalAssistant";
 import { PersonalAssistantSettings as SettingsDialog, assistantModelChoiceLabel } from "./PersonalAssistantSettings";
+import { enqueuePetPreferenceOperation } from "../desktopPet/usePetPreferences";
 
 vi.mock("../../api/personalAssistant", () => ({
   fetchPersonalAssistantSettings: vi.fn(),
@@ -102,6 +103,23 @@ describe("assistant settings dialog", () => {
     await render(true);
     const save = [...document.querySelectorAll("button")].find(button => button.textContent === "保存名称") as HTMLButtonElement;
     expect(save.disabled).toBe(true);
+  });
+  it("waits for pending migration before saving an appearance from the dialog", async () => {
+    let release!: () => void;
+    const migration = enqueuePetPreferenceOperation(() => new Promise<void>(resolve => { release = resolve; }));
+    await render(true);
+    vi.mocked(updatePersonalAssistantSettings).mockResolvedValue({ settings: { ...settings, preferences: { ...settings.preferences, characterId: "xiaoluo" } } });
+    const trigger = document.querySelector('button[role="combobox"][aria-label="默认外观"]') as HTMLButtonElement;
+    await act(async () => trigger.click());
+    const option = await vi.waitFor(() => {
+      const found = [...document.body.querySelectorAll('[role="option"]')].find(node => node.textContent === "小洛");
+      if (!found) throw new Error("appearance options not rendered yet");
+      return found as HTMLElement;
+    });
+    await act(async () => option.click());
+    expect(updatePersonalAssistantSettings).not.toHaveBeenCalled();
+    await act(async () => { release(); await migration; }); await settle();
+    expect(updatePersonalAssistantSettings).toHaveBeenCalledWith({ preferences: { characterId: "xiaoluo" } });
   });
 
   it("shows a retryable read failure instead of a silent fallback", async () => {
