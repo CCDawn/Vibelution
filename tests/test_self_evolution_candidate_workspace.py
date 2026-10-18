@@ -193,7 +193,8 @@ def _integrated_candidate(tmp_path):
     )
     candidate = Path(workspace["worktreePath"])
     (candidate / "kept.txt").write_text("candidate\n", encoding="utf-8")
-    _git(candidate, "add", "kept.txt")
+    (candidate / "kept.py").write_text("value = 1\n", encoding="utf-8")
+    _git(candidate, "add", "kept.txt", "kept.py")
     _git(candidate, "commit", "-m", "candidate")
     _git(root, "merge", "--ff-only", workspace["branch"])
     integration = {"status": "committed", "commitSha": _git(root, "rev-parse", "HEAD")}
@@ -229,6 +230,54 @@ def test_cleanup_retries_after_branch_deletion_fails(tmp_path, monkeypatch):
     assert not candidate.exists()
     assert _git(root, "branch", "--list", workspace["branch"])
     assert cleanup_candidate_workspace(root, workspace, integration=integration)["status"] == "cleaned"
+
+
+@pytest.mark.parametrize("legacy_pathlib", [False, True])
+def test_cleanup_allows_regenerable_validation_caches(tmp_path, monkeypatch, legacy_pathlib):
+    import py_compile
+
+    root, workspace, candidate, integration = _integrated_candidate(tmp_path)
+    excludes = tmp_path / "excludes"
+    excludes.write_text("__pycache__/\n.pytest_cache/\n.ruff_cache/\n", encoding="utf-8")
+    _git(root, "config", "core.excludesFile", str(excludes))
+    py_compile.compile(str(candidate / "kept.py"), doraise=True)
+    if legacy_pathlib:
+        monkeypatch.delattr(Path, "is_junction", raising=False)
+    cache = candidate / ".pytest_cache" / "v" / "cache"
+    cache.mkdir(parents=True)
+    (cache / "nodeids").write_text("[]", encoding="utf-8")
+    assert cleanup_candidate_workspace(root, workspace, integration=integration)["status"] == "cleaned"
+    assert not candidate.exists()
+
+
+def test_cleanup_preserves_compiled_artifact_without_regenerable_source(tmp_path):
+    import importlib.util
+    import sys
+
+    root, workspace, candidate, integration = _integrated_candidate(tmp_path)
+    excludes = tmp_path / "excludes"
+    excludes.write_text("__pycache__/\n", encoding="utf-8")
+    _git(root, "config", "core.excludesFile", str(excludes))
+    cache = candidate / "__pycache__"
+    cache.mkdir()
+    saved = cache / f"orphan.{sys.implementation.cache_tag}.pyc"
+    saved.write_bytes(importlib.util.MAGIC_NUMBER + b"keep unique compiled artifact")
+    with pytest.raises(CandidateWorkspaceError, match="clean"):
+        cleanup_candidate_workspace(root, workspace, integration=integration)
+    assert saved.exists()
+
+
+def test_cleanup_preserves_unknown_content_inside_cache_directory(tmp_path):
+    root, workspace, candidate, integration = _integrated_candidate(tmp_path)
+    excludes = tmp_path / "excludes"
+    excludes.write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(root, "config", "core.excludesFile", str(excludes))
+    cache = candidate / ".pytest_cache"
+    cache.mkdir()
+    (cache / "user-notes.txt").write_text("keep", encoding="utf-8")
+    with pytest.raises(CandidateWorkspaceError, match="clean"):
+        cleanup_candidate_workspace(root, workspace, integration=integration)
+    assert (cache / "user-notes.txt").read_text() == "keep"
 
 
 @pytest.mark.parametrize("change", ["tracked", "untracked", "ignored", "commit", "merged_later_commit"])
