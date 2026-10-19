@@ -417,3 +417,131 @@ def test_evidence_card_contract_rejection_generates_evidence_fields_contract(
     )
     context = _read_context(setup)
     assert context["writebackRemediation"]["kind"] == "evidence_fields"
+
+
+def _stub_writeback_acceptance_path_keep_graph(monkeypatch) -> None:
+    """同 ``_stub_writeback_acceptance_path``，但保留 candidate_graph 物化器。
+
+    形状拒绝发生在 agent-graph payload 解析处（先于 ``build_candidate_graph``
+    与 closure/gate），因此真实物化器在本用例中必然走拒绝分支而不是落库。
+    """
+    s = stage_writeback._service()
+    monkeypatch.setattr(
+        s, "_source_collection_stage_writeback_candidate_coverage", lambda *_a, **_kw: {}
+    )
+    for name in (
+        "sources",
+        "content_extraction",
+        "quality",
+        "knowledge_ingestion",
+    ):
+        monkeypatch.setattr(
+            s, "_materialize_source_collection_stage_writeback_" + name, lambda *_a, **_kw: {}
+        )
+
+
+def _shape_invalid_result() -> dict:
+    # 形状类违规：agent 把图集合写成标量（summary counts 混入 graph 集合）。
+    return {
+        "candidateGraph": {
+            "nodes": [{"candidateId": "cand-a"}],
+            "edges": 5,
+        }
+    }
+
+
+_SHAPE_REJECTION_PREFIX = (
+    "evidence_relation_graph_invalid: result_json.candidateGraph.edges "
+    "must be an array of objects; received int."
+)
+
+
+def test_shape_invalid_agent_graph_rejection_inlines_remediation(
+    tmp_path, monkeypatch
+):
+    """(e1) 形状拒绝（edges 非对象数组）：历史前缀不变 + 内联清单 + 契约注入。"""
+    setup = _start_stage_task(
+        tmp_path, monkeypatch, stage_id="relations", agent_role="source_relation_mapper"
+    )
+    _stub_relation_graph(monkeypatch, graph=_valid_graph())
+    _stub_writeback_acceptance_path_keep_graph(monkeypatch)
+
+    message = _reject_relations_writeback(setup, _shape_invalid_result())
+
+    # 形状守卫的历史拒绝前缀逐字保留（prompt contracts 测试钉住的文案）。
+    assert message.startswith(_SHAPE_REJECTION_PREFIX)
+    # 追加的确定性补救块：允许清单 + writebackRemediation 提示。
+    assert "补救提示" in message
+    for allowed in _ALLOWED_REFS:
+        assert allowed in message
+    assert "writebackRemediation" in message
+    # 拒绝本身不改任务状态。
+    assert _stored_task(setup)["status"] == "running"
+    contract = _stored_task(setup)["writebackRemediationContract"]
+    assert contract["kind"] == "relation_missing_fields"
+    assert contract["attempt"] == 1
+    assert contract["exhausted"] is False
+    assert any(
+        item.get("finding") == "malformed_collection"
+        and item.get("path") == "candidateGraph.edges"
+        for item in contract["findings"]
+    )
+    context = _read_context(setup)
+    assert context["writebackRemediation"]["kind"] == "relation_missing_fields"
+
+
+def test_second_shape_rejection_exhausts_contract_and_stops_injection(
+    tmp_path, monkeypatch
+):
+    """(e2) 形状类同类第二次拒绝置 exhausted=true，上下文不再注入。"""
+    setup = _start_stage_task(
+        tmp_path, monkeypatch, stage_id="relations", agent_role="source_relation_mapper"
+    )
+    _stub_relation_graph(monkeypatch, graph=_valid_graph())
+    _stub_writeback_acceptance_path_keep_graph(monkeypatch)
+
+    _reject_relations_writeback(setup, _shape_invalid_result())
+    assert "writebackRemediation" in _read_context(setup)
+
+    second_message = _reject_relations_writeback(setup, _shape_invalid_result())
+
+    assert second_message.startswith(_SHAPE_REJECTION_PREFIX)
+    stored = _stored_task(setup)
+    contract = stored["writebackRemediationContract"]
+    assert contract["kind"] == "relation_missing_fields"
+    assert contract["attempt"] == 2
+    assert contract["exhausted"] is True
+    assert "writebackRemediation" not in _read_context(setup)
+
+
+def test_shape_rejection_hint_points_to_full_list_and_pairs_candidates(
+    tmp_path, monkeypatch
+):
+    """(e3) 清单超 12 个截断时带全量指引句；内联 ref 配对 candidateId。"""
+    setup = _start_stage_task(
+        tmp_path, monkeypatch, stage_id="relations", agent_role="source_relation_mapper"
+    )
+    _stub_relation_graph(monkeypatch, graph=_valid_graph())
+    _stub_writeback_acceptance_path_keep_graph(monkeypatch)
+    many_refs = [f"ce-shape-{index:02d}" for index in range(1, 14)]
+    monkeypatch.setattr(registry, "load_allowed_evidence_refs", lambda **_: list(many_refs))
+    monkeypatch.setattr(
+        registry,
+        "load_relation_evidence_context",
+        lambda **_: [
+            {"claimEvidenceId": "ce-shape-01", "candidateId": "cand-shape-01"},
+        ],
+    )
+
+    message = _reject_relations_writeback(setup, _shape_invalid_result())
+
+    assert "共 13 个，仅展示前 12 个" in message
+    assert (
+        "全量清单见 source_collection_context_tool 的 allowedEvidenceRefs / relationEvidence"
+        in message
+    )
+    # 可选增强：内联 ref 带 candidateId 配对，未配对的 ref 保持原样；
+    # 第 13 个被截断，不出现在消息里。
+    assert "ce-shape-01(cand-shape-01)" in message
+    assert "ce-shape-12" in message
+    assert "ce-shape-13" not in message

@@ -5934,23 +5934,31 @@ def test_collection_request_projects_real_per_source_progress(
 
     requested_team_ids: list[str] = []
 
-    def fake_loader(team_id: str, run_ids: list[str]) -> dict[str, list[dict[str, object]]]:
+    def fake_loader(
+        team_id: str,
+        run_ids: list[str],
+        *,
+        question_id: str = "",
+    ) -> tuple[dict[str, list[dict[str, object]]], frozenset[str]]:
         requested_team_ids.append(team_id)
-        return {
-            "child-running": [
-                _collection_source_fact(),
-                _collection_source_fact(
-                    lifecycle="failed",
-                    outcome="none",
-                    actionability="available",
-                    updatedAt="2026-08-26T10:01:00Z",
-                    sourceId="q2",
-                    label="beta cortex",
-                    itemCount=0,
-                    error=_collection_search_failed_error(),
-                ),
-            ]
-        }
+        return (
+            {
+                "child-running": [
+                    _collection_source_fact(),
+                    _collection_source_fact(
+                        lifecycle="failed",
+                        outcome="none",
+                        actionability="available",
+                        updatedAt="2026-08-26T10:01:00Z",
+                        sourceId="q2",
+                        label="beta cortex",
+                        itemCount=0,
+                        error=_collection_search_failed_error(),
+                    ),
+                ]
+            },
+            frozenset(),
+        )
 
     monkeypatch.setattr(state_module, "_load_collection_source_facts", fake_loader)
 
@@ -6086,7 +6094,7 @@ def test_source_progress_is_representation_only_telemetry(
         monkeypatch.setattr(
             state_module,
             "_load_collection_source_facts",
-            lambda _team_id, _run_ids: facts,
+            lambda _team_id, _run_ids, *, question_id="": (facts, frozenset()),
         )
         return HypothesisFirstStateV2.model_validate(
             project_state_from_records(
@@ -6213,6 +6221,102 @@ def test_collection_source_facts_degrade_without_durable_search_events(
     degraded = project()
     assert degraded.collection.requests[0].sources == []
     assert degraded.collection.requests[0].childRun.runId == "child-run-9"
+
+
+def test_orphaned_collection_child_projects_terminal_and_does_not_flood_scene_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Owner project deleted: child run must stop looking live.
+
+    Regression for the forever-poll defect: an orphaned child run used to
+    keep the frozen ``running`` status, so the snapshot stayed live and every
+    4s poll re-emitted a ``collection_source_events.unavailable`` warning.
+    """
+
+    from core.web.services.team_workflow.research_projects import (
+        ResearchProjectNotFoundError,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2 as state_module,
+    )
+    from core.web.services.team_workflow.source_collection import (
+        residual as sc_residual,
+    )
+
+    scene_events: list[dict[str, str]] = []
+
+    def fake_scene_event(event_code: str, **fields: str) -> None:
+        scene_events.append({"eventCode": event_code, **fields})
+
+    def raise_orphan(_team_id: str, _run_id: str) -> dict[str, object]:
+        raise ResearchProjectNotFoundError("Research project not found.")
+
+    def project() -> HypothesisFirstStateV2:
+        return HypothesisFirstStateV2.model_validate(
+            project_state_from_records(
+                team_id="team-1",
+                question_id="SCI-001",
+                reset_boundary=None,
+                chain_records=[
+                    _collection_request_chain_record(
+                        "request-1",
+                        run_id="child-orphan-1",
+                        collection_run_status="running",
+                    )
+                ],
+                selection_records=[],
+                meeting_records=[],
+                digest_records=[],
+                decision_records=[],
+                hypothesis_round_records=[],
+            )
+        )
+
+    monkeypatch.setattr(
+        sc_residual,
+        "_source_collection_storage_artifact_paths",
+        raise_orphan,
+    )
+    monkeypatch.setattr(state_module, "_record_projection_scene_event", fake_scene_event)
+
+    # (a) Orphaned child run projects a recoverable terminal state, so the
+    # snapshot no longer looks live (shouldPoll semantics: not
+    # waiting_system).
+    orphan = project()
+    request = orphan.collection.requests[0]
+    assert request.lifecycle == "failed"
+    assert request.actionability == "available"
+    assert request.childRun.lifecycle == "failed"
+    assert any(
+        problem.code == "collection_child_orphaned"
+        for problem in request.problems
+    )
+    assert orphan.collection.lifecycle == "failed"
+    assert orphan.collection.actionability != "waiting_system"
+
+    # (b) Repeated polls of the stable orphan state never emit the warning
+    # scene event (deduplicated away entirely for this expected state).
+    for _ in range(3):
+        replay = project()
+        assert replay.collection.requests[0].lifecycle == "failed"
+    assert scene_events == []
+
+    # (c) Other artifact-resolution failures keep the per-occurrence scene
+    # event and carry the real question id instead of the legacy "".
+    def raise_other(_team_id: str, _run_id: str) -> dict[str, object]:
+        raise RuntimeError("storage artifact path failure")
+
+    monkeypatch.setattr(
+        sc_residual,
+        "_source_collection_storage_artifact_paths",
+        raise_other,
+    )
+    degraded = project()
+    assert degraded.collection.requests[0].lifecycle == "running"
+    assert [event["eventCode"] for event in scene_events] == [
+        "collection_source_events.unavailable"
+    ]
+    assert scene_events[0]["question_id"] == "SCI-001"
 
 
 def test_scope_cas_rejects_stale_state_version(monkeypatch: pytest.MonkeyPatch) -> None:
