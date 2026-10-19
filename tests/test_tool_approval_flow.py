@@ -488,6 +488,80 @@ def test_declined_approval_never_reaches_tool_implementation(monkeypatch):
     assert calls == []
 
 
+@pytest.mark.parametrize("decision", ["accept", "decline"])
+def test_peer_message_capability_still_requires_native_approval(monkeypatch, decision):
+    from dataclasses import replace
+    from core.infrastructure.agent_session import reset_session_state
+    from core.orchestration.agent_modes import AgentMode, resolve_mode_policy
+    from core.orchestration.runtime_goal import build_runtime_goal_packet
+
+    _runtime(monkeypatch)
+    packet = build_runtime_goal_packet(
+        resolve_mode_policy(AgentMode.CHAT, SimpleNamespace()), "Authorized team message"
+    )
+    reset_session_state().set_runtime_goal_packet(replace(packet, allow_subagents=False))
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool("agent_message_tool", lambda **args: calls.append(args) or "delivered")
+    args = {"content": "PING", "target_session": "peer-session", "target_agent": "peer-agent"}
+    result_box = {}
+
+    def execute():
+        _install(("agent_message_tool", "on_request", "write"))
+        result_box["value"] = executor.execute(
+            "agent_message_tool", args, tool_call_id="call-peer-message"
+        )
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    try:
+        request = _wait_for_pending()
+        assert calls == []
+        assert request["toolName"] == "agent_message_tool"
+        tool_approvals.resolve_tool_approval_request(
+            "session-a", request["requestId"], decision=decision
+        )
+    finally:
+        worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    result, action = result_box["value"]
+    assert action is None
+    if decision == "accept":
+        assert calls == [args]
+        assert result == "delivered"
+    else:
+        assert calls == []
+        assert "用户拒绝" in result
+
+
+def test_peer_message_capability_cannot_override_canonical_denial(monkeypatch):
+    from dataclasses import replace
+    from core.infrastructure.agent_session import reset_session_state
+    from core.orchestration.agent_modes import AgentMode, resolve_mode_policy
+    from core.orchestration.runtime_goal import build_runtime_goal_packet
+
+    _runtime(monkeypatch)
+    packet = build_runtime_goal_packet(
+        resolve_mode_policy(AgentMode.CHAT, SimpleNamespace()), "Authorized team message"
+    )
+    reset_session_state().set_runtime_goal_packet(replace(packet, allow_subagents=False))
+    _install()  # The turn's actual authorization decision contains no tools.
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool("agent_message_tool", lambda **args: calls.append(args) or "delivered")
+
+    result, action = executor.execute(
+        "agent_message_tool", {"target_session": "peer-session", "content": "PING"},
+        tool_call_id="call-peer-denied",
+    )
+
+    assert action is None
+    assert "delivered" not in str(result)
+    assert calls == []
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
+
+
 def test_approval_audit_is_bounded_and_excludes_raw_arguments(monkeypatch):
     _runtime(monkeypatch)
     _install(("web_search_tool", "on_request", "network"))

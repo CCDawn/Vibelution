@@ -220,6 +220,7 @@ class TurnCapabilityProfile:
     allow_subagents: bool
     completion_standard: str
     forbidden_actions: tuple[str, ...] = field(default_factory=tuple)
+    allow_agent_messages: bool = False
 
 
 @dataclass(frozen=True)
@@ -239,6 +240,12 @@ class RuntimeGoalPacket:
     capability_profile: str = "default"
     allow_code_context: bool | None = None
     max_calls_per_turn: int = 0
+    # None preserves the old boundary for callers constructing legacy packets.
+    allow_agent_messages: bool | None = None
+
+    def agent_messages_allowed(self) -> bool:
+        value = self.allow_subagents if self.allow_agent_messages is None else self.allow_agent_messages
+        return value is True
 
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
         """返回当前目标包允许激活的提示词组件（描述性）。
@@ -280,6 +287,7 @@ class RuntimeGoalPacket:
             f"  - Git 提交: {_yes_no(self.allow_git_commit)}",
             f"  - 进化事务: {_yes_no(self.allow_evolution_transaction)}",
             f"  - 子 agent: {_yes_no(self.allow_subagents)}",
+            f"  - 会话协作消息: {_yes_no(self.agent_messages_allowed())}",
             *budget_lines,
             f"- 完成标准: {self.completion_standard}",
             "- 禁止项:",
@@ -315,6 +323,7 @@ def build_runtime_goal_packet(
             allow_git_commit=profile.allow_git_commit,
             allow_evolution_transaction=profile.allow_evolution_transaction,
             allow_subagents=profile.allow_subagents,
+            allow_agent_messages=profile.allow_agent_messages,
             allow_code_context=_allow_code_context_for_turn(
                 profile.allow_file_writes,
                 tool_policy,
@@ -334,6 +343,7 @@ def build_runtime_goal_packet(
             allow_git_commit=False,
             allow_evolution_transaction=True,
             allow_subagents=False,
+            allow_agent_messages=False,
             allow_code_context=True,
             max_calls_per_turn=max_calls,
             completion_standard="按给定 case 或评测请求产生可比较证据，并在边界内停止。",
@@ -352,6 +362,7 @@ def build_runtime_goal_packet(
         allow_git_commit=True,
         allow_evolution_transaction=True,
         allow_subagents=True,
+        allow_agent_messages=True,
         allow_code_context=True,
         max_calls_per_turn=max_calls,
         completion_standard="围绕 Vibelution 稳定性、进化效率或 UI/agent 一致性完成可验证改进。",
@@ -415,6 +426,7 @@ def _chat_capability_profile(policy: ModePolicy, goal_text: str) -> TurnCapabili
             allow_git_commit=False,
             allow_evolution_transaction=False,
             allow_subagents=False,
+            allow_agent_messages=False,
             completion_standard="给出一段紧凑、可读的只读回复；不修改文件、不提交、不派发子 agent、不启动进化或部署。",
             forbidden_actions=(
                 "不要修改文件、执行写入型工具或通过命令间接写入工作区。",
@@ -430,6 +442,7 @@ def _chat_capability_profile(policy: ModePolicy, goal_text: str) -> TurnCapabili
         allow_git_commit=True,
         allow_evolution_transaction=False,
         allow_subagents=True,
+        allow_agent_messages=True,
         completion_standard="完成当前外部请求；可按明确请求读写项目文件或提交，但不默认自动提交或开启长期进化事务。",
         forbidden_actions=(
             "不要仅因文本提到自进化或监督进化就切换成另一个 agent。",

@@ -643,7 +643,6 @@ class ToolExecutor:
         "spawn_agent_tool",
         "send_message_tool",
         "cli_agent_run_tool",
-        "agent_message_tool",
     }
     _RUNTIME_GOAL_EVOLUTION_BLOCKED_TOOLS = {
         "open_evolution_transaction_tool",
@@ -1412,6 +1411,16 @@ class ToolExecutor:
             return None
         normalized_tool = str(tool_name or "").strip()
         profile = str(getattr(packet, "capability_profile", "") or getattr(packet, "objective_type", "") or "").strip()
+        # Peer Session delivery is not child-agent delegation. ToolPolicy,
+        # native approval, readonly guards and organization routing still apply.
+        message_capability = getattr(packet, "allow_agent_messages", None)
+        if message_capability is None:
+            message_capability = getattr(packet, "allow_subagents", False)
+        if normalized_tool == "agent_message_tool" and message_capability is not True:
+            return (
+                "[运行目标包] 当前能力边界禁止会话协作消息。"
+                f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
+            )
         if (
             not bool(getattr(packet, "allow_subagents", True))
             and normalized_tool in cls._RUNTIME_GOAL_SUBAGENT_BLOCKED_TOOLS
