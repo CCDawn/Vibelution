@@ -1621,26 +1621,30 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     missing_after_lock = False
     selected_conversation: dict[str, Any] | None = None
     metadata_changed = False
+    read_only = False
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
         if conversation is None:
             missing_after_lock = True
         else:
-            s._ensure_session_mutable(normalized_session_id, conversation=conversation)
-            changed = s._ensure_conversation_workspace_metadata(conversation) or changed
-            changed = s._ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
-            previous_active_id = s.load_active_conversation_id(s.PROJECT_ROOT)
-            need_activate = previous_active_id != normalized_session_id
-            if changed or need_activate:
-                if changed:
-                    conversation["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
-                s.save_session_chat_state(
-                    s.PROJECT_ROOT,
-                    normalized_session_id,
-                    conversation,
-                    activate=need_activate,
-                )
+            read_only = s._conversation_is_read_only(conversation)
+            # Opening sealed history is a read. Do not repair, save or activate it.
+            if not read_only:
+                s._ensure_session_mutable(normalized_session_id, conversation=conversation)
+                changed = s._ensure_conversation_workspace_metadata(conversation) or changed
+                changed = s._ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
+                previous_active_id = s.load_active_conversation_id(s.PROJECT_ROOT)
+                need_activate = previous_active_id != normalized_session_id
+                if changed or need_activate:
+                    if changed:
+                        conversation["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
+                    s.save_session_chat_state(
+                        s.PROJECT_ROOT,
+                        normalized_session_id,
+                        conversation,
+                        activate=need_activate,
+                    )
             selected_conversation = dict(conversation)
             metadata_changed = changed
     if missing_after_lock or selected_conversation is None:
@@ -1653,7 +1657,8 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
 
     # Viewing a session is not session activity: the directory list must keep
     # ordering by last activity, so a select must not touch recency.
-    directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
+    if not read_only:
+        directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
     if metadata_changed:
         # Plain view switches keep the index signature stable; invalidating on
         # every select forced the next poll to rebuild the whole projection.

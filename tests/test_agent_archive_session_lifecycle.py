@@ -331,11 +331,43 @@ def test_archive_rejects_sessions_with_pending_turns(tmp_path, monkeypatch, phas
     assert detail["readOnly"] is False
 
 
+@pytest.mark.parametrize("lightweight", [False, True])
+def test_archived_session_can_be_viewed_without_mutating_or_activating_it(
+    tmp_path, monkeypatch, lightweight,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert response.status_code == 200, response.text
+    before = session_service.load_session_chat_state(tmp_path, direct["id"])
+    active_before = session_service.load_active_conversation_id(tmp_path)
+    writes = []
+    original_save = session_service.save_session_chat_state
+
+    def record_save(*args, **kwargs):
+        writes.append((args, kwargs))
+        return original_save(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "save_session_chat_state", record_save)
+    selected = session_service.select_chat_session(direct["id"], lightweight=lightweight)
+
+    assert selected["id"] == direct["id"]
+    assert selected["readOnly"] is True
+    assert selected["archiveState"]["source"] == "agent_archive"
+    selected_response = client.post(
+        f"/api/sessions/{direct['id']}/select",
+        headers={"Prefer": "respond-async"} if lightweight else {},
+    )
+    assert selected_response.status_code == 200
+    assert selected_response.json()["readOnly"] is True
+    assert session_service.load_session_chat_state(tmp_path, direct["id"]) == before
+    assert session_service.load_active_conversation_id(tmp_path) == active_before
+    assert writes == []
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
         "rename",
-        "select",
         "child",
         "reasoning",
         "attachment",
@@ -366,8 +398,6 @@ def test_archived_session_enforces_a_real_read_only_barrier(
     with pytest.raises(session_service.SessionValidationError) as exc_info:
         if mutation == "rename":
             session_service.update_chat_session_title(direct["id"], "不应改名")
-        elif mutation == "select":
-            session_service.select_chat_session(direct["id"])
         elif mutation == "child":
             session_service.create_child_session(
                 direct["id"],
@@ -409,32 +439,6 @@ def test_archived_session_enforces_a_real_read_only_barrier(
     detail = session_service.get_session_detail(direct["id"])
     assert detail is not None
     assert detail["readOnly"] is True
-
-
-@pytest.mark.parametrize(
-    ("method", "path_suffix"),
-    [
-        ("post", "/select"),
-    ],
-)
-def test_archived_session_mutation_routes_return_validation_error(
-    tmp_path,
-    monkeypatch,
-    method,
-    path_suffix,
-):
-    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
-    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
-    assert archive_response.status_code == 200, archive_response.text
-
-    response = getattr(client, method)(
-        f"/api/sessions/{direct['id']}{path_suffix}"
-    )
-
-    assert response.status_code == 422, response.text
-    assert "read-only" in str(response.json()["detail"]).lower() or "只读" in str(
-        response.json()["detail"]
-    )
 
 
 def test_archived_session_can_still_be_deleted(tmp_path, monkeypatch):
