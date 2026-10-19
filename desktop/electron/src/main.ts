@@ -199,6 +199,7 @@ import {
   executeShutdownAuthorizationBoundary,
   fetchLauncherActiveWorkStatus,
   activeWorkStatusFromLauncherStatus,
+  isActiveWorkProbeAuthFailure,
   resolveQuitActiveWorkStatus,
   type ActiveWorkProbeState,
   type ActiveWorkStatus,
@@ -286,6 +287,7 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
+const WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS = ACTIVE_WORK_STATUS_TIMEOUT_MS * 1.5;
 const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
 const DESKTOP_QUIT_TOTAL_BUDGET_MS = 30_000;
 const PERIODIC_SHELL_FRESHNESS_MS = 5 * 60_000;
@@ -1412,19 +1414,48 @@ async function requestTransactionalWorkbenchClose(
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
     const preparationStartedAtMs = performance.now();
     const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
-    const context = await resolveDesktopActionLoopContext(bootstrap);
+    const desktopSessionId = currentDesktopSessionId(bootstrap, desktopEnvironment());
     let activeWorkState: ActiveWorkProbeState = "unknown";
+    let probeAttempts = 0;
+    let probeFailure = "";
+    // Preserve the original first-probe allowance; recovery shares a bounded
+    // extra half-step instead of doubling every close-stage timeout.
+    const probeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS);
     try {
+      const probe = (forceControlTokenRefresh: boolean) => withDesktopShellExitTimeout(async (attemptSignal) => {
+        const signal = AbortSignal.any([attemptSignal, probeDeadline.signal]);
+        signal.throwIfAborted();
+        probeAttempts += 1;
+        const context = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh, signal });
+        signal.throwIfAborted();
+        return await fetchLauncherActiveWorkStatus({ ...context, signal });
+      }, Math.max(1, Math.min(ACTIVE_WORK_STATUS_TIMEOUT_MS, probeDeadline.remainingMs())),
+      "resolve launcher active work status for workbench close");
       const status = await withDesktopShellExitTimeout(
-        (signal) => fetchLauncherActiveWorkStatus({ ...context, signal }),
-        ACTIVE_WORK_STATUS_TIMEOUT_MS,
+        () => resolveQuitActiveWorkStatus({
+          probe: () => probe(false),
+          recoverAndRetry: () => probe(true)
+        }),
+        probeDeadline,
         "resolve launcher active work status for workbench close"
       );
       activeWorkState = status.state;
-    } catch {
+      if (status.state === "unknown") {
+        probeFailure = isActiveWorkProbeAuthFailure(status.message) ? "authorization" : "unknown_projection";
+      }
+    } catch (error: unknown) {
       activeWorkState = "unknown";
+      probeFailure = isActiveWorkProbeAuthFailure(error) ? "authorization"
+        : String(error).includes("timed out") ? "timeout" : "unavailable";
+    } finally {
+      probeDeadline.dispose();
     }
     const activeWorkProbeMs = Math.max(0, Math.round(performance.now() - preparationStartedAtMs));
+    recordSupervisorEventFallbackLocally({
+      eventCode: "electron.workbench_close.active_work_checked",
+      message: "Workbench close active-work check settled.",
+      fields: { desktopSessionId, activeWorkState, probeAttempts, probeFailure, activeWorkProbeMs }
+    });
     let transaction = mainWorkbenchCloseStore.submit({
       mode: "normal",
       reason: "workbench_window_close",
@@ -1444,7 +1475,7 @@ async function requestTransactionalWorkbenchClose(
           fields: {
             closeId: transaction.closeId,
             requestId: transaction.requestId ?? "",
-            desktopSessionId: context.desktopSessionId,
+            desktopSessionId,
             operatorIntent: "keep_running",
             activeWorkState: transaction.activeWorkState,
             elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
@@ -1456,7 +1487,7 @@ async function requestTransactionalWorkbenchClose(
     }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
-      desktopSessionId: context.desktopSessionId,
+      desktopSessionId,
       requestedAtMs
     };
     const closeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS);
@@ -1469,7 +1500,7 @@ async function requestTransactionalWorkbenchClose(
         fields: {
           closeId: transaction.closeId,
           requestId: transaction.requestId ?? "",
-          desktopSessionId: context.desktopSessionId,
+          desktopSessionId,
           operatorIntent: transaction.mode === "force" ? "force_close" : "close",
           activeWorkState: transaction.activeWorkState,
           mode: transaction.mode,
@@ -1493,6 +1524,7 @@ async function requestTransactionalWorkbenchClose(
       const settled = await waitForWorkbenchBackendSettledForWindowClose({
         readStatus: async () => {
           try {
+            const context = await resolveDesktopActionLoopContext(bootstrap, { signal });
             return await fetchLauncherStatusSummary({ ...context, signal });
           } catch {
             signal.throwIfAborted();
@@ -1532,7 +1564,7 @@ async function requestTransactionalWorkbenchClose(
       message: "Workbench backend closed; Electron is requesting the final window close.",
       fields: {
         closeId: transaction.closeId,
-        desktopSessionId: context.desktopSessionId,
+        desktopSessionId,
         phase: transaction.phase,
         queuedMs,
         activeWorkProbeMs,

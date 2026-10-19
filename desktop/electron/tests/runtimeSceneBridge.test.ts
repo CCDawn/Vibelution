@@ -189,6 +189,190 @@ describe("RuntimeSceneBridge", () => {
   });
 });
 
+describe("RuntimeSceneBridge control-token self-heal", () => {
+  function controlTokenResponse(token: string, status = 200): Response {
+    return new Response(
+      JSON.stringify({ header: "X-Vibelution-Control-Token", controlToken: token }),
+      { status, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  function tokenHeaderOf(init?: RequestInit): string {
+    const headers = init?.headers as Record<string, string> | undefined;
+    return String(headers?.["X-Vibelution-Control-Token"] ?? "");
+  }
+
+  function eventCodeOf(init?: RequestInit): string {
+    return JSON.parse(String(init?.body)).eventCode as string;
+  }
+
+  it.each([403, 401])(
+    "refreshes the control token after a %s and retries the queue head with the rotated token",
+    async (authStatus) => {
+      const eventPosts: Array<{ token: string; eventCode: string }> = [];
+      let eventPostCount = 0;
+      let tokenFetchCount = 0;
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const href = String(input);
+        if (href.endsWith("/api/control-token")) {
+          tokenFetchCount += 1;
+          return controlTokenResponse("fresh-token");
+        }
+        expect(href).toBe("http://127.0.0.1:8765/api/launcher/runtime-scene/events");
+        eventPostCount += 1;
+        eventPosts.push({ token: tokenHeaderOf(init), eventCode: eventCodeOf(init) });
+        return eventPostCount === 1
+          ? new Response("{}", { status: authStatus })
+          : new Response("{}", { status: 202 });
+      });
+      const bridge = new RuntimeSceneBridge({
+        launcherOrigin: "http://127.0.0.1:8765",
+        controlToken: "stale-token",
+        maxBufferedEvents: 5,
+        fetchImpl
+      });
+
+      await bridge.record({ eventCode: "event-1", message: "message", fields: {} });
+
+      expect(tokenFetchCount).toBe(1);
+      expect(eventPosts).toEqual([
+        { token: "stale-token", eventCode: "event-1" },
+        { token: "fresh-token", eventCode: "event-1" }
+      ]);
+      expect(bridge.bufferedCount()).toBe(0);
+
+      // The rotated token sticks for later events without another refresh.
+      await bridge.record({ eventCode: "event-2", message: "message", fields: {} });
+      expect(tokenFetchCount).toBe(1);
+      expect(eventPosts[2]).toEqual({ token: "fresh-token", eventCode: "event-2" });
+      expect(bridge.bufferedCount()).toBe(0);
+    }
+  );
+
+  it("backs off after a failed refresh instead of hammering the token endpoint", async () => {
+    let now = 0;
+    let tokenFetchCount = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const href = String(input);
+      if (href.endsWith("/api/control-token")) {
+        tokenFetchCount += 1;
+        return new Response("backend unavailable", { status: 500 });
+      }
+      return new Response("{}", { status: 403 });
+    });
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "stale-token",
+      maxBufferedEvents: 50,
+      fetchImpl,
+      clock: () => now,
+      tokenRefreshBackoffBaseMs: 1_000,
+      tokenRefreshBackoffMaxMs: 30_000
+    });
+
+    await bridge.record({ eventCode: "event-1", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(1);
+
+    // Still inside the base backoff window: the head is retried with the old
+    // token but no second refresh may be issued.
+    await bridge.record({ eventCode: "event-2", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(1);
+    expect(bridge.bufferedCount()).toBe(2);
+
+    now = 1_500;
+    await bridge.record({ eventCode: "event-3", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(2);
+
+    // Second failure doubles the backoff: eligible again only at 1500 + 2000.
+    now = 3_000;
+    await bridge.record({ eventCode: "event-4", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(2);
+  });
+
+  it("stops refreshing for a cooldown window after repeated failed refreshes", async () => {
+    let now = 0;
+    let tokenFetchCount = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const href = String(input);
+      if (href.endsWith("/api/control-token")) {
+        tokenFetchCount += 1;
+        return new Response("backend unavailable", { status: 500 });
+      }
+      return new Response("{}", { status: 403 });
+    });
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "stale-token",
+      maxBufferedEvents: 50,
+      fetchImpl,
+      clock: () => now,
+      tokenRefreshBackoffBaseMs: 100,
+      tokenRefreshBackoffMaxMs: 400,
+      tokenRefreshMaxFailures: 3,
+      tokenRefreshCooldownMs: 5_000
+    });
+
+    now = 0;
+    await bridge.record({ eventCode: "event-1", message: "message", fields: {} });
+    now = 100;
+    await bridge.record({ eventCode: "event-2", message: "message", fields: {} });
+    now = 300;
+    await bridge.record({ eventCode: "event-3", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(3);
+
+    // Three consecutive failures opened a cooldown until 300 + 5000; requests
+    // inside that window retry the head silently but never touch the token
+    // endpoint, even once the exponential backoff alone would allow it.
+    now = 2_000;
+    await bridge.record({ eventCode: "event-4", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(3);
+    now = 5_299;
+    await bridge.record({ eventCode: "event-5", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(3);
+
+    // After the cooldown the refresh cycle starts over.
+    now = 5_300;
+    await bridge.record({ eventCode: "event-6", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(4);
+    expect(bridge.bufferedCount()).toBe(6);
+  });
+
+  it("does not retry the post when the refreshed token is unchanged", async () => {
+    let now = 0;
+    let tokenFetchCount = 0;
+    let eventPostCount = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const href = String(input);
+      if (href.endsWith("/api/control-token")) {
+        tokenFetchCount += 1;
+        return controlTokenResponse("same-token");
+      }
+      eventPostCount += 1;
+      return new Response("{}", { status: 403 });
+    });
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "same-token",
+      maxBufferedEvents: 50,
+      fetchImpl,
+      clock: () => now,
+      tokenRefreshBackoffBaseMs: 1_000
+    });
+
+    await bridge.record({ eventCode: "event-1", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(1);
+    expect(eventPostCount).toBe(1);
+    expect(bridge.bufferedCount()).toBe(1);
+
+    // An identical token is treated as an unhelpful refresh: no pointless
+    // duplicate POST of the head and no refresh storm on later records.
+    await bridge.record({ eventCode: "event-2", message: "message", fields: {} });
+    expect(tokenFetchCount).toBe(1);
+    expect(eventPostCount).toBe(2);
+    expect(bridge.bufferedCount()).toBe(2);
+  });
+});
+
 describe("electronEventPayload", () => {
   it("keeps runtime scene authority fields fixed", () => {
     expect(

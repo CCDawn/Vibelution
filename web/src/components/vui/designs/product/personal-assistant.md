@@ -115,11 +115,11 @@ VDialog size=sm + 纵向表单行；读取中 VStateSurface loading 骨架，读
 ## HumanAttentionNotifier
 
 ### 功能
-主工作台的“双通道人工注意”触发链：轮询个人助理 overview 的 attention 列表（复用既有 query key 与 5s 节奏，不新建后端路径），发现 `kind` 为 knowledge_review/anomaly 且当日未通知过的新条目 id，即调用壳层桥 `notifyHumanAttention(payload)`——助理悬浮窗开着时由壳层把通知投递进助理窗口，没开时壳层发 Windows 系统通知；收到壳层 `onHumanAttentionOpened` 打开回调时按 targetUrl（或 kind 默认路由）在工作台内导航。
+主工作台的“双通道人工注意”触发链：轮询个人助理 overview 的 attention 列表（复用既有 query key 与 5s 节奏，不新建后端路径），发现 `kind` 为 knowledge_review/anomaly/affair_reminder 且当日未通知过的新条目 id，即调用壳层桥 `notifyHumanAttention(payload)`——助理悬浮窗开着时由壳层把通知投递进助理窗口，没开时壳层发 Windows 系统通知；收到壳层 `onHumanAttentionOpened` 打开回调时按 targetUrl（或 kind 默认路由）在工作台内导航。
 ### 适用范围
 仅 AppShell 主工作台层挂载一次；可见通知卡归助理窗口（HumanAttentionNoticeStack），本组件不渲染任何界面。助理窗口自身不挂载（/desktop-assistant 不进 AppShell），不会双重触发。
 ### 使用方式
-`<HumanAttentionNotifier />` 渲染为 null。去重 id 按本地日（localStorage `vibelution.human-attention.notified.v1`，day key 为本地日期，上限 400 条）持久化，页面刷新不重弹；桥不存在（非桌面环境）时静默跳过且不标记 id。payload 字段与壳层契约为 `id/kind/severity/title/body?/targetUrl?`；打开回调按 targetUrl 优先、否则用最近通知过的 id→kind 映射落到默认路由（knowledge_review→`/memory/knowledge`，anomaly→`/teams?researchView=workflow`）。
+`<HumanAttentionNotifier />` 渲染为 null。去重 id 按本地日（localStorage `vibelution.human-attention.notified.v1`，day key 为本地日期，上限 400 条）持久化，页面刷新不重弹；桥不存在（非桌面环境）时静默跳过且不标记 id。payload 字段与壳层契约为 `id/kind/severity/title/body?/targetUrl?`；打开回调按 targetUrl 优先、否则用最近通知过的 id→kind 映射落到默认路由（knowledge_review→`/memory/knowledge`，anomaly→`/teams?researchView=workflow`，affair_reminder→`/personal-assistant`）。
 ### 非职责
 不创建 attention 数据（后端 overview 权威）、不做可见 UI、不改普通会话通知链（chatDesktopNotifications 保持独立）、不聚焦或移动窗口（壳层职责）。
 ### 视觉与状态
