@@ -1,22 +1,26 @@
 """Session-scoped budget parameter resolution for the execution layer.
 
-Two per-session budget overrides exist today:
+One per-session budget override exists today:
 
 * ``maxCallsPerTurn`` — per-turn tool-call quota; installed by the tool
   authorization layer with priority session override > model-family
   resolution > policy base.
-* ``thinkingBudgetChars`` — hard thinking-budget instruction in chars;
-  consumed by ``research_thinking_budget`` with priority session value >
-  env override > no injection.
+
+Thinking budgets are intentionally *not* session-configurable: the hard
+thinking-budget instruction is reserved for research workflow node sessions
+(see ``core.web.services.session.research_thinking_budget``), which always
+resolve through the env/default path. Stored payloads may still carry a
+legacy ``thinkingBudgetChars`` key; the read path ignores it, and the next
+PATCH save drops it from the stored payload.
 
 Storage follows the session model-parameters pattern: values live on the
 session's bound Agent registry record under one metadata key, guarded by the
 Agent ``configRevision`` compare-and-swap. Because chat sessions bind one
 direct Agent each, the Agent-scoped block stays session-private in practice.
 
-This module is the single read path shared by the authorization layer, the
-thinking-budget resolver, and the web service; it must stay import-cheap and
-late-bind web services inside functions only.
+This module is the single read path shared by the authorization layer and
+the web service; it must stay import-cheap and late-bind web services inside
+functions only.
 """
 
 from __future__ import annotations
@@ -28,8 +32,6 @@ SESSION_BUDGET_PARAMETERS_METADATA_KEY = "sessionBudgetParameters"
 
 SESSION_MAX_CALLS_PER_TURN_MIN = 1
 SESSION_MAX_CALLS_PER_TURN_MAX = 200
-SESSION_THINKING_BUDGET_CHARS_MIN = 50
-SESSION_THINKING_BUDGET_CHARS_MAX = 4000
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,15 +39,11 @@ class SessionBudgetParameters:
     """Per-session budget overrides; ``None`` fields fall back to defaults."""
 
     maxCallsPerTurn: int | None = None
-    thinkingBudgetChars: int | None = None
 
     def as_storage_payload(self) -> dict[str, int]:
         return {
             key: value
-            for key, value in (
-                ("maxCallsPerTurn", self.maxCallsPerTurn),
-                ("thinkingBudgetChars", self.thinkingBudgetChars),
-            )
+            for key, value in (("maxCallsPerTurn", self.maxCallsPerTurn),)
             if value is not None
         }
 
@@ -83,14 +81,11 @@ def normalize_session_budget_parameters(raw: Any) -> SessionBudgetParameters | N
         minimum=SESSION_MAX_CALLS_PER_TURN_MIN,
         maximum=SESSION_MAX_CALLS_PER_TURN_MAX,
     )
-    thinking_chars = _coerce_override_int(
-        raw.get("thinkingBudgetChars"),
-        minimum=SESSION_THINKING_BUDGET_CHARS_MIN,
-        maximum=SESSION_THINKING_BUDGET_CHARS_MAX,
-    )
-    if max_calls is None and thinking_chars is None:
+    # Legacy payloads may still carry a ``thinkingBudgetChars`` key; it is
+    # deliberately ignored here and dropped on the next PATCH save.
+    if max_calls is None:
         return None
-    return SessionBudgetParameters(maxCallsPerTurn=max_calls, thinkingBudgetChars=thinking_chars)
+    return SessionBudgetParameters(maxCallsPerTurn=max_calls)
 
 
 def session_budget_parameters_from_agent(agent: Any) -> SessionBudgetParameters | None:
@@ -161,8 +156,6 @@ __all__ = [
     "SESSION_BUDGET_PARAMETERS_METADATA_KEY",
     "SESSION_MAX_CALLS_PER_TURN_MAX",
     "SESSION_MAX_CALLS_PER_TURN_MIN",
-    "SESSION_THINKING_BUDGET_CHARS_MAX",
-    "SESSION_THINKING_BUDGET_CHARS_MIN",
     "SessionBudgetParameters",
     "SessionBudgetParametersValueError",
     "get_session_budget_parameters",

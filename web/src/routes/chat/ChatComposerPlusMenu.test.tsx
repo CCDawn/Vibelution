@@ -97,7 +97,6 @@ describe("composer budget entry interaction", () => {
     sessionId: "session-budget",
     revision: 7,
     maxCallsPerTurn: 32,
-    thinkingBudgetChars: null,
     onSave: vi.fn(),
   };
   function baseProps(budget?: ChatComposerBudgetControl, capabilityDisabled = false): ChatComposerPlusMenuProps {

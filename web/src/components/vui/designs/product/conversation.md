@@ -397,7 +397,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
-| budget | `ChatComposerBudgetControl \| null` | 提供 `sessionId/revision/两个限额/存取状态/onSave`；群聊与陪伴面不传 |
+| budget | `ChatComposerBudgetControl \| null` | 提供 `sessionId/revision/每回合工具调用额度/存取状态/onSave`；群聊与陪伴面不传 |
 | capabilityDisabled | 会话级禁用 | 与能力开关同一门：无 activeSession 时禁用预算入口 |
 
 ### 边界
@@ -420,7 +420,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ## ChatComposerBudgetPopover
 
 ### 功能
-Composer 加号菜单「预算与额度」入口原地展开的会话级预算配置悬浮面板（`VPopover`，`side="right"` 锚定菜单行）：两个数字输入——每回合工具调用额度（1–200）与思考预算字数（50–4000）。完整复用 `ConversationTurnModelControl` 的 draft+dirty+校验+显式保存范式：草稿只在会话切换或保存落地时重置；revision 刷新（含 409 冲突）不冲掉操作者草稿；输入为空即「清除/恢复默认」，保存时提交 `null`。
+Composer 加号菜单「预算与额度」入口原地展开的会话级预算配置悬浮面板（`VPopover`，`side="right"` 锚定菜单行）：单个数字输入——每回合工具调用额度（1–200）。完整复用 `ConversationTurnModelControl` 的 draft+dirty+校验+显式保存范式：草稿只在会话切换或保存落地时重置；revision 刷新（含 409 冲突）不冲掉操作者草稿；输入为空即「清除/恢复默认」，保存时提交 `null`。
 
 ### 适用范围
 - **适用**：直连 Agent 会话（普通会话面）的预算参数查看与修改；保存走 `PATCH /api/sessions/{id}/budget-parameters`，revision 冲突时经失效刷新拿最新值并提示重试。
@@ -437,7 +437,6 @@ Composer 加号菜单「预算与额度」入口原地展开的会话级预算�
   sessionId={budget.sessionId}
   revision={budget.revision}
   maxCallsPerTurn={budget.maxCallsPerTurn}
-  thinkingBudgetChars={budget.thinkingBudgetChars}
   loading={budget.loading}
   error={budget.error}
   pending={budget.pending}
@@ -449,11 +448,11 @@ Composer 加号菜单「预算与额度」入口原地展开的会话级预算�
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
 | revision | 服务端乐观锁版本 | 未取到前保存禁用；409 后经失效刷新拿新值重试 |
-| maxCallsPerTurn / thinkingBudgetChars | `number \| null` | null=按默认策略；空输入在保存时提交 null |
+| maxCallsPerTurn | `number \| null` | null=按默认策略；空输入在保存时提交 null |
 | pending / errorMessage | 保存态与错误文案 | pending 时输入、清除、取消、保存全部禁用；保存期间 composer 同步禁用 |
 
 ### 行为
-- 校验域与服务端 422 对齐：maxCallsPerTurn ∈ [1,200]、thinkingBudgetChars ∈ [50,4000]，非整数/越界即时报错且禁用保存；空串合法=清除。
+- 校验域与服务端 422 对齐：maxCallsPerTurn ∈ [1,200]，非整数/越界即时报错且禁用保存；空串合法=清除。
 - 每字段带「清除，恢复默认」按钮（RotateCcw 图标），等价于把输入清空。
 - 保存成功（pending 回落且无错误）后草稿重置为服务端真值；收起面板丢弃未保存草稿（pending 时可收起但不重置）。
 
