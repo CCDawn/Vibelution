@@ -29,6 +29,8 @@ export type MainLineQueuedCommand = {
 
 export type MainLineSubmitInput = {
   operation: MainLineLifecycleOperation;
+  /** Cancelled lease work must not occupy or later settle the current lane. */
+  signal?: AbortSignal;
   noBrowser?: boolean;
   execute: (command: MainLineQueuedCommand) => Promise<MainLineLifecycleResult>;
 };
@@ -154,6 +156,8 @@ export function createMainLineCommandQueue(options: {
   onCloseBackoffCoalesced?: (info: CloseBackoffCoalescedInfo) => void;
 } = {}): MainLineCommandQueue {
   type Slot = MainLineQueuedCommand & {
+    signal?: AbortSignal;
+    detachAbort?: () => void;
     execute: MainLineSubmitInput["execute"];
     result: Promise<MainLineSubmitResult>;
     resolve: (result: MainLineSubmitResult) => void;
@@ -173,8 +177,11 @@ export function createMainLineCommandQueue(options: {
   // the queue's active/pending structures until its drain finally clears it, so
   // the join branch can tell a live in-flight close from the just-settled one.
   let settledCloseSlot: Slot | null = null;
+  let latestPersistCommandId = "";
+  let intentPersistence: Promise<unknown> = Promise.resolve();
 
   const persist = (command: MainLineQueuedCommand): void => {
+    latestPersistCommandId = command.commandId;
     const snapshot: MainLineIntentSnapshot = {
       schemaVersion: 1,
       desiredState: desiredStateFor(command.type),
@@ -182,13 +189,15 @@ export function createMainLineCommandQueue(options: {
       commandId: command.commandId,
       updatedAt: new Date(now()).toISOString(),
     };
+    // Atomic renames are individually safe but can finish out of order. Keep
+    // recovery writes ordered without making close wait for disk I/O; skip
+    // older snapshots that have not started writing yet.
+    intentPersistence = intentPersistence.catch(() => undefined).then(() => {
+      if (latestPersistCommandId !== command.commandId) return;
+      return options.persistIntent?.(snapshot);
+    }).catch(() => undefined);
     try {
-      void options.persistIntent?.(snapshot);
-    } catch {
-      // Persistence is crash-recovery assistance, not the execute path.
-    }
-    try {
-      void options.writeOwnerMarker?.();
+      void Promise.resolve(options.writeOwnerMarker?.()).catch(() => undefined);
     } catch {
       // Owner marker is best-effort for the daemon idle skip.
     }
@@ -233,11 +242,11 @@ export function createMainLineCommandQueue(options: {
     persist(next);
     void next.execute(next).then(
       (result) => {
-        noteCloseSettlement(next, result);
+        if (active === next && !next.signal?.aborted) noteCloseSettlement(next, result);
         next.resolve(result);
       },
       (error: unknown) => {
-        noteCloseSettlement(next, {
+        if (active === next && !next.signal?.aborted) noteCloseSettlement(next, {
           schemaVersion: 1,
           accepted: false,
           operation: next.operation,
@@ -247,16 +256,28 @@ export function createMainLineCommandQueue(options: {
         next.reject(error instanceof Error ? error : new Error(String(error)));
       },
     ).finally(() => {
-      active = null;
-      draining = false;
-      drain();
+      next.detachAbort?.();
+      // An aborted command can finish after its replacement has started.
+      if (active === next) {
+        active = null;
+        draining = false;
+        drain();
+      }
     });
   };
 
   return {
     submit(input) {
+      if (input.signal?.aborted) return Promise.reject(input.signal.reason);
       const mapped = JOINABLE_OPERATIONS[input.operation];
       const noBrowser = Boolean(input.noBrowser);
+      // Once an open intent is admitted, an older closed result cannot prove
+      // closure anymore: that open can spawn and then be cancelled before its
+      // promise settles. A following close must execute in that case.
+      if (mapped === "open" || mapped === "restart" || input.operation === "rebuild-and-start") {
+        lastClose = null;
+        settledCloseSlot = null;
+      }
       if (mapped === null) {
         const passthrough: MainLineQueuedCommand = {
           commandId: newCommandId(now()),
@@ -288,6 +309,7 @@ export function createMainLineCommandQueue(options: {
         const item = pending[index];
         if (item && supersedesPending(mapped, item.type)) {
           pending.splice(index, 1);
+          item.detachAbort?.();
           item.resolve(supersededResult(item.operation));
         }
       }
@@ -337,10 +359,24 @@ export function createMainLineCommandQueue(options: {
         operation: input.operation,
         noBrowser,
         execute: input.execute,
+        signal: input.signal,
         result,
         resolve,
         reject,
       };
+      const abort = (): void => {
+        command.detachAbort?.();
+        const index = pending.indexOf(command);
+        if (index >= 0) pending.splice(index, 1);
+        command.reject(input.signal?.reason ?? new Error("main-line lifecycle command aborted"));
+        if (active === command) {
+          active = null;
+          draining = false;
+          drain();
+        }
+      };
+      command.detachAbort = () => input.signal?.removeEventListener("abort", abort);
+      input.signal?.addEventListener("abort", abort, { once: true });
       pending.push(command);
       persist(command);
       drain();
