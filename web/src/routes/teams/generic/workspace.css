@@ -1,5 +1,4 @@
-/* The approved workflow workspace uses one accent without changing global tokens. */
-.generic-team-workspace [data-vui="checkbox"] { --accent-cool: #256c58; }
+/* Narrow controls use the shared VUI theme; the recipe owns drawer geometry. */
 @media (max-width: 639px) {
   .generic-team-workspace [data-vui="canvas-workbench-responsive-controls"] {
     border: 0;
@@ -9,10 +8,10 @@
   }
   .generic-team-workspace [data-vui="canvas-workbench-responsive-controls"] button {
     min-height: 44px;
-    border-color: #d7e3da;
-    background: #fff;
+    border-color: var(--vui-border-subtle);
+    background: var(--vui-surface-panel);
     padding-inline: 12px;
-    color: #456653;
+    color: var(--fg-secondary);
   }
   .generic-team-workspace [data-vui="button"], .generic-team-workspace [role="tab"], .generic-team-workspace [role="combobox"], .generic-team-workspace [data-vui="checkbox"] {
     min-height: 44px;

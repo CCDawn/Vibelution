@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentInstance, ToolBundle, ToolRegistryItem, ToolRegistryPayload } from "../api/types";
 import { queryKeys } from "../api/queryKeys";
 
-vi.mock("../i18n/useAppI18n", () => ({useAppI18n: () => ({lang:"zh", t:(key:string)=>key})}));
+const dictionaryState=vi.hoisted(()=>({ready:true}));
+vi.mock("../i18n/useAppI18n", () => ({useAppI18n: () => ({lang:"zh", t:(key:string)=>key, dictionaryReady:dictionaryState.ready})}));
 vi.mock("../i18n/useShellI18n", () => ({useShellI18n: () => ({lang:"zh", t:(key:string)=>key})}));
 vi.mock("../api/tools", () => ({fetchToolRegistry:vi.fn(),fetchToolImage2Models:vi.fn(),fetchWebSearchToolHealth:vi.fn(),bulkDeleteToolRegistry:vi.fn(),bulkSetGeneratedToolsEnabled:vi.fn(),deleteTool:vi.fn(),setGeneratedToolEnabled:vi.fn(),setToolImage2DefaultModel:vi.fn(),testTool:vi.fn()}));
 vi.mock("../api/agents", () => ({listAgentSummaries:vi.fn(),updateAgentToolPolicy:vi.fn(),validateAgentToolPolicy:vi.fn()}));
@@ -36,9 +37,22 @@ async function mount(query="view=policy") {
 async function click(element:HTMLElement|null){expect(element).not.toBeNull();await act(async()=>{element!.dispatchEvent(new MouseEvent("mousedown",{button:0,bubbles:true}));element!.click();});}
 function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find(e=>e.textContent?.trim()===text) ?? null;}
 function viewTab(text:string){return [...host.querySelectorAll<HTMLElement>('[role="tab"]')].find(e=>e.textContent===text) ?? null;}
-afterEach(async()=>{await act(async()=>root?.unmount());host?.remove();client?.clear();vi.clearAllMocks();});
+afterEach(async()=>{await act(async()=>root?.unmount());host?.remove();client?.clear();vi.clearAllMocks();dictionaryState.ready=true;});
 
 describe("Tools workspaces retain policy semantics",()=>{
+  it("keeps translation keys behind the existing loading shell until the dictionary is ready",async()=>{
+    dictionaryState.ready=false;
+    await mount("view=library");
+    expect(host.querySelector('[data-route-loading="tools"]')).not.toBeNull();
+    expect(host.textContent).toContain("正在打开工具工作台");
+    expect(host.textContent).not.toMatch(/toolsNoMatches|toolsMainAgent|toolsCurrentAgentTools/);
+    expect(host.querySelector('[data-tools-view]')).toBeNull();
+    dictionaryState.ready=true;
+    await act(async()=>{root.render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/agents/tools?view=library"]}><ToolsRoute/></MemoryRouter></QueryClientProvider>);});
+    expect(host.querySelector('[data-route-loading="tools"]')).toBeNull();
+    expect(host.querySelector('[data-vui-domain-recipe="tools-workbench"]')).not.toBeNull();
+    expect(host.textContent).toContain("shared_tool");
+  });
   it("keeps unsaved permissions and shared-package tools across view switches",async()=>{
     await mount("focus=bundle&bundle=Alpha&agent=A1");
     expect(host.querySelector('[data-tools-view="policy"]')).not.toBeNull();
