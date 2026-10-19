@@ -64,6 +64,7 @@ describe("assistant settings dialog", () => {
     expect(document.body.textContent).toContain("助理设置");
     expect(document.body.textContent).toContain("默认外观");
     expect(document.body.textContent).toContain("对话模型");
+    expect(document.body.textContent).toContain("只对那个会话生效");
     expect(document.body.textContent).not.toContain("小洛");
   });
 
