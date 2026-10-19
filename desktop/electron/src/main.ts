@@ -371,6 +371,8 @@ const launcherStateStore = new LauncherStateStore(
     freshness: { current: null, label: "Launcher 代码版本：未知" }
   }
 );
+const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 1_800;
+const WORKBENCH_CLOSE_FORCE_AFTER_MS = 1_200;
 const WORKBENCH_START_READY_WAIT_MS = 90_000;
 const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
@@ -1410,7 +1412,9 @@ async function requestTransactionalWorkbenchClose(
   }
   const requestedAtMs = performance.now();
   const requestedAt = Date.now();
-  const fastCloseTiming = { deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200 };
+  const fastCloseTiming = process.platform === "win32"
+    ? { deadlineAt: requestedAt + WORKBENCH_CLOSE_BACKEND_WAIT_MS, forceAt: requestedAt + WORKBENCH_CLOSE_FORCE_AFTER_MS }
+    : undefined;
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
     const preparationStartedAtMs = performance.now();
     const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
@@ -1430,7 +1434,8 @@ async function requestTransactionalWorkbenchClose(
       desktopSessionId,
       requestedAtMs
     };
-    const closeDeadline = createDesktopShellExitDeadline(Math.max(1, fastCloseTiming.deadlineAt - Date.now()));
+    const closeDeadline = createDesktopShellExitDeadline(fastCloseTiming
+      ? Math.max(1, fastCloseTiming.deadlineAt - Date.now()) : 30_000);
     let backendStopMs = 0;
     let readbackMs = 0;
     const backendStopFlight = withDesktopShellExitTimeout(async (signal): Promise<boolean> => {
