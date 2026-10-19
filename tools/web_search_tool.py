@@ -87,6 +87,26 @@ _FETCH_ACCEPT_LANGUAGE_HEADER = "en;q=0.9,zh;q=0.8"
 # 仅改写 GET 抓取路径，搜索阶段（providers/facade_helpers 的 export API 调用）不受影响。
 _ARXIV_MIRROR_HOSTS = ("arxiv.org", "www.arxiv.org")
 _ARXIV_EXPORT_HOST = "export.arxiv.org"
+# EuropePMC REST 是全文抓取的反爬备援镜像（MDPI/OUP 403、PMC 连接失败、Frontiers
+# 超时等形态的兜底原文来源）；两个端点是固定常量，天然公网，不经用户 URL 拼接。
+_EUROPEPMC_REST_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
+# 备援正文剥完至少要有这个量级才算成功，避免把空壳/错误页当原文回执。
+_EUROPEPMC_MIN_TEXT_CHARS = 200
+# 备援触发条件：403（出版方反爬）、连接失败、超时——都是「换个镜像可能就通」的形态；
+# 404/其余 4xx-5xx 是终态性错误（契约见 _format_http_fetch_error），不备援。
+_EUROPEPMC_FALLBACK_ERROR_PREFIXES = (
+    "[错误] HTTP 403: ",
+    "[错误] 无法连接到服务器: ",
+    "[错误] 请求超时 (",
+)
+# doi.org 短链被跨域重定向安全策略拦停时也值得备援：该形态返回 [网页抓取] 回执，
+# 而 doi.org 路径段本身就是可解析的 DOI。
+_EUROPEPMC_CROSS_HOST_STOP_PREFIX = "[网页抓取] 目标发生跨主机重定向"
+# URL 路径内的裸 DOI（slash 边界避免 v10.1234/ 这类版本子串误配）与 PMC ID 段。
+_DOI_IN_PATH = re.compile(r"(?i)(?<=/)10\.\d{4,9}/[^\s\"'<>]+")
+_PMC_ID_IN_PATH = re.compile(r"(?i)(?<=/)PMC\d+(?=/|$)")
+# PMCID 只从这两个官方镜像域名提取，其他站点的 PMC 字样不当作标识符。
+_PMC_ARTICLE_HOSTS = ("pmc.ncbi.nlm.nih.gov", "ebi.ac.uk")
 _TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None, "refreshing": False}
 _TOKEN_HEALTH_CACHE_LOCK = threading.Lock()
 _SITE_QUERY_RE = re.compile(r"(?i)(?:^|[\s(])site:([A-Za-z0-9.-]+)")
@@ -863,6 +883,141 @@ def _arxiv_export_mirror_url(url: str) -> str:
     return parsed._replace(netloc=_ARXIV_EXPORT_HOST).geturl()
 
 
+def _europepmc_fallback_eligible(error: str) -> bool:
+    """Only anti-bot (403), connect-failure, timeout and stopped cross-host
+    redirect errors are worth one mirror attempt; terminal errors are not."""
+    if not error:
+        return False
+    if error.startswith(_EUROPEPMC_CROSS_HOST_STOP_PREFIX):
+        return True
+    return any(error.startswith(prefix) for prefix in _EUROPEPMC_FALLBACK_ERROR_PREFIXES)
+
+
+def _europepmc_identifiers(url: str) -> tuple[str | None, str | None]:
+    """Extract ``(doi, pmcid)`` from the request URL by pure regex; no network.
+
+    doi.org / dx.doi.org treat the path segment as the DOI; other hosts only
+    match a slash-bounded bare DOI inside the path. PMC IDs are only honored
+    on the two official mirror hosts. Neither found → ``(None, None)`` and
+    the caller keeps the original error.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except Exception:
+        return None, None
+    if host.startswith("www."):
+        host = host[len("www."):]
+    path = parsed.path or ""
+    pmcid: str | None = None
+    if host in _PMC_ARTICLE_HOSTS:
+        pmcid_match = _PMC_ID_IN_PATH.search(path)
+        if pmcid_match:
+            pmcid = pmcid_match.group(0).upper()
+    doi: str | None = None
+    if host in ("doi.org", "dx.doi.org") and len(path) > 1:
+        doi = unquote(path[1:]).strip().rstrip("/.,;:")
+    else:
+        doi_match = _DOI_IN_PATH.search(unquote(path))
+        if doi_match:
+            doi = doi_match.group(0).rstrip(".,;:")
+    if doi and not re.match(r"(?i)^10\.\d{4,9}/", doi):
+        doi = None
+    return doi, pmcid
+
+
+def _europepmc_normalize_pmcid(value: Any) -> str | None:
+    """Validate a raw pmcid payload into canonical ``PMC<digits>`` form."""
+    match = re.search(r"(?i)\bPMC\d+\b", str(value or ""))
+    return match.group(0).upper() if match else None
+
+
+def _europepmc_search_pmcid(doi: str) -> str | None:
+    """Resolve a DOI to its PMCID via the EuropePMC search endpoint (one call)."""
+    query = quote_plus(f'DOI:"{doi}"')
+    search_url = f"{_EUROPEPMC_REST_BASE}/search?query={query}&format=json"
+    with _open_web_fetch_client() as client:
+        response = client.get(
+            search_url,
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+        )
+        if response.status_code != 200:
+            return None
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+    results = (((payload or {}).get("resultList") or {}).get("result")) or []
+    if not isinstance(results, list) or not results:
+        return None
+    first = results[0] if isinstance(results[0], dict) else {}
+    # 只认结果列表第一条且 pmcid 非空，避免低相关命中拿错原文。
+    return _europepmc_normalize_pmcid(first.get("pmcid"))
+
+
+def _europepmc_fetch_fulltext(pmcid: str) -> str | None:
+    """Fetch and strip the EuropePMC full-text XML for ``pmcid``; bounded, never raises."""
+    fulltext_url = f"{_EUROPEPMC_REST_BASE}/{pmcid}/fullTextXML"
+    with _open_web_fetch_client() as client:
+        response = client.get(
+            fulltext_url,
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/xml,text/xml,*/*"},
+        )
+        if response.status_code != 200:
+            return None
+        document = _read_response_text(response)
+    if not isinstance(document, str) or document.startswith("[错误]"):
+        return None
+    text = _extract_plain_text(document)
+    if len(text.strip()) < _EUROPEPMC_MIN_TEXT_CHARS:
+        return None
+    return text
+
+
+def _europepmc_fulltext_mirror_text(url: str, error: str) -> str | None:
+    """One bounded EuropePMC mirror attempt for a failed direct fetch.
+
+    Trigger: the error is 403 / connect-failure / timeout / stopped cross-host
+    redirect AND the request URL carries a DOI or PMC ID. Chain: PMCID direct
+    (or DOI → search → PMCID) → fullTextXML → stripped plain text. Any failure
+    returns ``None`` so the caller keeps the original error string verbatim;
+    internal exceptions are swallowed so web_fetch never raises new shapes.
+    """
+    try:
+        if not _europepmc_fallback_eligible(error):
+            return None
+        doi, pmcid = _europepmc_identifiers(url)
+        if pmcid is None and doi:
+            pmcid = _europepmc_search_pmcid(doi)
+        if pmcid is None:
+            return None
+        return _europepmc_fetch_fulltext(pmcid)
+    except Exception:
+        return None
+
+
+def _open_web_fetch_client() -> httpx.Client:
+    """web_fetch 抓取用 client：接 operator 的 network.proxy_enabled/proxy_url。
+
+    httpx 默认只读环境变量代理，不吃 config；语义对齐 core/research/providers.py
+    的 _build_network_opener（启用且非空才挂代理）。config 导入放函数内延迟加载，
+    避免循环依赖；config 不可用时按无代理处理，不阻断抓取。只服务 web_fetch
+    抓取链路（含 EuropePMC 备援），搜索 backend 与 Bing 兜底不在范围内。
+    """
+    kwargs: dict[str, Any] = {"timeout": _WEB_FETCH_TIMEOUT, "follow_redirects": False}
+    try:
+        from config.settings import get_network_config
+
+        network = get_network_config()
+        if bool(getattr(network, "proxy_enabled", False)):
+            proxy_url = str(getattr(network, "proxy_url", "") or "").strip()
+            if proxy_url:
+                kwargs["proxy"] = proxy_url
+    except Exception:
+        pass
+    return httpx.Client(**kwargs)
+
+
 def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | None]:
     current_url = url
     original_host = (urlparse(url).hostname or "").lower()
@@ -871,7 +1026,7 @@ def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | Non
     # 常常是原样 URL，中间跳设置的 cookie 会让第二次请求落到 200；第 3 次出现才判真实环路。
     visit_counts: dict[str, int] = {current_url: 1}
     try:
-        with httpx.Client(timeout=_WEB_FETCH_TIMEOUT, follow_redirects=False) as client:
+        with _open_web_fetch_client() as client:
             for _ in range(_WEB_FETCH_MAX_REDIRECTS + 1):
                 validation_error = _validate_public_http_url(current_url)
                 if validation_error:
@@ -951,19 +1106,27 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
 
     fetch_url = _arxiv_export_mirror_url(url)
     final_url_or_error, response = _fetch_with_same_site_redirects(fetch_url)
+    mirror_fallback = False
     if response is None:
-        return final_url_or_error
-
-    is_pdf = "pdf" in str(response.headers.get("content-type") or "").lower()
-    document_or_error = _read_response_text(response)
-    if document_or_error.startswith("[错误]"):
-        return document_or_error
-
-    if is_pdf:
-        # PDF 提取结果已是纯文本；trafilatura 对纯文本输入返回 None，跳过以免二次加工失真。
-        text = document_or_error
+        # 直接抓取失败且为 403/连接失败/超时/跨域重定向被停、URL 可解析出 DOI/PMCID 时，
+        # 走一次 EuropePMC 镜像备援；备援任一步失败都返回 None → 原错误一字不改返回。
+        mirrored_text = _europepmc_fulltext_mirror_text(url, final_url_or_error)
+        if mirrored_text is None:
+            return final_url_or_error
+        text = mirrored_text
+        mirror_fallback = True
+        is_pdf = False
     else:
-        text = _extract_plain_text(document_or_error)
+        is_pdf = "pdf" in str(response.headers.get("content-type") or "").lower()
+        document_or_error = _read_response_text(response)
+        if document_or_error.startswith("[错误]"):
+            return document_or_error
+
+        if is_pdf:
+            # PDF 提取结果已是纯文本；trafilatura 对纯文本输入返回 None，跳过以免二次加工失真。
+            text = document_or_error
+        else:
+            text = _extract_plain_text(document_or_error)
 
     limit = _clamp_int(max_chars, default=8000, minimum=500, maximum=50000)
     if len(text) > limit:
@@ -973,11 +1136,11 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
         return f"[网页抓取] URL 内容为空: {final_url_or_error}"
 
     focus = f"\n关注点: {prompt.strip()[:240]}" if prompt and prompt.strip() else ""
-    # 回执 URL 策略：arXiv 改道抓取时回执行仍报告原始请求 URL——下游
+    # 回执 URL 策略：arXiv 改道与 EuropePMC 备援成功时，回执行仍报告原始请求 URL——下游
     # extraction（task_fetched_text → source_quotable_blocks）以 web_fetch_tool
-    # 的调用参数（原始 URL）为 locator 做精确串匹配，报 export 镜像 URL 会让
-    # 「源 URL=arxiv.org/abs/x」的回执永不命中。
-    receipt_url = url if fetch_url != url else final_url_or_error
+    # 的调用参数（原始 URL）为 locator 做精确串匹配，报镜像 URL 会让
+    # 「源 URL=原站」的回执永不命中。
+    receipt_url = url if (fetch_url != url or mirror_fallback) else final_url_or_error
     prefix = f"[PDF 文本] {receipt_url}" if is_pdf else f"[网页内容] {receipt_url}"
     return f"{prefix}{focus}\n\n{text}"
 

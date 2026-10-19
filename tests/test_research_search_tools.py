@@ -590,3 +590,252 @@ def test_web_fetch_other_status_codes_keep_plain_error(monkeypatch):
     result = web_search_tool.web_fetch("https://example.com/broken")
 
     assert result == "[错误] HTTP 500: https://example.com/broken"
+
+
+# ---------------------------------------------------------------------------
+# EuropePMC 镜像备援（403/连接失败/超时/跨域重定向被停 → DOI/PMCID → 全文回执）
+# ---------------------------------------------------------------------------
+
+_EUROPEPMC_SEARCH_PREFIX = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+_EUROPEPMC_FULLTEXT_PREFIX = "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC"
+_FULLTEXT_XML = (
+    "<article><body><p>"
+    + "Predictive coding accounts for cortical and cerebellar learning dynamics. " * 6
+    + "</p></body></article>"
+)
+
+
+def test_web_fetch_403_falls_back_to_europepmc_fulltext(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        if url == "https://www.mdpi.com/10.3390/s24186010":
+            return httpx.Response(403, request=httpx.Request("GET", url))
+        if url.startswith(_EUROPEPMC_SEARCH_PREFIX):
+            return httpx.Response(
+                200,
+                json={"resultList": {"result": [{"pmcid": "PMC1234567"}]}},
+                request=httpx.Request("GET", url),
+            )
+        if url == "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1234567/fullTextXML":
+            return httpx.Response(200, text=_FULLTEXT_XML, request=httpx.Request("GET", url))
+        raise AssertionError(f"unexpected url: {url}")
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://www.mdpi.com/10.3390/s24186010")
+
+    # 回执前缀与 URL 都报原始请求：下游 task_fetched_text 按原始 URL 精确匹配 locator。
+    assert result.startswith("[网页内容] https://www.mdpi.com/10.3390/s24186010")
+    assert "Predictive coding accounts" in result
+    assert calls[1].startswith(_EUROPEPMC_SEARCH_PREFIX)
+    # DOI 以带引号的转义查询串发给 europepmc search。
+    assert "DOI%3A%2210.3390%2Fs24186010%22" in calls[1]
+    assert calls[2] == "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1234567/fullTextXML"
+
+
+def test_web_fetch_403_without_identifier_keeps_original_error(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        return httpx.Response(403, request=httpx.Request("GET", url))
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://en.wikipedia.org/wiki/Predictive_coding")
+
+    # URL 里提不出 DOI/PMCID 就不发起备援：只有一次原始请求。
+    assert calls == ["https://en.wikipedia.org/wiki/Predictive_coding"]
+    assert result.startswith("[错误] HTTP 403")
+
+
+def test_web_fetch_fallback_zero_hits_return_original_error_verbatim(monkeypatch):
+    expected = (
+        "[错误] HTTP 403: https://www.mdpi.com/10.3390/s24186010 "
+        "该站点拒绝本工具访问（可能是反爬），勿重试 URL 变体，请改用搜索摘要或其他域名。"
+    )
+    search_payloads = (
+        {"resultList": {"result": []}},
+        # 结果第一条 pmcid 为空同样算未命中。
+        {"resultList": {"result": [{"pmcid": "", "id": "38922312"}]}},
+    )
+    for payload in search_payloads:
+        calls = []
+
+        def fake_request(method, url, **kwargs):
+            calls.append(url)
+            if url == "https://www.mdpi.com/10.3390/s24186010":
+                return httpx.Response(403, request=httpx.Request("GET", url))
+            if url.startswith(_EUROPEPMC_SEARCH_PREFIX):
+                return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
+            raise AssertionError(f"unexpected url: {url}")
+
+        install_fake_client(monkeypatch, fake_request)
+
+        result = web_search_tool.web_fetch("https://www.mdpi.com/10.3390/s24186010")
+
+        # 零契约漂移：错误字符串与无备援时逐字一致，不附加任何 PMC 字样。
+        assert result == expected
+        assert len(calls) == 2
+
+
+def test_web_fetch_fallback_fulltext_failure_returns_original_error_verbatim(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        if url == "https://www.mdpi.com/10.3390/s24186010":
+            return httpx.Response(403, request=httpx.Request("GET", url))
+        if url.startswith(_EUROPEPMC_SEARCH_PREFIX):
+            return httpx.Response(
+                200,
+                json={"resultList": {"result": [{"pmcid": "PMC1234567"}]}},
+                request=httpx.Request("GET", url),
+            )
+        if url.endswith("/PMC1234567/fullTextXML"):
+            return httpx.Response(404, request=httpx.Request("GET", url))
+        raise AssertionError(f"unexpected url: {url}")
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://www.mdpi.com/10.3390/s24186010")
+
+    assert result == (
+        "[错误] HTTP 403: https://www.mdpi.com/10.3390/s24186010 "
+        "该站点拒绝本工具访问（可能是反爬），勿重试 URL 变体，请改用搜索摘要或其他域名。"
+    )
+
+
+def test_web_fetch_404_does_not_trigger_europepmc_fallback(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://doi.org/10.1016/0021-7824(84)90075-X")
+
+    # 404 是终态性错误：即使 URL 带可解析 DOI 也不备援。
+    assert calls == ["https://doi.org/10.1016/0021-7824(84)90075-X"]
+    assert result.startswith("[错误] HTTP 404")
+    assert "目标不存在" in result
+
+
+def test_web_fetch_pmc_connect_failure_falls_back_via_pmcid_direct(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        if url.startswith("https://pmc.ncbi.nlm.nih.gov/"):
+            raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+        if url == "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC11541172/fullTextXML":
+            return httpx.Response(200, text=_FULLTEXT_XML, request=httpx.Request("GET", url))
+        raise AssertionError(f"unexpected url: {url}")
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://pmc.ncbi.nlm.nih.gov/articles/PMC11541172/")
+
+    # URL 自带 PMCID：跳过 search 解析，直接取全文；回执仍报 pmc 原始 URL。
+    assert result.startswith("[网页内容] https://pmc.ncbi.nlm.nih.gov/articles/PMC11541172/")
+    assert "Predictive coding accounts" in result
+    assert calls == [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC11541172/",
+        "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC11541172/fullTextXML",
+    ]
+
+
+def test_web_fetch_doi_cross_host_redirect_falls_back_to_europepmc(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append(url)
+        if url == "https://doi.org/10.1093/bioinformatics/btad098":
+            return httpx.Response(
+                302,
+                headers={
+                    "location": "https://academic.oup.com/bioinformatics/article/doi/10.1093/bioinformatics/btad098/7565189"
+                },
+                request=httpx.Request("GET", url),
+            )
+        if url.startswith(_EUROPEPMC_SEARCH_PREFIX):
+            return httpx.Response(
+                200,
+                json={"resultList": {"result": [{"pmcid": "PMC10423677"}]}},
+                request=httpx.Request("GET", url),
+            )
+        if url == "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC10423677/fullTextXML":
+            return httpx.Response(200, text=_FULLTEXT_XML, request=httpx.Request("GET", url))
+        raise AssertionError(f"unexpected url: {url}")
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://doi.org/10.1093/bioinformatics/btad098")
+
+    # doi.org 跨域重定向被安全策略拦停 → 备援取全文 → 回执报原始 doi.org URL。
+    assert result.startswith("[网页内容] https://doi.org/10.1093/bioinformatics/btad098")
+    assert "Predictive coding accounts" in result
+    assert "DOI%3A%2210.1093%2Fbioinformatics%2Fbtad098%22" in calls[1]
+
+
+# ---------------------------------------------------------------------------
+# web_fetch 抓取 client 的 operator 代理接线
+# ---------------------------------------------------------------------------
+
+
+def _install_constructor_capturing_client(monkeypatch, handler):
+    captured = {}
+
+    def factory(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeClient(handler)
+
+    monkeypatch.setattr(web_search_tool.httpx, "Client", factory)
+    return captured
+
+
+def test_web_fetch_client_uses_operator_proxy_when_enabled(monkeypatch):
+    monkeypatch.setattr(
+        "config.settings.get_network_config",
+        lambda: SimpleNamespace(proxy_enabled=True, proxy_url="http://127.0.0.1:7890"),
+    )
+
+    def fake_request(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            text="<html><body><p>proxy wired page body</p></body></html>",
+            request=httpx.Request("GET", url),
+        )
+
+    captured = _install_constructor_capturing_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://example.com/page")
+
+    assert result.startswith("[网页内容]")
+    assert captured.get("proxy") == "http://127.0.0.1:7890"
+    assert captured.get("follow_redirects") is False
+
+
+def test_web_fetch_client_omits_proxy_when_disabled(monkeypatch):
+    monkeypatch.setattr(
+        "config.settings.get_network_config",
+        lambda: SimpleNamespace(proxy_enabled=False, proxy_url="http://127.0.0.1:7890"),
+    )
+
+    def fake_request(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            text="<html><body><p>no proxy page body</p></body></html>",
+            request=httpx.Request("GET", url),
+        )
+
+    captured = _install_constructor_capturing_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_fetch("https://example.com/page")
+
+    assert result.startswith("[网页内容]")
+    assert "proxy" not in captured

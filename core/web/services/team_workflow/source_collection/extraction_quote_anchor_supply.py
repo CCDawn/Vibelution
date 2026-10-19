@@ -66,6 +66,15 @@ _ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
 # boundary keeps version-ish substrings (``.../v10.1234/...``) from matching.
 _DOI_PATH_SEGMENT = re.compile(r"(?<=/)(10\.\d{4,9}/\S+)$")
 
+# PMC article id as one complete path segment (slash-bounded both sides), e.g.
+# ``/articles/PMC1234567/`` on pmc.ncbi.nlm.nih.gov or
+# ``/europepmc/webservices/rest/PMC1234567/fullTextXML`` on ebi.ac.uk.
+_PMC_PATH_SEGMENT = re.compile(r"(?i)(?<=/)PMC\d+(?=/|$)")
+
+# The two official PMC mirrors whose URLs may carry the article id anywhere in
+# the path.  Other hosts never emit a ``pmc:`` key even with a PMC-ish segment.
+_PMC_ARTICLE_HOSTS = ("pmc.ncbi.nlm.nih.gov", "ebi.ac.uk")
+
 
 def _doi_locator_key(path: str) -> str:
     """Canonical ``doi:<doi>`` bridge key for one URL path, or ``""``.
@@ -82,6 +91,22 @@ def _doi_locator_key(path: str) -> str:
     return f"doi:{doi.lower()}" if doi else ""
 
 
+def _pmc_locator_key(host: str, path: str) -> str:
+    """Canonical ``pmc:PMC1234567`` bridge key for one PMC mirror URL, or ``""``.
+
+    Pure URL normalization — no DOI↔PMCID network lookup. The same full text is
+    served under both mirrors, so a candidate on one host should match a fetch
+    receipt on the other. The key requires a complete PMC id path segment on the
+    two official mirror hosts, keeping the bridge narrow enough not to overmatch.
+    """
+    if host not in _PMC_ARTICLE_HOSTS:
+        return ""
+    match = _PMC_PATH_SEGMENT.search(path)
+    if not match:
+        return ""
+    return f"pmc:{match.group(0).upper()}"
+
+
 def _normalized_locator_keys(url: Any) -> list[str]:
     """Candidate match keys for one source locator: raw form first, then one
     normalized form.
@@ -94,7 +119,10 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     the paper id (``/abs/2502.01542v2`` and ``/abs/2502.01542`` serve the same
     page).  Paths on every other site are never rewritten; URLs whose path
     ends in a DOI segment additionally emit a scheme-free ``doi:<doi>`` bridge
-    key so a DOI locator matches its publisher-mirror fetch receipt.
+    key so a DOI locator matches its publisher-mirror fetch receipt, and URLs
+    on the two PMC mirrors additionally emit ``pmc:<PMC id>`` so a
+    pmc.ncbi.nlm.nih.gov candidate matches an ebi.ac.uk receipt (and vice
+    versa) for the same article.
     """
     raw = _clean(url)
     if not raw:
@@ -124,6 +152,9 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     doi_key = _doi_locator_key(path)
     if doi_key and doi_key not in keys:
         keys.append(doi_key)
+    pmc_key = _pmc_locator_key(host, path)
+    if pmc_key and pmc_key not in keys:
+        keys.append(pmc_key)
     return keys
 
 
