@@ -27,6 +27,8 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   const notify = vi.fn();
   const trayNotify = vi.fn();
   const inspect = vi.fn(async () => ({ stale: true, launchBlocking: true }));
+  const fullInspect = vi.fn(() => inspect());
+  const launchInspect = vi.fn(() => inspect());
   const unpackagedInspect = vi.fn(async (_input: { signal?: AbortSignal }) => ({ stale: false }));
   const closed = vi.fn(async () => undefined);
   const promote = vi.fn(async () => ({
@@ -61,7 +63,8 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     runWithFrontendBuildGate,
     updateLauncherWindowTruth: notify,
     inspectUnpackagedShell: unpackagedInspect,
-    inspectCurrentDesktopShell: inspect,
+    inspectCurrentDesktopShell: fullInspect,
+    inspectCurrentDesktopShellLaunchReadiness: launchInspect,
     // Real routing decision so the unpackaged rebuild-and-start promotion lane
     // is exercised end to end without Electron.
     shouldRefreshBeforeLifecycle,
@@ -90,7 +93,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     { compilerOptions: { target: ScriptTarget.ES2022 } }
   ).outputText, sandbox);
   return {
-    ensure, reachable, reusable, opened, closed, inspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
+    ensure, reachable, reusable, opened, closed, inspect, fullInspect, launchInspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -158,6 +161,8 @@ describe("main-line frontend startup preflight", () => {
     h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
     await expect(h.run("start", {})).resolves.toMatchObject({ accepted: true });
     expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.launchInspect).toHaveBeenCalledOnce();
+    expect(h.fullInspect).not.toHaveBeenCalled();
     expect(h.ensure).toHaveBeenCalledOnce();
     expect(h.inspect.mock.invocationCallOrder[0]).toBeLessThan(h.ensure.mock.invocationCallOrder[0]!);
     expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "start" }));
@@ -210,6 +215,8 @@ describe("main-line frontend startup preflight", () => {
     h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
     await h.run("start", {});
     expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.fullInspect).toHaveBeenCalledOnce();
+    expect(h.launchInspect).not.toHaveBeenCalled();
     expect(h.ensure).toHaveBeenCalledOnce();
     expect(h.lifecycle).not.toHaveBeenCalled();
     expect(h.opened).toHaveBeenCalledOnce();

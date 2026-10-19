@@ -30,6 +30,12 @@ export type DesktopShellStatus = {
   refreshBlockedAt?: string;
 };
 
+export type DesktopShellLaunchReadiness = {
+  schemaVersion: 1;
+  launchBlocking: boolean;
+  reason: string;
+};
+
 export type DesktopShellRefreshSchedule = {
   schemaVersion: 1;
   scheduled: boolean;
@@ -277,6 +283,33 @@ export async function inspectDesktopShell(input: {
     killPolicy: "child"
   });
   return parseDesktopShellStatus(raw);
+}
+
+export async function inspectDesktopShellLaunchReadiness(input: {
+  workspaceRoot: string;
+  pythonPath: string;
+  spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
+}): Promise<DesktopShellLaunchReadiness> {
+  const raw = await runPythonJsonBridge({
+    pythonPath: input.pythonPath,
+    args: ["-c", String.raw`
+import json, sys
+from core.launcher.desktop_shell import inspect_desktop_shell_launch_readiness
+print(json.dumps(inspect_desktop_shell_launch_readiness(sys.argv[1])))
+`, input.workspaceRoot],
+    cwd: input.workspaceRoot,
+    spawnImpl: input.spawnImpl,
+    failureLabel: "desktop shell launch readiness",
+    timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child"
+  });
+  const result = parsePythonJsonBridgePayload<DesktopShellLaunchReadiness>(raw, "desktop shell launch readiness");
+  if (result?.schemaVersion !== 1 || typeof result.launchBlocking !== "boolean" || typeof result.reason !== "string") {
+    throw invalidPythonJsonBridgePayload("desktop shell launch readiness", "returned an invalid result shape");
+  }
+  return result;
 }
 
 export async function scheduleDesktopShellRefresh(input: {

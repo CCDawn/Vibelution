@@ -174,6 +174,7 @@ import {
   decidePeriodicDesktopShellRefresh,
   shouldProbePeriodicDesktopShell,
   inspectDesktopShell,
+  inspectDesktopShellLaunchReadiness,
   inspectUnpackagedShell,
   scheduleDesktopShellRefresh,
   ensureLatestLauncher,
@@ -181,7 +182,8 @@ import {
   shouldInspectDesktopShellBeforeLifecycle,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli,
-  type DesktopShellStatus
+  type DesktopShellStatus,
+  type DesktopShellLaunchReadiness
 } from "./process/desktopShellFreshness.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
@@ -2046,6 +2048,16 @@ async function packagedDesktopShellIsStale(): Promise<boolean> {
   }
 }
 
+async function inspectCurrentDesktopShellLaunchReadiness(signal?: AbortSignal): Promise<DesktopShellLaunchReadiness> {
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to inspect the desktop shell");
+  return await inspectDesktopShellLaunchReadiness({
+    workspaceRoot: createDesktopPathsForApp().workspaceRoot,
+    pythonPath,
+    signal
+  });
+}
+
 async function scheduleCurrentDesktopShellRefresh(
   thenLifecycle: string,
   options: { force?: boolean; shellKind?: "packaged" | "unpackaged" } = {}
@@ -3650,7 +3662,7 @@ async function orchestrateLauncherLifecycle(
   });
   if (shouldInspectDesktopShellBeforeLifecycle(lifecycleOperation, app.isPackaged)) {
     try {
-      const status = await inspectCurrentDesktopShell();
+      const status = await inspectCurrentDesktopShellLaunchReadiness(lifecycleSignal);
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
