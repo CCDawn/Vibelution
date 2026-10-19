@@ -306,7 +306,21 @@ def _lagging_project_task_id(raw_problem: Any) -> str:
     if not isinstance(problem, dict):
         return ""
     if is_project_agent_task_reconciliation_lag(problem):
-        return str(problem.get("taskId") or "").strip()
+        task_id = str(problem.get("taskId") or "").strip()
+        if task_id:
+            return task_id
+        # ``adapter_dispatch_worker._block_attempt`` 存的是双层包装：
+        # 顶层只有 code，原始扁平 {code, taskId, status} 在 detail 字符串里。
+        # 顶层取不到 taskId 时必须下钻，否则已完成的任务永远匹配不上恢复候选。
+        detail = problem.get("detail")
+        if is_project_agent_task_reconciliation_lag(detail):
+            try:
+                nested = detail if isinstance(detail, dict) else json.loads(str(detail))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return ""
+            if isinstance(nested, dict):
+                return str(nested.get("taskId") or "").strip()
+        return ""
     if str(problem.get("code") or "").strip() != "adapter_execution_exception":
         return ""
     detail = problem.get("detail")
