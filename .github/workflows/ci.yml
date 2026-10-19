@@ -1,7 +1,15 @@
 name: CI
 
 on:
-  # Manual only: automatic push/PR CI is disabled to avoid consuming GitHub Actions minutes.
+  # Layered triggers: push/PR on main run the fast gates (python-lint,
+  # linux-sandbox, web) so the branch badge stays green. The full Windows
+  # python test matrix and the Electron tests are workflow_dispatch only —
+  # the full suite cannot finish within the hosted-runner timeout — and are
+  # meant for manual runs and pre-release verification.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +46,9 @@ jobs:
   python-tests:
     name: Python Tests (Windows, py${{ matrix.python-version }})
     runs-on: windows-latest
+    # Manual layer only: the full suite cannot finish within the hosted-runner
+    # timeout, so it is gated to workflow_dispatch (manual / pre-release runs).
+    if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -167,6 +178,9 @@ jobs:
   electron-tests:
     name: Electron Launcher Tests
     runs-on: windows-latest
+    # Manual layer only: desktop main-process tests are slow and cannot be
+    # pre-verified locally, so they are gated to workflow_dispatch.
+    if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 15
     env:
       NODE_ENV: test
