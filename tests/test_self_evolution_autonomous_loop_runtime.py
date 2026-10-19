@@ -92,6 +92,37 @@ def test_delegated_runtime_reuses_existing_bindings_without_provisioning_or_tool
     assert all(turn["runtime_tool_source"] == "" for turn in turns)
 
 
+def test_recovery_runtime_uses_source_roles_without_provisioning_global_roles(monkeypatch):
+    from core.web.services.team_workflow.generic import code_repair
+
+    selected = {"observer": {"agentId": "dedicated-director"},
+                "executor": {"agentId": "dedicated-developer"},
+                "reviewer": {"agentId": "dedicated-reviewer"}}
+    contexts, turns = [], []
+    monkeypatch.setattr(code_repair, "recovery_role_bindings", lambda context: contexts.append(context) or selected)
+
+    def global_loader():
+        pytest.fail("Recovery must not use the old global observer/executor/reviewer")
+
+    def run(**kwargs):
+        turns.append(kwargs)
+        return {"result": {"status": "completed", "summary": "observed", "tool_trace": []}, "carryover": {}}
+
+    deps = AutonomousLoopRuntimeDependencies(load_bindings=global_loader, load_authorized_bindings=global_loader,
+        run_role_turn=run,
+        create_candidate=lambda context: {"worktreePath": "C:/candidate", "branch": "codex/candidate", "baseCommit": "a" * 40},
+        inspect_candidate=lambda context: {"headCommit": "b" * 40, "changedFiles": ["core/example.py"], "variantId": "variant"},
+        integrate_candidate=lambda context: {}, cleanup_candidate=lambda context: {})
+    hooks = build_autonomous_loop_hooks(deps)
+    context = _snapshot(request={"goal": "bounded repair", "localIntegration": {"acknowledge": True}},
+                        _recoverySource={"runId": "parent-run"})
+    hooks.observe(context)
+    hooks.evolve(context)
+    assert len(contexts) == 1
+    assert [turn["binding"]["agentId"] for turn in turns] == ["dedicated-director", "dedicated-developer"]
+    assert all(turn["runtime_tool_grants"] == [] for turn in turns)
+
+
 def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
     calls: list[tuple[str, dict]] = []
 
