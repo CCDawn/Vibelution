@@ -75,6 +75,11 @@ const previewExemptDesignSections = new Set([
   // cannot be expressed as a static preview. Covered by its settings-save,
   // proposal accept/reject and read-failure interaction tests.
   "PersonalAssistantDialoguePreferences",
+  // Server-bound affairs panel: the ledger items, counts and due states come
+  // from the personal-affairs plugin API, so its meaningful state cannot be
+  // expressed as a static preview. Covered by its add/complete/cancel/reopen/
+  // set-due/filter and read-failure interaction tests.
+  "PersonalAssistantAffairs",
   "DesktopAssistantReturnNotice",
   // Dual-channel human-attention surfaces bound to the native desktop bridge:
   // the notifier renders null and is driven by overview polling plus

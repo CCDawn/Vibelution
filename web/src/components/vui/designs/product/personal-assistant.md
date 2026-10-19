@@ -179,3 +179,20 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 `routes/personalAssistant/PersonalAssistantDialoguePreferences.tsx`（组合 VStringSelect/VButton/VStateSurface）+ 同名 `.styles.ts`；API 客户端 `api/virtualHumanLife.ts`，query key `virtualHumanDialogueSettings/virtualHumanPreferenceProposals`。
 ### 反冗余
 复用 VUI 表单原语与 virtualHumanLife 既有客户端模式，不新建第二套 select/设置通道；提案候选值标签只在展示层映射，不在前端维护第二份偏好状态。
+
+## PersonalAssistantAffairs
+
+### 功能
+个人助理的事务面板：一个账本三类事务（todo 待办 / schedule 日程 / goal 目标）。顶部 counts 徽标（进行中/已逾期/已完成）来自后端投影；新增行（类型 + 标题 + 可选截止时间）POST 账本；列表按后端排序（open 优先、逾期优先、截止升序）渲染，每行展示类型/截止状态徽标、本地化截止时间与备注。open 行可「完成/取消/设截止」，done/cancelled 行可「重新打开」；设截止在行内展开 datetime-local 编辑器，留空保存即清除截止。类型/状态筛选走查询参数，由 query key 变化驱动重新拉取。
+### 适用范围
+`/personal-assistant` 工作台右侧 VTabs 的「事务」标签（宽屏）与窄屏 VDialog 入口。不承担主动提醒推送（归 A2 提醒链）、不写 Agent 目录、不提供第二套与工具侧不同的状态机（一切状态迁移都走后端路由，前端只失效缓存）。
+### 使用方式
+`<PersonalAssistantAffairs agentId headerAction? />`。列表 GET `personal-affairs/affairs`（5s 轮询，与偏好面板节奏一致，kind/status 筛选进 query key）；动作互斥 actingKey，动作后失效整个 personal-affairs 前缀缓存；读取失败 VStateSurface error + 重试；动作失败 role=alert 行内提示。截止时间展示用本地 locale，编辑往返用 datetime-local 值与 ISO 转换。文案 zh/en 双语。
+### 非职责
+不解析自然语言建事务（对话中的结构化工具才是创建入口之一，面板只做手工补录与管理）、不做催办通知、不在前端持久化任何本地缓存或草稿。
+### 视觉与状态
+面板结构对齐 PersonalAssistantOverview/DialoguePreferences（pinned header + 滚动 content）；计数徽标横排、逾期计数用 error 色；新增表单与筛选行卡片化；事务行左文案右操作，行内截止编辑器以细分隔线展开；空态复用图标+文案模式并区分「无事务」与「筛选无结果」；动作中按钮 isPending 且兄弟按钮禁用。
+### 实现落点
+`routes/personalAssistant/PersonalAssistantAffairs.tsx`（组合 VStringSelect/VInput/VButton/VStateSurface）+ 同名 `.styles.ts`；API 客户端 `api/personalAffairs.ts`，DTO `api/types/personalAffairs.ts`，query key `personalAffairs`。
+### 反冗余
+复用 VUI 表单原语与 fetchJson 客户端模式，不新建第二套列表状态或乐观更新层；counts/dueState/排序全部信任后端投影，前端不重复计算。
