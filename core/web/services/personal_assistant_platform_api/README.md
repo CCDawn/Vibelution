@@ -19,8 +19,11 @@
   状态与管理面。排除 `memory`（Agent 私密记忆）、`external-agent`（MCP 协议面）、
   `user-content`/`files`（用户原始文档）、`logs`（原始日志走 project-query 包）、
   `config`（供应商凭据，脱敏未证明前不开）、`computer-use`（屏幕数据走授权的电脑工具）与无 tag 端点。
-- **私密子路径拒绝**（`DENIED_PATH_TOKENS`）：messages/transcript/export/timeline/inbox/events，
-  即使处于允许 tag 下也拒绝；自身 inbox 读取继续走 project-query 包。
+- **私密子路径拒绝**（`DENIED_PATH_TOKENS`，词级匹配）：路径段按 `-`/`_` 分词后命中
+  messages/transcript/export/timeline/inbox/events 任一整词即拒绝（`member-messages` 拦、
+  `messaging-status` 放），即使处于允许 tag 下；自身 inbox 读取继续走 project-query 包。
+- **query 不做客户端校验**：主机与路径已由白名单固定，query 由服务端自行解析；网关原样透传，
+  空值不追加 `?`。
 - **响应即不可信数据**：每个回执带 `untrustedContent: true`；载荷超过
   `MAX_RESPONSE_CHARS` 截断并标记 `truncated`。
 
