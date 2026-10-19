@@ -277,15 +277,18 @@ def _mark_stale_unresolved_rows(
 
 def reconcile_registered_research_tasks_once(
     *, should_stop: Callable[[], bool] = lambda: False, rebuild_index: bool = False,
+    settle_only: bool = False,
 ) -> dict[str, int]:
     """Use the active index, exact task identity, Journal and existing business verdict.
 
     Legacy registry rows recover their project pointer from the bound Session's
     experiment binding. No title matching, guessed success or Session mutation.
+    settle_only=True 只做注册表账本真相同步（僵尸收口 + 超龄 stale），不推进
+    业务对账；该同步只写注册表展示状态，不写业务 workflow 状态，封存模式放行。
     """
     store = runtime_task_registry.default_store()
     # Archive mode forbids automatic workflow-state writes, including recovery.
-    if challenge_archive_mode_enabled():
+    if challenge_archive_mode_enabled() and not settle_only:
         return {"checked": 0, "repaired": 0, "unresolved": 0}
     if should_stop():
         return {"checked": 0, "repaired": 0, "unresolved": 0}
@@ -299,84 +302,86 @@ def reconcile_registered_research_tasks_once(
         store, should_stop=should_stop,
         unresolved_reasons=unresolved_reasons, row_snapshots=row_snapshots,
     )
-    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for snapshot in store.active_task_states():
-        if should_stop():
-            break
-        if snapshot.get("kind") != runtime_task_registry.KIND_RESEARCH_TASK:
-            continue
-        task_id = str(snapshot.get("taskId") or "").strip()
-        team_id = str(snapshot.get("teamId") or "")
-        project_id = str(snapshot.get("researchProjectId") or "")
-        try:
-            if not (team_id and project_id):
-                row = session_service.load_session_chat_state(
-                    session_service.PROJECT_ROOT, str(snapshot.get("sourceSessionId") or ""),
-                ) or {}
-                binding = row.get("experiment_binding") or row.get("experimentBinding") or {}
-                team_id = str(binding.get("teamId") or "")
-                project_id = str(binding.get("researchProjectId") or "")
-            if not (team_id and project_id):
-                unresolved_reasons[task_id] = "binding_missing"
+    # 封存模式（settle_only）只做收口同步，不推进业务对账。
+    if not settle_only:
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for snapshot in store.active_task_states():
+            if should_stop():
+                break
+            if snapshot.get("kind") != runtime_task_registry.KIND_RESEARCH_TASK:
                 continue
-            groups.setdefault((team_id, project_id), []).append(snapshot)
-        except Exception:
-            unresolved_reasons[task_id] = "binding_error"
-
-    for (team_id, project_id), snapshots in groups.items():
-        if should_stop():
-            break
-        try:
-            # Verify pointers against the business store before any reconcile.
-            with tasks._TASK_LOCK:
-                if should_stop():
-                    break
-                domain = tasks._read_store(team_id, project_id)
-                matched = [task for task in domain["tasks"] if any(
-                    task.get("taskId") == row.get("taskId")
-                    and task.get("sessionId") == row.get("sourceSessionId")
-                    and (not row.get("sourceTurnId")
-                         or row["sourceTurnId"] == (task.get("turn") or {}).get("turnId"))
-                    for row in snapshots
-                )]
-                matched_task_ids = {task.get("taskId") for task in matched}
-                for row in snapshots:
-                    if row.get("taskId") not in matched_task_ids:
-                        unresolved_reasons[str(row.get("taskId") or "").strip()] = (
-                            "business_identity_mismatch"
-                        )
-                if not matched:
+            task_id = str(snapshot.get("taskId") or "").strip()
+            team_id = str(snapshot.get("teamId") or "")
+            project_id = str(snapshot.get("researchProjectId") or "")
+            try:
+                if not (team_id and project_id):
+                    row = session_service.load_session_chat_state(
+                        session_service.PROJECT_ROOT, str(snapshot.get("sourceSessionId") or ""),
+                    ) or {}
+                    binding = row.get("experiment_binding") or row.get("experimentBinding") or {}
+                    team_id = str(binding.get("teamId") or "")
+                    project_id = str(binding.get("researchProjectId") or "")
+                if not (team_id and project_id):
+                    unresolved_reasons[task_id] = "binding_missing"
                     continue
-                checked += len(matched)
-                if should_stop():
-                    break
-                tasks.reconcile_research_project_agent_task_statuses(
-                    team_id, project_id, should_stop=should_stop,
-                )
-                latest = tasks._read_store(team_id, project_id)
-                matched_ids = {task["taskId"] for task in matched}
-                for task in latest["tasks"]:
+                groups.setdefault((team_id, project_id), []).append(snapshot)
+            except Exception:
+                unresolved_reasons[task_id] = "binding_error"
+
+        for (team_id, project_id), snapshots in groups.items():
+            if should_stop():
+                break
+            try:
+                # Verify pointers against the business store before any reconcile.
+                with tasks._TASK_LOCK:
                     if should_stop():
                         break
-                    if task.get("taskId") in matched_ids:
-                        # Also repairs a crash after business commit but before
-                        # registry publication, including already terminal tasks.
-                        tasks._publish_runtime_task_status(team_id, project_id, task)
-                group_repaired = sum(
-                    (store.get_task(row["taskId"]) or {}).get("status") != row.get("status")
-                    for row in snapshots if row.get("taskId") in matched_ids
-                )
-                repaired += group_repaired
-            if group_repaired:
-                tasks._service()._record_workflow_event(
-                    "research_project_agent_task_registry_recovered", team_id,
-                    fields={"researchProjectId": project_id, "checked": len(matched)},
-                    outcome="accepted",
-                )
-        except Exception as exc:
-            for row in snapshots:
-                unresolved_reasons[str(row.get("taskId") or "").strip()] = "group_error"
-            logger.warning("Research task recovery deferred (%s).", type(exc).__name__)
+                    domain = tasks._read_store(team_id, project_id)
+                    matched = [task for task in domain["tasks"] if any(
+                        task.get("taskId") == row.get("taskId")
+                        and task.get("sessionId") == row.get("sourceSessionId")
+                        and (not row.get("sourceTurnId")
+                             or row["sourceTurnId"] == (task.get("turn") or {}).get("turnId"))
+                        for row in snapshots
+                    )]
+                    matched_task_ids = {task.get("taskId") for task in matched}
+                    for row in snapshots:
+                        if row.get("taskId") not in matched_task_ids:
+                            unresolved_reasons[str(row.get("taskId") or "").strip()] = (
+                                "business_identity_mismatch"
+                            )
+                    if not matched:
+                        continue
+                    checked += len(matched)
+                    if should_stop():
+                        break
+                    tasks.reconcile_research_project_agent_task_statuses(
+                        team_id, project_id, should_stop=should_stop,
+                    )
+                    latest = tasks._read_store(team_id, project_id)
+                    matched_ids = {task["taskId"] for task in matched}
+                    for task in latest["tasks"]:
+                        if should_stop():
+                            break
+                        if task.get("taskId") in matched_ids:
+                            # Also repairs a crash after business commit but before
+                            # registry publication, including already terminal tasks.
+                            tasks._publish_runtime_task_status(team_id, project_id, task)
+                    group_repaired = sum(
+                        (store.get_task(row["taskId"]) or {}).get("status") != row.get("status")
+                        for row in snapshots if row.get("taskId") in matched_ids
+                    )
+                    repaired += group_repaired
+                if group_repaired:
+                    tasks._service()._record_workflow_event(
+                        "research_project_agent_task_registry_recovered", team_id,
+                        fields={"researchProjectId": project_id, "checked": len(matched)},
+                        outcome="accepted",
+                    )
+            except Exception as exc:
+                for row in snapshots:
+                    unresolved_reasons[str(row.get("taskId") or "").strip()] = "group_error"
+                logger.warning("Research task recovery deferred (%s).", type(exc).__name__)
     repaired += _mark_stale_unresolved_rows(
         store, unresolved_reasons=unresolved_reasons,
         row_snapshots=row_snapshots, should_stop=should_stop,
@@ -396,9 +401,12 @@ def reconcile_registered_research_tasks_once(
 
 async def run_research_task_recovery(
     *, startup_jobs: Any, session_recovery: Any, interval_seconds: float = 30.0,
+    settle_only: bool = False,
 ) -> None:
     """Lifespan-owned startup repair and periodic compensation; no subprocesses."""
-    await asyncio.shield(session_recovery)
+    if not settle_only:
+        # settle-only 不依赖 session 恢复，等待它反而会让收口扫描永远不启动。
+        await asyncio.shield(session_recovery)
     iteration = 0
     while not startup_jobs.should_stop():
         try:
@@ -408,6 +416,7 @@ async def run_research_task_recovery(
                 reconcile_registered_research_tasks_once,
                 should_stop=startup_jobs.should_stop,
                 rebuild_index=iteration % 10 == 1,
+                settle_only=settle_only,
             )
         except asyncio.CancelledError:
             raise
