@@ -30,6 +30,7 @@ const COPY = {
     appearanceXiaoluo: "小洛",
     model: "对话模型",
     modelDefault: "选择模型",
+    modelHint: "这是助理新会话的默认模型；在某个会话里手动切换模型只对那个会话生效，不会改这里的默认。",
     modelUnavailable: "暂无可选模型，请先在设置页配置模型库。",
     saved: "已保存",
     saveFailed: "保存失败：",
@@ -49,6 +50,7 @@ const COPY = {
     appearanceXiaoluo: "Xiao Luo",
     model: "Chat model",
     modelDefault: "Select a model",
+    modelHint: "This is the default for the assistant's new sessions; switching a model inside one session only affects that session and never changes this default.",
     modelUnavailable: "No selectable models yet. Configure the model library first.",
     saved: "Saved",
     saveFailed: "Save failed: ",
@@ -184,6 +186,7 @@ export function PersonalAssistantSettings({ open, onOpenChange, children }: {
                 disabled: choice.providerHealthy === false || choice.missingApiKey,
               }))} />
               : <p className={styles.caption}>{copy.modelUnavailable}</p>}
+            <span className={styles.caption}>{copy.modelHint}</span>
           </label>
           {children}
           {feedback ? <p role="status" className={styles.caption}>{feedback}</p> : null}
