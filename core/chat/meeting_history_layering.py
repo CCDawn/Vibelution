@@ -72,6 +72,17 @@ _PEER_SECTION_MARKER = "其他 Agent 发言:"
 _BULLET_PREFIX = "- "
 _SPEAKER_SEPARATOR = ": "
 
+# 失败发言详情段（有界投影）：合成轮次消息在成功发言之外，为经理/后续发
+# 言者保留失败原因（speaker + errorType + 截断异常摘要；auto-continue 耗尽
+# 死信一并纳入）。有界约束：最多 3 条、每条截断到 2 行 / 240 字符；纯成功
+# 轮不追加该段，字节与旧契约一致。``_parse_round_lines`` 不认识该段标记，
+# 失败详情不进入冻结 recap（recap 语义保持逐字节不变）。
+_FAILURE_SECTION_MARKER = "失败发言详情:"
+_FAILURE_DETAIL_MAX_ENTRIES = 3
+_FAILURE_DETAIL_MAX_LINES = 2
+_FAILURE_DETAIL_MAX_CHARS = 240
+_DEAD_LETTER_STATUS_OPEN = "open"
+
 
 def resolve_meeting_history_verbatim_rounds(env: str | None = None) -> int:
     """解析逐字保留轮数旋钮。
@@ -236,6 +247,99 @@ def _trim_lines_bounded(text: str, *, max_lines: int) -> str:
     return "\n".join(lines[:max_lines])
 
 
+def _cap_failure_detail_chars(text: str) -> str:
+    if len(text) <= _FAILURE_DETAIL_MAX_CHARS:
+        return text
+    return f"{text[:_FAILURE_DETAIL_MAX_CHARS]}…"
+
+
+def _failed_message_detail(message: dict[str, Any]) -> str:
+    """把一条 failed 发言压成有界摘要（errorType + 截断异常文本）。
+
+    ``chat_room_service`` 两条失败路径（prep 失败与 runner 异常）的 summary
+    均形如 ``"ErrorType: 异常摘要"``，与 errorType 同时存在时不再重复回显类
+    名；拿不到 errorType 时按 summary 降级，两者皆空时只留 status。
+    """
+
+    error_type = str(message.get("errorType") or "").strip()
+    summary = _trim_lines_bounded(
+        str(message.get("summary") or ""), max_lines=_FAILURE_DETAIL_MAX_LINES
+    )
+    if error_type and summary.startswith(f"{error_type}:"):
+        detail = summary
+    elif error_type and summary:
+        detail = f"{error_type}: {summary}"
+    elif error_type:
+        detail = error_type
+    elif summary:
+        detail = summary
+    else:
+        detail = "status=failed"
+    return _cap_failure_detail_chars(detail)
+
+
+def _dead_letter_detail(dead_letter: dict[str, Any]) -> str:
+    """把一条 auto-continue 耗尽死信压成有界摘要（reason + 尝试次数 + 末错）。"""
+
+    reason = str(dead_letter.get("reason") or "").strip()
+    try:
+        attempts = int(dead_letter.get("attemptCount") or 0)
+    except (TypeError, ValueError):
+        attempts = 0
+    last_error = _trim_lines_bounded(
+        str(dead_letter.get("lastErrorSummary") or ""), max_lines=_FAILURE_DETAIL_MAX_LINES
+    )
+    bits = [bit for bit in (reason, f"尝试 {attempts} 次" if attempts > 0 else "") if bit]
+    head = f"自动续写耗尽（{'，'.join(bits)}）" if bits else "自动续写耗尽"
+    detail = f"{head}：{last_error}" if last_error else head
+    return _cap_failure_detail_chars(detail)
+
+
+def _round_failure_details(round_payload: Any) -> tuple[list[tuple[str, str]], int]:
+    """Collect bounded ``(speaker, digest)`` failure entries for one round.
+
+    failed 发言（消息顺序）在前；未 resolved 的 auto-continue 死信在后，且同
+    一 participant 已有消息级失败详情时跳过（消息级信息更权威，去重）。返回
+    ``(entries, hidden_count)``：超过上限的条目被截断并计数。纯投影——只读
+    不可变轮 payload，不依赖时间/随机，与模块其余部分同样确定性。
+    """
+
+    if not isinstance(round_payload, dict):
+        return [], 0
+    messages = [item for item in list(round_payload.get("messages") or []) if isinstance(item, dict)]
+    entries: list[tuple[str, str]] = []
+    failed_participants: set[str] = set()
+    for message in messages:
+        if str(message.get("status") or "").strip().lower() != "failed":
+            continue
+        speaker = str(message.get("speakerTitle") or message.get("participantId") or "").strip()
+        entries.append((speaker, _failed_message_detail(message)))
+        participant_id = str(message.get("participantId") or "").strip()
+        if participant_id:
+            failed_participants.add(participant_id)
+    speaker_by_participant = {
+        str(message.get("participantId") or "").strip(): str(
+            message.get("speakerTitle") or message.get("participantId") or ""
+        ).strip()
+        for message in messages
+        if str(message.get("participantId") or "").strip()
+    }
+    for dead_letter in list(round_payload.get("autoContinueDeadLetters") or []):
+        if not isinstance(dead_letter, dict):
+            continue
+        if str(dead_letter.get("status") or "").strip() != _DEAD_LETTER_STATUS_OPEN:
+            continue
+        participant_id = str(dead_letter.get("participantId") or "").strip()
+        if participant_id and participant_id in failed_participants:
+            continue
+        speaker = speaker_by_participant.get(participant_id) or participant_id
+        entries.append((speaker, _dead_letter_detail(dead_letter)))
+    if len(entries) <= _FAILURE_DETAIL_MAX_ENTRIES:
+        return entries, 0
+    hidden = len(entries) - _FAILURE_DETAIL_MAX_ENTRIES
+    return entries[:_FAILURE_DETAIL_MAX_ENTRIES], hidden
+
+
 def synthesize_room_round_message(
     round_payload: Any,
     *,
@@ -251,6 +355,13 @@ def synthesize_room_round_message(
     their stable-prefix contract.  The output carries the
     ``group_room_transcript`` metadata so downstream consumers (recap parser,
     token buckets) treat it exactly like the ledger transcripts it replaces.
+
+    Failure visibility (bounded): the round summary keeps its existing failure
+    count line, and when the round has failed speeches (or unresolved
+    auto-continue dead letters) a trailing ``失败发言详情:`` section appends up
+    to three ``speaker + errorType + 截断异常摘要`` entries so the manager and
+    later speakers can see why a turn failed.  Pure-success rounds emit no
+    such section — byte-identical to the legacy shape.
     """
 
     room_id_normalized = str(room_id or "").strip()
@@ -277,6 +388,15 @@ def synthesize_room_round_message(
         _PEER_SECTION_MARKER,
         *(peer_lines or ["- 本轮暂无其他 Agent 发言。"]),
     ]
+    failure_entries, failure_hidden = _round_failure_details(round_payload)
+    if failure_entries:
+        failure_lines = [
+            f"- {speaker}: {detail}" if speaker else f"- {detail}"
+            for speaker, detail in failure_entries
+        ]
+        if failure_hidden:
+            failure_lines.append(f"- 其余 {failure_hidden} 条失败详情已截断")
+        content_lines.extend(["", _FAILURE_SECTION_MARKER, *failure_lines])
     round_id = str(round_payload.get("roundId") or "").strip() if isinstance(round_payload, dict) else ""
     return {
         "role": "assistant",

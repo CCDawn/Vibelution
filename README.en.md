@@ -4,9 +4,22 @@
 </picture>
 
 <p align="center">
+  <a href="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml"><img src="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT"></a>
+  <a href="https://github.com/CCDawn/Vibelution/releases"><img src="https://img.shields.io/github/v/release/CCDawn/Vibelution" alt="GitHub release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform Windows macOS Linux">
+</p>
+
+<p align="center">
   <a href="README.md">中文</a> · English<br>
   <a href="#start">Quick start</a> · <a href="#features">Feature tour</a> · <a href="docs/guides/first-conversation.en.md">First conversation</a> · <a href="docs/README.md">Documentation</a><br>
-  Local workbench &nbsp; / &nbsp; Local or cloud models &nbsp; / &nbsp; MIT code license
+  Local workbench &nbsp; / &nbsp; Local or cloud models
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/research-preview.gif" width="880" alt="Work loop demo: organize tasks on the research canvas, advance them in team discussion, and distill them into a knowledge graph">
+  <br>
+  <em>A real work loop across the research canvas, team discussion, and knowledge graph</em>
 </p>
 
 <a id="teams"></a>
@@ -49,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 2. Open Chat, create or select an Agent, and start a new session.
 3. Send your first message. Once you receive a reply, try files, tools, or team tasks.
 
-[First conversation →](docs/guides/first-conversation.en.md) · [Windows installation and troubleshooting](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)
+[First conversation →](docs/guides/first-conversation.en.md) · [Windows installation and troubleshooting](docs/guides/install-windows.en.md) · [macOS](docs/guides/install-macos.md) (Chinese for now) · [Linux](docs/guides/install-linux.md) (Chinese for now)
 
 macOS and Linux use the browser workbench. Installation currently requires the runtimes above; a portable installer is still planned. The workbench runs locally. Cloud model requests are sent to the selected provider and may incur charges.
 
@@ -80,7 +93,7 @@ Choose different Agents for different tasks, keeping everyday questions, project
 
 Agent-private memory, team material, and formal knowledge have separate management surfaces. Browse the knowledge overview by topic, then open individual materials and their sources to carry useful context into your next task.
 
-[![Platform knowledge overview: topic groups and knowledge, ownership, and evidence relation views](docs/assets/readme/showcase/knowledge.png)](docs/assets/readme/showcase/knowledge.png)
+[![Platform knowledge overview: topic groups and knowledge, ownership, and evidence relation views](docs/assets/readme/showcase/knowledge.webp)](docs/assets/readme/showcase/knowledge.webp)
 
 **Find material through topics:** browse groups and search knowledge and sources. **Retain evidence:** formal knowledge supports proposals, review, and source management; private memory keeps its own access boundaries.
 
@@ -93,7 +106,7 @@ Agent-private memory, team material, and formal knowledge have separate manageme
 
 Self-evolution checks, changes, and verifies work against a goal. Supervised evolution brings the baseline, candidate, and independent reevaluation into one process, with review deciding whether to integrate the result.
 
-[![Supervised evolution: Agent review conversation, candidate changes, and stage progress](docs/assets/readme/showcase/evolution.png)](docs/assets/readme/showcase/evolution.png)
+[![Supervised evolution: Agent review conversation, candidate changes, and stage progress](docs/assets/readme/showcase/evolution.webp)](docs/assets/readme/showcase/evolution.webp)
 
 **Inspect the review:** retain Agent conversations, candidate changes, and reevaluation records. **Distinguish stages:** evaluation, approval, integration, and runtime activation are separate; one successful stage does not complete the entire process.
 
@@ -123,11 +136,22 @@ Research stocks and topics with analyst collaboration, market data, simulated ac
 
 Continue everyday conversations in character scenes. Configure identity, schedules, emotions, and long-term memory for Agents with the virtual-human plugin explicitly enabled.
 
-[![Virtual companion: character scene, life status, and everyday conversation](docs/assets/readme/showcase/companion.png)](docs/assets/readme/showcase/companion.png)
+<table>
+  <tr>
+    <td>
+      <a href="docs/assets/readme/showcase/companion.webp">
+        <img src="docs/assets/readme/showcase/companion.webp" alt="Virtual companion: character scene, life status, and everyday conversation" width="100%">
+      </a>
+    </td>
+    <td width="340" valign="top">
+      <img src="docs/assets/readme/desktop-pet.gif" width="320" alt="Desktop pet idle animation: a recorded Live2D idle loop">
+    </td>
+  </tr>
+</table>
 
 **Character and scene:** an immersive interface with life status and conversation together. **Conversation continuity:** the plugin provides proactive-contact, unfinished-topic, and memory mechanisms, subject to enablement and configuration.
 
-*The screenshot shows the conversation interface. Proactive scheduling and animated presentation depend on runtime support. Character names and third-party assets belong to their respective rights holders.*
+*Left: the character scene screenshot. Right: a recorded idle animation of the desktop pet. Proactive scheduling and animated presentation depend on runtime support. Character names and third-party assets belong to their respective rights holders.*
 
 [Virtual-human plugin](core/agent_plugins/virtual_human_life/README.md)
 
@@ -161,7 +185,7 @@ The floating window requires the Windows desktop workbench. [Model configuration
 
 ## Documentation and participation
 
-[Contributing](CONTRIBUTING.md) · [Documentation map](docs/README.md) · [Testing guide](tests/README.md) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/CCDawn/Vibelution/issues) · [Security](SECURITY.md)
+[Contributing](CONTRIBUTING.md) · [Documentation map](docs/README.md) · [Interactive architecture map](docs/architecture/index.html) (offline single file, about 14 MB; download and open in a browser) · [Testing guide](tests/README.md) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/CCDawn/Vibelution/issues) · [Security](SECURITY.md)
 
 Related projects: [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 

@@ -1,4 +1,5 @@
 import type { PersonalAssistantOverview } from "../../api/types/personalAssistant";
+import { reportHumanAttentionDeliveryFailure } from "../../api/personalAttentionFailureReport";
 
 /**
  * Dual-channel human-attention notifications (web layer).
@@ -257,20 +258,54 @@ export function browserHumanAttentionStorage(): Pick<Storage, "getItem" | "setIt
   }
 }
 
+/** Reject reasons the shell reports as a structured result instead of a throw. */
+function isInvalidPayloadDeliveryResult(result: unknown): boolean {
+  return (
+    typeof result === "object"
+    && result !== null
+    && (result as { delivered?: unknown }).delivered === "invalid_payload"
+  );
+}
+
 /**
  * Emit notifications for every unseen human-attention row. Ids are marked
  * before the async bridge call (at-most-once per id per day). A missing
- * bridge skips silently and marks nothing.
+ * bridge skips silently and marks nothing. Because the ledger already
+ * consumed the id, a rejected IPC call or an invalid_payload result is
+ * reported to the personal-assistant inbox (fire-and-forget, deduped and
+ * capped inside the reporter) instead of being lost — a missing bridge is
+ * the plain-browser case and is never reported.
  */
 export function emitNewHumanAttentionNotifications(input: {
   rows: readonly PersonalAssistantAttentionRow[];
   bridge: HumanAttentionBridge | undefined;
   ledger: HumanAttentionLedger;
+  reportFailure?: (report: {
+    id: string;
+    kind: string;
+    severity?: string;
+    reason: string;
+    title?: string;
+  }) => void;
 }): HumanAttentionNotificationPayload[] {
   const notify = input.bridge?.notifyHumanAttention;
   if (typeof notify !== "function") {
     return [];
   }
+  const reportFailure = input.reportFailure ?? reportHumanAttentionDeliveryFailure;
+  const safeReportFailure = (report: {
+    id: string;
+    kind: string;
+    severity?: string;
+    reason: string;
+    title?: string;
+  }): void => {
+    try {
+      reportFailure(report);
+    } catch {
+      // Reporting must never turn into an unhandled rejection.
+    }
+  };
   const emitted: HumanAttentionNotificationPayload[] = [];
   for (const row of input.rows ?? []) {
     const payload = buildHumanAttentionNotificationPayload(row);
@@ -279,7 +314,28 @@ export function emitNewHumanAttentionNotifications(input: {
     }
     input.ledger.add(payload.id);
     emitted.push(payload);
-    void Promise.resolve(notify(payload)).catch(() => undefined);
+    void Promise.resolve(notify(payload)).then(
+      (result) => {
+        if (isInvalidPayloadDeliveryResult(result)) {
+          safeReportFailure({
+            id: payload.id,
+            kind: payload.kind,
+            severity: payload.severity,
+            reason: "notify resolved with delivered=invalid_payload",
+            title: payload.title,
+          });
+        }
+      },
+      (error: unknown) => {
+        safeReportFailure({
+          id: payload.id,
+          kind: payload.kind,
+          severity: payload.severity,
+          reason: `notify rejected: ${error instanceof Error ? error.message : String(error)}`,
+          title: payload.title,
+        });
+      },
+    );
   }
   return emitted;
 }

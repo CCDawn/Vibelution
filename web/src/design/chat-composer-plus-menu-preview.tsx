@@ -187,7 +187,6 @@ export function ChatComposerPlusMenuPreviewApp() {
   const [groupNameDraft, setGroupNameDraft] = useState(GROUP_META.name);
   const [budgetPanelOpen, setBudgetPanelOpen] = useState(false);
   const [budgetMaxCallsDraft, setBudgetMaxCallsDraft] = useState("32");
-  const [budgetThinkingDraft, setBudgetThinkingDraft] = useState("");
   const [feedback, setFeedback] = useState("");
 
   const plusMenuRef = useRef<HTMLDivElement | null>(null);
@@ -284,7 +283,6 @@ export function ChatComposerPlusMenuPreviewApp() {
     setGroupNameDraft(GROUP_META.name);
     setBudgetPanelOpen(false);
     setBudgetMaxCallsDraft("32");
-    setBudgetThinkingDraft("");
     if (next === "direct") {
       setSessionBusy(true);
       setMentalEnabled(true);
@@ -333,11 +331,8 @@ export function ChatComposerPlusMenuPreviewApp() {
     const maxCallsLine = budgetMaxCallsDraft.trim() === ""
       ? "按模型策略"
       : `${budgetMaxCallsDraft.trim()} 次/回合`;
-    const thinkingLine = budgetThinkingDraft.trim() === ""
-      ? "默认 500 字"
-      : `${budgetThinkingDraft.trim()} 字`;
     setBudgetPanelOpen(false);
-    setFeedback(`已模拟保存预算与额度：工具调用 ${maxCallsLine}，思考预算 ${thinkingLine}`);
+    setFeedback(`已模拟保存预算与额度：工具调用 ${maxCallsLine}`);
   }
 
   function openReferencePicker(kind: ReferenceKind) {
@@ -450,7 +445,7 @@ export function ChatComposerPlusMenuPreviewApp() {
         {
           id: "budget-parameters",
           label: "预算与额度",
-          hint: "每回合工具调用与思考字数",
+          hint: "每回合工具调用次数",
           icon: <Gauge size={15} />,
           sidePanel: true,
         },
@@ -572,29 +567,6 @@ export function ChatComposerPlusMenuPreviewApp() {
                 icon={<RotateCcw size={13} />}
                 isDisabled={budgetMaxCallsDraft.trim() === ""}
                 onPress={() => setBudgetMaxCallsDraft("")}
-              />
-            </div>
-            <div className={styles.groupFieldRow}>
-              <span className={styles.groupFieldLabel}>思考预算字数</span>
-              <VNativeInput
-                className={styles.groupNameField}
-                type="number"
-                min={50}
-                max={4000}
-                step={1}
-                value={budgetThinkingDraft}
-                aria-label="思考预算字数"
-                placeholder="未配置=默认 500"
-                onChange={(event) => setBudgetThinkingDraft(event.target.value)}
-              />
-              <VButton
-                isIconOnly
-                variant="ghost"
-                density="compact"
-                aria-label="清除思考预算，恢复默认"
-                icon={<RotateCcw size={13} />}
-                isDisabled={budgetThinkingDraft.trim() === ""}
-                onPress={() => setBudgetThinkingDraft("")}
               />
             </div>
             <p className={styles.railNote}>保存按会话生效；清除输入框后保存即恢复默认策略。</p>

@@ -78,7 +78,6 @@ class SessionBudgetParametersResponse(BaseModel):
 
     revision: int = Field(ge=0)
     maxCallsPerTurn: int | None = None
-    thinkingBudgetChars: int | None = None
 
 
 class SessionBudgetParametersPayload(BaseModel):
@@ -92,4 +91,3 @@ class SessionBudgetParametersPayload(BaseModel):
 
     revision: StrictInt = Field(ge=0)
     maxCallsPerTurn: StrictInt | None = None
-    thinkingBudgetChars: StrictInt | None = None

@@ -4,9 +4,22 @@
 </picture>
 
 <p align="center">
+  <a href="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml"><img src="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT"></a>
+  <a href="https://github.com/CCDawn/Vibelution/releases"><img src="https://img.shields.io/github/v/release/CCDawn/Vibelution" alt="GitHub release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform Windows macOS Linux">
+</p>
+
+<p align="center">
   中文 · <a href="README.en.md">English</a><br>
   <a href="#start">快速开始</a> · <a href="#features">功能导览</a> · <a href="docs/guides/first-conversation.md">第一次对话</a> · <a href="docs/README.md">文档</a><br>
-  本地工作台 &nbsp; / &nbsp; 本地或云端模型 &nbsp; / &nbsp; MIT 代码许可证
+  本地工作台 &nbsp; / &nbsp; 本地或云端模型
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/research-preview.gif" width="880" alt="操作循环演示：在研究画布组织任务，经团队讨论推进，最终沉淀为知识图谱">
+  <br>
+  <em>研究画布 · 团队讨论 · 知识图谱的真实操作循环</em>
 </p>
 
 <a id="teams"></a>
@@ -80,7 +93,7 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 各 Agent 的私有记忆、团队资料与正式知识分别管理。在知识全景中按主题浏览，再进入具体资料与来源，把已经积累的内容带到下一次工作中。
 
-[![平台知识全景：按主题分组浏览正式知识，提供知识、归属与证据关系入口](docs/assets/readme/showcase/knowledge.png)](docs/assets/readme/showcase/knowledge.png)
+[![平台知识全景：按主题分组浏览正式知识，提供知识、归属与证据关系入口](docs/assets/readme/showcase/knowledge.webp)](docs/assets/readme/showcase/knowledge.webp)
 
 **从主题找到资料**：浏览主题分组、检索知识与来源。**保留依据**：正式知识有提案、审核和来源管理；私有记忆遵循各自的访问范围。
 
@@ -93,7 +106,7 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 自进化围绕目标开展检查、修改与验证；监督进化把基线、候选和独立复评放在同一条流程中，交由审核决定是否集成。
 
-[![监督进化工作台：Agent 评审对话、候选改动与阶段进度](docs/assets/readme/showcase/evolution.png)](docs/assets/readme/showcase/evolution.png)
+[![监督进化工作台：Agent 评审对话、候选改动与阶段进度](docs/assets/readme/showcase/evolution.webp)](docs/assets/readme/showcase/evolution.webp)
 
 **看见评审过程**：保留 Agent 对话、候选改动和复评记录。**区分完成阶段**：评测、审批、集成与运行版本激活分别展示，不把一个阶段的成功当成全部完成。
 
@@ -123,11 +136,22 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 在人物场景中继续日常对话。为显式启用虚拟人插件的 Agent 配置人物身份、日程、情绪与长期记忆，让陪伴有自己的呈现方式。
 
-[![虚拟人陪伴：人物场景、生活状态与日常对话](docs/assets/readme/showcase/companion.png)](docs/assets/readme/showcase/companion.png)
+<table>
+  <tr>
+    <td>
+      <a href="docs/assets/readme/showcase/companion.webp">
+        <img src="docs/assets/readme/showcase/companion.webp" alt="虚拟人陪伴：人物场景、生活状态与日常对话" width="100%">
+      </a>
+    </td>
+    <td width="340" valign="top">
+      <img src="docs/assets/readme/desktop-pet.gif" width="320" alt="桌宠待机动效：Live2D 形象的待机循环实录">
+    </td>
+  </tr>
+</table>
 
 **人物与场景**：沉浸式人物界面，生活状态与对话同屏。**持续对话**：插件提供主动联系、未完话题与记忆机制，并受启用状态和相关配置约束。
 
-*截图展示人物对话界面；主动调度和动态表现需要运行环境支持。角色名称与第三方素材的权利归各自权利人所有。*
+*左侧为人物场景截图，右侧为桌宠待机动效实录；主动调度和动态表现需要运行环境支持。角色名称与第三方素材的权利归各自权利人所有。*
 
 [虚拟人插件](core/agent_plugins/virtual_human_life/README.md)
 
@@ -161,7 +185,7 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 ## 文档与参与
 
-[贡献指南](CONTRIBUTING.md) · [文档地图](docs/README.md) · [测试指南](tests/README.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/CCDawn/Vibelution/issues) · [安全问题](SECURITY.md)
+[贡献指南](CONTRIBUTING.md) · [文档地图](docs/README.md) · [交互式架构地图](docs/architecture/index.html)（离线单文件约 14MB，下载后用浏览器打开） · [测试指南](tests/README.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/CCDawn/Vibelution/issues) · [安全问题](SECURITY.md)
 
 相关项目：[briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 

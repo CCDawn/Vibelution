@@ -1,7 +1,11 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import { RuntimeSceneBridge, electronEventPayload } from "../src/lifecycle/runtimeSceneBridge.js";
+import {
+  RuntimeSceneBridge,
+  RuntimeSceneEventRejectedError,
+  electronEventPayload
+} from "../src/lifecycle/runtimeSceneBridge.js";
 
 describe("RuntimeSceneBridge", () => {
   it("releases a real response socket after accepting headers with an unfinished body", async () => {
@@ -370,6 +374,136 @@ describe("RuntimeSceneBridge control-token self-heal", () => {
     expect(tokenFetchCount).toBe(1);
     expect(eventPostCount).toBe(2);
     expect(bridge.bufferedCount()).toBe(2);
+  });
+});
+
+describe("RuntimeSceneBridge structural rejection (queue head poisoning)", () => {
+  function bodiesOf(fetchImpl: ReturnType<typeof vi.fn>): Array<{ eventCode: string }> {
+    return fetchImpl.mock.calls.map((call) => JSON.parse(String((call[1] as RequestInit | undefined)?.body)));
+  }
+
+  it("drops a 400-poisoned head within one flush and still delivers the queued follower", async () => {
+    let releaseFirstPost: (() => void) | null = null;
+    let postCount = 0;
+    const fetchImpl = vi.fn(() => {
+      postCount += 1;
+      if (postCount === 1) {
+        return new Promise<Response>((resolve) => {
+          releaseFirstPost = () => resolve(new Response("{}", { status: 400 }));
+        });
+      }
+      return Promise.resolve(new Response("{}", { status: 202 }));
+    });
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      maxBufferedEvents: 5,
+      fetchImpl
+    });
+
+    const poisoned = bridge.record({ eventCode: "poison.event", message: "message", fields: {} });
+    const follower = bridge.record({ eventCode: "follower.event", message: "message", fields: {} });
+    await Promise.resolve();
+    expect(postCount).toBe(1);
+    releaseFirstPost?.();
+
+    await expect(poisoned).rejects.toBeInstanceOf(RuntimeSceneEventRejectedError);
+    await follower;
+    expect(bridge.bufferedCount()).toBe(0);
+    expect(bodiesOf(fetchImpl).map((body) => body.eventCode)).toEqual([
+      "poison.event",
+      "follower.event"
+    ]);
+  });
+
+  it("rejects record() with the dropped bounded event and status when its own event gets a 400", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 400 }));
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      maxBufferedEvents: 5,
+      fetchImpl
+    });
+    const original = {
+      eventCode: "not.whitelisted",
+      message: "not in the backend event whitelist",
+      fields: { reason: "unknown event code" }
+    };
+
+    let caught: unknown;
+    try {
+      await bridge.record(original);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(RuntimeSceneEventRejectedError);
+    const rejected = caught as RuntimeSceneEventRejectedError;
+    // The caller's catch block can recover the event and the status itself.
+    expect(rejected.status).toBe(400);
+    expect(rejected.event).toEqual(original);
+    expect(rejected.droppedEvents[0]).toBe(rejected.event);
+    expect(bridge.bufferedCount()).toBe(0);
+  });
+
+  it("lets later records deliver normally after a poisoned head was dropped", async () => {
+    const statuses = [400, 202];
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: statuses.shift() ?? 202 }));
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      maxBufferedEvents: 5,
+      fetchImpl
+    });
+
+    await expect(
+      bridge.record({ eventCode: "poison.event", message: "message", fields: {} })
+    ).rejects.toBeInstanceOf(RuntimeSceneEventRejectedError);
+
+    await bridge.record({ eventCode: "healthy.event", message: "message", fields: {} });
+    expect(bridge.bufferedCount()).toBe(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(bodiesOf(fetchImpl).map((body) => body.eventCode)).toEqual([
+      "poison.event",
+      "healthy.event"
+    ]);
+  });
+
+  it.each([404, 422])(
+    "drops a structurally rejected head on %s instead of keeping it queued",
+    async (status) => {
+      const fetchImpl = vi.fn(async () => new Response("{}", { status }));
+      const bridge = new RuntimeSceneBridge({
+        launcherOrigin: "http://127.0.0.1:8765",
+        controlToken: "token",
+        maxBufferedEvents: 5,
+        fetchImpl
+      });
+
+      await expect(
+        bridge.record({ eventCode: "rejected.event", message: "message", fields: {} })
+      ).rejects.toMatchObject({ name: "RuntimeSceneEventRejectedError", status });
+      expect(bridge.bufferedCount()).toBe(0);
+    }
+  );
+
+  it("keeps a 429 head queued for retry instead of dropping it", async () => {
+    let status = 429;
+    const fetchImpl = vi.fn(async () => new Response("{}", { status }));
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      maxBufferedEvents: 5,
+      fetchImpl
+    });
+
+    await bridge.record({ eventCode: "throttled.event", message: "message", fields: {} });
+    expect(bridge.bufferedCount()).toBe(1);
+
+    status = 202;
+    await bridge.flush();
+    expect(bridge.bufferedCount()).toBe(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
 

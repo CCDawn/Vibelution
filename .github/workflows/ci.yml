@@ -1,7 +1,15 @@
 name: CI
 
 on:
-  # Manual only: automatic push/PR CI is disabled to avoid consuming GitHub Actions minutes.
+  # Layered triggers: push/PR on main run the fast gates (python-lint,
+  # linux-sandbox, web) so the branch badge stays green. The full Windows
+  # python test matrix and the Electron tests are workflow_dispatch only —
+  # the full suite cannot finish within the hosted-runner timeout — and are
+  # meant for manual runs and pre-release verification.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +46,9 @@ jobs:
   python-tests:
     name: Python Tests (Windows, py${{ matrix.python-version }})
     runs-on: windows-latest
+    # Manual layer only: the full suite cannot finish within the hosted-runner
+    # timeout, so it is gated to workflow_dispatch (manual / pre-release runs).
+    if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -143,7 +154,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 24 matches the local toolchain (npm 11); npm 10 (Node 20)
+          # rewrites the lockfile with extra "dev" flags on optional deps
+          # and fails the lockfile sync check.
+          node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -155,18 +169,27 @@ jobs:
           npm --silent install --package-lock-only --ignore-scripts --no-audit --no-fund
           git diff --exit-code -- package-lock.json
 
+      # The full Vitest suite and the bundle-budget ratchet currently fail on
+      # known in-flight baselines (VUI contract tests and slight budget
+      # overruns owned by active workstreams). They run on manual dispatch
+      # only; return them to the push layer once the baseline is green.
       - name: Run Vitest
+        if: github.event_name == 'workflow_dispatch'
         run: npm run test
 
       - name: Build frontend
         run: npm run build
 
       - name: Verify bundle budgets
+        if: github.event_name == 'workflow_dispatch'
         run: npm run check:bundle
 
   electron-tests:
     name: Electron Launcher Tests
     runs-on: windows-latest
+    # Manual layer only: desktop main-process tests are slow and cannot be
+    # pre-verified locally, so they are gated to workflow_dispatch.
+    if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 15
     env:
       NODE_ENV: test

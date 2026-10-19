@@ -6,14 +6,11 @@ import styles from "./ChatComposerBudgetPopover.styles";
 
 /** Server validation domain for per-turn tool-call quota. */
 export const SESSION_BUDGET_MAX_CALLS_LIMITS = { min: 1, max: 200 } as const;
-/** Server validation domain for the thinking budget, in characters. */
-export const SESSION_BUDGET_THINKING_CHARS_LIMITS = { min: 50, max: 4000 } as const;
 
 /** PATCH payload the popover hands to the workbench mutation. */
 export type ChatComposerBudgetParametersPatch = {
   revision: number;
   maxCallsPerTurn: number | null;
-  thinkingBudgetChars: number | null;
 };
 
 export type ChatComposerBudgetPanelLabels = {
@@ -22,9 +19,6 @@ export type ChatComposerBudgetPanelLabels = {
   composerBudgetMaxCallsLabel: string;
   composerBudgetMaxCallsPlaceholder: string;
   composerBudgetClearMaxCalls: string;
-  composerBudgetThinkingLabel: string;
-  composerBudgetThinkingPlaceholder: string;
-  composerBudgetClearThinking: string;
   composerBudgetSave: string;
   composerBudgetCancel: string;
   composerBudgetLoading: string;
@@ -37,7 +31,6 @@ export type ChatComposerBudgetControl = {
   /** Server revision guard; saves are blocked until it is known. */
   revision?: number;
   maxCallsPerTurn: number | null;
-  thinkingBudgetChars: number | null;
   loading?: boolean;
   error?: boolean;
   pending?: boolean;
@@ -93,7 +86,6 @@ type ChatComposerBudgetPopoverProps = {
   /** Server revision guard; saves are blocked until it is known. */
   revision?: number;
   maxCallsPerTurn: number | null;
-  thinkingBudgetChars: number | null;
   loading?: boolean;
   error?: boolean;
   pending?: boolean;
@@ -115,7 +107,6 @@ export function ChatComposerBudgetPopover({
   sessionId,
   revision,
   maxCallsPerTurn,
-  thinkingBudgetChars,
   loading = false,
   error = false,
   pending = false,
@@ -124,37 +115,28 @@ export function ChatComposerBudgetPopover({
 }: ChatComposerBudgetPopoverProps) {
   const [open, setOpen] = useState(false);
   const [maxCallsDraft, setMaxCallsDraft] = useState(() => budgetDraft(maxCallsPerTurn));
-  const [thinkingDraft, setThinkingDraft] = useState(() => budgetDraft(thinkingBudgetChars));
   const [dirty, setDirty] = useState(false);
   const previousPendingRef = useRef(pending);
 
   const maxCallsValidation = validateSessionBudgetField(maxCallsDraft, SESSION_BUDGET_MAX_CALLS_LIMITS, lang);
-  const thinkingValidation = validateSessionBudgetField(thinkingDraft, SESSION_BUDGET_THINKING_CHARS_LIMITS, lang);
   const maxCallsError = dirty ? maxCallsValidation.error : "";
-  const thinkingError = dirty ? thinkingValidation.error : "";
-  const valuesChanged = (
-    maxCallsValidation.value !== (maxCallsPerTurn ?? null)
-    || thinkingValidation.value !== (thinkingBudgetChars ?? null)
-  );
+  const valuesChanged = maxCallsValidation.value !== (maxCallsPerTurn ?? null);
   const saveDisabled = Boolean(
     pending
       || loading
       || error
       || revision === undefined
       || !maxCallsValidation.valid
-      || !thinkingValidation.valid
       || !valuesChanged,
   );
 
   function resetDraft() {
     setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
-    setThinkingDraft(budgetDraft(thinkingBudgetChars));
     setDirty(false);
   }
 
   useEffect(() => {
     setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
-    setThinkingDraft(budgetDraft(thinkingBudgetChars));
     setDirty(false);
   // Identity change starts a new editing scope. Revision refreshes are
   // intentionally excluded so an optimistic operator's draft survives 409s.
@@ -162,31 +144,23 @@ export function ChatComposerBudgetPopover({
   }, [sessionId]);
 
   useEffect(() => {
-    if (
-      !dirty
-      || (
-        maxCallsValidation.value === (maxCallsPerTurn ?? null)
-        && thinkingValidation.value === (thinkingBudgetChars ?? null)
-      )
-    ) {
+    if (!dirty || maxCallsValidation.value === (maxCallsPerTurn ?? null)) {
       setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
-      setThinkingDraft(budgetDraft(thinkingBudgetChars));
       setDirty(false);
     }
   // Validation results are derived from the drafts; recompute inline instead
   // of depending on unstable derived objects.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxCallsPerTurn, thinkingBudgetChars, maxCallsDraft, thinkingDraft, dirty]);
+  }, [maxCallsPerTurn, maxCallsDraft, dirty]);
 
   useEffect(() => {
     const saved = previousPendingRef.current && !pending && !errorMessage;
     previousPendingRef.current = pending;
     if (saved) {
       setMaxCallsDraft(budgetDraft(maxCallsPerTurn));
-      setThinkingDraft(budgetDraft(thinkingBudgetChars));
       setDirty(false);
     }
-  }, [pending, errorMessage, maxCallsPerTurn, thinkingBudgetChars]);
+  }, [pending, errorMessage, maxCallsPerTurn]);
 
   return (
     <VPopover
@@ -251,44 +225,6 @@ export function ChatComposerBudgetPopover({
             </div>
             {maxCallsError ? <span className={styles.error} role="alert">{maxCallsError}</span> : null}
           </div>
-          <div className={styles.field}>
-            <label className={styles.fieldLabel} htmlFor="chat-composer-budget-thinking">
-              {labels.composerBudgetThinkingLabel}
-            </label>
-            <div className={styles.fieldRow}>
-              <VNativeInput
-                id="chat-composer-budget-thinking"
-                className={styles.fieldInput}
-                type="number"
-                inputMode="numeric"
-                min={SESSION_BUDGET_THINKING_CHARS_LIMITS.min}
-                max={SESSION_BUDGET_THINKING_CHARS_LIMITS.max}
-                step={1}
-                placeholder={labels.composerBudgetThinkingPlaceholder}
-                aria-label={labels.composerBudgetThinkingLabel}
-                aria-invalid={Boolean(thinkingError)}
-                disabled={pending || loading || error}
-                data-vui="chat-composer-budget-thinking-input"
-                value={thinkingDraft}
-                onChange={(event) => {
-                  setThinkingDraft(event.target.value);
-                  setDirty(true);
-                }}
-              />
-              <VIconButton
-                label={labels.composerBudgetClearThinking}
-                variant="ghost"
-                className={styles.clearButton}
-                icon={<RotateCcw size={15} aria-hidden="true" />}
-                isDisabled={pending || loading || error || thinkingDraft.trim() === ""}
-                onPress={() => {
-                  setThinkingDraft("");
-                  setDirty(true);
-                }}
-              />
-            </div>
-            {thinkingError ? <span className={styles.error} role="alert">{thinkingError}</span> : null}
-          </div>
         </div>
         {errorMessage ? <p className={styles.error} role="alert">{errorMessage}</p> : null}
         <div className={styles.footer}>
@@ -313,7 +249,6 @@ export function ChatComposerBudgetPopover({
               onSave({
                 revision,
                 maxCallsPerTurn: maxCallsValidation.value,
-                thinkingBudgetChars: thinkingValidation.value,
               });
             }}
           >
