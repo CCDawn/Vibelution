@@ -4,6 +4,8 @@ export default {
   brand: "min-w-0 flex-1 truncate text-vui-xs font-semibold",
   icon: "shrink-0 text-[var(--accent-cool)]",
   action: "!h-7 !min-h-7 !w-7 !min-w-7 !border-transparent !bg-transparent !px-0 !shadow-none",
+  create: "shrink-0 px-3 pt-3 pb-1",
+  createButton: "!w-full !justify-start !min-h-10",
   scroll: "min-h-0 flex-1 overflow-y-auto px-2 py-2",
   group: "mb-2",
   groupHeading: "flex items-center gap-2 px-2 pb-1 pt-2 text-vui-micro-11 text-vui-fg-tertiary",
