@@ -859,7 +859,7 @@ def _format_http_fetch_error(status_code: int, url: str) -> str:
     if status_code == 404:
         return f"{base} 目标不存在；重试相同或变体 URL 同样会失败，请改用其他来源或 search。"
     if status_code == 403:
-        return f"{base} 该站点拒绝本工具访问（可能是反爬），勿重试 URL 变体，请改用搜索摘要或其他域名。"
+        return f"{base} 该站点拒绝本工具访问（可能是反爬），勿重试同站 URL 变体；若上下文提供该来源的 DOI（doi.org）链接，可改用 DOI 链接抓取（会自动尝试 PMC 镜像备援）；否则请改用搜索摘要或其他域名。"
     return base
 
 
