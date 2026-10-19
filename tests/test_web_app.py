@@ -8613,6 +8613,10 @@ def test_submit_session_message_write_intent_rejects_self_evolution_lease(tmp_pa
     )
 
     assert readonly.status_code == 202
+    # The mocked worker must finish in the Journal before its runtime slot is released.
+    readonly_turn_id = session_service._get_session_turn_control("session-live").turn_id
+    append_conversation_event(tmp_path, "session-live", readonly_turn_id, "turn_completed", status="completed")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=readonly_turn_id, status="completed")
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
 
@@ -9142,6 +9146,9 @@ def test_stop_active_session_turn_blocks_continue_until_worker_observes_cancel_t
     assert continue_response.status_code == 409
     assert session_service._get_session_turn_control("session-live") is old_control
 
+    # Model the worker observing cancellation and durably acknowledging interruption.
+    append_conversation_event(tmp_path, "session-live", old_turn_id, "turn_interrupted", status="interrupted")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=old_turn_id, status="interrupted")
     session_service._set_session_running("session-live", False, turn_id=old_turn_id)
     session_service._clear_session_turn_control("session-live", turn_id=old_turn_id)
 
