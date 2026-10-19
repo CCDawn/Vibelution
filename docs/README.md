@@ -15,6 +15,7 @@
 | **安装指南** | [Windows（中文）](guides/install-windows.md) · [Windows (English)](guides/install-windows.en.md) · [macOS](guides/install-macos.md) · [Linux](guides/install-linux.md) |
 | **第一次对话** | [中文](guides/first-conversation.md) · [English](guides/first-conversation.en.md) |
 | **模型与配置** | [ops/config/INDEX.md](ops/config/INDEX.md) |
+| **交互式架构地图** | [architecture/index.html](architecture/index.html)（离线单文件约 14MB，下载后用浏览器打开） |
 
 > 用户文档目前以中文为主，英文版逐步补充中。
 
