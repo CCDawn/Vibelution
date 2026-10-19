@@ -28,6 +28,8 @@
 
 ## 2. 治理访问类（Governance Access Classes）
 
+个人助理的项目只读入口为 `personal_assistant_query_tool`：先 `index/list`，再按需 `index/describe`；运行时目录由实际注册的 adapter 生成，不在本指南复制全量资源表。它每次验证个人助理的原生直属 Session，只投影当前项目公开状态、自身收件、诊断摘要及 allowlist 内源码；不能读取其他会话正文、其他 Agent 收件或任意 API。配置工具列表与本轮可执行授权分别报告；来源不可用和有界扫描不能解释为没有问题。边界与落点见 [项目查询 README](../../core/web/services/personal_assistant_project/README.md)。
+
 治理访问类是**声明式契约**，与当前审计脚本的传输/漂移分类**不同层、不混用**：
 
 - `scripts/api_contract_audit.py` 的 `_classify_backend_without_frontend` 只是**传输/漂移**分类（`direct_fetch_*`、`binary_or_url_resource`、`agent_inbox_api` 等），**不机器执行治理访问类**，也不代表授权生效。
