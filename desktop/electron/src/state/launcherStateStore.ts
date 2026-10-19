@@ -1,3 +1,9 @@
+import {
+  projectVerifiedMainClosedBranches,
+  projectVerifiedMainClosedStatus,
+  retainCurrentMainBranch,
+} from "./verifiedMainLifecycleProjection.js";
+
 export type LauncherStateFreshness = "fresh" | "refreshing" | "stale";
 
 export type LauncherWindowState = {
@@ -320,6 +326,10 @@ export class LauncherStateStore {
   private nextReconcileAt = "";
   private readonly listeners = new Set<LauncherStateListener>();
   private refreshPromise: Promise<LauncherStateSnapshotV1> | null = null;
+  private refreshEpoch = 0;
+  private queuedRefreshPromise: Promise<LauncherStateSnapshotV1> | null = null;
+  private mainLifecycleEpoch = 0;
+  private observedMainEpoch = -1;
 
   constructor(
     private readonly loader: LauncherStateLoader,
@@ -368,6 +378,30 @@ export class LauncherStateStore {
     return this.publish();
   }
 
+  beginMainLifecycle(_operation: string): number {
+    this.mainLifecycleEpoch += 1;
+    this.freshness = "stale";
+    this.staleReason = "main_lifecycle_changed";
+    this.publish();
+    return this.mainLifecycleEpoch;
+  }
+
+  /** Call only after the owning close transaction verifies backend/port retirement. */
+  commitVerifiedMainClosed(expectedEpoch: number): boolean {
+    if (expectedEpoch !== this.mainLifecycleEpoch) return false;
+    this.mainLifecycleEpoch += 1;
+    this.observedMainEpoch = this.mainLifecycleEpoch;
+    this.freshness = "fresh";
+    this.staleReason = "";
+    this.sources = {
+      ...this.sources,
+      status: projectVerifiedMainClosedStatus(this.sources.status),
+      branchInstances: projectVerifiedMainClosedBranches(this.sources.branchInstances),
+    };
+    this.publish();
+    return true;
+  }
+
   updateCleanup(cleanup: Partial<LauncherCleanupSummary>): LauncherStateSnapshotV1 {
     this.cleanup = {
       ...this.cleanup,
@@ -387,8 +421,19 @@ export class LauncherStateStore {
 
   refresh(reason: string): Promise<LauncherStateSnapshotV1> {
     if (this.refreshPromise !== null) {
-      return this.refreshPromise;
+      if (this.refreshEpoch === this.mainLifecycleEpoch) return this.refreshPromise;
+      // Only a lifecycle change can queue another read. Repeated file hints
+      // share this one trailing read, which samples the latest epoch on launch.
+      if (this.queuedRefreshPromise !== null) return this.queuedRefreshPromise;
+      const queued = this.refreshPromise.then(() => {
+        if (this.queuedRefreshPromise === queued) this.queuedRefreshPromise = null;
+        return this.refresh(reason);
+      });
+      this.queuedRefreshPromise = queued;
+      return queued;
     }
+    const mainLifecycleEpoch = this.mainLifecycleEpoch;
+    this.refreshEpoch = mainLifecycleEpoch;
     this.freshness = "refreshing";
     this.staleReason = "";
     this.cleanup = {
@@ -402,13 +447,17 @@ export class LauncherStateStore {
         const branchInstances = unwrapSource(sources.branchInstances);
         const freshness = sources.freshness === undefined ? null : unwrapSource(sources.freshness);
         const cleanup = sources.cleanup === undefined ? null : unwrapSource(sources.cleanup);
+        const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch;
         this.sources = {
           ...this.sources,
-          ...(status.ok ? { status: status.value } : {}),
-          ...(branchInstances.ok ? { branchInstances: branchInstances.value } : {}),
+          ...(status.ok && !mainChanged ? { status: status.value } : {}),
+          ...(branchInstances.ok ? {
+            branchInstances: mainChanged
+              ? retainCurrentMainBranch(this.sources.branchInstances, branchInstances.value)
+              : branchInstances.value,
+          } : {}),
           ...(freshness?.ok ? { freshness: freshness.value } : {}),
         };
-        const criticalFailed = !status.ok;
         const reasons: string[] = [];
         if (!status.ok) {
           reasons.push(boundedStaleReason(status.message || status.errorType));
@@ -430,8 +479,15 @@ export class LauncherStateStore {
             reconciliation: { active: false, reason },
           };
         }
-        this.freshness = criticalFailed ? "stale" : "fresh";
-        this.staleReason = criticalFailed ? reasons[0] || "status_failed" : "";
+        if (mainChanged) {
+          const mainVerified = this.observedMainEpoch === this.mainLifecycleEpoch;
+          this.freshness = mainVerified ? "fresh" : "stale";
+          this.staleReason = mainVerified ? "" : "main_lifecycle_changed";
+        } else {
+          if (status.ok) this.observedMainEpoch = mainLifecycleEpoch;
+          this.freshness = status.ok ? "fresh" : "stale";
+          this.staleReason = status.ok ? "" : reasons[0] || "status_failed";
+        }
         if (cleanup?.ok) {
           this.nextReconcileAt = nextReconcileAtFrom(
             sources.nextReconcileAt,
@@ -443,8 +499,11 @@ export class LauncherStateStore {
         return this.publish();
       })
       .catch((error: unknown) => {
-        this.freshness = "stale" as const;
-        this.staleReason = boundedStaleReason(error instanceof Error ? error.message : String(error));
+        const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch;
+        const mainVerified = mainChanged && this.observedMainEpoch === this.mainLifecycleEpoch;
+        this.freshness = mainVerified ? "fresh" : "stale";
+        this.staleReason = mainVerified ? "" : mainChanged ? "main_lifecycle_changed"
+          : boundedStaleReason(error instanceof Error ? error.message : String(error));
         this.cleanup = {
           ...this.cleanup,
           reconciliation: { active: false, reason },

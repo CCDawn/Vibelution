@@ -70,6 +70,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     restartLauncherToLatestBuild: promote,
     joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false, joinInFlightRestart: false }),
     launcherLifecycleSupervisor: supervisor,
+    launcherStateStore: { beginMainLifecycle: vi.fn() },
     readLauncherStateFile: () => ({}),
     launcherStatePath: () => "unused",
     runWorkbenchLifecycle: lifecycle,

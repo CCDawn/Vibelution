@@ -33,6 +33,8 @@ function closeHarness() {
     return true;
   });
   const retireBuilds = vi.fn(async () => true);
+  const commitClosed = vi.fn(() => true);
+  const beginLifecycle = vi.fn(() => 1);
   const sandbox: Record<string, unknown> = {
     AbortSignal, Date, Error, performance, randomUUID: () => "explicit-close-request",
     process: { platform: "win32" }, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 1800, WORKBENCH_CLOSE_FORCE_AFTER_MS: 1200,
@@ -46,6 +48,7 @@ function closeHarness() {
     createDesktopShellExitDeadline, withDesktopShellExitTimeout,
     captureFrontendBuildRetirement: () => retireBuilds,
     mainWorkbenchCloseStore: store,
+    launcherStateStore: { beginMainLifecycle: beginLifecycle, commitVerifiedMainClosed: commitClosed },
     confirmWorkbenchForceClose: confirm,
     recordSupervisorEventFallbackLocally: record,
     stopWorkbenchBackend: stop,
@@ -56,7 +59,7 @@ function closeHarness() {
   runInNewContext(transpileModule(source.slice(begin, end) + "\nglobalThis.runClose = requestTransactionalWorkbenchClose;", {
     compilerOptions: { target: ScriptTarget.ES2022 }
   }).outputText, sandbox);
-  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus, retireBuilds,
+  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus, retireBuilds, commitClosed, beginLifecycle,
     run: () => (sandbox.runClose as (paths: object, bootstrap: object) => Promise<void>)({ workspaceRoot: "test-workspace" }, {}) };
 }
 
@@ -76,6 +79,8 @@ describe("Explicit Workbench close", () => {
       mode: "force", reason: "workbench_window_close", activeWorkState: "unknown", requestId: "explicit-close-request"
     });
     expect(h.closed).toHaveBeenCalledOnce();
+    expect(h.commitClosed).toHaveBeenCalledWith(1);
+    expect(h.commitClosed.mock.invocationCallOrder[0]).toBeLessThan(h.closed.mock.invocationCallOrder[0]!);
     expect(h.store.currentTransaction()?.phase).toBe("window_close_authorized");
   });
 
@@ -124,7 +129,16 @@ describe("Explicit Workbench close", () => {
     await expect(h.run()).rejects.toThrow("owned process still running");
     expect(h.readback).not.toHaveBeenCalled();
     expect(h.closed).not.toHaveBeenCalled();
+    expect(h.commitClosed).not.toHaveBeenCalled();
     expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_timeout" });
+  });
+
+  it("keeps a newer start's window when the old close lost its projection epoch", async () => {
+    const h = closeHarness();
+    h.commitClosed.mockReturnValueOnce(false);
+    await h.run();
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "lifecycle_intent_superseded" });
   });
 
   it("waits for exact owned frontend build retirement before authorizing the window", async () => {
@@ -133,6 +147,7 @@ describe("Explicit Workbench close", () => {
     await expect(h.run()).rejects.toThrow("Owned frontend build processes did not retire");
     expect(h.stop).toHaveBeenCalledOnce();
     expect(h.closed).not.toHaveBeenCalled();
+    expect(h.commitClosed).not.toHaveBeenCalled();
     expect(h.readback).not.toHaveBeenCalled();
   });
 
