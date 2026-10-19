@@ -234,7 +234,6 @@ def update_agent_budget_parameters_if_current(
                 "agentId": normalized_agent_id,
                 "configRevision": int(agent.get("configRevision") or 0),
                 "maxCallsPerTurn": payload.get("maxCallsPerTurn"),
-                "thinkingBudgetChars": payload.get("thinkingBudgetChars"),
             },
             lifecycle=True,
         )

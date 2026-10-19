@@ -159,7 +159,6 @@ export type SessionModelSelection = {
 export type SessionBudgetParameters = {
   revision: number;
   maxCallsPerTurn: number | null;
-  thinkingBudgetChars: number | null;
 };
 
 /**
@@ -170,7 +169,6 @@ export type SessionBudgetParameters = {
 export type SessionBudgetParametersUpdate = {
   revision: number;
   maxCallsPerTurn?: number | null;
-  thinkingBudgetChars?: number | null;
 };
 
 /** In-conversation SFT dataset curation decision for one assistant answer. */
