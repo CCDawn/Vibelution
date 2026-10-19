@@ -1,6 +1,6 @@
 export default {
   page: "@container/library flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4 overflow-y-auto p-4",
-  columns: "grid min-w-0 content-start items-start grid-cols-1 gap-5 @min-[750px]/library:grid-cols-[240px_minmax(0,1fr)]",
+  columns: "grid min-w-0 content-start items-start grid-cols-1 gap-5 @min-[750px]/library:!grid-cols-[240px_minmax(0,1fr)]",
   list: "grid min-w-0 content-start gap-2",
   detail: "grid min-w-0 content-start gap-4 rounded-lg border border-[var(--vui-border-subtle)] p-4",
   readerHeading: "flex min-w-0 flex-wrap items-start justify-between gap-3",
