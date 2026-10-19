@@ -21,6 +21,7 @@ from typing import Any
 
 from ..research_runtime.evidence_graph_gaps import evidence_graph_gap_counts
 from ..source_collection_common import project_source_version_families
+from .doi_enrichment import enrich_missing_doi
 from .relation_endpoints import (
     build_relation_endpoint_registry,
     resolve_relation_endpoint,
@@ -705,8 +706,17 @@ def _materialize_source_collection_stage_writeback_content_extraction(
             )
             if evidence_ledger:
                 normalized_extraction["evidenceLedger"] = evidence_ledger
-                normalized_extraction["evidenceStatus"] = evidence_ledger["status"]
-                evidence_ledgers.append({"candidateId": candidate_id, "evidenceStatus": evidence_ledger["status"]})
+                if normalized_extraction["decision"] in s.SOURCE_COLLECTION_EXCLUSION_DECISIONS:
+                    # Honest exclusion (SCI-021): an excluded candidate is
+                    # processed-and-dropped, not an evidence gap.  Keep the
+                    # ledger for audit, but never stamp it
+                    # ``missing_evidence_anchor`` — that would downgrade the
+                    # whole completed batch and re-open the candidate in the
+                    # retry_evidence focus forever.
+                    normalized_extraction["evidenceStatus"] = "excluded"
+                else:
+                    normalized_extraction["evidenceStatus"] = evidence_ledger["status"]
+                    evidence_ledgers.append({"candidateId": candidate_id, "evidenceStatus": evidence_ledger["status"]})
             metadata["contentExtraction"] = normalized_extraction
             candidate["metadata"] = metadata
             candidate["updatedAt"] = now
@@ -3669,6 +3679,13 @@ def _source_collection_stage_writeback_record_payload(
     elif doi:
         source_ref = source_ref or f"https://doi.org/{doi}"
     title = s._trim_text(lead.get("title"), max_length=260)
+    if not doi and title:
+        # SCI-021: leads from providers without DOI metadata (bare mdpi.com
+        # URLs) leave nothing to reroute a publisher 403 through the
+        # doi.org/EuropePMC mirror fallback.  Fill the gap from the exact
+        # title before the record/candidate metadata freezes; fail-open (a
+        # miss keeps the historical DOI-less shape).
+        doi = enrich_missing_doi(title) or ""
     year = s._trim_text(lead.get("year") or lead.get("published"), max_length=80)
     container = s._trim_text(lead.get("container") or lead.get("venue") or lead.get("journal"), max_length=240)
     if not source_ref and not source_url:
