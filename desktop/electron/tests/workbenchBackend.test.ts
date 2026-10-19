@@ -1541,10 +1541,15 @@ describe("runWorkbenchLifecycle", () => {
           if (failure === "cancelled") controller.abort(new Error("start cancelled"));
           return null;
         }
-      })).rejects.toThrow(failure === "rejected" ? "identity probe failed" : "identity could not be captured");
+      })).rejects.toThrow(failure === "cancelled" ? "start cancelled"
+        : failure === "rejected" ? "identity probe failed" : "identity could not be captured");
+      // Cancellation frees the queue immediately; exact-spawn cleanup still
+      // finishes independently and cannot publish into the successor's state.
+      await vi.waitFor(() => expect(hasTrackedWorkbenchJob("C:/repo")).toBe(false));
       expect(terminate).toHaveBeenCalledOnce();
       expect(hasTrackedWorkbenchJob("C:/repo")).toBe(false);
-      expect(written.at(-1)).toMatchObject({ backendPid: 0, spawnPid: 0, lastReason: "electron_main_start_failed_retired" });
+      if (failure === "cancelled") expect(written).toEqual([]);
+      else expect(written.at(-1)).toMatchObject({ backendPid: 0, spawnPid: 0, lastReason: "electron_main_start_failed_retired" });
     } finally {
       __setWorkbenchJobNativeForTests(undefined);
     }

@@ -23,7 +23,7 @@ function closeHarness() {
   const probe = vi.fn(async (_input: { controlToken: string; signal?: AbortSignal }) => ({ state: "idle", message: "" }));
   const confirm = vi.fn(async () => false);
   const stop = vi.fn(async (_paths: object, _bootstrap: object, _transaction: MainWorkbenchCloseTransaction, _signal: AbortSignal, _timing: { deadlineAt: number; forceAt: number }) => undefined);
-  const closed = vi.fn(async () => undefined);
+  const closed = vi.fn(async (_options?: { deadlineAt?: number }) => undefined);
   const record = vi.fn();
   const store = new MainWorkbenchCloseTransactionStore();
   const coordinator = vi.fn(async (_reason: string, run: () => Promise<void>) => run());
@@ -32,9 +32,11 @@ function closeHarness() {
     await input.readStatus();
     return true;
   });
+  const retireBuilds = vi.fn(async () => true);
   const sandbox: Record<string, unknown> = {
     AbortSignal, Date, Error, performance, randomUUID: () => "explicit-close-request",
     process: { platform: "win32" }, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 1800, WORKBENCH_CLOSE_FORCE_AFTER_MS: 1200,
+    WORKBENCH_CLOSE_TOTAL_WAIT_MS: 2000,
     windowProvider: { approveWorkbenchCloseOnce: closed },
     desktopLifecycleCoordinator: { request: coordinator },
     resolveDesktopActionLoopContext: context,
@@ -42,6 +44,7 @@ function closeHarness() {
     fetchLauncherActiveWorkStatus: probe,
     resolveQuitActiveWorkStatus, isActiveWorkProbeAuthFailure,
     createDesktopShellExitDeadline, withDesktopShellExitTimeout,
+    captureFrontendBuildRetirement: () => retireBuilds,
     mainWorkbenchCloseStore: store,
     confirmWorkbenchForceClose: confirm,
     recordSupervisorEventFallbackLocally: record,
@@ -53,7 +56,7 @@ function closeHarness() {
   runInNewContext(transpileModule(source.slice(begin, end) + "\nglobalThis.runClose = requestTransactionalWorkbenchClose;", {
     compilerOptions: { target: ScriptTarget.ES2022 }
   }).outputText, sandbox);
-  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus,
+  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus, retireBuilds,
     run: () => (sandbox.runClose as (paths: object, bootstrap: object) => Promise<void>)({ workspaceRoot: "test-workspace" }, {}) };
 }
 
@@ -93,6 +96,7 @@ describe("Explicit Workbench close", () => {
     expect(h.stop.mock.calls[0][4]).toEqual({ deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200 });
     expect(h.readback.mock.calls[0][0].timeoutMs).toBe(900);
     expect(h.readback.mock.calls[0][0].signal).toBe(h.stop.mock.calls[0][3]);
+    expect(h.closed).toHaveBeenCalledWith({ deadlineAt: requestedAt + 2000 });
   });
 
   it("authorizes window close only after the file-only final readback settles", async () => {
@@ -121,6 +125,15 @@ describe("Explicit Workbench close", () => {
     expect(h.readback).not.toHaveBeenCalled();
     expect(h.closed).not.toHaveBeenCalled();
     expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_timeout" });
+  });
+
+  it("waits for exact owned frontend build retirement before authorizing the window", async () => {
+    const h = closeHarness();
+    h.retireBuilds.mockResolvedValueOnce(false);
+    await expect(h.run()).rejects.toThrow("Owned frontend build processes did not retire");
+    expect(h.stop).toHaveBeenCalledOnce();
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.readback).not.toHaveBeenCalled();
   });
 
   it("does not report close success when final readback is unsettled", async () => {

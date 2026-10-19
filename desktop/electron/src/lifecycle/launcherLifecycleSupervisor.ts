@@ -290,8 +290,14 @@ export class LauncherLifecycleSupervisor {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const tail = previous.catch(() => undefined).then(() => gate);
+    // An aborted lease no longer owns the mutation lane. Its asynchronous
+    // work may still settle later, but all effects must honour its signal.
+    // Do not chain the new tail to the old promise: an uncooperative aborted
+    // predecessor must not hold every later close/start behind it.
+    const tail = gate;
     this.mutationTails.set(instanceId, tail);
+    input.lease.signal.addEventListener("abort", release, { once: true });
+    if (input.lease.signal.aborted) release();
 
     await previous.catch(() => undefined);
     try {
@@ -324,6 +330,7 @@ export class LauncherLifecycleSupervisor {
       }
       return { outcome: "committed", value };
     } finally {
+      input.lease.signal.removeEventListener("abort", release);
       release();
       void tail.finally(() => {
         if (this.mutationTails.get(instanceId) === tail) {
