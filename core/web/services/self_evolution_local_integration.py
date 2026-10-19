@@ -195,8 +195,13 @@ class AuthorizedLocalIntegration:
             self._native = session_service
         return self._native
 
-    def _principals(self, team_id: str) -> dict[str, dict[str, str]]:
-        bindings = self.load_bindings()
+    def _principals(self, team_id: str, *, context: dict[str, Any] | None = None) -> dict[str, dict[str, str]]:
+        bindings = None
+        if context and context.get("_recoverySource"):
+            from .team_workflow.generic.code_repair import recovery_role_bindings
+            bindings = recovery_role_bindings(context)
+        if bindings is None:
+            bindings = self.load_bindings()
         principals: dict[str, dict[str, str]] = {}
         for role in _ROLES:
             binding = bindings.get(role) if isinstance(bindings, dict) else None
@@ -246,7 +251,7 @@ class AuthorizedLocalIntegration:
             from .team_workflow.generic.code_repair import delegated_authorization
             grant = delegated_authorization(context)
             self._file_scope(grant["allowedFiles"])
-            if grant["principals"] != self._principals(grant["teamId"]):
+            if grant["principals"] != self._principals(grant["teamId"], context=context):
                 raise LocalIntegrationError("Recovery role binding or permissions changed.")
             return grant
         operator = current_server_operator()
@@ -293,7 +298,7 @@ class AuthorizedLocalIntegration:
         if auth.get("requestDigest") != _digest(request) or auth.get("allowedFiles") != request["allowedFiles"] or auth.get("teamId") != request["teamId"]:
             raise LocalIntegrationError("Authorized request scope changed.")
         self._file_scope(request["allowedFiles"])
-        if auth.get("principals") != self._principals(request["teamId"]):
+        if auth.get("principals") != self._principals(request["teamId"], context=fresh):
             raise LocalIntegrationError("Agent binding or permissions changed after authorization.")
         supplied = context.get("localIntegrationAuthorization")
         if supplied is not None and supplied != auth:

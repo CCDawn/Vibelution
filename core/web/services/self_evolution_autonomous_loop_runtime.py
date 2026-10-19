@@ -119,7 +119,12 @@ def build_autonomous_loop_hooks(
                       else dependencies.load_bindings)
             if loader is None:
                 raise AutonomousLoopRuntimeError("Authorized role bindings are unavailable.")
-            bindings = loader()
+            bindings = None
+            if context.get("_recoverySource"):
+                from .team_workflow.generic.code_repair import recovery_role_bindings
+                bindings = recovery_role_bindings(context)
+            if bindings is None:
+                bindings = loader()
             if not isinstance(bindings, dict):
                 raise AutonomousLoopRuntimeError(
                     "Self-evolution Agent bindings are unavailable."

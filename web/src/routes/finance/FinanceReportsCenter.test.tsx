@@ -203,3 +203,17 @@ it("removes a report confirmed missing from selection and excludes it from batch
   await act(async () => batchButton!.click());
   expect(vi.mocked(downloadFinancialReportsExport)).toHaveBeenCalledWith("agent-1", [{ sessionId: "session-valid", turnId: "turn-valid" }], "markdown");
 });
+
+
+it("starts research from an empty catalog without exporting or opening a session", async () => {
+  vi.mocked(fetchFinancialReports).mockResolvedValue({ items: [], nextCursor: null, scannedSessions: 0, order: "session_recency" });
+  const onNewResearch = vi.fn(), onOpenSession = vi.fn();
+  const node = await mountCenter({ agentId: "agent-1", cases: [], onSaveCases: vi.fn(), onOpenSession, onNewResearch, pending: false, zh: true });
+  await waitForQuery();
+  const start = [...node.querySelectorAll("button")].find((item) => item.textContent === "开始一次研究");
+  expect(start).toBeDefined();
+  await act(async () => start!.click());
+  expect(onNewResearch).toHaveBeenCalledOnce();
+  expect(onOpenSession).not.toHaveBeenCalled();
+  expect(downloadFinancialReportsExport).not.toHaveBeenCalled();
+});

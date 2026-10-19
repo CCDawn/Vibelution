@@ -522,3 +522,13 @@ it("preserves advanced values across disclosure and explains invalid numeric fie
   expect(node.querySelector<HTMLInputElement>('[aria-label="最多决策"]')?.value).toBe("0");
   expect(api.previewAIBacktest).not.toHaveBeenCalled();
 });
+
+
+it("explains setup, model-free preview and explicit budget confirmation before the fields", async () => {
+  await render();
+  const steps = node.querySelector('ol[aria-label="回测步骤"]');
+  expect([...steps!.querySelectorAll("li")].map(item => item.textContent)).toEqual(["1 设置策略与区间", "2 预检数据与预算 · 不调用模型", "3 确认预算后启动"]);
+  expect(button("开始AI回测")).toBeUndefined();
+  expect(api.previewAIBacktest).not.toHaveBeenCalled();
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
+});
