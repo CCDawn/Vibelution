@@ -870,7 +870,7 @@ describe("Electron window provider state", () => {
     expect(state.open).toBe(true);
   });
 
-  it("waits for the closed window state report before sending the final close callback", async () => {
+  it("sends the local close callback while the closed state report is still pending", async () => {
     let releaseReport: (() => void) | null = null;
     let closeCallbacks = 0;
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
@@ -893,10 +893,14 @@ describe("Electron window provider state", () => {
     workbenchWindow.emit("closed");
 
     expect(closeCallbacks).toBe(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(closeCallbacks).toBe(1);
+    expect(provider.snapshot().workbench.open).toBe(false);
+
     releaseReport?.();
     await Promise.resolve();
     await Promise.resolve();
-
     expect(closeCallbacks).toBe(1);
   });
 
