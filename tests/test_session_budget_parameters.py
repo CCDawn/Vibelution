@@ -7,8 +7,9 @@ Covers the per-session budget override surface:
 * ``core.orchestration.session_budget_resolve`` resolution.
 * Authorization install priority: 会话覆盖 > family 解析 > policy base, and
   the installed cap flowing into the Turn Status Bar display value.
-* Thinking-budget session-ization: 会话值 > env > 不注入, including ordinary
-  (non-workflow) sessions.
+* Thinking-budget injection stays workflow-scoped only (env > default);
+  residual legacy ``thinkingBudgetChars`` storage keys are ignored on read
+  and dropped on the next PATCH save.
 * ``token_budget`` (used/total) reaching the Turn Status Bar payload through
   the worker → agent call chain.
 """
@@ -47,9 +48,7 @@ from core.web.services import agent_directory_service, session_service
 from core.web.services.session import worker as session_worker
 from core.web.services.session.research_thinking_budget import (
     RESEARCH_THINKING_BUDGET_ENV,
-    build_research_node_thinking_budget_block,
     build_research_thinking_budget_segment,
-    resolve_session_thinking_budget_chars,
 )
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -63,7 +62,7 @@ pytestmark = pytest.mark.serial
 
 
 def test_budget_parameters_get_returns_view(monkeypatch: pytest.MonkeyPatch) -> None:
-    expected = {"revision": 7, "maxCallsPerTurn": 64, "thinkingBudgetChars": None}
+    expected = {"revision": 7, "maxCallsPerTurn": 64}
     monkeypatch.setattr(
         session_routes,
         "get_session_budget_parameters_view",
@@ -96,7 +95,7 @@ def test_budget_parameters_patch_passes_only_provided_fields(monkeypatch: pytest
     def update(session_id, **kwargs):
         captured["session_id"] = session_id
         captured.update(kwargs)
-        return {"revision": 8, "maxCallsPerTurn": kwargs.get("max_calls_per_turn"), "thinkingBudgetChars": None}
+        return {"revision": 8, "maxCallsPerTurn": kwargs.get("max_calls_per_turn")}
 
     monkeypatch.setattr(session_routes, "update_session_budget_parameters", update)
 
@@ -105,7 +104,8 @@ def test_budget_parameters_patch_passes_only_provided_fields(monkeypatch: pytest
         json={"revision": 7, "maxCallsPerTurn": 64},
     )
     assert only_max.status_code == 200
-    assert only_max.json() == {"revision": 8, "maxCallsPerTurn": 64, "thinkingBudgetChars": None}
+    assert only_max.json() == {"revision": 8, "maxCallsPerTurn": 64}
+    # Omitted fields must not be forwarded at all.
     assert captured == {
         "session_id": "session-active",
         "expected_revision": 7,
@@ -113,18 +113,23 @@ def test_budget_parameters_patch_passes_only_provided_fields(monkeypatch: pytest
     }
     captured.clear()
 
+    # An explicit null must reach the service as a clear request.
     explicit_null = client.patch(
         "/api/sessions/session-active/budget-parameters",
-        json={"revision": 8, "thinkingBudgetChars": None},
+        json={"revision": 8, "maxCallsPerTurn": None},
     )
     assert explicit_null.status_code == 200
-    # An explicit null must reach the service as a clear request, and omitted
-    # fields must not be forwarded at all.
     assert captured == {
         "session_id": "session-active",
         "expected_revision": 8,
-        "thinking_budget_chars": None,
+        "max_calls_per_turn": None,
     }
+    # The removed thinking-budget override is no longer part of the contract.
+    legacy = client.patch(
+        "/api/sessions/session-active/budget-parameters",
+        json={"revision": 7, "thinkingBudgetChars": 800},
+    )
+    assert legacy.status_code == 422
 
 
 def test_budget_parameters_patch_maps_conflict_and_validation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,12 +251,13 @@ def test_get_view_reports_configured_overrides_and_revision(budget_service_env) 
         SESSION_BUDGET_PARAMETERS_METADATA_KEY: {"maxCallsPerTurn": 64, "thinkingBudgetChars": 800}
     }
     view = session_service.get_session_budget_parameters_view("session-active")
-    assert view == {"revision": 7, "maxCallsPerTurn": 64, "thinkingBudgetChars": 800}
+    # The residual legacy thinkingBudgetChars key is ignored on read.
+    assert view == {"revision": 7, "maxCallsPerTurn": 64}
 
 
 def test_get_view_defaults_to_nulls_without_configuration(budget_service_env) -> None:
     view = session_service.get_session_budget_parameters_view("session-active")
-    assert view == {"revision": 7, "maxCallsPerTurn": None, "thinkingBudgetChars": None}
+    assert view == {"revision": 7, "maxCallsPerTurn": None}
 
 
 def test_patch_writes_override_and_bumps_revision(budget_service_env) -> None:
@@ -259,14 +265,13 @@ def test_patch_writes_override_and_bumps_revision(budget_service_env) -> None:
         "session-active",
         expected_revision=7,
         max_calls_per_turn=50,
-        thinking_budget_chars=1200,
     )
-    assert result == {"revision": 8, "maxCallsPerTurn": 50, "thinkingBudgetChars": 1200}
+    assert result == {"revision": 8, "maxCallsPerTurn": 50}
     assert budget_service_env["stub"].calls == [
         {
             "agentId": "agent-1",
             "expectedConfigRevision": 7,
-            "values": {"maxCallsPerTurn": 50, "thinkingBudgetChars": 1200},
+            "values": {"maxCallsPerTurn": 50},
         }
     ]
 
@@ -279,23 +284,24 @@ def test_patch_null_clears_back_to_defaults(budget_service_env) -> None:
         "session-active",
         expected_revision=7,
         max_calls_per_turn=None,
-        thinking_budget_chars=None,
     )
-    assert result == {"revision": 8, "maxCallsPerTurn": None, "thinkingBudgetChars": None}
+    assert result == {"revision": 8, "maxCallsPerTurn": None}
     # A full clear removes the storage block entirely (empty values payload).
     assert budget_service_env["stub"].calls[0]["values"] == {}
 
 
-def test_patch_omitted_fields_keep_current_values(budget_service_env) -> None:
+def test_patch_drops_residual_thinking_budget_key_on_save(budget_service_env) -> None:
     budget_service_env["agent"]["metadata"] = {
         SESSION_BUDGET_PARAMETERS_METADATA_KEY: {"maxCallsPerTurn": 64, "thinkingBudgetChars": 800}
     }
     result = session_service.update_session_budget_parameters(
         "session-active",
         expected_revision=7,
-        thinking_budget_chars=1000,
     )
-    assert result == {"revision": 8, "maxCallsPerTurn": 64, "thinkingBudgetChars": 1000}
+    # Omitted fields keep their current value, while the legacy
+    # thinkingBudgetChars key disappears from the stored payload.
+    assert result == {"revision": 8, "maxCallsPerTurn": 64}
+    assert budget_service_env["stub"].calls[0]["values"] == {"maxCallsPerTurn": 64}
 
 
 def test_patch_stale_revision_conflicts(budget_service_env) -> None:
@@ -314,9 +320,6 @@ def test_patch_stale_revision_conflicts(budget_service_env) -> None:
         ("maxCallsPerTurn", {"max_calls_per_turn": 201}),
         ("maxCallsPerTurn", {"max_calls_per_turn": "64"}),
         ("maxCallsPerTurn", {"max_calls_per_turn": True}),
-        ("thinkingBudgetChars", {"thinking_budget_chars": 49}),
-        ("thinkingBudgetChars", {"thinking_budget_chars": 4001}),
-        ("thinkingBudgetChars", {"thinking_budget_chars": 3.5}),
     ],
 )
 def test_patch_rejects_out_of_range_values(budget_service_env, field, kwargs) -> None:
@@ -345,11 +348,17 @@ def test_get_session_budget_parameters_resolves_session_to_agent(monkeypatch: py
         "get_agent",
         lambda _aid, **_k: {
             "agentId": "agent-1",
-            "metadata": {SESSION_BUDGET_PARAMETERS_METADATA_KEY: {"maxCallsPerTurn": 50}},
+            "metadata": {
+                SESSION_BUDGET_PARAMETERS_METADATA_KEY: {
+                    "maxCallsPerTurn": 50,
+                    "thinkingBudgetChars": 800,
+                }
+            },
         },
     )
     parameters = get_session_budget_parameters("session-active")
-    assert parameters == SessionBudgetParameters(maxCallsPerTurn=50, thinkingBudgetChars=None)
+    # The residual legacy thinkingBudgetChars key resolves away.
+    assert parameters == SessionBudgetParameters(maxCallsPerTurn=50)
 
 
 def test_get_session_budget_parameters_returns_none_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -377,8 +386,8 @@ def test_normalize_drops_out_of_range_and_junk_values() -> None:
     assert normalize_session_budget_parameters({}) is None
     assert normalize_session_budget_parameters({"maxCallsPerTurn": 201}) is None
     assert normalize_session_budget_parameters({"maxCallsPerTurn": "50"}) == SessionBudgetParameters(maxCallsPerTurn=50)
-    assert normalize_session_budget_parameters({"thinkingBudgetChars": 4001}) is None
-    assert normalize_session_budget_parameters({"thinkingBudgetChars": True}) is None
+    # Legacy thinking-only payloads no longer resolve to anything.
+    assert normalize_session_budget_parameters({"thinkingBudgetChars": 800}) is None
     assert session_budget_parameters_from_agent(None) is None
     assert session_budget_parameters_from_agent({"metadata": None}) is None
 
@@ -389,7 +398,7 @@ def test_validate_override_bounds() -> None:
     with pytest.raises(session_budget_resolve.SessionBudgetParametersValueError):
         validate_session_budget_override(0, field="maxCallsPerTurn", minimum=1, maximum=200)
     with pytest.raises(session_budget_resolve.SessionBudgetParametersValueError):
-        validate_session_budget_override(True, field="thinkingBudgetChars", minimum=50, maximum=4000)
+        validate_session_budget_override(True, field="maxCallsPerTurn", minimum=1, maximum=200)
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +530,7 @@ def test_install_without_session_id_keeps_family_resolution(monkeypatch: pytest.
 
 
 # ---------------------------------------------------------------------------
-# Thinking-budget session-ization: 会话值 > env > 不注入
+# Thinking-budget injection: workflow-scoped only, env > default
 # ---------------------------------------------------------------------------
 
 
@@ -532,86 +541,43 @@ def _chat_state_loader(conversation: dict | None):
     return loader
 
 
-def test_resolve_session_thinking_budget_uses_session_value() -> None:
-    provider = lambda _sid: SessionBudgetParameters(thinkingBudgetChars=1200)  # noqa: E731
-    assert resolve_session_thinking_budget_chars("session-active", session_budget_provider=provider) == 1200
-    assert (
-        resolve_session_thinking_budget_chars(
-            "session-active", session_budget_provider=lambda _sid: SessionBudgetParameters()
-        )
-        is None
-    )
-    assert resolve_session_thinking_budget_chars("session-active", session_budget_provider=lambda _sid: None) is None
+_WORKFLOW_BINDING_CONVERSATION = {
+    "experimentBinding": {"workflowRunId": "run-1", "workflowNodeId": "node-2"}
+}
 
 
-def test_session_value_wins_over_env_for_workflow_session(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workflow_session_keeps_env_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(RESEARCH_THINKING_BUDGET_ENV, "800")
-    conversation = {
-        "experimentBinding": {"workflowRunId": "run-1", "workflowNodeId": "node-2"}
-    }
     segment = build_research_thinking_budget_segment(
         "session-node",
         project_root=object(),
-        load_chat_state=_chat_state_loader(conversation),
-        session_budget_provider=lambda _sid: SessionBudgetParameters(thinkingBudgetChars=1200),
-    )
-    assert segment is not None
-    assert "必须控制在 1200 字以内" in segment["block"]
-
-
-def test_workflow_session_without_session_value_keeps_env_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(RESEARCH_THINKING_BUDGET_ENV, "800")
-    conversation = {
-        "experimentBinding": {"workflowRunId": "run-1", "workflowNodeId": "node-2"}
-    }
-    segment = build_research_thinking_budget_segment(
-        "session-node",
-        project_root=object(),
-        load_chat_state=_chat_state_loader(conversation),
-        session_budget_provider=lambda _sid: None,
+        load_chat_state=_chat_state_loader(_WORKFLOW_BINDING_CONVERSATION),
     )
     assert segment is not None
     assert "必须控制在 800 字以内" in segment["block"]
 
 
-def test_ordinary_session_with_session_value_gets_segment(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workflow_session_defaults_to_500_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(RESEARCH_THINKING_BUDGET_ENV, raising=False)
     segment = build_research_thinking_budget_segment(
-        "session-chat",
+        "session-node",
         project_root=object(),
-        load_chat_state=_chat_state_loader({}),
-        session_budget_provider=lambda _sid: SessionBudgetParameters(thinkingBudgetChars=300),
+        load_chat_state=_chat_state_loader(_WORKFLOW_BINDING_CONVERSATION),
     )
     assert segment is not None
-    assert segment["key"] == "research_thinking_budget"
-    assert "必须控制在 300 字以内" in segment["block"]
+    assert "必须控制在 500 字以内" in segment["block"]
 
 
-def test_ordinary_session_without_session_value_stays_uninjected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ordinary_session_with_residual_metadata_never_injects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv(RESEARCH_THINKING_BUDGET_ENV, "800")
     segment = build_research_thinking_budget_segment(
         "session-chat",
         project_root=object(),
         load_chat_state=_chat_state_loader({"experimentBinding": {"teamId": "team-1"}}),
-        session_budget_provider=lambda _sid: None,
     )
     assert segment is None
-
-
-def test_session_provider_failure_is_treated_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(RESEARCH_THINKING_BUDGET_ENV, raising=False)
-
-    def broken_provider(_sid):
-        raise RuntimeError("budget resolve unavailable")
-
-    segment = build_research_thinking_budget_segment(
-        "session-chat",
-        project_root=object(),
-        load_chat_state=_chat_state_loader({}),
-        session_budget_provider=broken_provider,
-    )
-    assert segment is None
-    assert build_research_node_thinking_budget_block(650).count("650") >= 1
 
 
 # ---------------------------------------------------------------------------
