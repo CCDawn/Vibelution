@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
+from .doi_enrichment import enrich_candidates_missing_doi
 from .extraction_fetch_text import task_fetched_text
 from .extraction_quote_anchor_supply import (
     QUOTE_BLOCK_MAX_CHARS,
@@ -1155,6 +1156,24 @@ def get_source_collection_stage_task_context(
     selected_candidates = pageable_candidates[candidate_page_offset:candidate_page_offset + candidate_page_limit]
     next_candidate_offset = candidate_page_offset + len(selected_candidates)
     candidate_has_more = next_candidate_offset < len(pageable_candidates)
+    if (
+        normalized_stage_id == "extraction"
+        or task_agent_role == "source_extractor"
+    ) and normalized_context_mode != "minimal":
+        # SCI-021 read-through: legacy candidates materialized without
+        # ``metadata.doi`` get an OpenAlex exact-title reverse-lookup here
+        # (bounded real-network lookups, fail-open).  Hits mutate the in-page
+        # dicts — so ``candidates[]``, ``quotableSources`` locators and the
+        # writeback audit all see the DOI — and persist back to the candidate
+        # store, so the enrichment survives this read.
+        try:
+            enrich_candidates_missing_doi(
+                normalized_team_id,
+                normalized_run_id,
+                [item for item in selected_candidates if isinstance(item, dict)],
+            )
+        except Exception:  # noqa: BLE001 - context reads stay available when enrichment breaks
+            pass
     storage_artifacts = s._source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     selected_unassessed_candidate_ids = [
         s._trim_text(item.get("candidateId"), max_length=128)

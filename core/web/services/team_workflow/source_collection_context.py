@@ -437,6 +437,20 @@ def compact_source_collection_quotable_sources(sources: Any) -> list[dict[str, A
             "blockOrigin": trim_text(source.get("blockOrigin"), max_length=40),
             "sourceAccess": normalize_metadata(source.get("sourceAccess")),
         }
+        # SCI-021: the fetchable locator surface (original URL plus the
+        # ``https://doi.org/<doi>`` form) must survive compaction — the
+        # compact context is what the extraction agent reads by default when
+        # it follows a publisher-403 hint onto the DOI link.
+        if trim_text(source.get("doi"), max_length=240):
+            entry["doi"] = trim_text(source.get("doi"), max_length=240)
+        if isinstance(source.get("locators"), list):
+            locators = [
+                trim_text(item, max_length=1000)
+                for item in list(source.get("locators") or [])[:6]
+                if trim_text(item, max_length=1000)
+            ]
+            if locators:
+                entry["locators"] = locators
         if source.get("blockOmitted"):
             entry["blockOmitted"] = trim_text(source.get("blockOmitted"), max_length=40)
         # ``blocks`` stays explicit even when empty: "no quotable text" is a
