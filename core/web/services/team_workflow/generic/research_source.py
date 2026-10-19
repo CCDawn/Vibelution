@@ -14,7 +14,6 @@ from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowC
 from core.research.workflow.contracts.retry_taxonomy import DEFAULT_RETRY_TAXONOMY
 from core.research.workflow.ledger import RunVersionConflictError
 from core.web.services.team_workflow.research_runtime import formal_write_runtime
-from core.web.services.team_workflow.research_runtime.archive_mode import challenge_archive_mode_enabled
 from core.web.services.team_workflow.research_runtime.command_service import (
     NodeNotReadyError, WorkflowCommandError,
 )
@@ -146,9 +145,6 @@ def _load(repository, record: dict) -> tuple[dict, object, object]:
     if latest.status == "succeeded":
         snapshot.update(status="completed", reason="source_step_succeeded")
         return snapshot, run, latest
-    if challenge_archive_mode_enabled():
-        snapshot["reason"] = "source_archived"
-        return snapshot, run, latest
     if run.status == "succeeded":
         snapshot["reason"] = "source_state_inconsistent"
         return snapshot, run, latest
@@ -228,8 +224,6 @@ def replay(record: dict) -> str:
     """Submit at most one native retry for the supervised failure identity."""
     from .binding import authorization_reason
 
-    if challenge_archive_mode_enabled():
-        return "source_archived"
     if record.get("stopRequested"):
         return "source_stopped"
     policy = (record.get("flow") or {}).get("failureRecovery") or {}
