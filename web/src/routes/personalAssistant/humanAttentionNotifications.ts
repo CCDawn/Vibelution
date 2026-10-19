@@ -12,7 +12,7 @@ import type { PersonalAssistantOverview } from "../../api/types/personalAssistan
 
 export type PersonalAssistantAttentionRow = PersonalAssistantOverview["attention"][number];
 
-export type HumanAttentionKind = "knowledge_review" | "anomaly";
+export type HumanAttentionKind = "knowledge_review" | "anomaly" | "affair_reminder";
 export type HumanAttentionSeverity = "critical" | "high" | "medium";
 export type HumanAttentionDelivery = "assistant_window" | "system_notification" | "attention_fallback";
 
@@ -41,7 +41,7 @@ export type HumanAttentionBridge = {
 };
 
 const ATTENTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-const HUMAN_ATTENTION_KINDS = new Set<string>(["knowledge_review", "anomaly"]);
+const HUMAN_ATTENTION_KINDS = new Set<string>(["knowledge_review", "anomaly", "affair_reminder"]);
 const SEVERITIES = new Set<string>(["critical", "high", "medium"]);
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 400;
@@ -55,11 +55,13 @@ const MAX_NOTIFIED_IDS = 400;
 export const HUMAN_ATTENTION_DEFAULT_TARGETS: Record<HumanAttentionKind, string> = {
   knowledge_review: "/memory/knowledge",
   anomaly: "/teams?researchView=workflow",
+  affair_reminder: "/personal-assistant",
 };
 
 export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string> = {
   knowledge_review: "知识待复核",
   anomaly: "研究流程异常待处理",
+  affair_reminder: "事务提醒待处理",
 };
 
 function normalizeText(value: unknown): string {
