@@ -46,7 +46,7 @@ AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workben
 | Prop | 说明 |
 | --- | --- |
 | children | 内容页、加载态或错误态，均沿用相同宿主 |
-| flush | 会话 recipe 自己拥有 4px inset 时使用；不重复增加边距 |
+| flush | 会话与团队 recipe 自己拥有 pane inset 时使用；不重复增加边距 |
 
 Frame 用 memo，消费者提供稳定的 Outlet 元素，以隔离全局状态轮询引起的父级更新；React Router context 和正文自己的状态更新仍正常传播。验证必须同时证明无关父级更新不重绘正文、导航仍切页、正文状态仍更新以及 frame DOM 节点保留。
 
