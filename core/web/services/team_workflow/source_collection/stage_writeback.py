@@ -5,7 +5,6 @@ Clarity B6: split from stages.py. Shared gates/helpers import from stage_session
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
@@ -23,17 +22,16 @@ from .extraction_quote_anchor_supply import (
 from .extraction_retrieved_at_backfill import (
     backfill_source_collection_stage_writeback_retrieved_at,
 )
+from .writeback_materialize import (
+    _persist_source_collection_stage_writeback_remediation_contract,
+    _prepare_relation_graph_writeback_remediation,
+)
 from .writeback_remediation_contract import (
     WRITEBACK_REMEDIATION_KIND_EVIDENCE_FIELDS,
-    WRITEBACK_REMEDIATION_KIND_RELATION_REFS,
     active_writeback_remediation,
     build_writeback_remediation_contract,
-    classify_relation_graph_rejection_error,
-    collect_relation_ref_violations,
     evidence_field_findings,
     next_writeback_remediation_attempt,
-    relation_missing_field_findings,
-    writeback_remediation_hint_block,
 )
 
 from .stage_session import (
@@ -559,119 +557,6 @@ def _apply_finding_receipt_gate_to_closure(
     })
 
 
-def _persist_source_collection_stage_writeback_remediation_contract(
-    team_id: str,
-    run_id: str,
-    task: dict[str, Any],
-    contract: dict[str, Any],
-) -> None:
-    """Record the one-shot remediation contract on the canonical task record.
-
-    This runs at a deterministic rejection, right before the writeback raises:
-    the contract is upserted into the task store and a workflow event is
-    emitted so the next ``source_collection_context_tool`` read can inject
-    ``writebackRemediation``.  Persistence must never mask or alter the
-    rejection itself — any store failure is swallowed with a stderr breadcrumb
-    (same shape as ``_record_workflow_event``).  The task status is untouched:
-    only the rejection semantics decide that.
-    """
-    s = _service()
-    task["writebackRemediationContract"] = contract
-    try:
-        s._upsert_source_collection_stage_session_task(team_id, run_id, task)
-    except Exception as exc:  # noqa: BLE001 - diagnostic breadcrumb, never masks the rejection
-        try:
-            print(
-                "[team-workflow] writeback remediation contract persist failed "
-                f"teamId={team_id} taskId={task.get('taskId', '')} "
-                f"errorType={type(exc).__name__} error={str(exc)[:200]}",
-                file=sys.stderr,
-                flush=True,
-            )
-        except Exception:  # noqa: BLE001, S110 - breadcrumb must never raise
-            pass
-    s._record_workflow_event(
-        "source_collection.stage_session_task_writeback_remediation_contract",
-        team_id,
-        fields={
-            "runId": run_id,
-            "taskId": s._trim_text(task.get("taskId"), max_length=160),
-            "stageId": s._trim_text(task.get("stageId"), max_length=80),
-            "agentId": s._trim_text(task.get("agentId"), max_length=160),
-            "kind": contract.get("kind", ""),
-            "findingCount": len(contract.get("findings") or []),
-            "remediationAttempt": int(contract.get("attempt") or 1),
-            "exhausted": bool(contract.get("exhausted")),
-        },
-        level="warning",
-        outcome="rejected",
-    )
-
-
-def _prepare_relation_graph_writeback_remediation(
-    team_id: str,
-    run_id: str,
-    task: dict[str, Any],
-    result_payload: dict[str, Any],
-    error_text: str,
-) -> str:
-    """Build + persist the relations-graph rejection contract; return the hint block.
-
-    At the rejection point the system holds both the allowed canonical refs
-    and the submitted result, so the diff is deterministic (production session
-    session-20261017-203847-419417: the relations agent re-read context 11
-    times and still submitted ``dprec-*`` record ids as evidenceRefs because
-    nothing told it exactly what to change).  The historical rejection prefix
-    is preserved byte-for-byte; only an appended ``补救提示`` block is new.
-    Graceful degradation: when the error is not classifiable, or the allowed
-    list cannot be loaded, the block degrades (allowed list only / absent) —
-    no validation is ever relaxed to manufacture a diff.
-    """
-    s = _service()
-    kind = classify_relation_graph_rejection_error(error_text)
-    if not kind:
-        return ""
-    from ..research_runtime.artifact_readback_registry import load_allowed_evidence_refs
-
-    try:
-        allowed_refs = list(
-            load_allowed_evidence_refs(
-                team_id=team_id,
-                authority_run_id=run_id,
-                workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
-            )
-        )
-    except Exception:  # noqa: BLE001 - diff degrades to violations-only
-        allowed_refs = []
-    if kind == WRITEBACK_REMEDIATION_KIND_RELATION_REFS:
-        findings = collect_relation_ref_violations(
-            result_payload if isinstance(result_payload, dict) else {},
-            set(allowed_refs),
-        )
-    else:
-        findings = relation_missing_field_findings(error_text)
-    attempt, exhausted = next_writeback_remediation_attempt(
-        task.get("writebackRemediationContract")
-        if isinstance(task.get("writebackRemediationContract"), dict)
-        else None,
-        kind,
-    )
-    contract = build_writeback_remediation_contract(
-        kind,
-        findings,
-        recorded_at=s.utc_now_iso(),
-        attempt=attempt,
-    )
-    contract["exhausted"] = exhausted
-    _persist_source_collection_stage_writeback_remediation_contract(
-        team_id,
-        run_id,
-        task,
-        contract,
-    )
-    return writeback_remediation_hint_block(kind, findings, allowed_refs)
-
-
 def writeback_source_collection_stage_session_task(
     team_id: str,
     task_id: str,
@@ -859,6 +744,10 @@ def writeback_source_collection_stage_session_task(
         run_id,
         task,
         writeback,
+        # Live writeback only: a shape-invalid agent graph is a deterministic
+        # rejection (remediation contract appended); stored replay keeps the
+        # degrade path (tests/test_source_collection_stage_graph_degraded_replay.py).
+        raise_on_agent_graph_invalid=True,
     )
     materialized_knowledge_ingestion = s._materialize_source_collection_stage_writeback_knowledge_ingestion(
         normalized_team_id,

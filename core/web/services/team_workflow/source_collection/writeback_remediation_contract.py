@@ -66,6 +66,15 @@ _MISSING_FIELDS_PATTERN = re.compile(
     r"missing required fields:\s*(?P<fields>[A-Za-z_,\s]+)"
 )
 
+# Shape-guard rejections from the agent-graph payload reader, e.g.
+# ``result_json.candidateGraph.edges must be an array of objects`` and
+# ``every result_json.counterEvidenceRefs item must be an object``.
+_SHAPE_REJECTION_MARKERS = (
+    "must be an array of objects",
+    "item must be an object",
+)
+_SHAPE_REJECTION_PATH_PATTERN = re.compile(r"result_json\.(?P<path>[A-Za-z_][\w.]*)")
+
 # Evidence-card contract errors start with the violating path token, e.g.
 # ``candidateExtractions[0].claims[1] is missing explicit fact``.
 _LEADING_PATH_PATTERN = re.compile(r"^(?P<path>[A-Za-z_][\w.\[\]-]*)")
@@ -81,15 +90,22 @@ def _clip(value: Any, max_chars: int = _VIOLATION_VALUE_MAX_CHARS) -> str:
 
 
 def classify_relation_graph_rejection_error(error_text: str) -> str:
-    """Map one ``load_evidence_relation_graph_payload`` error to a contract kind.
+    """Map one relation-graph rejection message to a contract kind.
 
-    Returns ``""`` when the error does not belong to a covered deterministic
-    class — callers then skip the contract entirely instead of guessing.
+    Covers both ``load_evidence_relation_graph_payload`` read-back errors and
+    the agent-graph payload reader's shape guard (``must be an array of
+    objects`` / ``every ... item must be an object``).  Returns ``""`` when
+    the error does not belong to a covered deterministic class — callers then
+    skip the contract entirely instead of guessing.
     """
     text = _clean(error_text)
     if not text:
         return ""
-    if "missing required fields" in text or "edges must be objects" in text:
+    if (
+        "missing required fields" in text
+        or "edges must be objects" in text
+        or any(marker in text for marker in _SHAPE_REJECTION_MARKERS)
+    ):
         return WRITEBACK_REMEDIATION_KIND_RELATION_MISSING_FIELDS
     if (
         "must be canonical claimEvidenceId" in text
@@ -116,6 +132,14 @@ def relation_missing_field_findings(error_text: str) -> list[dict[str, Any]]:
             ]
     if "edges must be objects" in text:
         return [{"finding": "malformed_collection", "path": "edges"}]
+    shape_match = _SHAPE_REJECTION_PATH_PATTERN.search(text)
+    if any(marker in text for marker in _SHAPE_REJECTION_MARKERS) and shape_match:
+        return [
+            {
+                "finding": "malformed_collection",
+                "path": shape_match.group("path"),
+            }
+        ]
     return [
         {
             "finding": "graph_shape_invalid",
@@ -340,16 +364,34 @@ def active_writeback_remediation(task: Mapping[str, Any]) -> dict[str, Any]:
     return contract
 
 
-def _allowed_refs_hint(allowed_refs: Sequence[str]) -> str:
+def _allowed_refs_hint(
+    allowed_refs: Sequence[str],
+    evidence_context: Mapping[str, str] | None = None,
+) -> str:
     refs = [_clean(ref) for ref in allowed_refs if _clean(ref)]
     if not refs:
         return (
             "allowedEvidenceRefs 为空：本轮没有 canonical 证据卡，任何 evidenceRef 都不合法；"
             "不要伪造引用，写 status=blocked 附真实原因。"
         )
-    shown = refs[:_ALLOWED_REFS_HINT_LIMIT]
-    clip_note = f"（共 {len(refs)} 个，仅展示前 {len(shown)} 个）" if len(refs) > len(shown) else ""
-    return f"allowedEvidenceRefs 允许的 canonical 引用={sorted(shown)}{clip_note}"
+    context = evidence_context if isinstance(evidence_context, Mapping) else {}
+
+    def _render(ref: str) -> str:
+        # Optional candidate pairing (same authority as
+        # ``load_relation_evidence_context``): ``ce-*(cand-*)`` lets the agent
+        # bind a ref to the candidate it came from without a re-read.
+        candidate = _clean(context.get(ref))
+        return f"{ref}({candidate})" if candidate else ref
+
+    shown = sorted(refs[:_ALLOWED_REFS_HINT_LIMIT])
+    clipped = len(refs) > len(shown)
+    clip_note = f"（共 {len(refs)} 个，仅展示前 {len(shown)} 个）" if clipped else ""
+    full_note = (
+        "；全量清单见 source_collection_context_tool 的 allowedEvidenceRefs / relationEvidence"
+        if clipped
+        else ""
+    )
+    return f"allowedEvidenceRefs 允许的 canonical 引用={[_render(ref) for ref in shown]}{clip_note}{full_note}"
 
 
 def _violations_hint(findings: Sequence[Mapping[str, Any]]) -> str:
@@ -373,6 +415,7 @@ def writeback_remediation_hint_block(
     kind: str,
     findings: Sequence[Mapping[str, Any]],
     allowed_refs: Sequence[str],
+    evidence_context: Mapping[str, str] | None = None,
 ) -> str:
     """Render the appended in-line remediation block for a rejection message.
 
@@ -386,13 +429,18 @@ def writeback_remediation_hint_block(
             if missing
             else "存在缺失或损坏的必需集合（见异常信息）"
         )
+        refs = [_clean(ref) for ref in allowed_refs if _clean(ref)]
+        # Inline the allowed list only when it actually loaded: an empty list
+        # may mean "load failed" and the misleading "refs 为空" wording must
+        # not leak into a missing-fields hint (shape/missing classes share it).
+        refs_note = f"；{_allowed_refs_hint(refs, evidence_context)}" if refs else ""
         return (
-            f" 补救提示: {missing_note}；"
+            f" 补救提示: {missing_note}{refs_note}；"
             "下一次读取 source_collection_context_tool 会带 writebackRemediation "
             "精确补救指令，按其 findings 修正后重新回写；同类违规只有一次系统修正机会。"
         )
     return (
-        f" 补救提示: {_allowed_refs_hint(allowed_refs)}；{_violations_hint(findings)}；"
+        f" 补救提示: {_allowed_refs_hint(allowed_refs, evidence_context)}；{_violations_hint(findings)}；"
         "下一次读取 source_collection_context_tool 会带 writebackRemediation "
         "精确补救指令，按其 findings 修正后重新回写；同类违规只有一次系统修正机会。"
     )
