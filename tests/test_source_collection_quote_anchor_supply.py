@@ -563,3 +563,45 @@ def test_locator_normalization_does_not_overmatch():
         {"recordId": "r1", "sourceUrl": "https://WWW.Example.ORG/abs/2502.01542"},
         {}, fetched_text_by_locator=fetched_example,
     )[0]["text"] == text
+
+
+def test_pmc_url_record_matches_ebi_pmc_url_receipt():
+    """PMC 双镜像桥接：pmc.ncbi.nlm.nih.gov record ↔ ebi.ac.uk 回执 → pmc: 键命中。"""
+    text = "PMC mirror full text body."
+    fetched = {
+        "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1234567/fullTextXML": _receipt(
+            "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1234567/fullTextXML", text
+        )
+    }
+    record = {"recordId": "r1", "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567/"}
+    assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)[0]["text"] == text
+
+
+def test_pmc_url_receipt_matches_pmc_url_record_reverse_direction():
+    """反方向同样命中：ebi.ac.uk record ↔ pmc.ncbi.nlm.nih.gov 回执。"""
+    text = "Reverse PMC bridge body."
+    fetched = {"https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567/": _receipt(
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567/", text)}
+    record = {
+        "recordId": "r1",
+        "sourceUrl": "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1234567/fullTextXML",
+    }
+    assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)[0]["text"] == text
+
+
+def test_pmc_locator_bridge_does_not_overmatch():
+    """完整 PMC ID 匹配才桥接：不同 id、非镜像 host 的 PMC 字样不误命中。"""
+    text = "Original PMC fetched body."
+    fetched = {"https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567/": _receipt(
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567/", text)}
+    # 不同 PMC id 不命中。
+    other_pmc = {"recordId": "r1", "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7654321/"}
+    assert source_quotable_blocks(other_pmc, {}, fetched_text_by_locator=fetched) == []
+    # 非镜像 host 即使 path 带 PMC 段也不发 pmc: 键。
+    non_mirror = {"recordId": "r1", "sourceUrl": "https://example.org/articles/PMC1234567/"}
+    fetched_example = {"https://example.org/articles/PMC9999999/": _receipt(
+        "https://example.org/articles/PMC9999999/", text)}
+    assert source_quotable_blocks(non_mirror, {}, fetched_text_by_locator=fetched_example) == []
+    # PMC id 必须是完整 path 段：PMC1234567abc 这类粘连串不归一成键。
+    glued = {"recordId": "r1", "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567abc/"}
+    assert source_quotable_blocks(glued, {}, fetched_text_by_locator=fetched) == []
