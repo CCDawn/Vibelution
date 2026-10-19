@@ -5,8 +5,8 @@ import type { ConversationMessage, SessionTurnItem } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import { buildAgentMessageOperations } from "./agentMessageOperations";
 import { buildAgentMessageTimelineItems } from "./agentMessageTimeline";
+import { buildStreamingTimelineScrollSignal } from "./conversationTimelineScrollSignals";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
-
 const projectionSource = readFileSync(new URL("./useAgentMessageTimelineProjection.ts", import.meta.url), "utf8");
 
 function assistantMessage(
@@ -439,7 +439,54 @@ describe("projectAgentMessageTimelineMessages", () => {
       },
     });
 
-    expect(projection.messages).toHaveLength(1);
+expect(projection.messages).toHaveLength(1);
     expect(projection.messages[0]?.id).toBe("session-1-message-12");
+  });
+
+  it("gives the deduped overlay one row identity and one streaming scroll signal", () => {
+    const inFlightItem = (owner: string): SessionTurnItem => ({
+      id: `${owner}:1`,
+      itemId: owner,
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-signal",
+      type: "agent_message",
+      phase: "final_answer",
+      status: "running",
+      revision: 1,
+      sequence: 1,
+      terminal: false,
+      text: "同一 turn 的在途正文",
+    });
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [{
+        id: "session-1-message-live-turn-signal",
+        role: "assistant",
+        content: "",
+        turnId: "turn-signal",
+        status: "running",
+        timestamp: "2026-10-17T12:00:00Z",
+        turnItems: [inFlightItem("live")],
+        metadata: { kind: "session_live_overlay", turnId: "turn-signal" },
+      }],
+      activeTurnMessage: {
+        id: "session-1-message-active-turn-signal",
+        role: "assistant",
+        content: "",
+        turnId: "turn-signal",
+        status: "running",
+        timestamp: "2026-10-17T12:00:01Z",
+        turnItems: [inFlightItem("active")],
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-signal" },
+      },
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.rowIdentities).toHaveLength(1);
+    expect(projection.rowIdentities[0]?.messageId).toBe("session-1-message-active-turn-signal");
+    expect(projection.streamingMessages).toHaveLength(1);
+    const signal = buildStreamingTimelineScrollSignal(projection.streamingMessages, new Map());
+    expect(signal.split("|")).toHaveLength(1);
+    expect(signal.startsWith("session-1-message-active-turn-signal:")).toBe(true);
   });
 });
