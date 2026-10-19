@@ -5,8 +5,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
 MANUAL_DISPATCH_GATE = "if: github.event_name == 'workflow_dispatch'"
-FAST_GATE_JOBS = ("python-lint", "linux-sandbox", "web")
+FAST_GATE_JOBS = ("python-lint", "linux-sandbox")
 MANUAL_ONLY_JOBS = ("python-tests", "electron-tests")
+WEB_DISPATCH_STEPS = ("Run Vitest", "Verify bundle budgets")
+WEB_PUSH_STEPS = ("Install dependencies", "Verify package lock is in sync", "Build frontend")
 
 
 def workflow_text() -> str:
@@ -30,6 +32,20 @@ def job_blocks() -> dict:
     return {name: "\n".join(body) for name, body in blocks.items()}
 
 
+def step_blocks(job_body: str) -> dict:
+    """Split a job body into {step name: step text} blocks."""
+    steps = {}
+    current = None
+    for line in job_body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- name:"):
+            current = stripped[len("- name:") :].strip()
+            steps[current] = [line]
+        elif current is not None:
+            steps[current].append(line)
+    return {name: "\n".join(body) for name, body in steps.items()}
+
+
 def test_ci_uses_layered_triggers() -> None:
     text = workflow_text()
     trigger_block = text.split("concurrency:", 1)[0]
@@ -49,6 +65,22 @@ def test_fast_gate_jobs_run_on_every_trigger() -> None:
     blocks = job_blocks()
     for job_id in FAST_GATE_JOBS:
         assert MANUAL_DISPATCH_GATE not in blocks[job_id]
+
+
+def test_web_job_splits_push_integrity_from_full_suites() -> None:
+    """The web job has no job-level gate: install, lockfile sync, and the
+    production build run on every push; the Vitest suite and the bundle
+    ratchet are manual-dispatch only until the in-flight baselines are green.
+    """
+    blocks = job_blocks()
+    web_body = blocks["web"]
+    header = web_body.split("steps:", 1)[0]
+    assert MANUAL_DISPATCH_GATE not in header
+    steps = step_blocks(web_body)
+    for step_name in WEB_DISPATCH_STEPS:
+        assert MANUAL_DISPATCH_GATE in steps[step_name], step_name
+    for step_name in WEB_PUSH_STEPS:
+        assert MANUAL_DISPATCH_GATE not in steps[step_name], step_name
 
 
 def test_fast_gate_runs_reachable_fatal_ruff() -> None:
