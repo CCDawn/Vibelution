@@ -1,12 +1,130 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
+import { ScriptTarget, transpileModule } from "typescript";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MainWorkbenchCloseTransactionStore } from "../src/lifecycle/workbenchCloseTransactionStore.js";
+import { createDesktopShellExitDeadline, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
+import { isActiveWorkProbeAuthFailure, resolveQuitActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const closeStoreSource = readFileSync(
   fileURLToPath(new URL("../src/lifecycle/workbenchCloseTransactionStore.ts", import.meta.url)),
   "utf8",
 );
+
+function closeHarness() {
+  const source = readFileSync(mainSourcePath, "utf8");
+  const begin = source.indexOf("async function requestTransactionalWorkbenchClose(");
+  const end = source.indexOf("\nasync function stopWorkbenchBackend(", begin);
+  const context = vi.fn(async (_bootstrap: unknown, options: { forceControlTokenRefresh?: boolean; signal?: AbortSignal } = {}) => ({
+    launcherOrigin: "http://127.0.0.1:1234", controlToken: options.forceControlTokenRefresh ? "fresh" : "cached", desktopSessionId: "stable-session"
+  }));
+  const probe = vi.fn(async (_input: { controlToken: string; signal?: AbortSignal }) => ({ state: "idle", message: "" }));
+  const confirm = vi.fn(async () => false);
+  const stop = vi.fn(async () => undefined);
+  const closed = vi.fn(async () => undefined);
+  const record = vi.fn();
+  const sandbox: Record<string, unknown> = {
+    AbortSignal, Error, performance,
+    windowProvider: { approveWorkbenchCloseOnce: closed },
+    desktopLifecycleCoordinator: { request: async (_reason: string, run: () => Promise<void>) => run() },
+    resolveDesktopActionLoopContext: context,
+    currentDesktopSessionId: () => "stable-session", desktopEnvironment: () => ({}),
+    fetchLauncherActiveWorkStatus: probe,
+    resolveQuitActiveWorkStatus, isActiveWorkProbeAuthFailure,
+    createDesktopShellExitDeadline, withDesktopShellExitTimeout,
+    ACTIVE_WORK_STATUS_TIMEOUT_MS: 8000, WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS: 12000, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 30000,
+    mainWorkbenchCloseStore: new MainWorkbenchCloseTransactionStore(),
+    confirmWorkbenchForceClose: confirm,
+    recordSupervisorEventFallbackLocally: record,
+    stopWorkbenchBackend: stop,
+    waitForWorkbenchBackendSettledForWindowClose: async () => true,
+    pendingWorkbenchCloseAck: null, workbenchCloseBackendStopInFlight: null
+  };
+  runInNewContext(transpileModule(source.slice(begin, end) + "\nglobalThis.runClose = requestTransactionalWorkbenchClose;", {
+    compilerOptions: { target: ScriptTarget.ES2022 }
+  }).outputText, sandbox);
+  return { context, probe, confirm, stop, closed, record, run: () => (sandbox.runClose as (paths: object, bootstrap: object) => Promise<void>)({}, {}) };
+}
+
+afterEach(() => vi.useRealTimers());
+
+describe("Workbench close active-work recovery", () => {
+  it("refreshes a rejected cached token and closes idle work without confirmation", async () => {
+    const h = closeHarness();
+    h.probe.mockRejectedValueOnce(new Error("launcher active-work status request failed: 403"));
+    await h.run();
+    expect(h.context).toHaveBeenLastCalledWith({}, expect.objectContaining({ forceControlTokenRefresh: true }));
+    expect(h.probe.mock.calls.map(([input]) => input.controlToken)).toEqual(["cached", "fresh"]);
+    expect(h.confirm).not.toHaveBeenCalled();
+    expect(h.stop).toHaveBeenCalledOnce();
+    expect(h.closed).toHaveBeenCalledOnce();
+  });
+
+  it("preserves task protection when the recovered probe finds active work", async () => {
+    const h = closeHarness();
+    h.probe.mockRejectedValueOnce(new Error("401 unauthorized"));
+    h.probe.mockResolvedValueOnce({ state: "active", message: "work is running" });
+    await h.run();
+    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "active");
+    expect(h.stop).not.toHaveBeenCalled();
+    expect(h.closed).not.toHaveBeenCalled();
+  });
+
+  it("keeps unknown state protected after two authentication failures", async () => {
+    const h = closeHarness();
+    h.probe.mockRejectedValue(new Error("403 forbidden"));
+    await h.run();
+    expect(h.probe).toHaveBeenCalledTimes(2);
+    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "unknown");
+    expect(h.stop).not.toHaveBeenCalled();
+  });
+
+  it("recovers a timeout without showing a confirmation when the retry is idle", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness();
+    h.probe.mockImplementationOnce(() => new Promise(() => undefined));
+    const closing = h.run();
+    await vi.advanceTimersByTimeAsync(8001);
+    await closing;
+    expect(h.probe).toHaveBeenCalledTimes(2);
+    expect(h.confirm).not.toHaveBeenCalled();
+    expect(h.closed).toHaveBeenCalledOnce();
+    expect(h.record).toHaveBeenCalledWith(expect.objectContaining({
+      eventCode: "electron.workbench_close.active_work_checked",
+      fields: expect.objectContaining({ desktopSessionId: "stable-session", activeWorkState: "idle", probeAttempts: 2 })
+    }));
+  });
+
+  it("retries a stalled probe and aborts both attempts within one 12 second budget", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness();
+    h.probe.mockImplementation(() => new Promise(() => undefined));
+    const closing = h.run();
+    await vi.advanceTimersByTimeAsync(8001);
+    expect(h.probe).toHaveBeenCalledTimes(2);
+    expect(h.probe.mock.calls[0][0].signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(4000);
+    await closing;
+    expect(h.probe.mock.calls[1][0].signal?.aborted).toBe(true);
+    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "unknown");
+    expect(h.stop).not.toHaveBeenCalled();
+  });
+
+  it("bounds control-token acquisition too and never probes after it has expired", async () => {
+    vi.useFakeTimers();
+    const h = closeHarness();
+    h.context.mockImplementation(() => new Promise(() => undefined));
+    const closing = h.run();
+    await vi.advanceTimersByTimeAsync(12001);
+    await closing;
+    expect(h.context).toHaveBeenCalledTimes(2);
+    expect(h.probe).not.toHaveBeenCalled();
+    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "unknown");
+    expect(h.stop).not.toHaveBeenCalled();
+  });
+});
 
 describe("Electron main transactional Workbench close", () => {
   it("persists close evidence locally instead of awaiting the backend being stopped", () => {
