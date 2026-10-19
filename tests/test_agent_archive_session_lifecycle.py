@@ -337,7 +337,6 @@ def test_archive_rejects_sessions_with_pending_turns(tmp_path, monkeypatch, phas
         "rename",
         "select",
         "child",
-        "delete",
         "reasoning",
         "attachment",
         "submit",
@@ -376,8 +375,6 @@ def test_archived_session_enforces_a_real_read_only_barrier(
                 task_title="封存后子会话",
                 auto_start=False,
             )
-        elif mutation == "delete":
-            session_service.delete_chat_session(direct["id"])
         elif mutation == "reasoning":
             session_service.update_session_reasoning_effort(
                 direct["id"],
@@ -418,7 +415,6 @@ def test_archived_session_enforces_a_real_read_only_barrier(
     ("method", "path_suffix"),
     [
         ("post", "/select"),
-        ("delete", ""),
     ],
 )
 def test_archived_session_mutation_routes_return_validation_error(
@@ -439,6 +435,34 @@ def test_archived_session_mutation_routes_return_validation_error(
     assert "read-only" in str(response.json()["detail"]).lower() or "只读" in str(
         response.json()["detail"]
     )
+
+
+def test_archived_session_can_still_be_deleted(tmp_path, monkeypatch):
+    """Read-only sealing must not block delete — otherwise archived sessions
+    are wedged forever (the historical 422 "已归档并处于只读状态" defect)."""
+
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+
+    result = session_service.delete_chat_session(direct["id"])
+
+    assert result["deleted"] is True
+    assert result["deletedSessionId"] == direct["id"]
+    payload = session_service.load_chat_state(session_service.PROJECT_ROOT)
+    assert session_service._find_conversation_entry(payload, direct["id"]) is None
+
+
+def test_archived_session_delete_route_succeeds(tmp_path, monkeypatch):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+
+    response = client.delete(f"/api/sessions/{direct['id']}")
+
+    assert response.status_code == 200, response.text
+    payload = session_service.load_chat_state(session_service.PROJECT_ROOT)
+    assert session_service._find_conversation_entry(payload, direct["id"]) is None
 
 
 def test_archived_agent_cannot_be_reactivated_without_a_restore_transaction(tmp_path, monkeypatch):
