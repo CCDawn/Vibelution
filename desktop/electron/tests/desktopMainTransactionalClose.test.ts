@@ -34,6 +34,7 @@ function closeHarness() {
   });
   const sandbox: Record<string, unknown> = {
     AbortSignal, Date, Error, performance, randomUUID: () => "explicit-close-request",
+    process: { platform: "win32" }, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 1800, WORKBENCH_CLOSE_FORCE_AFTER_MS: 1200,
     windowProvider: { approveWorkbenchCloseOnce: closed },
     desktopLifecycleCoordinator: { request: coordinator },
     resolveDesktopActionLoopContext: context,
@@ -212,8 +213,9 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("!shouldDeferOrchestratedWindowClose(payload)");
     expect(source).toContain('from "./lifecycle/workbenchBackendCloseReadiness.js"');
     expect(source).toContain("waitForWorkbenchBackendSettledForWindowClose({");
-    expect(request).toContain("deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200");
-    expect(request).toContain("createDesktopShellExitDeadline(Math.max(1, fastCloseTiming.deadlineAt - Date.now()))");
+    expect(request).toContain("deadlineAt: requestedAt + WORKBENCH_CLOSE_BACKEND_WAIT_MS, forceAt: requestedAt + WORKBENCH_CLOSE_FORCE_AFTER_MS");
+    expect(request).toContain("Math.max(1, fastCloseTiming.deadlineAt - Date.now())");
+    expect(request).toContain('process.platform === "win32"');
     expect(request).toContain("readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot)");
     expect(stopSource).toContain('transaction.mode === "force" ? "operator" : "window-close", signal, fastCloseTiming');
     expect(source).toContain("timeoutMs: closeDeadline.remainingMs()");
