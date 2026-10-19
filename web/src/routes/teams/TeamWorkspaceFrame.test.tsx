@@ -65,11 +65,14 @@ describe('shared Teams workspace frame', () => {
       expect(panel?.className).toContain('!bg-vui-surface-rail');
       expect(panel?.className).toContain('!rounded-none');
       expect(panel?.className).toContain('!border-0');
+      expect(panel?.className).toContain('!p-0');
       expect(panel?.className).not.toContain('--shell-surface:var(--vui-surface-chat)');
     }
 
     const content = host.querySelector<HTMLElement>('[data-team-panel="content"]');
     expect(content?.className).toContain('--shell-surface:var(--vui-surface-chat)');
+    expect(content?.className).toContain('vui-workbench-pane');
+    expect(content?.className).toContain('!p-0');
     expect(content?.className).toContain('--vui-surface-panel:var(--vui-surface-chat)');
     expect(content?.className).toContain('rounded-[var(--vui-radius-panel-soft)]');
     expect(content?.className).toContain('shadow-none');

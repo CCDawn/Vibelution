@@ -21,7 +21,7 @@
 
 ### 视觉与布局
 - 外框与左右栏复用 `vuiRailFillClass` / `--vui-surface-rail`；左右面板不覆盖 `--shell-surface`，由外框的 rail surface 提供连续背景。
-- 中心内容面只在内容面板设置 `--shell-surface`、`--vui-surface-panel` 与 `--vui-surface-workspace` 为 `--vui-surface-chat`，保持主题中的对话背景、VUI 软圆角与平面无阴影。
+- 中心内容面只在内容面板设置 `--shell-surface`、`--vui-surface-panel` 与 `--vui-surface-workspace` 为 `--vui-surface-chat`，通过 `vui-workbench-pane` 保持主题中的对话背景、窗口 pane 圆角与平面无阴影。三栏面板使用 `p-0`，标题栏和正文各自管理内边距，不叠加 `VSurface` 默认 padding。
 - AppShell 对 `/teams` 使用 `VWorkbenchFrame flush`，由团队 recipe 自己管理 pane 间距。外框使用 `p-0`，顶边与会话 Agent 工作台齐平；中心列使用 `mx-1 mb-1`，700px 以下收为 `mx-0.5 mb-0.5`，避免外框与中心列叠加左侧留白。布局缩放、可选检查器和既有响应行为继续由 `VCanvasWorkbenchPage` 管理。
 
 ### 实现落点
@@ -496,6 +496,6 @@
 
 ## Generic workflow workspace
 
-The approved workspace composes existing VUI APIs rather than defining another design system: `VCanvasWorkbenchPage` with `WORKBENCH_LAYOUT_IDS.teams`, `VTabs`, `VButton`, VUI form controls and dialogs. White panels, subdued green accent, a dotted sequential canvas and connected node cards retain the approved preview composition. At narrow widths, the rail and inspector become existing recipe drawers; the title and toolbar wrap, and the canvas scrolls independently. No business topic is mandatory.
+The workspace composes existing VUI APIs rather than defining another design system: `VCanvasWorkbenchPage` with `WORKBENCH_LAYOUT_IDS.teams`, `VTabs`, `VButton`, VUI form controls and dialogs. Surfaces, text, selection and status colors follow shared light/dark theme tokens; primary actions use the VButton primary variant. The rail shares the shell surface, while the canvas and inspector retain the shared pane chrome, dotted sequential canvas and connected node cards. Outer inset is 4px on the sides and bottom (2px below 700px), with no extra top padding. At narrow widths, the rail and inspector become existing recipe drawers; the title and toolbar wrap, and the canvas scrolls independently. No business topic is mandatory.
 
 Owner: `routes/teams/generic/`; adjacent component `.styles.ts` files own visual utilities. Definition edits are explicit drafts until save. Runs use server snapshots and show only canonical execution status, lifecycle records and native result projections. Stop remains “正在停止” until the server confirms termination. Errors stay visible; deletion requires confirmation; dialog text is rendered as plain text. Existing team conversations and historical research records remain accessible.
