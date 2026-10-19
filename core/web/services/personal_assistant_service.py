@@ -64,7 +64,8 @@ _PRE_COMPUTER_TOOLS = (
 )
 _COMPUTER_TOOLS = (*_PRE_COMPUTER_TOOLS, "personal_assistant_computer_observe_tool", "personal_assistant_computer_action_tool")
 _PRE_AFFAIRS_TOOLS = (*_COMPUTER_TOOLS, "personal_assistant_query_tool")
-TOOLS = (*_PRE_AFFAIRS_TOOLS, "personal_affairs_tool")
+_PRE_PLATFORM_TOOLS = (*_PRE_AFFAIRS_TOOLS, "personal_affairs_tool")
+TOOLS = (*_PRE_PLATFORM_TOOLS, "personal_assistant_platform_api_tool")
 # Older provisioning toolsets that may still live in persisted snapshots; each
 # generation stays recognizable so explicit re-provisioning upgrades it to TOOLS.
 _TOOLSET_GENERATIONS = (_LEGACY_TOOLS + _DESKTOP_TOOLS, _PRE_COMPUTER_TOOLS)
@@ -241,7 +242,7 @@ def _provisioning_snapshot_bases() -> tuple[dict, ...]:
         )
     # The immediately preceding default used restricted networking. A custom
     # denial on that same toolset must not be mistaken for a system default.
-    for toolset in (_COMPUTER_TOOLS, _PRE_AFFAIRS_TOOLS):
+    for toolset in (_COMPUTER_TOOLS, _PRE_AFFAIRS_TOOLS, _PRE_PLATFORM_TOOLS):
         bases.append({**PRIVATE_V2_POLICY, "networkAccess": "restricted",
             "allowedTools": list(toolset), "preferredTools": list(toolset)})
     return tuple(bases)
