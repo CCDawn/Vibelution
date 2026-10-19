@@ -5,6 +5,7 @@ from pathlib import Path
 
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.services.team_workflow.research_runtime.completed_project_task_recovery import (
+    _lagging_project_task_id,
     find_completed_project_task_recovery,
 )
 from tests._support.command_helpers import CommandHarness
@@ -19,6 +20,20 @@ from tests.test_research_workflow_agent_anchor import (
 def _lag_problem(task_id: str) -> dict[str, str]:
     return {
         "code": "adapter_execution_exception",
+        "detail": json.dumps(
+            {
+                "code": "project_agent_task_not_reconciled",
+                "taskId": task_id,
+                "status": "running",
+            }
+        ),
+    }
+
+
+def _current_block_problem(task_id: str) -> dict[str, str]:
+    """``adapter_dispatch_worker._block_attempt`` 现行写入形状：code 提升到顶层。"""
+    return {
+        "code": "project_agent_task_not_reconciled",
         "detail": json.dumps(
             {
                 "code": "project_agent_task_not_reconciled",
@@ -46,15 +61,17 @@ def _seed_failed_project_task_recovery(
     *,
     task_id: str = "task-completed",
     voided_usage: bool = True,
+    problem: dict[str, str] | None = None,
+    attempt_status: str = "failed",
 ) -> object:
     action = _project_agent_action()
     _seed(harness, action, action.node_id)
-    problem = _lag_problem(task_id)
+    problem = problem or _lag_problem(task_id)
 
     def mutate(uow):
         uow.repository.update_attempt_status(
             action.node_run_id,
-            "failed",
+            attempt_status,
             FIXED_NOW_MS + 1,
             problem_json=json.dumps(problem),
             finished_at_ms=FIXED_NOW_MS + 1,
@@ -124,6 +141,61 @@ def _task_status_patch(monkeypatch, task: dict[str, object]) -> None:
         "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
         lambda _team_id, _project_id: {"tasks": [task]},
     )
+
+
+def test_lagging_project_task_id_extracts_from_all_block_shapes() -> None:
+    flat = {
+        "code": "project_agent_task_not_reconciled",
+        "taskId": "task-flat",
+        "status": "running",
+    }
+    assert _lagging_project_task_id(flat) == "task-flat"
+    assert _lagging_project_task_id(_lag_problem("task-historical")) == "task-historical"
+    assert (
+        _lagging_project_task_id(_current_block_problem("task-current")) == "task-current"
+    )
+    assert _lagging_project_task_id({"code": "other_problem"}) == ""
+    assert _lagging_project_task_id(None) == ""
+
+
+def test_reconcile_run_recovers_blocked_attempt_from_current_block_shape(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """现行 `_block_attempt` 形状（顶层 lag code + blocked 尝试）同样可恢复。"""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(status="running")
+        action = _seed_failed_project_task_recovery(
+            harness,
+            task_id="task-current",
+            problem=_current_block_problem("task-current"),
+            attempt_status="blocked",
+            voided_usage=False,
+        )
+        _task_status_patch(monkeypatch, _completed_task(action=action, task_id="task-current"))
+
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                node_id=None,
+                expected_run_version=1,
+                idempotency_key="ui:recover-current-shape",
+            )
+        )
+
+        assert receipt.status == "accepted"
+        attempt = harness.store.latest_attempt(action.run_id, action.node_id)
+        assert attempt is not None and attempt.status == "dispatching"
+        outbox = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert outbox is not None and outbox.status == "pending"
+        assert (
+            json.loads(outbox.last_problem_json or "{}")["completionResume"]["handle"][
+                "task_id"
+            ]
+            == "task-current"
+        )
+    finally:
+        harness.close()
 
 
 def test_reconcile_run_recovers_completed_project_task_without_new_execution(
