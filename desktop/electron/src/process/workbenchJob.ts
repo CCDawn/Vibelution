@@ -9,6 +9,7 @@ const JOB_TERMINATE_POLL_MS = 100;
 const JOB_REAP_INTERVAL_MS = 1_000;
 
 export type WorkbenchJobHandle = object;
+export type WorkbenchJobRetirement = (() => Promise<boolean>) & { isCurrent: () => boolean };
 
 export type WorkbenchJobSpawnInput = {
   executable: string;
@@ -192,14 +193,17 @@ export function hasTrackedWorkbenchJob(workspaceRoot: string): boolean {
 }
 
 /** Capture ownership before any asynchronous identity/readiness work. */
-export function captureTrackedWorkbenchJobRetirement(workspaceRoot: string, pid: number): (() => Promise<boolean>) | null {
+export function captureTrackedWorkbenchJobRetirement(workspaceRoot: string, pid: number): WorkbenchJobRetirement | null {
   const current = tracked.get(jobKey(workspaceRoot));
   if (!current || current.pid !== pid) return null;
-  return async () => {
+  const retire = async (): Promise<boolean> => {
     if (current.released) return true;
     if (tracked.get(current.key) !== current) return false;
     return await retireJob(current);
   };
+  return Object.assign(retire, {
+    isCurrent: () => !current.released && tracked.get(current.key) === current
+  });
 }
 
 async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative, isReleased?: () => boolean): Promise<boolean> {

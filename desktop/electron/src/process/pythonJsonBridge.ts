@@ -438,6 +438,7 @@ export async function capturePythonProcessIdentity(input: {
   pid: number;
   timeoutMs?: number;
   spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
 }): Promise<PythonProcessIdentity | null> {
   const pid = Math.trunc(Number(input.pid));
   if (!input.pythonPath.trim() || !input.workspaceRoot.trim() || !Number.isFinite(pid) || pid <= 0) {
@@ -451,6 +452,7 @@ export async function capturePythonProcessIdentity(input: {
       cwd: input.workspaceRoot,
       spawnImpl: input.spawnImpl,
       failureLabel: `process identity capture for pid ${pid}`,
+      signal: input.signal,
       timeoutMs: input.timeoutMs ?? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
       killPolicy: "child"
     });

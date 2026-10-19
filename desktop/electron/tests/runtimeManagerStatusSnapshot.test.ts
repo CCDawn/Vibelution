@@ -1,12 +1,81 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { readRuntimeManagerLauncherStatusSummary } from "../src/lifecycle/runtimeManagerStatusSnapshot.js";
 import { isWorkbenchBackendSettledForWindowClose } from "../src/lifecycle/workbenchBackendCloseReadiness.js";
 
+function withCloseSnapshots(
+  managerSnapshot: string | null,
+  launcherSnapshot: Record<string, unknown> | null,
+  check: (workspaceRoot: string) => void
+) {
+  const temporaryRoot = realpathSync(tmpdir());
+  const workspaceRoot = mkdtempSync(join(temporaryRoot, "vibelution-rm-close-status-"));
+  try {
+    if (managerSnapshot !== null) {
+      const stateDir = join(workspaceRoot, ".runtime", "runtime-manager");
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(join(stateDir, "state.json"), managerSnapshot, "utf8");
+    }
+    if (launcherSnapshot !== null) {
+      const launcherDir = join(workspaceRoot, ".runtime", "launcher");
+      mkdirSync(launcherDir, { recursive: true });
+      writeFileSync(join(launcherDir, "state.json"), JSON.stringify(launcherSnapshot), "utf8");
+    }
+    check(workspaceRoot);
+  } finally {
+    const target = realpathSync(workspaceRoot);
+    const child = relative(temporaryRoot, target);
+    if (!child || child.startsWith("..") || isAbsolute(child)) throw new Error("Unsafe snapshot fixture cleanup path");
+    rmSync(target, { recursive: true, force: true });
+  }
+}
+
+const confirmedElectronClose = {
+  lastSource: "electron_main", desiredState: "closed", observedState: "closed",
+  backendPid: 0, backendLaunchPid: 0, spawnPid: 0, phase: "steady", lifecycleConsistency: "consistent"
+};
+
 describe("readRuntimeManagerLauncherStatusSummary", () => {
+  it("accepts an authoritative Electron close when Runtime Manager has never written a snapshot", () => {
+    withCloseSnapshots(null, confirmedElectronClose, (workspaceRoot) => {
+      const summary = readRuntimeManagerLauncherStatusSummary(workspaceRoot, "cmd_unconfirmed");
+      expect(summary).toEqual({
+        overallState: "idle", observedState: "closed", lifecycleConsistency: "consistent", phase: "steady",
+        stateVersion: 0, backendHealthy: false, backendPortListening: false, lifecycleResults: []
+      });
+      expect(isWorkbenchBackendSettledForWindowClose(summary)).toBe(true);
+    });
+  });
+
+  it.each(["{incomplete-json", "[]"])("accepts an authoritative Electron close over corrupt Runtime Manager data %s", (snapshot) => {
+    withCloseSnapshots(snapshot, confirmedElectronClose, (workspaceRoot) => {
+      const summary = readRuntimeManagerLauncherStatusSummary(workspaceRoot);
+      expect(summary).toMatchObject({ observedState: "closed", backendHealthy: false, backendPortListening: false });
+      expect(summary.lifecycleResults).toEqual([]);
+      expect(isWorkbenchBackendSettledForWindowClose(summary)).toBe(true);
+    });
+  });
+
+  const unconfirmedLauncherStates = [
+    ["missing Electron state", null],
+    ["another state owner", { ...confirmedElectronClose, lastSource: "runtime_manager" }],
+    ["open intent", { ...confirmedElectronClose, desiredState: "open" }],
+    ["open observation", { ...confirmedElectronClose, observedState: "open" }],
+    ["live backend", { ...confirmedElectronClose, backendPid: process.pid }],
+    ["live launch wrapper", { ...confirmedElectronClose, backendLaunchPid: process.pid }],
+    ["live spawned root", { ...confirmedElectronClose, spawnPid: process.pid }]
+  ] as const;
+  it.each([null, "{incomplete-json"].flatMap((snapshot) => unconfirmedLauncherStates.map(([name, launcher]) => ({
+    name: `${snapshot === null ? "missing" : "corrupt"} RM state and ${name}`, snapshot, launcher
+  }))))("keeps read failures for $name", ({ snapshot, launcher }) => {
+    withCloseSnapshots(snapshot, launcher, (workspaceRoot) => {
+      expect(() => readRuntimeManagerLauncherStatusSummary(workspaceRoot)).toThrow();
+    });
+  });
+
   it("maps runtime manager workbench fields into launcher status summary", () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-rm-status-"));
     const stateDir = join(workspaceRoot, ".runtime", "runtime-manager");

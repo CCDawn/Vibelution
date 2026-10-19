@@ -287,7 +287,6 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
-const WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS = ACTIVE_WORK_STATUS_TIMEOUT_MS * 1.5;
 const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
 const DESKTOP_QUIT_TOTAL_BUDGET_MS = 30_000;
 const PERIODIC_SHELL_FRESHNESS_MS = 5 * 60_000;
@@ -372,7 +371,6 @@ const launcherStateStore = new LauncherStateStore(
     freshness: { current: null, label: "Launcher 代码版本：未知" }
   }
 );
-const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
 const WORKBENCH_START_READY_WAIT_MS = 90_000;
 const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
@@ -1411,86 +1409,28 @@ async function requestTransactionalWorkbenchClose(
     throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
   }
   const requestedAtMs = performance.now();
+  const requestedAt = Date.now();
+  const fastCloseTiming = { deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200 };
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
     const preparationStartedAtMs = performance.now();
     const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
     const desktopSessionId = currentDesktopSessionId(bootstrap, desktopEnvironment());
-    let activeWorkState: ActiveWorkProbeState = "unknown";
-    let probeAttempts = 0;
-    let probeFailure = "";
-    // Preserve the original first-probe allowance; recovery shares a bounded
-    // extra half-step instead of doubling every close-stage timeout.
-    const probeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS);
-    try {
-      const probe = (forceControlTokenRefresh: boolean) => withDesktopShellExitTimeout(async (attemptSignal) => {
-        const signal = AbortSignal.any([attemptSignal, probeDeadline.signal]);
-        signal.throwIfAborted();
-        probeAttempts += 1;
-        const context = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh, signal });
-        signal.throwIfAborted();
-        return await fetchLauncherActiveWorkStatus({ ...context, signal });
-      }, Math.max(1, Math.min(ACTIVE_WORK_STATUS_TIMEOUT_MS, probeDeadline.remainingMs())),
-      "resolve launcher active work status for workbench close");
-      const status = await withDesktopShellExitTimeout(
-        () => resolveQuitActiveWorkStatus({
-          probe: () => probe(false),
-          recoverAndRetry: () => probe(true)
-        }),
-        probeDeadline,
-        "resolve launcher active work status for workbench close"
-      );
-      activeWorkState = status.state;
-      if (status.state === "unknown") {
-        probeFailure = isActiveWorkProbeAuthFailure(status.message) ? "authorization" : "unknown_projection";
-      }
-    } catch (error: unknown) {
-      activeWorkState = "unknown";
-      probeFailure = isActiveWorkProbeAuthFailure(error) ? "authorization"
-        : String(error).includes("timed out") ? "timeout" : "unavailable";
-    } finally {
-      probeDeadline.dispose();
-    }
-    const activeWorkProbeMs = Math.max(0, Math.round(performance.now() - preparationStartedAtMs));
-    recordSupervisorEventFallbackLocally({
-      eventCode: "electron.workbench_close.active_work_checked",
-      message: "Workbench close active-work check settled.",
-      fields: { desktopSessionId, activeWorkState, probeAttempts, probeFailure, activeWorkProbeMs }
-    });
+    // Explicit project close interrupts work and attempts saving immediately.
+    // A status probe is advisory and must never consume the close budget.
+    const activeWorkState: ActiveWorkProbeState = "unknown";
+    const activeWorkProbeMs = 0;
     let transaction = mainWorkbenchCloseStore.submit({
-      mode: "normal",
+      mode: "force",
+      requestId: randomUUID(),
       reason: "workbench_window_close",
       activeWorkState
     });
-    if (transaction.phase === "confirmation_required") {
-      const confirmed = await confirmWorkbenchForceClose(provider, transaction.activeWorkState);
-      if (!confirmed) {
-        mainWorkbenchCloseStore.fail(
-          transaction.closeId,
-          "user_cancelled",
-          "Workbench close was cancelled while active work was present."
-        );
-        recordSupervisorEventFallbackLocally({
-          eventCode: "electron.workbench_close.cancelled_active_work",
-          message: "Workbench close was cancelled while active work was present.",
-          fields: {
-            closeId: transaction.closeId,
-            requestId: transaction.requestId ?? "",
-            desktopSessionId,
-            operatorIntent: "keep_running",
-            activeWorkState: transaction.activeWorkState,
-            elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
-          }
-        });
-        return;
-      }
-      transaction = mainWorkbenchCloseStore.confirm(transaction.closeId, transaction.requestId!);
-    }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
       desktopSessionId,
       requestedAtMs
     };
-    const closeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+    const closeDeadline = createDesktopShellExitDeadline(Math.max(1, fastCloseTiming.deadlineAt - Date.now()));
     let backendStopMs = 0;
     let readbackMs = 0;
     const backendStopFlight = withDesktopShellExitTimeout(async (signal): Promise<boolean> => {
@@ -1511,7 +1451,7 @@ async function requestTransactionalWorkbenchClose(
       signal.throwIfAborted();
       const stopStartedAtMs = performance.now();
       try {
-        await stopWorkbenchBackend(paths, bootstrap, transaction, signal);
+        await stopWorkbenchBackend(paths, bootstrap, transaction, signal, fastCloseTiming);
       } finally {
         backendStopMs = Math.max(0, Math.round(performance.now() - stopStartedAtMs));
         recordSupervisorEventFallbackLocally({
@@ -1522,15 +1462,7 @@ async function requestTransactionalWorkbenchClose(
       }
       const readbackStartedAtMs = performance.now();
       const settled = await waitForWorkbenchBackendSettledForWindowClose({
-        readStatus: async () => {
-          try {
-            const context = await resolveDesktopActionLoopContext(bootstrap, { signal });
-            return await fetchLauncherStatusSummary({ ...context, signal });
-          } catch {
-            signal.throwIfAborted();
-            return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
-          }
-        },
+        readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot),
         timeoutMs: closeDeadline.remainingMs(),
         signal
       });
@@ -1581,7 +1513,8 @@ async function stopWorkbenchBackend(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
   transaction: MainWorkbenchCloseTransaction,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fastCloseTiming?: { deadlineAt: number; forceAt: number }
 ): Promise<void> {
   void paths;
   void bootstrap;
@@ -1603,7 +1536,7 @@ async function stopWorkbenchBackend(
     // A force close is an explicitly confirmed destructive operator intent and
     // keeps the original supersede semantics; a normal window close must not
     // abort an in-flight restart.
-  }, transaction.mode === "force" ? "operator" : "window-close", signal);
+  }, transaction.mode === "force" ? "operator" : "window-close", signal, fastCloseTiming);
   if (!result.accepted) {
     throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
   }
@@ -1801,28 +1734,6 @@ async function handleTransactionalWorkbenchCloseFailure(
   }, 0);
 }
 
-async function confirmWorkbenchForceClose(
-  provider: ElectronWindowProvider,
-  activeWorkState: ActiveWorkProbeState
-): Promise<boolean> {
-  const statusUnknown = activeWorkState === "unknown";
-  const options = {
-    type: "warning" as const,
-    title: statusUnknown ? "无法确认任务状态" : "仍有进行中的任务",
-    message: statusUnknown
-      ? "当前无法确认是否有任务运行，强制关闭可能中断任务。"
-      : "关闭工作台会中断正在运行的任务。",
-    detail: "选择“继续运行”会保留窗口、后端和当前任务；只有再次确认才会强制关闭。",
-    buttons: ["继续运行", "停止任务并关闭"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true
-  };
-  const parent = provider.workbenchDialogParent() as unknown as BrowserWindow | null;
-  const response = parent === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(parent, options);
-  return response.response === 1;
-}
-
 function launcherLifecyclePayloadBody(payload: LauncherIpcInvokePayload): Record<string, unknown> {
   const body = payload.init?.body;
   return typeof body === "object" && body !== null && !Array.isArray(body)
@@ -1913,7 +1824,7 @@ async function authorizeLauncherForceLifecycle(input: {
     },
     confirm: confirmLauncherForceLifecycle,
     record: async (authorization) => {
-      await recordElectronSupervisorEvent(launcherBootstrap, {
+      const event = {
         eventCode: "electron.lifecycle.force_authorized",
         message: "Operator confirmed a force Launcher lifecycle operation.",
         fields: {
@@ -1924,7 +1835,12 @@ async function authorizeLauncherForceLifecycle(input: {
           activeWorkState: authorization.probeState,
           activeWorkMessage: authorization.probeMessage.slice(0, 300)
         }
-      });
+      };
+      if (preconfirmedCloseAuthorization(input.instanceId, input.payload)) {
+        recordSupervisorEventFallbackLocally(event);
+      } else {
+        await recordElectronSupervisorEvent(launcherBootstrap, event);
+      }
     }
   });
 }
@@ -3545,7 +3461,8 @@ async function orchestrateLauncherLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload,
   provenance: LauncherLifecycleProvenance = "operator",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fastCloseTiming?: { deadlineAt: number; forceAt: number }
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -3755,6 +3672,8 @@ async function orchestrateLauncherLifecycle(
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
+      ...(fastCloseTiming && preconfirmedCloseAuthorization("main", payload)
+        ? { fastCloseTiming, controlToken: desktopActionContext?.controlToken } : {}),
       // Never cache the earlier reuse probe: queueing can overlap source
       // changes, and a rejected reuse must revalidate before spawning.
       ensureFrontend: async ({ signal: buildSignal }) => {

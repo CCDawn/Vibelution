@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { ScriptTarget, transpileModule } from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MainWorkbenchCloseTransactionStore } from "../src/lifecycle/workbenchCloseTransactionStore.js";
+import { MainWorkbenchCloseTransactionStore, type MainWorkbenchCloseTransaction } from "../src/lifecycle/workbenchCloseTransactionStore.js";
 import { createDesktopShellExitDeadline, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import { isActiveWorkProbeAuthFailure, resolveQuitActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 
@@ -22,107 +22,127 @@ function closeHarness() {
   }));
   const probe = vi.fn(async (_input: { controlToken: string; signal?: AbortSignal }) => ({ state: "idle", message: "" }));
   const confirm = vi.fn(async () => false);
-  const stop = vi.fn(async () => undefined);
+  const stop = vi.fn(async (_paths: object, _bootstrap: object, _transaction: MainWorkbenchCloseTransaction, _signal: AbortSignal, _timing: { deadlineAt: number; forceAt: number }) => undefined);
   const closed = vi.fn(async () => undefined);
   const record = vi.fn();
+  const store = new MainWorkbenchCloseTransactionStore();
+  const coordinator = vi.fn(async (_reason: string, run: () => Promise<void>) => run());
+  const readStatus = vi.fn(async (_workspaceRoot: string) => ({ observedState: "closed" }));
+  const readback = vi.fn(async (input: { readStatus: () => Promise<unknown>; timeoutMs: number; signal: AbortSignal }) => {
+    await input.readStatus();
+    return true;
+  });
   const sandbox: Record<string, unknown> = {
-    AbortSignal, Error, performance,
+    AbortSignal, Date, Error, performance, randomUUID: () => "explicit-close-request",
     windowProvider: { approveWorkbenchCloseOnce: closed },
-    desktopLifecycleCoordinator: { request: async (_reason: string, run: () => Promise<void>) => run() },
+    desktopLifecycleCoordinator: { request: coordinator },
     resolveDesktopActionLoopContext: context,
     currentDesktopSessionId: () => "stable-session", desktopEnvironment: () => ({}),
     fetchLauncherActiveWorkStatus: probe,
     resolveQuitActiveWorkStatus, isActiveWorkProbeAuthFailure,
     createDesktopShellExitDeadline, withDesktopShellExitTimeout,
-    ACTIVE_WORK_STATUS_TIMEOUT_MS: 8000, WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS: 12000, WORKBENCH_CLOSE_BACKEND_WAIT_MS: 30000,
-    mainWorkbenchCloseStore: new MainWorkbenchCloseTransactionStore(),
+    mainWorkbenchCloseStore: store,
     confirmWorkbenchForceClose: confirm,
     recordSupervisorEventFallbackLocally: record,
     stopWorkbenchBackend: stop,
-    waitForWorkbenchBackendSettledForWindowClose: async () => true,
+    waitForWorkbenchBackendSettledForWindowClose: readback,
+    readRuntimeManagerLauncherStatusSummary: readStatus,
     pendingWorkbenchCloseAck: null, workbenchCloseBackendStopInFlight: null
   };
   runInNewContext(transpileModule(source.slice(begin, end) + "\nglobalThis.runClose = requestTransactionalWorkbenchClose;", {
     compilerOptions: { target: ScriptTarget.ES2022 }
   }).outputText, sandbox);
-  return { context, probe, confirm, stop, closed, record, run: () => (sandbox.runClose as (paths: object, bootstrap: object) => Promise<void>)({}, {}) };
+  return { context, probe, confirm, stop, closed, record, store, coordinator, readback, readStatus,
+    run: () => (sandbox.runClose as (paths: object, bootstrap: object) => Promise<void>)({ workspaceRoot: "test-workspace" }, {}) };
 }
 
 afterEach(() => vi.useRealTimers());
 
-describe("Workbench close active-work recovery", () => {
-  it("refreshes a rejected cached token and closes idle work without confirmation", async () => {
+describe("Explicit Workbench close", () => {
+  it("interrupts work without waiting for a status probe, control token, or confirmation", async () => {
     const h = closeHarness();
-    h.probe.mockRejectedValueOnce(new Error("launcher active-work status request failed: 403"));
+    h.context.mockImplementation(() => new Promise(() => undefined));
+    h.probe.mockImplementation(() => new Promise(() => undefined));
     await h.run();
-    expect(h.context).toHaveBeenLastCalledWith({}, expect.objectContaining({ forceControlTokenRefresh: true }));
-    expect(h.probe.mock.calls.map(([input]) => input.controlToken)).toEqual(["cached", "fresh"]);
+    expect(h.context).not.toHaveBeenCalled();
+    expect(h.probe).not.toHaveBeenCalled();
     expect(h.confirm).not.toHaveBeenCalled();
     expect(h.stop).toHaveBeenCalledOnce();
+    expect(h.stop.mock.calls[0][2]).toMatchObject({
+      mode: "force", reason: "workbench_window_close", activeWorkState: "unknown", requestId: "explicit-close-request"
+    });
     expect(h.closed).toHaveBeenCalledOnce();
+    expect(h.store.currentTransaction()?.phase).toBe("window_close_authorized");
   });
 
-  it("preserves task protection when the recovered probe finds active work", async () => {
-    const h = closeHarness();
-    h.probe.mockRejectedValueOnce(new Error("401 unauthorized"));
-    h.probe.mockResolvedValueOnce({ state: "active", message: "work is running" });
-    await h.run();
-    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "active");
-    expect(h.stop).not.toHaveBeenCalled();
-    expect(h.closed).not.toHaveBeenCalled();
-  });
-
-  it("keeps unknown state protected after two authentication failures", async () => {
-    const h = closeHarness();
-    h.probe.mockRejectedValue(new Error("403 forbidden"));
-    await h.run();
-    expect(h.probe).toHaveBeenCalledTimes(2);
-    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "unknown");
-    expect(h.stop).not.toHaveBeenCalled();
-  });
-
-  it("recovers a timeout without showing a confirmation when the retry is idle", async () => {
+  it("passes one absolute request deadline and force time through the fifth stop argument", async () => {
     vi.useFakeTimers();
     const h = closeHarness();
-    h.probe.mockImplementationOnce(() => new Promise(() => undefined));
+    const requestedAt = Date.now();
+    h.coordinator.mockImplementation(async (_reason, run) => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await run();
+    });
+    h.stop.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
     const closing = h.run();
-    await vi.advanceTimersByTimeAsync(8001);
+    await vi.advanceTimersByTimeAsync(900);
     await closing;
-    expect(h.probe).toHaveBeenCalledTimes(2);
-    expect(h.confirm).not.toHaveBeenCalled();
+    expect(h.stop.mock.calls[0][4]).toEqual({ deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200 });
+    expect(h.readback.mock.calls[0][0].timeoutMs).toBe(900);
+    expect(h.readback.mock.calls[0][0].signal).toBe(h.stop.mock.calls[0][3]);
+  });
+
+  it("authorizes window close only after the file-only final readback settles", async () => {
+    const h = closeHarness();
+    let finishReadback!: (settled: boolean) => void;
+    h.readback.mockImplementationOnce(async (input) => {
+      await input.readStatus();
+      return await new Promise((resolve) => { finishReadback = resolve; });
+    });
+    const closing = h.run();
+    await vi.waitFor(() => expect(h.readStatus).toHaveBeenCalledWith("test-workspace"));
+    expect(h.store.currentTransaction()?.phase).toBe("backend_closing");
+    expect(h.closed).not.toHaveBeenCalled();
+    finishReadback(true);
+    await closing;
     expect(h.closed).toHaveBeenCalledOnce();
     expect(h.record).toHaveBeenCalledWith(expect.objectContaining({
-      eventCode: "electron.workbench_close.active_work_checked",
-      fields: expect.objectContaining({ desktopSessionId: "stable-session", activeWorkState: "idle", probeAttempts: 2 })
+      eventCode: "electron.workbench_close.window_authorized"
     }));
   });
 
-  it("retries a stalled probe and aborts both attempts within one 12 second budget", async () => {
-    vi.useFakeTimers();
+  it("does not authorize window close when backend stopping fails", async () => {
     const h = closeHarness();
-    h.probe.mockImplementation(() => new Promise(() => undefined));
-    const closing = h.run();
-    await vi.advanceTimersByTimeAsync(8001);
-    expect(h.probe).toHaveBeenCalledTimes(2);
-    expect(h.probe.mock.calls[0][0].signal?.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(4000);
-    await closing;
-    expect(h.probe.mock.calls[1][0].signal?.aborted).toBe(true);
-    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "unknown");
-    expect(h.stop).not.toHaveBeenCalled();
+    h.stop.mockRejectedValueOnce(new Error("owned process still running"));
+    await expect(h.run()).rejects.toThrow("owned process still running");
+    expect(h.readback).not.toHaveBeenCalled();
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_timeout" });
   });
 
-  it("bounds control-token acquisition too and never probes after it has expired", async () => {
+  it("does not report close success when final readback is unsettled", async () => {
+    const h = closeHarness();
+    h.readback.mockResolvedValueOnce(false);
+    await expect(h.run()).rejects.toThrow("did not settle closed");
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()?.phase).toBe("failed");
+    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.window_authorized")).toBe(false);
+  });
+
+  it.each(["backend stop", "final readback"])("fails a stalled %s within the same 1800ms budget", async (stage) => {
     vi.useFakeTimers();
     const h = closeHarness();
-    h.context.mockImplementation(() => new Promise(() => undefined));
-    const closing = h.run();
-    await vi.advanceTimersByTimeAsync(12001);
-    await closing;
-    expect(h.context).toHaveBeenCalledTimes(2);
-    expect(h.probe).not.toHaveBeenCalled();
-    expect(h.confirm).toHaveBeenCalledWith(expect.anything(), "unknown");
-    expect(h.stop).not.toHaveBeenCalled();
+    if (stage === "backend stop") h.stop.mockImplementationOnce(() => new Promise(() => undefined));
+    else h.readback.mockImplementationOnce(() => new Promise(() => undefined));
+    const failure = h.run().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1800);
+    expect((await failure as Error).message).toContain("workbench close timed out after 1800ms");
+    expect(h.stop.mock.calls[0][3].aborted).toBe(true);
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.store.currentTransaction()).toMatchObject({ phase: "failed", failureCode: "backend_stop_timeout" });
+    expect(h.record.mock.calls.some(([event]) => event.eventCode === "electron.workbench_close.window_authorized")).toBe(false);
   });
 });
 
@@ -158,7 +178,7 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("shouldInterceptWorkbenchClose: () => !shutdownApproved");
     expect(source).toContain("requestTransactionalWorkbenchClose(paths, bootstrap)");
     expect(source).toContain("mainWorkbenchCloseStore.submit(");
-    expect(source).toContain("mainWorkbenchCloseStore.confirm(");
+    expect(source).toContain('mode: "force",\n      requestId: randomUUID(),');
     expect(source).toContain("mainWorkbenchCloseStore.backendStopped(");
     expect(source).toContain("await provider.approveWorkbenchCloseOnce()");
     expect(source).toContain("buttons: [\"重试\", \"仍关闭窗口\"]");
@@ -178,10 +198,12 @@ describe("Electron main transactional Workbench close", () => {
     const stopSource = source.slice(stopStart, stopEnd);
 
     expect(source).toContain("electron.workbench_close.backend_stopping");
-    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap, transaction, signal)");
-    expect(source).toContain('let activeWorkState: ActiveWorkProbeState = "unknown"');
-    expect(source).toContain("activeWorkState = status.state");
-    expect(source).toContain("mainWorkbenchCloseStore.confirm(transaction.closeId, transaction.requestId!)");
+    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap, transaction, signal, fastCloseTiming)");
+    expect(source).toContain('const activeWorkState: ActiveWorkProbeState = "unknown"');
+    const request = source.slice(source.indexOf("async function requestTransactionalWorkbenchClose("), stopStart);
+    expect(request).not.toContain("fetchLauncherActiveWorkStatus(");
+    expect(request).not.toContain("confirmWorkbenchForceClose(");
+    expect(request).not.toContain("resolveDesktopActionLoopContext(");
     expect(stopSource).toContain("orchestrateLauncherLifecycle(operation");
     expect(stopSource).toContain("requestId: transaction.requestId");
     expect(stopSource).toContain("closeId: transaction.closeId");
@@ -190,7 +212,10 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("!shouldDeferOrchestratedWindowClose(payload)");
     expect(source).toContain('from "./lifecycle/workbenchBackendCloseReadiness.js"');
     expect(source).toContain("waitForWorkbenchBackendSettledForWindowClose({");
-    expect(source).toContain("createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS)");
+    expect(request).toContain("deadlineAt: requestedAt + 1800, forceAt: requestedAt + 1200");
+    expect(request).toContain("createDesktopShellExitDeadline(Math.max(1, fastCloseTiming.deadlineAt - Date.now()))");
+    expect(request).toContain("readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot)");
+    expect(stopSource).toContain('transaction.mode === "force" ? "operator" : "window-close", signal, fastCloseTiming');
     expect(source).toContain("timeoutMs: closeDeadline.remainingMs()");
     expect(source).toContain("mainWorkbenchCloseStore.fail(");
     expect(source).toContain('"backend_stop_timeout"');

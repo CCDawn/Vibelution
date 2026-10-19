@@ -58,6 +58,8 @@ export type RunWorkbenchLifecycleInput = {
   operation: WorkbenchLifecycleOperation;
   /** Only explicit operator restarts set this; forwarded and automatic restarts remain protected. */
   interruptActiveWork?: boolean;
+  fastCloseTiming?: { deadlineAt: number; forceAt: number };
+  controlToken?: string;
   spawnImpl?: WorkbenchBackendSpawn;
   signal?: AbortSignal;
   queue?: MainLineCommandQueue;
@@ -153,6 +155,8 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
           pythonPath: input.pythonPath,
           operation: input.operation,
           interruptActiveWork: input.interruptActiveWork,
+          fastCloseTiming: input.fastCloseTiming,
+          controlToken: input.controlToken,
           command,
           signal: deadline.signal,
           spawnImpl: input.spawnImpl,
