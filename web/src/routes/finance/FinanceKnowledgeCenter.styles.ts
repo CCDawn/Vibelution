@@ -1,7 +1,7 @@
 export default {
   page: "@container/knowledge flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto p-4",
   topicPage: "@container/topic mx-auto flex min-h-0 w-full min-w-0 max-w-3xl flex-1 flex-col gap-6 overflow-y-auto p-4",
-  formFields: "grid min-w-0 grid-cols-1 items-start gap-4 @min-[480px]/topic:grid-cols-2",
+  formFields: "grid min-w-0 grid-cols-1 items-start gap-4 @min-[480px]/topic:!grid-cols-2",
   formFooter: "flex min-w-0 flex-wrap items-center justify-end gap-3 border-t border-[var(--vui-border-subtle)] pt-4",
   exercise: "flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--vui-border-subtle)] pt-4",
   heading: "m-0 text-lg font-semibold",
@@ -10,7 +10,7 @@ export default {
   actions: "flex min-w-0 flex-wrap items-end gap-3",
   examples: "grid min-w-0 gap-2",
   example: "!h-auto !justify-start !whitespace-normal !py-3 text-left",
-  columns: "grid min-w-0 content-start items-start grid-cols-1 gap-5 @min-[750px]/knowledge:grid-cols-[220px_minmax(0,1fr)]",
+  columns: "grid min-w-0 content-start items-start grid-cols-1 gap-5 @min-[750px]/knowledge:!grid-cols-[220px_minmax(0,1fr)]",
   list: "grid min-w-0 content-start gap-2",
   listItem: "!h-auto !min-w-0 !justify-start !whitespace-normal !py-3 text-left",
   title: "m-0 break-words text-sm font-semibold",
