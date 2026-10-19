@@ -26,13 +26,40 @@ def _orchestrator():
 def _issue_scope(record: dict, request: dict) -> dict:
     from core.runtime_manager.work_run_store import WorkRunStore
     from core.web.services.self_evolution_autonomous_loop_orchestrator import PROJECT_ROOT
-    from core.web.services.self_evolution_local_integration import AuthorizedLocalIntegration, load_existing_bindings
+    from core.web.services.self_evolution_local_integration import AuthorizedLocalIntegration
 
     # Issuance reads policy only. No WorkRun or candidate is created until an
     # actual failure exhausts its existing budget.
     authority = AuthorizedLocalIntegration(store=WorkRunStore(), project_root=PROJECT_ROOT,
-                                           load_bindings=load_existing_bindings)
-    return authority.authorize({"runId": record["id"], "request": {"localIntegration": request}})
+                                           load_bindings=lambda: bound_role_bindings(record))
+    grant = authority.authorize({"runId": record["id"], "request": {"localIntegration": request}})
+    grant["roleBindingSource"] = "recovery_binding_v1"
+    return grant
+
+
+def bound_role_bindings(record: dict) -> dict:
+    """Resolve this source's authorized roles without modifying global slots."""
+    from core.web.services.self_evolution_control_service import _self_evolution_binding_from_payload
+
+    policy = record["flow"].get("failureRecovery") or {}
+    if not policy.get("bindingId"):
+        raise store.WorkflowError("代码修复需要有效的四角色绑定。")
+    slots = {"observer": policy["directorAgentId"], "executor": policy["developerAgentId"],
+             "reviewer": policy["reviewerAgentId"]}
+    payload = {"modes": {"self_evolution": {"slots": slots}}}
+    return {role: _self_evolution_binding_from_payload(payload, role) for role in slots}
+
+
+def recovery_role_bindings(context: dict) -> dict | None:
+    """Recheck the canonical parent before using its role authority.
+
+    Pre-upgrade grants retain their global-slot fingerprint; no existing grant
+    silently changes its principals or gains a new authority source.
+    """
+    parent = _parent(context["_recoverySource"])
+    if (parent.get("_codeRepairAuthorization") or {}).get("roleBindingSource") != "recovery_binding_v1":
+        return None
+    return bound_role_bindings(parent)
 
 
 def authorize(record: dict, request: dict) -> None:

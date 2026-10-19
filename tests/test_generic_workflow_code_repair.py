@@ -187,6 +187,85 @@ def test_real_authority_delegates_without_operator_and_keeps_exact_deadline(real
                              source=source, run_id=child["runId"])
 
 
+@pytest.mark.parametrize("role_change", [False, True])
+def test_source_bound_repair_ignores_global_slots_but_rechecks_bound_agents(real_child, monkeypatch, role_change):
+    from core.web.services.self_evolution_local_integration import RUN_KIND
+    from core.web.services.team_workflow.generic import code_repair
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+
+    env, run, adapter, _actor, child, request, _source, _grant = real_child
+    target = store.path("team-a", "runs", run["id"])
+    parent = store.read(target)
+    adapter.load_bindings = lambda: code_repair.bound_role_bindings(parent)
+    with server_operator_scope("trusted-http-operator", roles=("operator",)):
+        grant = adapter.authorize({"runId": parent["id"], "request": {"localIntegration": request["localIntegration"]}})
+    grant["roleBindingSource"] = "recovery_binding_v1"
+    parent["_codeRepairAuthorization"] = grant
+    store.write(target, parent)
+    child["localIntegrationAuthorization"] = {**deepcopy(grant), "runId": child["runId"], "sourceRunId": parent["id"]}
+    adapter.store.persist_snapshot(RUN_KIND, child)
+    adapter.load_bindings = lambda: pytest.fail("Source-bound recovery must not read unrelated global role slots")
+    assert adapter.authorize(child)["principals"] == grant["principals"]
+    adapter.check(child)
+    if role_change:
+        env.agents["director"]["toolPolicy"]["allowedTools"].append("write_file_tool")
+        with pytest.raises(ValueError):
+            adapter.check(child)
+
+
+@pytest.mark.parametrize("change", ["revoke", "expiry"])
+def test_production_source_grant_reaches_child_and_still_fences_revocation(bound_env, monkeypatch, change):
+    from types import SimpleNamespace
+    from core.runtime_manager import work_run_store
+    from core.web.services import agent_directory_service as directory, team_service
+    from core.web.services import self_evolution_autonomous_loop_orchestrator as orchestrator
+    from core.web.services import self_evolution_control_service as control
+    from core.web.services.self_evolution_local_integration import AuthorizedLocalIntegration
+    from core.web.services.self_evolution_autonomous_loop_service import AutonomousLoopHooks, SelfEvolutionAutonomousLoopService
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+    from core.web.services.team_workflow.generic import code_repair
+
+    for agent in bound_env.agents.values():
+        agent["permissionPreset"] = "request_approval"
+        agent["toolPolicy"]["policyId"] = "policy-" + agent["agentId"]
+    monkeypatch.setattr(directory, "resolve_tool_policy_for_agent", lambda key, **kw: deepcopy(bound_env.agents[key]["toolPolicy"]))
+    monkeypatch.setattr(team_service, "_load_index", lambda: {"teams": deepcopy(list(bound_env.teams.values()))})
+    monkeypatch.setattr(orchestrator, "PROJECT_ROOT", bound_env.tmp_path)
+    monkeypatch.setattr(work_run_store, "default_work_runs_dir", lambda: bound_env.tmp_path / "workruns")
+    monkeypatch.setattr(control, "_raw_self_evolution_mode_slots", lambda: pytest.fail("Do not read global role slots"))
+    binding.bind_recovery("team-a", "flow-a", payload(maxAttempts=1))
+    request = {"expectedRevision": 2, "values": {"subject": "original task"},
+               "idempotencyKey": "production-bound-source", "localIntegration": scope()}
+    with server_operator_scope("trusted-http-operator", roles=("operator",)):
+        run = tick(service.start_run("team-a", "flow-a", request), 2)
+    parent_path = store.path("team-a", "runs", run["id"])
+    parent = store.read(parent_path)
+    grant = parent["_codeRepairAuthorization"]
+    assert grant["roleBindingSource"] == "recovery_binding_v1"
+    assert {key: value["agentId"] for key, value in grant["principals"].items()} == {
+        "observer": "director", "executor": "developer", "reviewer": "reviewer"}
+    adapter = AuthorizedLocalIntegration(store=work_run_store.WorkRunStore(), project_root=bound_env.tmp_path,
+        load_bindings=lambda: pytest.fail("Do not fall back to global roles"))
+    unused = lambda context: {}
+    actor = SelfEvolutionAutonomousLoopService(store=adapter.store, hooks=AutonomousLoopHooks(
+        observe=unused, plan=unused, evolve=unused, integrate=unused, cleanup=unused,
+        authorize=adapter.authorize, review=unused, check_authorization=adapter.check))
+    monkeypatch.setattr(code_repair, "_orchestrator", lambda: SimpleNamespace(start_recovery=actor.queue_recovery))
+    run = scan(fail(bound_env, run), 2)
+    parent = store.read(parent_path)
+    child = actor.get_recovery(run["recovery"]["codeRepairRunId"], source=parent["_codeRepairSource"])
+    assert child is not None
+    assert child["localIntegrationAuthorization"]["principals"] == grant["principals"]
+    adapter.check(child)
+    if change == "revoke":
+        binding.revoke_recovery("team-a", "flow-a", {"expectedRevision": 2})
+    else:
+        parent["_codeRepairAuthorization"]["expiresAt"] = "2020-01-01T00:00:00+00:00"
+        store.write(parent_path, parent)
+    with pytest.raises(ValueError):
+        adapter.check(child)
+
+
 @pytest.mark.parametrize("change", ["stop", "revoke", "expiry", "source_move", "scope"])
 def test_real_child_fences_changes_to_its_parent_authorization(real_child, change):
     from core.web.services.self_evolution_local_integration import RUN_KIND
