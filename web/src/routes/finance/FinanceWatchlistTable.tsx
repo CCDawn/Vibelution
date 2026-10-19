@@ -93,18 +93,18 @@ export function FinanceWatchlistTable({
         </VButton>;
       },
     },
-    { id: "price", header: mixedCurrencies || !singleCurrency ? zh ? "现价" : "Price" : zh ? `现价(${currencyName(singleCurrency)})` : `Price (${singleCurrency})`, width: 108, align: "right", render: ({ quote }) => <span className={styles.number}>{quote ? `${valueText(quote.price, stockMarketCode(quote) === "HK" ? 3 : 2)}${mixedCurrencies ? ` ${quoteCurrency(quote, zh)}` : ""}` : "—"}</span> },
+    { id: "price", header: mixedCurrencies || !singleCurrency ? zh ? "现价" : "Price" : zh ? `现价(${currencyName(singleCurrency)})` : `Price (${singleCurrency})`, width: 148, align: "right", truncate: false, render: ({ quote }) => <span className={editStyles.number}>{quote ? `${valueText(quote.price, stockMarketCode(quote) === "HK" ? 3 : 2)}${mixedCurrencies ? ` ${quoteCurrency(quote, zh)}` : ""}` : "—"}</span> },
     {
-      id: "change", header: zh ? "涨跌幅" : "Change", width: 86, align: "right",
+      id: "change", header: zh ? "涨跌幅" : "Change", width: 112, align: "right", truncate: false,
       render: ({ quote }) => {
         const change = quote?.changePercent;
         return change === null || change === undefined || !Number.isFinite(change) ? <span className={styles.nullValue}>—</span> : <span className={`${editStyles.changePill} ${change >= 0 ? editStyles.changePillUp : editStyles.changePillDown}`}>{quoteChange(change)}</span>;
       },
     },
-    { id: "volume", header: zh ? "成交量" : "Volume", width: 84, align: "right", render: ({ quote }) => <span className={styles.number}>{quoteVolume(quote, zh)}</span> },
-    { id: "turnover", header: zh ? "成交额" : "Turnover", width: 92, align: "right", render: ({ quote }) => <span className={styles.number}>{quoteAmount(quote, "turnover", zh)}</span> },
-    { id: "pe", header: "PE", width: 66, align: "right", render: ({ quote }) => <span className={styles.number}>{valueText(quote?.peRatio)}</span> },
-    { id: "marketCap", header: mixedCurrencies || !singleCurrency ? zh ? "总市值" : "Market cap" : zh ? `总市值(${currencyName(singleCurrency)})` : `Market cap (${singleCurrency})`, width: 92, align: "right", render: ({ quote }) => <span className={styles.number}>{quoteAmount(quote, "marketCap", zh)}</span> },
+    { id: "volume", header: zh ? "成交量" : "Volume", width: 140, align: "right", truncate: false, render: ({ quote }) => <span className={editStyles.number}>{quoteVolume(quote, zh)}</span> },
+    { id: "turnover", header: zh ? "成交额" : "Turnover", width: 160, align: "right", truncate: false, render: ({ quote }) => <span className={editStyles.number}>{quoteAmount(quote, "turnover", zh)}</span> },
+    { id: "pe", header: "PE", width: 96, align: "right", truncate: false, render: ({ quote }) => <span className={editStyles.number}>{valueText(quote?.peRatio)}</span> },
+    { id: "marketCap", header: mixedCurrencies || !singleCurrency ? zh ? "总市值" : "Market cap" : zh ? `总市值(${currencyName(singleCurrency)})` : `Market cap (${singleCurrency})`, width: 176, align: "right", truncate: false, render: ({ quote }) => <span className={editStyles.number}>{quoteAmount(quote, "marketCap", zh)}</span> },
     {
       id: "tags", header: zh ? "标签 / 备注" : "Tags / note", width: 120,
       render: ({ stock }) => {
