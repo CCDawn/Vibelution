@@ -251,6 +251,34 @@ class OverviewResponse(BaseModel):
 
 
 
+class AttentionDeliveryFailureReportRequest(BaseModel):
+
+    """Renderer-side delivery-failure report; service clips every field again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=128)
+
+    kind: str = Field(min_length=1, max_length=40)
+
+    severity: str | None = Field(default=None, max_length=16)
+
+    stage: Literal["renderer", "shell"]
+
+    reason: str = Field(default="", max_length=400)
+
+    title: str | None = Field(default=None, max_length=160)
+
+
+
+class AttentionDeliveryFailureReportResponse(BaseModel):
+
+    accepted: StrictBool
+
+    reason: str = ""
+
+
+
 @router.get("/personal-assistant", response_model=AssistantResponse)
 
 def get_assistant() -> dict:
@@ -311,6 +339,24 @@ def overview(
 
     return personal_attention_service.attach_attention_to_overview(payload)
 
+
+
+@router.post(
+    "/personal-assistant/attention/report-delivery-failure",
+    response_model=AttentionDeliveryFailureReportResponse,
+)
+def report_attention_delivery_failure(
+    payload: AttentionDeliveryFailureReportRequest,
+) -> dict:
+    # 上报是 fire-and-forget：服务内部限流/去重/吞错，路由永远 200 带 accepted。
+    return personal_attention_service.report_attention_delivery_failure(
+        id=payload.id,
+        kind=payload.kind,
+        severity=payload.severity or "",
+        stage=payload.stage,
+        reason=payload.reason,
+        title=payload.title or "",
+    )
 
 
 @router.get("/personal-assistant/settings", response_model=SettingsResponse)

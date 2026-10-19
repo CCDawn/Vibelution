@@ -34,7 +34,9 @@ from core.chat.meeting_history_layering import (
     MEETING_HISTORY_VERBATIM_ROUNDS_ENV,
     apply_meeting_history_layering,
     build_meeting_round_recap,
+    build_room_round_history,
     resolve_meeting_history_verbatim_rounds,
+    synthesize_room_round_message,
 )
 from core.chat.model_messages import ProviderMessageChain
 from core.web.services import chat_room_service
@@ -337,3 +339,306 @@ def test_explicit_rounds_override_via_argument(verbatim_rounds):
     # 逐轮原位替换不改变消息数；冻结 recap 消息数 = 老化轮数。
     assert len(layered) == len(seed)
     assert len(_recap_messages(layered)) == 6 - verbatim_rounds
+
+
+# ---------------------------------------------------------------------------
+# 房间轮次合成：失败发言错误详情（有界）对经理/后续发言者可见。
+# 失败消息形状对齐 chat_room_service：status=failed、content=""、
+# summary="ErrorType: 异常摘要"、errorType="ErrorType"（prep 失败与 runner
+# 异常同一契约）；auto-continue 耗尽死信挂在轮记录 autoContinueDeadLetters。
+# ---------------------------------------------------------------------------
+
+_MIXED_ROUND_SUMMARY = "本轮群聊完成：2/4 位参与者成功发言，2 位未成功（失败 2、受阻 0、停止 0、0 位部分完成）。"
+_SUCCESS_ROUND_SUMMARY = "本轮群聊完成：2/2 位参与者成功发言，0 位未成功（失败 0、受阻 0、停止 0、0 位部分完成）。"
+
+
+def _speaker_message(
+    speaker: str,
+    participant_id: str,
+    *,
+    status: str = "completed",
+    content: str = "围绕议题给出结论。",
+    summary: str = "",
+    error_type: str = "",
+) -> dict:
+    return {
+        "participantId": participant_id,
+        "speakerTitle": speaker,
+        "status": status,
+        "content": content,
+        "summary": summary,
+        "errorType": error_type,
+    }
+
+
+def _failed_message(
+    index: int,
+    *,
+    error_type: str = "AgentLlmResolutionError",
+    summary: str | None = None,
+    participant_id: str = "",
+    speaker: str = "",
+) -> dict:
+    return _speaker_message(
+        speaker or f"失败成员{index}",
+        participant_id or f"participant-f{index}",
+        status="failed",
+        content="",
+        summary=(
+            summary
+            if summary is not None
+            else f"{error_type}: 无法解析成员 {index} 的模型绑定"
+        ),
+        error_type=error_type,
+    )
+
+
+def _failure_section(content: str) -> str:
+    assert "失败发言详情:" in content
+    return content.split("失败发言详情:", 1)[1]
+
+
+def test_room_round_synthesis_keeps_count_line_and_adds_failure_details():
+    round_payload = {
+        "roundId": "round-mixed",
+        "topic": "接口联调",
+        "summary": _MIXED_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m", content="请补齐失败项后重新评估。"),
+            _speaker_message("甲研究员", "participant-a", content="实验数据已复核。"),
+            _failed_message(1),
+            _failed_message(
+                2,
+                error_type="PromptAssemblyBudgetError",
+                summary="PromptAssemblyBudgetError: 预算超限",
+            ),
+        ],
+    }
+    message = synthesize_room_round_message(
+        round_payload, round_number=1, room_id=ROOM_ID, participant_id="participant-a"
+    )
+    content = message["content"]
+    # 既有失败计数行保留（轮 summary 原样进入「摘要:」行）。
+    assert f"摘要: {_MIXED_ROUND_SUMMARY}" in content
+    # 成功发言仍进入 own/peer 段。
+    assert "- 甲研究员: 实验数据已复核。" in content
+    assert "- 经理: 请补齐失败项后重新评估。" in content
+    # 失败详情段：speaker + errorType + 异常摘要（summary 已带类名时不重复）。
+    section = _failure_section(content)
+    assert "- 失败成员1: AgentLlmResolutionError: 无法解析成员 1 的模型绑定" in section
+    assert "- 失败成员2: PromptAssemblyBudgetError: 预算超限" in section
+    # 纯投影确定性：同一轮 payload 两次合成逐字节一致。
+    again = synthesize_room_round_message(
+        round_payload, round_number=1, room_id=ROOM_ID, participant_id="participant-a"
+    )
+    assert again == message
+
+
+def test_room_round_failure_details_truncated_beyond_three_entries():
+    round_payload = {
+        "roundId": "round-many-failures",
+        "topic": "回归验证",
+        "summary": "本轮群聊完成：1/6 位参与者成功发言，5 位未成功（失败 5、受阻 0、停止 0、0 位部分完成）。",
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m"),
+            *(_failed_message(index) for index in range(1, 6)),
+        ],
+    }
+    content = synthesize_room_round_message(round_payload, round_number=2, room_id=ROOM_ID)["content"]
+    section = _failure_section(content)
+    bullets = [line for line in section.splitlines() if line.startswith("- ")]
+    # 有界：3 条详情 + 1 条截断说明。
+    assert len(bullets) == 4
+    assert bullets[0].startswith("- 失败成员1: ")
+    assert bullets[2].startswith("- 失败成员3: ")
+    assert bullets[3] == "- 其余 2 条失败详情已截断"
+    assert "失败成员4" not in section
+    assert "失败成员5" not in section
+
+
+def test_room_round_failure_detail_is_line_and_char_bounded():
+    long_summary = "RuntimeError: " + "调用链路过长需要收敛 " * 60
+    round_payload = {
+        "roundId": "round-bounded",
+        "topic": "长异常截断",
+        "summary": _MIXED_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m"),
+            _failed_message(1, summary=long_summary),
+            _failed_message(
+                2,
+                error_type="ValueError",
+                summary="ValueError: 第一行\n第二行\n第三行\n第四行",
+            ),
+        ],
+    }
+    content = synthesize_room_round_message(round_payload, round_number=1, room_id=ROOM_ID)["content"]
+    long_bullet = next(line for line in content.splitlines() if "RuntimeError" in line)
+    # 240 字符上限 + 省略号（"- " + speaker + ": " 前缀之外即为详情主体）。
+    assert long_bullet.endswith("…")
+    assert len(long_bullet) <= len("- 失败成员1: ") + 240 + 1
+    # 多行摘要只保留前 2 行。
+    assert "ValueError: 第一行\n第二行" in content
+    assert "第三行" not in content
+    assert "第四行" not in content
+
+
+def test_pure_success_round_synthesis_matches_legacy_shape():
+    round_payload = {
+        "roundId": "round-success",
+        "topic": "接口联调",
+        "summary": _SUCCESS_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [
+            _speaker_message("甲研究员", "participant-a", content="实验数据已复核。"),
+            _speaker_message("乙分析师", "participant-b", content="结论成立。"),
+        ],
+    }
+    message = synthesize_room_round_message(
+        round_payload,
+        round_number=1,
+        room_id=ROOM_ID,
+        room_title="评审会议",
+    )
+    expected = "\n".join(
+        [
+            "[群聊同步]",
+            "群聊: 评审会议",
+            "议题: 接口联调",
+            f"摘要: {_SUCCESS_ROUND_SUMMARY}",
+            "",
+            "你的发言:",
+            "- 本轮你没有发言。",
+            "",
+            "其他 Agent 发言:",
+            "- 甲研究员: 实验数据已复核。",
+            "- 乙分析师: 结论成立。",
+        ]
+    )
+    # 纯成功轮不加失败详情段，字节与旧契约一致。
+    assert message["content"] == expected
+
+
+def test_failure_detail_degrades_without_error_type():
+    round_payload = {
+        "roundId": "round-degraded",
+        "topic": "降级形态",
+        "summary": _MIXED_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m"),
+            _failed_message(1, error_type="", summary=""),
+            _failed_message(2, error_type="", summary="模型解析失败"),
+        ],
+    }
+    content = synthesize_room_round_message(round_payload, round_number=1, room_id=ROOM_ID)["content"]
+    section = _failure_section(content)
+    # 拿不到 errorType：有 summary 用 summary，两者皆空只留 speaker+status。
+    assert "- 失败成员2: 模型解析失败" in section
+    assert "- 失败成员1: status=failed" in section
+
+
+def test_open_dead_letter_surfaces_and_resolved_ignored():
+    round_payload = {
+        "roundId": "round-deadletter",
+        "topic": "自动续写耗尽",
+        "summary": "本轮群聊完成：1/2 位参与者成功发言，1 位未成功（失败 0、受阻 0、停止 0、1 位部分完成）。",
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m"),
+            _speaker_message(
+                "丙工程师", "participant-p3", status="partial", content="分析进行到一半"
+            ),
+        ],
+        "autoContinueDeadLetters": [
+            {
+                "participantId": "participant-p3",
+                "attemptCount": 4,
+                "reason": "quota_exhausted",
+                "status": "open",
+                "lastErrorCategory": "provider",
+                "lastErrorDisposition": "retry",
+                "lastErrorSummary": "ConnectionError: 上游超时",
+            },
+            {
+                "participantId": "participant-p9",
+                "attemptCount": 3,
+                "reason": "deadline_insufficient",
+                "status": "resolved",
+                "lastErrorSummary": "ConnectionError: 已恢复",
+            },
+        ],
+    }
+    content = synthesize_room_round_message(round_payload, round_number=1, room_id=ROOM_ID)["content"]
+    section = _failure_section(content)
+    # open 死信有界纳入：speaker 由 participantId 映射，reason/尝试次数/末错齐全。
+    assert "- 丙工程师: 自动续写耗尽（quota_exhausted，尝试 4 次）：ConnectionError: 上游超时" in section
+    # resolved 死信已恢复，不再进入详情。
+    assert "deadline_insufficient" not in section
+    assert "已恢复" not in section
+
+
+def test_dead_letter_skipped_when_message_level_failure_present():
+    round_payload = {
+        "roundId": "round-dedupe",
+        "topic": "去重",
+        "summary": _MIXED_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m"),
+            _failed_message(
+                1, participant_id="participant-f1", speaker="丙工程师"
+            ),
+        ],
+        "autoContinueDeadLetters": [
+            {
+                "participantId": "participant-f1",
+                "attemptCount": 2,
+                "reason": "quota_exhausted",
+                "status": "open",
+                "lastErrorSummary": "ConnectionError: 上游超时",
+            }
+        ],
+    }
+    content = synthesize_room_round_message(round_payload, round_number=1, room_id=ROOM_ID)["content"]
+    section = _failure_section(content)
+    # 同一 participant 既有 failed 消息又有 open 死信：只保留消息级详情。
+    detail_bullets = [
+        line for line in section.splitlines() if line.startswith("- ") and "自动续写耗尽" not in line
+    ]
+    assert detail_bullets == ["- 丙工程师: AgentLlmResolutionError: 无法解析成员 1 的模型绑定"]
+
+
+def test_build_room_round_history_keeps_failure_details_in_verbatim_tail():
+    mixed_round = {
+        "roundId": "round-mixed",
+        "topic": "接口联调",
+        "summary": _MIXED_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [
+            _speaker_message("经理", "participant-m"),
+            _failed_message(1),
+        ],
+    }
+    success_round = {
+        "roundId": "round-success",
+        "topic": "复审",
+        "summary": _SUCCESS_ROUND_SUMMARY,
+        "status": "completed",
+        "messages": [_speaker_message("甲研究员", "participant-a")],
+    }
+    messages, state = build_room_round_history(
+        [mixed_round, success_round],
+        room_id=ROOM_ID,
+        room_title="评审会议",
+        participant_id="participant-a",
+        verbatim_rounds=2,
+    )
+    assert state["terminalRoundCount"] == 2
+    # 逐字窗口内的合成轮次消息带失败详情，经理重新被唤起时可见失败原因。
+    assert "失败发言详情:" in messages[0]["content"]
+    assert "AgentLlmResolutionError" in messages[0]["content"]
+    assert "失败发言详情:" not in messages[1]["content"]
