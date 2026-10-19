@@ -20,6 +20,7 @@
 | Supervised **worktree loop**（隔离 checkout + harness） | `supervised_worktree_evolution_service.py` → `scripts/evolution_harness.py` · `work_run_store` lease | 直接写本地 `main`；无 lease 开 worktree write |
 | Self **observation / worktree run** 控制 | `self_evolution_control_service.py`（route：`evolution.py` · `agents.py`） | 在 `self_evolution_service` 里 spawn agent/LLM |
 | **autonomous self-evolution loop**（默认用户批准，可显式委托本地集成） | `self_evolution_autonomous_loop_service.py` + `self_evolution_local_integration.py` | 冒充 user 决策；无固定 SHA 独立验收直接合入；扩 iteration |
+| **有限持续多轮调度**（成功后继续，达到轮数或期限停止） | `self_evolution_campaign_service.py` + `self_evolution_autonomous_loop_orchestrator.py` | 续签子授权；复制候选执行队列；重跑未知子任务；自动部署 |
 | Candidate **隔离执行**（harness 协议） | `supervised_candidate_runtime_service.py` | 可见控制台 sandbox；超协议 limit 仍落盘全文 |
 | Candidate **Git 集成**（唯一晋级路） | `supervised_candidate_integration_service.py` + `evolution_promotion_lane.py` | `expected_head` 不匹配仍 force merge；Gym/live run 当第二写入者改 baseline |
 | Supervised Agent 角色对齐 | `supervised_agent_service.py`（route：`agents.py`） | 与 evolution control 双写 AgentInstance |
@@ -69,7 +70,24 @@ Domain SSOT（业务规则与持久化）
 
 `POST /evolution/self/autonomous-runs/{run_id}/actions` 新增 `revoke_local_integration`，同样要求可信 privileged operator；撤销与最终合入共用授权锁，已完成撤销后不再接纳合入。缺权限返回 403，冲突返回 409，非法授权字段返回 422。合入成功后用安全、可重试的非强制清理；已合入事实恢复与新的合入审批分开，清理失败不重复合入。部署、产品重启、远端发布和扩权仍需用户决定。
 
-通用总监修复可通过启动来源 Run 时的可选 `localIntegration` 有限委托接入此候选链路，详见 [generic code repair](team_workflow/generic/README.md#scoped-code-repair-through-the-existing-candidate-owner)。父 Run 保留授权和确定子任务引用，WorkRun 继续拥有候选执行及集成事实；后台不伪造 operator，不扩大文件范围或延长期限。代码合入后仍等待用户部署及独立效果验收。持续多轮调度仍是后续能力；源码与本地测试通过不代表正式运行实例已部署或完成原生 Session 实机验收。
+通用总监修复可通过启动来源 Run 时的可选 `localIntegration` 有限委托接入此候选链路，详见 [generic code repair](team_workflow/generic/README.md#scoped-code-repair-through-the-existing-candidate-owner)。父 Run 保留授权和确定子任务引用，WorkRun 继续拥有候选执行及集成事实；后台不伪造 operator，不扩大文件范围或延长期限。代码合入后仍等待用户部署及独立效果验收。源码与本地测试通过不代表正式运行实例已部署或完成原生 Session 实机验收。
+
+## 有限持续多轮调度
+
+新增兼容接口 `POST /evolution/self/campaigns`：`goal`、必填 `idempotencyKey`、`rounds`（默认 3、1–10）以及必填 `localIntegration`。总时限直接使用该授权的 `validForSeconds`（60–3600 秒），从首次接纳开始计算；重复请求复用同一 campaign，不重新签权、不重置时间。同一 key 换请求返回 409。旧 `autonomous-runs` 仍保持单轮及原审批行为。
+
+| 状态或字段 | 唯一权威 | 消费者 |
+| --- | --- | --- |
+| 轮数、截止时间、root grant、精确 child 引用 | WorkRun `self_evolution_campaign` | campaign 调度与授权 adapter |
+| 候选开发、独立审查、Git 回执、清理和执行结束事实 | 既有 WorkRun `self_evolution_autonomous_loop` | campaign 只读汇总 |
+| 原生 Agent 输出与工具证据 | 原生 Session Journal | 原审查及执行 adapter |
+| HTTP schema / TS 客户端 | `evolution_models.py` / `api/types/evolution.ts` | 专用 API；正式配置 UI 待预览批准 |
+
+所有修改命令校验控制令牌与服务器 privileged operator；客户端身份字段不授予权限。`GET /campaigns/active` 和 `GET /campaigns/{id}` 查询状态；`POST /campaigns/{id}/actions` 接受 `stop` 或 `revoke_local_integration`。child 固定为 `<campaign-id>-round-N`，只从私有来源派生 root grant，保留原角色指纹、文件范围和截止时间。每轮从最新 main 创建候选，只有独立审查、真实本地合入与安全清理均成功且同步执行已结束，才再次观察和计划。
+
+失败、部分完成、撤销、到期或未知执行状态均阻止下一轮。期限 watchdog 请求精确 child 停止；已在执行的原生调用或原子合入可继续到安全返回，期间显示 `stopping`，不会谎报已结束。即使整轮未成功，已证明的合入 SHA 仍保留。重启只恢复精确结果及停止意图，不自动重跑未知 child；未明确结束的候选会阻止新的委托执行，需保留现场处理。部署、产品重启和远端操作仍由用户决定。
+
+`web/harness-supervision-preview.html` 是使用模拟数据的独立配置预览，不连接生产写接口；预览批准前不接正式配置页面。
 
 ---
 

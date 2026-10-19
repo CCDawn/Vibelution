@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import replace
+from datetime import datetime, timezone
 from concurrent.futures import Executor, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -47,11 +48,54 @@ class SelfEvolutionAutonomousLoopOrchestrator:
         *,
         service: SelfEvolutionAutonomousLoopService,
         executor: Executor,
+        campaign_service: Any = None,
     ) -> None:
         self._service = service
         self._executor = executor
         self._recovery_lock = threading.Lock()
         self._recovery_futures: dict[str, Any] = {}
+        self._campaign_service = campaign_service
+        self._campaign_futures: dict[str, Any] = {}
+
+    def start_campaign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """One executor job owns sequential rounds; it never waits on itself."""
+        with self._recovery_lock:
+            self._campaign_futures = {key: future for key, future in self._campaign_futures.items() if not future.done()}
+            queued = self._campaign_service.queue(payload)
+            run_id = queued["runId"]
+            previous = self._campaign_futures.get(run_id)
+            if queued.get("status") == "queued" and (previous is None or previous.done()):
+                deadline = datetime.fromisoformat(queued["deadline"])
+                delay = max(0.0, (deadline - datetime.now(timezone.utc)).total_seconds())
+                timer = threading.Timer(delay, self._campaign_service.check_deadline, args=(run_id,))
+                timer.daemon = True
+                timer.start()
+
+                def execute():
+                    try:
+                        return self._campaign_service.run(run_id)
+                    finally:
+                        timer.cancel()
+
+                try:
+                    self._campaign_futures[run_id] = self._executor.submit(execute)
+                except Exception:
+                    timer.cancel()
+                    self._campaign_service.cancel(run_id)
+                    raise
+            return queued
+
+    def get_campaign(self, campaign_id: str) -> dict:
+        return self._campaign_service.get(campaign_id)
+
+    def active_campaign(self) -> dict | None:
+        return self._campaign_service.active()
+
+    def cancel_campaign(self, campaign_id: str) -> dict:
+        return self._campaign_service.cancel(campaign_id)
+
+    def revoke_campaign(self, campaign_id: str) -> dict:
+        return self._campaign_service.revoke(campaign_id)
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         queued = self._service.queue(payload)
@@ -99,6 +143,10 @@ class SelfEvolutionAutonomousLoopOrchestrator:
         return self._service.retry_cleanup(run_id)
 
     def interrupt_active_for_restart(self, reason: str) -> list[dict[str, Any]]:
+        if self._campaign_service is not None:
+            campaign = self._campaign_service.active()
+            if campaign is not None:
+                self._campaign_service.cancel(campaign["runId"])
         return self._service.interrupt_active_for_restart(reason)
 
     def get(self, run_id: str) -> dict[str, Any]:
@@ -256,9 +304,13 @@ def build_default_orchestrator(
                       review=promotion.review, check_authorization=promotion.check),
     )
     service.reconcile_interrupted_on_startup()
+    from .self_evolution_campaign_service import SelfEvolutionCampaignService
+    campaigns = SelfEvolutionCampaignService(store=store, child=service, authorize=promotion.authorize)
+    campaigns.recover_active()
     return SelfEvolutionAutonomousLoopOrchestrator(
         service=service,
         executor=executor,
+        campaign_service=campaigns,
     )
 
 
