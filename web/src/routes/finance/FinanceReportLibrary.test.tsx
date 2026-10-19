@@ -36,7 +36,10 @@ async function render(row = assistant, citation: ReportCitation | null = null, c
 }
 async function settleScope() { for (let step = 0; step < 10; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); }
 async function expandExcerpt() {
-  await act(async () => node.querySelector("summary")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  const toggle = node.querySelector<HTMLButtonElement>('button[aria-controls$="-excerpt"]');
+  expect(toggle).not.toBeNull();
+  if (toggle!.getAttribute("aria-expanded") === "false") await act(async () => toggle!.click());
+  expect(toggle!.getAttribute("aria-expanded")).toBe("true");
   for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 }
 describe("financial report library", () => {
@@ -67,11 +70,12 @@ describe("financial report library", () => {
     expect(fetchKnowledgeTrace).toHaveBeenCalledWith("financial-kb", "item", expect.objectContaining({ agentId: "finance" }));
     expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
     const originalLink = node.querySelector<HTMLAnchorElement>('a[target="_blank"]');
-    const excerpt = node.querySelector("details");
+    const excerpt = [...node.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "阅读原文摘录");
     expect(originalLink).not.toBeNull();
     expect(excerpt).not.toBeNull();
     expect(Boolean(originalLink!.compareDocumentPosition(excerpt!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(excerpt?.open).toBe(false);
+    expect(excerpt?.getAttribute("aria-expanded")).toBe("false");
+    expect(node.querySelector("blockquote")).toBeNull();
     await expandExcerpt();
     expect(fetchKnowledgeItemBody).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance", knowledgeBaseId: "financial-kb", knowledgeItemId: "item", sourceArtifactId: "source", readMode: "source" }));
     expect(node.textContent).toContain("2025FY"); expect(node.textContent).toContain("12");
@@ -79,6 +83,21 @@ describe("financial report library", () => {
     expect(node.querySelector("blockquote b")).toBeNull();
     expect(node.textContent).not.toContain("当前引用");
     expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf#page=12");
+  });
+  it("puts the excerpt before collapsed metadata and formats the publication date", async () => {
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, publishedAt: "2026-04-03T00:00:00Z" } } }] } });
+    await render();
+    const metadataToggle = [...node.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "资料属性与来源")!;
+    expect(metadataToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(node.querySelector("dl")).toBeNull();
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
+    await expandExcerpt();
+    expect(Boolean(node.querySelector("blockquote")!.compareDocumentPosition(metadataToggle) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    await act(async () => metadataToggle.click());
+    expect(metadataToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(node.querySelector("dl")?.textContent).toContain("2026年4月3日");
+    expect(node.querySelector("dl")?.textContent).toContain("真实公司");
+    expect(node.querySelector("dl")?.textContent).not.toContain("T00:00");
   });
   it("renders alternate source citations as compact icon, title, and page rows", async () => {
     const page63 = {
@@ -111,7 +130,9 @@ describe("financial report library", () => {
     await render();
     expect(node.textContent).not.toContain("无关私有资料");
     expect(node.querySelector('a[target="_blank"]')).toBeNull();
-    expect(node.querySelector("dl")?.textContent).not.toContain("12");
+    expect(node.querySelector("dl")).toBeNull();
+    await act(async () => node.querySelector<HTMLButtonElement>('button[aria-controls$="-metadata"]')!.click());
+    expect(node.querySelector("dl")!.textContent).not.toContain("12");
   });
   it("handles unreadable and empty libraries without fictional evidence", async () => {
     await render({ ...assistant, knowledgeReadable: false });
@@ -129,6 +150,7 @@ describe("financial report library", () => {
     const retry = [...node.querySelectorAll("button")].find((button) => button.textContent === "重试")!;
     await act(async () => retry.click());
     for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "资料属性与来源")!.click());
     expect(node.textContent).toContain("真实公司");
     expect(node.textContent).not.toContain("资料加载失败");
   });
@@ -285,6 +307,7 @@ describe("financial report library", () => {
     await settleScope();
     expect(node.textContent).toContain("年度财报");
     expect(node.textContent).not.toContain("awaiting source review");
+    await act(async () => node.querySelector<HTMLButtonElement>('button[aria-controls$="-metadata"]')!.click());
     expect(node.textContent).toContain("贵州茅台酒股份有限公司");
   });
 

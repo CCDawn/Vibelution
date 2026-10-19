@@ -1,8 +1,10 @@
 const styles = {
-  body: "grid min-w-0 content-start gap-3 p-3",
+  body: "grid min-w-0 max-w-5xl content-start gap-5 p-4 sm:p-6",
+  start: "grid min-w-0 justify-items-start gap-3 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-5",
+  startTitle: "m-0 text-lg font-semibold",
   identity: "grid min-w-0 gap-0.5",
   eyebrow: "text-[11px] text-[var(--fg-tertiary)]",
-  name: "m-0 truncate text-sm font-medium",
+  name: "m-0 break-words text-xl font-semibold tracking-tight",
   meta: "m-0 truncate text-xs text-[var(--fg-tertiary)]",
   section: "grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] pt-3",
   sectionTitle: "m-0 text-xs font-medium text-[var(--fg-secondary)]",
