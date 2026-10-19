@@ -124,6 +124,7 @@ import {
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
 import { captureTrackedWorkbenchJobRetirement } from "./process/workbenchJob.js";
+import { captureFrontendBuildRetirement } from "./process/ownedFrontendBuildBridge.js";
 import { waitForPortRelease } from "./process/workbenchBackendRetire.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import {
@@ -373,6 +374,7 @@ const launcherStateStore = new LauncherStateStore(
 );
 const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 1_800;
 const WORKBENCH_CLOSE_FORCE_AFTER_MS = 1_200;
+const WORKBENCH_CLOSE_TOTAL_WAIT_MS = 2_000;
 const WORKBENCH_START_READY_WAIT_MS = 90_000;
 const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
@@ -1415,6 +1417,7 @@ async function requestTransactionalWorkbenchClose(
   const fastCloseTiming = process.platform === "win32"
     ? { deadlineAt: requestedAt + WORKBENCH_CLOSE_BACKEND_WAIT_MS, forceAt: requestedAt + WORKBENCH_CLOSE_FORCE_AFTER_MS }
     : undefined;
+  const retireFrontendBuilds = captureFrontendBuildRetirement(paths.workspaceRoot);
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
     const preparationStartedAtMs = performance.now();
     const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
@@ -1456,7 +1459,11 @@ async function requestTransactionalWorkbenchClose(
       signal.throwIfAborted();
       const stopStartedAtMs = performance.now();
       try {
-        await stopWorkbenchBackend(paths, bootstrap, transaction, signal, fastCloseTiming);
+        const [, buildsRetired] = await Promise.all([
+          stopWorkbenchBackend(paths, bootstrap, transaction, signal, fastCloseTiming),
+          retireFrontendBuilds()
+        ]);
+        if (!buildsRetired) throw new Error("Owned frontend build processes did not retire before window authorization.");
       } finally {
         backendStopMs = Math.max(0, Math.round(performance.now() - stopStartedAtMs));
         recordSupervisorEventFallbackLocally({
@@ -1510,7 +1517,8 @@ async function requestTransactionalWorkbenchClose(
         elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
       }
     });
-    await provider.approveWorkbenchCloseOnce();
+    await provider.approveWorkbenchCloseOnce(fastCloseTiming
+      ? { deadlineAt: requestedAt + WORKBENCH_CLOSE_TOTAL_WAIT_MS } : {});
   });
 }
 
@@ -3494,63 +3502,21 @@ async function orchestrateLauncherLifecycle(
   let frontendCheckedForReuse = false;
   let shellStale = false;
 
-  if (startsWorkbench) {
-    // A live backend can bypass the mutation, so verify its release here.
-    // Cold starts and restarts verify inside the queued mutation instead,
-    // keeping one full fingerprint scan at the actual startup boundary.
-    if (supervisedOperation === "start" && windowProvider !== null
-      && await mainLineBackendIsReachable(paths.workspaceRoot)) {
-      const frontend = await runWithFrontendBuildGate(
-        "main",
-        { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
-        () => ensureFrontendRelease({
-          workspaceRoot: paths.workspaceRoot,
-          pythonPath,
-          signal
-        })
-      );
-      frontendReleaseChanged = !frontend.skipped;
-      frontendCheckedForReuse = true;
-    }
-    if (!app.isPackaged) {
-      try {
-        const shell = await inspectUnpackagedShell({
-          workspaceRoot: paths.workspaceRoot,
-          pythonPath
-        });
-        shellStale = shell.stale && shell.reason !== "missing_binary";
-      } catch (error: unknown) {
-        console.warn(error instanceof Error ? error.message : String(error));
-      }
-    }
-  }
-
+  // Claim cancellation before frontend preflight: a close must also supersede
+  // a build that has not reached the serialized backend mutation yet.
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
   const stopJoinDecision = joinDecisionForLauncherLifecycleStop(operation, provenance);
   if (stopJoinDecision.waitForInFlightRestart) {
-    // A window-level stop must not abort an in-flight restart or
-    // rebuild-and-start; wait for the mutation to settle first, then stop the
-    // (restarted) backend.
     await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS, signal);
   }
   signal?.throwIfAborted();
   const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
-    {
-      instanceId: "main",
-      operation: lifecycleOperation,
-      desiredState
-    },
+    { instanceId: "main", operation: lifecycleOperation, desiredState },
     { joinInFlightRestart: stopJoinDecision.joinInFlightRestart }
   );
   if (begunIntent.outcome === "joined-in-flight-restart") {
-    // A forwarded stop never aborts an in-flight restart or rebuild-and-start;
-    // report it as accepted so the forwarding side settles without a failure,
-    // while the running mutation keeps going to completion.
     return {
-      schemaVersion: 1,
-      accepted: true,
-      operation,
-      commandId: randomUUID(),
+      schemaVersion: 1, accepted: true, operation, commandId: randomUUID(),
       code: "joined_in_flight_restart",
       message: "在途 Launcher restart/rebuild-and-start 正在执行；本次转发的 stop 未中断它。"
     };
@@ -3559,6 +3525,46 @@ async function orchestrateLauncherLifecycle(
   const lifecycleSignal = signal
     ? AbortSignal.any([signal, intentLease.signal])
     : intentLease.signal;
+
+  try {
+    if (startsWorkbench) {
+      // A live backend can bypass the mutation, so verify its release here.
+      // Cold starts and restarts verify inside the queued mutation instead,
+      // keeping one full fingerprint scan at the actual startup boundary.
+      if (supervisedOperation === "start" && windowProvider !== null
+        && await mainLineBackendIsReachable(paths.workspaceRoot)) {
+        const frontend = await runWithFrontendBuildGate(
+          "main",
+          { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
+          () => ensureFrontendRelease({
+            workspaceRoot: paths.workspaceRoot,
+            pythonPath,
+            signal: lifecycleSignal
+          })
+        );
+        frontendReleaseChanged = !frontend.skipped;
+        frontendCheckedForReuse = true;
+      }
+      lifecycleSignal.throwIfAborted();
+      if (!app.isPackaged) {
+        try {
+          const shell = await inspectUnpackagedShell({
+            workspaceRoot: paths.workspaceRoot,
+            pythonPath,
+            signal: lifecycleSignal
+          });
+          shellStale = shell.stale && shell.reason !== "missing_binary";
+        } catch (error: unknown) {
+          console.warn(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    lifecycleSignal.throwIfAborted();
+  } catch (error: unknown) {
+    launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+    throw error;
+  }
   if (supervisedOperation === "start" && windowProvider !== null) {
     // Advisory packaged staleness (the sealed frontend hash differs, but the
     // shell is still usable) must not turn "open the workbench" into a restart.

@@ -13,6 +13,7 @@ import type { Readable } from "node:stream";
 
 import { BoundedStdioSink, type BoundedStdioStatus } from "./boundedStdio.js";
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
+import { runOwnedFrontendBuildBridge } from "./ownedFrontendBuildBridge.js";
 import {
   PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   createPythonOwnedProcessTreeTerminator,
@@ -36,7 +37,7 @@ import {
   type WorkbenchPortOwnerResolution
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
-import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
+import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, getTrackedWorkbenchJobPid, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
 import { closeOwnedWorkbenchFast } from "./fastWorkbenchClose.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
@@ -677,6 +678,7 @@ export async function classifyWorkbenchPortOccupant(input: {
    */
   resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
 }): Promise<WorkbenchPortOccupant> {
+  input.signal?.throwIfAborted();
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const port = Math.trunc(input.port);
   const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
@@ -696,6 +698,7 @@ export async function classifyWorkbenchPortOccupant(input: {
       const response = await fetchHealth(workbenchHealthUrl(port, host));
       if (response.status === 200 && typeof response.json === "function") {
         const parsed: unknown = await response.json();
+        input.signal?.throwIfAborted();
         if (isRecord(parsed)) {
           body = parsed;
           break;
@@ -709,6 +712,7 @@ export async function classifyWorkbenchPortOccupant(input: {
       await new Promise<void>((resolve) => setTimeout(resolve, OCCUPANT_HEALTH_PROBE_RETRY_MS));
     }
   }
+  input.signal?.throwIfAborted();
   if (
     body === null
     || body.status !== "ok"
@@ -728,6 +732,7 @@ export async function classifyWorkbenchPortOccupant(input: {
       } catch {
         owner = null;
       }
+      input.signal?.throwIfAborted();
       if (
         owner
         && owner.pid > 0
@@ -785,6 +790,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
   verifiedPid?: number;
   activeWorkBlocked?: boolean;
 }> {
+  input.signal?.throwIfAborted();
   const port = Math.trunc(input.port);
   if (!Number.isFinite(port) || port <= 0) {
     const pidAlive = input.pidAlive ?? knownPidIsAlive;
@@ -795,6 +801,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
       .map((pid) => Math.trunc(Number(pid)))
       .filter((pid) => Number.isFinite(pid) && pid > 0))];
     for (const pid of extraPids) {
+      input.signal?.throwIfAborted();
       if (terminateProcessTree) {
         const expectedIdentity = input.expectedIdentities?.[String(pid)];
         if (!expectedIdentity || !(await terminateProcessTree(pid, expectedIdentity))) {
@@ -819,9 +826,11 @@ export async function reclaimStaleWorkbenchBackend(input: {
     ...(input.expectedIdentities ?? {})
   };
   const occupant = await classifyWorkbenchPortOccupant(input);
+  input.signal?.throwIfAborted();
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
   const terminateOne = async (pid: number): Promise<boolean> => {
+    input.signal?.throwIfAborted();
     const finishLogDrain = async (): Promise<boolean> => {
       const drained = await waitForWorkbenchBackendLogDrain(input.workspaceRoot, pid);
       if (!drained) failedTreePids.add(pid);
@@ -832,6 +841,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         return await finishLogDrain();
       }
     }
+    input.signal?.throwIfAborted();
     if (input.terminateProcessTree) {
       const expectedIdentity = expectedIdentities[String(pid)];
       // The project classifier is not a substitute for pid/create-time/exe
@@ -955,10 +965,12 @@ export async function reclaimStaleWorkbenchBackend(input: {
         now: input.now,
         delay: input.delay
       });
+      input.signal?.throwIfAborted();
       gracefulCompleted = graceful.completed;
       if (gracefulCompleted) {
         const ownedJob = hasTrackedWorkbenchJob(input.workspaceRoot);
         const jobClosed = await closeTrackedWorkbenchJob(input.workspaceRoot);
+        input.signal?.throwIfAborted();
         if ((ownedJob && !jobClosed) || !(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, occupant.pid))) {
           return {
             reclaimed: false,
@@ -998,6 +1010,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
       // kind-checked tree terminator make the final call.
       if (!expectedIdentities[String(occupant.pid)] && input.captureProcessIdentity) {
         const captured = await input.captureProcessIdentity(occupant.pid);
+        input.signal?.throwIfAborted();
         if (
           captured
           && Math.trunc(Number(captured.pid)) === occupant.pid
@@ -1113,6 +1126,7 @@ export async function resolveBindableWorkbenchPort(input: {
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
 }): Promise<{ port: number; note: string }> {
+  input.signal?.throwIfAborted();
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const connect = input.connect ?? ((port, nextHost) => probeTcpConnect(port, nextHost));
   const preferred = Math.trunc(input.preferred) > 0 ? Math.trunc(input.preferred) : DEFAULT_WORKBENCH_PORT;
@@ -1122,6 +1136,7 @@ export async function resolveBindableWorkbenchPort(input: {
   // Never silently drift to a new port: identify the occupier first. A stale
   // backend of this project is reclaimed; anything unidentifiable fails loud.
   const occupant = await classifyWorkbenchPortOccupant({ ...input, port: preferred, host });
+  input.signal?.throwIfAborted();
   if (occupant.kind === "free") {
     // The occupier released the port between the connect probe and the
     // classification; the preferred port is bindable again.
@@ -1208,30 +1223,35 @@ export async function ensureFrontendRelease(input: {
       }
     }
   };
-  const raw = await runBridge({
-    pythonPath: input.pythonPath,
-    args: [
-      join(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
-      "--action",
-      "ensure-frontend-build",
-      "--workspace",
-      input.workspaceRoot,
-      "--output",
-      "json"
-    ],
-    cwd: input.workspaceRoot,
-    failureLabel: "frontend build preflight",
-    timeoutMs: PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
-    signal: input.signal,
-    killPolicy: "owned-tree",
-    mutation: true,
-    terminateOwnedTree,
-    captureChildIdentity: (pid) => capturePythonProcessIdentity({
-      pythonPath: input.pythonPath,
-      workspaceRoot: input.workspaceRoot,
-      pid
+  const args = [
+    join(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+    "--action",
+    "ensure-frontend-build",
+    "--workspace",
+    input.workspaceRoot,
+    "--output",
+    "json"
+  ];
+  const raw = process.platform === "win32" && !input.runBridge && !input.terminateProcessTree
+    ? await runOwnedFrontendBuildBridge({
+      workspaceRoot: input.workspaceRoot, pythonPath: input.pythonPath, args, signal: input.signal
     })
-  });
+    : await runBridge({
+      pythonPath: input.pythonPath,
+      args,
+      cwd: input.workspaceRoot,
+      failureLabel: "frontend build preflight",
+      timeoutMs: PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+      signal: input.signal,
+      killPolicy: "owned-tree",
+      mutation: true,
+      terminateOwnedTree,
+      captureChildIdentity: (pid) => capturePythonProcessIdentity({
+        pythonPath: input.pythonPath,
+        workspaceRoot: input.workspaceRoot,
+        pid
+      })
+    });
   const payload = parsePythonJsonBridgePayload<{
     ok?: unknown;
     reason?: unknown;
@@ -1441,7 +1461,11 @@ export async function executeMainLineWorkbench(
   const fileExists = input.fileExists ?? existsSync;
   const statePath = launcherStatePath(input.workspaceRoot);
   const readState = input.readState ?? (() => readLauncherStateFile(statePath));
-  const writeState = input.writeState ?? ((state) => writeLauncherStateFile(statePath, state));
+  const persistState = input.writeState ?? ((state: WorkbenchBackendState) => writeLauncherStateFile(statePath, state));
+  const writeState = (state: WorkbenchBackendState): void => {
+    input.signal?.throwIfAborted();
+    persistState(state);
+  };
   const host = DEFAULT_WORKBENCH_HOST;
   const operation = input.operation;
   const commandId = input.command.commandId;
@@ -1500,7 +1524,8 @@ export async function executeMainLineWorkbench(
       const retired = await closeOwnedWorkbenchFast({
         workspaceRoot: input.workspaceRoot,
         port,
-        spawnPid: Number(previous.spawnPid || previous.backendLaunchPid || 0),
+        spawnPid: getTrackedWorkbenchJobPid(input.workspaceRoot)
+          || Number(previous.spawnPid || previous.backendLaunchPid || 0),
         ...input.fastCloseTiming,
         signal: input.signal,
         controlToken: input.controlToken
@@ -1549,6 +1574,7 @@ export async function executeMainLineWorkbench(
       pidAlive: input.pidAlive,
       connect: input.connect
     });
+    input.signal?.throwIfAborted();
     const reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
     const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
     const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
@@ -1748,6 +1774,7 @@ export async function executeMainLineWorkbench(
         : ""
     ].filter(Boolean);
     const lifecycleWarning = lifecycleWarnings.join("; ");
+    input.signal?.throwIfAborted();
     clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
     writeState({
       ...previous,
@@ -1810,7 +1837,7 @@ export async function executeMainLineWorkbench(
   const persistStartPreflightFailure = (error: unknown): void => {
     // The error is rethrown by every caller; a superseded intent settles
     // through the supervisor's superseded/ignored outcome instead of a state.
-    if (isSupersededLifecycleIntent(error, input.signal)) {
+    if (input.signal?.aborted || isSupersededLifecycleIntent(error, input.signal)) {
       return;
     }
     const detail = error instanceof Error ? error.message : String(error);
@@ -1838,6 +1865,7 @@ export async function executeMainLineWorkbench(
     persistStartPreflightFailure(error);
     throw error;
   }
+  input.signal?.throwIfAborted();
 
   const preferred = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
   const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
@@ -1876,6 +1904,7 @@ export async function executeMainLineWorkbench(
     pidAlive: input.pidAlive,
     connect: input.connect
   });
+  input.signal?.throwIfAborted();
   reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
   const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
   const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
@@ -1975,6 +2004,7 @@ export async function executeMainLineWorkbench(
     persistStartPreflightFailure(error);
     throw error;
   }
+  input.signal?.throwIfAborted();
   const spawned = spawnWorkbenchBackend({
     workspaceRoot: input.workspaceRoot,
     pythonPath: input.pythonPath,
@@ -1987,6 +2017,7 @@ export async function executeMainLineWorkbench(
   const retireOwnedJob = captureTrackedWorkbenchJobRetirement(input.workspaceRoot, spawnPid);
   let backendIdentity: PythonProcessIdentity | null = null;
   const persistUnretiredStart = (message: string): void => {
+    if (input.signal?.aborted) return;
     writeState({
       ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed",
@@ -2024,9 +2055,15 @@ export async function executeMainLineWorkbench(
     if (spawnPid <= 0) {
       return;
     }
-    if (retireOwnedJob && await retireOwnedJob()) {
-      await finishLogDrain();
-      return;
+    if (retireOwnedJob) {
+      // This cleanup belongs to the captured spawn, never a replacement Job.
+      // A stale capture must not fall back to retiring a workspace/PID again.
+      if (!retireOwnedJob.isCurrent()) return;
+      if (await retireOwnedJob()) {
+        await finishLogDrain();
+        return;
+      }
+      throw new Error(`workbench backend owned Job retirement was not verified for pid ${spawnPid}`);
     }
     if (terminateProcessTree) {
       if (!backendIdentity) {
@@ -2072,6 +2109,7 @@ export async function executeMainLineWorkbench(
       connect: input.connect,
       fetchHealth: input.fetchHealth
     });
+    input.signal?.throwIfAborted();
   } catch (error: unknown) {
     try {
       await retireSpawnedTree();
@@ -2083,6 +2121,7 @@ export async function executeMainLineWorkbench(
       persistUnretiredStart(message);
       throw new Error(`${error instanceof Error ? error.message : String(error)}; ${message}`);
     }
+    if (input.signal?.aborted) throw error;
     writeState({
       ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
       desiredState: "closed", observedState: "failed", phase: "failed",
@@ -2097,6 +2136,7 @@ export async function executeMainLineWorkbench(
     });
     throw error;
   }
+  input.signal?.throwIfAborted();
   writeState({
     ...previous,
     schemaVersion: 1,

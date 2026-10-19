@@ -106,10 +106,13 @@ async function recordCloseBackoffCoalescedEvent(
 }
 
 export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): Promise<WorkbenchLifecycleResult> {
+  if (input.signal?.aborted) {
+    throw new PythonJsonBridgeError("aborted", "workbench lifecycle was aborted before spawn");
+  }
   const runtimeManagerDir = resolveRuntimeManagerDir(input.workspaceRoot);
   const queue = input.queue ?? getSharedMainLineCommandQueue({
     persistIntent: (intent) => {
-      void writeMainLineIntent(runtimeManagerDir, intent).catch(() => undefined);
+      return writeMainLineIntent(runtimeManagerDir, intent).catch(() => undefined);
     },
     writeOwnerMarker: () => {
       void writeMainLineQueueOwnerMarker(runtimeManagerDir).catch(() => undefined);
@@ -128,6 +131,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
   );
   return queue.submit({
     operation: input.operation,
+    signal: input.signal,
     noBrowser: true,
     execute: async (command) => {
       if (input.signal?.aborted) {
@@ -172,6 +176,7 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
           captureProcessIdentity: input.captureProcessIdentity,
           resolvePortOwner: input.resolvePortOwner
         });
+        deadline.signal.throwIfAborted();
         // An executed lifecycle command fulfils or obsoletes every queued
         // restart request; only a re-queued restart (active work returned)
         // keeps its intent pending for the Electron fulfilment pass.

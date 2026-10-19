@@ -868,6 +868,71 @@ def test_unstructured_fallback_does_not_override_markers() -> None:
     assert fallback["disagreements"][0]["issue"] == "hyp-b 泛化不足"
 
 
+def test_llm_digest_merge_backfills_unstructured_entries_for_markerless_speeches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _r5_freeform_messages(2)
+    monkeypatch.setattr(
+        meeting_runtime.meeting_rounds,
+        "completed_meeting_source_messages",
+        lambda meeting_round: [dict(message) for message in messages],
+    )
+    draft = meeting_runtime.build_meeting_digest_draft(
+        {
+            "meetingRoundId": "mr-llm-freeform",
+            "meetingType": "hypothesis_review",
+            "agenda": ["评审入选候选"],
+            "discussionItemRefs": ["hypothesis_candidate:hyp-a"],
+            "participants": ["a", "b"],
+            "chatRoomRoundIds": ["round-r5"],
+        },
+        messages,
+        drafter=lambda meeting_round, source_messages: {
+            "summary": "LLM narrative summary",
+            "documentMarkdown": "narrative only, structured markers empty",
+        },
+    )
+    assert draft["agreements"]
+    assert all(
+        isinstance(item, dict) and item.get("derivedFrom") == "unstructured"
+        for item in draft["agreements"]
+    )
+    assert meetings.digest_draft_captured_discussion(draft)
+
+
+def test_llm_digest_merge_keeps_extracted_markers_over_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = [
+        {
+            "status": "completed",
+            "content": "AGREE: hyp-a 机制证据最完整",
+            "roomId": "room-1",
+            "roundId": "round-1",
+            "messageId": "msg-1",
+            "speakerTitle": "A001",
+        }
+    ]
+    monkeypatch.setattr(
+        meeting_runtime.meeting_rounds,
+        "completed_meeting_source_messages",
+        lambda meeting_round: [dict(message) for message in messages],
+    )
+    draft = meeting_runtime.build_meeting_digest_draft(
+        {
+            "meetingRoundId": "mr-llm-markers",
+            "meetingType": "hypothesis_review",
+            "agenda": [],
+            "discussionItemRefs": [],
+            "participants": ["a"],
+            "chatRoomRoundIds": ["round-1"],
+        },
+        messages,
+        drafter=lambda meeting_round, source_messages: {"summary": "LLM narrative"},
+    )
+    assert draft["agreements"] == ["hyp-a 机制证据最完整"]
+
+
 def test_structured_message_payload_is_the_digest_authority() -> None:
     evidence_request = _evidence_request_payload()
     messages = [
@@ -1229,7 +1294,7 @@ def test_prepare_summary_draft_persists_unstructured_entries(
         assert all(item.get("sourceMessageRefs") for item in agreements)
 
 
-def test_approve_empty_digest_with_completed_speech_raises(
+def test_approve_llm_digest_from_markerless_freeform_speeches_captures_discussion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
@@ -1296,14 +1361,19 @@ def test_approve_empty_digest_with_completed_speech_raises(
             force=False,
             drafter=_empty_drafter,
         )
-        assert drafted["digestDraft"]["agreements"] == []
-        with pytest.raises(ContractValidationError, match="纪要未捕获讨论内容"):
-            chain.approve_meeting_digest(
-                team_id,
-                meeting_id,
-                closed_by=agent_ids[0],
-                expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
-            )
+        agreements = drafted["digestDraft"]["agreements"]
+        assert agreements
+        assert all(
+            isinstance(item, dict) and item.get("derivedFrom") == "unstructured"
+            for item in agreements
+        )
+        approved = chain.approve_meeting_digest(
+            team_id,
+            meeting_id,
+            closed_by=agent_ids[0],
+            expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
+        )
+        assert approved["meetingRound"]["status"] == "closed"
 
 
 # ---------------------------------------------------------------------------

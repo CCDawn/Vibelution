@@ -2710,7 +2710,7 @@ def test_system_auto_draft_path_also_merges_deterministic_markers(tmp_path, monk
     assert draft["summary"] == "LLM 叙事：评审整体顺利，倾向 cand-a。"
 
 
-def test_llm_digest_with_empty_protocol_buckets_submits_legal_empty_buckets(
+def test_llm_digest_with_empty_protocol_buckets_backfills_unstructured_entries(
     tmp_path, monkeypatch
 ):
     def _freeform_runner(participant, prompt, context):
@@ -2726,9 +2726,16 @@ def test_llm_digest_with_empty_protocol_buckets_submits_legal_empty_buckets(
         tmp_path, monkeypatch, runner=_freeform_runner
     )
     draft = drafted["digestDraft"]
-    # Extraction is empty, so the hallucinated LLM markers are stripped and the
-    # submitted draft carries legal empty buckets instead.
-    assert draft["agreements"] == []
+    # Extraction is empty, so the hallucinated LLM markers are stripped. The
+    # unstructured fallback then keeps parity with the deterministic drafter:
+    # cited per-speech entries backfill agreements so the digest still
+    # captures the discussion, while every other bucket stays empty.
+    assert draft["agreements"]
+    assert all(
+        isinstance(item, dict) and item.get("derivedFrom") == "unstructured"
+        for item in draft["agreements"]
+    )
+    assert all(item.get("sourceMessageRefs") for item in draft["agreements"])
     assert draft["disagreements"] == []
     assert draft["risks"] == []
     assert draft["actionItems"] == []
