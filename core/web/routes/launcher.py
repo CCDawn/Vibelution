@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request
 
 from core.launcher.api_contract import (
@@ -98,7 +100,9 @@ def _workbench_close_transaction_response(operation):
     response_model=LauncherStatusResponse,
     response_model_exclude_unset=True,
 )
-def launcher_status() -> dict:
+def launcher_status(projection: Literal["full", "active-work"] = "full") -> dict:
+    if projection == "active-work":
+        return launcher_service.get_launcher_active_work_status()
     return launcher_service.get_launcher_status()
 
 

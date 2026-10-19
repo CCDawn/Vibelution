@@ -410,6 +410,16 @@ def migrate_launcher_branch_workspaces() -> dict[str, Any]:
     return migrate_legacy_branch_workspaces(PROJECT_ROOT)
 
 
+def get_launcher_active_work_status() -> dict[str, Any]:
+    """Read the canonical work guard without scanning diagnostic history."""
+    runs = launcher_active_work_runs()
+    return {"lifecycleProof": {"activeWorkRuns": {
+        "count": len(runs),
+        "kinds": sorted({item["kind"] for item in runs if item.get("kind")}),
+        "items": runs[:8],
+    }}}
+
+
 def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
