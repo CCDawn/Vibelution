@@ -337,6 +337,7 @@ class SessionDao:
         hidden_from_index: bool = False,
         team_id: str = "",
         last_preview: str = "",
+        archived: bool = False,
     ) -> dict[str, Any]:
         now_ms = _now_ms()
         preview = _bounded_preview(last_preview)
@@ -348,8 +349,8 @@ class SessionDao:
               recency_at_ms, updated_at_ms, created_at_ms,
               session_kind, session_role, conversation_index_kind,
               conversation_index_visibility, hidden_from_index, team_id,
-              last_preview, last_preview_at_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              last_preview, last_preview_at_ms, archived_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -369,6 +370,7 @@ class SessionDao:
                 str(team_id or "").strip(),
                 preview,
                 now_ms if preview else None,
+                now_ms if archived else None,
             ),
         )
         return {"sessionId": session_id, "agentId": agent_id}
@@ -401,6 +403,7 @@ class SessionDao:
         team_id: str = "",
         last_preview: str = "",
         touch_recency: bool = True,
+        archived: bool = False,
     ) -> dict[str, Any]:
         existing = self._connection.execute(
             f"SELECT {_DIRECTORY_SESSION_COLUMNS} FROM sessions WHERE session_id=?",
@@ -421,6 +424,7 @@ class SessionDao:
                 hidden_from_index=hidden_from_index,
                 team_id=team_id,
                 last_preview=last_preview,
+                archived=archived,
             )
             return {"sessionId": session_id, "agentId": agent_id, "action": "created"}
         if str(existing["agent_id"]) != str(agent_id).strip():
@@ -429,6 +433,14 @@ class SessionDao:
         preview = _bounded_preview(last_preview)
         recency_at_ms = now_ms if touch_recency else int(existing["recency_at_ms"])
         preview_at = now_ms if preview else existing["last_preview_at_ms"]
+        # archived=True keeps the earliest seal (COALESCE-style: an already
+        # sealed row keeps its original archived_at_ms); archived=False clears
+        # the seal. Deriving this from the payload archive_state on every sync
+        # is what keeps agent-archived rows sealed even when an unrelated
+        # upsert re-syncs them.
+        archived_at_ms = (
+            int(existing["archived_at_ms"] or now_ms) if archived else None
+        )
         self._connection.execute(
             """
             UPDATE sessions
@@ -436,7 +448,7 @@ class SessionDao:
                 session_kind=?, session_role=?, conversation_index_kind=?,
                 conversation_index_visibility=?, hidden_from_index=?, team_id=?,
                 last_preview=?, last_preview_at_ms=?, recency_at_ms=?,
-                updated_at_ms=?, archived_at_ms=NULL
+                updated_at_ms=?, archived_at_ms=?
             WHERE session_id=?
             """,
             (
@@ -453,6 +465,7 @@ class SessionDao:
                 preview_at,
                 recency_at_ms,
                 now_ms,
+                archived_at_ms,
                 session_id,
             ),
         )

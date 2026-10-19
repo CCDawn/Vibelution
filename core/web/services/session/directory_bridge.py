@@ -512,6 +512,7 @@ def sync_conversation_record(
             team_id=str(conversation.get("team_id") or conversation.get("teamId") or "").strip(),
             last_preview=str(last_preview or ""),
             touch_recency=touch_recency,
+            archived=_directory_archived_from_payload(conversation),
         )
         if wait:
             future.result(timeout=_SYNC_TIMEOUT_SECONDS)
@@ -631,6 +632,20 @@ def _ensure_agent_revision(store: Any, agent_id: str) -> str:
     if not snapshots:
         raise ValueError("Session directory Agent snapshot import returned no revision.")
     return str(snapshots[0]["configRevisionId"])
+
+
+def _directory_archived_from_payload(conversation: Mapping[str, Any]) -> bool:
+    """Derive the directory seal from the payload archive_state.
+
+    Every directory sync re-derives archived from the authoritative payload,
+    so an unrelated upsert can no longer silently unseal an archived session
+    (the historical agent_archive bug: payload sealed, directory row live).
+    """
+
+    raw = conversation.get("archive_state") or conversation.get("archiveState")
+    if not isinstance(raw, Mapping):
+        return False
+    return str(raw.get("status") or "").strip().lower() == "archived"
 
 
 def _directory_hidden_from_index(conversation: Mapping[str, Any]) -> bool:
