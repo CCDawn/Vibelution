@@ -161,6 +161,7 @@ import { createConversationTimelineItems } from "./conversationTimelineItems";
 import { createConversationTimelineRows } from "./conversationTimelineRows";
 import { useComputerUseResults } from "./useComputerUseResults";
 import { useConversationComposer } from "./useConversationComposer";
+import { useConversationCopyAnswerFeedback } from "./useConversationCopyAnswerFeedback";
 import { useConversationFind } from "./useConversationFind";
 import { useConversationForkSession } from "./useConversationForkSession";
 import { useConversationSelectionQuote } from "./useConversationSelectionQuote";
@@ -440,8 +441,9 @@ export const ConversationView = React.memo(function ConversationView({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
-  const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
-  const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
+  const { copiedAnswerMessageId, handleCopyAnswer } = useConversationCopyAnswerFeedback({
+    copyText: copyTextToClipboard,
+  });
   // In-chat SFT curation: server map + optimistic overlay for instant button
   // feedback; a failed POST rolls the overlay entry back (ZCode like/dislike
   // rollback pattern) and the 409 copy surfaces briefly on the button title.
@@ -1058,12 +1060,6 @@ export const ConversationView = React.memo(function ConversationView({
 
 
 
-  useEffect(() => () => {
-    if (copyAnswerFeedbackTimerRef.current !== null) {
-      window.clearTimeout(copyAnswerFeedbackTimerRef.current);
-    }
-  }, []);
-
   useEffect(() => {
     if (!streamingTimelineScrollSignal || !onStreamingFramePaint) {
       return;
@@ -1188,23 +1184,6 @@ export const ConversationView = React.memo(function ConversationView({
     feedbackTimelineGroups,
     renderFeedbackTimelineDetails,
   });
-
-  function handleCopyAnswer(messageId: string, text: string) {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return;
-    }
-    void copyTextToClipboard(trimmed).then(() => {
-      setCopiedAnswerMessageId(messageId);
-      if (copyAnswerFeedbackTimerRef.current !== null) {
-        window.clearTimeout(copyAnswerFeedbackTimerRef.current);
-      }
-      copyAnswerFeedbackTimerRef.current = window.setTimeout(() => {
-        copyAnswerFeedbackTimerRef.current = null;
-        setCopiedAnswerMessageId((current) => (current === messageId ? "" : current));
-      }, 1600);
-    }).catch(() => undefined);
-  }
 
   /** Bounded visible feedback for a rejected curation click (~3s on the title). */
   function showCurationFeedback(messageId: string, action: SessionMessageCurationAction, message: string) {
