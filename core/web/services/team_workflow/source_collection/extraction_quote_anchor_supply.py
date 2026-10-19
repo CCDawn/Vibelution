@@ -166,6 +166,8 @@ def source_quotable_blocks(
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
 ) -> list[dict[str, Any]]:
     """Bind a source locator to original text from this task's fetch receipts."""
+    from .doi_enrichment import source_metadata_doi
+
     records = [source]
     metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
     linked_id = _clean(metadata.get("sourceRecordId"))
@@ -192,9 +194,21 @@ def source_quotable_blocks(
     blocks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for record in records:
-        for key in ("sourceUrl", "sourceRef", "rawLocation"):
+        locator_keys = [_clean(record.get(key)) for key in ("sourceUrl", "sourceRef", "rawLocation")]
+        # SCI-021: a candidate enriched with ``metadata.doi`` must bind a
+        # receipt fetched through its ``https://doi.org/<doi>`` form — the
+        # publisher 403 hint reroutes exactly there, and the EuropePMC mirror
+        # fallback answers inside that same tool call.  The DOI locator emits
+        # the ``doi:<doi>`` bridge key on the candidate side, matching the
+        # doi.org receipt (or any publisher-mirror URL ending in the DOI).
+        record_doi = source_metadata_doi(record)
+        if record_doi:
+            doi_locator = f"https://doi.org/{record_doi}"
+            if doi_locator not in locator_keys:
+                locator_keys.append(doi_locator)
+        for key in locator_keys:
             receipt = None
-            for candidate_key in _normalized_locator_keys(record.get(key)):
+            for candidate_key in _normalized_locator_keys(key):
                 receipt = fetched_by_key.get(candidate_key)
                 if receipt:
                     break
@@ -348,6 +362,8 @@ def _quotable_source_entry(
     fetch_failure: Mapping[str, Any] | None,
     budget_left: int,
 ) -> dict[str, Any]:
+    from .doi_enrichment import source_metadata_doi
+
     kept_blocks: list[dict[str, Any]] = []
     omitted = False
     for block in blocks:
@@ -364,6 +380,20 @@ def _quotable_source_entry(
             break
         kept_blocks.append(block)
         budget_left -= len(text)
+    # Fetchable locator surface (SCI-021): the original URL stays first and a
+    # known DOI additionally surfaces as its fetchable ``https://doi.org/``
+    # form, so the agent can follow the 403 hint onto the DOI link (whose
+    # EuropePMC mirror fallback answers inside the same tool call).
+    locators: list[str] = []
+    for key in ("sourceUrl", "sourceRef", "rawLocation"):
+        value = _clean(source.get(key))
+        if value.startswith(("http://", "https://")) and value not in locators:
+            locators.append(value[:1000])
+    doi = source_metadata_doi(source)
+    if doi:
+        doi_link = f"https://doi.org/{doi}"[:1000]
+        if doi_link not in locators:
+            locators.append(doi_link)
     entry: dict[str, Any] = {
         "sourceId": source_id,
         "sourceKind": source_kind,
@@ -373,6 +403,10 @@ def _quotable_source_entry(
         "blockOrigin": kept_blocks[0]["origin"] if kept_blocks else "",
         "sourceAccess": source_access_marker(blocks, fetch_failure=fetch_failure),
     }
+    if doi:
+        entry["doi"] = doi[:240]
+    if locators:
+        entry["locators"] = locators
     if omitted:
         entry["blockOmitted"] = "budget_exhausted"
     # ``blocks`` stays explicit even when empty: "no quotable text" is a

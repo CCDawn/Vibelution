@@ -164,6 +164,21 @@ def test_extraction_contract_states_nested_findings_carry_fact_themselves() -> N
     assert "`limitations`（字符串数组" in prompt
 
 
+def test_extraction_contract_teaches_honest_exclusion_over_blocking_skip() -> None:
+    # 生产实锤（SCI-021）：OUP 非 OA / dbbs 学位论文登录墙是真不可得，
+    # agent 照教条保留 missing_evidence_anchor → completed 永远降级
+    # needs_review → 产物永不物化。契约必须教非必需来源用 decision=exclude
+    # 诚实剔除，仅结论必需时才保留 missing_evidence_anchor 申请复审。
+    prompt = "\n".join(stage_writeback_prompt_lines("extraction"))
+
+    assert "多轮抓取" in prompt
+    assert "DOI 链接改道" in prompt
+    assert "`decision=exclude`" in prompt
+    assert "付费墙/登录墙/无 DOI 元数据" in prompt
+    assert "不要保留 `evidenceStatus=missing_evidence_anchor` 阻塞整批" in prompt
+    assert "仅当缺少该来源结论不成立" in prompt
+
+
 def test_unknown_stage_has_no_extra_writeback_contract() -> None:
     assert stage_writeback_prompt_lines("unknown") == []
 
