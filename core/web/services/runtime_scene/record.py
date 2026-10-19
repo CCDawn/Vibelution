@@ -2897,6 +2897,42 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_HUMAN_ATTENTION_INVALID_EVENT_CODE = "electron.human_attention_notification.invalid"
+
+_HUMAN_ATTENTION_INVALID_DELIVERED_VALUE = "invalid_payload"
+
+
+def _report_human_attention_delivery_failure_from_supervisor_event(
+    *,
+    message: str,
+    fields: dict[str, Any] | None,
+) -> None:
+    """Shell-side proxy write: invalid human-attention deliveries are reported
+    to the personal-assistant inbox in-process (no HTTP hop). The renderer
+    channel reports its own failures; this covers the shell's invalid_payload
+    results and payload-validation rejections, whose fields may lack id/kind.
+    Never raises — the supervisor event path must not be affected."""
+
+    try:
+
+        from core.web.services import personal_attention_service
+
+        row = fields if isinstance(fields, dict) else {}
+
+        personal_attention_service.report_attention_delivery_failure(
+            id=str(row.get("id") or "").strip(),
+            kind=str(row.get("kind") or "").strip(),
+            severity=str(row.get("severity") or "").strip(),
+            stage="shell",
+            reason=str(row.get("reason") or message or "").strip(),
+            title=str(row.get("title") or "").strip(),
+        )
+
+    except Exception:  # noqa: BLE001 - proxy reporting must never break recording
+
+        pass
+
+
 def record_electron_supervisor_event(
     event_code: str,
     *,
@@ -2910,7 +2946,7 @@ def record_electron_supervisor_event(
     event_name = str(event_code or "").strip()
     if event_name not in s.ELECTRON_SUPERVISOR_EVENT_CODES:
         raise ValueError(f"unsupported electron supervisor event: {event_name}")
-    return s.record_runtime_scene_event(
+    result = s.record_runtime_scene_event(
         "electron_launcher",
         "desktop_supervisor",
         event_name,
@@ -2921,6 +2957,18 @@ def record_electron_supervisor_event(
         occurred_at=occurred_at,
         lifecycle=True,
     )
+    if isinstance(result, dict) and result.get("accepted") is not False:
+        is_invalid = (
+            event_name == _HUMAN_ATTENTION_INVALID_EVENT_CODE
+            or str((fields or {}).get("delivered") or "").strip()
+            == _HUMAN_ATTENTION_INVALID_DELIVERED_VALUE
+        )
+        if is_invalid:
+            _report_human_attention_delivery_failure_from_supervisor_event(
+                message=message,
+                fields=fields,
+            )
+    return result
 
 
 def record_research_scene_event(

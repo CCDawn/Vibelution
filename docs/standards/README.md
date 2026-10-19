@@ -51,7 +51,7 @@
 
 ## development-standard 章节跳转卡（R21）
 
-**全文约 1386 行（`wc -l` 实测）— 禁止默认通读。** 先在本表命中任务类型，只打开对应 §；仍不够再下钻链接列。
+**全文约 1369 行（`wc -l` 实测）— 禁止默认通读。** 先在本表命中任务类型，只打开对应 §；仍不够再下钻链接列。
 
 | 任务类型 | 先读 § | 常见下钻 |
 | --- | --- | --- |
@@ -72,8 +72,8 @@
 | **删除 / 归档 / Reset** | §23.9 | `memory_cleanup` 触面时 + reset 相关测试 |
 | **Agent / Session / Chat 生命周期** | §23.2 · §18 | `conversation-flow-map.md` |
 | **Runtime scene 证据** | §23.3 · §5 | `core/logging/README.md` |
-| **Teams / SC / 研究流** | §20 · §20.1 | teams README · `team_workflow/README.md` |
-| **Gym / 进化** | §20 | ADR0001 · `evolution_services.md` |
+| **Teams / SC / 研究流** | — | teams README · `team_workflow/README.md`（历史流程站点规则已归档：[archive/guides/reproduce-challenge-cup.md](../archive/guides/reproduce-challenge-cup.md)） |
+| **Gym / 进化** | — | ADR0001 · `evolution_services.md` |
 | **测试策略** | §11 | `tests/README.md` · `tests/test_matrix.yaml` |
 | **Git / 合入 / remote** | §13 · §14 · §16 | 根 `AGENTS.md` §2 合入门 |
 | **版本 / 发布** | §15 | §12 refresh 决策 |

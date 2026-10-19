@@ -13,8 +13,6 @@
 | [0009](0009-launcher-control-plane-lives-in-electron-main.md) | Launcher 控制面落在 Electron 主进程（TS + IPC），工作台仍是 Python | Accepted |
 | [0010](0010-chat-route-is-window-local-authority.md) | Chat 当前页面/会话/群聊由窗口内 committed Router URL 单一权威；后端 pointer 降级为 last-viewed hint | Accepted |
 
-0006 / 0007 为挑战杯私密规划文档，不进入 GitHub。本地副本见桌面 `挑战杯/03-工程合同/`。
-
 ## 写法
 
 - 一决策一文；写 Context / Decision / Consequences。

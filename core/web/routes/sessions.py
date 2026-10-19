@@ -704,8 +704,6 @@ def session_budget_parameters_update(
     field_kwargs = {}
     if "maxCallsPerTurn" in provided:
         field_kwargs["max_calls_per_turn"] = provided["maxCallsPerTurn"]
-    if "thinkingBudgetChars" in provided:
-        field_kwargs["thinking_budget_chars"] = provided["thinkingBudgetChars"]
     try:
         return update_session_budget_parameters(
             session_id,
