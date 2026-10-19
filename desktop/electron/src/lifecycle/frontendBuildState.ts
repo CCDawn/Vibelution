@@ -23,10 +23,10 @@ function normalizeInstanceId(instanceId: string): string {
   return String(instanceId || "").trim();
 }
 
-export function beginFrontendBuild(instanceId: string, operation = ""): FrontendBuildMarker {
+export function beginFrontendBuild(instanceId: string, operation = "", replaceCurrent = false): FrontendBuildMarker {
   const id = normalizeInstanceId(instanceId);
   const existing = markers.get(id);
-  if (existing) {
+  if (existing && !replaceCurrent) {
     return existing;
   }
   const marker: FrontendBuildMarker = {
@@ -38,8 +38,9 @@ export function beginFrontendBuild(instanceId: string, operation = ""): Frontend
   return marker;
 }
 
-export function endFrontendBuild(instanceId: string): void {
-  markers.delete(normalizeInstanceId(instanceId));
+export function endFrontendBuild(instanceId: string, expected?: FrontendBuildMarker): void {
+  const id = normalizeInstanceId(instanceId);
+  if (!expected || markers.get(id) === expected) markers.delete(id);
 }
 
 export function peekFrontendBuild(instanceId: string): boolean {
@@ -70,12 +71,12 @@ export async function runWithFrontendBuildGate<T>(
   options: { operation?: string; notify?: () => void },
   run: () => Promise<T>
 ): Promise<T> {
-  beginFrontendBuild(instanceId, options.operation);
+  const marker = beginFrontendBuild(instanceId, options.operation, true);
   options.notify?.();
   try {
     return await run();
   } finally {
-    endFrontendBuild(instanceId);
+    endFrontendBuild(instanceId, marker);
     options.notify?.();
   }
 }

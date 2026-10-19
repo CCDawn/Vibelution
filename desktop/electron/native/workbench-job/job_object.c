@@ -34,6 +34,7 @@ typedef struct DrainState {
 
 typedef struct JobBox {
   HANDLE job;
+  HANDLE root_process;
   DrainState *stdout_drain;
   DrainState *stderr_drain;
 } JobBox;
@@ -397,6 +398,10 @@ static void job_box_destroy(JobBox *box) {
     CloseHandle(box->job);
     box->job = NULL;
   }
+  if (box->root_process != NULL) {
+    CloseHandle(box->root_process);
+    box->root_process = NULL;
+  }
   release_drain_owner(&box->stdout_drain, 1);
   release_drain_owner(&box->stderr_drain, 1);
   free(box);
@@ -742,6 +747,7 @@ static napi_value spawn(napi_env env, napi_callback_info info) {
   SECURITY_ATTRIBUTES pipe_security;
   ULONGLONG max_log_bytes;
   DWORD creation_flags;
+  bool contain_descendants = false;
   ZeroMemory(&startup, sizeof(startup));
   ZeroMemory(&process, sizeof(process));
   napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
@@ -763,6 +769,16 @@ static napi_value spawn(napi_env env, napi_callback_info info) {
   }
   max_log_bytes = optional_log_max_bytes(env, argv[0]);
   if (max_log_bytes == 0) goto cleanup_inputs;
+  {
+    napi_value value;
+    bool present = false;
+    if (napi_has_named_property(env, argv[0], "containDescendants", &present) != napi_ok
+        || (present && (napi_get_named_property(env, argv[0], "containDescendants", &value) != napi_ok
+          || napi_get_value_bool(env, value, &contain_descendants) != napi_ok))) {
+      napi_throw_type_error(env, NULL, "containDescendants must be a boolean");
+      goto cleanup_inputs;
+    }
+  }
   executable = utf8_to_wide(env, executable_utf8);
   cwd = utf8_to_wide(env, cwd_utf8);
   stdout_path = utf8_to_wide(env, stdout_utf8);
@@ -783,7 +799,7 @@ static napi_value spawn(napi_env env, napi_callback_info info) {
   }
   ZeroMemory(&limits, sizeof(limits));
   limits.BasicLimitInformation.LimitFlags =
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | (contain_descendants ? 0 : JOB_OBJECT_LIMIT_BREAKAWAY_OK);
   if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
     throw_win(env, "SetInformationJobObject");
     goto cleanup_job;
@@ -912,7 +928,8 @@ static napi_value spawn(napi_env env, napi_callback_info info) {
     goto cleanup_box;
   }
   CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
+  /* Preserve the exact root identity after exit; never reopen by reusable PID. */
+  box->root_process = process.hProcess;
   DeleteProcThreadAttributeList(startup.lpAttributeList);
   free(startup.lpAttributeList);
   startup.lpAttributeList = NULL;
@@ -1019,6 +1036,39 @@ static napi_value active_count(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value exit_code(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_value result;
+  JobBox *box;
+  DWORD wait_result;
+  DWORD code;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc < 1) {
+    napi_throw_type_error(env, NULL, "workbench job handle is required");
+    return NULL;
+  }
+  box = unwrap_job(env, argv[0]);
+  if (box == NULL) return NULL;
+  if (box->root_process == NULL) {
+    napi_throw_error(env, NULL, "workbench root process handle is unavailable");
+    return NULL;
+  }
+  wait_result = WaitForSingleObject(box->root_process, 0);
+  if (wait_result == WAIT_TIMEOUT) {
+    napi_get_null(env, &result);
+    return result;
+  }
+  if (wait_result == WAIT_FAILED) return throw_win(env, "WaitForSingleObject(root process)");
+  if (wait_result != WAIT_OBJECT_0) {
+    napi_throw_error(env, NULL, "workbench root process wait returned an unexpected status");
+    return NULL;
+  }
+  if (!GetExitCodeProcess(box->root_process, &code)) return throw_win(env, "GetExitCodeProcess");
+  napi_create_uint32(env, code, &result);
+  return result;
+}
+
 static int query_active_processes(JobBox *box, DWORD *count) {
   JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
   ZeroMemory(&accounting, sizeof(accounting));
@@ -1108,6 +1158,10 @@ static napi_value close_job(napi_env env, napi_callback_info info) {
     napi_throw_error(env, NULL, "workbench job cannot close until processes and stdout/stderr drains exit");
     return NULL;
   }
+  if (box->root_process != NULL) {
+    if (!CloseHandle(box->root_process)) return throw_win(env, "CloseHandle(root process)");
+    box->root_process = NULL;
+  }
   if (!CloseHandle(box->job)) {
     return throw_win(env, "CloseHandle(job)");
   }
@@ -1126,6 +1180,8 @@ static napi_value init(napi_env env, napi_value exports) {
   napi_set_named_property(env, exports, "terminate", fn);
   napi_create_function(env, "activeCount", NAPI_AUTO_LENGTH, active_count, NULL, &fn);
   napi_set_named_property(env, exports, "activeCount", fn);
+  napi_create_function(env, "exitCode", NAPI_AUTO_LENGTH, exit_code, NULL, &fn);
+  napi_set_named_property(env, exports, "exitCode", fn);
   napi_create_function(env, "drainStatus", NAPI_AUTO_LENGTH, drain_status, NULL, &fn);
   napi_set_named_property(env, exports, "drainStatus", fn);
   napi_create_function(env, "close", NAPI_AUTO_LENGTH, close_job, NULL, &fn);

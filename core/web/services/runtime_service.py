@@ -543,6 +543,10 @@ def request_runtime_shutdown(
         and not stop_manager
     )
     if user_retire:
+        if normalized_source == "electron_user_close":
+            from .runtime_service_user_close import retire_for_user_close
+
+            return retire_for_user_close(lang)
         return _retire_for_user_restart(lang, source=normalized_source)
     observed_active_work_runs = _restart_guard_active_work_runs()
     _record_shutdown_event(
@@ -1568,13 +1572,14 @@ def _active_source_collection_run_items() -> list[dict[str, str]]:
 def _stop_active_source_collection_runs_before_shutdown(
     *,
     deadline: float | None = None,
+    active_items: list[dict[str, str]] | None = None,
 ) -> list[dict[str, object]]:
     """Cancel active source searches through their existing owned stop path."""
 
     if deadline is None:
         deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
     active_completed, active_value, active_error = _run_with_bounded_wait(
-        _active_source_collection_run_items,
+        _active_source_collection_run_items if active_items is None else lambda: active_items,
         timeout_seconds=_remaining_harvest_seconds(deadline),
     )
     if not active_completed:
@@ -1650,6 +1655,7 @@ def _stop_active_source_collection_runs_before_shutdown(
 def _stop_active_chat_room_rounds_before_shutdown(
     *,
     deadline: float | None = None,
+    active_items: list[dict[str, str]] | None = None,
 ) -> list[dict[str, object]]:
     """Stop active chat room rounds with light flags, then bounded persist.
 
@@ -1662,7 +1668,7 @@ def _stop_active_chat_room_rounds_before_shutdown(
 
     if deadline is None:
         deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
-    rounds = _active_chat_room_round_items()
+    rounds = _active_chat_room_round_items() if active_items is None else active_items
     if not rounds:
         return []
 
