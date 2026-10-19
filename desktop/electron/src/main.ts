@@ -1419,6 +1419,7 @@ async function requestTransactionalWorkbenchClose(
     : undefined;
   const retireFrontendBuilds = captureFrontendBuildRetirement(paths.workspaceRoot);
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
+    const projectionEpoch = launcherStateStore.beginMainLifecycle("force-stop");
     const preparationStartedAtMs = performance.now();
     const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
     const desktopSessionId = currentDesktopSessionId(bootstrap, desktopEnvironment());
@@ -1501,6 +1502,10 @@ async function requestTransactionalWorkbenchClose(
       if (workbenchCloseBackendStopInFlight === ownedBackendStop) {
         workbenchCloseBackendStopInFlight = null;
       }
+    }
+    if (!launcherStateStore.commitVerifiedMainClosed(projectionEpoch)) {
+      mainWorkbenchCloseStore.fail(transaction.closeId, "lifecycle_intent_superseded", "A newer main lifecycle intent superseded this close.");
+      return;
     }
     transaction = mainWorkbenchCloseStore.backendStopped(transaction.closeId);
     recordSupervisorEventFallbackLocally({
@@ -3522,6 +3527,7 @@ async function orchestrateLauncherLifecycle(
     };
   }
   const intentLease = begunIntent.lease;
+  if (startsWorkbench) launcherStateStore.beginMainLifecycle(supervisedOperation);
   const lifecycleSignal = signal
     ? AbortSignal.any([signal, intentLease.signal])
     : intentLease.signal;
@@ -4841,7 +4847,7 @@ function scheduleLauncherStateFileHint(): void {
 function startLauncherStateFileHints(paths: DesktopPaths): void {
   stopLauncherStateFileHints();
   const localAppData = String(desktopEnvironment().LOCALAPPDATA || "").trim();
-  const runtimeDir = resolve(paths.workspaceRoot, ".runtime", "launcher");
+  const runtimeDir = dirname(launcherStatePath(paths.workspaceRoot));
   const statTargets = [
     resolve(runtimeDir, "state.json"),
     resolve(runtimeDir, "ports.json"),
@@ -4858,7 +4864,13 @@ function startLauncherStateFileHints(paths: DesktopPaths): void {
   }
   for (const target of watchTargets) {
     try {
-      const watcher = watch(target, { persistent: false }, () => scheduleLauncherStateFileHint());
+      const watcher = watch(target, { persistent: false }, (_event, filename) => {
+        // Runtime logs and atomic-write temporary files share this directory.
+        // Only finalized state/port observations should trigger inventory work.
+        if (target === runtimeDir && filename !== null
+          && !["state.json", "ports.json"].includes(filename.toString())) return;
+        scheduleLauncherStateFileHint();
+      });
       watcher.on("error", () => undefined);
       launcherStateWatchers.push(watcher);
     } catch {

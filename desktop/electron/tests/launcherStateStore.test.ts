@@ -185,4 +185,133 @@ describe("LauncherStateStore", () => {
     expect(store.snapshot().main.window).toEqual({ open: true, rendererProcessId: 101 });
     expect(store.snapshot().instances[0].window).toEqual({ open: true, rendererProcessId: 202 });
   });
+
+  it("publishes verified closure immediately and fences an older loader without dropping peer observations", async () => {
+    const open = {
+      status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 42, port: 8000, alive: true } } },
+      branchInstances: { items: [
+        { id: "main", current: true, runtime: { lifecycleState: "running", backend: { alive: true, pid: 42 } } },
+        { id: "worktree:peer", runtime: { lifecycleState: "running", backend: { alive: true, pid: 77 } } },
+      ] },
+    };
+    let resolveLoad!: (value: typeof open) => void;
+    const store = new LauncherStateStore(() => new Promise<typeof open>((resolve) => { resolveLoad = resolve; }), open);
+    const pushed: string[] = [];
+    store.subscribe((snapshot) => pushed.push(snapshot.main.observedState));
+    const epoch = store.beginMainLifecycle("force-stop");
+    const pending = store.refresh("during_close");
+    store.commitVerifiedMainClosed(epoch);
+    expect(store.snapshot().main).toMatchObject({ observedState: "closed", pid: 0 });
+    expect(pushed.at(-1)).toBe("closed");
+    const late = structuredClone(open);
+    late.branchInstances.items[1].runtime.backend.pid = 78;
+    resolveLoad(late);
+    await pending;
+    expect(store.snapshot().main).toMatchObject({ observedState: "closed", pid: 0 });
+    expect(store.projectBranchInstances()).toMatchObject({ items: [
+      { current: true, runtime: { lifecycleState: "closed", backend: { alive: false, pid: 0 } } },
+      { id: "worktree:peer", runtime: { backend: { pid: 78 } } },
+    ] });
+    expect(open.status.projectBundle.backend.pid).toBe(42);
+  });
+
+  it("rejects an old close token after a new start and accepts a new observation of the running backend", async () => {
+    const loader = vi.fn(async () => ({
+      status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 99, port: 8000 } } },
+      branchInstances: { items: [] },
+    }));
+    const store = new LauncherStateStore(loader, initial);
+    const closeEpoch = store.beginMainLifecycle("stop");
+    store.commitVerifiedMainClosed(closeEpoch);
+    store.beginMainLifecycle("restart");
+    await store.refresh("new_start");
+    const revision = store.snapshot().revision;
+    store.commitVerifiedMainClosed(closeEpoch);
+    expect(store.snapshot()).toMatchObject({ revision, main: { observedState: "open", pid: 99 } });
+  });
+
+  it("fences a loader that began before a new start without turning window closure into backend retirement", async () => {
+    let resolveLoad!: (value: typeof initial) => void;
+    const store = new LauncherStateStore(() => new Promise<typeof initial>((resolve) => { resolveLoad = resolve; }), {
+      status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 42, port: 8000, alive: true } } },
+      branchInstances: { items: [] },
+    });
+    store.updateWindowTruth({ workbench: { open: false, rendererProcessId: 0 }, instances: [] });
+    expect(store.projectStatus()).toMatchObject({ projectBundle: { backend: { alive: true, pid: 42 } } });
+    const pending = store.refresh("old_closed_read");
+    store.beginMainLifecycle("start");
+    resolveLoad(initial);
+    await pending;
+    expect(store.snapshot().main).toMatchObject({ observedState: "open", pid: 42, window: { open: false } });
+    expect(store.snapshot().freshness).toBe("stale");
+  });
+
+  it.each(["source failure", "bridge rejection"])("waits for one current-epoch refresh after an obsolete %s", async (failure) => {
+    type Sources = { status: unknown; branchInstances: unknown };
+    let resolveOld!: (value: Sources) => void;
+    let rejectOld!: (error: Error) => void;
+    let resolveNew!: (value: Sources) => void;
+    const loader = vi.fn()
+      .mockImplementationOnce(() => new Promise<Sources>((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }))
+      .mockImplementationOnce(() => new Promise<Sources>((resolve) => { resolveNew = resolve; }));
+    const store = new LauncherStateStore(loader, initial);
+    const published: Array<{ freshness: string; observed: string }> = [];
+    store.subscribe((snapshot) => published.push({ freshness: snapshot.freshness, observed: snapshot.main.observedState }));
+    const old = store.refresh("before_start");
+    store.beginMainLifecycle("start");
+    const current = store.refresh("lifecycle_complete");
+    expect(current).not.toBe(old);
+    for (let index = 0; index < 20; index += 1) {
+      expect(store.refresh("file_hint")).toBe(current);
+    }
+    let currentSettled = false;
+    void current.then(() => { currentSettled = true; });
+    if (failure === "bridge rejection") rejectOld(new Error("old bridge failed"));
+    else resolveOld({ status: { ok: false, errorType: "RuntimeError", message: "old status failed" }, branchInstances: { items: [] } });
+    await old;
+    await Promise.resolve();
+    expect(loader).toHaveBeenCalledTimes(2);
+    expect(currentSettled).toBe(false);
+    expect(published).not.toContainEqual({ freshness: "fresh", observed: "closed" });
+    for (let index = 0; index < 20; index += 1) store.refresh("same_epoch_hint");
+    resolveNew({ status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 99, port: 8000 } } }, branchInstances: { items: [] } });
+    expect(await current).toMatchObject({ freshness: "fresh", main: { observedState: "open", pid: 99 } });
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a verified close fresh when an obsolete status result arrives", async () => {
+    let resolveOld!: (value: typeof initial) => void;
+    const store = new LauncherStateStore(() => new Promise<typeof initial>((resolve) => { resolveOld = resolve; }), initial);
+    const old = store.refresh("before_close");
+    const epoch = store.beginMainLifecycle("stop");
+    expect(store.commitVerifiedMainClosed(epoch)).toBe(true);
+    resolveOld(initial);
+    await old;
+    expect(store.snapshot()).toMatchObject({ freshness: "fresh", main: { observedState: "closed", pid: 0 } });
+    store.beginMainLifecycle("start");
+    expect(store.snapshot().freshness).toBe("stale");
+  });
+
+  it("coalesces several lifecycle changes before the queued read starts", async () => {
+    let resolveOld!: (value: typeof initial) => void;
+    const open = {
+      status: { projectBundle: { id: "main", observedState: "open", backend: { pid: 88, port: 8000 } } },
+      branchInstances: { items: [] },
+    };
+    const loader = vi.fn()
+      .mockImplementationOnce(() => new Promise<typeof initial>((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(open);
+    const store = new LauncherStateStore(loader, initial);
+    const old = store.refresh("before_lifecycle");
+    store.beginMainLifecycle("start");
+    const queued = store.refresh("start_complete");
+    store.beginMainLifecycle("restart");
+    expect(store.refresh("restart_complete")).toBe(queued);
+    store.beginMainLifecycle("rebuild-and-start");
+    expect(store.refresh("rebuild_complete")).toBe(queued);
+    resolveOld(initial);
+    await old;
+    expect(await queued).toMatchObject({ freshness: "fresh", main: { observedState: "open", pid: 88 } });
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
 });
