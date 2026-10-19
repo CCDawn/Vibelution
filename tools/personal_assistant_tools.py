@@ -59,6 +59,23 @@ def personal_assistant_query_tool(resource: str = "index", operation: str = "lis
         query=query, path=path, offset=offset, limit=limit, line=line, max_lines=max_lines), ensure_ascii=False)
 
 
+def personal_assistant_platform_api_tool(path: str = "index", query: str = "", tag: str = "") -> str:
+    """Read platform management state through the loopback workbench API (GET-only)."""
+    try:
+        runtime = _identity()
+    except (ValueError, TypeError, directory.AgentDirectoryError):
+        return _error("个人助理原生身份或配置未就绪，请先核对绑定。")
+    from core.web.services.personal_assistant_platform_api import (
+        platform_api_get,
+        platform_api_index,
+    )
+
+    normalized = str(path or "").strip()
+    if normalized == "index":
+        return json.dumps(platform_api_index(runtime, tag=tag), ensure_ascii=False)
+    return json.dumps(platform_api_get(runtime, normalized, query=query), ensure_ascii=False)
+
+
 def _receipt(raw: str) -> str:
     """Preserve native outcome and object ids without returning private objects."""
     result = json.loads(raw)
