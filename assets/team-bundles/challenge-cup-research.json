@@ -2,7 +2,7 @@
   "kind": "vibelution-team-bundle",
   "schemaVersion": 1,
   "appVersion": "1.1.2",
-  "notes": "挑战杯科研团队六角色配置包。模型路由依据 docs/ops/config/10-qwen-challenge-cup-agent-routing.md（2026-09-08 核验版）；persona/task 提示词为按该文档职责起草的 draft，原实例数据迁移后可替换为原版。全部模型走 dashscope_main，需设置 DASHSCOPE_API_KEY。",
+  "notes": "挑战杯科研团队六角色配置包。模型路由按 2026-09-08 核验的 Qwen 分层路由方案落定（依据文档已随赛事材料归档）；persona/task 提示词为按该方案职责起草的 draft，原实例数据迁移后可替换为原版。全部模型走 dashscope_main，需设置 DASHSCOPE_API_KEY。",
   "team": {
     "name": "挑战杯科研团队",
     "description": "资料搜集—内容提炼—知识整理—假说生成—评审修订的科研协作团队（配置包重建版）",

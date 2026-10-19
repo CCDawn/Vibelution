@@ -68,3 +68,48 @@ export DASHSCOPE_API_KEY="sk-你的key"
 | 预检提示 `DASHSCOPE_API_KEY` 未设置 | 密钥环境变量未生效；重开终端或确认写入了正确的 rc 文件后重启工作台 |
 | 成员会话无回复 | 检查 key 有效性与模型开通（qwen3.8-max 需要对应权限） |
 | 导入后想恢复成员提示词 | 重新导入本配置包即可（upsert 覆盖） |
+
+---
+
+## 来自 development-standard 的迁入段落
+
+> 以下为原 `docs/standards/development-standard.md` §20 / §20.1（2026-10-19 迁出，内容原样保留）。
+
+### 20. Challenge Cup Flow Site
+
+For work under:
+
+`<project-root>\挑战杯`
+
+every development, design, schema, data, workflow, candidate-knowledge, memory-platform, graph-sync, experiment, or deliverable change must be reflected in the research flow HTML site unless the user explicitly says to skip it.
+
+Canonical entrypoint:
+
+`<project-root>\挑战杯\research_team_flow_design.html`
+
+Per-node pages:
+
+`<project-root>\挑战杯\research_flow_pages\`
+
+Prefer updating:
+
+`<project-root>\挑战杯\build_research_flow_site.mjs`
+
+then regenerate:
+
+```powershell
+node "<project-root>\挑战杯\build_research_flow_site.mjs"
+```
+
+Before finishing a Challenge Cup round, verify HTML links still resolve and report whether the flow HTML was updated.
+
+#### 20.1 Challenge Cup And Teams Projection Sync
+
+When Challenge Cup or Teams research workflow schema, data, evidence, or generated-site behavior changes, report a projection table before completion:
+
+| Source or fact | Backend source | API DTO | Teams UI | Generated flow site | Project memory/docs | Validation | Deferred debt |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+This applies especially to Evidence Ledger, `contentExtraction`, `candidateExtractions`, `recordExtractions`, stage tasks, source references, graph evidence, candidate knowledge, memory-platform sync, and deliverable state.
+
+Do not mark a research workflow change complete while a user-visible projection is stale unless the debt has an owner, claim or trigger, and a concrete validation gap.
