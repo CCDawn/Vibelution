@@ -377,7 +377,7 @@ describe("fetchLauncherActiveWorkStatus", () => {
         { kind: "source_collection_run", runId: "run-2" }
       ]
     });
-    expect(requests[0].url).toBe("http://127.0.0.1:8765/api/launcher/status");
+    expect(requests[0].url).toBe("http://127.0.0.1:8765/api/launcher/status?projection=active-work");
     expect(requests[0].init.headers).toMatchObject({
       "X-Vibelution-Control-Token": "token"
     });

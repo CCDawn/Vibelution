@@ -35,6 +35,32 @@ LAUNCHER_ROUTE = REPO_ROOT / "core" / "web" / "routes" / "launcher.py"
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
+
+def test_active_work_projection_uses_canonical_guard_without_full_status(monkeypatch):
+    def no_full_scan():
+        raise AssertionError("active-work check must not scan full status or diagnostic history")
+
+    from core.launcher import service
+
+    monkeypatch.setattr(launcher_routes.launcher_service, "get_launcher_status", no_full_scan)
+    monkeypatch.setattr(service, "launcher_active_work_runs", lambda: [
+        {"kind": "chat_turn", "runId": "one", "status": "running", "sessionId": "s"},
+        {"kind": "formal_run", "runId": "two", "status": "running", "sessionId": ""},
+    ])
+    response = client.get("/api/launcher/status?projection=active-work")
+    assert response.status_code == 200
+    assert response.json() == {"lifecycleProof": {"activeWorkRuns": {
+        "count": 2, "kinds": ["chat_turn", "formal_run"],
+        "items": service.launcher_active_work_runs(),
+    }}}
+
+
+def test_active_work_projection_requires_control_token_and_valid_projection():
+    from core.web.app import create_app
+    unauthorized = TestClient(create_app()).get("/api/launcher/status?projection=active-work")
+    assert unauthorized.status_code == 403
+    assert client.get("/api/launcher/status?projection=invalid").status_code == 422
+
 JSON_ROUTE_FUNCTIONS = {
     "launcher_status",
     "launcher_freshness",

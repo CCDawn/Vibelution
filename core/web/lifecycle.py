@@ -900,6 +900,14 @@ def _sync_owner_result_is_clean(result: Any) -> bool:
 
 
 async def _run_shutdown_step(name: str, awaitable: Any, *, deadline: float) -> Any:
+    started = time.perf_counter()
+    try:
+        return await _run_shutdown_step_owned(name, awaitable, deadline=deadline)
+    finally:
+        logger.info("Shutdown stage %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
+
+
+async def _run_shutdown_step_owned(name: str, awaitable: Any, *, deadline: float) -> Any:
     """Isolate one owner failure/cancellation and still run later cleanup."""
 
     try:
@@ -1026,6 +1034,7 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
     )
 
     async def _shutdown_owner(name: str, callback: Callable[..., Any], kwargs: dict[str, Any]) -> bool:
+        started = time.perf_counter()
         try:
             completed, result = await run_sync_bounded(
                 callback,
@@ -1039,6 +1048,8 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
         except Exception as exc:  # noqa: BLE001 - isolate each runtime owner
             logger.error("Owned runtime shutdown failed: %s (%s)", name, type(exc).__name__)
             return False
+        finally:
+            logger.info("Shutdown owner %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
         if not completed or not isinstance(result, dict) or result.get("closed") is not True:
             logger.error("Owned runtime shutdown incomplete: %s", name)
             return False
