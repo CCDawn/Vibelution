@@ -153,6 +153,68 @@ describe("main-line frontend startup preflight", () => {
     expect(h.lifecycle).not.toHaveBeenCalled();
   });
 
+  it("checks a current packaged shell once before a cold start", async () => {
+    const h = harness({ packaged: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await expect(h.run("start", {})).resolves.toMatchObject({ accepted: true });
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.inspect.mock.invocationCallOrder[0]).toBeLessThan(h.ensure.mock.invocationCallOrder[0]!);
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "start" }));
+    expect(h.promote).not.toHaveBeenCalled();
+  });
+
+  it("checks a launch-blocking packaged shell once and promotes before a cold start", async () => {
+    const h = harness({ packaged: true });
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.promote).toHaveBeenCalledOnce();
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("skips the reuse-only shell scan after rebuilding the live backend's frontend", async () => {
+    const h = harness({ packaged: true, live: true, releaseChanged: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.reusable).not.toHaveBeenCalled();
+    // The earlier build cannot replace the queued mutation's fresh source check.
+    expect(h.ensure).toHaveBeenCalledTimes(2);
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "restart" }));
+  });
+
+  it("rechecks the shell before restart when a verified live backend cannot be reused", async () => {
+    const h = harness({ packaged: true, live: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    h.reusable.mockResolvedValue(false);
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledTimes(2);
+    expect(h.ensure).toHaveBeenCalledTimes(2);
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "restart" }));
+  });
+
+  it("promotes a shell that becomes launch-blocking after live-backend reuse fails", async () => {
+    const h = harness({ packaged: true, live: true });
+    h.inspect.mockResolvedValueOnce({ stale: false, launchBlocking: false });
+    h.reusable.mockResolvedValue(false);
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledTimes(2);
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.promote).toHaveBeenCalledWith(false, "restart", { shellKind: "packaged" });
+    expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("still checks the packaged shell before reusing a verified live backend", async () => {
+    const h = harness({ packaged: true, live: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.lifecycle).not.toHaveBeenCalled();
+    expect(h.opened).toHaveBeenCalledOnce();
+  });
+
   it.each(["start", "restart"])("verifies once at the startup boundary for %s", async (operation) => {
     const h = harness();
     await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: true });

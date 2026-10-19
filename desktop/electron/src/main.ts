@@ -3579,7 +3579,10 @@ async function orchestrateLauncherLifecycle(
     // and falls through to the existing refresh gate.
     let packagedShellBlocksReuse = false;
     let packagedShellAdvisoryStale = false;
-    if (app.isPackaged) {
+    // This probe only decides whether an already verified live backend can
+    // bypass the mutation. Otherwise the final shell gate below is sufficient;
+    // each full shell inspection also scans the frontend build inputs.
+    if (app.isPackaged && frontendCheckedForReuse && !frontendReleaseChanged) {
       try {
         const status = await inspectCurrentDesktopShell();
         packagedShellBlocksReuse = Boolean(status.launchBlocking);
