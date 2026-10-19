@@ -45,10 +45,12 @@ afterEach(async () => {
 });
 
 describe("FinanceWatchlistTable", () => {
-  it("sorts by fetched quotes and removes the chosen stock", async () => {
+  it("sorts by fetched quotes, annotates single-currency headers and removes the chosen stock", async () => {
     const onRemoveStock = vi.fn();
     await render({ onRemoveStock });
     const rows = Array.from(node.querySelectorAll('[role="row"]')).map((row) => row.textContent ?? "");
+    expect(rows[0]).toContain("现价(元)");
+    expect(rows[0]).toContain("总市值(元)");
     expect(rows[1]).toContain("贵州茅台");
     expect(rows[2]).toContain("平安银行");
     const remove = Array.from(node.querySelectorAll("button")).find((button) => button.getAttribute("aria-label") === "移除 平安银行");
@@ -57,7 +59,7 @@ describe("FinanceWatchlistTable", () => {
     expect(onRemoveStock).toHaveBeenCalledWith(watchlist[0]);
   });
 
-  it("shows each row's source timestamp and provider error", async () => {
+  it("moves row timestamps into titles and stale-day badges and keeps provider errors as icon labels", async () => {
     api.fetchQuotes.mockResolvedValueOnce({
       source: "腾讯财经", sourceUrl: "https://gu.qq.com/", fetchedAt: "2026-10-05T01:00:00+00:00", items: [
         { symbol: "sz000001", quote: quote(watchlist[0], -1.2), error: "单股报价有警告" },
@@ -66,9 +68,12 @@ describe("FinanceWatchlistTable", () => {
     });
     await render();
 
-    expect(node.textContent).toContain("2026-10-05T09:30:00+08:00");
-    expect(node.textContent).toContain("单股报价有警告");
-    expect(node.textContent).toContain("供应商未返回报价");
+    expect(node.textContent).not.toContain("2026-10-05T09:30:00+08:00");
+    const titles = Array.from(node.querySelectorAll("button[title]")).map((button) => button.getAttribute("title") ?? "");
+    expect(titles.some((title) => title.startsWith("快照时间"))).toBe(true);
+    const errorLabels = Array.from(node.querySelectorAll('[role="img"][aria-label]')).map((icon) => icon.getAttribute("aria-label") ?? "");
+    expect(errorLabels).toContain("单股报价有警告");
+    expect(errorLabels).toContain("供应商未返回报价");
   });
 
   it("keeps cached quotes and retries after a refresh failure", async () => {
@@ -80,11 +85,46 @@ describe("FinanceWatchlistTable", () => {
     expect(node.textContent).toContain("刷新失败，当前显示上次成功获取的数据");
     expect(node.textContent).toContain("quotes refresh failed");
     expect(node.textContent).toContain("贵州茅台");
-    expect(node.textContent).toContain("上次成功抓取 2026-10-05T01:00:00+00:00");
+    expect(node.textContent).not.toContain("2026-10-05T01:00:00+00:00");
+    expect(node.textContent).toMatch(/腾讯财经 · (?:\d{1,2}月\d{1,2}日 )?\d{1,2}:\d{2} 更新 · 每分钟刷新/);
 
     await act(async () => buttonWithText("重试").click());
     await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(api.fetchQuotes).toHaveBeenCalledTimes(3);
     expect(node.textContent).not.toContain("quotes refresh failed");
+  });
+
+  it("shows compact quote units and keeps currency suffixes only for mixed watchlists", async () => {
+    const mixedWatchlist = [...watchlist, { symbol: "hk00700", ticker: "00700", name: "腾讯控股", market: "港交所" }];
+    api.fetchQuotes.mockResolvedValueOnce({ source: "腾讯财经", sourceUrl: "", fetchedAt: "2026-10-05T01:00:00+00:00", items: [
+      { symbol: "sz000001", quote: { ...quote(watchlist[0], 1.5), volume: 2_507_900, turnover: 3_360_000_000, marketCap: 16_718_000_000_000 }, error: null },
+      { symbol: "sh600519", quote: quote(watchlist[1], 2.4), error: null },
+      { symbol: "hk00700", quote: { ...quote({ symbol: "hk00700", ticker: "00700", name: "腾讯控股", market: "港交所" } as (typeof mixedWatchlist)[number], 1.76), price: 335.806, volume: 12_500_000, volumeLots: null, turnover: 3_360_000_000 }, error: null },
+    ] });
+    await render({ watchlist: mixedWatchlist });
+
+    const rows = Array.from(node.querySelectorAll('[role="row"]')).map((row) => row.textContent ?? "");
+    expect(rows[0]).toContain("现价");
+    expect(rows[0]).not.toContain("现价(元)");
+    expect(rows.some((row) => row.includes("2.51万手"))).toBe(true);
+    expect(rows.some((row) => row.includes("1,250.00万股"))).toBe(true);
+    expect(rows.some((row) => row.includes("33.60亿"))).toBe(true);
+    expect(rows.some((row) => row.includes("16.72万亿"))).toBe(true);
+    expect(rows.some((row) => row.includes("335.806 港元"))).toBe(true);
+    expect(rows.some((row) =>row.includes("10 元"))).toBe(true);
+  });
+
+  it("collapses extra tags behind a count while keeping the full text in the cell title", async () => {
+    const tagged = { ...watchlist[0], tags: ["白酒", "消费", "核心资产"], note: "长期持有" };
+    await render({ watchlist: [tagged, watchlist[1]] });
+
+    const row = Array.from(node.querySelectorAll('[role="row"]')).find((item) => item.textContent?.includes("平安银行"));
+    expect(row?.textContent).toContain("白酒");
+    expect(row?.textContent).toContain("+1");
+    expect(row?.textContent).not.toContain("核心资产");
+    expect(row?.textContent).not.toContain("长期持有");
+    expect(row?.querySelector('[title="白酒 · 消费 · 核心资产 · 长期持有"]')).toBeTruthy();
+    const plain = Array.from(node.querySelectorAll('[role="row"]')).find((item) => item.textContent?.includes("贵州茅台"));
+    expect(plain?.textContent?.match(/—/g)?.length).toBeGreaterThanOrEqual(1);
   });
 });
