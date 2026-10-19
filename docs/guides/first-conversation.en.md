@@ -19,7 +19,7 @@ This short path needs one Agent and one regular conversation. You do not need to
 
 You should see your message and the Agent's text reply in the current conversation. You do not need to create a team or group chat for this first test.
 
-If session creation fails, retry `New session`; the draft is retained. If the model is unavailable or its connectivity probe fails, check the config file, model, key environment variable, and network. If the workbench does not open, use your platform guide's troubleshooting section: [Windows](install-windows.md#失败时看哪里), [macOS](install-macos.md), or [Linux](install-linux.md).
+If session creation fails, retry `New session`; the draft is retained. If the model is unavailable or its connectivity probe fails, check the config file, model, key environment variable, and network. If the workbench does not open, use your platform guide's troubleshooting section: [Windows](install-windows.en.md#troubleshooting), [macOS](install-macos.md), or [Linux](install-linux.md).
 
 ## Sources
 

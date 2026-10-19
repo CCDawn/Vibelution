@@ -431,7 +431,7 @@ This subsection is **guidance for maintainability**, not a hard gate. Prefer cor
 - Emergency fixes, compatibility shims, and one-off glue may land on a facade or a large file when that is the smallest safe path. Prefer a short closeout note when the placement is temporary or unusual.
 - Do not invent parallel god files under a new name to dodge size awareness.
 
-Docs index: [docs/README.md](docs/README.md) norms map. Service claim maps: `core/web/services/session/README.md`, `team_workflow/README.md`, `agent_directory/README.md`, `runtime_scene/README.md`.
+Docs index: [docs/README.md](../README.md) norms map. Service claim maps: `core/web/services/session/README.md`, `team_workflow/README.md`, `agent_directory/README.md`, `runtime_scene/README.md`.
 
 ## 9. Frontend Standards
 
@@ -857,45 +857,6 @@ When a task needs a new written plan or design:
 5. Durable rules extracted from a plan belong in `docs/standards/`, ADR, or the owning module README — not left only in the plan.
 
 Do not treat archive paths as live instruction sets. Do not reintroduce a long-lived `docs/plans/` or `docs/superpowers/` tree for day-to-day authority.
-
-## 20. Challenge Cup Flow Site
-
-For work under:
-
-`<project-root>\挑战杯`
-
-every development, design, schema, data, workflow, candidate-knowledge, memory-platform, graph-sync, experiment, or deliverable change must be reflected in the research flow HTML site unless the user explicitly says to skip it.
-
-Canonical entrypoint:
-
-`<project-root>\挑战杯\research_team_flow_design.html`
-
-Per-node pages:
-
-`<project-root>\挑战杯\research_flow_pages\`
-
-Prefer updating:
-
-`<project-root>\挑战杯\build_research_flow_site.mjs`
-
-then regenerate:
-
-```powershell
-node "<project-root>\挑战杯\build_research_flow_site.mjs"
-```
-
-Before finishing a Challenge Cup round, verify HTML links still resolve and report whether the flow HTML was updated.
-
-### 20.1 Challenge Cup And Teams Projection Sync
-
-When Challenge Cup or Teams research workflow schema, data, evidence, or generated-site behavior changes, report a projection table before completion:
-
-| Source or fact | Backend source | API DTO | Teams UI | Generated flow site | Project memory/docs | Validation | Deferred debt |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-
-This applies especially to Evidence Ledger, `contentExtraction`, `candidateExtractions`, `recordExtractions`, stage tasks, source references, graph evidence, candidate knowledge, memory-platform sync, and deliverable state.
-
-Do not mark a research workflow change complete while a user-visible projection is stale unless the debt has an owner, claim or trigger, and a concrete validation gap.
 
 ## 21. Final Reports
 
