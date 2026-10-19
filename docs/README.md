@@ -6,11 +6,29 @@
 
 ---
 
-## 现行入口（Agent 优先）
+## 用户入门
+
+面向最终用户的安装与上手文档，从这里开始：
+
+| 需求 | 打开 |
+| --- | --- |
+| **安装指南** | [Windows（中文）](guides/install-windows.md) · [Windows (English)](guides/install-windows.en.md) · [macOS](guides/install-macos.md) · [Linux](guides/install-linux.md) |
+| **第一次对话** | [中文](guides/first-conversation.md) · [English](guides/first-conversation.en.md) |
+| **模型与配置** | [ops/config/INDEX.md](ops/config/INDEX.md) |
+| **交互式架构地图** | [architecture/index.html](architecture/index.html)（离线单文件约 14MB，下载后用浏览器打开） |
+
+> 用户文档目前以中文为主，英文版逐步补充中。
+
+---
+
+## 开发与治理入口（维护者 / 内部 Agent）
+
+以下面向项目维护者与内部开发 Agent；外部贡献者请从 [CONTRIBUTING.md](../CONTRIBUTING.md) 开始。
 
 | 需求 | 打开 |
 | --- | --- |
 | **Agent 开发路由（非用户手册）** | [guides/README.md](guides/README.md) · [route](guides/route.md) · [ownership](guides/ownership.md) · [loop](guides/loop.md) |
+| **在研草案清单（plans/，内部）** | [plans/README.md](plans/README.md) |
 | **项目速查地图（三主线）** | [guides/project-map.md](guides/project-map.md) |
 | 全局红线 / 路由 | [../AGENTS.md](../AGENTS.md) |
 | 开发标准全图 | [standards/README.md](standards/README.md) |
@@ -54,7 +72,7 @@
 | [assets/](assets/) | 静态资源 | README 截图等 |
 | [archive/](archive/) | **归档** | 一切历史计划/规格/审计；见 [archive/README.md](archive/README.md) |
 
-`docs/plans/` **不是**规范权威（见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)）。在研草案清单只维护在 [plans/README.md](plans/README.md)。本页不复制状态。已迁出的计划见 [archive/README.md](archive/README.md)，逐份说明见 plans/README 的历史段。
+`docs/plans/` **不是**规范权威（见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)）。在研草案清单见上方内部入口表，本页不复制状态。已迁出的计划见 [archive/README.md](archive/README.md)。
 
 新计划若需要：带 Status 元数据，**完成后尽快迁入 `docs/archive/`**，并只更新 `docs/plans/README.md`。权威策略见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)。
 

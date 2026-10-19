@@ -20,7 +20,7 @@
 
 历史快照（已迁出）：
 
-- `2026-08-30-challenge-cup-automatic-chain-reliability-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md)（historical；挑战杯结束，生产核对与 T8 不再收口）
+- `2026-08-30-challenge-cup-automatic-chain-reliability-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md)（historical；赛事结束，生产核对与 T8 不再收口）
 - `2026-08-25-challenge-cup-canonical-workflow-state-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-25-challenge-cup-canonical-workflow-state-plan.md)（historical；官方题库到 H1–H4 的验收停止）
 - `2026-08-22-challenge-cup-hypothesis-scoped-sessions.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md)（historical；不删公共房间，不按 SCI-096 清空重建）
 - `2026-08-21-research-workflow-three-pane-current-task-redesign.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-21-research-workflow-three-pane-current-task-redesign.md)（historical；赛题浏览器验收停止，currentTask 可另用于通用工作台）

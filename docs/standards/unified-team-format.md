@@ -91,7 +91,7 @@ modelRef?        可选；llmBindings 槽位引用（见 §4）
 | 体系 | 现状 | 收敛动作 |
 | --- | --- | --- |
 | 通用（自定义/模板团队） | **已合规**：`team_crud` + `_normalize_members` 就是格式权威 | 保持；格式变更必须先改本文与门禁测试 |
-| 科研（挑战杯） | `bootstrap_challenge_cup_research_team` 仍直接写 3 字段成员行，未走 `_normalize_members`。组织同步已不再写成员。读侧对 3 字段存量行完整容忍（投影 fail-open、修复不动存量行、消费方只读 agentId/role，回归锁死） | 挑战杯收尾已停止，不沿这条启动路径补字段。新增系统团队必须复用 `_normalize_members` |
+| 科研演示团队 | `bootstrap_challenge_cup_research_team` 仍直接写 3 字段成员行，未走 `_normalize_members`。组织同步已不再写成员。读侧对 3 字段存量行完整容忍（投影 fail-open、修复不动存量行、消费方只读 agentId/role，回归锁死） | 科研演示团队收尾已停止，不沿这条启动路径补字段。新增系统团队必须复用 `_normalize_members` |
 | 进化（Gym/自进化） | **已闭环**：`ensure_evolution_system_teams` 成员行经 `_normalize_members` 落成 8 字段；missing 探针查 ID/kind/source/成员齐全性（存量空 roster 下次 bootstrap 自愈），物化失败不落空成员；spec 声明 `managed: true` | 保持；不另建成员存储。角色声明仍不在本行展开 |
 | 金融 | **已迁移**：`teamKind/teamSource=financial` 显式记录（purpose 前缀保留为业务身份与识别 legacy 兜底），成员行 8 字段，角色声明走角色文件层（五个 `financial_*.md`），托管谓词覆盖（PATCH 409/级联归档拒绝），存量团队由 `backfill_financial_team_identities` 幂等补齐 | 保持；成员补齐走 workflow-owned 锁内直写 `_append_missing_team_members`，不经 operator PATCH 路径 |
 | 开发团队模板 | 唯一可新建模板。实例化走 `create_team`，成员行经 `_normalize_members`；角色声明从角色文件层读取（§5） | 保持。医疗问诊与妇幼数字健康模板已移除，不再作为格式先例 |

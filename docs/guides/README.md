@@ -38,7 +38,6 @@
 | [install-macos.md](install-macos.md) | macOS 最终用户安装（人类） | ~100 | **Agent 开发一律跳过** |
 | [install-linux.md](install-linux.md) | Linux 最终用户安装（人类） | ~95 | **Agent 开发一律跳过** |
 | [agent-deploy-runbook.md](agent-deploy-runbook.md) | **外部 AI Agent 部署 Runbook**：替用户搭建/启动/验收的操作序列 | ~120 | 非「帮用户部署本项目」任务 |
-| [reproduce-challenge-cup.md](reproduce-challenge-cup.md) | 挑战杯团队复现（人类） | ~80 | **Agent 开发一律跳过** |
 
 **FE 路由索引：** [`web/src/routes/README.md`](../../web/src/routes/README.md)（非 Chat/Teams 30 秒表；~80 行）
 
