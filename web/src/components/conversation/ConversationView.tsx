@@ -9,19 +9,15 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
-import type {
-  ConversationMessage,
-  SessionMessageCurationAction,
-} from "../../api/types";
+import type { ConversationMessage } from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { fetchPublicConfig } from "../../api/config";
-import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -47,12 +43,7 @@ import {
   assistantTurnIsInFlight,
   assistantTurnIsStreaming,
 } from "../../routes/chatTurnProtocol";
-import {
-  applyOptimisticCuration,
-  buildMessageCurationMap,
-  resolveMessageCurationState,
-  type MessageCurationDecision,
-} from "./conversationMessageCuration";
+import { useConversationMessageCuration } from "./useConversationMessageCuration";
 import {
   compactStreamingStatusPlaceholder,
   isInternalStreamingStatusStage,
@@ -442,38 +433,15 @@ export const ConversationView = React.memo(function ConversationView({
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
-  // In-chat SFT curation: server map + optimistic overlay for instant button
-  // feedback; a failed POST rolls the overlay entry back (ZCode like/dislike
-  // rollback pattern) and the 409 copy surfaces briefly on the button title.
-  const queryClient = useQueryClient();
-  const [curationOverrides, setCurationOverrides] = useState<Map<string, MessageCurationDecision>>(new Map());
-  const [curationFeedback, setCurationFeedback] = useState<{
-    messageId: string;
-    action: SessionMessageCurationAction;
-    message: string;
-  } | null>(null);
-  const curationFeedbackTimerRef = useRef<number | null>(null);
-  const messageCurationQuery = useQuery({
-    queryKey: queryKeys.sessionMessageCuration(sessionId),
-    queryFn: () => fetchSessionMessageCuration(sessionId),
-    enabled: Boolean(sessionId) && !companionMode,
+  const {
+    messageCurationMap,
+    curationFeedback,
+    handleCurateMessage,
+  } = useConversationMessageCuration({
+    sessionId,
+    companionMode,
+    t,
   });
-  const serverMessageCurationMap = useMemo(
-    () => buildMessageCurationMap(messageCurationQuery.data?.items ?? []),
-    [messageCurationQuery.data],
-  );
-  const messageCurationMap = useMemo(() => {
-    if (curationOverrides.size === 0) {
-      return serverMessageCurationMap;
-    }
-    return new Map([...serverMessageCurationMap, ...curationOverrides]);
-  }, [curationOverrides, serverMessageCurationMap]);
-
-  // A session switch must not inherit the previous session's optimistic writes.
-  useEffect(() => {
-    setCurationOverrides(new Map());
-    setCurationFeedback(null);
-  }, [sessionId]);
   const {
     forkDialogMessage,
     forkScope,
@@ -1204,54 +1172,6 @@ export const ConversationView = React.memo(function ConversationView({
         setCopiedAnswerMessageId((current) => (current === messageId ? "" : current));
       }, 1600);
     }).catch(() => undefined);
-  }
-
-  /** Bounded visible feedback for a rejected curation click (~3s on the title). */
-  function showCurationFeedback(messageId: string, action: SessionMessageCurationAction, message: string) {
-    setCurationFeedback({ messageId, action, message });
-    if (curationFeedbackTimerRef.current !== null) {
-      window.clearTimeout(curationFeedbackTimerRef.current);
-    }
-    curationFeedbackTimerRef.current = window.setTimeout(() => {
-      curationFeedbackTimerRef.current = null;
-      setCurationFeedback((current) => (current?.messageId === messageId ? null : current));
-    }, 3000);
-  }
-
-  function handleCurateMessage(messageId: string, action: SessionMessageCurationAction) {
-    if (!sessionId || resolveMessageCurationState(messageCurationMap, messageId) === action) {
-      return;
-    }
-    // Optimistic flip; the query invalidation restores server authority on
-    // success and the overlay entry is dropped again on failure (rollback).
-    setCurationOverrides((current) => applyOptimisticCuration(current, messageId, action));
-    void setSessionMessageCuration(sessionId, messageId, action)
-      .then(() => {
-        setCurationOverrides((current) => {
-          if (!current.has(messageId)) {
-            return current;
-          }
-          const next = new Map(current);
-          next.delete(messageId);
-          return next;
-        });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessageCuration(sessionId) });
-      })
-      .catch((error) => {
-        setCurationOverrides((current) => {
-          if (!current.has(messageId)) {
-            return current;
-          }
-          const next = new Map(current);
-          next.delete(messageId);
-          return next;
-        });
-        showCurationFeedback(
-          messageId,
-          action,
-          isFetchJsonHttpError(error) && error.message ? error.message : t("curationActionFailed"),
-        );
-      });
   }
 
   const renderMarkdownImage = useCallback((alt: string, url: string, duplicateImageUrls?: Set<string>) => {
