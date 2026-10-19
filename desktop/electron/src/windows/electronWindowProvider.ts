@@ -614,7 +614,7 @@ export class ElectronWindowProvider {
     return this.stateFor("workbench");
   }
 
-  async approveWorkbenchCloseOnce(): Promise<ManagedWindowState> {
+  async approveWorkbenchCloseOnce(options: { deadlineAt?: number } = {}): Promise<ManagedWindowState> {
     this.reconcileCurrentWorkbenchWindow();
     const workbenchWindow = this.workbenchWindow;
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
@@ -624,7 +624,10 @@ export class ElectronWindowProvider {
     this.workbenchCloseAuthorized = true;
     workbenchWindow.close();
     if (!workbenchWindow.isDestroyed()) {
-      const outcome = await waitForWindowClosed(workbenchWindow, this.hungCloseDestroyAfterMs);
+      const remainingMs = typeof options.deadlineAt === "number" && Number.isFinite(options.deadlineAt)
+        ? Math.max(0, options.deadlineAt - Date.now())
+        : this.hungCloseDestroyAfterMs;
+      const outcome = await waitForWindowClosed(workbenchWindow, Math.min(this.hungCloseDestroyAfterMs, remainingMs));
       if (outcome === "timeout" && !workbenchWindow.isDestroyed()) {
         try {
           workbenchWindow.destroy();

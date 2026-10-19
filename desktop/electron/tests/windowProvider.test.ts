@@ -828,6 +828,28 @@ describe("Electron window provider state", () => {
     expect(provider.snapshot().workbench.open).toBe(false);
   });
 
+  it.each([0, 150])("bounds hung renderer closure by the remaining global budget of %i ms", async (remainingMs) => {
+    vi.useFakeTimers();
+    try {
+      const window = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+      const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+        createWorkbenchWindow: () => window,
+        shouldInterceptWorkbenchClose: () => true
+      });
+      await provider.openOrFocusWorkbench();
+      const closing = provider.approveWorkbenchCloseOnce({ deadlineAt: Date.now() + remainingMs });
+      if (remainingMs > 0) {
+        await vi.advanceTimersByTimeAsync(remainingMs - 1);
+        expect(window.isDestroyed()).toBe(false);
+      }
+      await vi.advanceTimersByTimeAsync(remainingMs > 0 ? 1 : 0);
+      expect((await closing).open).toBe(false);
+      expect(window.destroyCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not let a programmatic Workbench close bypass the transactional interceptor", async () => {
     const closeRequests: string[] = [];
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);

@@ -27,6 +27,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   const notify = vi.fn();
   const trayNotify = vi.fn();
   const inspect = vi.fn(async () => ({ stale: true, launchBlocking: true }));
+  const unpackagedInspect = vi.fn(async (_input: { signal?: AbortSignal }) => ({ stale: false }));
   const closed = vi.fn(async () => undefined);
   const promote = vi.fn(async () => ({
     schemaVersion: 1,
@@ -59,7 +60,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     ensureFrontendRelease: ensure,
     runWithFrontendBuildGate,
     updateLauncherWindowTruth: notify,
-    inspectUnpackagedShell: async () => ({ stale: false }),
+    inspectUnpackagedShell: unpackagedInspect,
     inspectCurrentDesktopShell: inspect,
     // Real routing decision so the unpackaged rebuild-and-start promotion lane
     // is exercised end to end without Electron.
@@ -88,7 +89,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     { compilerOptions: { target: ScriptTarget.ES2022 } }
   ).outputText, sandbox);
   return {
-    ensure, reachable, reusable, opened, closed, inspect, notify, trayNotify, promote, lifecycle, supervisor,
+    ensure, reachable, reusable, opened, closed, inspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -98,6 +99,41 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
 afterEach(resetFrontendBuildStateForTests);
 
 describe("main-line frontend startup preflight", () => {
+  it("cancels the unpackaged shell probe when close supersedes startup", async () => {
+    const h = harness();
+    let probeSignal: AbortSignal | undefined;
+    h.unpackagedInspect.mockImplementation(({ signal }) => {
+      probeSignal = signal;
+      return new Promise((resolve) => signal!.addEventListener("abort", () => resolve({ stale: false }), { once: true }));
+    });
+    const opening = h.run("start", {}).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(h.unpackagedInspect).toHaveBeenCalledOnce());
+    await expect(h.run("force-stop", {})).resolves.toMatchObject({ accepted: true });
+    expect(probeSignal?.aborted).toBe(true);
+    expect(await opening).toBeInstanceOf(Error);
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.opened).not.toHaveBeenCalled();
+  });
+
+  it("cancels live-backend preflight before mutation and prevents a late open after close", async () => {
+    const h = harness({ live: true });
+    let finishBuild!: () => void;
+    let buildSignal: AbortSignal | undefined;
+    h.ensure.mockImplementation(({ signal }) => {
+      buildSignal = signal;
+      return new Promise((resolve) => { finishBuild = () => resolve({ skipped: true }); });
+    });
+    const opening = h.run("start", {}).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(h.ensure).toHaveBeenCalledOnce());
+    await expect(h.run("force-stop", {})).resolves.toMatchObject({ accepted: true });
+    expect(buildSignal?.aborted).toBe(true);
+    finishBuild();
+    expect(await opening).toBeInstanceOf(Error);
+    expect(h.opened).not.toHaveBeenCalled();
+    expect(h.lifecycle.mock.calls.map(([input]) => input.operation)).toEqual(["force-stop"]);
+    expect(h.supervisor.snapshot("main")?.desiredState).toBe("closed");
+  });
+
   it.each(["stop", "force-stop", "shutdown"])("executes packaged %s without inspecting or building a release", async (operation) => {
     const h = harness({ packaged: true });
     h.inspect.mockImplementation(() => new Promise(() => undefined));
