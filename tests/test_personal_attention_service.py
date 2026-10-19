@@ -828,3 +828,131 @@ def test_severity_values_come_from_the_frozen_contract_table():
     assert attention.ANOMALY_SEVERITY_CRITICAL in ANOMALY_SEVERITIES
 
     assert set(ANOMALY_KIND_SEVERITY.values()) <= set(ANOMALY_SEVERITIES)
+
+
+class _FakeAffairsService:
+    """Records the requested agent and replays a canned projection."""
+
+    def __init__(self, items):
+        self.items = items
+        self.requested_agent_ids = []
+
+    def list_items(self, agent_id, *, kind="", status=""):
+        self.requested_agent_ids.append(agent_id)
+        return {
+            "schemaVersion": 1,
+            "agentId": agent_id,
+            "items": [dict(item) for item in self.items],
+            "counts": {"open": 0, "overdue": 0, "done": 0},
+            "updatedAt": "2026-10-19T00:00:00Z",
+        }
+
+
+def _affair(item_id, *, status="open", due_state="overdue", due_at="2026-10-19T02:00:00Z", title="整理周报"):
+    return {
+        "schemaVersion": 1,
+        "itemId": item_id,
+        "kind": "todo",
+        "title": title,
+        "note": "",
+        "status": status,
+        "dueAt": due_at,
+        "createdAt": "2026-10-17T00:00:00Z",
+        "updatedAt": "2026-10-19T00:00:00Z",
+        "completedAt": "",
+        "sourceTurnId": "",
+        "dueState": due_state,
+    }
+
+
+def _patch_affairs(monkeypatch, fake):
+    from core.web.services import personal_affairs_service as affairs_web
+
+    monkeypatch.setattr(affairs_web, "get_personal_affairs_service", lambda: fake)
+    return affairs_web
+
+
+def test_affair_reminder_attention_requires_an_assistant(monkeypatch):
+    monkeypatch.setattr(service, "profile_agent", lambda: None)
+    from core.web.services.personal_affairs_service import (
+        collect_affair_reminder_attention,
+    )
+
+    assert collect_affair_reminder_attention() == []
+
+
+def test_affair_reminder_attention_maps_due_open_items_with_day_scoped_ids(monkeypatch):
+    fake = _FakeAffairsService([
+        _affair("affair-today", due_state="today", due_at="2026-10-19T10:00:00Z", title="和用户复盘"),
+        _affair("affair-overdue", due_state="overdue", title="  整理  周报 "),
+        _affair("affair-done", status="done", due_state="none", due_at=""),
+        _affair("affair-cancelled", status="cancelled"),
+        _affair("affair-upcoming", due_state="upcoming", due_at="2026-10-25T00:00:00Z"),
+        _affair("affair-nodue", due_state="none", due_at=""),
+    ])
+    _patch_affairs(monkeypatch, fake)
+    monkeypatch.setattr(service, "profile_agent", lambda: {"agentId": "assistant-agent"})
+    from core.web.services.personal_affairs_service import (
+        collect_affair_reminder_attention,
+    )
+
+    rows = collect_affair_reminder_attention()
+    assert fake.requested_agent_ids == ["assistant-agent"]
+    assert [row["id"].split(":")[1] for row in rows] == ["affair-overdue", "affair-today"]
+    assert all(row["kind"] == "affair_reminder" for row in rows)
+    assert rows[0]["severity"] == "high"
+    assert rows[0]["title"] == "事务提醒：整理 周报"
+    assert rows[0]["body"].startswith("截止 ")
+    assert rows[0]["targetUrl"] == "/personal-assistant"
+    assert rows[1]["severity"] == "medium"
+    day_key = rows[0]["id"].rsplit(":", 1)[1]
+    assert len(day_key) == 8 and day_key.isdigit()
+    assert {row["id"].split(":")[1] for row in rows}.isdisjoint(
+        {"affair-done", "affair-cancelled", "affair-upcoming", "affair-nodue"}
+    )
+
+
+def test_affair_reminder_attention_caps_and_degrades_safely(monkeypatch):
+    fake = _FakeAffairsService([_affair(f"affair-{index}") for index in range(8)])
+    affairs_web = _patch_affairs(monkeypatch, fake)
+    monkeypatch.setattr(service, "profile_agent", lambda: {"agentId": "assistant-agent"})
+
+    rows = affairs_web.collect_affair_reminder_attention(limit=3)
+    assert len(rows) == 3
+
+    def _boom():
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(affairs_web, "get_personal_affairs_service", _boom)
+    assert affairs_web.collect_affair_reminder_attention() == []
+
+    def _conflict():
+        raise RuntimeError("multiple assistant identities")
+
+    monkeypatch.setattr(service, "profile_agent", _conflict)
+    monkeypatch.setattr(affairs_web, "get_personal_affairs_service", lambda: fake)
+    assert affairs_web.collect_affair_reminder_attention() == []
+
+
+def test_overview_attaches_affair_reminders_without_touching_session_attention(monkeypatch):
+    monkeypatch.setattr(attention, "collect_knowledge_review_attention", lambda: [])
+    monkeypatch.setattr(attention, "collect_anomaly_attention", lambda: [])
+    reminder = {
+        "id": "affair-reminder:affair-1:20261019",
+        "kind": "affair_reminder",
+        "severity": "high",
+        "title": "事务提醒：整理周报",
+        "body": "截止 2026-10-19T02:00:00Z",
+        "targetUrl": "/personal-assistant",
+    }
+    monkeypatch.setattr(attention, "_collect_affair_reminder_attention", lambda: [dict(reminder)])
+    payload = {
+        "generatedAt": "2026-10-19T00:00:00+00:00",
+        "counts": {"agents": 0, "sessions": 0, "running": 0, "waiting": 0, "failed": 0},
+        "agents": [],
+        "sessions": [],
+        "attention": [],
+    }
+    attached = attention.attach_attention_to_overview(payload)
+    assert attached["humanAttention"] == [reminder]
+    assert attached["attention"] == []

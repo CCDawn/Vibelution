@@ -474,6 +474,15 @@ def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
     }
 
 
+def profile_agent() -> dict | None:
+    """Public read-only accessor for the personal-assistant identity.
+
+    Returns None when no assistant exists yet; identity conflicts still raise
+    so misconfiguration stays visible to every consumer.
+    """
+    return _profile_agent()
+
+
 def _active_profile_agent() -> dict:
     """Identity gate for settings mutations; conflicts fail closed like reads."""
     agent = _profile_agent()
