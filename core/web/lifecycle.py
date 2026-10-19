@@ -229,13 +229,17 @@ def _start_research_task_recovery_job(startup_jobs: StartupJobGroup, session_rec
         return None
     from .services.team_workflow.research_runtime.archive_mode import challenge_archive_mode_enabled
 
-    if challenge_archive_mode_enabled():
-        return None
+    # 封存模式不做业务对账推进，但注册表僵尸收口（账本真相同步，只写注册表
+    # 展示状态）仍要跑，否则顶栏任务卡 running 的僵尸行永远无人收口。
+    settle_only = challenge_archive_mode_enabled()
     from .services.research_task_recovery import run_research_task_recovery
 
     return startup_jobs.start_async(
         "research-task-recovery",
-        run_research_task_recovery(startup_jobs=startup_jobs, session_recovery=session_recovery),
+        run_research_task_recovery(
+            startup_jobs=startup_jobs, session_recovery=session_recovery,
+            settle_only=settle_only,
+        ),
     )
 
 
