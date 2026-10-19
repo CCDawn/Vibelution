@@ -2214,7 +2214,6 @@ export function ChatCodingRouteWorkbench() {
         sessionId: activeSessionId,
         revision: sessionBudgetParametersQuery.data?.revision,
         maxCallsPerTurn: sessionBudgetParametersQuery.data?.maxCallsPerTurn ?? null,
-        thinkingBudgetChars: sessionBudgetParametersQuery.data?.thinkingBudgetChars ?? null,
         loading: sessionBudgetParametersQuery.isLoading,
         error: sessionBudgetParametersQuery.isError,
         pending: budgetParametersSavePending,

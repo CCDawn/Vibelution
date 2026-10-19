@@ -16,8 +16,6 @@ from typing import Any
 from core.orchestration.session_budget_resolve import (
     SESSION_MAX_CALLS_PER_TURN_MAX,
     SESSION_MAX_CALLS_PER_TURN_MIN,
-    SESSION_THINKING_BUDGET_CHARS_MAX,
-    SESSION_THINKING_BUDGET_CHARS_MIN,
     SessionBudgetParametersValueError,
     session_budget_parameters_from_agent,
     validate_session_budget_override,
@@ -66,7 +64,6 @@ def get_session_budget_parameters_view(session_id: str) -> dict[str, Any]:
     return {
         "revision": max(0, int(agent.get("configRevision") or 0)),
         "maxCallsPerTurn": parameters.maxCallsPerTurn if parameters is not None else None,
-        "thinkingBudgetChars": parameters.thinkingBudgetChars if parameters is not None else None,
     }
 
 
@@ -75,14 +72,14 @@ def update_session_budget_parameters(
     *,
     expected_revision: int,
     max_calls_per_turn: Any = _UNCHANGED,
-    thinking_budget_chars: Any = _UNCHANGED,
 ) -> dict[str, Any]:
     """Update the session budget overrides for subsequent accepted turns.
 
     Omitted fields keep their current value; ``None`` clears one override back
-    to the default resolution (family/base or no thinking-budget injection).
-    Running and queued turns are intentionally allowed; their accepted
-    parameters were already snapshotted by the submit path.
+    to the default resolution (family/base). Running and queued turns are
+    intentionally allowed; their accepted parameters were already snapshotted
+    by the submit path. Legacy ``thinkingBudgetChars`` storage keys are not
+    migrated — they are simply dropped from the payload on the next save.
     """
     s = _service()
     normalized_session_id = str(session_id or "").strip()
@@ -103,16 +100,6 @@ def update_session_budget_parameters(
                 maximum=SESSION_MAX_CALLS_PER_TURN_MAX,
             )
         )
-        normalized_thinking_chars = (
-            _UNCHANGED
-            if thinking_budget_chars is _UNCHANGED
-            else validate_session_budget_override(
-                thinking_budget_chars,
-                field="thinkingBudgetChars",
-                minimum=SESSION_THINKING_BUDGET_CHARS_MIN,
-                maximum=SESSION_THINKING_BUDGET_CHARS_MAX,
-            )
-        )
     except SessionBudgetParametersValueError as exc:
         raise s.SessionValidationError(str(exc)) from exc
 
@@ -129,17 +116,9 @@ def update_session_budget_parameters(
             if normalized_max_calls is not _UNCHANGED
             else (current.maxCallsPerTurn if current is not None else None)
         )
-        next_thinking_chars = (
-            normalized_thinking_chars
-            if normalized_thinking_chars is not _UNCHANGED
-            else (current.thinkingBudgetChars if current is not None else None)
-        )
         next_payload = {
             key: value
-            for key, value in (
-                ("maxCallsPerTurn", next_max_calls),
-                ("thinkingBudgetChars", next_thinking_chars),
-            )
+            for key, value in (("maxCallsPerTurn", next_max_calls),)
             if value is not None
         }
         from core.llm.agent_model_parameters import AgentModelParametersError
