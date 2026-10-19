@@ -90,15 +90,6 @@ def test_running_task_and_stopped_recovery_do_not_invent_a_terminal_result(repai
     assert recovery.reconcile_registered_research_tasks_once(should_stop=lambda: True)["checked"] == 0
 
 
-def test_archive_mode_never_reconciles_or_writes_registered_research_tasks(repair_env, monkeypatch):
-    store, _, calls, events = repair_env
-    monkeypatch.setenv("VIBELUTION_CHALLENGE_ARCHIVE_MODE", "1")
-    before = store.get_task("task-1")
-    assert recovery.reconcile_registered_research_tasks_once(rebuild_index=True)["checked"] == 0
-    assert store.get_task("task-1") == before
-    assert not calls and not events
-
-
 def test_stop_received_while_waiting_for_task_lock_prevents_business_reconcile(repair_env, monkeypatch):
     store, _, calls, events = repair_env
     stopped = False
@@ -327,92 +318,3 @@ def test_stale_grace_env_override_and_parse_fallback(monkeypatch):
     assert recovery._row_exceeds_stale_grace(two_hours_old) is False
     # 时间戳全坏时保守视为未超龄。
     assert recovery._row_exceeds_stale_grace({"updatedAt": "garbage"}) is False
-
-
-def test_settle_only_bypasses_archive_gate_and_skips_business_reconcile(
-    tmp_path, monkeypatch,
-):
-    """封存模式下 settle-only 仍收口僵尸，且绝不触碰业务对账。"""
-    monkeypatch.setattr(recovery, "challenge_archive_mode_enabled", lambda: True)
-    task = {"taskId": "task-done", "sessionId": "session-1", "status": "completed",
-            "turn": {"turnId": "turn-1", "status": "completed"},
-            "resultRefs": ["plan-9"], "failureCode": "",
-            "updatedAt": "2026-10-18T01:00:00Z"}
-    store, calls, events = _recovery_env_with_business_task(tmp_path, monkeypatch, task)
-
-    def _forbidden(*args, **kwargs):
-        raise AssertionError("settle-only must not advance business reconcile")
-
-    monkeypatch.setattr(recovery.tasks, "reconcile_research_project_agent_task_statuses",
-                        _forbidden)
-
-    # 默认路径仍被封存闸门挡住，零写入。
-    assert recovery.reconcile_registered_research_tasks_once() == {
-        "checked": 0, "repaired": 0, "unresolved": 0,
-    }
-    assert store.get_task("task-done")["status"] == "running"
-
-    result = recovery.reconcile_registered_research_tasks_once(settle_only=True)
-
-    assert result == {"checked": 1, "repaired": 1, "unresolved": 0}
-    row = store.get_task("task-done")
-    assert row["status"] == "completed"
-    assert store.active_task_states() == []
-    assert calls == []
-    assert any(e[0][0] == "research_project_agent_task_registry_recovered" for e in events)
-
-
-def test_run_research_task_recovery_settle_only_skips_session_recovery(monkeypatch):
-    """settle-only 主循环不等待 session 恢复即可完成收口轮。"""
-    seen_kwargs = []
-
-    class Jobs:
-        def should_stop(self):
-            return len(seen_kwargs) >= 1
-
-        async def run_sync(self, name, callback, **kwargs):
-            seen_kwargs.append(kwargs)
-            return callback(**kwargs)
-
-    async def exercise():
-        never = asyncio.get_running_loop().create_future()
-        await asyncio.wait_for(
-            recovery.run_research_task_recovery(
-                startup_jobs=Jobs(), session_recovery=never,
-                interval_seconds=0.01, settle_only=True,
-            ),
-            timeout=1,
-        )
-
-    asyncio.run(exercise())
-    assert seen_kwargs and seen_kwargs[0]["settle_only"] is True
-
-
-def test_lifecycle_archive_mode_starts_settle_only_recovery_job(monkeypatch):
-    """封存模式下 lifecycle 仍启动恢复任务（settle-only），不再直接返回 None。"""
-    from core.web import lifecycle
-    from core.web.services.team_workflow.research_runtime import archive_mode
-
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setattr(archive_mode, "challenge_archive_mode_enabled", lambda: True)
-
-    class Jobs:
-        def __init__(self):
-            self.coroutines = []
-
-        def should_stop(self):
-            return True
-
-        async def run_sync(self, name, callback, **kwargs):
-            return callback(**kwargs)
-
-        def start_async(self, name, coroutine):
-            self.coroutines.append((name, coroutine))
-            return object()
-
-    jobs = Jobs()
-    marker = lifecycle._start_research_task_recovery_job(jobs, session_recovery=object())
-    assert marker is not None
-    assert jobs.coroutines and jobs.coroutines[0][0] == "research-task-recovery"
-    # settle-only 协程不得 await session_recovery（object() 不是可等待对象）。
-    asyncio.run(jobs.coroutines[0][1])

@@ -254,19 +254,6 @@ def test_default_unknown_side_effects_and_revoked_binding_block_replay(source, m
     assert research_source.replay(source.record) == "recovery_authorization_revoked_or_changed"
 
 
-def test_archive_hot_switch_blocks_repair_fence_and_native_replay(source, monkeypatch):
-    source.seed()
-    assert research_source.fence(source.record) == ""
-    monkeypatch.setenv("VIBELUTION_CHALLENGE_ARCHIVE_MODE", "1")
-    snapshot = research_source.observe(source.record)
-    assert not snapshot["eligible"] and snapshot["reason"] == "source_archived"
-    assert research_source.fence(source.record) == "source_archived"
-    assert research_source.replay(source.record) == "source_archived"
-    assert len(source.harness.store.list_attempts("run-test")) == 1
-    assert source.harness.store.list_pending_outbox("run-test") == []
-    assert len(source.harness.store.list_attempts("run-test")) == 1
-
-
 def test_native_readiness_refusal_is_not_reclassified_as_infrastructure(source, monkeypatch):
     from tests._support.readiness_fakes import StubNotReadyReadiness
 

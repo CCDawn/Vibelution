@@ -406,8 +406,7 @@ class WorkflowRuntime:
         RETRY_NODE, directive only, or the frozen human-required escalation.
         Self-throttled (default 300s, env override), limit=1 per due tick,
         and the same peek + never-raises discipline as the quote-anchor
-        recovery: any failure is swallowed after logging.  Archive mode
-        (封存模式) never reaches here — no maintenance thread exists.
+        recovery: any failure is swallowed after logging.
         """
         if not _stage_planner_sweep_due(int(time.time() * 1000)):
             return
@@ -549,10 +548,10 @@ class WorkflowRuntime:
         the dedicated serial hypothesis recovery tick with the same peek + self-throttle
         discipline as the digest watchdog; never raises, never re-drives.
 
-        Gated by the auto-advance kill switch (``VIBELUTION_AUTO_ADVANCE_DISABLED``,
-        which also covers challenge archive mode 封存模式): this sweep
-        adjudicates chains and auto-starts formal runs, i.e. it advances
-        state, so it must stay dormant whenever auto-advance is disabled.
+        Gated by the auto-advance kill switch
+        (``VIBELUTION_AUTO_ADVANCE_DISABLED``): this sweep adjudicates chains
+        and auto-starts formal runs, i.e. it advances state, so it must stay
+        dormant whenever auto-advance is disabled.
         """
         from .automation_policy_executor import kill_switch_enabled
 
@@ -818,7 +817,6 @@ def build_workflow_runtime(
 
 _PRODUCTION: WorkflowRuntime | None = None
 _PUMP: WorkflowOutboxPump | None = None
-_ARCHIVE_READ_STORE: WorkflowLedgerStore | None = None
 # Serializes the whole start/stop sequence (check → build → assign → close).
 # The singleton check-then-act used to be lock-free, so concurrent starts
 # could build two WorkflowLedgerStores plus two pump threads on the same
@@ -863,21 +861,11 @@ def start_production_workflow_runtime() -> str:
     that races an in-flight start/stop fails closed with
     ``ProductionRuntimeBusyError`` instead of blocking; a start against an
     already-ready runtime stays idempotent and returns ``"ready"``.
-
-    Challenge archive mode (封存模式, see ``archive_mode``) skips the start
-    workers and returns ``"archive_mode"``: an archived batch is read-only,
-    so no outbox pump workers / maintenance / receipt-persistence /
-    hypothesis-recovery threads may exist. Formal reads use existing Ledger
-    reader connections without initializing a writer or creating a database.
     """
-    from .archive_mode import challenge_archive_mode_enabled
-
-    archived = challenge_archive_mode_enabled()
-    global _PRODUCTION, _PUMP, _ARCHIVE_READ_STORE
+    global _PRODUCTION, _PUMP
     from core.research.workflow.migration.manifest import is_activated
 
     from .formal_write_runtime import (
-        clear_migration_required,
         mark_migration_required,
         reset_formal_write_runtime_for_tests,
     )
@@ -892,47 +880,11 @@ def start_production_workflow_runtime() -> str:
     try:
         if _PRODUCTION is not None:
             return "ready"
-        if archived and _ARCHIVE_READ_STORE is not None:
-            return "archive_mode"
         data_root = research_workflow_data_root()
-        if not archived:
-            data_root.mkdir(parents=True, exist_ok=True)
-        # The manifest loader creates its directory. Archived reads must not
-        # create that directory when the migration has never been initialized.
-        migration_directory_exists = (data_root / "migration").is_dir()
-        if legacy_json_runs_exist(data_root) and not (
-            (not archived or migration_directory_exists) and is_activated(data_root)
-        ):
+        data_root.mkdir(parents=True, exist_ok=True)
+        if legacy_json_runs_exist(data_root) and not is_activated(data_root):
             mark_migration_required()
             return "migration_required"
-        if archived:
-            # Construct the existing query facade over reader connections only.
-            # open()/initialize() would mutate the schema and start a writer;
-            # checkpoint resolution also opens a writable checkpointer.
-            store = WorkflowLedgerStore(workflow_ledger_path(data_root))
-            try:
-                store.read(lambda repo: repo.execute(
-                    "SELECT run_id FROM workflow_runs LIMIT 1"
-                ).fetchone())
-                registry = ActionRegistry()
-                register_default_adapters(registry, RealDomainPorts(store))
-                context = RealDomainReadinessContext(store, adapter_registry=registry)
-                configure_formal_read_runtime(
-                    store=store,
-                    readiness_service=_build_readiness_service(store),
-                    readiness_context=lambda: context,
-                )
-                clear_migration_required()
-            except Exception:
-                from .formal_read_runtime import release_formal_read_runtime
-
-                release_formal_read_runtime(store)
-                store.close()
-                logger.exception("archive workflow read runtime initialization failed")
-                return "unavailable"
-            _ARCHIVE_READ_STORE = store
-            logger.info("challenge archive mode: formal reads ready; no workflow workers")
-            return "archive_mode"
         pump = WorkflowOutboxPump(workers=workflow_worker_count())
         try:
             _PRODUCTION = build_workflow_runtime(
@@ -950,7 +902,7 @@ def start_production_workflow_runtime() -> str:
 
 
 def stop_production_workflow_runtime() -> None:
-    global _PRODUCTION, _PUMP, _ARCHIVE_READ_STORE
+    global _PRODUCTION, _PUMP
     with _LIFECYCLE_LOCK:
         pump = _PUMP
         _PUMP = None
@@ -961,8 +913,6 @@ def stop_production_workflow_runtime() -> None:
             pump.stop()
         runtime = _PRODUCTION
         _PRODUCTION = None
-        archive_store = _ARCHIVE_READ_STORE
-        _ARCHIVE_READ_STORE = None
         if runtime is not None:
             from .formal_read_runtime import release_formal_read_runtime
             from .formal_write_runtime import release_formal_write_runtime
@@ -970,8 +920,3 @@ def stop_production_workflow_runtime() -> None:
             release_formal_read_runtime(runtime.store)
             release_formal_write_runtime(runtime.store)
             runtime.close()
-        if archive_store is not None:
-            from .formal_read_runtime import release_formal_read_runtime
-
-            release_formal_read_runtime(archive_store)
-            archive_store.close()

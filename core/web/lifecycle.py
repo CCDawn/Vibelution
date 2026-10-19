@@ -119,24 +119,8 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
 
 
 def _start_meeting_driver_recovery_job(startup_jobs: StartupJobGroup):
-    """Schedule the startup meeting-driver recovery scan unless archived.
+    """Schedule the startup meeting-driver recovery scan."""
 
-    挑战杯封存模式（archive_mode，只读可看）下跳过这次扫描：它会遍历
-    全部 open 会议并补写 fence 记录（改写状态），封存语义要求启动期不再
-    改写任何 workflow 状态。返回 None 表示任务未创建；其余启动逻辑不受
-    影响。开关读取集中在 research_runtime.archive_mode。
-    """
-
-    from .services.team_workflow.research_runtime.archive_mode import (
-        challenge_archive_mode_enabled,
-    )
-
-    if challenge_archive_mode_enabled():
-        logger.info(
-            "challenge archive mode: skipping startup meeting-driver "
-            "recovery scan (read-only archive)"
-        )
-        return None
     return startup_jobs.start_thread(
         "startup-meeting-driver-recovery", _recover_challenge_meeting_drivers_on_startup
     )
@@ -228,18 +212,12 @@ def _start_research_task_recovery_job(startup_jobs: StartupJobGroup, session_rec
     # Other lifespan tests must never repair the operator's live task store.
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return None
-    from .services.team_workflow.research_runtime.archive_mode import challenge_archive_mode_enabled
-
-    # 封存模式不做业务对账推进，但注册表僵尸收口（账本真相同步，只写注册表
-    # 展示状态）仍要跑，否则顶栏任务卡 running 的僵尸行永远无人收口。
-    settle_only = challenge_archive_mode_enabled()
     from .services.research_task_recovery import run_research_task_recovery
 
     return startup_jobs.start_async(
         "research-task-recovery",
         run_research_task_recovery(
             startup_jobs=startup_jobs, session_recovery=session_recovery,
-            settle_only=settle_only,
         ),
     )
 
@@ -675,12 +653,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
-    if startup_meeting_driver_recovery_task is not None:
-        startup_meeting_driver_recovery_task.add_done_callback(
-            lambda task: consume_startup_task_result(
-                task, message="Challenge meeting driver recovery failed during startup."
-            )
+    startup_meeting_driver_recovery_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Challenge meeting driver recovery failed during startup."
         )
+    )
     startup_chat_room_round_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Chat room round startup recovery failed during startup."
@@ -1098,12 +1075,7 @@ async def _start_generic_workflows_after_session_recovery(
 
 
 def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
-    """Initialize formal reads even when archive mode disables workflow workers.
-
-    The startup job finishes after configuring reader connections in archive
-    mode; no research writer, outbox pump or research worker is started.
-    The independent user-workflow owner may recover its own saved runs.
-    """
+    """Start the Ledger-backed research workflow runtime (workers + reads)."""
 
     return startup_jobs.start_thread(
         "startup-workflow-runtime", _start_research_workflow_runtime

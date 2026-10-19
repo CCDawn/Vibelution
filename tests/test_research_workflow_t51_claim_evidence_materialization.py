@@ -1407,9 +1407,9 @@ def test_completed_extraction_fails_closed_without_run_question(
 
 
 # ---------------------------------------------------------------------------
-# 封存模式 question 解析三级回退（缺陷①：挑战杯 challenge_archive_mode）
+# ledger/write-store 不可用时的 question 解析回退
 #
-# 封存模式后端进程不 configure_formal_write_runtime，
+# 后端进程未 configure_formal_write_runtime 时（write-store 不可用），
 # ``_formal_question_scope`` 原先无条件 get_write_store() 抛
 # FormalWriteRuntimeUnavailable，整个提炼物化 fail-closed，关系阶段拿不到
 # 任何 allowed evidence refs（结构性断链）。修复后：ledger 优先，缺席或
@@ -1418,7 +1418,7 @@ def test_completed_extraction_fails_closed_without_run_question(
 # ---------------------------------------------------------------------------
 
 
-def _archive_mode_env(
+def _formal_write_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     *,
     run_scope: dict,
@@ -1427,8 +1427,9 @@ def _archive_mode_env(
     """Patch the question-scope tiers: ledger unavailable by default.
 
     ``ledger_run=None`` leaves the formal write runtime unconfigured (the
-    archive-mode shape); passing a run object swaps in a reachable ledger.
-    ``run_scope`` is what the collection run's own scope read returns.
+    write-store-unavailable shape); passing a run object swaps in a
+    reachable ledger. ``run_scope`` is what the collection run's own scope
+    read returns.
     """
     from types import SimpleNamespace
 
@@ -1453,12 +1454,12 @@ def _archive_mode_env(
 def test_formal_question_scope_falls_back_to_run_scope_when_ledger_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tier 2 命中：ledger 未配置（封存模式）→ run scope questionId 接管。"""
+    """Tier 2 命中：ledger/write-store 不可用 → run scope questionId 接管。"""
     from core.web.services.team_workflow.research_runtime import (
         agent_claim_evidence_materializer as materializer,
     )
 
-    _archive_mode_env(monkeypatch, run_scope={"questionId": "sci-0091"})
+    _formal_write_unavailable(monkeypatch, run_scope={"questionId": "sci-0091"})
     scope, resolution = materializer._formal_question_scope(
         "team-a", "wf-run-9", "sc-run-a"
     )
@@ -1489,7 +1490,7 @@ def test_formal_question_scope_falls_back_when_ledger_run_lacks_question(
         agent_claim_evidence_materializer as materializer,
     )
 
-    _archive_mode_env(
+    _formal_write_unavailable(
         monkeypatch,
         run_scope={"questionId": "SCI-0091"},
         ledger_run=SimpleNamespace(question_id=""),
@@ -1511,14 +1512,14 @@ def test_formal_question_scope_fails_closed_when_both_tiers_miss_the_question(
         agent_claim_evidence_materializer as materializer,
     )
 
-    _archive_mode_env(monkeypatch, run_scope={"collectionMode": "web_search"})
+    _formal_write_unavailable(monkeypatch, run_scope={"collectionMode": "web_search"})
     with pytest.raises(
         EvidenceMaterializationError,
         match="formal workflow run ledger is unavailable",
     ):
         materializer._formal_question_scope("team-a", "wf-run-9", "sc-run-a")
 
-    _archive_mode_env(
+    _formal_write_unavailable(
         monkeypatch,
         run_scope={"collectionMode": "web_search"},
         ledger_run=SimpleNamespace(question_id=""),
@@ -1549,18 +1550,18 @@ def _production_entry_env(
     )
 
 
-def test_archive_mode_extraction_materializes_via_run_scope_fallback(
+def test_write_store_unavailable_extraction_materializes_via_run_scope_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """封存模式全链路：ledger 未配置 + run scope 带 questionId → 物化成功。
+    """write-store 不可用全链路：ledger 未配置 + run scope 带 questionId → 物化成功。
 
     ClaimEvidence 卡注册、claim ledger 提案、``run_scope_fallback`` 标记
     全部走通——修复前该链路在 _formal_question_scope 处 fail-closed。
     """
     team_id, _scope = _claim_bridge_env(tmp_path, monkeypatch)
     task = _verified_task(team_id=team_id)
-    _archive_mode_env(monkeypatch, run_scope={"questionId": _QUESTION_ID.lower()})
+    _formal_write_unavailable(monkeypatch, run_scope={"questionId": _QUESTION_ID.lower()})
     _production_entry_env(monkeypatch, task)
 
     materialized = materialize_completed_extraction_task(
@@ -1580,14 +1581,14 @@ def test_archive_mode_extraction_materializes_via_run_scope_fallback(
     assert listing["claims"][0]["question"] == _QUESTION_ID
 
 
-def test_archive_mode_both_scope_tiers_missing_keeps_fail_closed_error(
+def test_both_scope_tiers_missing_keeps_fail_closed_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """两级都拿不到 → 生产入口仍 fail-closed，且不落任何卡/ledger 行。"""
     team_id, _scope = _claim_bridge_env(tmp_path, monkeypatch)
     task = _verified_task(team_id=team_id)
-    _archive_mode_env(monkeypatch, run_scope={"collectionMode": "web_search"})
+    _formal_write_unavailable(monkeypatch, run_scope={"collectionMode": "web_search"})
     _production_entry_env(monkeypatch, task)
 
     with pytest.raises(
@@ -1613,7 +1614,7 @@ def test_ledger_resolved_extraction_keeps_legacy_record_shape(
 
     team_id, _scope = _claim_bridge_env(tmp_path, monkeypatch)
     task = _verified_task(team_id=team_id)
-    _archive_mode_env(
+    _formal_write_unavailable(
         monkeypatch,
         run_scope={"questionId": "SCI-OTHER"},
         ledger_run=SimpleNamespace(question_id=_QUESTION_ID.lower()),
