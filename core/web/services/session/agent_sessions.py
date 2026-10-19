@@ -3941,10 +3941,10 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
                     "replacementDirectSessionId": "",
                 }
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-        s._ensure_session_mutable(
-            conversation_id,
-            conversation=target_conversation,
-        )
+        # Deliberately no `_ensure_session_mutable` here: an archived (read-only)
+        # session must stay deletable — sealing is reversible only by delete or
+        # restore, so blocking delete wedged archived sessions forever. The busy
+        # guard below still refuses deletes of running/stopping turns.
         s._ensure_conversation_workspace_metadata(target_conversation)
         target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
         target_agent = s.get_agent(target_agent_id, include_archived=False) if target_agent_id else None

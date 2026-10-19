@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -347,7 +348,7 @@ def test_startup_timeout_does_not_fall_back_to_legacy_json(
     )
 
 
-def test_archive_agent_sessions_hides_store_directory_rows(
+def test_archive_agent_sessions_seals_store_directory_rows(
     isolated_directory_runtime: Path,
 ):
     project_root = isolated_directory_runtime
@@ -359,12 +360,43 @@ def test_archive_agent_sessions_hides_store_directory_rows(
 
     session_service.archive_agent_sessions("agent-alpha", direct_session_id=session_id)
 
+    # The directory row is sealed (archived_at_ms), so it leaves every listing
+    # surface — including hidden-inclusive agent-scoped queries that used to
+    # leak payload-archived-but-directory-live rows.
     assert session_id not in _session_ids()
-    hidden_ids = _session_ids(include_hidden=True)
-    assert session_id in hidden_ids
+    assert session_id not in _session_ids(include_hidden=True)
     rows = _store_directory_rows(include_hidden=True)
-    match = next(row for row in rows if str(row.get("sessionId") or "") == session_id)
-    assert match.get("hiddenFromIndex") is True
+    assert all(str(row.get("sessionId") or "") != session_id for row in rows)
+
+    db_path = developer_sandbox.sandboxed_workspace_path(
+        project_root, "chat", "conversations.sqlite3"
+    )
+    connection = sqlite3.connect(db_path)
+    try:
+        sealed_at, hidden_flag = connection.execute(
+            "SELECT archived_at_ms, hidden_from_index FROM sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        assert sealed_at is not None
+        assert hidden_flag == 1
+    finally:
+        connection.close()
+
+    # A later unrelated re-sync of the (still archived) payload must keep the
+    # seal instead of resetting archived_at_ms like the legacy upsert did.
+    payload = session_service.load_chat_state(session_service.PROJECT_ROOT)
+    archived_row = session_service._find_conversation_entry(payload, session_id)
+    assert archived_row is not None
+    directory_bridge.sync_conversation_record(archived_row, wait=True)
+    connection = sqlite3.connect(db_path)
+    try:
+        still_sealed_at, = connection.execute(
+            "SELECT archived_at_ms FROM sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        assert still_sealed_at == sealed_at
+    finally:
+        connection.close()
 
 
 def test_supervised_session_is_hidden_in_store_directory(
