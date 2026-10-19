@@ -177,6 +177,7 @@ import {
   scheduleDesktopShellRefresh,
   ensureLatestLauncher,
   shouldDeferWorkbenchOpenUntilLifecycleStart,
+  shouldInspectDesktopShellBeforeLifecycle,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli,
   type DesktopShellStatus
@@ -420,6 +421,7 @@ type DesktopActionLoopContext = {
 type PendingWorkbenchCloseAck = {
   closeId: string;
   desktopSessionId: string;
+  requestedAtMs: number;
 };
 
 type PublicDeepLinkSource = "open_url" | "second_instance" | "startup";
@@ -1406,7 +1408,10 @@ async function requestTransactionalWorkbenchClose(
   if (provider === null || bootstrap === null) {
     throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
   }
+  const requestedAtMs = performance.now();
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
+    const preparationStartedAtMs = performance.now();
+    const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
     const context = await resolveDesktopActionLoopContext(bootstrap);
     let activeWorkState: ActiveWorkProbeState = "unknown";
     try {
@@ -1419,6 +1424,7 @@ async function requestTransactionalWorkbenchClose(
     } catch {
       activeWorkState = "unknown";
     }
+    const activeWorkProbeMs = Math.max(0, Math.round(performance.now() - preparationStartedAtMs));
     let transaction = mainWorkbenchCloseStore.submit({
       mode: "normal",
       reason: "workbench_window_close",
@@ -1432,7 +1438,7 @@ async function requestTransactionalWorkbenchClose(
           "user_cancelled",
           "Workbench close was cancelled while active work was present."
         );
-        await recordElectronSupervisorEvent(bootstrap, {
+        recordSupervisorEventFallbackLocally({
           eventCode: "electron.workbench_close.cancelled_active_work",
           message: "Workbench close was cancelled while active work was present.",
           fields: {
@@ -1440,7 +1446,8 @@ async function requestTransactionalWorkbenchClose(
             requestId: transaction.requestId ?? "",
             desktopSessionId: context.desktopSessionId,
             operatorIntent: "keep_running",
-            activeWorkState: transaction.activeWorkState
+            activeWorkState: transaction.activeWorkState,
+            elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
           }
         });
         return;
@@ -1449,11 +1456,14 @@ async function requestTransactionalWorkbenchClose(
     }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
-      desktopSessionId: context.desktopSessionId
+      desktopSessionId: context.desktopSessionId,
+      requestedAtMs
     };
     const closeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+    let backendStopMs = 0;
+    let readbackMs = 0;
     const backendStopFlight = withDesktopShellExitTimeout(async (signal): Promise<boolean> => {
-      await recordElectronSupervisorEvent(bootstrap, {
+      recordSupervisorEventFallbackLocally({
         eventCode: "electron.workbench_close.backend_stopping",
         message: "Electron is stopping the workbench backend.",
         fields: {
@@ -1462,12 +1472,25 @@ async function requestTransactionalWorkbenchClose(
           desktopSessionId: context.desktopSessionId,
           operatorIntent: transaction.mode === "force" ? "force_close" : "close",
           activeWorkState: transaction.activeWorkState,
-          mode: transaction.mode
+          mode: transaction.mode,
+          queuedMs,
+          activeWorkProbeMs
         }
       });
       signal.throwIfAborted();
-      await stopWorkbenchBackend(paths, bootstrap, transaction, signal);
-      return await waitForWorkbenchBackendSettledForWindowClose({
+      const stopStartedAtMs = performance.now();
+      try {
+        await stopWorkbenchBackend(paths, bootstrap, transaction, signal);
+      } finally {
+        backendStopMs = Math.max(0, Math.round(performance.now() - stopStartedAtMs));
+        recordSupervisorEventFallbackLocally({
+          eventCode: "electron.workbench_close.backend_stop_settled",
+          message: "Workbench backend stop returned; closure still requires the final state readback.",
+          fields: { closeId: transaction.closeId, backendStopMs, aborted: signal.aborted }
+        });
+      }
+      const readbackStartedAtMs = performance.now();
+      const settled = await waitForWorkbenchBackendSettledForWindowClose({
         readStatus: async () => {
           try {
             return await fetchLauncherStatusSummary({ ...context, signal });
@@ -1479,6 +1502,8 @@ async function requestTransactionalWorkbenchClose(
         timeoutMs: closeDeadline.remainingMs(),
         signal
       });
+      readbackMs = Math.max(0, Math.round(performance.now() - readbackStartedAtMs));
+      return settled;
     }, closeDeadline, "workbench close");
     workbenchCloseBackendStopInFlight = backendStopFlight.then((settled) => {
       if (!settled) {
@@ -1508,7 +1533,12 @@ async function requestTransactionalWorkbenchClose(
       fields: {
         closeId: transaction.closeId,
         desktopSessionId: context.desktopSessionId,
-        phase: transaction.phase
+        phase: transaction.phase,
+        queuedMs,
+        activeWorkProbeMs,
+        backendStopMs,
+        readbackMs,
+        elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
       }
     });
     await provider.approveWorkbenchCloseOnce();
@@ -1616,7 +1646,7 @@ async function acknowledgeTransactionalWorkbenchClose(
       // approved, authorized leftover, or a bypassed intercept). The backend
       // keeps running in that case and Launcher will sit on 部分运行 with no
       // trace unless this is recorded.
-      await recordElectronSupervisorEvent(bootstrap, {
+      recordSupervisorEventFallbackLocally({
         eventCode: "electron.workbench_close.untracked_window_closed",
         message: "Workbench window closed without a close transaction; the backend may keep running.",
         fields: {
@@ -1635,7 +1665,7 @@ async function acknowledgeTransactionalWorkbenchClose(
   const settled = mainWorkbenchCloseStore.windowClosed(transaction.closeId);
   const context = await resolveDesktopActionLoopContext(bootstrap);
   if (settled.phase === "failed") {
-    await recordElectronSupervisorEvent(bootstrap, {
+    recordSupervisorEventFallbackLocally({
       eventCode: "electron.workbench_close.window_closed_after_failure",
       message: "Workbench window closed after the close transaction failed; backend outcome remains failed.",
       fields: {
@@ -1643,7 +1673,8 @@ async function acknowledgeTransactionalWorkbenchClose(
         desktopSessionId: context.desktopSessionId,
         failureCode: settled.failureCode ?? "",
         failureMessage: (settled.message ?? "").slice(0, 300),
-        workspaceRoot: paths.workspaceRoot
+        workspaceRoot: paths.workspaceRoot,
+        elapsedMs: Math.max(0, Math.round(performance.now() - pending.requestedAtMs))
       }
     });
     return;
@@ -1654,14 +1685,15 @@ async function acknowledgeTransactionalWorkbenchClose(
     desktopSessionRevision,
     controlToken: context.controlToken
   });
-  await recordElectronSupervisorEvent(bootstrap, {
+  recordSupervisorEventFallbackLocally({
     eventCode: "electron.workbench_close.completed",
     message: "Electron confirmed the Workbench closed after the backend stopped.",
     fields: {
       closeId: transaction.closeId,
       desktopSessionId: context.desktopSessionId,
       desktopSessionRevision,
-      workspaceRoot: paths.workspaceRoot
+      workspaceRoot: paths.workspaceRoot,
+      elapsedMs: Math.max(0, Math.round(performance.now() - pending.requestedAtMs))
     }
   });
 }
@@ -1701,7 +1733,7 @@ async function handleTransactionalWorkbenchCloseFailure(
   error: unknown
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
-  await recordElectronSupervisorEvent(bootstrap, {
+  recordSupervisorEventFallbackLocally({
     eventCode: "electron.workbench_close.failed",
     message: "Workbench close transaction failed before Electron window authorization.",
     fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
@@ -1712,7 +1744,7 @@ async function handleTransactionalWorkbenchCloseFailure(
     return;
   }
   if (isWorkbenchCloseControlFetchFailure(error)) {
-    await recordElectronSupervisorEvent(bootstrap, {
+    recordSupervisorEventFallbackLocally({
       eventCode: "electron.workbench_close.fail_open_destroy",
       message: "Workbench close control fetch failed; Electron is destroying the window.",
       fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
@@ -1722,7 +1754,7 @@ async function handleTransactionalWorkbenchCloseFailure(
   }
   const retry = await confirmWorkbenchCloseRetry(provider, message);
   if (!retry) {
-    await recordElectronSupervisorEvent(bootstrap, {
+    recordSupervisorEventFallbackLocally({
       eventCode: "electron.workbench_close.fail_open_user_declined",
       message: "Workbench close transaction failed and retry was declined; closing the window while the backend may keep running.",
       fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
@@ -2326,11 +2358,14 @@ async function recordDesktopExitEvent(
   deadline: DesktopShellExitDeadline,
   event: RuntimeSceneElectronEvent
 ): Promise<void> {
-  await withDesktopShellExitTimeout(
-    () => recordElectronSupervisorEvent(launcherBootstrap, event),
-    deadline,
-    event.eventCode
-  ).catch(() => undefined);
+  recordSupervisorEventFallbackLocally({
+    ...event,
+    fields: {
+      ...event.fields,
+      budgetConsumedMs: deadline.budgetMs - deadline.remainingMs(),
+      budgetRemainingMs: deadline.remainingMs()
+    }
+  });
 }
 
 async function joinWorkbenchCloseBackendStop(deadline: DesktopShellExitDeadline): Promise<boolean> {
@@ -2526,8 +2561,8 @@ async function requestDesktopShellExit(
                 signal.throwIfAborted();
                 await closeDesktopSessionIfRegistered();
               },
-              recordEvent: async (event) => {
-                await recordElectronSupervisorEvent(launcherBootstrap, {
+              recordEvent: (event) => {
+                recordSupervisorEventFallbackLocally({
                   ...event,
                   fields: {
                     closeReason,
@@ -3094,8 +3129,8 @@ async function requestForcedDesktopShellExit(
               signal.throwIfAborted();
               await closeDesktopSessionIfRegistered();
             },
-            recordEvent: async (event) => {
-              await recordElectronSupervisorEvent(launcherBootstrap, {
+            recordEvent: (event) => {
+              recordSupervisorEventFallbackLocally({
                 ...event,
                 fields: {
                   closeReason,
@@ -3644,7 +3679,7 @@ async function orchestrateLauncherLifecycle(
     isPackaged: app.isPackaged,
     launchBlocking: false
   });
-  if (app.isPackaged) {
+  if (shouldInspectDesktopShellBeforeLifecycle(lifecycleOperation, app.isPackaged)) {
     try {
       const status = await inspectCurrentDesktopShell();
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {

@@ -13,6 +13,7 @@ import {
   scheduleDesktopShellRefresh,
   ensureLatestLauncher,
   shouldDeferWorkbenchOpenUntilLifecycleStart,
+  shouldInspectDesktopShellBeforeLifecycle,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli
 } from "../src/process/desktopShellFreshness.js";
@@ -50,6 +51,16 @@ function fakeSpawnWithOutput(output: string, exitCode = 0): ReturnType<typeof vi
 }
 
 describe("desktop shell freshness", () => {
+  it("inspects packaged launch operations without scanning versions for stops", () => {
+    for (const operation of ["start", "restart", "rebuild-and-start"]) {
+      expect(shouldInspectDesktopShellBeforeLifecycle(operation, true)).toBe(true);
+      expect(shouldInspectDesktopShellBeforeLifecycle(operation, false)).toBe(false);
+    }
+    for (const operation of ["stop", "force-stop", "shutdown", ""]) {
+      expect(shouldInspectDesktopShellBeforeLifecycle(operation, true)).toBe(false);
+    }
+  });
+
   it("refreshes only a packaged stale shell outside smoke and canary", () => {
     expect(decidePackagedDesktopShellRefresh({ isPackaged: false, smoke: false, stale: true })).toBe("skip");
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: true, stale: true })).toBe("skip");

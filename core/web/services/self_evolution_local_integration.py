@@ -235,6 +235,13 @@ class AuthorizedLocalIntegration:
                 raise LocalIntegrationError("Authorization only accepts exact files inside the project.")
 
     def authorize(self, context: dict[str, Any]) -> dict[str, Any]:
+        if context.get("_recoverySource"):
+            from .team_workflow.generic.code_repair import delegated_authorization
+            grant = delegated_authorization(context)
+            self._file_scope(grant["allowedFiles"])
+            if grant["principals"] != self._principals(grant["teamId"]):
+                raise LocalIntegrationError("Recovery role binding or permissions changed.")
+            return grant
         operator = current_server_operator()
         if not operator or not operator.operator_id or not operator_has_privileged_role(operator.roles):
             raise PermissionError("command_forbidden")
@@ -284,6 +291,10 @@ class AuthorizedLocalIntegration:
         supplied = context.get("localIntegrationAuthorization")
         if supplied is not None and supplied != auth:
             raise LocalIntegrationError("Caller authorization is stale.")
+        if fresh.get("_recoverySource"):
+            from .team_workflow.generic.code_repair import delegated_authorization
+            if delegated_authorization(fresh) != auth:
+                raise LocalIntegrationError("Recovery source delegation changed.")
         return fresh
 
     def check(self, context: dict[str, Any]) -> None:
@@ -512,7 +523,8 @@ class AuthorizedLocalIntegration:
 
     @contextmanager
     def guard(self, context: dict[str, Any]) -> Iterator[None]:
-        with authorization_lock(self.store, context.get("runId", "")):
+        from .team_workflow.generic.code_repair import source_guard
+        with source_guard(context), authorization_lock(self.store, context.get("runId", "")):
             fresh = self._fresh(context)
             candidate = fresh.get("candidate")
             receipt = fresh.get("independentReview")

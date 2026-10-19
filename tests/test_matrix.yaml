@@ -810,11 +810,12 @@ rules:
       - "tests/test_generic_workflow_research_source_adapter.py"
       - "tests/test_generic_workflow_session_source.py"
       - "tests/test_generic_workflow_session_source_adapter.py"
+      - "tests/test_generic_workflow_code_repair.py"
       - "web/src/api/genericTeamWorkflows.ts"
       - "web/src/api/genericTeamWorkflows.test.ts"
       - "web/src/api/types/genericTeamWorkflow.ts"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_generic_team_workflows.py tests/test_generic_workflow_recovery.py tests/test_generic_workflow_binding.py tests/test_generic_workflow_result_contract.py tests/test_generic_workflow_research_source.py tests/test_generic_workflow_research_source_adapter.py tests/test_generic_workflow_session_source.py tests/test_generic_workflow_session_source_adapter.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_generic_team_workflows.py tests/test_generic_workflow_recovery.py tests/test_generic_workflow_binding.py tests/test_generic_workflow_result_contract.py tests/test_generic_workflow_research_source.py tests/test_generic_workflow_research_source_adapter.py tests/test_generic_workflow_session_source.py tests/test_generic_workflow_session_source_adapter.py tests/test_generic_workflow_code_repair.py -q"
       - "node web/node_modules/vitest/vitest.mjs run src/api/genericTeamWorkflows.test.ts --root web"
     notes:
       - "Generic runs have a distinct state owner and native execution contract; research routes and Ledger are unchanged."

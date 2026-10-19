@@ -174,6 +174,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
     : GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS;
   const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? defaultTimeoutMs));
   const now = input.now ?? Date.now;
+  const deadline = now() + timeoutMs;
   const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
   let controlToken = String(input.controlToken ?? process.env.VIBELUTION_WEB_CONTROL_TOKEN ?? "").trim();
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
@@ -182,20 +183,40 @@ export async function requestGracefulWorkbenchShutdown(input: {
     return { status: response.status, json: () => response.json() };
   });
   const controller = new AbortController();
+  let accepted = false;
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   const onAbort = (): void => {
     controller.abort(input.signal?.reason);
   };
   input.signal?.addEventListener("abort", onAbort, { once: true });
+  const waitWithinDeadline = async <T>(operation: () => Promise<T>): Promise<T> => {
+    controller.signal.throwIfAborted();
+    let rejectOnAbort: (() => void) | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => {
+          controller.signal.throwIfAborted();
+          return operation();
+        }),
+        new Promise<never>((_resolve, reject) => {
+          rejectOnAbort = () => reject(controller.signal.reason);
+          controller.signal.addEventListener("abort", rejectOnAbort, { once: true });
+          if (controller.signal.aborted) rejectOnAbort();
+        })
+      ]);
+    } finally {
+      if (rejectOnAbort) controller.signal.removeEventListener("abort", rejectOnAbort);
+    }
+  };
   try {
     timeoutTimer = setTimeout(() => controller.abort(new Error("graceful shutdown timed out")), timeoutMs);
     if (!controlToken && input.healthVerified && isLoopbackHost(host)) {
-      const tokenResponse = await request(`http://${host}:${port}/api/control-token`, {
+      const tokenResponse = await waitWithinDeadline(() => request(`http://${host}:${port}/api/control-token`, {
         method: "GET",
         signal: controller.signal
-      });
+      }));
       if (tokenResponse.status === 200 && tokenResponse.json) {
-        const payload = await tokenResponse.json();
+        const payload = await waitWithinDeadline(() => tokenResponse.json!());
         if (isRecord(payload) && typeof payload.controlToken === "string") {
           controlToken = payload.controlToken.trim();
         }
@@ -208,7 +229,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
         reason: "backend control token is unavailable; falling back to verified process-tree retirement"
       };
     }
-    const response = await request(`http://${host}:${port}/api/runtime/shutdown`, {
+    const response = await waitWithinDeadline(() => request(`http://${host}:${port}/api/runtime/shutdown`, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -224,7 +245,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
             })
           }
         : {})
-    });
+    }));
     if (response.status === 409) {
       return {
         requested: false,
@@ -242,12 +263,13 @@ export async function requestGracefulWorkbenchShutdown(input: {
       };
     }
 
-    const deadline = now() + timeoutMs;
-    const delay = input.delay ?? ((ms) => abortableDelay(ms, input.signal));
+    accepted = true;
+    const delay = input.delay ?? ((ms) => abortableDelay(ms, controller.signal));
     while (now() < deadline) {
-      input.signal?.throwIfAborted();
+      controller.signal.throwIfAborted();
       const processGone = !input.backendPid || !pidAlive(Math.trunc(input.backendPid));
-      const portGone = !(await connect(port, host));
+      const portGone = !(await waitWithinDeadline(() => connect(port, host)));
+      controller.signal.throwIfAborted();
       if (processGone && portGone) {
         return {
           requested: true,
@@ -256,7 +278,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
           reason: "backend completed graceful shutdown"
         };
       }
-      await delay(Math.min(PORT_RELEASE_POLL_MS, Math.max(1, deadline - now())));
+      await waitWithinDeadline(() => delay(Math.min(PORT_RELEASE_POLL_MS, Math.max(1, deadline - now()))));
     }
     return {
       requested: true,
@@ -269,9 +291,12 @@ export async function requestGracefulWorkbenchShutdown(input: {
       throw error;
     }
     return {
-      requested: false,
+      requested: accepted,
       completed: false,
-      reason: error instanceof Error ? error.message : String(error)
+      ...(accepted ? { status: 202 } : {}),
+      reason: accepted && controller.signal.aborted
+        ? "backend did not complete graceful shutdown before the deadline"
+        : error instanceof Error ? error.message : String(error)
     };
   } finally {
     if (timeoutTimer !== null) {

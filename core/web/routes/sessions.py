@@ -101,6 +101,7 @@ from core.web.services.session_service import (
     send_now_session_queued_turn,
     update_session_queued_turn,
     regenerate_session_message,
+    retry_session_message,
     request_stop_session_turn,
     resolve_session_image_artifact,
     resolve_session_stream_initial_payload,
@@ -295,6 +296,28 @@ class SessionHeadPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nodeId: str = Field(min_length=1, max_length=200)
+
+
+class SessionMessageRetryPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clientSubmissionId: str = Field(min_length=1, max_length=128, pattern=r"\S", strict=True)
+    expectedTurnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
+    expectedHeadId: str = Field(min_length=1, max_length=200, pattern=r"\S", strict=True)
+    expectedLedgerSeq: int = Field(ge=1, strict=True)
+    expectedAgentId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
+    baseMessageId: str = Field(min_length=1, max_length=200, pattern=r"\S", strict=True)
+
+
+class SessionRetryReceipt(BaseModel):
+    clientSubmissionId: str
+    turnId: str
+    journalEventId: str
+    journalSequence: int
+
+
+class SessionMessageRetryResponse(SessionCatalogItem):
+    retryReceipt: SessionRetryReceipt
 
 
 class SessionForkPayload(BaseModel):
@@ -1245,6 +1268,28 @@ def session_regenerate_message(session_id: str, payload: SessionMessageRegenerat
             turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
+            base_message_id=payload.baseMessageId,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/messages/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionMessageRetryResponse,
+    response_model_exclude_unset=True,
+)
+def session_retry_message(session_id: str, payload: SessionMessageRetryPayload) -> dict:
+    try:
+        return retry_session_message(
+            session_id, client_submission_id=payload.clientSubmissionId,
+            expected_turn_id=payload.expectedTurnId, expected_head_id=payload.expectedHeadId,
+            expected_ledger_seq=payload.expectedLedgerSeq, expected_agent_id=payload.expectedAgentId,
             base_message_id=payload.baseMessageId,
         )
     except SessionNotFoundError as exc:
