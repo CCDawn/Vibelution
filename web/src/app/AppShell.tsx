@@ -3299,7 +3299,7 @@ export function AppShell() {
         onRecover={() => { void beginRestart(); }}
         onRetry={() => { void backendHealthQuery.refetch(); }}
       /></div>
-        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><VWorkbenchFrame flush={location.pathname === "/chat"}>{routeContent}</VWorkbenchFrame></>}
+        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}>{routeContent}</VWorkbenchFrame></>}
           aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
           resize={{ layoutId: WORKBENCH_LAYOUT_IDS.projectUtilities, aside: { defaultWidth: 420, minWidth: 320, maxWidth: 640 } }} />
       </div>
