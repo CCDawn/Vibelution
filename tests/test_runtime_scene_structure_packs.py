@@ -2,8 +2,96 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.web.services import runtime_scene_service as facade
 from core.web.services.runtime_scene import diagnosis, file_preview, package_index, query, record
+
+# 2026-10-19 生产事故复盘：Electron 壳实际发射的事件码大量未登记进
+# ELECTRON_SUPERVISOR_EVENT_CODES，record_electron_supervisor_event 抛
+# ValueError → API 400，事件桥队列队头被拒后所有 supervisor 事件（含人工
+# 关注通知）无声消失。下面两个清单锁定发射清单即契约的口径。
+_ELECTRON_SHELL_EMITTED_EVENT_CODES = {
+    # conversation_notification
+    "electron.conversation_notification.notified",
+    "electron.conversation_notification.suppressed",
+    "electron.conversation_notification.failed",
+    # deep_link
+    "electron.deep_link.accepted",
+    "electron.deep_link.rejected",
+    # startup
+    "electron.startup.summary",
+    "electron.startup.control_plane_attached",
+    "electron.startup.desktop_session_registered",
+    "electron.startup.workbench_window_ready",
+    # lifecycle
+    "electron.lifecycle.force_authorized",
+    "electron.lifecycle.os_session_end",
+    # tray
+    "electron.tray.created",
+    "electron.tray.ready",
+    "electron.tray.quit_all.force_interrupt",
+    "electron.tray.restart_all.force_interrupt",
+    "electron.tray.restart_all.post_refresh_stale",
+    "electron.tray.restart_all.restore",
+    "electron.tray.restart_all.restore_failed",
+    "electron.tray.restart_launcher.force_interrupt",
+    # runtime
+    "electron.runtime.start_reap_requested",
+    "electron.runtime.start_reap_failed",
+    "electron.runtime.stop_requested",
+    "electron.runtime.stop_failed",
+    # launcher_service
+    "electron.launcher_service.start_reap_requested",
+    "electron.launcher_service.start_reap_failed",
+    "electron.launcher_service.stop_requested",
+    "electron.launcher_service.stop_failed",
+    # desktop_session
+    "electron.desktop_session.heartbeat_failed",
+    "electron.desktop_session.heartbeat_recovery_failed",
+    # desktop_control
+    "electron.desktop_control.recovered",
+    # desktop_shell
+    "electron.desktop_shell.exit_blocked_stop_failed",
+    # workbench_close
+    "electron.workbench_close.window_authorized",
+    "electron.workbench_close.active_work_checked",
+    "electron.workbench_close.cancelled_active_work",
+    "electron.workbench_close.backend_stopping",
+    "electron.workbench_close.backend_stop_settled",
+    "electron.workbench_close.fail_open_destroy",
+    "electron.workbench_close.fail_open_user_declined",
+    "electron.workbench_close.failed",
+    "electron.workbench_close.untracked_window_closed",
+    "electron.workbench_close.window_closed_after_failure",
+    "electron.workbench_close.completed",
+    # main_line
+    "electron.main_line_command.settled",
+    "electron.main_line_command.close_backoff_coalesced",
+    # isolated
+    "electron.isolated_instance.stopped",
+    "electron.isolated_instance.stop_failed",
+    "electron.isolated_instances.stop_all_requested",
+    "electron.isolated_instances.stop_all_failed",
+    # watchdog
+    "electron.workbench_backend_watchdog.degraded",
+    "electron.workbench_backend_watchdog.recovered",
+}
+_ELECTRON_LEGACY_EVENT_CODES = {
+    "electron.launcher.supervisor.started",
+    "electron.launcher.window.opened",
+    "electron.workbench.window.opened",
+    "electron.workbench.navigation.ready",
+    "electron.workbench.navigation.failed",
+    "electron.launcher_service.started",
+    "electron.launcher_service.exited",
+    "electron.desktop_action.claimed",
+    "electron.desktop_action.succeeded",
+    "electron.desktop_action.failed",
+    "electron.human_attention_notification.delivered",
+    "electron.human_attention_notification.suppressed",
+    "electron.human_attention_notification.invalid",
+}
 
 
 def test_facade_reexports_record_pack() -> None:
@@ -31,6 +119,35 @@ def test_electron_supervisor_catalog_accepts_human_attention_notification_outcom
         "electron.human_attention_notification.suppressed",
         "electron.human_attention_notification.invalid",
     }.issubset(facade.ELECTRON_SUPERVISOR_EVENT_CODES)
+
+
+def test_electron_supervisor_catalog_covers_all_shell_emitted_and_legacy_codes() -> None:
+    # 发射清单即契约：壳侧每个 `eventCode: "electron.*"` 发射码（对照方法：
+    # grep desktop/electron/src 的 "electron\.[a-z0-9_.]" 模式与本表做差集）
+    # 加历史保留码（含未被发射的 electron.launcher.window.opened）必须全部在册。
+    assert facade.ELECTRON_SUPERVISOR_EVENT_CODES.issuperset(_ELECTRON_SHELL_EMITTED_EVENT_CODES)
+    assert facade.ELECTRON_SUPERVISOR_EVENT_CODES.issuperset(_ELECTRON_LEGACY_EVENT_CODES)
+
+
+def test_record_electron_supervisor_event_accepts_every_catalogued_code(monkeypatch) -> None:
+    monkeypatch.setattr(
+        facade,
+        "record_runtime_scene_event",
+        lambda *args, **_kwargs: {"accepted": True, "runtimeSceneId": "scene-1"},
+    )
+    for event_code in sorted(facade.ELECTRON_SUPERVISOR_EVENT_CODES):
+        result = facade.record_electron_supervisor_event(event_code, message=event_code)
+        assert result["accepted"] is True
+
+
+def test_record_electron_supervisor_event_still_rejects_unknown_codes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        facade,
+        "record_runtime_scene_event",
+        lambda *args, **_kwargs: {"accepted": True, "runtimeSceneId": "scene-1"},
+    )
+    with pytest.raises(ValueError):
+        facade.record_electron_supervisor_event("electron.fake.code", message="must be rejected")
 
 
 def test_facade_reexports_query_pack() -> None:
