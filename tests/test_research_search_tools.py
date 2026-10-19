@@ -577,7 +577,7 @@ def test_web_fetch_403_returns_anti_bot_no_retry_hint(monkeypatch):
 
     assert result.startswith("[错误] HTTP 403")
     assert "拒绝本工具访问" in result
-    assert "勿重试 URL 变体" in result
+    assert "勿重试同站 URL 变体" in result
     assert "请改用搜索摘要或其他域名" in result
 
 
@@ -654,7 +654,7 @@ def test_web_fetch_403_without_identifier_keeps_original_error(monkeypatch):
 def test_web_fetch_fallback_zero_hits_return_original_error_verbatim(monkeypatch):
     expected = (
         "[错误] HTTP 403: https://www.mdpi.com/10.3390/s24186010 "
-        "该站点拒绝本工具访问（可能是反爬），勿重试 URL 变体，请改用搜索摘要或其他域名。"
+        "该站点拒绝本工具访问（可能是反爬），勿重试同站 URL 变体；若上下文提供该来源的 DOI（doi.org）链接，可改用 DOI 链接抓取（会自动尝试 PMC 镜像备援）；否则请改用搜索摘要或其他域名。"
     )
     search_payloads = (
         {"resultList": {"result": []}},
@@ -704,7 +704,7 @@ def test_web_fetch_fallback_fulltext_failure_returns_original_error_verbatim(mon
 
     assert result == (
         "[错误] HTTP 403: https://www.mdpi.com/10.3390/s24186010 "
-        "该站点拒绝本工具访问（可能是反爬），勿重试 URL 变体，请改用搜索摘要或其他域名。"
+        "该站点拒绝本工具访问（可能是反爬），勿重试同站 URL 变体；若上下文提供该来源的 DOI（doi.org）链接，可改用 DOI 链接抓取（会自动尝试 PMC 镜像备援）；否则请改用搜索摘要或其他域名。"
     )
 
 
