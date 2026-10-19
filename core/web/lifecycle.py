@@ -18,6 +18,7 @@ from .server_shutdown import mark_server_shutdown_clean
 from .startup_jobs import StartupJobGroup, remaining_seconds, run_sync_bounded
 
 logger = logging.getLogger(__name__)
+shutdown_logger = logging.getLogger("uvicorn.error")
 LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS = 25.0
 
 
@@ -904,7 +905,7 @@ async def _run_shutdown_step(name: str, awaitable: Any, *, deadline: float) -> A
     try:
         return await _run_shutdown_step_owned(name, awaitable, deadline=deadline)
     finally:
-        logger.info("Shutdown stage %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
+        shutdown_logger.info("Shutdown stage %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
 
 
 async def _run_shutdown_step_owned(name: str, awaitable: Any, *, deadline: float) -> Any:
@@ -1049,7 +1050,7 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
             logger.error("Owned runtime shutdown failed: %s (%s)", name, type(exc).__name__)
             return False
         finally:
-            logger.info("Shutdown owner %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
+            shutdown_logger.info("Shutdown owner %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
         if not completed or not isinstance(result, dict) or result.get("closed") is not True:
             logger.error("Owned runtime shutdown incomplete: %s", name)
             return False
