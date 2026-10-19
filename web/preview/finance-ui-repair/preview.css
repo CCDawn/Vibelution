@@ -1,0 +1,8 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+@source "./*.tsx";
+@source "./*.ts";
+html, body, #root { height: 100%; margin: 0; }

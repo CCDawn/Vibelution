@@ -152,7 +152,7 @@ export function FinanceResearchConfig({ value, onChange, onStart, disabled, pend
     return effort && supported.has(effort) ? effort : undefined;
   };
   return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "研究设置" : "Research settings"}>
-    <div className={styles.heading}><strong className={styles.title}><SlidersHorizontal size={15} />{zh ? "发起研究" : "Start research"}</strong><span className={styles.caption}>{zh ? "财报 · 事件 · 风险" : "Financials · Events · Risks"}</span></div>
+    <div className={styles.heading}><strong className={styles.title}><SlidersHorizontal size={15} />{zh ? "研究设置" : "Research settings"}</strong><span className={styles.caption}>{zh ? "确认范围后开始" : "Choose a scope, then start"}</span></div>
     <div className={styles.fields}>
       <label className={styles.field}>{zh ? "分析日期" : "As of"}<VInput type="date" value={value.date} max={localResearchDate()} aria-invalid={!isValidResearchDate(value.date)} aria-label={zh ? "分析日期" : "Analysis date"} onChange={(event) => onChange({ ...value, date: event.target.value })} /></label>
       <label className={styles.field}>{zh ? "报告期" : "Report period"}<VInput value={value.period} maxLength={40} placeholder="2024FY" aria-label={zh ? "报告期" : "Report period"} onChange={(event) => onChange({ ...value, period: event.target.value })} /></label>
@@ -164,8 +164,8 @@ export function FinanceResearchConfig({ value, onChange, onStart, disabled, pend
         const choice = choices.find((candidate) => modelId(candidate) === String(key));
         if (choice) onTurnModelSelectionChange({ modelId: modelId(choice), ...(keepReasoningEffort(choice) ? { reasoningEffort: keepReasoningEffort(choice) } : {}) });
       }} /></label>
-      <VButton variant="primary" isDisabled={!canStartResearch} onPress={onStart} icon={<Play size={14} />}>{pending ? (zh ? "正在启动" : "Starting") : (zh ? "开始研究" : "Start research")}</VButton>
     </div>
+    <div className={styles.footer}><span className={styles.caption}>{zh ? "快速适合初筛，深入与全面适合交叉核验。" : "Quick for screening; deep and comprehensive for cross-checking."}</span><VButton variant="primary" isDisabled={!canStartResearch} onPress={onStart} icon={<Play size={14} />}>{pending ? (zh ? "正在启动" : "Starting") : (zh ? "开始研究" : "Start research")}</VButton></div>
     {effectiveEffort ? <p className={styles.caption} aria-live="polite">{zh ? `本轮推理：${effortLabel}` : `Reasoning: ${effectiveEffort}`}</p> : null}
     {modelGateMessage ? <VStateSurface tone={modelGateTone} density="compact" title={zh ? "模型状态" : "Model status"} className={styles.modelStatus} data-testid="finance-research-model-status" aria-live="polite" actions={hasDefaultProblem && agentConfigHref ? <VRouteLinkButton to={agentConfigHref}>{zh ? "打开助手配置" : "Open assistant settings"}</VRouteLinkButton> : undefined}>{modelGateMessage}{selectableTurnModel ? <span className={styles.modelStatusDetail}>{zh ? ` 本轮已选：${selectableTurnModel.label || selectableTurnModel.model || selectableTurnModel.modelId}。` : ` Selected for this turn: ${selectableTurnModel.label || selectableTurnModel.model || selectableTurnModel.modelId}.`}</span> : null}</VStateSurface> : null}
   </VSurface>;

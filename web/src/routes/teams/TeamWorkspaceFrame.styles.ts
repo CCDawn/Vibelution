@@ -7,6 +7,6 @@ export default {
   bodyScroll: "overflow-x-hidden overflow-y-auto [&>*]:shrink-0",
   bodyFixed: "overflow-hidden !p-0",
   barePane: "!border-0 !rounded-none !bg-transparent !p-0",
-  page: "[--shell-surface:var(--vui-surface-rail)] !p-1",
-  workspace: "[&>[data-vui=split-main]]:mx-1",
+  page: "[--shell-surface:var(--vui-surface-rail)] !p-0",
+  workspace: "[&>[data-vui=split-main]]:h-auto! [&>[data-vui=split-main]]:mx-1 [&>[data-vui=split-main]]:mb-1 max-[700px]:[&>[data-vui=split-main]]:mx-0.5! max-[700px]:[&>[data-vui=split-main]]:mb-0.5!",
 } as const;

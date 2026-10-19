@@ -126,8 +126,14 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
     }
   }
   return <div className={styles.page}>
+    <ol className={styles.steps} aria-label={zh ? "回测步骤" : "Backtest steps"}>
+      <li>{zh ? "1 设置策略与区间" : "1 Set strategy and dates"}</li>
+      <li>{zh ? "2 预检数据与预算 · 不调用模型" : "2 Check data and budget · no model calls"}</li>
+      <li>{zh ? "3 确认预算后启动" : "3 Confirm budget and start"}</li>
+    </ol>
+    <VSurface tone="panel" padding="normal" className={styles.setup}>
     <p className={styles.note}>{zh ? "历史日线 → AI目标仓位 → 下日开盘撮合。独立模拟账户，不连接券商；支持单股或组合、停止续跑和结果导出。" : "Historical bars → AI target weights → next-open execution. Independent simulation, no broker connection; single-stock or basket runs can be stopped, resumed and exported."}</p>
-    <div className={styles.row}>
+    <div className={styles.formGrid}>
       <label className={styles.field}>{zh ? "历史行情源" : "Historical source"}<VSelect aria-label={zh ? "AI回测历史行情源" : "AI backtest historical data source"} selectedKey={form.dataSource ?? "tencent"} isDisabled={busy} className={styles.scopeSelect} options={[{ id: "tencent", label: "腾讯财经" }, { id: "eastmoney", label: "东方财富" }, { id: "sina", label: "新浪财经" }, { id: "auto", label: zh ? "自动备用（整段切换）" : "Whole-snapshot fallback" }]} onSelectionChange={key => edit("dataSource", String(key) as "tencent" | "eastmoney" | "sina" | "auto")} /></label>
       <label className={styles.field}>{zh ? "公司行动" : "Corporate actions"}<VSelect aria-label={zh ? "AI回测公司行动" : "AI backtest corporate actions"} selectedKey={form.corporateActionPolicy ?? "block"} isDisabled={busy} className={styles.actionSelect} options={[{ id: "block", label: zh ? "检测到即阻断" : "Block detected actions" }, { id: "verified_cash_dividends", label: zh ? "核验现金分红" : "Verify cash dividends" }]} onSelectionChange={key => edit("corporateActionPolicy", String(key) as "block" | "verified_cash_dividends")} /></label>
       <label className={styles.field}>{zh ? "回测范围" : "Scope"}<VSelect aria-label={zh ? "AI回测范围" : "AI backtest scope"} selectedKey={scope} isDisabled={busy} className={styles.scopeSelect} options={[{ id: "single", label: zh ? "单股" : "Single stock" }, { id: "portfolio", label: zh ? "组合" : "Portfolio" }]} onSelectionChange={key => changeScope(String(key ?? "single") as "single" | "portfolio")} /></label>
@@ -142,7 +148,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {parsed.symbols.length ? <div className={styles.assetList}>{parsed.symbols.map(symbol => <span key={symbol} className={styles.assetChip}><VChip>{symbol}</VChip><VButton type="button" variant="ghost" isIconOnly aria-label={zh ? `移除 ${symbol}` : `Remove ${symbol}`} isDisabled={busy} onPress={() => removeSymbol(symbol)} icon={<X size={13} aria-hidden="true" />} /></span>)}</div> : null}
       {portfolioError ? <VStateSurface tone="error" density="compact" title={portfolioError} /> : null}
     </div> : null}
-    <div className={styles.row}>
+    <div className={styles.formGrid}>
       <label className={styles.field}>{zh ? "开始" : "From"}<VInput aria-label={zh ? "AI回测开始日期" : "AI backtest start date"} type="date" aria-invalid={Boolean(dateError) || undefined} max={ago(1)} value={form.startDate} disabled={busy} onChange={event => edit("startDate", event.target.value)} /></label>
       <label className={styles.field}>{zh ? "结束" : "To"}<VInput aria-label={zh ? "AI回测结束日期" : "AI backtest end date"} type="date" aria-invalid={Boolean(dateError) || undefined} max={ago(1)} value={form.endDate} disabled={busy} onChange={event => edit("endDate", event.target.value)} /></label>
       <label className={styles.field}>{zh ? "样本外起点（可选）" : "Holdout start (optional)"}<VInput aria-label={zh ? "AI回测样本外起点" : "AI backtest out-of-sample start date"} type="date" aria-invalid={Boolean(holdoutError) || undefined} min={form.startDate} max={form.endDate} value={form.outOfSampleStartDate ?? ""} disabled={busy} onChange={event => edit("outOfSampleStartDate", event.target.value || undefined)} /></label>
@@ -154,8 +160,8 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
     <label className={styles.panel}><span className={styles.status}>{zh ? "策略指令" : "Strategy instruction"}</span><VTextarea aria-label={zh ? "AI回测策略指令" : "AI backtest strategy instructions"} aria-invalid={Boolean(strategyError) || undefined} value={form.strategy} maxLength={2000} disabled={busy} onChange={event => edit("strategy", event.target.value)} /></label>
     {strategyError ? <p className={styles.fieldError} role="status">{strategyError}</p> : null}
     <VButton variant="ghost" className={styles.advancedToggle} aria-expanded={advancedOpen} aria-controls="finance-backtest-advanced" icon={advancedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setAdvancedOpen(value => !value)}>{zh ? "高级设置 · 费用、撮合与预算" : "Advanced · fees, execution and budget"}</VButton>
-    <div id="finance-backtest-advanced" className={advancedOpen ? styles.panel : "hidden"}>
-      <div className={styles.row}>
+    <div id="finance-backtest-advanced" className={advancedOpen ? styles.panel : styles.hidden}>
+      <div className={styles.formGrid}>
       <label className={styles.field}>{zh ? "费用口径" : "Fee policy"}<VSelect aria-label={zh ? "AI回测费用口径" : "AI backtest fee policy"} selectedKey={form.feeModel ?? "legacy_commission_stamp_v1"} isDisabled={busy} options={[{ id: "legacy_commission_stamp_v1", label: zh ? "原有简化费用" : "Legacy simplified fees" }, { id: "verified_ashare_fees_v1", label: zh ? "沪深历史分项" : "Historical SH / SZ fees" }]} onSelectionChange={key => edit("feeModel", String(key) as "legacy_commission_stamp_v1" | "verified_ashare_fees_v1")} /></label>
       <label className={styles.field}>{zh ? "限价规则" : "Price limits"}<VSelect aria-label={zh ? "AI回测限价规则" : "AI backtest price limit rules"} selectedKey={form.priceLimitModel ?? "candidate_bands_v1"} isDisabled={busy} options={[{ id: "candidate_bands_v1", label: zh ? "常见幅度估算" : "Candidate bands" }, { id: "supplied_daily_limits_v1", label: zh ? "导入逐日限价" : "Import daily limits" }]} onSelectionChange={key => edit("priceLimitModel", String(key) as "candidate_bands_v1" | "supplied_daily_limits_v1")} /></label>
       {number("commissionBps", form.feeModel === "verified_ashare_fees_v1" ? (zh ? "含规费佣金 bps" : "All-in commission bps") : (zh ? "佣金 bps" : "Commission bps"), 0, 100, 0.1)}
@@ -181,6 +187,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       if (data.agentId !== agentId || !resultMatchesSymbols(data, expectedSymbols)) throw new Error(zh ? "回测预检标的或归属不匹配，请刷新后重试" : "Preview asset or owner mismatch; refresh and retry");
       setPreview(data);
     })}>{zh ? "检查数据与预算" : "Check data and budget"}</VButton><span className={styles.note}>{zh ? "预检不调用模型。印花税按成交日期计算；1 bps = 0.01%。" : "Preview makes no model calls. Stamp duty follows execution dates; 1 bps = 0.01%."}</span></div>
+    </VSurface>
     {preview ? <VSurface tone="panel" padding="normal" className={styles.panel}>
       <div className={styles.row}><strong>{assetLabel(symbolsForRun(preview), zh)}</strong><span>{zh ? "共同区间" : "Common period"} {preview.dateCoverage.actualStartDate} — {preview.dateCoverage.actualEndDate}</span><span>{zh ? `${preview.dateCoverage.tradingDays} 个交易日 · ${preview.decisionCount} 次决策` : `${preview.dateCoverage.tradingDays} sessions · ${preview.decisionCount} decisions`}</span></div>
       <div className={styles.row}><span>{zh ? "样本外起点" : "Holdout starts"} {preview.outOfSampleStartDate || "—"}</span><span>{zh ? "模型" : "Model"} {preview.modelId}</span><span>{zh ? "预计 Token" : "Estimated tokens"} {typeof preview.estimatedTokens === "number" ? preview.estimatedTokens.toLocaleString() : "—"} / {preview.maxTokens.toLocaleString()}</span><span>{zh ? "数据哈希" : "Data hash"} {preview.dataHash.slice(0, 12)}</span></div>

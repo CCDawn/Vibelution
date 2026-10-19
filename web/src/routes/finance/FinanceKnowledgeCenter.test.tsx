@@ -41,6 +41,7 @@ describe("Finance knowledge center", () => {
   it("finds the annual filing workflow with a financial-report synonym", async () => {
     api.skills.mockResolvedValue({ skills: [] });
     await render("skills");
+    expect(container.textContent).toContain(`练习对象：${stock.name} · ${stock.ticker}`);
     await searchSkills("  财报  ");
     expect(button("核对一份年报")).toBeTruthy();
     expect(container.textContent).not.toContain("没有匹配流程");
@@ -155,6 +156,7 @@ describe("Finance knowledge center", () => {
   });
   it("offers five lessons and resets the quiz before starting a real research exercise", async () => {
     await render("learning");
+    expect(container.textContent).toContain(`练习对象：${stock.name} · ${stock.ticker}`);
     expect(button("5. 模拟交易")).toBeTruthy(); expect(button("核对一份年报")).toBeTruthy();
     await act(async () => button("公司年报披露的营业收入").click());
     expect(container.textContent).toContain("回答正确");

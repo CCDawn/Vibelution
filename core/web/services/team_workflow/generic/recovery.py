@@ -120,6 +120,8 @@ def _scene(record: dict, state: dict, *, deployment_ref: str = "") -> str:
     return json.dumps({
         "schemaVersion": 1, "issueId": state["issueId"], "teamId": record["teamId"],
         "sourceRunId": record["id"], "sourceFlowId": record["flow"]["id"],
+        "roleBindings": {role: (record["flow"].get("failureRecovery") or {}).get(role + "AgentId", "")
+                         for role in ("assistant", "director", "developer", "reviewer")},
         "nodeId": state["nodeId"], "failureCode": attempts[-1].get("failureCode", ""),
         "researchSource": record["flow"]["steps"][0].get("researchSource") if service.supervised(record) else None,
         "sessionSource": record["flow"]["steps"][0].get("sessionSource") if service.supervised(record) else None,

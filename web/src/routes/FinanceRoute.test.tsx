@@ -229,7 +229,7 @@ describe("financial assistant page", () => {
   it("loads report deep links and replaces old research progress with current context", async () => {
     await render("/finance?session=native-session&finance_area=reports");
     expect(container.querySelector('[aria-label="研究记录范围"] [aria-selected="true"]')?.textContent).toBe("已完成报告");
-    expect(container.textContent).toContain("选择报告");
+    expect(container.textContent).toContain("已扫描范围内没有匹配报告");
     expect(button("打开研究对话")).toBeUndefined();
     await chooseGroup("行情");
     expect(container.querySelector('[aria-label="当前股票"]')?.textContent).toContain("贵州茅台");
@@ -370,8 +370,8 @@ describe("financial assistant page", () => {
     await render("/finance?session=native-session");
     await chooseTab("主题研究");
     expect(container.textContent).toContain("研究模型暂不可用");
-    expect(button("开始研究")?.disabled).toBe(true);
-    await act(async () => button("开始研究")!.click());
+    expect(button("开始主题研究")?.disabled).toBe(true);
+    await act(async () => button("开始主题研究")!.click());
     expect(createChatSession).not.toHaveBeenCalled();
     expect(nativeSubmit).not.toHaveBeenCalled();
   });
@@ -458,7 +458,7 @@ describe("financial assistant page", () => {
     await chooseTab("主题研究");
     const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="研究主题"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "人工智能算力产业链"); field.dispatchEvent(new Event("input", { bubbles: true })); });
-    await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); }); await settle();
+    await act(async () => { button("开始主题研究")!.click(); button("开始主题研究")!.click(); }); await settle();
     expect(createChatSession).toHaveBeenCalledTimes(1);
     expect(createChatSession).toHaveBeenCalledWith({ agentId: row.agentId, title: "主题 · 人工智能算力产业链" }, expect.any(String));
     expect(nativeSubmit).toHaveBeenCalledTimes(1);
@@ -488,7 +488,7 @@ describe("financial assistant page", () => {
     vi.mocked(createFinancialAssistant).mockReturnValue(new Promise((done) => { resolve = done; }));
     await render("/finance?session=native-session");
     expect(createFinancialAssistant).not.toHaveBeenCalled();
-    await chooseTab("过程");
+    await chooseTab("研究过程");
     const locationBeforeActivation = container.querySelector("output")?.textContent;
     const enable = button("启用行情查询")!;
     expect(enable).toBeTruthy();
@@ -506,7 +506,7 @@ describe("financial assistant page", () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, marketToolStatus: "upgrade_available" }]);
     vi.mocked(createFinancialAssistant).mockRejectedValue(new Error("启用未完成"));
     await render("/finance?session=native-session");
-    await chooseTab("过程");
+    await chooseTab("研究过程");
     await act(async () => button("启用行情查询")!.click());
     await settle();
     expect(container.textContent).toContain("启用未完成");
@@ -554,7 +554,7 @@ describe("financial assistant page", () => {
     expect(createFinancialAssistant).not.toHaveBeenCalled();
     expect(fetchSessionDetail).not.toHaveBeenCalled();
     expect(container.textContent).toContain("finance-workspace");
-    await chooseTab("资料");
+    await chooseTab("来源资料");
     await settle();
     expect(listKnowledgeItems).toHaveBeenCalledWith(row.knowledgeBaseId, expect.objectContaining({ agentId: row.agentId, signal: expect.any(AbortSignal) }));
   });
@@ -784,7 +784,7 @@ it("keeps a newly selected stock separate from the previous native research unti
   await render("/finance?session=native-session&finance_tab=overview&finance_asideTab=process");
   expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe("贵州茅台 (600519)");
   expect(container.textContent).not.toContain("old_stock_tool");
-  expect(document.querySelector('[role="dialog"] [aria-label="研究辅助面板"] [aria-selected="true"]')?.textContent).toBe("过程");
+  expect(document.querySelector('[role="dialog"] [aria-label="研究辅助面板"] [aria-selected="true"]')?.textContent).toBe("研究过程");
   await chooseTab("研究报告");
   expect(container.querySelector('[aria-label="当前研究操作"] h1')?.textContent).toBe("贵州茅台 (600519)");
   expect(container.textContent).toContain("这只股票还没有研究报告");

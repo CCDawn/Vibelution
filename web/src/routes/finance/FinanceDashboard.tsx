@@ -122,16 +122,16 @@ export function FinanceDashboard({
         <span className={styles.stockIdentity}><strong>{row.stock.name}</strong><small>{row.stock.ticker} · {row.stock.market}</small></span>
       </VButton>,
     },
-    { id: "price", header: zh ? "最新价" : "Price", width: 94, align: "right", render: (row) => row.result?.quote ? <span className={styles.number}>{formatNumber(row.result.quote.price, 3, zh)} {quoteCurrency(row.result.quote, zh)}</span> : <span className={styles.number}>—</span> },
+    { id: "price", header: zh ? "最新价" : "Price", width: 148, align: "right", truncate: false, render: (row) => row.result?.quote ? <span className={styles.number}>{formatNumber(row.result.quote.price, 3, zh)} {quoteCurrency(row.result.quote, zh)}</span> : <span className={styles.number}>—</span> },
     {
-      id: "change", header: zh ? "涨跌幅" : "Change", width: 98, align: "right",
+      id: "change", header: zh ? "涨跌幅" : "Change", width: 112, align: "right", truncate: false,
       render: (row) => {
         const change = row.result?.quote?.changePercent;
         const tone = change === null || change === undefined ? styles.muted : change >= 0 ? styles.rise : styles.fall;
         return <span className={`${styles.number} ${tone}`}>{formatChange(change, zh)}</span>;
       },
     },
-    { id: "pe", header: "PE", width: 78, align: "right", render: (row) => <span className={styles.number}>{formatNumber(row.result?.quote?.peRatio, 2, zh)}</span> },
+    { id: "pe", header: "PE", width: 88, align: "right", truncate: false, render: (row) => <span className={styles.number}>{formatNumber(row.result?.quote?.peRatio, 2, zh)}</span> },
   ], [onNavigate, onSelectStock, zh]);
 
   async function refresh() {
