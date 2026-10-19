@@ -22,6 +22,28 @@ describe("workbench job registry", () => {
     vi.useRealTimers();
   });
 
+  it("confirms completed retirement on the next 20 ms poll while preserving incomplete drains", async () => {
+    vi.useFakeTimers();
+    let drained = false;
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => 0, drainStatus: () => ({ complete: drained, channels: [] }), close
+    });
+    spawnTrackedWorkbenchProcess("C:/fast-retirement", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    const retirement = terminateTrackedWorkbenchJob("C:/fast-retirement", process.pid);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(close).not.toHaveBeenCalled();
+    drained = true;
+    await vi.advanceTimersByTimeAsync(19);
+    expect(close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(retirement).resolves.toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("releases an idle job after natural exit without another lifecycle command", async () => {
     vi.useFakeTimers();
     let active = 1;

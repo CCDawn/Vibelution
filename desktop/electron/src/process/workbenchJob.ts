@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { appendSupervisorEventFallback } from "../lifecycle/supervisorEventFallback.js";
 
 const JOB_TERMINATE_WAIT_MS = 8_000;
-const JOB_TERMINATE_POLL_MS = 100;
+const JOB_TERMINATE_POLL_MS = 20;
 const JOB_REAP_INTERVAL_MS = 1_000;
 
 export type WorkbenchJobHandle = object;
@@ -20,6 +20,8 @@ export type WorkbenchJobSpawnInput = {
   stderrPath: string;
   /** Test seam; production keeps the native 64 MiB default. */
   maxLogBytes?: number;
+  /** Keep build descendants inside the Job even if they request breakaway. */
+  containDescendants?: boolean;
 };
 
 export type WorkbenchJobDrainChannelStatus = {
@@ -190,6 +192,11 @@ export function spawnTrackedWorkbenchProcess(
 
 export function hasTrackedWorkbenchJob(workspaceRoot: string): boolean {
   return tracked.has(jobKey(workspaceRoot));
+}
+
+/** Synchronous lookup only; retirement must still capture the exact Job. */
+export function getTrackedWorkbenchJobPid(workspaceRoot: string): number {
+  return tracked.get(jobKey(workspaceRoot))?.pid ?? 0;
 }
 
 /** Capture ownership before any asynchronous identity/readiness work. */
