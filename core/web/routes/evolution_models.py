@@ -16,6 +16,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.web.services.self_evolution_local_integration import LocalIntegrationRequest
 
 
+class SelfEvolutionCampaignStartPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(min_length=1, max_length=4000)
+    rounds: int = Field(default=3, ge=1, le=10, strict=True)
+    idempotencyKey: str = Field(min_length=1, max_length=120, strict=True)
+    localIntegration: LocalIntegrationRequest
+
+
+class SelfEvolutionCampaignActionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str
+
+
 class SupervisedRunStartPayload(BaseModel):
     sourceKind: str = ""
     datasetName: str = ""

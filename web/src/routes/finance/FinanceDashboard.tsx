@@ -19,7 +19,7 @@ import {
   type VDenseTableColumn,
 } from "../../components/vui";
 import { ACTIVE_FINANCIAL_BATCH_STATUSES } from "./financialJobModel";
-import { quoteCurrency } from "./financeMarketDisplay";
+import { formatQuoteTimestamp, quoteCurrency } from "./financeMarketDisplay";
 import { researchRecordStatus } from "./stockResearchModel";
 import styles from "./FinanceDashboard.styles";
 
@@ -47,13 +47,6 @@ function formatNumber(value: number | null | undefined, digits = 2, zh = true): 
 function formatChange(value: number | null | undefined, zh: boolean): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${value > 0 ? "+" : ""}${formatNumber(value, 2, zh)}%`;
-}
-
-function formatUpdatedAt(value: string, zh: boolean): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? (zh ? "时间未知" : "Time unavailable")
-    : date.toLocaleTimeString(zh ? "zh-CN" : "en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function statusLabel(assistant: FinancialAssistant, zh: boolean): { label: string; tone: "neutral" | "success" | "warning" } {
@@ -161,7 +154,7 @@ export function FinanceDashboard({
               : quotes.isPending ? <div className={styles.skeleton} aria-label={zh ? "加载自选行情" : "Loading watchlist quotes"}><VSkeleton /><VSkeleton /><VSkeleton /></div>
                 : <>
                   <div className={styles.tableWrap}><VDenseTable ariaLabel={zh ? "自选股票行情" : "Watchlist market quotes"} columns={quoteColumns} rows={quoteRows} getRowKey={(row) => row.stock.symbol} resizable emptyText={zh ? "暂无行情" : "No quotes"} /></div>
-                  <div className={styles.quoteFooter}><span>{quotes.data?.source ?? ""} · {quotes.data ? formatUpdatedAt(quotes.data.fetchedAt, zh) : "—"}</span><VButton variant="ghost" onPress={() => onNavigate("screen")}>{zh ? "智能选股" : "Stock screener"}</VButton></div>
+                  <div className={styles.quoteFooter}><span>{quotes.data?.source ?? ""} · {quotes.data ? formatQuoteTimestamp(quotes.data.fetchedAt, zh) : "—"}</span><VButton variant="ghost" onPress={() => onNavigate("screen")}>{zh ? "智能选股" : "Stock screener"}</VButton></div>
                 </>}
         </VSurface>
         <VSurface className={styles.panel} padding="normal" ariaLabel={zh ? "最近研究" : "Recent research"}>

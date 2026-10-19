@@ -32,9 +32,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**90**
+- Facade `*_service.py`：**91**
 - 有 pack README：**8**
-- 仅单文件 facade：**82**
+- 仅单文件 facade：**83**
 
 ## Domain 速查
 
@@ -48,7 +48,7 @@
 | Knowledge / RAG (`knowledge`) | 5 |
 | Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
-| Self / Supervised evolution (`evolution`) | 12 |
+| Self / Supervised evolution (`evolution`) | 13 |
 | Runtime / runtime scene (`runtime`) | 4 |
 | Launcher / Reset (`launcher`) | 2 |
 | Config / Provider / Model / Theme (`config`) | 7 |
@@ -170,6 +170,7 @@
 | `evolution_runtime_projection_service.py` | Unified runtime projections for evolution workspace surfaces. | — | `evolution.py` | `test_evolution_promotion_lane.py`, `test_evolution_runtime_projection_service.py` |
 | `evolution_service.py` | Real supervised evolution payloads for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_self_evolution_service.py`, `test_runtime_scene_package_diagnosis.py` |
 | `self_evolution_autonomous_loop_service.py` | Persistent no-score orchestration for user-approved self-evolution loops. | — | `evolution.py` | `test_self_evolution_autonomous_loop_service.py` |
+| `self_evolution_campaign_service.py` | Bounded campaigns delegating every candidate to the single-loop owner. | — | `evolution.py` | `test_self_evolution_campaign_service.py`, `test_self_evolution_campaign_integration.py`, `test_self_evolution_campaign_routes.py` |
 | `self_evolution_control_service.py` | Bounded self-evolution run control for the web workbench. | — | `agents.py`, `evolution.py` | `test_web_app.py`, `test_self_evolution_autonomous_loop_runtime.py`, `test_team_structure_packs.py` |
 | `self_evolution_service.py` | Real self-evolution payloads for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_self_evolution_service.py`, `test_web_config_routes.py` |
 | `supervised_candidate_integration_service.py` | Transactional Git integration for supervised evolution candidates. | — | — | `test_supervised_worktree_evolution_service.py`, `test_supervised_candidate_integration_service.py` |

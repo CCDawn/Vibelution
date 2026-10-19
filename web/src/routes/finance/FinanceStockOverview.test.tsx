@@ -116,6 +116,8 @@ describe("FinanceStockOverview cached refresh failure", () => {
     expect(node.textContent).toContain("quote refresh failed");
     expect(node.textContent).toContain("2026-10-05T09:30:00+08:00");
     expect(node.textContent).toContain("2026-10-05T01:00:00+00:00");
+    expect(node.textContent).toContain("成交额(元)");
+    expect(node.textContent).toContain("47.97亿");
 
     const retry = Array.from(node.querySelectorAll("button")).find((button) => button.textContent?.includes("重试"));
     expect(retry).toBeTruthy();

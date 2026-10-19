@@ -29,6 +29,8 @@ from core.web.routes.evolution_models import (
     PromptReflectionGeneratePayload,
     SelfEvolutionAutonomousRunActionPayload,
     SelfEvolutionAutonomousRunStartPayload,
+    SelfEvolutionCampaignStartPayload,
+    SelfEvolutionCampaignActionPayload,
     SelfEvolutionHistoryDeletePayload,
     SelfEvolutionWorktreeRunStartPayload,
     SelfObservationRunActionPayload,
@@ -96,6 +98,7 @@ from core.web.services.self_evolution_control_service import (
     stream_self_observation_run_events,
 )
 from core.web.services.self_evolution_autonomous_loop_orchestrator import (
+    default_orchestrator,
     approve_autonomous_self_evolution,
     get_active_autonomous_self_evolution_run,
     get_autonomous_self_evolution_run,
@@ -750,6 +753,63 @@ def self_observation_run_action(run_id: str, payload: SelfObservationRunActionPa
     except SelfEvolutionRunBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SelfEvolutionRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/self/campaigns", status_code=status.HTTP_202_ACCEPTED,
+             response_model=EvolutionRunResponse, response_model_exclude_unset=True)
+def self_evolution_start_campaign(payload: SelfEvolutionCampaignStartPayload, request: Request) -> dict:
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
+    from core.web.services.team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
+    try:
+        with server_operator_scope_from_http(request) as operator:
+            if not operator_has_privileged_role(operator.roles):
+                raise PermissionError("command_forbidden")
+            return default_orchestrator().start_campaign(payload.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="command_forbidden") from exc
+    except AutonomousLoopConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/self/campaigns/active", response_model=EvolutionRunResponse | None,
+            response_model_exclude_unset=True)
+def self_evolution_active_campaign() -> dict | None:
+    return default_orchestrator().active_campaign()
+
+
+@router.get("/evolution/self/campaigns/{campaign_id}", response_model=EvolutionRunResponse,
+            response_model_exclude_unset=True)
+def self_evolution_campaign(campaign_id: str) -> dict:
+    try:
+        return default_orchestrator().get_campaign(campaign_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/self/campaigns/{campaign_id}/actions", response_model=EvolutionRunResponse,
+             response_model_exclude_unset=True)
+def self_evolution_campaign_action(campaign_id: str, payload: SelfEvolutionCampaignActionPayload,
+                                   request: Request) -> dict:
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
+    from core.web.services.team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
+    try:
+        with server_operator_scope_from_http(request) as operator:
+            if not operator_has_privileged_role(operator.roles):
+                raise PermissionError("command_forbidden")
+            owner = default_orchestrator()
+            if payload.action == "stop":
+                return owner.cancel_campaign(campaign_id)
+            if payload.action == "revoke_local_integration":
+                return owner.revoke_campaign(campaign_id)
+            raise AutonomousLoopValidationError("Campaign action must be stop or revoke_local_integration.")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="command_forbidden") from exc
+    except AutonomousLoopConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

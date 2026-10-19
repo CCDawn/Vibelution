@@ -16,6 +16,8 @@ import type {
   SelfEvolutionHistoryDeleteResponse,
   SelfEvolutionWorkspaceSnapshot,
   SelfObservationRun,
+  SelfEvolutionCampaignStartRequest,
+  SelfEvolutionCampaignRun,
   SupervisedWorktreeRun,
 } from "./types";
 
@@ -25,6 +27,22 @@ function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+export function startSelfEvolutionCampaign(body: SelfEvolutionCampaignStartRequest): Promise<SelfEvolutionCampaignRun> {
+  return sendJson("/api/evolution/self/campaigns", "POST", body);
+}
+
+export function fetchActiveSelfEvolutionCampaign(): Promise<SelfEvolutionCampaignRun | null> {
+  return fetchJson("/api/evolution/self/campaigns/active");
+}
+
+export function fetchSelfEvolutionCampaign(runId: string): Promise<SelfEvolutionCampaignRun> {
+  return fetchJson(`/api/evolution/self/campaigns/${encodeURIComponent(runId)}`);
+}
+
+export function actOnSelfEvolutionCampaign(runId: string, action: "stop" | "revoke_local_integration"): Promise<SelfEvolutionCampaignRun> {
+  return sendJson(`/api/evolution/self/campaigns/${encodeURIComponent(runId)}/actions`, "POST", { action });
 }
 
 export function fetchEvolutionOverview<T = EvolutionOverview>(): Promise<T> {
