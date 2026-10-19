@@ -154,7 +154,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 24 matches the local toolchain (npm 11); npm 10 (Node 20)
+          # rewrites the lockfile with extra "dev" flags on optional deps
+          # and fails the lockfile sync check.
+          node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
