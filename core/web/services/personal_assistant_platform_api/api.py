@@ -24,7 +24,6 @@ import json
 import os
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -74,18 +73,21 @@ ALLOWED_TAGS = frozenset(
     }
 )
 
-# Path segments that mark private content even under an allowed tag.
-DENIED_PATH_TOKENS = ("messages", "transcript", "export", "timeline", "inbox", "events")
+# Path words that mark private content even under an allowed tag.  Matched as
+# whole words per path segment (``-``/``_`` split), so ``member-messages`` is
+# denied while a compound like ``messagesdigest`` is not treated as a hit.
+DENIED_PATH_TOKENS = frozenset(
+    {"messages", "transcript", "export", "timeline", "inbox", "events"}
+)
 
 REQUEST_TIMEOUT_SECONDS = 10.0
 MAX_RESPONSE_CHARS = 48_000
 INDEX_ENDPOINTS_CAP = 80
 
 
-def platform_api_index(runtime: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
+def platform_api_index(*, tag: str = "") -> dict[str, Any]:
     """Navigate the allowlisted GET surface of the live API."""
 
-    del runtime  # identity is checked by the tool shell; kept for symmetry
     wanted = str(tag or "").strip().lower()
     if wanted and wanted not in ALLOWED_TAGS:
         return _blocked(f"tag {wanted or '(empty)'} is not in the allowlist")
@@ -119,21 +121,16 @@ def platform_api_index(runtime: dict[str, Any], *, tag: str = "") -> dict[str, A
     return _envelope(overview)
 
 
-def platform_api_get(runtime: dict[str, Any], path: str, query: str = "") -> dict[str, Any]:
+def platform_api_get(path: str, query: str = "") -> dict[str, Any]:
     """Execute one allowlisted GET against the loopback workbench API."""
 
-    del runtime
     normalized = str(path or "").strip()
-    if not normalized.startswith("/api/") or "?" in normalized or "#" in normalized:
-        return _blocked("path must be a registered /api/... endpoint path without query")
     endpoints = _allowlisted_get_endpoints()
     if normalized not in endpoints:
         return _blocked(
             "path is not a registered GET endpoint in the allowlisted surface; call index first"
         )
     suffix = str(query or "").strip()
-    if suffix and not _valid_query(suffix):
-        return _blocked("query must be urlencoded key=value pairs")
     url = f"http://127.0.0.1{_workbench_port()}{normalized}"
     if suffix:
         url = f"{url}?{suffix}"
@@ -201,14 +198,24 @@ def _filter_get_endpoints(paths: dict[str, Any]) -> dict[str, dict[str, Any]]:
         tags = frozenset(str(item) for item in get_op.get("tags") or [])
         if not tags or not (tags & ALLOWED_TAGS):
             continue
-        lowered = str(path).lower()
-        if any(token in lowered for token in DENIED_PATH_TOKENS):
+        if _has_denied_path_word(str(path)):
             continue
         result[str(path)] = {
             "tags": tags,
             "summary": str(get_op.get("summary") or "")[:120],
         }
     return result
+
+
+def _has_denied_path_word(path: str) -> bool:
+    lowered = str(path).lower()
+    words = {
+        word
+        for segment in lowered.split("/")
+        for word in segment.replace("-", "_").split("_")
+        if word
+    }
+    return bool(words & DENIED_PATH_TOKENS)
 
 
 def _workbench_port() -> int:
@@ -218,17 +225,6 @@ def _workbench_port() -> int:
     except ValueError:
         return 8000
     return port if 0 < port < 65536 else 8000
-
-
-def _valid_query(suffix: str) -> bool:
-    if any(bad in suffix for bad in "#?/\\ \t\r\n"):
-        return False
-    pairs = urllib.parse.parse_qsl(suffix, keep_blank_values=True)
-    if not pairs:
-        return False
-    # parse_qsl with keep_blank_values accepts bare tokens as empty-value
-    # pairs; require real key=value shape on every non-empty segment.
-    return all("=" in segment for segment in suffix.split("&") if segment)
 
 
 def _json_detail(text: str) -> str:
