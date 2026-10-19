@@ -840,9 +840,11 @@ export class ElectronWindowProvider {
         return;
       }
       const report = role === "pet" ? undefined : this.reportState(closedWindowState(role));
+      void Promise.resolve(report).catch(() => undefined);
       if (wasWorkbench) {
-        void Promise.resolve(report)
-          .catch(() => undefined)
+        // Native closure is already proven. A stalled state mirror must not
+        // hold the local transaction open and block the next close after reopen.
+        void Promise.resolve()
           .then(() => this.onWorkbenchClosed())
           .catch(() => undefined);
       }
