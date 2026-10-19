@@ -8,7 +8,7 @@
 | `companions.png` | 2026-09-08 从本地运行中的 `/companions` 页面取得的人物大厅截图；未进入私人对话、未改写展示数据。 |
 | `desktop-pet.gif` | 2026-09-08 本地运行中的 `/desktop-pet` 页面实录，截取约 5 秒待机动效。使用真实页面与现有角色资产，不模拟任务完成或确认事件。 |
 | `challenge-cup-demo.mp4` | Codex 视频制作工作区中的 `SCI-003真实历史流程演示_AI配音_2026-09-08.mp4` 原始成片，未重新编码。157.376 秒，1920 × 1080，H.264 / AAC，22,742,480 字节。 |
-| `challenge-cup-preview.gif` | 上述成片第 3–6、40–43、94–97 秒，按原速串接研究画布、团队讨论、图谱三个片段；880px 宽、7fps，用于 README 自动预览。 |
+| `challenge-cup-preview.gif` | 上述成片第 3–6、40–43、94–97 秒，按原速串接研究画布、团队讨论、图谱三个片段；880px 宽、7fps，用于 README 自动预览。2026-10-19 起更名为 `research-preview.gif` 并挂中英文 README 首屏。 |
 | `challenge-cup-graph.png` | 同一制作工作区的 `checked-scene-5.png`，用于放大查看图谱和封面排版。 |
 | `research-workflow.png` | 同一制作工作区的 `checked-scene-0.png`，展示原生研究画布的历史回放与知识搜集段放大画面。 |
 | `web-workbench-*.png` | 沿用仓库已有的工作台演示截图，说明 Agent 配置、团队、Git 与评测布局（`web-workbench-chat.png` 的实际内容为 Agent 配置）；不作为 2026-09-08 运行状态证明。 |
@@ -129,3 +129,17 @@ python docs/assets/readme/capture.py
 `showcase/cover.zh.svg`、`cover.en.svg` 及对应 `cover-mobile.*.svg` 是可编辑的文字封面。`showcase/team-flow.*.svg` 与 `team-flow-mobile.*.svg` 是依据团队截图整理的角色分工示意，明确标注为非产品界面、非执行记录；桌面横排和手机纵排分别排版。可编辑组合预览见 [中文图解](showcase/team-diagram.zh.html) / [English diagram](showcase/team-diagram.en.html)。这些图解无外部字体或图片依赖。
 
 功能描述沿用上方事实来源，并补充 [团队前端](../../../web/src/routes/teams/TeamHomeSurface.tsx)、[金融工作台](../../../web/src/routes/finance/README.md) 与 [虚拟人插件](../../../core/agent_plugins/virtual_human_life/README.md)。本轮不修改产品界面或运行配置；首页素材更新不代表产品功能重新验收或远端发布。
+
+## 2026-10-19 README 门面升级
+
+中文与英文首页增加首屏操作循环动图、shields.io 徽章（license / release / platform）与交互式架构地图入口；05 陪伴节新增桌宠动图并排展示。除下表素材变更外，未改动其他资产。
+
+| 变更 | 记录 |
+| --- | --- |
+| GIF 更名 | `challenge-cup-preview.gif` → `research-preview.gif`（对外名称去赛事化），挂两版 README 首屏并配一行说明文字。 |
+| `desktop-pet.gif` | 新挂载点：两版 README 05 陪伴节，与 `showcase/companion.webp` 并排（静态全景 + 动态特写，宽度 320）。 |
+| `showcase/companion.png` → `companion.webp` | 2513 × 1596、4,307,242 字节 → 1200 × 762、88,382 字节（LANCZOS 重采样 + WebP quality 80）；导出缩样目检界面文字仍可读；原 PNG 已删除。 |
+| `showcase/knowledge.png` → `knowledge.webp` | 3013 × 1672、800,225 字节 → 1200 × 666、31,758 字节，同规格压缩；原 PNG 已删除。 |
+| `showcase/evolution.png` → `evolution.webp` | 3013 × 1672、720,938 字节 → 1200 × 666、65,450 字节，同规格压缩；原 PNG 已删除。 |
+
+压缩后，2026-10-16 表中 `showcase/companion.png`、`showcase/knowledge.png`、`showcase/evolution.png` 三个条目的文件现以 `.webp` 形式存在。`docs/architecture/index.html`（离线单文件交互式架构地图，约 14MB）首次在两版 README「文档与参与」节获得入口。
