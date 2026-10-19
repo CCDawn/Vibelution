@@ -9,12 +9,12 @@ that a *hard* system-prompt budget line ("思考过程必须控制在500字以�
 wording has no effect and relay-side thinking switches are rejected or ignored,
 so the prompt line is the only effective lever.
 
-This module owns that lever: budget resolution (session override, env
-override, bounded default), the instruction block text, and workflow-scope
-detection. Resolution priority is 会话值 > env > 不注入: workflow-scoped node
-sessions always receive the block (session value when configured, else the
-env/default resolution); ordinary chat sessions receive it only when a
-session-configured ``thinkingBudgetChars`` override exists.
+This module owns that lever: budget resolution (env override, bounded
+default), the instruction block text, and workflow-scope detection. The block
+is injected exclusively for workflow-scoped node sessions; there is no
+session-level override — ordinary chat sessions never receive it, even when
+legacy Agent metadata still carries a residual ``thinkingBudgetChars`` key
+(the read path no longer consults session budget parameters at all).
 """
 
 from __future__ import annotations
@@ -58,36 +58,6 @@ def resolve_research_thinking_budget_chars(
     return min(budget, _MAX_RESEARCH_THINKING_BUDGET_CHARS)
 
 
-def resolve_session_thinking_budget_chars(
-    session_id: str,
-    *,
-    session_budget_provider: Callable[[str], Any] | None = None,
-) -> int | None:
-    """Session-configured thinking budget in chars, or ``None`` when unset.
-
-    The provider is late-bound so facade monkeypatches stay effective in tests
-    and the orchestration resolver is not imported at module load.
-    """
-
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return None
-    provider = session_budget_provider
-    if provider is None:
-        from core.orchestration.session_budget_resolve import get_session_budget_parameters
-
-        provider = get_session_budget_parameters
-    try:
-        parameters = provider(normalized_session_id)
-    except Exception:  # noqa: BLE001 - session lookup must never break the turn
-        return None
-    value = parameters.thinkingBudgetChars if parameters is not None else None
-    try:
-        return int(value) if value else None
-    except (TypeError, ValueError):
-        return None
-
-
 def build_research_node_thinking_budget_block(budget_chars: int | None = None) -> str:
     """Render the hard budget instruction block.
 
@@ -125,17 +95,15 @@ def build_research_thinking_budget_segment(
     *,
     project_root: Any,
     load_chat_state: Callable[[Any, str], dict[str, Any] | None],
-    session_budget_provider: Callable[[str], Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return the cache_prefix thinking-budget segment, else None.
 
-    Workflow-scoped node sessions always get the block (session value when
-    configured, else env/default — the historical behavior). Ordinary chat
-    sessions get it only when a session-configured thinking budget exists.
+    Only workflow-scoped node sessions get the block, always through the
+    env/default resolution (the historical behavior). Ordinary chat sessions
+    never receive it, regardless of any residual session budget metadata.
 
-    ``load_chat_state`` and ``session_budget_provider`` are late-bound so
-    facade monkeypatches stay effective in tests and the service singleton is
-    not imported here.
+    ``load_chat_state`` is late-bound so facade monkeypatches stay effective
+    in tests and the service singleton is not imported here.
     """
 
     normalized_session_id = str(session_id or "").strip()
@@ -150,16 +118,11 @@ def build_research_thinking_budget_segment(
         if isinstance(conversation, dict)
         else None
     )
-    workflow_scoped = is_workflow_scoped_experiment_binding(binding)
-    session_budget_chars = resolve_session_thinking_budget_chars(
-        normalized_session_id,
-        session_budget_provider=session_budget_provider,
-    )
-    if not workflow_scoped and session_budget_chars is None:
-        # Ordinary sessions without a session-configured override keep the
-        # historical behavior: no thinking-budget instruction at all.
+    if not is_workflow_scoped_experiment_binding(binding):
+        # Ordinary sessions keep the historical behavior: no thinking-budget
+        # instruction at all.
         return None
-    block = build_research_node_thinking_budget_block(session_budget_chars)
+    block = build_research_node_thinking_budget_block()
     if not block:
         return None
     return {

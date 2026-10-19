@@ -54,6 +54,10 @@ from __future__ import annotations
 
 import json
 
+import threading
+
+import time
+
 from pathlib import Path
 
 from typing import Any, Iterator
@@ -743,3 +747,260 @@ def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
         payload["humanAttention"] = extension
 
     return payload
+
+
+# ---------------------------------------------------------------------------
+# 投递失败上报 → 个人助理 agent 收件箱
+#
+# 双通道通知的账本语义是 at-most-once：web 侧先记 ledger 再异步 notify，
+# IPC 拒绝或壳侧 invalid_payload 时用户可能永远看不到这条关注事项。这里
+# 提供统一入口，把失败写成个人助理收件箱里一条 ``delivery_failure`` 消息
+# （prompt_eligible=True；个人助理 delegation_policy allowWakeMessages=False，
+# 消息只留收件箱等下一轮——正是「汇报」语义，不唤醒）。防灌水：进程内
+# 每 (kind, stage) 桶每小时上限 + 同 (id, kind, stage) 去重窗口。任何失败
+# 吞掉，绝不影响调用方主路径（overview 轮询 / supervisor 事件记录）。
+# ---------------------------------------------------------------------------
+
+
+ATTENTION_DELIVERY_FAILURE_INBOX_KIND = "delivery_failure"
+
+ATTENTION_DELIVERY_FAILURE_STAGE_RENDERER = "renderer"
+
+ATTENTION_DELIVERY_FAILURE_STAGE_SHELL = "shell"
+
+ATTENTION_DELIVERY_FAILURE_STAGES = frozenset(
+    {ATTENTION_DELIVERY_FAILURE_STAGE_RENDERER, ATTENTION_DELIVERY_FAILURE_STAGE_SHELL}
+)
+
+
+MAX_DELIVERY_FAILURES_PER_BUCKET_PER_HOUR = 6
+
+DELIVERY_FAILURE_DEDUP_WINDOW_SECONDS = 30 * 60
+
+_DELIVERY_FAILURE_SEEN_MAX = 512
+
+_DELIVERY_FAILURE_ID_LIMIT = 128
+
+_DELIVERY_FAILURE_KIND_LIMIT = 40
+
+_DELIVERY_FAILURE_SEVERITY_LIMIT = 16
+
+_DELIVERY_FAILURE_REASON_LIMIT = 320
+
+_DELIVERY_FAILURE_TITLE_LIMIT = 120
+
+_DELIVERY_FAILURE_STAGE_LABELS = {
+    ATTENTION_DELIVERY_FAILURE_STAGE_RENDERER: "前端渲染通道",
+    ATTENTION_DELIVERY_FAILURE_STAGE_SHELL: "桌面壳通道",
+}
+
+
+class _DeliveryFailureState:
+    """Process-wide rate limit + dedup state (module-level singleton)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.bucket_windows: dict[tuple[str, str], list[float]] = {}
+        self.seen: dict[str, float] = {}
+
+    def reset(self) -> None:
+        with self.lock:
+            self.bucket_windows.clear()
+            self.seen.clear()
+
+
+_delivery_failure_state = _DeliveryFailureState()
+
+
+def reset_attention_delivery_failure_reporter_for_tests() -> None:
+    """Reset the process-level rate limit/dedup state between tests."""
+
+    _delivery_failure_state.reset()
+
+
+def _claim_delivery_failure_slot(
+    state: _DeliveryFailureState,
+    *,
+    attention_id: str,
+    kind: str,
+    stage: str,
+    now: float,
+) -> str:
+    """Reserve one report slot; returns "" on success or a rejection reason."""
+
+    seen_key = f"{attention_id}|{kind}|{stage}"
+
+    bucket_key = (kind, stage)
+
+    hour_ago = now - 3600.0
+
+    with state.lock:
+
+        # 同 (id, kind, stage) 去重窗口：窗口内重复失败只报一次。
+
+        last_seen = state.seen.get(seen_key)
+
+        if last_seen is not None and now - last_seen < DELIVERY_FAILURE_DEDUP_WINDOW_SECONDS:
+
+            return "duplicate"
+
+        # 惰性清理过期 seen 条目，防止状态无界增长。
+
+        if len(state.seen) >= _DELIVERY_FAILURE_SEEN_MAX:
+
+            state.seen = {
+
+                key: seen_at
+
+                for key, seen_at in state.seen.items()
+
+                if now - seen_at < DELIVERY_FAILURE_DEDUP_WINDOW_SECONDS
+
+            }
+
+        window = [
+            stamp
+            for stamp in state.bucket_windows.get(bucket_key, [])
+            if stamp > hour_ago
+        ]
+
+        if len(window) >= MAX_DELIVERY_FAILURES_PER_BUCKET_PER_HOUR:
+
+            return "rate_limited"
+
+        window.append(now)
+
+        state.bucket_windows[bucket_key] = window
+
+        state.seen[seen_key] = now
+
+        return ""
+
+
+def _delivery_failure_message(
+    *,
+    attention_id: str,
+    kind: str,
+    severity: str,
+    stage: str,
+    reason: str,
+    title: str,
+) -> tuple[str, str, dict[str, str]]:
+    """Build (content, summary, metadata) for the inbox row; all bounded."""
+
+    stage_label = _DELIVERY_FAILURE_STAGE_LABELS.get(stage, stage)
+
+    summary = _clip(f"人工关注通知投递失败（{kind}/{stage}）", limit=_TITLE_LIMIT)
+
+    lines = [
+        f"人工关注通知投递失败（{stage_label}），这条关注事项可能没有被看到。",
+        f"- 通知ID: {attention_id}",
+        f"- 类型: {kind}",
+    ]
+
+    if severity:
+        lines.append(f"- 严重度: {severity}")
+
+    if title:
+        lines.append(f"- 标题: {title}")
+
+    if reason:
+        lines.append(f"- 原因: {reason}")
+
+    lines.append("请确认对应事项是否仍需人工处理。")
+
+    metadata = {
+        "attentionId": attention_id,
+        "kind": kind,
+        "severity": severity,
+        "stage": stage,
+        "reason": reason,
+        "reportedBy": "personal_attention_service",
+    }
+
+    return "\n".join(lines), summary, metadata
+
+
+def report_attention_delivery_failure(
+    *,
+    id: str = "",
+    kind: str = "",
+    severity: str = "",
+    stage: str,
+    reason: str = "",
+    title: str = "",
+) -> dict[str, Any]:
+    """Write one delivery-failure report into the assistant inbox; never raises.
+
+    Returns ``{"accepted": bool, "reason": str}``; every failure mode
+    (missing assistant, rate limit, dedup window, writer error) degrades to
+    ``accepted=False`` without touching the caller's path.
+    """
+
+    try:
+
+        normalized_stage = str(stage or "").strip()
+
+        if normalized_stage not in ATTENTION_DELIVERY_FAILURE_STAGES:
+
+            return {"accepted": False, "reason": "invalid_stage"}
+
+        attention_id = _clip(id or "unknown", limit=_DELIVERY_FAILURE_ID_LIMIT)
+
+        normalized_kind = _clip(kind or "unknown", limit=_DELIVERY_FAILURE_KIND_LIMIT)
+
+        normalized_severity = _clip(severity, limit=_DELIVERY_FAILURE_SEVERITY_LIMIT)
+
+        normalized_reason = _clip(reason, limit=_DELIVERY_FAILURE_REASON_LIMIT)
+
+        normalized_title = _clip(title, limit=_DELIVERY_FAILURE_TITLE_LIMIT)
+
+        rejection = _claim_delivery_failure_slot(
+            _delivery_failure_state,
+            attention_id=attention_id,
+            kind=normalized_kind,
+            stage=normalized_stage,
+            now=time.monotonic(),
+        )
+
+        if rejection:
+            return {"accepted": False, "reason": rejection}
+
+        from core.web.services import (
+            agent_directory_service,
+            personal_assistant_service,
+        )
+
+        assistant = (
+            personal_assistant_service.get_personal_assistant().get("assistant") or {}
+        )
+
+        agent_id = str(assistant.get("agentId") or "").strip()
+
+        if not agent_id:
+            return {"accepted": False, "reason": "no_assistant"}
+
+        content, summary, metadata = _delivery_failure_message(
+            attention_id=attention_id,
+            kind=normalized_kind,
+            severity=normalized_severity,
+            stage=normalized_stage,
+            reason=normalized_reason,
+            title=normalized_title,
+        )
+
+        agent_directory_service.write_agent_inbox_message(
+            agent_id,
+            content=content,
+            summary=summary,
+            kind=ATTENTION_DELIVERY_FAILURE_INBOX_KIND,
+            prompt_eligible=True,
+            created_by="attention_monitor",
+            metadata=metadata,
+        )
+
+        return {"accepted": True, "reason": ""}
+
+    except Exception:  # noqa: BLE001 - reporting must never break the caller
+
+        return {"accepted": False, "reason": "error"}
