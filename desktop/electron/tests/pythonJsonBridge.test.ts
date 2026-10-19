@@ -4,6 +4,7 @@ import {
   DEFAULT_PYTHON_JSON_BRIDGE_MAX_BYTES,
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
   createPythonOwnedProcessTreeTerminator,
+  capturePythonProcessIdentity,
   launcherApiBridgeTimeoutMs,
   parsePythonJsonBridgePayload,
   pythonJsonBridgeFailureMessage,
@@ -14,6 +15,16 @@ import {
   PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
 } from "../src/process/pythonJsonBridge.js";
+
+it("cancels a wedged process identity query when a close supersedes startup", async () => {
+  const controller = new AbortController();
+  const { spawnImpl, kill } = hangingSpawn({ exitOnKill: true });
+  const pending = capturePythonProcessIdentity({ pythonPath: "pythonw.exe", workspaceRoot: "C:/repo",
+    pid: 123, spawnImpl, signal: controller.signal });
+  controller.abort(new Error("launcher lifecycle intent superseded for main"));
+  await expect(pending).resolves.toBeNull();
+  expect(kill).toHaveBeenCalled();
+});
 
 function fakeSpawnWithOutput(output: string, exitCode = 0, delayMs = 0) {
   const dispatch = (listener: () => void) => delayMs > 0 ? setTimeout(listener, delayMs) : queueMicrotask(listener);

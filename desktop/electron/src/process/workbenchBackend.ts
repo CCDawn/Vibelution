@@ -37,6 +37,7 @@ import {
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
+import { closeOwnedWorkbenchFast } from "./fastWorkbenchClose.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
   defaultFetchWorkbenchHealth,
@@ -115,6 +116,8 @@ export type ExecuteMainLineWorkbenchInput = {
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   controlToken?: string;
+  /** Internal explicit window-close budget; never accepted from renderer JSON. */
+  fastCloseTiming?: { deadlineAt: number; forceAt: number };
   /** Explicit operator restart consent to pause active work through graceful shutdown. */
   interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
@@ -125,12 +128,14 @@ export type ExecuteMainLineWorkbenchInput = {
     pythonPath: string;
     workspaceRoot: string;
     pid: number;
+    signal?: AbortSignal;
   }) => Promise<PythonProcessIdentity | null>;
   /** Inventory-based port owner resolution for a wedged backend that owns the port. */
   resolvePortOwner?: (input: {
     pythonPath: string;
     workspaceRoot: string;
     port: number;
+    signal?: AbortSignal;
   }) => Promise<WorkbenchPortOwnerResolution | null>;
 };
 
@@ -1447,7 +1452,8 @@ export async function executeMainLineWorkbench(
     return await captureIdentity({
       pythonPath: input.pythonPath,
       workspaceRoot: input.workspaceRoot,
-      pid
+      pid,
+      signal: input.signal
     });
   };
   const resolveIdentityForPort = input.resolvePortOwner
@@ -1457,7 +1463,8 @@ export async function executeMainLineWorkbench(
     return await resolveIdentityForPort({
       pythonPath: input.pythonPath,
       workspaceRoot: input.workspaceRoot,
-      port
+      port,
+      signal: input.signal
     });
   };
 
@@ -1481,6 +1488,40 @@ export async function executeMainLineWorkbench(
     }
     const previous = readState();
     const port = preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: previous });
+    const hasLiveBackendHandle = [previous.spawnPid, previous.backendLaunchPid, previous.backendPid]
+      .some((pid) => (input.pidAlive ?? knownPidIsAlive)(Number(pid || 0)));
+    if (input.fastCloseTiming && operation === "force-stop"
+      && (hasTrackedWorkbenchJob(input.workspaceRoot) || hasLiveBackendHandle)) {
+      const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
+      if (daemonPid > 0 && (input.pidAlive ?? knownPidIsAlive)(daemonPid)) {
+        return { schemaVersion: 1, accepted: false, operation, commandId,
+          code: "backend_retire_incomplete", message: "A separate Runtime Manager daemon requires verified retirement." };
+      }
+      const retired = await closeOwnedWorkbenchFast({
+        workspaceRoot: input.workspaceRoot,
+        port,
+        spawnPid: Number(previous.spawnPid || previous.backendLaunchPid || 0),
+        ...input.fastCloseTiming,
+        signal: input.signal,
+        controlToken: input.controlToken
+      });
+      input.signal?.throwIfAborted();
+      if (!retired) {
+        return { schemaVersion: 1, accepted: false, operation, commandId,
+          code: "backend_retire_incomplete", message: "Owned backend retirement was not verified within the close deadline." };
+      }
+      clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
+      writeState({
+        ...previous, desiredState: "closed", observedState: "closed", phase: "steady",
+        failureMessage: "", lifecycleWarning: "",
+        backendPid: 0, backendLaunchPid: 0, spawnPid: 0,
+        backendCreateTime: 0, backendExecutable: "",
+        backendLaunchCreateTime: 0, backendLaunchExecutable: "",
+        spawnCreateTime: 0, spawnExecutable: "",
+        lastReason: "electron_main_force_stop", lastSource: "electron_main", updatedAt: isoNow(input.now)
+      });
+      return accepted(operation, commandId);
+    }
     const daemonPid = (input.readDaemonPid ?? readDaemonPid)(input.workspaceRoot);
     const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
     const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
@@ -2009,7 +2050,8 @@ export async function executeMainLineWorkbench(
       backendIdentity = await captureIdentity({
         pythonPath: spawned.pythonPath,
         workspaceRoot: input.workspaceRoot,
-        pid: spawnPid
+        pid: spawnPid,
+        signal: input.signal
       });
       if (!backendIdentity) {
         throw new Error(`workbench backend process identity could not be captured for pid ${spawnPid}`);

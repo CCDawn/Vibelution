@@ -417,10 +417,12 @@ class RuntimeRestartPauseFailed(Exception):
         super().__init__(self.message)
 
 
-def _retire_for_user_restart(lang: str) -> dict[str, object]:
+def _retire_for_user_restart(
+    lang: str, *, source: str = "electron_user_restart",
+) -> dict[str, object]:
     """Use task owners to stop work and persist partials before local exit.
 
-    This is the backend half of an operator restart in Electron's serialized
+    This is the backend half of an operator close/restart in Electron's serialized
     lifecycle queue. It must never enqueue another lifecycle operation.
     """
     deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
@@ -441,17 +443,19 @@ def _retire_for_user_restart(lang: str) -> dict[str, object]:
         failures.append({"kind": "active_work_readback", "status": "failed", "error": "restart_pause_readback_failed"})
     else:
         failures.extend({**item, "error": "restart_pause_not_settled"} for item in remaining or [])
+    action = "close" if source == "electron_user_close" else "restart"
     _record_shutdown_event(
-        "runtime.shutdown.user_restart_paused" if not failures else "runtime.shutdown.user_restart_pause_failed",
-        message="Operator restart task cleanup settled." if not failures else "Operator restart task cleanup failed.",
+        f"runtime.shutdown.user_{action}_paused" if not failures else f"runtime.shutdown.user_{action}_pause_failed",
+        message=f"Operator {action} task cleanup settled." if not failures else f"Operator {action} task cleanup failed.",
         outcome="accepted" if not failures else "failed",
         level="info" if not failures else "error",
-        fields={"source": "electron_user_restart", "taskCount": len(results), "failedCount": len(failures), "pauseResults": results},
+        fields={"source": source, "taskCount": len(results), "failedCount": len(failures), "pauseResults": results},
     )
     if failures:
         raise RuntimeRestartPauseFailed(failures)
     response = _electron_retire_local_shutdown(
         lang,
+        source=source,
         stopped_chat_room_rounds=rooms,
         stopped_chat_turns=turns,
         stopped_source_collection_runs=sources,
@@ -497,10 +501,11 @@ def request_runtime_shutdown(
 
     Request classes (ADR 0009: product lifecycle writes live in Electron main):
 
-    - Explicit operator restart retirement (source=electron_user_restart,
-      reason=user_restart, interruptActiveWork=true): task owners stop and
-      persist partial state, then this backend exits locally. Electron owns
-      the subsequent start; no daemon command is submitted here.
+    - Explicit operator close/restart retirement (source=electron_user_close,
+      reason=user_close, or source=electron_user_restart, reason=user_restart,
+      with interruptActiveWork=true): task owners stop and persist partial
+      state, then this backend exits locally. Electron owns the lifecycle
+      operation; no daemon command is submitted here.
     - No body (Electron graceful retire, workbenchBackendRetire.ts): the backend
       schedules its own local exit after stopping in-flight work. Never spawns
       the daemon and never enqueues close_workbench; the retire poller waits for
@@ -525,18 +530,20 @@ def request_runtime_shutdown(
         stop_manager=stop_manager,
         body_present=body_present,
     )
-    # An explicit user restart has priority over active work. The protected
-    # shutdown API only accepts this mode with its exact local-retire source;
+    # An explicit user close/restart has priority over active work. The protected
+    # shutdown API only accepts this mode with its exact local-retire pair;
     # normal shutdown and automatic restart retain their existing guards.
-    user_restart = (
+    user_retire = (
         body_present
         and interrupt_active_work
-        and normalized_source == "electron_user_restart"
-        and normalized_reason == "user_restart"
+        and (normalized_source, normalized_reason) in {
+            ("electron_user_restart", "user_restart"),
+            ("electron_user_close", "user_close"),
+        }
         and not stop_manager
     )
-    if user_restart:
-        return _retire_for_user_restart(lang)
+    if user_retire:
+        return _retire_for_user_restart(lang, source=normalized_source)
     observed_active_work_runs = _restart_guard_active_work_runs()
     _record_shutdown_event(
         "runtime.shutdown.requested",
@@ -729,6 +736,7 @@ def request_runtime_shutdown(
 def _electron_retire_local_shutdown(
     lang: str,
     *,
+    source: str = "electron_retire",
     stopped_chat_room_rounds: list[dict[str, object]] | None = None,
     stopped_chat_turns: list[dict[str, object]] | None = None,
     stopped_source_collection_runs: list[dict[str, object]] | None = None,
@@ -767,7 +775,7 @@ def _electron_retire_local_shutdown(
         outcome="accepted",
         fields=_shutdown_event_fields(
             mode="local_retire",
-            source="electron_retire",
+            source=source,
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
             stopped_source_collection_runs=stopped_source_collection_runs,

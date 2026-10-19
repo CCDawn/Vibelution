@@ -5,6 +5,109 @@ import pytest
 from core.web.services import runtime_service
 
 
+@pytest.fixture
+def operator_retire_owners(monkeypatch):
+    calls = []
+    events = []
+    owner_names = (
+        "_stop_additional_work_for_restart",
+        "_stop_active_evolution_runs_before_shutdown",
+        "_stop_active_source_collection_runs_before_shutdown",
+        "_stop_active_chat_room_rounds_before_shutdown",
+        "_stop_active_chat_turns_before_shutdown",
+    )
+    for name in owner_names:
+        def stop_owner(*, owner=name, **kwargs):
+            calls.append((owner, kwargs))
+            return [{"kind": owner, "status": "stopped"}]
+
+        monkeypatch.setattr(runtime_service, name, stop_owner)
+    monkeypatch.setattr(runtime_service, "get_web_language", lambda: "en")
+    monkeypatch.setattr(
+        runtime_service, "_restart_guard_active_work_runs",
+        lambda: [] if len(calls) == len(owner_names) else [{"kind": "chat_turn", "runId": "active"}],
+    )
+    monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda: calls.append(("exit", {})))
+    monkeypatch.setattr(runtime_service, "_record_shutdown_event", lambda code, **kwargs: events.append((code, kwargs)))
+
+    def unexpected_lifecycle_write(*args, **kwargs):
+        raise AssertionError("Electron retirement must not submit another lifecycle operation")
+
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", unexpected_lifecycle_write)
+    monkeypatch.setattr(runtime_service, "submit_command", unexpected_lifecycle_write)
+    return calls, events
+
+
+@pytest.mark.parametrize("action", ["close", "restart"])
+def test_operator_retire_stops_task_owners_and_preserves_source(operator_retire_owners, action):
+    calls, events = operator_retire_owners
+    source = f"electron_user_{action}"
+
+    response = runtime_service.request_runtime_shutdown(
+        body_present=True, source=source, reason=f"user_{action}", interrupt_active_work=True,
+    )
+
+    assert response["mode"] == "local_retire"
+    assert response["accepted"] is True
+    assert [name for name, _ in calls] == [
+        "_stop_additional_work_for_restart",
+        "_stop_active_evolution_runs_before_shutdown",
+        "_stop_active_source_collection_runs_before_shutdown",
+        "_stop_active_chat_room_rounds_before_shutdown",
+        "_stop_active_chat_turns_before_shutdown",
+        "exit",
+    ]
+    assert len({kwargs["deadline"] for _, kwargs in calls[:-1]}) == 1
+    assert calls[-2][1]["persist_partials"] is True
+    assert response["chatTurns"][0]["status"] == "stopped"
+    assert response["otherWorkRuns"][0]["status"] == "stopped"
+    assert [code for code, _ in events] == [f"runtime.shutdown.user_{action}_paused", "runtime.shutdown.accepted"]
+    assert all(event["fields"]["source"] == source for _, event in events)
+
+
+@pytest.mark.parametrize("source,reason,interrupt,body_present,stop_manager", [
+    ("web_ui", "user_close", True, True, False),
+    ("electron_user_close", "user_restart", True, True, False),
+    ("electron_user_restart", "user_close", True, True, False),
+    ("electron_user_close", "user_close", False, True, False),
+    ("electron_user_close", "user_close", True, False, False),
+    ("electron_user_close", "user_close", True, True, True),
+])
+def test_operator_close_requires_exact_authorization(
+    operator_retire_owners, source, reason, interrupt, body_present, stop_manager,
+):
+    calls, _ = operator_retire_owners
+
+    with pytest.raises(runtime_service.RuntimeRestartActiveWorkBlocked):
+        runtime_service.request_runtime_shutdown(
+            body_present=body_present, source=source, reason=reason,
+            interrupt_active_work=interrupt, stop_manager=stop_manager,
+        )
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("action", ["close", "restart"])
+def test_operator_retire_does_not_claim_saved_state_when_owner_times_out(
+    monkeypatch, operator_retire_owners, action,
+):
+    calls, events = operator_retire_owners
+    monkeypatch.setattr(
+        runtime_service, "_stop_active_chat_turns_before_shutdown",
+        lambda **kwargs: [{"kind": "chat_turn", "status": "timeout", "error": "chat_turn_stop_wait_timeout"}],
+    )
+
+    with pytest.raises(runtime_service.RuntimeRestartPauseFailed) as failure:
+        runtime_service.request_runtime_shutdown(
+            body_present=True, source=f"electron_user_{action}", reason=f"user_{action}", interrupt_active_work=True,
+        )
+
+    assert failure.value.results[0]["error"] == "chat_turn_stop_wait_timeout"
+    assert all(name != "exit" for name, _ in calls)
+    assert events[-1][0] == f"runtime.shutdown.user_{action}_pause_failed"
+    assert events[-1][1]["fields"]["source"] == f"electron_user_{action}"
+
+
 def test_local_backend_exit_requires_an_owned_uvicorn_server(monkeypatch):
     monkeypatch.setattr(runtime_service, "sys", SimpleNamespace(modules={}))
     monkeypatch.setattr(

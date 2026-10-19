@@ -125,6 +125,7 @@ describe("workbench job registry", () => {
     const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
     const old = spawnTrackedWorkbenchProcess("C:/replacement", input);
     const retireOld = captureTrackedWorkbenchJobRetirement("C:/replacement", old.pid)!;
+    expect(retireOld.isCurrent()).toBe(true);
     const retirement = terminateTrackedWorkbenchJob("C:/replacement", old.pid);
     expect(() => spawnTrackedWorkbenchProcess("C:/replacement", input)).toThrow("still terminating or draining");
     expect(hasTrackedWorkbenchJob("C:/replacement")).toBe(true);
@@ -132,7 +133,9 @@ describe("workbench job registry", () => {
     await vi.advanceTimersByTimeAsync(100);
     await retirement;
     expect(hasTrackedWorkbenchJob("C:/replacement")).toBe(false);
+    expect(retireOld.isCurrent()).toBe(false);
     const replacement = spawnTrackedWorkbenchProcess("C:/replacement", input);
+    expect(retireOld.isCurrent()).toBe(false);
     const calls = terminate.mock.calls.length;
     await expect(terminateTrackedWorkbenchJob("C:/replacement", old.pid)).resolves.toBe(false);
     expect(terminate.mock.calls.length).toBe(calls);
@@ -180,6 +183,26 @@ describe("workbench job registry", () => {
     terminate.mockReturnValue(true);
     await expect(retire()).resolves.toBe(true);
     expect(hasTrackedWorkbenchJob("C:/unconfirmed-retirement")).toBe(false);
+  });
+
+  it("does not authorize HTTP or native termination of a replacement that reused the same PID", async () => {
+    const jobs: object[] = [];
+    const terminate = vi.fn(() => true);
+    __setWorkbenchJobNativeForTests({
+      spawn: () => { const job = {}; jobs.push(job); return { pid: process.pid, job }; },
+      terminate, activeCount: () => 0, drainStatus: completeDrainStatus, close: () => undefined
+    });
+    const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
+    spawnTrackedWorkbenchProcess("C:/same-pid-replacement", input);
+    const retireOld = captureTrackedWorkbenchJobRetirement("C:/same-pid-replacement", process.pid)!;
+    expect(retireOld.isCurrent()).toBe(true);
+    spawnTrackedWorkbenchProcess("C:/same-pid-replacement", input);
+    expect(retireOld.isCurrent()).toBe(false);
+    expect(captureTrackedWorkbenchJobRetirement("C:/same-pid-replacement", process.pid)!.isCurrent()).toBe(true);
+    await expect(retireOld()).resolves.toBe(true);
+    expect(terminate).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/same-pid-replacement")).toBe(true);
+    expect(jobs).toHaveLength(2);
   });
 
   it("terminates the tracked group before a later tree walk would be needed", async () => {
