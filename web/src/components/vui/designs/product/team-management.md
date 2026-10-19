@@ -22,7 +22,7 @@
 ### 视觉与布局
 - 外框与左右栏复用 `vuiRailFillClass` / `--vui-surface-rail`；左右面板不覆盖 `--shell-surface`，由外框的 rail surface 提供连续背景。
 - 中心内容面只在内容面板设置 `--shell-surface`、`--vui-surface-panel` 与 `--vui-surface-workspace` 为 `--vui-surface-chat`，保持主题中的对话背景、VUI 软圆角与平面无阴影。
-- 外框使用 `p-0`，顶边与会话 Agent 工作台齐平；中心列使用 `mx-1 mb-1`，700px 以下收为 `mx-0.5 mb-0.5`，避免外框与中心列叠加左侧留白。布局缩放、可选检查器和既有响应行为继续由 `VCanvasWorkbenchPage` 管理。
+- AppShell 对 `/teams` 使用 `VWorkbenchFrame flush`，由团队 recipe 自己管理 pane 间距。外框使用 `p-0`，顶边与会话 Agent 工作台齐平；中心列使用 `mx-1 mb-1`，700px 以下收为 `mx-0.5 mb-0.5`，避免外框与中心列叠加左侧留白。布局缩放、可选检查器和既有响应行为继续由 `VCanvasWorkbenchPage` 管理。
 
 ### 实现落点
 `web/src/routes/teams/TeamWorkspaceFrame.tsx` 与 `TeamWorkspaceFrame.styles.ts`。
