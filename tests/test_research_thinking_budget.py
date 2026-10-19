@@ -89,6 +89,26 @@ def test_segment_injected_for_research_node_session() -> None:
     assert "必须控制在 500 字以内" in segment["block"]
 
 
+def test_segment_for_research_node_session_uses_env_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = {
+        "experimentBinding": {"workflowRunId": "run-1", "workflowNodeId": "node-2"}
+    }
+
+    def loader(_project_root: object, _session_id: str):
+        return conversation
+
+    monkeypatch.setenv(RESEARCH_THINKING_BUDGET_ENV, "800")
+    segment = build_research_thinking_budget_segment(
+        "session-node",
+        project_root=object(),
+        load_chat_state=loader,
+    )
+    assert segment is not None
+    assert "必须控制在 800 字以内" in segment["block"]
+
+
 def test_segment_absent_for_ordinary_chat_session() -> None:
     segment = build_research_thinking_budget_segment(
         "session-chat",
@@ -96,6 +116,73 @@ def test_segment_absent_for_ordinary_chat_session() -> None:
         load_chat_state=_load_chat_state,
     )
     assert segment is None
+
+
+def test_segment_absent_for_ordinary_session_even_with_env_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def loader(_project_root: object, _session_id: str):
+        return {}
+
+    monkeypatch.setenv(RESEARCH_THINKING_BUDGET_ENV, "800")
+    segment = build_research_thinking_budget_segment(
+        "session-chat",
+        project_root=object(),
+        load_chat_state=loader,
+    )
+    assert segment is None
+
+
+def test_segment_absent_for_ordinary_session_with_residual_budget_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy ``thinkingBudgetChars`` storage must never re-enable injection."""
+
+    from core.orchestration import session_budget_resolve
+    from core.orchestration.session_budget_resolve import (
+        SessionBudgetParameters,
+        normalize_session_budget_parameters,
+    )
+
+    # Residual legacy key survives in stored payloads but resolves away.
+    parameters = normalize_session_budget_parameters(
+        {"maxCallsPerTurn": 50, "thinkingBudgetChars": 800}
+    )
+    assert parameters == SessionBudgetParameters(maxCallsPerTurn=50)
+
+    # Even with such residual parameters resolvable for the session, the
+    # injection path never consults the session budget resolver.
+    monkeypatch.setattr(
+        session_budget_resolve,
+        "get_session_budget_parameters",
+        lambda _sid: parameters,
+    )
+
+    def loader(_project_root: object, _session_id: str):
+        return {"experimentBinding": {"teamId": "team-1"}}
+
+    monkeypatch.delenv(RESEARCH_THINKING_BUDGET_ENV, raising=False)
+    segment = build_research_thinking_budget_segment(
+        "session-chat",
+        project_root=object(),
+        load_chat_state=loader,
+    )
+    assert segment is None
+
+
+def test_module_has_no_session_thinking_budget_resolution() -> None:
+    """Contract guard: session-level thinking budgets are gone for good."""
+
+    import inspect
+
+    from core.web.services.session import research_thinking_budget as module
+
+    assert not hasattr(module, "resolve_session_thinking_budget_chars")
+    # No session budget resolution may be wired back into the injection path
+    # (docstring mentions of the legacy storage key are documentation only).
+    source = inspect.getsource(module)
+    assert "session_budget_resolve" not in source
+    assert "get_session_budget_parameters" not in source
 
 
 def test_segment_absent_for_team_agent_session_without_workflow_scope() -> None:

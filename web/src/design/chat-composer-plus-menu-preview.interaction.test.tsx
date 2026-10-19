@@ -361,21 +361,42 @@ describe("chat composer plus menu preview loop", () => {
     });
     // The plus menu itself is a popover with role="dialog"; anchor on the
     // budget panel's own aria-label so the two never collide.
-    const dialog = document.body.querySelector('[role="dialog"][aria-label="预算与额度"]');
+    let dialog = document.body.querySelector('[role="dialog"][aria-label="预算与额度"]');
     expect(dialog?.textContent).toContain("每回合工具调用额度");
     const maxCalls = dialog?.querySelector<HTMLInputElement>('input[aria-label="每回合工具调用额度"]');
-    const thinking = dialog?.querySelector<HTMLInputElement>('input[aria-label="思考预算字数"]');
     expect(maxCalls).toBeTruthy();
     expect(maxCalls?.value).toBe("32");
-    expect(thinking?.value).toBe("");
+    // The thinking-budget field is retired; only the tool-call quota remains.
+    expect(dialog?.querySelector('input[aria-label="思考预算字数"]')).toBeNull();
 
     await act(async () => {
-      setInputValue(thinking!, "800");
+      setInputValue(maxCalls!, "64");
     });
+    await act(async () => {
+      Array.from(dialog?.querySelectorAll("button") ?? [])
+        .find((button) => button.textContent?.trim() === "保存")
+        ?.click();
+    });
+    expect(document.body.querySelector('[role="dialog"][aria-label="预算与额度"]')).toBeNull();
+    expect(host.textContent).toContain("已模拟保存预算与额度");
+    expect(host.textContent).toContain("64 次/回合");
+
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await act(async () => {
+      buttonByLabel("更多操作")?.click();
+    });
+    await act(async () => {
+      buttonByLabel("预算与额度")?.click();
+    });
+    dialog = document.body.querySelector('[role="dialog"][aria-label="预算与额度"]');
+    expect(dialog?.querySelector<HTMLInputElement>('input[aria-label="每回合工具调用额度"]')?.value).toBe("64");
+
     await act(async () => {
       buttonByLabel("清除工具调用额度，恢复默认")?.click();
     });
-    expect(maxCalls?.value).toBe("");
+    expect(dialog?.querySelector<HTMLInputElement>('input[aria-label="每回合工具调用额度"]')?.value).toBe("");
 
     await act(async () => {
       Array.from(dialog?.querySelectorAll("button") ?? [])
@@ -385,7 +406,6 @@ describe("chat composer plus menu preview loop", () => {
     expect(document.body.querySelector('[role="dialog"][aria-label="预算与额度"]')).toBeNull();
     expect(host.textContent).toContain("已模拟保存预算与额度");
     expect(host.textContent).toContain("按模型策略");
-    expect(host.textContent).toContain("800 字");
   });
 
   it("opens the inline slash palette from composer typing and never from the plus menu", async () => {
