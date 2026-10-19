@@ -80,6 +80,8 @@ ATTENTION_KIND_KNOWLEDGE_REVIEW = "knowledge_review"
 
 ATTENTION_KIND_ANOMALY = "anomaly"
 
+ATTENTION_KIND_AFFAIR_REMINDER = "affair_reminder"
+
 
 MAX_KNOWLEDGE_REVIEW_ITEMS = 20
 
@@ -671,6 +673,13 @@ def collect_anomaly_attention(
 
 
 
+def _collect_affair_reminder_attention() -> list[dict[str, str]]:
+    """Due/overdue personal-affairs rows; lazy import keeps collector wiring optional."""
+    from .personal_affairs_service import collect_affair_reminder_attention
+
+    return collect_affair_reminder_attention()
+
+
 def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
     """Attach human-attention entries to every overview page.
@@ -711,7 +720,15 @@ def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
     extension: list[dict[str, str]] = []
 
-    for collector in (collect_knowledge_review_attention, collect_anomaly_attention):
+    for collector in (
+
+        collect_knowledge_review_attention,
+
+        collect_anomaly_attention,
+
+        _collect_affair_reminder_attention,
+
+    ):
 
         try:
 

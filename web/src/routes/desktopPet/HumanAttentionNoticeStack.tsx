@@ -20,14 +20,14 @@ const COPY = {
     close: "关闭通知",
     open: "查看该事项",
     fallbackTitle: "需要你的关注",
-    kinds: { knowledge_review: "知识复核", anomaly: "研究异常" },
+    kinds: { knowledge_review: "知识复核", anomaly: "研究异常", affair_reminder: "事务提醒" },
   },
   en: {
     region: "Attention notifications",
     close: "Dismiss notification",
     open: "Open the related item",
     fallbackTitle: "Needs your attention",
-    kinds: { knowledge_review: "Knowledge review", anomaly: "Anomaly" },
+    kinds: { knowledge_review: "Knowledge review", anomaly: "Anomaly", affair_reminder: "Affair" },
   },
 } as const;
 

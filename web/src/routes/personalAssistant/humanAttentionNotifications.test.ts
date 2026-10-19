@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PersonalAssistantAttentionRow } from "./humanAttentionNotifications";
 import {
+  HUMAN_ATTENTION_FALLBACK_TITLES,
   buildHumanAttentionNotificationPayload,
   createHumanAttentionLedger,
   emitNewHumanAttentionNotifications,
   humanAttentionBridge,
   humanAttentionTargetFor,
+  isHumanAttentionKind,
   localDayKey,
   parseHumanAttentionEvent,
   sanitizeHumanAttentionTargetUrl,
@@ -82,6 +84,12 @@ describe("human attention target resolution", () => {
     expect(humanAttentionTargetFor({ kind: "anomaly" })).toBe("/teams?researchView=workflow");
     expect(humanAttentionTargetFor({ kind: "anomaly", targetUrl: "/memory/knowledge" })).toBe("/memory/knowledge");
     expect(humanAttentionTargetFor({})).toBe("");
+  });
+  it("accepts affair_reminder rows with the assistant-page default target", () => {
+    expect(isHumanAttentionKind("affair_reminder")).toBe(true);
+    expect(isHumanAttentionKind("affair-reminder")).toBe(false);
+    expect(humanAttentionTargetFor({ kind: "affair_reminder" })).toBe("/personal-assistant");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.affair_reminder).toContain("事务");
   });
 });
 
