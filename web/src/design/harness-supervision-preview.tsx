@@ -7,6 +7,7 @@ import "./tokens.css";
 import "./vui-native-controls.css";
 import "./vui-provider-theme.css";
 import "./harness-supervision-preview.css";
+import styles from "./harness-supervision-preview.styles";
 
 type RunStatus = "ready" | "running" | "recovering" | "director" | "user" | "stopped" | "complete";
 type Run = { status: RunStatus; rounds: number; minutes: number; failures: number; message: string; events: string[] };
@@ -91,59 +92,59 @@ function HarnessSupervisionPreview() {
   const tone = run.status === "director" || run.status === "user" ? "warning" : run.status === "complete" ? "success" : run.status === "running" || run.status === "recovering" ? "info" : "neutral";
 
   return (
-    <div className="hsp-root">
-      <header className="hsp-topbar">
-        <span className="hsp-brand"><span className="hsp-brand-mark">V</span> Vibelution</span>
-        <span className="hsp-breadcrumb">平台 <ArrowRight size={12} /> 自进化</span>
+    <div className={styles.hspRoot}>
+      <header className={styles.hspTopbar}>
+        <span className={styles.hspBrand}><span className={styles.hspBrandMark}>V</span> Vibelution</span>
+        <span className={styles.hspBreadcrumb}>平台 <ArrowRight size={12} /> 自进化</span>
         <VChip tone="neutral">交互预览</VChip>
       </header>
-      <main className="hsp-workspace">
-        <VDenseOpsPage ariaLabel="自进化监督配置" fill={false} className="hsp-page" title="自进化监督" meta="在授权内持续改进，异常时有人接手" headerClassName="hsp-page-header" actions={<span className="hsp-local"><span /> 仅本地模拟</span>}>
-          <div className="hsp-content">
-            <section className="hsp-enable" aria-label="启用配置">
-              <span className="hsp-enable-icon"><Workflow size={22} /></span>
-              <div className="hsp-enable-copy"><h2>让团队继续完成下一轮</h2><p>成功后继续，达到轮数或有效时限即停止。</p></div>
-              <div className="hsp-switch"><span>{enabled ? "已启用" : "已关闭"}</span><VSwitch aria-label="启用自进化监督" isSelected={enabled} isDisabled={active} onChange={setEnabled} /></div>
+      <main className={styles.hspWorkspace}>
+        <VDenseOpsPage ariaLabel="自进化监督配置" fill={false} className={styles.hspPage} title="自进化监督" meta="在授权内持续改进，异常时有人接手" headerClassName="hsp-page-header" actions={<span className={styles.hspLocal}><span /> 仅本地模拟</span>}>
+          <div className={styles.hspContent}>
+            <section className={styles.hspEnable} aria-label="启用配置">
+              <span className={styles.hspEnableIcon}><Workflow size={22} /></span>
+              <div className={styles.hspEnableCopy}><h2>让团队继续完成下一轮</h2><p>成功后继续，达到轮数或有效时限即停止。</p></div>
+              <div className={styles.hspSwitch}><span>{enabled ? "已启用" : "已关闭"}</span><VSwitch aria-label="启用自进化监督" isSelected={enabled} isDisabled={active} onChange={setEnabled} /></div>
             </section>
 
-            <section className="hsp-section" aria-labelledby="hsp-roles">
-              <div className="hsp-section-title"><h2 id="hsp-roles">角色分工</h2><span>用户保留授权与部署决定权</span></div>
-              <div className="hsp-human"><span className="hsp-avatar hsp-avatar-human">你</span><strong>用户</strong><span>确定目标、文件范围与授权期限</span><VChip>最终决定</VChip></div>
-              <div className="hsp-role-grid">
-                {roleDefinitions.map((role, index) => <div className="hsp-role" key={role.id}>
-                  <div className="hsp-role-title"><span className={`hsp-avatar hsp-avatar-${index}`}>{role.name.slice(0, 1)}</span><label htmlFor={`hsp-${role.id}`}>{role.name}</label>{index < 3 && <ArrowRight className="hsp-flow-arrow" size={13} />}</div>
+            <section className={styles.hspSection} aria-labelledby="hsp-roles">
+              <div className={styles.hspSectionTitle}><h2 id="hsp-roles">角色分工</h2><span>用户保留授权与部署决定权</span></div>
+              <div className={styles.hspHuman}><span className={styles.hspAvatarHspAvatarHuman}>你</span><strong>用户</strong><span>确定目标、文件范围与授权期限</span><VChip>最终决定</VChip></div>
+              <div className={styles.hspRoleGrid}>
+                {roleDefinitions.map((role, index) => <div className={styles.hspRole} key={role.id}>
+                  <div className={styles.hspRoleTitle}><span className={`hsp-avatar hsp-avatar-${index}`}>{role.name.slice(0, 1)}</span><label htmlFor={`hsp-${role.id}`}>{role.name}</label>{index < 3 && <ArrowRight className={styles.hspFlowArrow} size={13} />}</div>
                   <VNativeSelect id={`hsp-${role.id}`} aria-label={`${role.name}绑定`} value={bindings[role.id]} disabled={active || !enabled} onChange={(e) => setBindings({ ...bindings, [role.id]: e.target.value })}>{role.choices.map((choice) => <option key={choice}>{choice}</option>)}</VNativeSelect>
                   <p>{role.summary}</p>
                 </div>)}
               </div>
             </section>
 
-            <section className="hsp-section hsp-budget-section" aria-labelledby="hsp-budget">
-              <div className="hsp-section-title"><h2 id="hsp-budget">运行预算</h2><span>任一上限先到即停止</span></div>
-              <div className="hsp-budget">
-                <label className="hsp-number"><span>最多轮数</span><div><VNativeInput type="number" min={1} max={10} step={1} aria-label="最多轮数" value={roundLimit} disabled={active || !enabled} onChange={(e) => setRoundLimit(e.target.value)} /><span>轮</span></div><small>1–10 轮</small></label>
-                <label className="hsp-number"><span>总时限</span><div><VNativeInput type="number" min={1} max={60} step={1} aria-label="总时限" value={timeLimit} disabled={active || !enabled} onChange={(e) => setTimeLimit(e.target.value)} /><span>分钟</span></div><small>1–60 分钟</small></label>
-                <div className="hsp-authorization"><ShieldCheck size={18} /><div><strong>本次授权剩余 30 分钟</strong><p>有效时限 {valid ? minuteBudget : "—"} 分钟，以更早到期的授权为准。</p></div></div>
+            <section className={styles.hspSectionHspBudgetSection} aria-labelledby="hsp-budget">
+              <div className={styles.hspSectionTitle}><h2 id="hsp-budget">运行预算</h2><span>任一上限先到即停止</span></div>
+              <div className={styles.hspBudget}>
+                <label className={styles.hspNumber}><span>最多轮数</span><div><VNativeInput type="number" min={1} max={10} step={1} aria-label="最多轮数" value={roundLimit} disabled={active || !enabled} onChange={(e) => setRoundLimit(e.target.value)} /><span>轮</span></div><small>1–10 轮</small></label>
+                <label className={styles.hspNumber}><span>总时限</span><div><VNativeInput type="number" min={1} max={60} step={1} aria-label="总时限" value={timeLimit} disabled={active || !enabled} onChange={(e) => setTimeLimit(e.target.value)} /><span>分钟</span></div><small>1–60 分钟</small></label>
+                <div className={styles.hspAuthorization}><ShieldCheck size={18} /><div><strong>本次授权剩余 30 分钟</strong><p>有效时限 {valid ? minuteBudget : "—"} 分钟，以更早到期的授权为准。</p></div></div>
               </div>
-              {!valid && <p className="hsp-error" role="alert">轮数请输入 1–10 的整数，时限请输入 1–60 的整数。</p>}
-              <div className="hsp-scope"><span>固定文件范围</span><code>core/orchestration/harness_campaign.py</code><code>tests/test_harness_campaign.py</code><span className="hsp-scope-note">模拟授权 · 各轮保持一致</span></div>
+              {!valid && <p className={styles.hspError} role="alert">轮数请输入 1–10 的整数，时限请输入 1–60 的整数。</p>}
+              <div className={styles.hspScope}><span>固定文件范围</span><code>core/orchestration/harness_campaign.py</code><code>tests/test_harness_campaign.py</code><span className={styles.hspScopeNote}>模拟授权 · 各轮保持一致</span></div>
             </section>
 
-            <section className="hsp-run" aria-labelledby="hsp-status-title" data-status={run.status}>
-              <div className="hsp-run-heading"><h2 id="hsp-status-title">运行状态</h2><VChip tone={tone}>{labels[run.status]}</VChip><div className="hsp-run-actions">{active ? <VButton icon={<Square size={13} />} onPress={stop}>停止</VButton> : <VButton variant="primary" icon={run.status === "ready" ? <Play size={14} /> : <RotateCcw size={14} />} isDisabled={!enabled || !valid} onPress={start}>{run.status === "ready" ? "开始模拟" : "重新模拟"}</VButton>}</div></div>
-              <div className="hsp-status-copy" role="status" aria-live="polite"><span className={`hsp-status-dot hsp-status-${run.status}`} /><strong>{run.message}</strong></div>
-              <div className="hsp-progress-line"><span>已完成 <b>{run.rounds}</b> / {valid ? roundBudget : "—"} 轮</span><span>已用 <b>{run.minutes}</b> / {valid ? minuteBudget : "—"} 分钟</span><span>连续失败 <b>{run.failures}</b> / 3</span></div>
-              <div className="hsp-progress" aria-hidden="true"><span style={{ width: `${valid ? Math.min(100, Math.max(run.rounds / roundBudget, run.minutes / minuteBudget) * 100) : 0}%` }} /></div>
-              {run.status === "director" && <div className="hsp-decision"><CirclePause size={17} /><div><strong>{bindings.director}正在接手</strong><p>先核对副作用与授权；范围或权限需要改变时，再交用户确认。</p></div><VButton onPress={() => setRun((current) => ({ ...current, status: "user", message: "总监建议调整范围，等待用户重新授权", events: event(current, "总监请求用户重新授权；未扩大范围") }))}>模拟需用户决定</VButton></div>}
-              {run.status === "user" && <p className="hsp-waiting">用户尚未授权，团队保持暂停。部署也始终等待用户决定。</p>}
-              <div className="hsp-simulator"><span>模拟事件</span><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("failure")}>失败一次</VButton><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("exhausted")}>重试耗尽</VButton><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("safe")}>安全中断</VButton><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("unknown")}>副作用不明</VButton></div>
+            <section className={styles.hspRun} aria-labelledby="hsp-status-title" data-status={run.status}>
+              <div className={styles.hspRunHeading}><h2 id="hsp-status-title">运行状态</h2><VChip tone={tone}>{labels[run.status]}</VChip><div className={styles.hspRunActions}>{active ? <VButton icon={<Square size={13} />} onPress={stop}>停止</VButton> : <VButton variant="primary" icon={run.status === "ready" ? <Play size={14} /> : <RotateCcw size={14} />} isDisabled={!enabled || !valid} onPress={start}>{run.status === "ready" ? "开始模拟" : "重新模拟"}</VButton>}</div></div>
+              <div className={styles.hspStatusCopy} role="status" aria-live="polite"><span className={`hsp-status-dot hsp-status-${run.status}`} /><strong>{run.message}</strong></div>
+              <div className={styles.hspProgressLine}><span>已完成 <b>{run.rounds}</b> / {valid ? roundBudget : "—"} 轮</span><span>已用 <b>{run.minutes}</b> / {valid ? minuteBudget : "—"} 分钟</span><span>连续失败 <b>{run.failures}</b> / 3</span></div>
+              <div className={styles.hspProgress} aria-hidden="true"><span style={{ width: `${valid ? Math.min(100, Math.max(run.rounds / roundBudget, run.minutes / minuteBudget) * 100) : 0}%` }} /></div>
+              {run.status === "director" && <div className={styles.hspDecision}><CirclePause size={17} /><div><strong>{bindings.director}正在接手</strong><p>先核对副作用与授权；范围或权限需要改变时，再交用户确认。</p></div><VButton onPress={() => setRun((current) => ({ ...current, status: "user", message: "总监建议调整范围，等待用户重新授权", events: event(current, "总监请求用户重新授权；未扩大范围") }))}>模拟需用户决定</VButton></div>}
+              {run.status === "user" && <p className={styles.hspWaiting}>用户尚未授权，团队保持暂停。部署也始终等待用户决定。</p>}
+              <div className={styles.hspSimulator}><span>模拟事件</span><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("failure")}>失败一次</VButton><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("exhausted")}>重试耗尽</VButton><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("safe")}>安全中断</VButton><VButton variant="ghost" isDisabled={run.status !== "running"} onPress={() => simulate("unknown")}>副作用不明</VButton></div>
             </section>
 
-            <section className="hsp-details">
-              <VButton variant="ghost" contentLayout="plain" className="hsp-details-toggle" aria-expanded={details} aria-controls="hsp-detail-body" trailingIcon={<ChevronDown className={details ? "hsp-chevron-open" : ""} size={16} />} onPress={() => setDetails(!details)}><span>监督规则与运行记录</span><span className="hsp-details-subtitle">失败升级 · 安全续跑 · 授权边界</span></VButton>
-              {details && <div id="hsp-detail-body" className="hsp-detail-body"><div className="hsp-rules"><p><Check size={14} /><span><strong>失败升级</strong>现有重试耗尽或连续 3 次失败，任一触发即交总监。</span></p><p><Check size={14} /><span><strong>安全续跑</strong>检查点、文件范围、授权均有效，且确认无未知副作用时自动恢复。</span></p><p><Check size={14} /><span><strong>暂停裁决</strong>副作用不明交总监；扩范围、加权限、授权过期交用户，不自动部署。</span></p></div><div className="hsp-log"><h3>本次模拟记录</h3>{run.events.length ? <ol>{run.events.map((entry, index) => <li key={`${index}-${entry}`}><span>{String(run.events.length - index).padStart(2, "0")}</span>{entry}</li>)}</ol> : <p>开始模拟后，在这里查看关键节点。</p>}</div></div>}
+            <section className={styles.hspDetails}>
+              <VButton variant="ghost" contentLayout="plain" className={styles.hspDetailsToggle} aria-expanded={details} aria-controls="hsp-detail-body" trailingIcon={<ChevronDown className={details ? "hsp-chevron-open" : ""} size={16} />} onPress={() => setDetails(!details)}><span>监督规则与运行记录</span><span className={styles.hspDetailsSubtitle}>失败升级 · 安全续跑 · 授权边界</span></VButton>
+              {details && <div id="hsp-detail-body" className={styles.hspDetailBody}><div className={styles.hspRules}><p><Check size={14} /><span><strong>失败升级</strong>现有重试耗尽或连续 3 次失败，任一触发即交总监。</span></p><p><Check size={14} /><span><strong>安全续跑</strong>检查点、文件范围、授权均有效，且确认无未知副作用时自动恢复。</span></p><p><Check size={14} /><span><strong>暂停裁决</strong>副作用不明交总监；扩范围、加权限、授权过期交用户，不自动部署。</span></p></div><div className={styles.hspLog}><h3>本次模拟记录</h3>{run.events.length ? <ol>{run.events.map((entry, index) => <li key={`${index}-${entry}`}><span>{String(run.events.length - index).padStart(2, "0")}</span>{entry}</li>)}</ol> : <p>开始模拟后，在这里查看关键节点。</p>}</div></div>}
             </section>
-            <footer className="hsp-footer">所有数据均为模拟 · 1 秒代表 1 分钟 · 不连接真实任务或写接口</footer>
+            <footer className={styles.hspFooter}>所有数据均为模拟 · 1 秒代表 1 分钟 · 不连接真实任务或写接口</footer>
           </div>
         </VDenseOpsPage>
       </main>
