@@ -7287,6 +7287,7 @@ class TestRuntimeStateMemoryFlow:
         assert captured["goal_seen_during_build"] == agent_module._SESSION_CHAT_PROMPT_GOAL
         assert captured["packet_seen_during_build"].goal == agent_module._SESSION_CHAT_PROMPT_GOAL
         assert captured["packet_seen_during_build"].allow_subagents is False
+        assert captured["packet_seen_during_build"].allow_agent_messages is True
         assert captured["excluded_sections"] == ["RUNTIME_LOG_INDEX"]
         assert raw_user_message not in captured["packet_seen_during_build"].render()
 
