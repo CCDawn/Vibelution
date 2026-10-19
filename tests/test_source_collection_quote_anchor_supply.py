@@ -605,3 +605,71 @@ def test_pmc_locator_bridge_does_not_overmatch():
     # PMC id 必须是完整 path 段：PMC1234567abc 这类粘连串不归一成键。
     glued = {"recordId": "r1", "sourceUrl": "https://pmc.ncbi.nlm.nih.gov/articles/PMC1234567abc/"}
     assert source_quotable_blocks(glued, {}, fetched_text_by_locator=fetched) == []
+
+
+def test_frontiers_mid_path_doi_bridge_does_not_swallow_trailing_segment():
+    """frontiersin.org /articles/<doi>/full：DOI 段在 path 中段，键不得吞 /full。"""
+    from core.web.services.team_workflow.source_collection.extraction_quote_anchor_supply import (
+        _normalized_locator_keys,
+    )
+    keys = _normalized_locator_keys(
+        "https://www.frontiersin.org/articles/10.3389/fmicb.2023.1104454/full"
+    )
+    assert "doi:10.3389/fmicb.2023.1104454" in keys
+    assert "doi:10.3389/fmicb.2023.1104454/full" not in keys
+
+
+def test_doi_candidate_binds_frontiers_publisher_receipt():
+    """现网实锤形态：候选 sourceRef 裸 DOI ↔ frontiersin.org 全文回执 → 命中。"""
+    text = "Frontiers fetched abstract body for thiostrepton resistance."
+    fetched = {
+        "https://www.frontiersin.org/articles/10.3389/fmicb.2023.1104454/full": _receipt(
+            "https://www.frontiersin.org/articles/10.3389/fmicb.2023.1104454/full", text
+        )
+    }
+    candidate = {
+        "candidateId": "c1",
+        "sourceRef": "10.3389/fmicb.2023.1104454",
+        "metadata": {"doi": "10.3389/fmicb.2023.1104454"},
+    }
+    blocks = source_quotable_blocks(candidate, {}, fetched_text_by_locator=fetched)
+    assert [b["text"] for b in blocks] == [text]
+
+
+def test_nature_host_doi_suffix_bridge_binds_implicit_prefix():
+    """nature.com/articles/<suffix>：前缀 10.1038 隐含在 host，候选 DOI 桥接命中。"""
+    text = "Nature Communications fetched abstract body."
+    fetched = {
+        "https://www.nature.com/articles/s41467-026-72496-4": _receipt(
+            "https://www.nature.com/articles/s41467-026-72496-4", text
+        )
+    }
+    candidate = {
+        "candidateId": "c1",
+        "sourceRef": "10.1038/s41467-026-72496-4",
+        "metadata": {"doi": "10.1038/s41467-026-72496-4"},
+    }
+    blocks = source_quotable_blocks(candidate, {}, fetched_text_by_locator=fetched)
+    assert [b["text"] for b in blocks] == [text]
+
+
+def test_host_doi_suffix_bridge_does_not_overmatch():
+    """nature 桥只认 /articles/<suffix> 形状；他站 /articles/ 路径、异 suffix 不误命中。"""
+    from core.web.services.team_workflow.source_collection.extraction_quote_anchor_supply import (
+        _normalized_locator_keys,
+    )
+    # 非 nature 站点的同形 path 不发隐含前缀键。
+    keys = _normalized_locator_keys("https://example.org/articles/s41467-026-72496-4")
+    assert not any(key.startswith("doi:") for key in keys)
+    # nature.com 非 /articles/ 路径不发键。
+    keys = _normalized_locator_keys("https://www.nature.com/subjects/s41467-026-72496-4")
+    assert not any(key.startswith("doi:10.1038/") for key in keys)
+
+
+def test_doiorg_end_of_path_key_still_bridges():
+    """回归：doi.org 结尾形态的既有桥不回归。"""
+    from core.web.services.team_workflow.source_collection.extraction_quote_anchor_supply import (
+        _normalized_locator_keys,
+    )
+    keys = _normalized_locator_keys("https://doi.org/10.21656/1000-0887.390245")
+    assert "doi:10.21656/1000-0887.390245" in keys

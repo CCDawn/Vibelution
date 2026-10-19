@@ -60,11 +60,24 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
 _ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
 
 # DOI path segment for cross-host receipt bridging: a registrant prefix plus
-# suffix ending the URL path, e.g. ``/10.21656/1000-0887.390245`` on doi.org
-# itself or ``/EN/10.21656/1000-0887.390245`` / ``/doi/10.21656/...`` /
-# ``/article/doi/10.21656/...`` on a publisher mirror.  The leading-slash
-# boundary keeps version-ish substrings (``.../v10.1234/...``) from matching.
-_DOI_PATH_SEGMENT = re.compile(r"(?<=/)(10\.\d{4,9}/\S+)$")
+# suffix, e.g. ``/10.21656/1000-0887.390245`` on doi.org itself or
+# ``/EN/10.21656/1000-0887.390245`` / ``/doi/10.21656/...`` on a publisher
+# mirror.  The leading-slash boundary keeps version-ish substrings
+# (``.../v10.1234/...``) from matching.  The suffix charset excludes ``/``, so
+# a DOI embedded mid-path (``/articles/10.3389/fmicb.2023.1104454/full`` on
+# frontiersin.org) bridges without swallowing the trailing path segment — the
+# old end-anchored ``\S+$`` form produced ``doi:...1104454/full``, a key no
+# candidate could ever emit.  Legacy slash-bearing DOI suffixes stay
+# unbridgeable by this key rather than risking overmatch.
+_DOI_PATH_SEGMENT = re.compile(r"(?<=/)(10\.\d{4,9}/[^\s/?#]+)")
+
+# Publisher article URLs that embed the DOI *suffix* while the prefix is
+# implicit in the host's URL scheme — pure normalization cannot derive these.
+# Scoped exactly like the PMC mirror hosts: host + path shape must both match.
+_HOST_DOI_ARTICLE_PATHS = {
+    # nature.com/articles/<doi-suffix> ↔ doi:<prefix>/<doi-suffix>
+    "nature.com": ("10.1038", re.compile(r"^/articles/(?P<suffix>[^/?#]+)/?$")),
+}
 
 # PMC article id as one complete path segment (slash-bounded both sides), e.g.
 # ``/articles/PMC1234567/`` on pmc.ncbi.nlm.nih.gov or
@@ -89,6 +102,25 @@ def _doi_locator_key(path: str) -> str:
         return ""
     doi = match.group(1).rstrip(".,;:")
     return f"doi:{doi.lower()}" if doi else ""
+
+
+def _host_doi_locator_key(host: str, path: str) -> str:
+    """``doi:<prefix>/<suffix>`` key for hosts whose article URL embeds only the DOI suffix.
+
+    nature.com serves ``https://www.nature.com/articles/<doi-suffix>`` where the
+    registrant prefix (10.1038) is carried by the host, not the path — the
+    generic path-segment key can never fire.  Registration is deliberately
+    narrow (one host, one path shape) and mirrors the PMC mirror-host rule.
+    """
+    entry = _HOST_DOI_ARTICLE_PATHS.get(host)
+    if not entry:
+        return ""
+    doi_prefix, path_shape = entry
+    match = path_shape.match(path)
+    if not match:
+        return ""
+    suffix = match.group("suffix").rstrip(".,;:")
+    return f"doi:{doi_prefix}/{suffix.lower()}" if suffix else ""
 
 
 def _pmc_locator_key(host: str, path: str) -> str:
@@ -118,9 +150,11 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     ``/abs/`` pages — strip the optional trailing ``vN`` version suffix from
     the paper id (``/abs/2502.01542v2`` and ``/abs/2502.01542`` serve the same
     page).  Paths on every other site are never rewritten; URLs whose path
-    ends in a DOI segment additionally emit a scheme-free ``doi:<doi>`` bridge
-    key so a DOI locator matches its publisher-mirror fetch receipt, and URLs
-    on the two PMC mirrors additionally emit ``pmc:<PMC id>`` so a
+    carries a DOI segment (anywhere, bounded by ``/``) additionally emit a
+    scheme-free ``doi:<doi>`` bridge key so a DOI locator matches its
+    publisher-mirror fetch receipt, registered hosts whose article URL embeds
+    only the DOI suffix (nature.com) emit their implicit-prefix ``doi:`` key,
+    and URLs on the two PMC mirrors additionally emit ``pmc:<PMC id>`` so a
     pmc.ncbi.nlm.nih.gov candidate matches an ebi.ac.uk receipt (and vice
     versa) for the same article.
     """
@@ -152,6 +186,9 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     doi_key = _doi_locator_key(path)
     if doi_key and doi_key not in keys:
         keys.append(doi_key)
+    host_doi_key = _host_doi_locator_key(host, path)
+    if host_doi_key and host_doi_key not in keys:
+        keys.append(host_doi_key)
     pmc_key = _pmc_locator_key(host, path)
     if pmc_key and pmc_key not in keys:
         keys.append(pmc_key)
