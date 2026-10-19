@@ -165,3 +165,67 @@ describe("human attention emission", () => {
     expect(notifyHumanAttention).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("human attention emission failure reporting", () => {
+  it("reports a rejected bridge call once with the failure context", async () => {
+    const ledger = createHumanAttentionLedger(memoryStorage(), "2026-10-18");
+    const reportFailure = vi.fn();
+    const notifyHumanAttention = vi.fn().mockRejectedValue(new Error("ipc rejected"));
+    emitNewHumanAttentionNotifications({
+      rows: [attentionRow({ id: "kr-11", kind: "anomaly", severity: "critical" })],
+      bridge: { notifyHumanAttention },
+      ledger,
+      reportFailure,
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(reportFailure).toHaveBeenCalledTimes(1);
+    expect(reportFailure).toHaveBeenCalledWith({
+      id: "kr-11",
+      kind: "anomaly",
+      severity: "critical",
+      reason: "notify rejected: ipc rejected",
+      title: "待复核知识",
+    });
+  });
+  it("reports an invalid_payload resolve value but not healthy deliveries", async () => {
+    const ledger = createHumanAttentionLedger(memoryStorage(), "2026-10-18");
+    const reportFailure = vi.fn();
+    const invalid = vi.fn().mockResolvedValue({ delivered: "invalid_payload", error: "bad kind" });
+    const healthy = vi.fn().mockResolvedValue({ delivered: "system_notification" });
+    const opaqueResult = vi.fn().mockResolvedValue(undefined);
+    emitNewHumanAttentionNotifications({
+      rows: [attentionRow({ id: "kr-12", kind: "anomaly" })],
+      bridge: { notifyHumanAttention: invalid },
+      ledger,
+      reportFailure,
+    });
+    emitNewHumanAttentionNotifications({
+      rows: [attentionRow({ id: "kr-13", kind: "anomaly" })],
+      bridge: { notifyHumanAttention: healthy },
+      ledger,
+      reportFailure,
+    });
+    emitNewHumanAttentionNotifications({
+      rows: [attentionRow({ id: "kr-14", kind: "anomaly" })],
+      bridge: { notifyHumanAttention: opaqueResult },
+      ledger,
+      reportFailure,
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(reportFailure).toHaveBeenCalledTimes(1);
+    expect(reportFailure).toHaveBeenCalledWith(expect.objectContaining({
+      id: "kr-12",
+      reason: "notify resolved with delivered=invalid_payload",
+    }));
+  });
+  it("never reports when the bridge is missing (plain browser)", () => {
+    const reportFailure = vi.fn();
+    emitNewHumanAttentionNotifications({
+      rows: [attentionRow({ id: "kr-15" })],
+      bridge: undefined,
+      ledger: createHumanAttentionLedger(memoryStorage(), "2026-10-18"),
+      reportFailure,
+    });
+    expect(reportFailure).not.toHaveBeenCalled();
+  });
+});
