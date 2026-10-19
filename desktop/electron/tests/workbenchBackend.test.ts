@@ -301,6 +301,115 @@ describe("workbenchBackendRetire", () => {
     vi.useRealTimers();
   });
 
+  it("shares the 12s graceful deadline with a slow accepted shutdown response", async () => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const startedAt = Date.now();
+      const shutdown = requestGracefulWorkbenchShutdown({
+        port: 8000,
+        backendPid: 4242,
+        controlToken: "test-control-token",
+        request: async () => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 11_000));
+          return { status: 202 };
+        },
+        connect: async () => true,
+        pidAlive: () => true
+      }).then((result) => { settled = true; return result; });
+
+      await vi.advanceTimersByTimeAsync(11_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      await expect(shutdown).resolves.toMatchObject({ requested: true, completed: false, status: 202 });
+      expect(Date.now() - startedAt).toBe(12_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles an accepted graceful shutdown at its internal deadline while a port probe is pending", async () => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      let requestSignal: AbortSignal | undefined;
+      const connect = vi.fn(() => new Promise<boolean>(() => undefined));
+      const shutdown = requestGracefulWorkbenchShutdown({
+        port: 8000,
+        controlToken: "test-control-token",
+        request: async (_url, options) => { requestSignal = options.signal; return { status: 202 }; },
+        connect
+      }).then((result) => { settled = true; return result; });
+
+      await vi.advanceTimersByTimeAsync(11_999);
+      expect(connect).toHaveBeenCalledOnce();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requestSignal?.aborted).toBe(true);
+      expect(settled).toBe(true);
+      await expect(shutdown).resolves.toMatchObject({ requested: true, completed: false, status: 202 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves an external abort after a graceful shutdown was accepted", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const abortReason = new Error("operator cancelled graceful shutdown");
+      const shutdown = requestGracefulWorkbenchShutdown({
+        port: 8000,
+        controlToken: "test-control-token",
+        signal: controller.signal,
+        request: async () => ({ status: 202 }),
+        connect: async () => true
+      });
+      const rejected = expect(shutdown).rejects.toBe(abortReason);
+      await vi.advanceTimersByTimeAsync(50);
+      controller.abort(abortReason);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts token acquisition and its response body toward the graceful deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const request = vi.fn(async (_url: string, options: { method: string; signal: AbortSignal }) => {
+        if (options.method === "GET") {
+          await new Promise<void>((resolve) => setTimeout(resolve, 7_000));
+          return { status: 200, json: async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+            return { controlToken: "backend-control-token" };
+          } };
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+        return { status: 202 };
+      });
+      const shutdown = requestGracefulWorkbenchShutdown({
+        port: 8000,
+        controlToken: "",
+        healthVerified: true,
+        request,
+        connect: async () => true
+      }).then((result) => { settled = true; return result; });
+
+      await vi.advanceTimersByTimeAsync(11_999);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls[0][1].signal).toBe(request.mock.calls[1][1].signal);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      await expect(shutdown).resolves.toMatchObject({ requested: true, completed: false, status: 202 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("treats active-work refusal as a fallback signal without polling", async () => {
     const connect = vi.fn().mockResolvedValue(true);
     await expect(

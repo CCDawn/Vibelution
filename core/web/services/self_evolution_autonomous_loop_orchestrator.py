@@ -50,6 +50,8 @@ class SelfEvolutionAutonomousLoopOrchestrator:
     ) -> None:
         self._service = service
         self._executor = executor
+        self._recovery_lock = threading.Lock()
+        self._recovery_futures: dict[str, Any] = {}
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         queued = self._service.queue(payload)
@@ -66,6 +68,21 @@ class SelfEvolutionAutonomousLoopOrchestrator:
         decision: dict[str, Any],
     ) -> dict[str, Any]:
         return self._service.approve(run_id, decision=decision)
+
+    def start_recovery(self, payload: dict, *, source: dict, run_id: str) -> dict:
+        with self._recovery_lock:
+            self._recovery_futures = {key: future for key, future in self._recovery_futures.items() if not future.done()}
+            queued = self._service.queue_recovery(payload, source=source, run_id=run_id)
+            previous = self._recovery_futures.get(run_id)
+            if queued.get("status") == "queued" and (previous is None or previous.done()):
+                self._recovery_futures[run_id] = self._executor.submit(self._service.run_until_review, run_id)
+            return queued
+
+    def cancel_recovery(self, run_id: str, *, source: dict) -> dict | None:
+        return self._service.cancel_recovery(run_id, source=source)
+
+    def get_recovery(self, run_id: str, *, source: dict) -> dict | None:
+        return self._service.get_recovery(run_id, source=source)
 
     def reject(
         self,

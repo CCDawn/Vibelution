@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
 from core.web.services import generic_team_workflow_service as service
@@ -16,6 +16,8 @@ from core.web.services.team_workflow.generic.models import (
 def _call(callback: Callable, *args):
     try:
         return callback(*args)
+    except PermissionError as exc:
+        raise HTTPException(403, detail="command_forbidden") from exc
     except service.NotFound as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     except service.Conflict as exc:
@@ -54,7 +56,14 @@ def register_generic_team_workflow_routes(router: APIRouter) -> None:
         return _call(service.get_run, team_id, run_id)
 
     @router.post("/teams/{team_id}/workflows/{flow_id}/runs", response_model=Run)
-    def start(team_id: str, flow_id: str, payload: StartRun):
+    def start(team_id: str, flow_id: str, payload: StartRun, request: Request):
+        if payload.localIntegration is not None:
+            from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope_from_http
+            try:
+                with server_operator_scope_from_http(request):
+                    return _call(service.start_run, team_id, flow_id, payload.model_dump())
+            except PermissionError as exc:
+                raise HTTPException(403, detail="command_forbidden") from exc
         return _call(service.start_run, team_id, flow_id, payload.model_dump())
 
     @router.post("/teams/{team_id}/workflow-runs/{run_id}/commands", response_model=Run)

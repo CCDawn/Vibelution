@@ -40,12 +40,20 @@ export type TeamFlowRecoveryState = {
   failureCount?: number;
   repairAttempts?: number;
   repairRunId?: string;
+  codeRepairRunId?: string;
   reason?: string;
   evidenceRefs?: string[];
   reviewerSessionId?: string;
   reviewerTurnId?: string;
   sourceAttemptKey?: string;
   replayedAttemptKey?: string;
+};
+
+export type TeamFlowLocalIntegrationRequest = {
+  acknowledge: true;
+  allowedFiles: string[];
+  teamId: string;
+  validForSeconds: number;
 };
 
 export type TeamFlow = {
