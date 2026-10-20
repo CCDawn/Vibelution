@@ -12,10 +12,11 @@ from core.infrastructure.file_lock import cross_process_file_lock
 from core.web.services.financial_preferences_service import FinancialPreferenceError
 from .advisor_contract import AdvisorCommand, InvestmentPlan
 from .investment import InvestmentProfile
+from .position_evidence import actual_positions, is_reference_position
 
 
 def state_fingerprint(state: dict) -> str:
-    positions = [{"symbol": row["stock"]["symbol"], "quantity": float(row["quantity"]), "costPrice": float(row["costPrice"]), "currency": row["currency"]} for row in state.get("manualPositions", [])]
+    positions = [{"symbol": row["stock"]["symbol"], "quantity": float(row["quantity"]), "costPrice": float(row["costPrice"]), "currency": row["currency"]} for row in actual_positions(state.get("manualPositions", []))]
     positions.sort(key=lambda row: (row["symbol"], row["quantity"], row["costPrice"], row["currency"]))
     semantic = {"investmentProfile": state.get("investmentProfile"), "manualPositions": positions}
     return hashlib.sha256(json.dumps(semantic, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -89,7 +90,7 @@ def _plan(state: dict, plan_id: str) -> dict:
 def _quotes(state: dict, orders: list[dict]) -> dict:
     from core.web.services.financial_research_service import batch_quotes
 
-    symbols = sorted({row["symbol"] for row in orders} | {row["stock"]["symbol"] for row in state["manualPositions"]})
+    symbols = sorted({row["symbol"] for row in orders} | {row["stock"]["symbol"] for row in actual_positions(state["manualPositions"])})
     result = {}
     for start in range(0, len(symbols), 50):
         try:
@@ -194,8 +195,12 @@ def command(agent_id: str, payload: dict) -> dict:
                 else:
                     # Recommendations are never used as evidence of actual trades.
                     positions = workspace._section("manualPositions", data["actualPositions"])
+                    if any(is_reference_position(row) for row in positions):
+                        raise FinancialPreferenceError("实际持仓不能包含标注验收、测试或模拟的参考记录，请核对后重新录入", 409)
                     symbols = [row["stock"]["symbol"] for row in positions]
-                    if len(set(symbols)) != len(symbols) or any(not symbol.startswith(("sh", "sz", "bj")) for symbol in symbols):
+                    from core.web.services import financial_market_service as market
+
+                    if len(set(symbols)) != len(symbols) or any(not symbol.startswith(("sh", "sz", "bj")) or market.is_etf_symbol(symbol) for symbol in symbols):
                         raise FinancialPreferenceError("实际持仓必须为不重复的 A 股股票")
                     profile = dict(state["investmentProfile"] or {})
                     profile.update(availableCashCny=data["actualCashCny"], holdingsStatus="recorded" if positions else "none")

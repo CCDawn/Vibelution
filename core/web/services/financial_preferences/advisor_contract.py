@@ -83,8 +83,15 @@ class PlanProposal(StrictModel):
 Proposal = Annotated[ProfileProposal | PlanProposal, Field(discriminator="kind")]
 
 
+class BudgetAssessment(StrictModel):
+    budgetCny: float | None
+    budgetSource: Literal["conversation", "saved_profile", "unknown"]
+    issues: list[str] = Field(default_factory=list, max_length=10)
+
+
 class ProposalResponse(StrictModel):
     proposal: Proposal | None
+    assessment: BudgetAssessment | None = None
 
 
 class ConfirmProposal(StrictModel):

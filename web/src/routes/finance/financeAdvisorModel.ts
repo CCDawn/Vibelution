@@ -2,11 +2,11 @@ import type { ConversationMessage } from "../../api/types";
 import type { FinancialInvestmentProfile } from "../../api/types/financialPreferences";
 
 /** Only a discovery hint; the server reads and validates the canonical native Turn. */
-export function latestAdvisorProposalTurn(messages: readonly ConversationMessage[]) {
+export function latestAdvisorAnswerTurn(messages: readonly ConversationMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== "assistant" || message.status !== "completed" || !message.turnId) continue;
-    if (message.turnItems?.some(item => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed" && /```investment-proposal\s/.test(item.text))) return message.turnId;
+    if (message.turnItems?.some(item => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed")) return message.turnId;
   }
   return null;
 }

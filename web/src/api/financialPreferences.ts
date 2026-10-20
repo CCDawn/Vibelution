@@ -1,7 +1,7 @@
 import { fetchJson } from "./client";
 import type { FinancialPreference, FinancialPreferences } from "./types/financialPreferences";
 import type { FinancialWorkspacePatch, FinancialWorkspaceSettings } from "./types/financialPreferences";
-import type { FinancialAdvisorCheck, FinancialAdvisorCommand, FinancialAdvisorProposal } from "./types/financialPreferences";
+import type { FinancialAdvisorAssessment, FinancialAdvisorCheck, FinancialAdvisorCommand, FinancialAdvisorProposal } from "./types/financialPreferences";
 export type { FinancialPreference, FinancialPreferences } from "./types/financialPreferences";
 export type { FinancialWatchStock, FinancialResearchProfile, FinancialManualPosition, FinancialReviewCase, FinancialWorkspacePatch, FinancialWorkspaceSettings } from "./types/financialPreferences";
 
@@ -13,7 +13,7 @@ export function updateFinancialWorkspace(agentId: string, expectedRevision: numb
   return fetchJson(`/api/financial-preferences/${encodeURIComponent(agentId)}/workspace`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision, patch }) });
 }
 
-export function fetchFinancialAdvisorProposal(agentId: string, sessionId: string, turnId: string, options?: { signal?: AbortSignal }): Promise<{ proposal: FinancialAdvisorProposal | null }> {
+export function fetchFinancialAdvisorProposal(agentId: string, sessionId: string, turnId: string, options?: { signal?: AbortSignal }): Promise<{ proposal: FinancialAdvisorProposal | null; assessment?: FinancialAdvisorAssessment | null }> {
   const params = new URLSearchParams({ sessionId, turnId });
   return fetchJson(`/api/financial-preferences/${encodeURIComponent(agentId)}/workspace/advisor/proposal?${params}`, { signal: options?.signal });
 }

@@ -54,6 +54,7 @@ def build_investment_context_lines(agent: dict) -> list[str]:
     ):
         return []
     from .workspace import get_workspace
+    from .position_evidence import actual_positions
 
     lines = [
         "## 本轮投资配置",
@@ -63,23 +64,26 @@ def build_investment_context_lines(agent: dict) -> list[str]:
     try:
         state = get_workspace(str(agent.get("agentId") or ""))
         investment = state["investmentProfile"]
+        verified_positions = actual_positions(state["manualPositions"])
         profile = json.dumps(investment, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-        holding_lines = []
+        holding_lines = [] if len(verified_positions) == len(state["manualPositions"]) else [
+            "手动持仓含明确标注验收、测试或模拟的参考记录，已从真实资产分析中隔离；实际持仓仍需用户核对，不能由其推断空仓。",
+        ]
         if investment and investment["holdingsStatus"] == "recorded":
             positions = [
                 {
                     "stock": {key: row["stock"][key] for key in ("symbol", "ticker", "name", "market")},
                     **{key: row[key] for key in ("quantity", "costPrice", "currency")},
                 }
-                for row in state["manualPositions"]
+                for row in verified_positions
             ]
             if positions:
-                holding_lines = [
+                holding_lines += [
                     "以下仅为用户手动录入的持仓，非交易账本，不含实时价，未与券商核实；不得把测试或模拟记录当作真实资产。",
                     "ManualPositions: " + json.dumps(positions, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
                 ]
             else:
-                holding_lines = ["ManualPositions: null", "用户选择已录入，但手动持仓列表为空，实际持仓未知，不得按空仓分析。"]
+                holding_lines += ["ManualPositions: null", "用户选择已录入，但手动持仓列表为空，实际持仓未知，不得按空仓分析。"]
     except Exception:
         # Do not reuse a previous turn's budget or interrupt unrelated context.
         return [*lines, "本轮投资配置读取失败：预算不可确认，禁止依据旧预算给出金额；请先恢复读取或请用户重新确认。"]
@@ -90,6 +94,7 @@ def build_investment_context_lines(agent: dict) -> list[str]:
         f"InvestmentProfileRevision: {state['revision']}",
         f"InvestmentProfile: {profile}",
         "null 表示未知或未配置，不等于零；未确认预算不得猜测金额，holdingsStatus=unknown 不得当作空仓。",
+        "回答涉及金额时，先明确本轮投资预算及来源，再据此计算；预算、实际现金、最大亏损与波动参考是不同条件，不能互相代替。检查正文和配置提案中的预算是否一致，条件不足只给参考比较。",
         *holding_lines,
         *advisor_context_lines(state),
     ]

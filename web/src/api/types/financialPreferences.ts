@@ -46,6 +46,10 @@ export type FinancialInvestmentPlan = FinancialPlanDraft & {
 export type FinancialAdvisorProposal =
   | { kind: "profile"; baseFingerprint: string; profile: FinancialInvestmentProfile }
   | { kind: "plan"; baseFingerprint: string; plan: FinancialPlanDraft };
+export type FinancialAdvisorAssessment = {
+  budgetCny: number | null; budgetSource: "conversation" | "saved_profile" | "unknown";
+  issues: string[];
+};
 export type FinancialAdvisorCommand = { expectedRevision: number } & (
   | { action: "confirm_proposal"; sessionId: string; turnId: string }
   | { action: "adopt" | "invalidate"; planId: string }

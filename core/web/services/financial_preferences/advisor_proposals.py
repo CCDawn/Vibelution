@@ -108,4 +108,13 @@ def get_proposal(agent_id: str, session_id: str, turn_id: str) -> dict:
     answer = "\n\n".join(str(item.get("text") or "") for item in ordered)
     if re.search(r"(?:本轮已按请求停止[。，]|This turn was stopped (?:as requested|before it started)\.)", answer, re.I):
         return {"proposal": None}
-    return {"proposal": parse_proposal(answer)}
+    from .analysis_checks import assess_budget
+    from .workspace import get_workspace
+
+    proposal = parse_proposal(answer)
+    state = get_workspace(agent_id)
+    assessment = assess_budget(answer, active_events, turn_id, state["investmentProfile"], proposal)
+    result = {"proposal": None if assessment["issues"] else proposal}
+    if assessment["budgetCny"] is not None or assessment["issues"]:
+        result["assessment"] = assessment
+    return result

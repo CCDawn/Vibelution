@@ -12,6 +12,18 @@ require the current revision. Corrupt files fail closed without replacement.
 Quotes, generated reports and market valuations are always read from their
 existing authorities; only identifiers and user-authored settings are persisted.
 
+`analysis_checks.py` reads only active-branch native user messages (latest 20
+Turns before the selected final) or the currently saved profile and detects
+explicit budget conflicts. Hypotheticals, quoted examples, corrections and
+volatility amounts are not budget assertions. An ambiguous source blocks
+confirmation. These bounded checks do not certify unmentioned numbers or advice
+quality; the answer and journal remain unchanged. The proposal read/confirmation
+path shares this assessment, including for ordinary answers without a proposal.
+`position_evidence.py` quarantines explicitly labelled acceptance/test/simulation
+records from model asset context, quote fetches and portfolio calculations while
+retaining the original workspace records. Such records block adoption and cannot
+be submitted as actual execution evidence; empty filtered holdings stay unknown.
+
 `investmentProfile` is a nullable section replaced as a whole on PATCH. Missing
 numeric/boolean fields remain unknown (`null`); market defaults to `CN` and holdings
 status to `unknown`. Old workspace files read as `investmentProfile: null`. The

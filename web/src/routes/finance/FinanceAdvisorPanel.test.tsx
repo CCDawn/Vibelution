@@ -57,6 +57,21 @@ it("does not discover a proposal in user, tool, or incomplete output", async () 
   await render([{ ...message, role: "user" }, { ...message, status: "running" }] as ConversationMessage[]);
   expect(api.fetchFinancialAdvisorProposal).not.toHaveBeenCalled();
 });
+it("checks a plain completed answer and shows the budget conflict without offering confirmation", async () => {
+  vi.mocked(api.fetchFinancialAdvisorProposal).mockResolvedValue({ proposal: null, assessment: { budgetCny: 6000, budgetSource: "conversation", issues: ["回答预算600元与6000元不一致"] } });
+  await render([{ ...message, turnItems: [{ ...message.turnItems![0], text: "以600元起步。" }] }] as ConversationMessage[]);
+  expect(api.fetchFinancialAdvisorProposal).toHaveBeenCalled();
+  expect(document.body.textContent).toContain("本轮回答金额不一致");
+  await click("建议需要重新核对");
+  expect([...document.querySelectorAll("button")].some(button => button.textContent === "确认保存")).toBe(false);
+  expect(api.financialAdvisorCommand).not.toHaveBeenCalled();
+});
+it("does not label ordinary analysis without a proposal as an invalid proposal", async () => {
+  vi.mocked(api.fetchFinancialAdvisorProposal).mockResolvedValue({ proposal: null });
+  await render([{ ...message, turnItems: [{ ...message.turnItems![0], text: "预算6000元，先确认现金。" }] }] as ConversationMessage[]);
+  expect(api.fetchFinancialAdvisorProposal).toHaveBeenCalled();
+  expect(document.body.textContent).not.toContain("建议需要重新核对");
+});
 it("keeps adoption disabled until the numeric check passes and preserves failure feedback", async () => {
   state.investmentPlans = [{ id: "p", title: "观察", rationale: "等待", orders: [], reviewAfter: null, status: "proposed", createdAt: "", updatedAt: "", source: { sessionId: "old", turnId: "old" }, stateFingerprint: fingerprint, needsReview: false }];
   vi.mocked(api.checkFinancialAdvisorPlan).mockResolvedValue({ passed: false, blockers: ["现金未确认"], warnings: [], feesCny: 0, cashAfterCny: null, orders: [] });

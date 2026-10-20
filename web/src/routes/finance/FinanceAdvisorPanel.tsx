@@ -4,7 +4,7 @@ import { checkFinancialAdvisorPlan, fetchFinancialAdvisorProposal, financialAdvi
 import type { FinancialAdvisorCheck, FinancialAdvisorCommand, FinancialInvestmentPlan, FinancialPlanDraft, FinancialWorkspaceSettings } from "../../api/types/financialPreferences";
 import { VButton, VDialog, VStateSurface } from "../../components/vui";
 import { FinanceAdvisorExecution } from "./FinanceAdvisorExecution";
-import { ADVISOR_PLAN_PROMPT, advisorCheckText, investmentConditionRows, latestAdvisorProposalTurn } from "./financeAdvisorModel";
+import { ADVISOR_PLAN_PROMPT, advisorCheckText, investmentConditionRows, latestAdvisorAnswerTurn } from "./financeAdvisorModel";
 import type { FinancialSessionView } from "./FinancialResearchBridge";
 import { useFinanceWorkspace } from "./useFinanceWorkspace";
 import styles from "./FinanceAdvisorPanel.styles";
@@ -36,20 +36,22 @@ export function FinanceAdvisorPanel({ agentId, view, zh, onConditions, onResearc
   const [check, setCheck] = useState<{ planId: string; revision: number; value: FinancialAdvisorCheck } | null>(null);
   const [handled, setHandled] = useState<string | null>(null);
   const gate = useRef(false);
-  const turnId = latestAdvisorProposalTurn(view?.agentId === agentId ? view.messages ?? [] : []);
+  const turnId = latestAdvisorAnswerTurn(view?.agentId === agentId ? view.messages ?? [] : []);
+  const proposalHint = view?.messages?.some(message => message.role === "assistant" && message.turnId === turnId && message.turnItems?.some(item => item.type === "agent_message" && item.phase === "final_answer" && /```investment-proposal\s/.test(item.text)));
   const sourceKey = `${view?.sessionId ?? ""}/${turnId ?? ""}`;
   const proposalQuery = useQuery({
-    queryKey: ["finance", "advisor-proposal", agentId, view?.sessionId, turnId],
+    queryKey: ["finance", "advisor-proposal", agentId, view?.sessionId, turnId, state?.revision],
     queryFn: ({ signal }) => fetchFinancialAdvisorProposal(agentId, view!.sessionId, turnId!, { signal }),
     enabled: Boolean(turnId && !view?.busy && handled !== sourceKey),
     staleTime: Infinity, retry: false,
   });
   const proposal = handled !== sourceKey ? proposalQuery.data?.proposal : null;
+  const amountIssues = proposalQuery.data?.assessment?.issues ?? [];
   const plans = state?.investmentPlans ?? [];
   const current: FinancialInvestmentPlan | undefined = plans[plans.length - 1];
   const sourceSaved = plans.some(plan => plan.source.sessionId === view?.sessionId && plan.source.turnId === turnId);
-  const freshProposal = proposal && !sourceSaved;
-  const unrecognizedProposal = turnId && handled !== sourceKey && proposalQuery.isSuccess && !proposal;
+  const freshProposal = proposal && !sourceSaved && !amountIssues.length;
+  const unrecognizedProposal = proposalHint && handled !== sourceKey && proposalQuery.isSuccess && !proposal;
   const proposalStale = proposal?.baseFingerprint !== state?.investmentStateFingerprint;
   const checked = check && check.planId === current?.id && check.revision === state?.revision ? check.value : null;
   async function command(payload: FinancialAdvisorCommand) {
@@ -80,9 +82,10 @@ export function FinanceAdvisorPanel({ agentId, view, zh, onConditions, onResearc
   return <>
     <div className={styles.strip} aria-label={zh ? "投资摘要" : "Investment summary"}>
       <VButton variant="ghost" onPress={onConditions}>{zh ? "投资条件" : "Conditions"} · {state?.investmentProfile?.budgetCny == null ? (zh ? "待确认" : "Unknown") : `¥${state.investmentProfile.budgetCny.toLocaleString()}`}</VButton>
-      <VButton variant="ghost" onPress={() => setOpen(true)}>{freshProposal ? (zh ? "查看待确认内容" : "Review proposal") : unrecognizedProposal || proposalQuery.isError ? (zh ? "建议需要重新核对" : "Proposal needs attention") : `${zh ? "当前方案" : "Plan"} · ${status}`}</VButton>
+      <VButton variant="ghost" onPress={() => setOpen(true)}>{freshProposal ? (zh ? "查看待确认内容" : "Review proposal") : amountIssues.length || unrecognizedProposal || proposalQuery.isError ? (zh ? "建议需要重新核对" : "Proposal needs attention") : `${zh ? "当前方案" : "Plan"} · ${status}`}</VButton>
       {current?.reviewAfter ? <span className={styles.caption}>{zh ? "下次复核 " : "Next review "}{new Date(current.reviewAfter).toLocaleDateString()}</span> : null}
     </div>
+    {amountIssues.length ? <VStateSurface tone="error" density="compact" title={zh ? "本轮回答金额不一致，请重新分析" : "Budget statements conflict; reassess before using this answer"}>{amountIssues.join(" ")}</VStateSurface> : null}
     <VDialog open={open} onOpenChange={setOpen} title={zh ? "我的投资方案" : "My investment plan"} size="lg">
       <div className={styles.root}>
         {workspace.query.isError ? <VStateSurface tone="error" title={zh ? "投资状态读取失败" : "Cannot read investment state"} actions={<VButton onPress={() => void workspace.query.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !state ? <p>{zh ? "正在读取…" : "Loading…"}</p> : <>

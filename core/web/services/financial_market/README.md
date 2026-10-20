@@ -12,6 +12,14 @@ null for HK/US. HK/US daily bars are returned as raw bars because Tencent
 returns no adjusted-series key for those markets; CN bars remain forward
 adjusted (`qfq`).
 
+Read-only listed ETF identifiers include `sh510300`, `sh510500`, `sh510880`
+and `sz159915` (bare six-digit ETF codes resolve to the correct exchange).
+ETF prices and normalized volume refer to fund units; the shared `share`
+wire fields represent units and legacy lots are 100 units. Tools label those
+units explicitly. Stock PE/PB/market-cap fields are null for ETFs. Public
+quote support does not extend stock-only paper-ledger admission, quantity or
+fee rules: `normalize_a_share_symbol` keeps the original stock allowlist.
+
 The adapter only reads public Tencent endpoints. An endpoint response that is
 missing, malformed, or has an unrecognized time/currency format is unavailable;
 the parser does not synthesize quote values or relabel raw bars as adjusted.
