@@ -6327,7 +6327,8 @@ def test_self_built_httpx_client_pins_keepalive_expiry_above_default(monkeypatch
     """
     import httpx
 
-    from core.llm.client import _LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS, _llm_new_httpx_client
+    from config.models import DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+    from core.llm.client import _llm_new_httpx_client, _llm_httpx_keepalive_expiry_seconds
 
     captured: dict = {}
     real_client = httpx.Client
@@ -6338,13 +6339,103 @@ def test_self_built_httpx_client_pins_keepalive_expiry_above_default(monkeypatch
             super().__init__(**kwargs)
 
     monkeypatch.setattr(httpx, "Client", RecordingClient)
+    monkeypatch.delenv("VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS", raising=False)
+    # Isolate the resolver from the operator config file: fall straight to
+    # the packaged default tier.
+    monkeypatch.setattr(
+        "core.llm.client.get_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("no config")),
+    )
 
     client = _llm_new_httpx_client(timeout=5, verify=True)
     pool = client._transport._pool
     # httpcore 1.x 把 Limits 拆到 pool 属性；keepalive_expiry 是本修复的语义点。
-    assert pool._keepalive_expiry == _LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS == 300.0
+    assert pool._keepalive_expiry == DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS == 1800.0
     assert pool._max_keepalive_connections == 20
+    assert captured["limits"].keepalive_expiry == _llm_httpx_keepalive_expiry_seconds()
     client.close()
+
+
+def test_keepalive_expiry_resolver_tiers(monkeypatch):
+    """Resolution order: in-process override > env > llm config > default."""
+
+    from config.models import DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS, LLMConfig
+    from core.llm.client import _llm_httpx_keepalive_expiry_seconds
+
+    class _Cfg:
+        class llm:  # noqa: N801 - minimal duck-typed AppConfig.llm
+            http_keepalive_expiry_seconds = 600.0
+
+    monkeypatch.delenv("VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS", raising=False)
+    monkeypatch.setattr("core.llm.client.get_config", lambda *_a, **_k: _Cfg())
+
+    assert _llm_httpx_keepalive_expiry_seconds() == 600.0
+
+    # env 覆盖 operator config，且被钳制到安全范围。
+    monkeypatch.setenv("VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS", "2")
+    assert _llm_httpx_keepalive_expiry_seconds() == 5.0
+    monkeypatch.setenv("VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS", "900")
+    assert _llm_httpx_keepalive_expiry_seconds() == 900.0
+
+    # in-process override 优先于一切。
+    monkeypatch.setattr(
+        "core.llm.client._LLM_HTTPX_KEEPALIVE_EXPIRY_OVERRIDE", 42.0
+    )
+    assert _llm_httpx_keepalive_expiry_seconds() == 42.0
+    monkeypatch.delenv("VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS", raising=False)
+    assert _llm_httpx_keepalive_expiry_seconds() == 42.0
+
+    # 配置读取失败（嵌入/测试环境）必须回退默认，不得炸调用方。
+    monkeypatch.setattr("core.llm.client._LLM_HTTPX_KEEPALIVE_EXPIRY_OVERRIDE", None)
+    monkeypatch.setattr(
+        "core.llm.client.get_config",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("no config")),
+    )
+    assert _llm_httpx_keepalive_expiry_seconds() == DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+    assert LLMConfig().http_keepalive_expiry_seconds == DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+
+
+def test_keepalive_expiry_flows_into_proxied_and_direct_clients(monkeypatch):
+    """Override reaches both proxy and direct httpx client constructions."""
+
+    from core.llm.client import _LLM_EFFECTIVE_PROXY, _llm_new_httpx_client
+
+    monkeypatch.setattr(
+        "core.llm.client._LLM_HTTPX_KEEPALIVE_EXPIRY_OVERRIDE", 1234.0
+    )
+
+    direct = _llm_new_httpx_client(timeout=5, verify=True)
+    assert direct._transport._pool._keepalive_expiry == 1234.0
+    direct.close()
+
+    proxy_token = _LLM_EFFECTIVE_PROXY.set("http://127.0.0.1:7890")
+    try:
+        proxied = _llm_new_httpx_client(timeout=5, verify=True)
+        # 代理路径的连接池挂在 proxy mount 上（client._transport 是直连池）。
+        proxy_pool = proxied._transport_for_url("https://example.com")._pool
+        assert getattr(proxy_pool, "_proxy_url", None) is not None
+        assert proxy_pool._keepalive_expiry == 1234.0
+        proxied.close()
+    finally:
+        _LLM_EFFECTIVE_PROXY.reset(proxy_token)
+
+
+def test_keepalive_expiry_bumped_on_litellm_responses_handler(monkeypatch):
+    """The cached litellm responses handler keeps the same pooled retention."""
+
+    from core.llm.client import _new_cancellable_responses_http_handler
+
+    monkeypatch.setattr(
+        "core.llm.client._LLM_HTTPX_KEEPALIVE_EXPIRY_OVERRIDE", 777.0
+    )
+
+    handler = _new_cancellable_responses_http_handler({"timeout": 5, "ssl_verify": True})
+    try:
+        pool = handler.client._transport._pool
+        # httpx 默认 5s；未提升前该路径闲置连接会在工具间隙被回收。
+        assert pool._keepalive_expiry == 777.0
+    finally:
+        handler.close()
 
 
 def test_duplicate_tool_call_error_classified_as_tool_protocol_error():

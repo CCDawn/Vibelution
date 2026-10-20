@@ -539,3 +539,141 @@ def test_empty_micro_compact_state_shape():
         },
         "tokenMetering": {"tokenSource": "estimate"},
     }
+
+
+# ---------------------------------------------------------------------------
+# Seed-path assembly kwargs gate (AgentRuntime.micro_compact_assembly_kwargs)
+# ---------------------------------------------------------------------------
+
+
+def _seed_gate_stub(*, micro_enabled: bool = True, explicit_trigger: int = 0, effective_limit: int = 128_000):
+    """Minimal AgentRuntime seam: only the attributes the seed gate touches."""
+    from types import SimpleNamespace
+
+    import agent as agent_module
+
+    runtime = agent_module.AgentRuntime
+
+    class Stub(SimpleNamespace):
+        _automatic_context_compression_threshold = runtime._automatic_context_compression_threshold
+        _automatic_context_compression_threshold_tokens = runtime._automatic_context_compression_threshold_tokens
+        _micro_compact_enabled = runtime._micro_compact_enabled
+        _micro_compact_trigger_tokens = runtime._micro_compact_trigger_tokens
+        _micro_compact_settings = runtime._micro_compact_settings
+        micro_compact_assembly_kwargs = runtime.micro_compact_assembly_kwargs
+
+    return Stub(
+        config=SimpleNamespace(
+            context_compression=ContextCompressionConfig(micro_compact_enabled=micro_enabled),
+        ),
+        _context_compression_trigger_tokens=explicit_trigger,
+        _effective_max_token_limit=effective_limit,
+    )
+
+
+def _ledger_seed_history(*, result_chars: int, groups: int = 1) -> list[dict]:
+    """Seed/ledger replay shape: tool payloads live in tool_calls, content is empty."""
+    history: list[dict] = [{"role": "user", "content": "开始调查"}]
+    for index in range(groups):
+        history.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "name": "grep_search_tool",
+                        "arguments": {"query": f"检索-{index}"},
+                        "result": _big_text(f"seed-result-{index}", chars=result_chars),
+                    }
+                ],
+            }
+        )
+    history.append({"role": "user", "content": "继续"})
+    return history
+
+
+def test_seed_gate_injects_kwargs_when_ledger_history_reaches_line():
+    """回归断点：ledger 形态（content 空、payload 在 tool_calls）达到触发线时必须注入 kwargs。"""
+    from tools.token_manager import (
+        estimate_messages_tokens_for_threshold,
+        estimate_messages_tokens_with_tool_payloads,
+    )
+
+    agent = _seed_gate_stub(explicit_trigger=20_000)
+    micro_line = agent._micro_compact_trigger_tokens()
+    assert micro_line == 18_000  # min(20_000*0.9, 20_000-2_000)
+
+    history = _ledger_seed_history(result_chars=80_000)
+
+    # 断点复现：content-only 口径看不到 tool payload，永远低于触发线。
+    assert estimate_messages_tokens_for_threshold(history, micro_line) < micro_line
+    # 修复后：payload 口径达到触发线并注入 kwargs。
+    assert estimate_messages_tokens_with_tool_payloads(history, micro_line) >= micro_line
+
+    kwargs = agent.micro_compact_assembly_kwargs(history)
+    assert kwargs is not None
+    assert kwargs["micro_compact_old_tool_results"] is True
+    assert set(kwargs) == {
+        "micro_compact_old_tool_results",
+        "micro_compact_keep_recent_groups",
+        "micro_compact_min_savings_tokens",
+        "micro_compact_tool_whitelist",
+    }
+    assert kwargs["micro_compact_keep_recent_groups"] == DEFAULT_KEEP_RECENT_GROUPS
+
+
+def test_seed_gate_below_line_returns_none_with_zero_side_effects():
+    """低于触发线时返回 None，不做任何投影前置消费。"""
+    agent = _seed_gate_stub(explicit_trigger=20_000)
+    small_history = _ledger_seed_history(result_chars=200)
+
+    assert agent.micro_compact_assembly_kwargs(small_history) is None
+    # 无 kwargs 注入时 assembler 的 microCompact 状态必须保持零态。
+    baseline = assemble_conversation_context(
+        [],
+        session_id="session-seed-gate-zero",
+        history_seed_profile="full",
+        recent_message_limit=None,
+    )
+    assert baseline.micro_compact_state["applied"] is False
+    assert baseline.micro_compact_state["clearedGroups"] == 0
+
+
+def test_seed_gate_disabled_tier_and_degenerate_window_return_none():
+    agent = _seed_gate_stub(micro_enabled=False, explicit_trigger=20_000)
+    assert agent.micro_compact_assembly_kwargs(_ledger_seed_history(result_chars=80_000)) is None
+
+    degenerate = _seed_gate_stub(explicit_trigger=0, effective_limit=2_000)
+    assert degenerate._micro_compact_trigger_tokens() == 0
+    assert degenerate.micro_compact_assembly_kwargs(_ledger_seed_history(result_chars=80_000)) is None
+
+
+def test_seed_gate_kwargs_flip_assembler_projection(tmp_path):
+    """注入链路通：gate 返回的 kwargs 能让 assembler 的 applied 标记翻转为 True。"""
+    from uuid import uuid4
+
+    agent = _seed_gate_stub(explicit_trigger=20_000)
+    groups = [_tool_group(index, "read_file_tool", chars=6_000) for index in range(1, 8)]
+    session_id = f"session-{uuid4().hex[:8]}"
+    _ledger_events_from_groups(tmp_path, session_id, groups, "turn-a")
+    events = load_conversation_events(tmp_path, session_id)
+
+    baseline = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        ledger_events=events,
+        recent_message_limit=None,
+    )
+    assert baseline.micro_compact_state["applied"] is False
+
+    kwargs = agent.micro_compact_assembly_kwargs(_ledger_seed_history(result_chars=80_000))
+    assert kwargs is not None
+    assembled = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        ledger_events=events,
+        recent_message_limit=None,
+        **kwargs,
+    )
+    assert assembled.micro_compact_state["applied"] is True
+    assert assembled.micro_compact_state["clearedGroups"] == 2

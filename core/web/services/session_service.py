@@ -81,7 +81,8 @@ from core.chat.conversation_branches import (
     visible_messages_with_branch_info,
 )
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
-from core.chat.context_assembler import assemble_conversation_context
+from core.chat.context_assembler import assemble_conversation_context as _assemble_conversation_context_impl
+from core.chat.projection_stickiness import persist_assembly_projection_locks
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure import developer_sandbox
@@ -1070,6 +1071,38 @@ from core.web.services.session.publish import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def assemble_conversation_context(*args: Any, **kwargs: Any):
+    """Assemble the conversation context, then persist new projection locks.
+
+    Thin persistence wrapper around ``core.chat.context_assembler``: whenever
+    this assembly sent tool results in a projected (placeholder/truncated)
+    form that has no lock record yet, one append-only out-of-band ledger
+    event locks that form so later assemblies replay byte-identical prefix
+    bytes for DeepSeek-style exact-match prefix caches. The lock writer lives
+    in ``core.chat.projection_stickiness`` (single write authority); this
+    wrapper only routes the assembly result to it. Persistence failures never
+    fail the turn: the assembly result is returned unchanged.
+    """
+
+    result = _assemble_conversation_context_impl(*args, **kwargs)
+    try:
+        persist_assembly_projection_locks(
+            PROJECT_ROOT,
+            str(kwargs.get("session_id") or ""),
+            turn_id=str(kwargs.get("current_turn_id") or ""),
+            ledger_events=kwargs.get("ledger_events"),
+            tool_result_replacement_state=result.tool_result_replacement_state,
+            micro_compact_state=result.micro_compact_state,
+            history_seed_compaction_state=result.history_seed_compaction_state,
+        )
+    except Exception as exc:  # noqa: BLE001 - lock persistence must never fail the turn
+        logging.getLogger(__name__).warning(
+            "projection lock persistence skipped: %s",
+            exc,
+        )
+    return result
 
 
 def current_session_turn_id(session_id: str) -> str:

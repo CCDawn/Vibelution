@@ -1776,6 +1776,151 @@ describe("runWorkbenchLifecycle", () => {
     });
   });
 
+  function registeredRestartHarness() {
+    const base = harness();
+    const alive = new Set([51, 52]);
+    const state: Record<string, unknown> = {
+      backendPid: 51, backendLaunchPid: 52, spawnPid: 52, backendPort: 8000,
+      backendCreateTime: 1, backendExecutable: "C:/Python/pythonw.exe",
+      backendLaunchCreateTime: 2, backendLaunchExecutable: "C:/repo/.venv/Scripts/pythonw.exe",
+      spawnCreateTime: 2, spawnExecutable: "C:/repo/.venv/Scripts/pythonw.exe"
+    };
+    let spawned = false;
+    const spawnImpl = vi.fn((...args: Parameters<typeof base.spawnImpl>) => {
+      spawned = true;
+      return base.spawnImpl(...args);
+    });
+    const terminateProcessTree = vi.fn(async () => false);
+    const gracefulShutdown = vi.fn(async () => {
+      alive.clear();
+      return { requested: true, completed: true, status: 202, reason: "closed" };
+    });
+    const input: Parameters<typeof executeMainLineWorkbench>[0] = {
+      ...base.input,
+      operation: "restart",
+      interruptActiveWork: true,
+      command: { commandId: "cmd_registered_restart", type: "restart", operation: "restart", noBrowser: true },
+      readState: () => state,
+      spawnImpl,
+      pidAlive: (pid) => alive.has(pid),
+      connect: async () => alive.has(51) || spawned,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: alive.has(51) ? 51 : 4242, workspaceRoot: "C:/repo" })
+      }),
+      gracefulShutdown,
+      terminateProcessTree
+    };
+    return { input, state, alive, spawnImpl, terminateProcessTree, gracefulShutdown, written: base.written };
+  }
+
+  it("does not re-retire distinct backend and launch-wrapper handles after graceful restart", async () => {
+    const { input, spawnImpl, terminateProcessTree, written } = registeredRestartHarness();
+    const result = await executeMainLineWorkbench(input);
+    expect(result.accepted).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({
+      backendPid: 4242,
+      lifecycleWarning: expect.stringContaining("reconciled 2 dead registered handle(s) after port 8000 was released")
+    });
+    expect(written.at(-1)?.lifecycleWarning).not.toContain("still listening");
+  });
+
+  it.each(["live", "missing identity"] as const)("keeps a %s launch wrapper on the verified retirement path", async (scene) => {
+    const { input, state, alive, spawnImpl, terminateProcessTree, written } = registeredRestartHarness();
+    if (scene === "live") {
+      input.gracefulShutdown = async () => {
+        alive.delete(51);
+        return { requested: true, completed: true, status: 202, reason: "backend closed" };
+      };
+    } else {
+      delete state.backendLaunchCreateTime;
+      delete state.spawnCreateTime;
+    }
+    expect((await executeMainLineWorkbench(input)).accepted).toBe(true);
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).toHaveBeenCalledWith(...(scene === "live"
+      ? [52, expect.objectContaining({ pid: 52, createTime: 2 })]
+      : [52]));
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(written.at(-1)?.lifecycleWarning).toContain("registered handle retirement stayed unverified");
+  });
+
+  it("retains dead restart handles when their original port is occupied again", async () => {
+    const { input, alive, spawnImpl, terminateProcessTree, written } = registeredRestartHarness();
+    let releasedProbes = 0;
+    // Reclaim and the resolver each see the released port; it is rebound before
+    // the subsequent dead-handle reconciliation can release registrations.
+    input.connect = async () => alive.has(51) || ++releasedProbes >= 3;
+    await expect(executeMainLineWorkbench(input)).rejects.toThrow("Failed to verify retirement of owned process tree 52");
+    expect(terminateProcessTree).toHaveBeenCalledWith(52, expect.objectContaining({ pid: 52 }));
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({ backendPid: 51, backendLaunchPid: 52, spawnPid: 52, observedState: "failed" });
+  });
+
+  it("does not release historical handles using a relocated free port", async () => {
+    const { input, alive, terminateProcessTree, written } = registeredRestartHarness();
+    alive.clear();
+    let spawned = false;
+    const spawnImpl = vi.fn(() => {
+      spawned = true;
+      return fakeBackendChild();
+    });
+    input.interruptActiveWork = false;
+    input.spawnImpl = spawnImpl;
+    input.connect = async (port) => port === 8000 || spawned;
+    input.fetchHealth = async (url) => ({
+      status: 200,
+      json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: url.includes(":8000/") ? "C:/other" : "C:/repo" })
+    });
+    expect((await executeMainLineWorkbench(input)).accepted).toBe(true);
+    expect(terminateProcessTree).toHaveBeenCalledWith(52, expect.objectContaining({ pid: 52 }));
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(written.at(-1)).toMatchObject({ backendPort: 8001 });
+    expect(written.at(-1)?.lifecycleWarning).not.toContain("reconciled");
+  });
+
+  it("does not restore post-reclaim handles when a later retirement check fails", async () => {
+    const { input, spawnImpl, written } = registeredRestartHarness();
+    input.readDaemonPid = () => 77;
+    input.readDaemonIdentity = () => ({ pid: 77, createTime: 3, executable: "C:/Python/pythonw.exe" });
+    let closed = false;
+    input.gracefulShutdown = async () => {
+      closed = true;
+      return { requested: true, completed: true, status: 202, reason: "closed" };
+    };
+    input.pidAlive = (pid) => pid === 77 || (!closed && (pid === 51 || pid === 52));
+    // Keep the failure fatal through the unchanged free-port fallback check.
+    let retirementFailed = false;
+    input.terminateProcessTree = async () => {
+      retirementFailed = true;
+      throw new Error("daemon retirement failed");
+    };
+    input.connect = async () => !closed || retirementFailed;
+    await expect(executeMainLineWorkbench(input)).rejects.toThrow("daemon retirement failed");
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({
+      observedState: "failed", backendPid: 0, backendLaunchPid: 0, spawnPid: 0,
+      backendCreateTime: 0, backendExecutable: "", backendLaunchCreateTime: 0,
+      backendLaunchExecutable: "", spawnCreateTime: 0, spawnExecutable: ""
+    });
+  });
+
+  it("keeps the user pause confirmation gate before reconciling newly dead restart handles", async () => {
+    const { input, spawnImpl, terminateProcessTree, gracefulShutdown, written } = registeredRestartHarness();
+    let probes = 0;
+    // The old listener disappears between initial reconciliation and port
+    // resolution, without this restart receiving a saved-pause acknowledgement.
+    input.connect = async () => ++probes === 1;
+    input.pidAlive = () => false;
+    await expect(executeMainLineWorkbench(input)).rejects.toThrow("explicit user restart shutdown was not confirmed");
+    expect(gracefulShutdown).not.toHaveBeenCalled();
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(written.at(-1)).toMatchObject({ backendPid: 51, backendLaunchPid: 52, spawnPid: 52 });
+  });
+
   it("restarts despite a pid-reused registered handle while the backend port is free", async () => {
     const { spawnImpl, input, written } = harness();
     let listening = false;
