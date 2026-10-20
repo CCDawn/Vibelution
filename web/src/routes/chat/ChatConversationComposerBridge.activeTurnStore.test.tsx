@@ -119,6 +119,15 @@ function renderTree(element: React.ReactElement) {
   });
 }
 
+it("does not expose model controls on a read-only conversation", () => {
+  const props = baseProps();
+  const turnModelControl = { loading: false, error: true } as BridgeProps["turnModelControl"];
+  renderTree(<ChatConversationComposerBridge {...props} composer={{ ...props.composer, readOnly: true, disabled: true }} turnModelControl={turnModelControl} />);
+  expect(lazyViewProps.at(-1)?.turnModelControl).toBeUndefined();
+  act(() => root!.render(<ChatConversationComposerBridge {...props} turnModelControl={turnModelControl} />));
+  expect(lazyViewProps.at(-1)?.turnModelControl).toBe(turnModelControl);
+});
+
 beforeEach(() => {
   lazyViewProps.length = 0;
 });
