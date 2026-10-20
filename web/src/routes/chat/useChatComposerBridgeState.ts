@@ -233,7 +233,9 @@ export function useChatComposerBridgeState({
         editMessagePlaceholder: t("editMessagePlaceholder"),
         loadingSession: t("loadingSession"),
         messageInputPlaceholder: t("messageInputPlaceholder"),
-        readOnlySession: lang === "zh" ? "此会话为只读，无法发送消息" : "This session is read-only",
+        readOnlySession: detail?.archiveState?.source === "agent_archive"
+          ? (lang === "zh" ? "所属助手已归档，此会话仅供查看" : "The assistant is archived; this conversation is view-only")
+          : (lang === "zh" ? "此会话为只读，无法发送消息" : "This session is read-only"),
         saveAndRerunMessage: t("saveAndRerunMessage"),
         sessionBusyQueuePlaceholder: t("sessionBusyQueuePlaceholder"),
         sessionBusyQueuedPlaceholder: t("sessionBusyQueuedPlaceholder"),
@@ -257,6 +259,7 @@ export function useChatComposerBridgeState({
       activeReferenceAttachments,
       activeSessionId,
       detail?.readOnly,
+      detail?.archiveState?.source,
       lang,
       resolvedEditTarget?.original,
       resolvedEditTarget?.messageId,

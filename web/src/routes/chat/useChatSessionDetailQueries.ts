@@ -24,6 +24,7 @@ import {
 } from "./chatSessionQuerySeams";
 import type { SessionStreamDecisionSnapshot } from "./chatSessionStreamConnect";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { canLoadSessionParameters } from "./chatSessionSurfaceModel";
 
 export type UseChatSessionDetailQueriesInput = {
   activeSessionId: string | null;
@@ -119,7 +120,7 @@ export function useChatSessionDetailQueries({
   }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching, setStartupDetailSettledSessionId]);
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
-    enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
+    enabled: secondaryChatDataEnabled && canLoadSessionParameters(activeSessionId, sessionDetailQuery.data) && !isTempSessionId(activeSessionId),
     queryFn: () => fetchSessionLlmOptions(activeSessionId ?? ""),
     staleTime: 30_000,
     // Re-read the Agent binding when returning from Agent management.
@@ -132,6 +133,7 @@ export function useChatSessionDetailQueries({
     enabled: (
       secondaryChatDataEnabled
       && !financeSurface
+      && canLoadSessionParameters(activeSessionId, sessionDetailQuery.data)
       && Boolean(activeSessionId)
       && !isTempSessionId(activeSessionId)
     ),

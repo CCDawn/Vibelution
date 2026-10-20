@@ -51,6 +51,54 @@ export class RuntimeSceneEventPostError extends Error {
   }
 }
 
+/**
+ * A structurally rejected drop recorded by one flush cycle: the HTTP status
+ * that permanently refused the event, plus the bounded event object itself.
+ */
+export type RuntimeSceneEventDrop = {
+  status: number;
+  event: RuntimeSceneElectronEvent;
+};
+
+/**
+ * Raised when a structurally rejected event (backend 400/404/422: the event
+ * payload itself can never be accepted by this endpoint) is dropped from the
+ * queue. `event` is the bounded event object that was enqueued by the failing
+ * `record()` call (reference equality), so its caller can persist the event
+ * through its own supervisor-event fallback. `droppedEvents` lists every
+ * event dropped by the same flush cycle, including the one in `event`.
+ */
+export class RuntimeSceneEventRejectedError extends Error {
+  readonly status: number;
+  readonly event: RuntimeSceneElectronEvent;
+  readonly droppedEvents: readonly RuntimeSceneElectronEvent[];
+
+  constructor(firstDrop: RuntimeSceneEventDrop, furtherDrops: readonly RuntimeSceneEventDrop[] = []) {
+    super(`runtime scene event permanently rejected: ${firstDrop.status}`);
+    this.name = "RuntimeSceneEventRejectedError";
+    this.status = firstDrop.status;
+    this.event = firstDrop.event;
+    this.droppedEvents = [firstDrop.event, ...furtherDrops.map((drop) => drop.event)];
+  }
+}
+
+/**
+ * Statuses that mean the event itself can never be accepted by the runtime
+ * scene endpoint (unknown event code, malformed payload, wrong route). Unlike
+ * auth (401/403, self-healed by token refresh) or transient failures
+ * (429/5xx/network, retried by a later flush), retrying these events is
+ * pointless: leaving them queued would poison the head of the buffer and
+ * silently block every event behind them forever.
+ */
+const STRUCTURAL_REJECTION_STATUSES: ReadonlySet<number> = new Set([400, 404, 422]);
+
+function isStructuralRejection(error: unknown): error is RuntimeSceneEventPostError {
+  return (
+    error instanceof RuntimeSceneEventPostError &&
+    STRUCTURAL_REJECTION_STATUSES.has(error.status)
+  );
+}
+
 function isAuthRejectionStatus(status: number): boolean {
   return status === 401 || status === 403;
 }
@@ -121,10 +169,19 @@ export class RuntimeSceneBridge {
     this.trimQueue();
     try {
       await this.flush();
-    } catch {
-      // The failed head remains owned by the queue and will be retried by a
-      // later record/flush call. Do not re-enqueue it here: a concurrent
-      // flush may already have delivered it successfully.
+    } catch (error) {
+      // A structurally rejected event (backend 400/404/422) has already been
+      // dropped from the queue and can never be delivered; surface that to
+      // this caller (reference equality against the bounded copy it enqueued)
+      // so the supervisor-event local fallback in the shell can persist it.
+      // All other failures keep the legacy silent-retry semantics: the failed
+      // head stays queued and will be retried by a later record/flush call.
+      if (
+        error instanceof RuntimeSceneEventRejectedError &&
+        error.droppedEvents.includes(bounded)
+      ) {
+        throw error;
+      }
     }
   }
 
@@ -153,24 +210,34 @@ export class RuntimeSceneBridge {
   }
 
   private async flushQueue(ownerPromise: Promise<void>): Promise<void> {
+    const dropped: RuntimeSceneEventDrop[] = [];
     try {
       while (this.queue.length > 0) {
         const next = this.queue[0];
         this.inFlight = next;
+        let rejectionStatus: number | null = null;
         try {
           await this.post(next);
+        } catch (error) {
+          // A structural rejection (400/404/422) means this event can never
+          // be accepted. Drop it instead of throwing out of the loop: a
+          // poisoned head would otherwise block every later event forever.
+          // Transient failures (429/5xx/network) still throw and leave the
+          // head queued for the legacy silent retry.
+          if (!isStructuralRejection(error)) {
+            throw error;
+          }
+          rejectionStatus = error.status;
         } finally {
           this.inFlight = null;
         }
         // Only the flush that owns this head may remove it. Other records can
         // append concurrently, but they cannot shift the in-flight event.
-        if (this.queue[0] === next) {
-          this.queue.shift();
-        } else {
-          const index = this.queue.indexOf(next);
-          if (index >= 0) {
-            this.queue.splice(index, 1);
-          }
+        this.dequeue(next);
+        if (rejectionStatus !== null) {
+          // 历史滞留毒头的丢弃暂无本地留痕，接线点留待 main.ts 空闲后。
+          dropped.push({ status: rejectionStatus, event: next });
+          continue;
         }
       }
     } finally {
@@ -179,6 +246,23 @@ export class RuntimeSceneBridge {
       // without requiring a third external flush call.
       if (this.flushPromise === ownerPromise) {
         this.flushPromise = null;
+      }
+    }
+    if (dropped.length > 0) {
+      // The owner promise rejects with the drop record so awaiting callers
+      // (record()) can match their own bounded event by reference and
+      // re-throw it to their caller for the local fallback path.
+      throw new RuntimeSceneEventRejectedError(dropped[0], dropped.slice(1));
+    }
+  }
+
+  private dequeue(event: RuntimeSceneElectronEvent): void {
+    if (this.queue[0] === event) {
+      this.queue.shift();
+    } else {
+      const index = this.queue.indexOf(event);
+      if (index >= 0) {
+        this.queue.splice(index, 1);
       }
     }
   }

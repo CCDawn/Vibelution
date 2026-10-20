@@ -1026,6 +1026,7 @@ def supersede_empty_discussion_meeting(
                 "meeting status changed while failed-discussion recovery was running"
             )
         _append_round_record(normalized_team_id, closed_record)
+    _seal_closed_meeting_speaker_tasks(closed_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -1124,6 +1125,9 @@ def terminate_meeting_executions(
         for updated in updates:
             if str(updated.get("meetingRoundId") or "") in stopped_ids:
                 _append_jsonl(_rounds_path(normalized_team_id), updated)
+    for updated in updates:
+        if str(updated.get("meetingRoundId") or "") in stopped_ids:
+            _seal_closed_meeting_speaker_tasks(updated)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -1264,6 +1268,7 @@ def stop_discussion_meeting(
                 "meeting status changed while the operator stop was running"
             )
         _append_round_record(normalized_team_id, closed_record)
+    _seal_closed_meeting_speaker_tasks(closed_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -2559,6 +2564,25 @@ def _promote_closed_meeting_room_context(
         return
 
 
+def _seal_closed_meeting_speaker_tasks(meeting_round: Mapping[str, Any]) -> None:
+    """Close the room's speaker child-session registry tasks after closure.
+
+    Room-bound discussion speakers never run a turn of their own, so their
+    ``idle`` registry tasks would otherwise stay in the active bucket forever
+    (one topbar "空闲" row per speaker per round). Fail-open by design: the
+    closure is already committed and this is pure housekeeping.
+    """
+
+    from core.web.services.team_workflow.meeting_participant_tasks import (
+        seal_closed_meeting_participant_tasks,
+    )
+
+    try:
+        seal_closed_meeting_participant_tasks(meeting_round)
+    except Exception:  # noqa: BLE001 - housekeeping must never raise here
+        return
+
+
 def approve_meeting_closure(
     team_id: str,
     meeting_round_id: str,
@@ -2675,6 +2699,7 @@ def approve_meeting_closure(
             )
         _append_round_record(normalized_team_id, closed_record)
     _promote_closed_meeting_room_context(closed_record, digest, decisions)
+    _seal_closed_meeting_speaker_tasks(closed_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,

@@ -27,14 +27,15 @@
 | `team/` | `team_service.py` | [team/README.md](team/README.md) |
 | `team_knowledge/` | `team_knowledge_service.py` | [team_knowledge/README.md](team_knowledge/README.md) |
 | `agent_directory/` | `agent_directory_service.py` | [agent_directory/README.md](agent_directory/README.md) |
+| `personal_assistant_project/` | Canonical personal-assistant query tool | [personal_assistant_project/README.md](personal_assistant_project/README.md) |
 | `agent_perception/` | `agent_perception_service.py` | [agent_perception/README.md](agent_perception/README.md) |
 | `runtime_scene/` | `runtime_scene_service.py` | [runtime_scene/README.md](runtime_scene/README.md) |
 
 ## 统计
 
-- Facade `*_service.py`：**90**
+- Facade `*_service.py`：**91**
 - 有 pack README：**8**
-- 仅单文件 facade：**82**
+- 仅单文件 facade：**83**
 
 ## Domain 速查
 
@@ -48,7 +49,7 @@
 | Knowledge / RAG (`knowledge`) | 5 |
 | Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
-| Self / Supervised evolution (`evolution`) | 12 |
+| Self / Supervised evolution (`evolution`) | 13 |
 | Runtime / runtime scene (`runtime`) | 4 |
 | Launcher / Reset (`launcher`) | 2 |
 | Config / Provider / Model / Theme (`config`) | 7 |
@@ -101,7 +102,7 @@
 | `agent_operation_service.py` | Shared Agent catalog operations for HTTP routes and governed tools. | — | `agents.py` | `test_project_operation_tools.py` |
 | `agent_perception_service.py` | Operator-scoped perception configuration, bounded source reads and native background runs. | `agent_perception/` | `agents.py` | `test_agent_perception_policy.py`, `test_agent_perception_service.py`, `test_agent_perception_routes.py`, `test_agent_perception_runtime.py` |
 | `financial_assistant_service.py` | Financial specialist entry and explicit setup over native Agent/Session/knowledge lifecycle. | — | `financial_assistant.py` | `test_financial_assistant_service.py` |
-| `personal_assistant_service.py` | Personal assistant singleton identity and safe public platform overview over native services. | — | `personal_assistant.py` | `test_personal_assistant_service.py`, `test_personal_assistant_api.py`, `test_personal_assistant_tools.py` |
+| `personal_assistant_service.py` | Personal assistant singleton, public overview and indexed project reads over native authorities. | [`personal_assistant_project/`](personal_assistant_project/README.md) | `personal_assistant.py` and canonical assistant tools | `test_personal_assistant_service.py`, `test_personal_assistant_api.py`, `test_personal_assistant_tools.py`, `test_personal_assistant_project_query.py`, `test_personal_assistant_windows_read.py` |
 | `personal_affairs_service.py` | Agent-scoped todos, schedules and goals over the personal-affairs domain store; exports the due-affair attention collector for the dual-channel notifier. | `core/agent_plugins/personal_affairs/` | `personal_assistant_affairs.py` | `test_personal_affairs.py` |
 | `personal_assistant_computer_service.py` | Operator-selected single-window consent, one-shot action confirmation, pause/takeover and cancellation; driver and vision helpers retain their own boundaries. | — | `personal_assistant_computer.py` and canonical assistant tools | `test_personal_assistant_computer*.py` |
 | `personal_attention_service.py` | Read-only projection of knowledge-review, anomaly and affair-reminder attention from native task authorities. | — | `personal_assistant.py` | `test_personal_attention_service.py` |
@@ -170,6 +171,7 @@
 | `evolution_runtime_projection_service.py` | Unified runtime projections for evolution workspace surfaces. | — | `evolution.py` | `test_evolution_promotion_lane.py`, `test_evolution_runtime_projection_service.py` |
 | `evolution_service.py` | Real supervised evolution payloads for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_self_evolution_service.py`, `test_runtime_scene_package_diagnosis.py` |
 | `self_evolution_autonomous_loop_service.py` | Persistent no-score orchestration for user-approved self-evolution loops. | — | `evolution.py` | `test_self_evolution_autonomous_loop_service.py` |
+| `self_evolution_campaign_service.py` | Bounded campaigns delegating every candidate to the single-loop owner. | — | `evolution.py` | `test_self_evolution_campaign_service.py`, `test_self_evolution_campaign_integration.py`, `test_self_evolution_campaign_routes.py` |
 | `self_evolution_control_service.py` | Bounded self-evolution run control for the web workbench. | — | `agents.py`, `evolution.py` | `test_web_app.py`, `test_self_evolution_autonomous_loop_runtime.py`, `test_team_structure_packs.py` |
 | `self_evolution_service.py` | Real self-evolution payloads for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_self_evolution_service.py`, `test_web_config_routes.py` |
 | `supervised_candidate_integration_service.py` | Transactional Git integration for supervised evolution candidates. | — | — | `test_supervised_worktree_evolution_service.py`, `test_supervised_candidate_integration_service.py` |

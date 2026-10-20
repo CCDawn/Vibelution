@@ -93,6 +93,7 @@ function readElectronMainLineIntentCommandId(runtimeManagerDir: string): string 
 type ElectronMainLineObservation = {
   present: boolean;
   backendAlive: boolean;
+  confirmedClosed: boolean;
   desiredState: string;
   observedState: string;
   lifecycleConsistency: string;
@@ -109,15 +110,23 @@ function readElectronMainLineObservation(workspaceRoot: string): ElectronMainLin
     return {
       present: false,
       backendAlive: false,
+      confirmedClosed: false,
       desiredState: "",
       observedState: "",
       lifecycleConsistency: "",
       phase: ""
     };
   }
+  const backendAlive = knownPidIsAlive(Number(payload.backendPid || 0));
+  const liveBackendHandle = backendAlive || [payload.backendLaunchPid, payload.spawnPid]
+    .some((pid) => knownPidIsAlive(Number(pid || 0)));
   return {
     present: true,
-    backendAlive: knownPidIsAlive(Number(payload.backendPid || 0)),
+    backendAlive,
+    confirmedClosed: payload.lastSource === "electron_main"
+      && payload.desiredState === "closed"
+      && payload.observedState === "closed"
+      && !liveBackendHandle,
     desiredState: String(payload.desiredState || "").trim(),
     observedState: String(payload.observedState || "").trim(),
     lifecycleConsistency: String(payload.lifecycleConsistency || "").trim(),
@@ -131,9 +140,20 @@ export function readRuntimeManagerLauncherStatusSummary(
 ): LauncherStatusSummary {
   const runtimeManagerDir = resolveRuntimeManagerDir(workspaceRoot);
   const statePath = join(runtimeManagerDir, "state.json");
-  const raw = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
-  if (!isRecord(raw)) {
-    throw new Error("runtime manager state snapshot is invalid");
+  const electron = readElectronMainLineObservation(workspaceRoot);
+  let raw: Record<string, unknown>;
+  try {
+    const snapshot = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
+    if (!isRecord(snapshot)) {
+      throw new Error("runtime manager state snapshot is invalid");
+    }
+    raw = snapshot;
+  } catch (error: unknown) {
+    // Fast close writes the authoritative Electron launcher state without
+    // starting Runtime Manager. Missing or damaged RM data cannot undo that
+    // settled close, but must never fabricate open health or command success.
+    if (!electron.confirmedClosed) throw error;
+    raw = { runtimeState: "idle" };
   }
   const workbench = isRecord(raw.workbench) ? raw.workbench : {};
   const runtimeState = String(raw.runtimeState || "").trim().toLowerCase();
@@ -141,7 +161,6 @@ export function readRuntimeManagerLauncherStatusSummary(
   const recent = readRecentLifecycleResults(runtimeManagerDir);
   const expected = String(expectedCommandId || "").trim();
   const exact = expected ? readExactLifecycleResult(runtimeManagerDir, expected) : null;
-  const electron = readElectronMainLineObservation(workspaceRoot);
   const synthesized = (
     !exact
     && expected

@@ -288,6 +288,20 @@ describe("FinancePaperTrading", () => {
     expect(api.fetchAccount.mock.calls[1][1]).toMatchObject({ orderSymbol: "sh688001" });
   });
 
+  it("keeps estimates and settlement restrictions outside collapsed trading details", async () => {
+    api.fetchAccount.mockResolvedValue(account);
+    await render(<FinancePaperTrading assistant={agent} stock={stock} zh mode="account" onResearchPrompt={vi.fn()} />);
+    const details = container.querySelector("details");
+    expect(details?.open).toBe(false);
+    expect(details?.textContent).toContain(account.feePolicy.description);
+    expect(details?.textContent).toContain("主板规则：买入至少 100 股");
+    expect(container.textContent).toContain("预估费用");
+    expect(details?.textContent).not.toContain("预估费用");
+    expect(container.textContent).toContain(account.tPlusOneRule);
+    expect(details?.textContent).not.toContain(account.tPlusOneRule);
+    expect(api.submitOrder).not.toHaveBeenCalled();
+  });
+
   it("renders calendar totals from actual ledger days and keeps no-trade months empty", async () => {
     api.fetchReview.mockResolvedValueOnce({
       account,
@@ -301,6 +315,12 @@ describe("FinancePaperTrading", () => {
     const onResearchPrompt = vi.fn();
     await render(<FinancePaperTrading assistant={agent} stock={stock} zh mode="review" onResearchPrompt={onResearchPrompt} />);
     expect(container.textContent).toContain("交易日历");
+    const calendarDetails = [...container.querySelectorAll("details")].find((item) => item.querySelector("summary")?.textContent === "按日期查看交易日历");
+    expect(calendarDetails?.open).toBe(false);
+    const dailyTable = container.querySelector('[aria-label="本月实际交易日复盘"]');
+    expect(dailyTable).not.toBeNull();
+    expect(calendarDetails?.contains(dailyTable)).toBe(false);
+
     expect(container.textContent).toContain("2 笔");
     expect(container.textContent).toContain("¥89.45");
     await act(async () => buttonWithText("AI 复盘").click());

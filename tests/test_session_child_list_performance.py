@@ -123,7 +123,10 @@ def test_directory_bridge_resolves_root_before_listing_direct_children(
         monkeypatch.setattr(
             directory_bridge,
             "_service",
-            lambda: SimpleNamespace(_agent_lookup_for_conversations=lambda: {}),
+            lambda: SimpleNamespace(
+                _agent_lookup_for_conversations=lambda: {},
+                _terminal_reason_from_conversation=lambda _raw: "",
+            ),
         )
         monkeypatch.setattr(
             directory_bridge,

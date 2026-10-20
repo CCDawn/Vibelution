@@ -18,16 +18,13 @@ import urllib.request
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
+from importlib import import_module as _import_module
 from pathlib import Path
 from typing import Any, Iterable
 
 from config.paths import resolve_workspace_home
 from config.public_config import build_effective_config, load_public_config
 from core.chat.conversation_ledger import load_conversation_events
-from core.infrastructure import developer_sandbox
-from core.llm import LLMClient, LLMInvocationContext, invoke_llm
-from core.research import experiment_contract, formal_runner, smoke_runner
-from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_workflow.source_collection_context import (
@@ -864,6 +861,31 @@ from core.web.services.team_workflow.knowledge_kernel import (
     _transfer_records_path,
     _official_model_evidence_store_path,
 )
+
+
+_EXECUTION_EXPORTS = {
+    "developer_sandbox": ("core.infrastructure.developer_sandbox", None),
+    "LLMClient": ("core.llm", "LLMClient"),
+    "LLMInvocationContext": ("core.llm", "LLMInvocationContext"),
+    "invoke_llm": ("core.llm", "invoke_llm"),
+    "experiment_contract": ("core.research.experiment_contract", None),
+    "formal_runner": ("core.research.formal_runner", None),
+    "smoke_runner": ("core.research.smoke_runner", None),
+    "work_run_store": ("core.runtime_manager.work_run_store", None),
+}
+
+
+def __getattr__(name: str) -> Any:
+    # Packs already resolve dependencies through _service() at execution time.
+    # Keep these names out of eager star exports used by the route modules.
+    target = _EXECUTION_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = target
+    module = _import_module(module_name)
+    value = getattr(module, attribute) if attribute else module
+    globals()[name] = value
+    return value
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

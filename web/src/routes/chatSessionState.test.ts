@@ -1925,6 +1925,101 @@ describe("mergeSessionDetailHandoff", () => {
 
     const outcome = mergeSessionDetailHandoffWithOutcome(current, stale);
 
-    expect(outcome).toEqual({ detail: current, authorityAccepted: false, historyMerged: false });
+expect(outcome).toEqual({ detail: current, authorityAccepted: false, historyMerged: false });
+  });
+
+  it("settles an optimistic user row through the turn binding when the canonical row lost its submission id", () => {
+    const optimistic: ConversationMessage = {
+      id: "optimistic-user-submission-1",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-05-22T10:00:00Z",
+      metadata: {
+        optimisticUserMessage: true,
+        clientSubmissionId: "submission-1",
+        pending: false,
+        turnId: "turn-1",
+      },
+    };
+    const canonical: ConversationMessage = {
+      id: "session-live-message-2",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-05-22T10:00:03Z",
+      metadata: { turnId: "turn-1" },
+    };
+
+    const merged = mergeSessionDetailMessageWindow(
+      makeDetail({
+        messages: [optimistic],
+        messageWindow: makeWindow({ totalMessages: 1, returnedMessages: 1, newestMessageIndex: 1 }),
+      }),
+      makeDetail({ messages: [canonical], messageWindow: makeWindow() }),
+    );
+
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-2"]);
+  });
+
+  it("settles an optimistic user row by bounded content when neither submission id nor turn id survives", () => {
+    const optimistic: ConversationMessage = {
+      id: "optimistic-user-submission-2",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-05-22T10:00:00Z",
+      metadata: {
+        optimisticUserMessage: true,
+        clientSubmissionId: "submission-2",
+        pending: true,
+      },
+    };
+    const canonical: ConversationMessage = {
+      id: "session-live-message-3",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-05-22T10:00:30Z",
+    };
+
+    const merged = mergeSessionDetailMessageWindow(
+      makeDetail({
+        messages: [optimistic],
+        messageWindow: makeWindow({ totalMessages: 1, returnedMessages: 1, newestMessageIndex: 1 }),
+      }),
+      makeDetail({ messages: [canonical], messageWindow: makeWindow() }),
+    );
+
+    expect(merged.messages.map((message) => message.id)).toEqual(["session-live-message-3"]);
+  });
+
+  it("keeps an optimistic user row when the identical text falls outside the settle window", () => {
+    const optimistic: ConversationMessage = {
+      id: "optimistic-user-submission-3",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-05-22T10:00:00Z",
+      metadata: {
+        optimisticUserMessage: true,
+        clientSubmissionId: "submission-3",
+        pending: true,
+      },
+    };
+    const canonical: ConversationMessage = {
+      id: "session-live-message-4",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-05-22T10:30:00Z",
+    };
+
+    const merged = mergeSessionDetailMessageWindow(
+      makeDetail({
+        messages: [optimistic],
+        messageWindow: makeWindow({ totalMessages: 1, returnedMessages: 1, newestMessageIndex: 1 }),
+      }),
+      makeDetail({ messages: [canonical], messageWindow: makeWindow() }),
+    );
+
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "session-live-message-4",
+      "optimistic-user-submission-3",
+    ]);
   });
 });

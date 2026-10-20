@@ -195,8 +195,13 @@ class AuthorizedLocalIntegration:
             self._native = session_service
         return self._native
 
-    def _principals(self, team_id: str) -> dict[str, dict[str, str]]:
-        bindings = self.load_bindings()
+    def _principals(self, team_id: str, *, context: dict[str, Any] | None = None) -> dict[str, dict[str, str]]:
+        bindings = None
+        if context and context.get("_recoverySource"):
+            from .team_workflow.generic.code_repair import recovery_role_bindings
+            bindings = recovery_role_bindings(context)
+        if bindings is None:
+            bindings = self.load_bindings()
         principals: dict[str, dict[str, str]] = {}
         for role in _ROLES:
             binding = bindings.get(role) if isinstance(bindings, dict) else None
@@ -235,11 +240,18 @@ class AuthorizedLocalIntegration:
                 raise LocalIntegrationError("Authorization only accepts exact files inside the project.")
 
     def authorize(self, context: dict[str, Any]) -> dict[str, Any]:
+        if context.get("_campaignSource"):
+            from .self_evolution_campaign_service import delegated_authorization
+            grant = delegated_authorization(context)
+            self._file_scope(grant["allowedFiles"])
+            if grant["principals"] != self._principals(grant["teamId"]):
+                raise LocalIntegrationError("Campaign role binding or permissions changed.")
+            return grant
         if context.get("_recoverySource"):
             from .team_workflow.generic.code_repair import delegated_authorization
             grant = delegated_authorization(context)
             self._file_scope(grant["allowedFiles"])
-            if grant["principals"] != self._principals(grant["teamId"]):
+            if grant["principals"] != self._principals(grant["teamId"], context=context):
                 raise LocalIntegrationError("Recovery role binding or permissions changed.")
             return grant
         operator = current_server_operator()
@@ -286,7 +298,7 @@ class AuthorizedLocalIntegration:
         if auth.get("requestDigest") != _digest(request) or auth.get("allowedFiles") != request["allowedFiles"] or auth.get("teamId") != request["teamId"]:
             raise LocalIntegrationError("Authorized request scope changed.")
         self._file_scope(request["allowedFiles"])
-        if auth.get("principals") != self._principals(request["teamId"]):
+        if auth.get("principals") != self._principals(request["teamId"], context=fresh):
             raise LocalIntegrationError("Agent binding or permissions changed after authorization.")
         supplied = context.get("localIntegrationAuthorization")
         if supplied is not None and supplied != auth:
@@ -295,6 +307,10 @@ class AuthorizedLocalIntegration:
             from .team_workflow.generic.code_repair import delegated_authorization
             if delegated_authorization(fresh) != auth:
                 raise LocalIntegrationError("Recovery source delegation changed.")
+        if fresh.get("_campaignSource") or auth.get("campaignSource"):
+            from .self_evolution_campaign_service import delegated_authorization
+            if delegated_authorization(fresh) != auth:
+                raise LocalIntegrationError("Campaign source delegation changed.")
         return fresh
 
     def check(self, context: dict[str, Any]) -> None:
@@ -524,7 +540,8 @@ class AuthorizedLocalIntegration:
     @contextmanager
     def guard(self, context: dict[str, Any]) -> Iterator[None]:
         from .team_workflow.generic.code_repair import source_guard
-        with source_guard(context), authorization_lock(self.store, context.get("runId", "")):
+        from .self_evolution_campaign_service import source_guard as campaign_guard
+        with campaign_guard(context), source_guard(context), authorization_lock(self.store, context.get("runId", "")):
             fresh = self._fresh(context)
             candidate = fresh.get("candidate")
             receipt = fresh.get("independentReview")

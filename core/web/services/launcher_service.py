@@ -14,6 +14,7 @@ from core.launcher.service import (
     LauncherSupervisorCommandResponse,
     cleanup_launcher_branch_instances,
     get_launcher_status,
+    get_launcher_active_work_status,
     launcher_active_work_runs,
     list_launcher_branch_instances,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "LauncherSupervisorCommandResponse",
     "cleanup_launcher_branch_instances",
     "get_launcher_status",
+    "get_launcher_active_work_status",
     "launcher_active_work_runs",
     "list_launcher_branch_instances",
 ]

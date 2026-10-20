@@ -47,18 +47,27 @@ def test_fresh_deployment_supplies_selectable_chat_and_six_research_roles(fresh_
     assert len(result["team"]["members"]) == 6
 
 
-def test_restart_preserves_operator_configuration_and_does_not_duplicate(fresh_deployment):
+def test_restart_preserves_operator_configuration_and_does_not_duplicate(fresh_deployment, monkeypatch):
     seeded = ensure_builtin_agents()
     role_id = seeded["researchAgentIds"][0]
     directory.update_agent_instance(role_id, display_name="我自己的协调员",
                                     llm_bindings={"dialogue": {"modelId": "my-own-model"}},
                                     task_profile={"mission": "保留我的工作约定"})
     before = directory.get_agent(role_id)
+    list_agents = directory.list_agents
+    queries = []
+
+    def summaries(**kwargs):
+        queries.append(kwargs)
+        return list_agents(**kwargs)
+
+    monkeypatch.setattr(directory, "list_agents", summaries)
     second = ensure_builtin_agents()
     after = directory.get_agent(role_id)
     assert second["createdAgentIds"] == []
     assert second["researchAgentIds"] == seeded["researchAgentIds"]
     assert after == before
+    assert queries == [{"include_archived": True, "detail": "summary"}]
 
 
 def test_restart_does_not_resurrect_archived_starter(fresh_deployment):

@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import pytest
+from core.infrastructure import tool_result as tool_result_module
 from core.infrastructure.tool_result import (
     extract_tool_result_semantics,
     truncate_result,
@@ -184,7 +185,10 @@ class TestTruncateResult:
         assert len(compact["results"]) <= 8
         assert len(packaged.content) <= 1600
 
-    def test_package_tool_result_compacts_source_collection_context_with_paging_ids(self):
+    def test_package_tool_result_compacts_source_collection_context_with_paging_ids(self, monkeypatch):
+        # 该用例验证压缩机制本身：把工具契约下限降到测试预算，模拟
+        # 「服务端上下文远超预算」的真实降档场景。
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 900)
         payload = {
             "status": "ok",
             "contextKind": "source_collection_stage_task_context",
@@ -252,7 +256,8 @@ class TestTruncateResult:
         assert "summaryPreview" in compact["candidates"][0]
         assert "summary" not in compact["candidates"][0]
 
-    def test_package_tool_result_source_collection_context_strips_non_page_payload(self):
+    def test_package_tool_result_source_collection_context_strips_non_page_payload(self, monkeypatch):
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 900)
         payload = {
             "status": "ok",
             "contextKind": "source_collection_stage_task_context",
@@ -327,7 +332,8 @@ class TestTruncateResult:
         assert "latestAssessment" not in compact["candidates"][0]
         assert "excluded-49" not in packaged.content
 
-    def test_package_tool_result_preserves_governed_evidence_context_when_long(self):
+    def test_package_tool_result_preserves_governed_evidence_context_when_long(self, monkeypatch):
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 4000)
         payload = {
             "status": "ok",
             "contextKind": "source_collection_stage_task_context",
@@ -383,7 +389,8 @@ class TestTruncateResult:
         assert "context_mode=retry_evidence" in compact["usage"]["continuationHint"]
         assert "context_mode=retry_evidence" in packaged.continuation_hint
 
-    def test_package_tool_result_keeps_evidence_anchors_when_evidence_context_exceeds_budget(self):
+    def test_package_tool_result_keeps_evidence_anchors_when_evidence_context_exceeds_budget(self, monkeypatch):
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 1600)
         payload = {
             "status": "ok",
             "contextKind": "source_collection_stage_task_context",
@@ -431,7 +438,8 @@ class TestTruncateResult:
         assert all(item.get("evidenceRefs") for item in compact["candidates"])
         assert all("summaryPreview" not in item for item in compact["candidates"])
 
-    def test_package_tool_result_preserves_ingestion_steward_packet_when_long(self):
+    def test_package_tool_result_preserves_ingestion_steward_packet_when_long(self, monkeypatch):
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 2400)
         approved_ids = ["candidate-approved-1", "candidate-approved-2"]
         payload = {
             "status": "ok",
@@ -537,7 +545,8 @@ class TestTruncateResult:
         assert "candidates" not in packet["writebackResultSkeleton"]["candidate_summary"]["approved"]
         assert len(json.dumps(compact, ensure_ascii=False)) < 16_000
 
-    def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self):
+    def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self, monkeypatch):
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 900)
         payload = {
             "status": "ok",
             "contextKind": "source_collection_stage_task_context",
@@ -596,6 +605,230 @@ class TestTruncateResult:
         assert compact["recordPage"]["hasMore"] is True
         assert compact["recordIds"][0] == "dprec-20260628120000000000-record0"
         assert compact["usage"]["recordContinuationHint"]
+
+
+class TestSourceCollectionContextFloorContract:
+    """source_collection_context_tool 的模型可见字符下限与分派查询投影契约。
+
+    服务端下发的受控资料上下文携带 36 条冻结检索查询（正式检索唯一合法
+    来源），典型 13-23KB；默认 4000 字符预算会把 assignments 压成只有
+    计数，直接断掉 source_finding 阶段。这里锁定两条契约：低于下限原样
+    直通（调用方显式传更小预算也会被抬到下限），超过下限走结构化压缩但
+    所有降档形态都保留分派查询投影且裁剪显式标记。
+    """
+
+    def test_floor_overrides_small_caller_budget_and_passes_through(self):
+        queries = [
+            {
+                "queryId": f"q-floor-{index:02d}",
+                "perspective": "empirical",
+                "query": ("frozen verbatim retrieval query body " * 6) + f" #{index:02d}",
+            }
+            for index in range(36)
+        ]
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "full",
+            "counts": {"candidateCount": 0, "returnedCandidateCount": 0},
+            "candidatePage": {"offset": 0, "limit": 5, "returned": 0, "total": 0, "hasMore": False},
+            "candidates": [],
+            "assignments": [
+                {"assignmentId": "assign-floor", "status": "pending", "assignedQueries": queries}
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        assert 4000 < len(payload_json) <= 16000
+
+        packaged = package_tool_result(
+            payload_json,
+            tool_name="source_collection_context_tool",
+            max_chars=4000,
+        )
+
+        assert packaged.truncated is False
+        assert packaged.strategy == "passthrough"
+        assert packaged.content == payload_json
+        assert "frozen verbatim retrieval query body " * 1 in packaged.content
+        assert packaged.content.count("q-floor-") == 36
+
+    def test_over_floor_compact_keeps_assigned_query_projection(self):
+        filler = "Governed source-collection abstract metadata. " * 80
+        candidates = [
+            {
+                "candidateId": f"candidate-{index}",
+                "title": f"Source candidate {index}",
+                "sourceKind": "paper",
+                "summary": filler,
+            }
+            for index in range(5)
+        ]
+        queries = [
+            {
+                "queryId": f"q-compact-{index}",
+                "perspective": f"perspective-{index}",
+                "query": f"frozen compact query text {index}",
+            }
+            for index in range(3)
+        ]
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "compact",
+            "counts": {"candidateCount": 5, "returnedCandidateCount": 5},
+            "candidatePage": {"offset": 0, "limit": 5, "returned": 5, "total": 5, "hasMore": False},
+            "candidates": candidates,
+            "assignments": [
+                {"assignmentId": "assign-alpha", "status": "pending", "assignedQueries": queries},
+                {"assignmentId": "assign-beta", "status": "completed", "assignedQueries": queries[:1]},
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        assert len(payload_json) > 16000
+
+        packaged = package_tool_result(payload_json, tool_name="source_collection_context_tool")
+
+        assert packaged.truncated is True
+        assert packaged.strategy == "structured_compact"
+        compact = json.loads(packaged.content)
+        assert compact["visibleAssignmentCount"] == 2
+        assert compact["omittedAssignmentCount"] == 0
+        alpha = next(item for item in compact["assignments"] if item["assignmentId"] == "assign-alpha")
+        assert [q["queryId"] for q in alpha["assignedQueries"]] == [
+            "q-compact-0",
+            "q-compact-1",
+            "q-compact-2",
+        ]
+        assert all(q.get("query") for q in alpha["assignedQueries"])
+        assert "frozen compact query text 1" in packaged.content
+        beta = next(item for item in compact["assignments"] if item["assignmentId"] == "assign-beta")
+        assert beta["returnedQueryCount"] == 1
+
+    def test_assignment_projection_truncation_is_explicit(self):
+        long_query = "q" * 260
+        assignments = [
+            {
+                "assignmentId": f"assign-{index}",
+                "status": "pending",
+                "assignedQueries": [
+                    {"queryId": f"q-{index}-{slot}", "perspective": "p", "query": long_query}
+                    for slot in range(60)
+                ],
+            }
+            for index in range(13)
+        ]
+
+        view = tool_result_module._compact_source_collection_context_assignments(assignments)
+
+        assert view["visibleAssignmentCount"] == 12
+        assert view["omittedAssignmentCount"] == 1
+        first = view["assignments"][0]
+        assert first["returnedQueryCount"] == 48
+        assert first["truncatedQueryCount"] == 12
+        clipped = first["assignedQueries"][0]["query"]
+        assert clipped.endswith("…[query truncated]")
+        assert len(clipped) <= 200 + len("…[query truncated]")
+
+    def test_evidence_anchor_tier_keeps_assigned_queries(self, monkeypatch):
+        monkeypatch.setattr(tool_result_module, "_SOURCE_CONTEXT_RESULT_MAX_CHARS", 1200)
+        filler = "Governed source-collection abstract metadata. " * 80
+        candidates = [
+            {
+                "candidateId": f"candidate-evidence-{index}",
+                "title": f"Evidence {index}",
+                "sourceKind": "paper",
+                "doi": f"10.0000/e-{index}",
+                "summary": filler,
+                "evidenceRefs": [{"type": "doi", "id": f"10.0000/e-{index}", "label": f"E{index}"}],
+                "evidenceScope": "collected_summary_metadata",
+            }
+            for index in range(6)
+        ]
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "evidence",
+            "counts": {"candidateCount": 6, "returnedCandidateCount": 6},
+            "candidatePage": {"offset": 0, "limit": 6, "returned": 6, "total": 6, "hasMore": False},
+            "candidates": candidates,
+            "assignments": [
+                {
+                    "assignmentId": "assign-retry",
+                    "status": "pending",
+                    "assignedQueries": [
+                        {
+                            "queryId": "q-retry-0",
+                            "perspective": "empirical",
+                            "query": "verbatim retry frozen query",
+                        }
+                    ],
+                }
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+                "evidenceInstruction": "摘要不等于全文，不得虚构页码、引语或全文结论。",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=1200,
+        )
+
+        compact = json.loads(packaged.content)
+        assert compact["contextMode"].endswith("evidence_anchor_only")
+        assert compact["fieldMode"] == "evidence_source"
+        assert compact["assignments"][0]["assignedQueries"][0]["query"] == "verbatim retry frozen query"
+
+    def test_render_layer_respects_floor_and_keeps_queries_whole(self):
+        queries = [
+            {
+                "queryId": f"q-render-{index:02d}",
+                "perspective": "theory",
+                "query": "frozen render query body " * 10,
+            }
+            for index in range(30)
+        ]
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "full",
+            "counts": {},
+            "candidates": [],
+            "assignments": [
+                {"assignmentId": "assign-render", "status": "pending", "assignedQueries": queries}
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        assert 4000 < len(payload_json) <= 16000
+
+        facts = package_tool_result_facts(
+            payload_json,
+            tool_name="source_collection_context_tool",
+            max_chars=4000,
+        )
+        assert facts.result_kind == "source_collection_context"
+        assert facts.truncated is False
+
+        rendered = render_tool_result_for_model(facts, max_chars=4000)
+
+        assert "frozen render query body" in rendered
+        assert "模型上下文已限长" not in rendered
+        assert len(rendered) > 4000
 
 
 class TestFormatToolMessage:

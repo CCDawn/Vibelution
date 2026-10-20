@@ -3227,6 +3227,8 @@ export function ChatCodingRouteWorkbench() {
             setSessionBrowserOpen={setSessionBrowserOpen}
             headerExportVisible={headerExportVisible}
             conversationModel={conversationModel}
+            tokenSpeedModelKey={JSON.stringify([turnModelSelection, detail?.dialogueModelId, agentModel?.modelRef])}
+            tokenSpeedDisconnectedSinceMs={streamDisconnectedSinceMs}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
             ordinaryChangeRail={ordinaryChangeRail}
             changeRailVisible={changeRailVisible}

@@ -38,12 +38,13 @@ export function FinanceStockHeader({ stock, query, starred, onToggleStar, zh, co
   </div>;
 }
 export function FinanceStockFacts({ quote, zh }: { quote: StockSnapshot["stock"] | undefined; zh: boolean }) {
+  const amountLabel = (zhLabel: string, enLabel: string) => quote ? `${zh ? zhLabel : `${enLabel} `}(${quoteCurrency(quote, zh)})` : zh ? zhLabel : enLabel;
   return <dl className={styles.facts}>
       {[
         { label: zh ? "今开" : "Open", values: [quoteNumber(quote?.open)] },
         { label: zh ? "最高 / 最低" : "High / Low", values: [quoteNumber(quote?.high), "/", quoteNumber(quote?.low)] },
-        { label: zh ? "成交额" : "Turnover", values: [quoteAmount(quote, "turnover", zh)] },
-        { label: zh ? "总市值" : "Market cap", values: [quoteAmount(quote, "marketCap", zh)] },
+        { label: amountLabel("成交额", "Turnover"), values: [quoteAmount(quote, "turnover", zh)] },
+        { label: amountLabel("总市值", "Market cap"), values: [quoteAmount(quote, "marketCap", zh)] },
         { label: zh ? "市盈率" : "PE", values: [quoteNumber(quote?.peRatio)] },
         { label: zh ? "市净率" : "PB", values: [quoteNumber(quote?.pbRatio)] },
       ].map(({ label, values }) => (

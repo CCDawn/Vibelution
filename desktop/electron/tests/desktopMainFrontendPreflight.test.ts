@@ -27,6 +27,9 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
   const notify = vi.fn();
   const trayNotify = vi.fn();
   const inspect = vi.fn(async () => ({ stale: true, launchBlocking: true }));
+  const fullInspect = vi.fn(() => inspect());
+  const launchInspect = vi.fn(() => inspect());
+  const unpackagedInspect = vi.fn(async (_input: { signal?: AbortSignal }) => ({ stale: false }));
   const closed = vi.fn(async () => undefined);
   const promote = vi.fn(async () => ({
     schemaVersion: 1,
@@ -59,8 +62,9 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     ensureFrontendRelease: ensure,
     runWithFrontendBuildGate,
     updateLauncherWindowTruth: notify,
-    inspectUnpackagedShell: async () => ({ stale: false }),
-    inspectCurrentDesktopShell: inspect,
+    inspectUnpackagedShell: unpackagedInspect,
+    inspectCurrentDesktopShell: fullInspect,
+    inspectCurrentDesktopShellLaunchReadiness: launchInspect,
     // Real routing decision so the unpackaged rebuild-and-start promotion lane
     // is exercised end to end without Electron.
     shouldRefreshBeforeLifecycle,
@@ -69,6 +73,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     restartLauncherToLatestBuild: promote,
     joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false, joinInFlightRestart: false }),
     launcherLifecycleSupervisor: supervisor,
+    launcherStateStore: { beginMainLifecycle: vi.fn() },
     readLauncherStateFile: () => ({}),
     launcherStatePath: () => "unused",
     runWorkbenchLifecycle: lifecycle,
@@ -88,7 +93,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     { compilerOptions: { target: ScriptTarget.ES2022 } }
   ).outputText, sandbox);
   return {
-    ensure, reachable, reusable, opened, closed, inspect, notify, trayNotify, promote, lifecycle, supervisor,
+    ensure, reachable, reusable, opened, closed, inspect, fullInspect, launchInspect, unpackagedInspect, notify, trayNotify, promote, lifecycle, supervisor,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -98,6 +103,41 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
 afterEach(resetFrontendBuildStateForTests);
 
 describe("main-line frontend startup preflight", () => {
+  it("cancels the unpackaged shell probe when close supersedes startup", async () => {
+    const h = harness();
+    let probeSignal: AbortSignal | undefined;
+    h.unpackagedInspect.mockImplementation(({ signal }) => {
+      probeSignal = signal;
+      return new Promise((resolve) => signal!.addEventListener("abort", () => resolve({ stale: false }), { once: true }));
+    });
+    const opening = h.run("start", {}).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(h.unpackagedInspect).toHaveBeenCalledOnce());
+    await expect(h.run("force-stop", {})).resolves.toMatchObject({ accepted: true });
+    expect(probeSignal?.aborted).toBe(true);
+    expect(await opening).toBeInstanceOf(Error);
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.opened).not.toHaveBeenCalled();
+  });
+
+  it("cancels live-backend preflight before mutation and prevents a late open after close", async () => {
+    const h = harness({ live: true });
+    let finishBuild!: () => void;
+    let buildSignal: AbortSignal | undefined;
+    h.ensure.mockImplementation(({ signal }) => {
+      buildSignal = signal;
+      return new Promise((resolve) => { finishBuild = () => resolve({ skipped: true }); });
+    });
+    const opening = h.run("start", {}).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(h.ensure).toHaveBeenCalledOnce());
+    await expect(h.run("force-stop", {})).resolves.toMatchObject({ accepted: true });
+    expect(buildSignal?.aborted).toBe(true);
+    finishBuild();
+    expect(await opening).toBeInstanceOf(Error);
+    expect(h.opened).not.toHaveBeenCalled();
+    expect(h.lifecycle.mock.calls.map(([input]) => input.operation)).toEqual(["force-stop"]);
+    expect(h.supervisor.snapshot("main")?.desiredState).toBe("closed");
+  });
+
   it.each(["stop", "force-stop", "shutdown"])("executes packaged %s without inspecting or building a release", async (operation) => {
     const h = harness({ packaged: true });
     h.inspect.mockImplementation(() => new Promise(() => undefined));
@@ -114,6 +154,72 @@ describe("main-line frontend startup preflight", () => {
     expect(h.inspect).toHaveBeenCalled();
     expect(h.promote).toHaveBeenCalledWith(operation === "restart", operation, { shellKind: "packaged" });
     expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("checks a current packaged shell once before a cold start", async () => {
+    const h = harness({ packaged: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await expect(h.run("start", {})).resolves.toMatchObject({ accepted: true });
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.launchInspect).toHaveBeenCalledOnce();
+    expect(h.fullInspect).not.toHaveBeenCalled();
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.inspect.mock.invocationCallOrder[0]).toBeLessThan(h.ensure.mock.invocationCallOrder[0]!);
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "start" }));
+    expect(h.promote).not.toHaveBeenCalled();
+  });
+
+  it("checks a launch-blocking packaged shell once and promotes before a cold start", async () => {
+    const h = harness({ packaged: true });
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.promote).toHaveBeenCalledOnce();
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("skips the reuse-only shell scan after rebuilding the live backend's frontend", async () => {
+    const h = harness({ packaged: true, live: true, releaseChanged: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.reusable).not.toHaveBeenCalled();
+    // The earlier build cannot replace the queued mutation's fresh source check.
+    expect(h.ensure).toHaveBeenCalledTimes(2);
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "restart" }));
+  });
+
+  it("rechecks the shell before restart when a verified live backend cannot be reused", async () => {
+    const h = harness({ packaged: true, live: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    h.reusable.mockResolvedValue(false);
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledTimes(2);
+    expect(h.ensure).toHaveBeenCalledTimes(2);
+    expect(h.lifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "restart" }));
+  });
+
+  it("promotes a shell that becomes launch-blocking after live-backend reuse fails", async () => {
+    const h = harness({ packaged: true, live: true });
+    h.inspect.mockResolvedValueOnce({ stale: false, launchBlocking: false });
+    h.reusable.mockResolvedValue(false);
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledTimes(2);
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.promote).toHaveBeenCalledWith(false, "restart", { shellKind: "packaged" });
+    expect(h.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("still checks the packaged shell before reusing a verified live backend", async () => {
+    const h = harness({ packaged: true, live: true });
+    h.inspect.mockResolvedValue({ stale: false, launchBlocking: false });
+    await h.run("start", {});
+    expect(h.inspect).toHaveBeenCalledOnce();
+    expect(h.fullInspect).toHaveBeenCalledOnce();
+    expect(h.launchInspect).not.toHaveBeenCalled();
+    expect(h.ensure).toHaveBeenCalledOnce();
+    expect(h.lifecycle).not.toHaveBeenCalled();
+    expect(h.opened).toHaveBeenCalledOnce();
   });
 
   it.each(["start", "restart"])("verifies once at the startup boundary for %s", async (operation) => {

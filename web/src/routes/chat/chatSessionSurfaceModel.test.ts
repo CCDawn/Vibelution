@@ -5,9 +5,19 @@ import {
   buildChatActiveSkillViewModel,
   buildChatMentalStateViewModel,
   buildChatSessionStateViewModel,
+  canLoadSessionParameters,
 } from "./chatSessionSurfaceModel";
 
 describe("chatSessionSurfaceModel", () => {
+  it("loads parameters only after the selected session has an authoritative writable detail", () => {
+    const detail = { id: "current", readOnly: false } as import("../../api/types").SessionDetail;
+    expect(canLoadSessionParameters("current", undefined)).toBe(false);
+    expect(canLoadSessionParameters("other", detail)).toBe(false);
+    expect(canLoadSessionParameters("current", { ...detail, provisionalTranscript: true })).toBe(false);
+    expect(canLoadSessionParameters("current", { ...detail, readOnly: true })).toBe(false);
+    expect(canLoadSessionParameters("current", detail)).toBe(true);
+    expect(canLoadSessionParameters("current", { ...detail, archiveState: { status: "archived", source: "session_archive" } })).toBe(true);
+  });
   it("builds active skill summary and status labels", () => {
     const model = buildChatActiveSkillViewModel({
       contract: {
@@ -126,6 +136,17 @@ describe("chatSessionSurfaceModel", () => {
       selectedChatAgentDirectSessionId: "primary",
     });
     expect(tabs.map((item) => item.id)).toEqual(["primary", "child", "other"]);
+  });
+
+  it("removes archived sessions from ordinary Agent tabs even when cached lists retain them", () => {
+    const tabs = buildAgentSessionTabs({
+      sessions: [
+        { id: "active", createdAt: "2026-01-01", updatedAt: "2026-08-14T12:00:00Z" } as never,
+        { id: "archived", createdAt: "2026-01-02", updatedAt: "2026-08-14T12:00:01Z", archiveState: { status: "archived" } } as never,
+      ],
+      selectedChatAgentDirectSessionId: "active",
+    });
+    expect(tabs.map((item) => item.id)).toEqual(["active"]);
   });
 
   it("does not reshuffle tabs when a background session becomes more recent", () => {

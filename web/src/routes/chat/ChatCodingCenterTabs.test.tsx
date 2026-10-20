@@ -67,6 +67,15 @@ afterEach(async () => {
 });
 
 describe("ChatCodingCenterTabs task progress entry", () => {
+  it("shows only the current native session's compact speed gauge", async () => {
+    const input = props();
+    expect((await render(input)).querySelector('[data-testid="conversation-token-speed"]')).not.toBeNull();
+    for (const overrides of [{ groupPanelActive: true }, { projectBusActive: true }, { verifiedCompanionMode: true },
+      { activeCliAgentRunId: "cli" }, { activeSessionId: "different" }]) {
+      expect((await render({ ...input, ...overrides })).querySelector('[data-testid="conversation-token-speed"]')).toBeNull();
+    }
+    expect((await render({ ...input, financeSurface: true })).querySelector('[data-testid="conversation-token-speed"]')).not.toBeNull();
+  });
   it("toggles an independent floating checklist without changing the right rail or session browser", async () => {
     const open = vi.fn(() => true);
     unsubscribe = subscribeChatRightRailOpen(open);

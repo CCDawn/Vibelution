@@ -400,6 +400,7 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
     {mode === "account" ? <>
       <section className={styles.section} aria-label={zh ? "模拟下单" : "Paper order"}>
         <h3 className={styles.sectionHeading}><span>{zh ? `模拟交易 · ${stock.name}（${stock.ticker}）` : `Paper order · ${stock.name} (${stock.ticker})`}</span><span>{currentQuote ? <span className={styles.quotePrice}>{formatYuan(String(currentQuote.price), zh)}</span> : (zh ? "报价不可用" : "Quote unavailable")}</span></h3>
+        <p className={styles.helper}>{zh ? "仅模拟成交，不连接券商或真实账户；买入持仓按 A 股 T+1 规则解冻。" : "Simulated execution only, with no broker or real account connection; bought shares follow A-share T+1 settlement."}</p>
         <form className={styles.controls} onSubmit={(event) => void submitOrder(event)}>
           <label className={styles.field}>{zh ? "交易方向" : "Side"}
             <VSelect selectedKey={side} onSelectionChange={(key) => { setSide(String(key) as PaperSide); setOrderError(""); }} aria-label={zh ? "交易方向" : "Side"} options={[{ id: "buy", label: zh ? "买入" : "Buy" }, { id: "sell", label: zh ? "卖出" : "Sell" }]} />
@@ -407,10 +408,10 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
           <label className={styles.field}>{zh ? "股数" : "Shares"}
             <VInput type="number" inputMode="numeric" min={1} max={1_000_000} step={1} value={quantity} className={styles.input} aria-label={zh ? "模拟交易股数" : "Paper order shares"} onChange={(event) => setQuantity(event.target.value)} />
           </label>
-          <label className={styles.field}>{zh ? "理由" : "Reason"}
+          <label className={styles.reasonField}>{zh ? "理由" : "Reason"}
             <VInput value={reason} maxLength={500} className={styles.input} aria-label={zh ? "模拟交易理由" : "Paper order reason"} placeholder={zh ? "记录本次模拟决策" : "Record the simulated decision"} onChange={(event) => setReason(event.target.value)} />
           </label>
-          <span className={styles.field} aria-label={zh ? "服务端报价" : "Server quote"}>
+          <span className={styles.quoteField} aria-label={zh ? "服务端报价" : "Server quote"}>
             <span>{zh ? "腾讯报价" : "Tencent quote"}</span>
             <span className={styles.quotePrice}>{currentQuote ? `${formatYuan(String(currentQuote.price), zh)} · ${currentQuote.timestamp}` : (zh ? "等待报价" : "Waiting for quote")}</span>
           </span>
@@ -421,7 +422,7 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
         <div className={styles.orderMeta}>
           {!tradeDateReady ? <span role="status">{account.tradeDate ? `${account.tradeDate} · ${zh ? "非 A 股交易日，模拟下单已暂停" : "A-share market closed; paper orders are paused"}` : (zh ? "交易日状态不可用，模拟下单已暂停" : "Trading-day status unavailable; paper orders are paused")}</span> : null}
           {tradeDateReady && currentQuote && !quoteMatchesTradeDate ? <span role="status">{zh ? `当前报价日期 ${beijingQuoteDate(currentQuote.timestamp) || "未知"}，不是交易日 ${account.tradeDate} 行情，暂不能模拟成交` : `Quote date ${beijingQuoteDate(currentQuote.timestamp) || "unknown"} does not match trading date ${account.tradeDate}; paper execution is paused`}</span> : null}
-          {quantityRule ? <span role="status">{orderQuantityRuleText(quantityRule, zh)}</span> : <span role="status">{zh ? "正在读取该股票的板块股数规则" : "Loading this stock's board quantity rules"}</span>}
+          {!quantityRule || !quantityRule.supportedForSimulation ? <span role="status">{quantityRule ? orderQuantityRuleText(quantityRule, zh) : (zh ? "正在读取该股票的板块股数规则" : "Loading this stock's board quantity rules")}</span> : null}
           {quantityRule?.supportedForSimulation && invalidBoardQuantity ? <span role="status">{zh ? "股数不符合该板块的起始数量、递增单位或单笔上限" : "Quantity does not meet this board's minimum, increment, or per-order cap"}</span> : null}
           {side === "sell" ? <span role="status">{!currentPosition || currentPosition.quantity <= 0
             ? (zh ? "当前没有该股票持仓" : "There is no position in this stock")
@@ -431,10 +432,16 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
                 ? (zh ? "当前可卖 0 股；持仓股份处于 A 股 T+1 冻结状态" : "0 shares currently sellable; the position is locked by A-share T+1 settlement")
                 : (zh ? "当前可卖 0 股" : "0 shares currently sellable")}{orderShares > sellableQuantity && sellableQuantity > 0 ? (zh ? `，本次股数超过可卖数量` : "; order exceeds sellable shares") : ""}</span> : null}
           {tradeEstimate ? <span>{zh ? "预估成交额" : "Est. amount"} {formatYuan(tradeEstimate.gross, zh)} · {zh ? "预估费用" : "Est. fees"} {formatYuan(tradeEstimate.fees, zh)} · {zh ? "现金变化" : "Cash change"} {formatYuan(tradeEstimate.cashImpact, zh)} · {zh ? "成交采用服务端最新报价" : "Execution uses the server quote"}</span> : null}
-          <span>{account.feePolicy.description}</span>
           <span>{account.tPlusOneRule}</span>
           {currentQuote ? <span>{quoteQuery.data?.source} · {zh ? "报价日" : "Quote date"} {currentQuote.timestamp.slice(0, 10)} · {zh ? "获取" : "Fetched"} {quoteQuery.data?.fetchedAt}</span> : null}
         </div>
+        <details className={styles.details}>
+          <summary className={styles.detailsSummary}>{zh ? "交易规则与费用说明" : "Trading rules and fees"}</summary>
+          <div className={styles.detailContent}>
+            {quantityRule?.supportedForSimulation ? <span>{orderQuantityRuleText(quantityRule, zh)}</span> : null}
+            <span>{account.feePolicy.description}</span>
+          </div>
+        </details>
         {quoteQuery.error ? <p className={styles.warning}>{errorText(quoteQuery.error, zh)}</p> : null}
         {orderError ? <p className={styles.orderError} role="alert">{orderError}</p> : null}
       </section>
@@ -467,7 +474,7 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
       </section>
     </> : <>
       <div className={styles.calendarToolbar}>
-        <h3 className={styles.sectionHeading}><span>{zh ? "交易日历" : "Trading calendar"}</span></h3>
+        <h3 className={styles.sectionHeading}><span>{zh ? "交易复盘" : "Trade review"}</span></h3>
         <label className={styles.field}>{zh ? "月份" : "Month"}<VInput type="month" value={month} className={styles.input} aria-label={zh ? "复盘月份" : "Review month"} onChange={(event) => setMonth(event.target.value || beijingMonthNow())} /></label>
       </div>
       {review ? <>
@@ -477,19 +484,6 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
           { id: "all-realized", label: zh ? "全量已实现" : "All-time realized", value: formatYuan(review.summary.allTimeRealizedPnlYuan, zh), tone: Number(review.summary.allTimeRealizedPnlYuan) >= 0 ? "success" : "danger" },
           { id: "fees", label: zh ? "全量费用" : "All-time fees", value: formatYuan(review.summary.allTimeFeesYuan, zh) },
         ]} />
-        <div className={styles.calendar} role="grid" aria-label={`${month}${zh ? "交易日历" : " trading calendar"}`}>
-          {weekdayLabels.map((label) => <span key={`weekday-${label}`} role="columnheader" className={styles.weekday}>{zh ? label : ["M", "T", "W", "T", "F", "S", "S"][weekdayLabels.indexOf(label)]}</span>)}
-          {Array.from({ length: monthOffsetMonday(month) }, (_, index) => <span key={`blank-${index}`} aria-hidden="true" className={styles.blankDay} />)}
-          {Array.from({ length: monthDayCount(month) }, (_, index) => {
-            const dayNumber = index + 1;
-            const day = dailyMap(review.days).get(dayNumber);
-            const pnl = day?.realizedPnlYuan;
-            return <span key={dayNumber} role="gridcell" aria-label={day ? `${day.date} ${day.tradeCount} ${zh ? "笔交易" : "trades"} ${formatYuan(pnl, zh)}` : `${month}-${String(dayNumber).padStart(2, "0")}`} className={styles.calendarDay}>
-              <strong className={styles.calendarDate}>{dayNumber}</strong>
-              {day ? <><small className={styles.calendarTrades}>{day.tradeCount}{zh ? " 笔" : " trades"} · {zh ? "费" : "fee"} {formatYuan(day.feesYuan, zh)}</small><small className={`${styles.calendarResult} ${signedTone(pnl)}`}>{zh ? "已实现" : "Realized"} {formatYuan(pnl, zh)}</small></> : null}
-            </span>;
-          })}
-        </div>
         <VDenseTable<PaperReviewDay>
           ariaLabel={zh ? "本月实际交易日复盘" : "Actual trade day review"}
           columns={[
@@ -504,6 +498,22 @@ export function FinancePaperTrading({ assistant, stock, zh, mode, onResearchProm
           getRowKey={(row) => row.date}
           emptyText={zh ? "本月没有真实账本交易日" : "No trade days in this ledger month"}
         />
+        <details className={styles.details}>
+          <summary className={styles.detailsSummary}>{zh ? "按日期查看交易日历" : "View the trading calendar by date"}</summary>
+        <div className={styles.calendar} role="grid" aria-label={`${month}${zh ? "交易日历" : " trading calendar"}`}>
+          {weekdayLabels.map((label) => <span key={`weekday-${label}`} role="columnheader" className={styles.weekday}>{zh ? label : ["M", "T", "W", "T", "F", "S", "S"][weekdayLabels.indexOf(label)]}</span>)}
+          {Array.from({ length: monthOffsetMonday(month) }, (_, index) => <span key={`blank-${index}`} aria-hidden="true" className={styles.blankDay} />)}
+          {Array.from({ length: monthDayCount(month) }, (_, index) => {
+            const dayNumber = index + 1;
+            const day = dailyMap(review.days).get(dayNumber);
+            const pnl = day?.realizedPnlYuan;
+            return <span key={dayNumber} role="gridcell" aria-label={day ? `${day.date} ${day.tradeCount} ${zh ? "笔交易" : "trades"} ${formatYuan(pnl, zh)}` : `${month}-${String(dayNumber).padStart(2, "0")}`} className={styles.calendarDay}>
+              <strong className={styles.calendarDate}>{dayNumber}</strong>
+              {day ? <><small className={styles.calendarTrades}>{day.tradeCount}{zh ? " 笔" : " trades"} · {zh ? "费" : "fee"} {formatYuan(day.feesYuan, zh)}</small><small className={`${styles.calendarResult} ${signedTone(pnl)}`}>{zh ? "已实现" : "Realized"} {formatYuan(pnl, zh)}</small></> : null}
+            </span>;
+          })}
+        </div>
+        </details>
         <p className={styles.helper}>{zh ? "本页按账本实际订单汇总交易日；未生成没有历史行情依据的净值曲线。" : "Days are grouped from actual ledger orders. No equity curve is generated without historical quote evidence."}</p>
       </> : null}
     </>}

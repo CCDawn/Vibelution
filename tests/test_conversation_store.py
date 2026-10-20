@@ -1192,6 +1192,94 @@ def test_schema_v4_exposes_directory_columns_and_bounded_preview(
         store.close()
 
 
+def test_initialize_reseals_directory_rows_whose_payload_says_archived(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    """The historical agent_archive bug left rows payload-sealed but directory-live.
+
+    Re-opening the store must re-seal exactly those rows from the payload
+    archive_state and leave non-archived payloads untouched.
+    """
+
+    db_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store)
+        # Legacy-shape upsert (no payload-derived archived flag): directory row
+        # stays live while the runtime payload below claims archived.
+        store.repository.upsert_directory_session(
+            session_id="session-sealed",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Sealed in payload only",
+            hidden_from_index=True,
+        ).result(timeout=3)
+        store.repository.replace_chat_state({
+            "version": 1,
+            "active_conversation_id": "session-sealed",
+            "updated_at": "2026-10-19T00:00:00Z",
+            "conversations": [
+                {
+                    "conversation_id": "session-sealed",
+                    "agent_id": "agent-a",
+                    "title": "Sealed in payload only",
+                    "archive_state": {"status": "archived", "source": "agent_archive"},
+                },
+                {
+                    "conversation_id": "session-live",
+                    "agent_id": "agent-a",
+                    "title": "Still live",
+                },
+            ],
+        }).result(timeout=3)
+    finally:
+        store.close()
+
+    connection = sqlite3.connect(db_path)
+    try:
+        sealed_before, = connection.execute(
+            "SELECT archived_at_ms FROM sessions WHERE session_id='session-sealed'"
+        ).fetchone()
+        assert sealed_before is None
+    finally:
+        connection.close()
+
+    reopened = _open_store(tmp_path)
+    try:
+        connection = sqlite3.connect(db_path)
+        try:
+            sealed_at, = connection.execute(
+                "SELECT archived_at_ms FROM sessions WHERE session_id='session-sealed'"
+            ).fetchone()
+            assert sealed_at is not None
+            live_sealed, = connection.execute(
+                "SELECT COUNT(*) FROM sessions WHERE session_id='session-live' "
+                "AND archived_at_ms IS NOT NULL"
+            ).fetchone()
+            assert live_sealed == 0
+        finally:
+            connection.close()
+        page = reopened.repository.list_directory_page(include_hidden=True, limit=50)
+        assert all(row["sessionId"] != "session-sealed" for row in page["rows"])
+    finally:
+        reopened.close()
+
+    # The repair is idempotent: a third open keeps the original seal time.
+    third = _open_store(tmp_path)
+    try:
+        connection = sqlite3.connect(db_path)
+        try:
+            sealed_again, = connection.execute(
+                "SELECT archived_at_ms FROM sessions WHERE session_id='session-sealed'"
+            ).fetchone()
+            assert sealed_again == sealed_at
+        finally:
+            connection.close()
+    finally:
+        third.close()
+
+
 def test_directory_list_uses_keyset_cursor_not_offset(
     tmp_path: Path,
     safe_sqlite_runtime: None,

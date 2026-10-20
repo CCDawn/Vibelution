@@ -6,7 +6,7 @@ export default {
   metrics: "grid min-w-0 grid-cols-3 gap-3",
   summary: "grid min-w-0 gap-1 [&>strong]:text-sm [&>span]:font-mono [&>small]:text-vui-fg-tertiary",
   table: "min-w-0 max-w-full overflow-x-auto",
-  number: "font-mono text-xs",
+  number: "block max-w-full whitespace-normal break-words [overflow-wrap:anywhere] text-right font-mono text-xs tabular-nums",
   stock: "!h-auto !max-w-full !justify-start !px-1 text-left",
   identity: "grid min-w-0 gap-1 [&>small]:font-mono [&>small]:text-vui-fg-tertiary",
   form: "grid min-w-0 gap-3",

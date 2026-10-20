@@ -175,15 +175,16 @@ def _sync_directory(conversation: dict[str, Any], *, archive: bool) -> None:
     from core.web.services.session import directory_bridge
 
     if archive:
-        # Re-sync flags first (hidden_from_index derived from chat_state), then
-        # seal the directory row (archived_at_ms). A later unrelated upsert may
-        # clear archived_at_ms but keeps hidden_from_index until unarchive.
-        directory_bridge.sync_conversation_record(conversation, touch_recency=False)
+        # Unpin first: set_session_pinned only sees rows that are not yet
+        # sealed, and the sync below now derives the seal from the payload
+        # archive_state (it used to seal only at the explicit archive call).
         _unpin_directory_session(session_id)
+        directory_bridge.sync_conversation_record(conversation, touch_recency=False)
         directory_bridge.archive_directory_session_safe(session_id, wait=True)
     else:
-        # Upsert clears archived_at_ms and re-derives hidden_from_index=False,
-        # which restores default listing visibility.
+        # Upsert re-derives archived from the now-unarchived payload (clears
+        # archived_at_ms) and hidden_from_index=False, restoring listing
+        # visibility.
         directory_bridge.sync_conversation_record(conversation, wait=True)
     s._invalidate_session_list_cache()
 

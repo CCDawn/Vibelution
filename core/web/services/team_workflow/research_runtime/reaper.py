@@ -71,19 +71,12 @@ _REAPER_SWEEP_LOCK = threading.Lock()
 
 
 def reaper_enabled() -> bool:
-    """Configured ON/OFF kill switch for the awaiting-approval reaper.
-
-    The reaper also stays off under challenge archive mode (封存模式):
-    archiving means read-only visibility, so the 7-day auto-rejection and
-    escalation must never rewrite meeting state.
-    """
+    """Configured ON/OFF kill switch for the awaiting-approval reaper."""
 
     raw = str(os.environ.get(REAPER_KILL_SWITCH_ENV) or "").strip().lower()
     if raw in {"0", "false", "off"}:
         return False
-    from .archive_mode import challenge_archive_mode_enabled
-
-    return not challenge_archive_mode_enabled()
+    return True
 
 
 def reset_reaper_throttle_for_tests() -> None:

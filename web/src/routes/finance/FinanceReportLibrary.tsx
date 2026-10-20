@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { BookOpen, ExternalLink, FileText, RefreshCw } from "lucide-react";
 import type { FinancialAssistant } from "../../api/financialAssistant";
@@ -54,6 +54,13 @@ function sourceIdentityLabel(identities: SourceIdentity[], zh: boolean) {
     || (zh ? "公司 / 代码未提供" : "Company / ticker unavailable")).join("；");
 }
 
+function publishedDate(value: string, zh: boolean) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(zh ? "zh-CN" : "en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  }).format(date);
+}
+
 export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null, currentStock }: {
   assistant: FinancialAssistant; zh: boolean; returnTo: string; citation?: ReportCitation | null; currentStock?: StockIdentity;
 }) {
@@ -67,6 +74,8 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
   const [showAllDocuments, setShowAllDocuments] = useState(false);
   const [scopeScan, setScopeScan] = useState<ScopeScanState>(() => ({ key: stockKey, limit: CITATION_TRACE_BATCH_SIZE, scannedThrough: 0, identities: {}, failedItemIds: [] }));
   const [excerptOpen, setExcerptOpen] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false);
+  const disclosureId = useId();
   if (selectionScope.agentId !== agentId || selectionScope.knowledgeBaseId !== knowledgeBaseId || selectionScope.citation !== citation || selectionScope.stockKey !== stockKey) {
     setSelectionScope({ agentId, knowledgeBaseId, citation, stockKey });
     setSearch("");
@@ -193,7 +202,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
   const libraryUrl = agentCenterMemoryRoute({ agentId, knowledgeBaseId, view: "knowledge", returnTo, returnLabel: zh ? "炒股智能体" : "Investment assistant" });
 
   return (
-    <div className={styles.aside} data-finance-report-library>
+    <div className={libraryStyles.page} data-finance-report-library>
       <div className={styles.sectionHeading}>
         <span className={styles.libraryHeading}><BookOpen size={15} aria-hidden="true" />{zh ? "财报资料" : "Report library"}</span>
         <VButton variant="ghost" aria-label={zh ? "刷新财报资料" : "Refresh reports"} isDisabled={!readable || itemsQuery.isFetching} onPress={() => {
@@ -208,11 +217,11 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
       {citation ? <div className={styles.libraryCitation}>
         <div className={styles.libraryCitationRow}>
           <strong className={styles.libraryCitationTitle} title={`${zh ? "当前引用" : "Selected citation"} · ${citation.label}`}>
-            <FileText size={14} aria-hidden="true" /><span className="min-w-0 truncate">{zh ? "当前引用" : "Selected citation"} · {citation.label}</span>
+            <FileText size={14} aria-hidden="true" /><span className={libraryStyles.citationText}>{zh ? "当前引用" : "Selected citation"} · {citation.label}</span>
           </strong>
           <VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument icon={<ExternalLink size={14} aria-hidden="true" />} className={`${styles.link} ${styles.libraryCitationAction}`}>{zh ? "打开原文" : "Open source"}</VRouteLinkButton>
         </div>
-        {citationScanComplete && !matchedItemId ? <span className={`${styles.small} basis-full`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
+        {citationScanComplete && !matchedItemId ? <span className={`${styles.small} ${libraryStyles.citationNotice}`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
       </div> : null}
       {knowledgeBaseId ? <div className={libraryStyles.importActions}><FinanceEvidenceImport key={`${agentId}:${stockKey}`} agentId={agentId} knowledgeBaseId={knowledgeBaseId} stock={currentStock} sourceUrl={citation?.url} zh={zh} /><VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton></div> : null}
       {!readable ? <VStateSurface density="compact" tone="unavailable" title={zh ? "财报库不可读" : "Library unavailable"} /> :
@@ -237,12 +246,16 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
             {!scopeComplete ? <div className={styles.skeleton} aria-label={zh ? "正在核对资料公司与代码" : "Checking material company and ticker"}><VSkeleton /></div> : null}
             {scopeComplete && scopeReadFailed ? <p role="status" className={libraryStyles.scopeNotice}>{zh ? "部分资料来源未能读取，当前股票范围可能不完整；未核实资料已排除。" : "Some source records could not be read. The current-stock scope may be incomplete; unverified materials are excluded."}</p> : null}
           </div> : null}
-          <VInput value={search} onChange={(event) => setSearch(event.target.value)} aria-label={zh ? "查找财报资料" : "Find reports"} placeholder={zh ? "查找资料" : "Find reports"} className={styles.input} />
+          <VInput value={search} onChange={(event) => setSearch(event.target.value)} aria-label={zh ? "查找财报资料" : "Find reports"} placeholder={zh ? "查找资料" : "Find reports"} className={`${styles.input} ${libraryStyles.search}`} />
+          <div className={libraryStyles.columns} data-finance-library-columns>
           {!scopeComplete ? null : items.length === 0 ? <VStateSurface density="compact" tone="empty" title={search ? (zh ? "没有匹配资料" : "No matches") : currentStock && !showAllDocuments ? (zh ? `暂无 ${currentStock.name}（${currentStock.ticker}）的匹配资料` : `No materials matched ${currentStock.name} (${currentStock.ticker})`) : (zh ? "暂无有效财报" : "No active reports")} /> :
-            <div className={styles.sourceList}>{items.map((item) => <VButton key={item.knowledgeItemId} variant="ghost" contentLayout="plain" className={`${styles.sourceButton} ${selected?.knowledgeItemId === item.knowledgeItemId ? styles.selected : ""}`} aria-pressed={selected?.knowledgeItemId === item.knowledgeItemId} onPress={() => { setManualBrowse(true); setSelectedId(item.knowledgeItemId); setSourceId(""); setExcerptOpen(false); }}>
+            <div className={libraryStyles.list}>{items.map((item) => <VButton key={item.knowledgeItemId} variant="ghost" contentLayout="plain" className={`${styles.sourceButton} ${selected?.knowledgeItemId === item.knowledgeItemId ? styles.selected : ""}`} aria-pressed={selected?.knowledgeItemId === item.knowledgeItemId} onPress={() => { setManualBrowse(true); setSelectedId(item.knowledgeItemId); setSourceId(""); setExcerptOpen(false); }}>
               <span className={styles.rowText}><strong>{item.title}</strong>{currentStock && showAllDocuments ? <span className={libraryStyles.identity}>{sourceIdentityLabel(activeScopeScan.identities[item.knowledgeItemId] ?? [], zh)}</span> : null}{item.summary && item.summary !== "Financial PDF excerpt awaiting source review." ? <span className={styles.small}>{item.summary.slice(0, 80)}</span> : null}</span>
             </VButton>)}</div>}
-          {selected ? <section className={styles.detail} aria-label={zh ? "资料来源" : "Report source"}>
+          {selected ? <section className={libraryStyles.detail} aria-label={zh ? "资料来源" : "Report source"}>
+            <div className={libraryStyles.readerHeading}><div className={libraryStyles.list}><h2 className={libraryStyles.title}>{selected.title}</h2>{metadata ? <p className={styles.small}>{[metadata.period, metadata.page ? (zh ? `第 ${metadata.page} 页` : `Page ${metadata.page}`) : ""].filter(Boolean).join(" · ")}</p> : null}</div>
+              {metadata?.url ? <VRouteLinkButton to={`${metadata.url}${/^\d+$/.test(metadata.page) ? `#page=${metadata.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument icon={<ExternalLink size={14} aria-hidden="true" />} className={styles.link}>{zh ? "查看原始财报" : "Open original report"}</VRouteLinkButton> : null}
+            </div>
             {traceQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "来源加载失败" : "Could not load source"} actions={<VButton onPress={() => void traceQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :
               traceQuery.isPending ? <VSkeleton /> :
               !source ? <p className={styles.small}>{zh ? "没有有效原文来源" : "No active source available"}</p> : <>
@@ -256,25 +269,30 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null,
                     </span>
                   </VButton>;
                 })}</div> : null}
-                {metadata ? <dl className={styles.facts}>
+                <div className={libraryStyles.excerptDisclosure}>
+                  <VButton variant="ghost" className={libraryStyles.disclosureButton} aria-expanded={excerptOpen} aria-controls={`${disclosureId}-excerpt`} onPress={() => setExcerptOpen(!excerptOpen)}>{zh ? (excerptOpen ? "收起原文摘录" : "阅读原文摘录") : (excerptOpen ? "Hide source excerpt" : "Read source excerpt")}</VButton>
+                  {excerptOpen ? <div id={`${disclosureId}-excerpt`} className={libraryStyles.list}>
+                    {bodyQuery.isError && <VStateSurface density="compact" tone="error" title={zh ? "原文加载失败" : "Could not read source"} actions={<VButton onPress={() => void bodyQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} />}
+                    {bodyQuery.isPending && <VSkeleton />}
+                    {!bodyQuery.isError && !bodyQuery.isPending && (sourceContent
+                      ? <><blockquote className={styles.excerpt}>{sourceContent}</blockquote>{body?.hasMore && <span className={styles.small}>{zh ? "仅显示开头摘录" : "Opening excerpt only"}</span>}</>
+                      : <p className={styles.small}>{zh ? "原文未提供" : "Source text unavailable"}</p>)}
+                  </div> : null}
+                </div>
+                {metadata ? <div className={libraryStyles.metadata}>
+                  <VButton variant="ghost" className={libraryStyles.disclosureButton} aria-expanded={metadataOpen} aria-controls={`${disclosureId}-metadata`} onPress={() => setMetadataOpen(!metadataOpen)}>{zh ? "资料属性与来源" : "Material properties and source"}</VButton>
+                  {metadataOpen ? <dl id={`${disclosureId}-metadata`} className={styles.facts}>
                   {metadata.company ? <><dt>{zh ? "公司" : "Company"}</dt><dd>{metadata.company}</dd></> : null}
                   {metadata.ticker ? <><dt>{zh ? "代码" : "Ticker"}</dt><dd>{metadata.ticker}</dd></> : null}
                   {metadata.period ? <><dt>{zh ? "报告期" : "Period"}</dt><dd>{metadata.period}</dd></> : null}
                   {metadata.version ? <><dt>{zh ? "版本" : "Version"}</dt><dd>{metadata.version}</dd></> : null}
                   {metadata.page ? <><dt>{zh ? "页码" : "Page"}</dt><dd>{metadata.page}</dd></> : null}
-                  {metadata.publishedAt ? <><dt>{zh ? "发布" : "Published"}</dt><dd>{metadata.publishedAt}</dd></> : null}
-                </dl> : null}
-                {metadata?.url ? <VRouteLinkButton to={`${metadata.url}${/^\d+$/.test(metadata.page) ? `#page=${metadata.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument icon={<ExternalLink size={14} aria-hidden="true" />} className={styles.link}>{zh ? "查看原始财报" : "Open original report"}</VRouteLinkButton> : null}
-                <details className={libraryStyles.excerptDisclosure} open={excerptOpen} onToggle={(event) => setExcerptOpen(event.currentTarget.open)}>
-                  <summary className={libraryStyles.excerptSummary}>{zh ? "展开原文摘录" : "Show source excerpt"}</summary>
-                  {bodyQuery.isError && <VStateSurface density="compact" tone="error" title={zh ? "原文加载失败" : "Could not read source"} actions={<VButton onPress={() => void bodyQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} />}
-                  {bodyQuery.isPending && <VSkeleton />}
-                  {!bodyQuery.isError && !bodyQuery.isPending && (sourceContent
-                    ? <><blockquote className={styles.excerpt}>{sourceContent}</blockquote>{body?.hasMore && <span className={styles.small}>{zh ? "仅显示开头摘录" : "Opening excerpt only"}</span>}</>
-                    : <p className={styles.small}>{zh ? "原文未提供" : "Source text unavailable"}</p>)}
-                </details>
+                  {metadata.publishedAt ? <><dt>{zh ? "发布" : "Published"}</dt><dd>{publishedDate(metadata.publishedAt, zh)}</dd></> : null}
+                  </dl> : null}
+                </div> : null}
               </>}
           </section> : null}
+          </div>
         </>}
     </div>
   );

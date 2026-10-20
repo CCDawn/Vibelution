@@ -1254,6 +1254,40 @@ export type SelfEvolutionAutonomousLoopStartRequest = {
   maxIterations: number;
 };
 
+export type SelfEvolutionCampaignStartRequest = {
+  goal: string;
+  rounds?: number;
+  idempotencyKey: string;
+  localIntegration: {
+    acknowledge: true;
+    allowedFiles: string[];
+    teamId: string;
+    validForSeconds: number;
+  };
+};
+
+export type SelfEvolutionCampaignRun = {
+  runId: string;
+  status: "queued" | "running" | "stopping" | "stopped" | "completed";
+  phase: string;
+  deadline: string;
+  request: SelfEvolutionCampaignStartRequest;
+  rounds: Array<{
+    runId: string;
+    round: number;
+    status: string;
+    childStatus?: string;
+    settled?: boolean;
+    commitSha?: string;
+  }>;
+  stopRequested: boolean;
+  stopReason?: string;
+  childUnsettled?: boolean;
+  deploymentRequired?: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SelfEvolutionAutonomousLoopActionRequest = {
   runId: string;
   action: "approve" | "reject" | "retry_cleanup";

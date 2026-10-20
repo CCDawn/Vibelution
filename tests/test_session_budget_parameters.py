@@ -89,6 +89,22 @@ def test_budget_parameters_get_maps_not_found_and_validation(monkeypatch: pytest
     assert invalid.status_code == 422
 
 
+def test_budget_agent_lookup_names_archived_agent_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An archived Agent must surface the read-only archive reason, not a misleading 'no config'."""
+
+    from core.web.services.session import budget_parameters as budget_parameters_module
+
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: True)
+    monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda _session_id: "agent-archived")
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {"agentId": agent_id, "status": "archived"},
+    )
+    with pytest.raises(session_service.SessionValidationError, match="已归档"):
+        budget_parameters_module.get_session_budget_parameters_view("session-archived")
+
+
 def test_budget_parameters_patch_passes_only_provided_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

@@ -923,6 +923,7 @@ describe("ConversationView native Codex transcript surface", () => {
       timestamp: "2026-09-11T05:00:00Z",
       turnId: `turn-reasoning-${status}`,
       status,
+      metadata: { processStage: "model_thinking" },
       turnItems: [{
         id: `reasoning-${status}-r1`,
         itemId: `reasoning-${status}`,
@@ -943,6 +944,9 @@ describe("ConversationView native Codex transcript surface", () => {
     const live = renderConversation([reasoning("running")]);
     expect(live).toContain('data-thought-expanded="false"');
     expect(live).toContain("思考中");
+    expect(live.match(/思考中/g)).toHaveLength(1);
+    expect(live).toContain("工作中");
+    expect(live.match(/data-codex-process-disclosure=/g)).toHaveLength(1);
     expect(live).toContain('data-thought-streaming-summary="true"');
     expect(live).toContain("先确认这个函数的两条来源路径");
     expect(live).not.toContain('data-thought-scroll-body="true"');

@@ -49,23 +49,30 @@ describe('shared Teams workspace frame', () => {
     const page = host.querySelector<HTMLElement>('[data-vui="workbench-page"]');
     expect(page?.className).toContain('!bg-vui-surface-rail');
     expect(page?.className).toContain('[--shell-surface:var(--vui-surface-rail)]');
-    expect(page?.className).toContain('!p-1');
-    expect(page?.className).not.toContain('!p-3');
+    expect(page?.className).toContain('!p-0');
+    expect(page?.className).not.toContain('!p-1');
 
     const workspace = host.querySelector<HTMLElement>('[data-vui="split-workspace"]');
     expect(workspace?.getAttribute('data-vui-layout-id')).toBe(WORKBENCH_LAYOUT_IDS.teams);
+    expect(workspace?.className).toContain('[&>[data-vui=split-main]]:h-auto!');
     expect(workspace?.className).toContain('[&>[data-vui=split-main]]:mx-1');
+    expect(workspace?.className).toContain('[&>[data-vui=split-main]]:mb-1');
+    expect(workspace?.className).toContain('max-[700px]:[&>[data-vui=split-main]]:mx-0.5!');
+    expect(workspace?.className).toContain('max-[700px]:[&>[data-vui=split-main]]:mb-0.5!');
 
     for (const region of ['navigation', 'inspector']) {
       const panel = host.querySelector<HTMLElement>(`[data-team-panel="${region}"]`);
       expect(panel?.className).toContain('!bg-vui-surface-rail');
       expect(panel?.className).toContain('!rounded-none');
       expect(panel?.className).toContain('!border-0');
+      expect(panel?.className).toContain('!p-0');
       expect(panel?.className).not.toContain('--shell-surface:var(--vui-surface-chat)');
     }
 
     const content = host.querySelector<HTMLElement>('[data-team-panel="content"]');
     expect(content?.className).toContain('--shell-surface:var(--vui-surface-chat)');
+    expect(content?.className).toContain('vui-workbench-pane');
+    expect(content?.className).toContain('!p-0');
     expect(content?.className).toContain('--vui-surface-panel:var(--vui-surface-chat)');
     expect(content?.className).toContain('rounded-[var(--vui-radius-panel-soft)]');
     expect(content?.className).toContain('shadow-none');

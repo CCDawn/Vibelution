@@ -44,6 +44,23 @@ describe("frontend build state markers", () => {
 });
 
 describe("runWithFrontendBuildGate", () => {
+  it("keeps the replacement marker when a cancelled build finishes late", async () => {
+    resetFrontendBuildStateForTests();
+    let finishOld!: () => void;
+    let finishNew!: () => void;
+    const old = runWithFrontendBuildGate("main", { operation: "start" }, () => new Promise<void>((resolve) => { finishOld = resolve; }));
+    const replacement = runWithFrontendBuildGate("main", { operation: "restart" }, () => new Promise<void>((resolve) => { finishNew = resolve; }));
+    const marker = frontendBuildMarker("main");
+    finishOld();
+    await old;
+    expect(peekFrontendBuild("main")).toBe(true);
+    expect(frontendBuildMarker("main")).toBe(marker);
+    expect(marker?.operation).toBe("restart");
+    finishNew();
+    await replacement;
+    expect(peekFrontendBuild("main")).toBe(false);
+  });
+
   it("publishes building before the awaited work settles and clears it afterwards", async () => {
     resetFrontendBuildStateForTests();
     const events: string[] = [];

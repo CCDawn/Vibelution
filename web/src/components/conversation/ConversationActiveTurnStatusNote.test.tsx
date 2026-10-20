@@ -13,6 +13,7 @@ function renderNote(options: {
   message?: Record<string, unknown>;
   streamState?: ActiveTurnStreamState;
   companionMode?: boolean;
+  advisoriesOnly?: boolean;
   lang?: "zh" | "en";
 }) {
   const {
@@ -26,6 +27,7 @@ function renderNote(options: {
       <ConversationActiveTurnStatusNote
         lang={lang}
         companionMode={companionMode}
+        advisoriesOnly={options.advisoriesOnly}
         statusLabel="状态"
         message={message as never}
       />
@@ -34,6 +36,7 @@ function renderNote(options: {
     <ConversationActiveTurnStatusNote
       lang={lang}
       companionMode={companionMode}
+      advisoriesOnly={options.advisoriesOnly}
       statusLabel="状态"
       message={message as never}
     />
@@ -42,6 +45,36 @@ function renderNote(options: {
 }
 
 describe("ConversationActiveTurnStatusNote canonical turn items", () => {
+  it("yields routine thinking to the work disclosure without dropping disconnect feedback", () => {
+    const message = { timestamp: new Date().toISOString(), status: "running", metadata: { processStage: "model_thinking" } };
+    expect(renderNote({ message, advisoriesOnly: true })).toBe("");
+    const disconnected = renderNote({
+      message,
+      advisoriesOnly: true,
+      streamState: {
+        streamConnected: false,
+        streamDisconnectedSinceMs: Date.now() - 12_000,
+        reconnectSessionStream: () => undefined,
+      },
+    });
+    expect(disconnected).toContain("连接已断开，正在重连…");
+    expect(disconnected).toContain('data-testid="active-turn-reconnect"');
+    expect(disconnected).not.toContain("思考中");
+  });
+
+  it("keeps stopping and counted retry feedback when the work disclosure owns progress", () => {
+    const stopping = renderToStaticMarkup(<ConversationActiveTurnStatusNote
+      lang="zh" phase="stopping" advisoriesOnly message={{ status: "running" }}
+    />);
+    expect(stopping).toContain("正在终止");
+    const retry = renderToStaticMarkup(<ConversationActiveTurnStatusNote
+      lang="zh" advisoriesOnly message={{
+        turnItems: [{ type: "retry", status: "running", sequence: 1, revision: 1,
+          attempt: 3, metadata: { maxAttempts: 5 } } as never],
+      }}
+    />);
+    expect(retry).toContain("第 3/5 次重试");
+  });
   it("uses one unlabeled typing affordance for companion mode", () => {
     const html = renderToStaticMarkup(
       <ConversationActiveTurnStatusNote

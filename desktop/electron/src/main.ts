@@ -124,6 +124,7 @@ import {
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
 import { captureTrackedWorkbenchJobRetirement } from "./process/workbenchJob.js";
+import { captureFrontendBuildRetirement } from "./process/ownedFrontendBuildBridge.js";
 import { waitForPortRelease } from "./process/workbenchBackendRetire.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import {
@@ -173,6 +174,7 @@ import {
   decidePeriodicDesktopShellRefresh,
   shouldProbePeriodicDesktopShell,
   inspectDesktopShell,
+  inspectDesktopShellLaunchReadiness,
   inspectUnpackagedShell,
   scheduleDesktopShellRefresh,
   ensureLatestLauncher,
@@ -180,7 +182,8 @@ import {
   shouldInspectDesktopShellBeforeLifecycle,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli,
-  type DesktopShellStatus
+  type DesktopShellStatus,
+  type DesktopShellLaunchReadiness
 } from "./process/desktopShellFreshness.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
@@ -287,7 +290,6 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
-const WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS = ACTIVE_WORK_STATUS_TIMEOUT_MS * 1.5;
 const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
 const DESKTOP_QUIT_TOTAL_BUDGET_MS = 30_000;
 const PERIODIC_SHELL_FRESHNESS_MS = 5 * 60_000;
@@ -372,7 +374,9 @@ const launcherStateStore = new LauncherStateStore(
     freshness: { current: null, label: "Launcher 代码版本：未知" }
   }
 );
-const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
+const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 1_800;
+const WORKBENCH_CLOSE_FORCE_AFTER_MS = 1_200;
+const WORKBENCH_CLOSE_TOTAL_WAIT_MS = 2_000;
 const WORKBENCH_START_READY_WAIT_MS = 90_000;
 const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
@@ -1411,86 +1415,33 @@ async function requestTransactionalWorkbenchClose(
     throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
   }
   const requestedAtMs = performance.now();
+  const requestedAt = Date.now();
+  const fastCloseTiming = process.platform === "win32"
+    ? { deadlineAt: requestedAt + WORKBENCH_CLOSE_BACKEND_WAIT_MS, forceAt: requestedAt + WORKBENCH_CLOSE_FORCE_AFTER_MS }
+    : undefined;
+  const retireFrontendBuilds = captureFrontendBuildRetirement(paths.workspaceRoot);
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
+    const projectionEpoch = launcherStateStore.beginMainLifecycle("force-stop");
     const preparationStartedAtMs = performance.now();
     const queuedMs = Math.max(0, Math.round(preparationStartedAtMs - requestedAtMs));
     const desktopSessionId = currentDesktopSessionId(bootstrap, desktopEnvironment());
-    let activeWorkState: ActiveWorkProbeState = "unknown";
-    let probeAttempts = 0;
-    let probeFailure = "";
-    // Preserve the original first-probe allowance; recovery shares a bounded
-    // extra half-step instead of doubling every close-stage timeout.
-    const probeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_ACTIVE_WORK_BUDGET_MS);
-    try {
-      const probe = (forceControlTokenRefresh: boolean) => withDesktopShellExitTimeout(async (attemptSignal) => {
-        const signal = AbortSignal.any([attemptSignal, probeDeadline.signal]);
-        signal.throwIfAborted();
-        probeAttempts += 1;
-        const context = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh, signal });
-        signal.throwIfAborted();
-        return await fetchLauncherActiveWorkStatus({ ...context, signal });
-      }, Math.max(1, Math.min(ACTIVE_WORK_STATUS_TIMEOUT_MS, probeDeadline.remainingMs())),
-      "resolve launcher active work status for workbench close");
-      const status = await withDesktopShellExitTimeout(
-        () => resolveQuitActiveWorkStatus({
-          probe: () => probe(false),
-          recoverAndRetry: () => probe(true)
-        }),
-        probeDeadline,
-        "resolve launcher active work status for workbench close"
-      );
-      activeWorkState = status.state;
-      if (status.state === "unknown") {
-        probeFailure = isActiveWorkProbeAuthFailure(status.message) ? "authorization" : "unknown_projection";
-      }
-    } catch (error: unknown) {
-      activeWorkState = "unknown";
-      probeFailure = isActiveWorkProbeAuthFailure(error) ? "authorization"
-        : String(error).includes("timed out") ? "timeout" : "unavailable";
-    } finally {
-      probeDeadline.dispose();
-    }
-    const activeWorkProbeMs = Math.max(0, Math.round(performance.now() - preparationStartedAtMs));
-    recordSupervisorEventFallbackLocally({
-      eventCode: "electron.workbench_close.active_work_checked",
-      message: "Workbench close active-work check settled.",
-      fields: { desktopSessionId, activeWorkState, probeAttempts, probeFailure, activeWorkProbeMs }
-    });
+    // Explicit project close interrupts work and attempts saving immediately.
+    // A status probe is advisory and must never consume the close budget.
+    const activeWorkState: ActiveWorkProbeState = "unknown";
+    const activeWorkProbeMs = 0;
     let transaction = mainWorkbenchCloseStore.submit({
-      mode: "normal",
+      mode: "force",
+      requestId: randomUUID(),
       reason: "workbench_window_close",
       activeWorkState
     });
-    if (transaction.phase === "confirmation_required") {
-      const confirmed = await confirmWorkbenchForceClose(provider, transaction.activeWorkState);
-      if (!confirmed) {
-        mainWorkbenchCloseStore.fail(
-          transaction.closeId,
-          "user_cancelled",
-          "Workbench close was cancelled while active work was present."
-        );
-        recordSupervisorEventFallbackLocally({
-          eventCode: "electron.workbench_close.cancelled_active_work",
-          message: "Workbench close was cancelled while active work was present.",
-          fields: {
-            closeId: transaction.closeId,
-            requestId: transaction.requestId ?? "",
-            desktopSessionId,
-            operatorIntent: "keep_running",
-            activeWorkState: transaction.activeWorkState,
-            elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
-          }
-        });
-        return;
-      }
-      transaction = mainWorkbenchCloseStore.confirm(transaction.closeId, transaction.requestId!);
-    }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
       desktopSessionId,
       requestedAtMs
     };
-    const closeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+    const closeDeadline = createDesktopShellExitDeadline(fastCloseTiming
+      ? Math.max(1, fastCloseTiming.deadlineAt - Date.now()) : 30_000);
     let backendStopMs = 0;
     let readbackMs = 0;
     const backendStopFlight = withDesktopShellExitTimeout(async (signal): Promise<boolean> => {
@@ -1511,7 +1462,11 @@ async function requestTransactionalWorkbenchClose(
       signal.throwIfAborted();
       const stopStartedAtMs = performance.now();
       try {
-        await stopWorkbenchBackend(paths, bootstrap, transaction, signal);
+        const [, buildsRetired] = await Promise.all([
+          stopWorkbenchBackend(paths, bootstrap, transaction, signal, fastCloseTiming),
+          retireFrontendBuilds()
+        ]);
+        if (!buildsRetired) throw new Error("Owned frontend build processes did not retire before window authorization.");
       } finally {
         backendStopMs = Math.max(0, Math.round(performance.now() - stopStartedAtMs));
         recordSupervisorEventFallbackLocally({
@@ -1522,15 +1477,7 @@ async function requestTransactionalWorkbenchClose(
       }
       const readbackStartedAtMs = performance.now();
       const settled = await waitForWorkbenchBackendSettledForWindowClose({
-        readStatus: async () => {
-          try {
-            const context = await resolveDesktopActionLoopContext(bootstrap, { signal });
-            return await fetchLauncherStatusSummary({ ...context, signal });
-          } catch {
-            signal.throwIfAborted();
-            return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
-          }
-        },
+        readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot),
         timeoutMs: closeDeadline.remainingMs(),
         signal
       });
@@ -1558,6 +1505,10 @@ async function requestTransactionalWorkbenchClose(
         workbenchCloseBackendStopInFlight = null;
       }
     }
+    if (!launcherStateStore.commitVerifiedMainClosed(projectionEpoch)) {
+      mainWorkbenchCloseStore.fail(transaction.closeId, "lifecycle_intent_superseded", "A newer main lifecycle intent superseded this close.");
+      return;
+    }
     transaction = mainWorkbenchCloseStore.backendStopped(transaction.closeId);
     recordSupervisorEventFallbackLocally({
       eventCode: "electron.workbench_close.window_authorized",
@@ -1573,7 +1524,8 @@ async function requestTransactionalWorkbenchClose(
         elapsedMs: Math.max(0, Math.round(performance.now() - requestedAtMs))
       }
     });
-    await provider.approveWorkbenchCloseOnce();
+    await provider.approveWorkbenchCloseOnce(fastCloseTiming
+      ? { deadlineAt: requestedAt + WORKBENCH_CLOSE_TOTAL_WAIT_MS } : {});
   });
 }
 
@@ -1581,7 +1533,8 @@ async function stopWorkbenchBackend(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
   transaction: MainWorkbenchCloseTransaction,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fastCloseTiming?: { deadlineAt: number; forceAt: number }
 ): Promise<void> {
   void paths;
   void bootstrap;
@@ -1603,7 +1556,7 @@ async function stopWorkbenchBackend(
     // A force close is an explicitly confirmed destructive operator intent and
     // keeps the original supersede semantics; a normal window close must not
     // abort an in-flight restart.
-  }, transaction.mode === "force" ? "operator" : "window-close", signal);
+  }, transaction.mode === "force" ? "operator" : "window-close", signal, fastCloseTiming);
   if (!result.accepted) {
     throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
   }
@@ -1801,28 +1754,6 @@ async function handleTransactionalWorkbenchCloseFailure(
   }, 0);
 }
 
-async function confirmWorkbenchForceClose(
-  provider: ElectronWindowProvider,
-  activeWorkState: ActiveWorkProbeState
-): Promise<boolean> {
-  const statusUnknown = activeWorkState === "unknown";
-  const options = {
-    type: "warning" as const,
-    title: statusUnknown ? "无法确认任务状态" : "仍有进行中的任务",
-    message: statusUnknown
-      ? "当前无法确认是否有任务运行，强制关闭可能中断任务。"
-      : "关闭工作台会中断正在运行的任务。",
-    detail: "选择“继续运行”会保留窗口、后端和当前任务；只有再次确认才会强制关闭。",
-    buttons: ["继续运行", "停止任务并关闭"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true
-  };
-  const parent = provider.workbenchDialogParent() as unknown as BrowserWindow | null;
-  const response = parent === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(parent, options);
-  return response.response === 1;
-}
-
 function launcherLifecyclePayloadBody(payload: LauncherIpcInvokePayload): Record<string, unknown> {
   const body = payload.init?.body;
   return typeof body === "object" && body !== null && !Array.isArray(body)
@@ -1913,7 +1844,7 @@ async function authorizeLauncherForceLifecycle(input: {
     },
     confirm: confirmLauncherForceLifecycle,
     record: async (authorization) => {
-      await recordElectronSupervisorEvent(launcherBootstrap, {
+      const event = {
         eventCode: "electron.lifecycle.force_authorized",
         message: "Operator confirmed a force Launcher lifecycle operation.",
         fields: {
@@ -1924,7 +1855,12 @@ async function authorizeLauncherForceLifecycle(input: {
           activeWorkState: authorization.probeState,
           activeWorkMessage: authorization.probeMessage.slice(0, 300)
         }
-      });
+      };
+      if (preconfirmedCloseAuthorization(input.instanceId, input.payload)) {
+        recordSupervisorEventFallbackLocally(event);
+      } else {
+        await recordElectronSupervisorEvent(launcherBootstrap, event);
+      }
     }
   });
 }
@@ -2110,6 +2046,16 @@ async function packagedDesktopShellIsStale(): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+async function inspectCurrentDesktopShellLaunchReadiness(signal?: AbortSignal): Promise<DesktopShellLaunchReadiness> {
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to inspect the desktop shell");
+  return await inspectDesktopShellLaunchReadiness({
+    workspaceRoot: createDesktopPathsForApp().workspaceRoot,
+    pythonPath,
+    signal
+  });
 }
 
 async function scheduleCurrentDesktopShellRefresh(
@@ -3545,7 +3491,8 @@ async function orchestrateLauncherLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload,
   provenance: LauncherLifecycleProvenance = "operator",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fastCloseTiming?: { deadlineAt: number; forceAt: number }
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -3572,71 +3519,70 @@ async function orchestrateLauncherLifecycle(
   let frontendCheckedForReuse = false;
   let shellStale = false;
 
-  if (startsWorkbench) {
-    // A live backend can bypass the mutation, so verify its release here.
-    // Cold starts and restarts verify inside the queued mutation instead,
-    // keeping one full fingerprint scan at the actual startup boundary.
-    if (supervisedOperation === "start" && windowProvider !== null
-      && await mainLineBackendIsReachable(paths.workspaceRoot)) {
-      const frontend = await runWithFrontendBuildGate(
-        "main",
-        { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
-        () => ensureFrontendRelease({
-          workspaceRoot: paths.workspaceRoot,
-          pythonPath,
-          signal
-        })
-      );
-      frontendReleaseChanged = !frontend.skipped;
-      frontendCheckedForReuse = true;
-    }
-    if (!app.isPackaged) {
-      try {
-        const shell = await inspectUnpackagedShell({
-          workspaceRoot: paths.workspaceRoot,
-          pythonPath
-        });
-        shellStale = shell.stale && shell.reason !== "missing_binary";
-      } catch (error: unknown) {
-        console.warn(error instanceof Error ? error.message : String(error));
-      }
-    }
-  }
-
+  // Claim cancellation before frontend preflight: a close must also supersede
+  // a build that has not reached the serialized backend mutation yet.
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
   const stopJoinDecision = joinDecisionForLauncherLifecycleStop(operation, provenance);
   if (stopJoinDecision.waitForInFlightRestart) {
-    // A window-level stop must not abort an in-flight restart or
-    // rebuild-and-start; wait for the mutation to settle first, then stop the
-    // (restarted) backend.
     await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS, signal);
   }
   signal?.throwIfAborted();
   const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
-    {
-      instanceId: "main",
-      operation: lifecycleOperation,
-      desiredState
-    },
+    { instanceId: "main", operation: lifecycleOperation, desiredState },
     { joinInFlightRestart: stopJoinDecision.joinInFlightRestart }
   );
   if (begunIntent.outcome === "joined-in-flight-restart") {
-    // A forwarded stop never aborts an in-flight restart or rebuild-and-start;
-    // report it as accepted so the forwarding side settles without a failure,
-    // while the running mutation keeps going to completion.
     return {
-      schemaVersion: 1,
-      accepted: true,
-      operation,
-      commandId: randomUUID(),
+      schemaVersion: 1, accepted: true, operation, commandId: randomUUID(),
       code: "joined_in_flight_restart",
       message: "在途 Launcher restart/rebuild-and-start 正在执行；本次转发的 stop 未中断它。"
     };
   }
   const intentLease = begunIntent.lease;
+  if (startsWorkbench) launcherStateStore.beginMainLifecycle(supervisedOperation);
   const lifecycleSignal = signal
     ? AbortSignal.any([signal, intentLease.signal])
     : intentLease.signal;
+
+  try {
+    if (startsWorkbench) {
+      // A live backend can bypass the mutation, so verify its release here.
+      // Cold starts and restarts verify inside the queued mutation instead,
+      // keeping one full fingerprint scan at the actual startup boundary.
+      if (supervisedOperation === "start" && windowProvider !== null
+        && await mainLineBackendIsReachable(paths.workspaceRoot)) {
+        const frontend = await runWithFrontendBuildGate(
+          "main",
+          { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
+          () => ensureFrontendRelease({
+            workspaceRoot: paths.workspaceRoot,
+            pythonPath,
+            signal: lifecycleSignal
+          })
+        );
+        frontendReleaseChanged = !frontend.skipped;
+        frontendCheckedForReuse = true;
+      }
+      lifecycleSignal.throwIfAborted();
+      if (!app.isPackaged) {
+        try {
+          const shell = await inspectUnpackagedShell({
+            workspaceRoot: paths.workspaceRoot,
+            pythonPath,
+            signal: lifecycleSignal
+          });
+          shellStale = shell.stale && shell.reason !== "missing_binary";
+        } catch (error: unknown) {
+          console.warn(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    lifecycleSignal.throwIfAborted();
+  } catch (error: unknown) {
+    launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+    throw error;
+  }
   if (supervisedOperation === "start" && windowProvider !== null) {
     // Advisory packaged staleness (the sealed frontend hash differs, but the
     // shell is still usable) must not turn "open the workbench" into a restart.
@@ -3645,7 +3591,10 @@ async function orchestrateLauncherLifecycle(
     // and falls through to the existing refresh gate.
     let packagedShellBlocksReuse = false;
     let packagedShellAdvisoryStale = false;
-    if (app.isPackaged) {
+    // This probe only decides whether an already verified live backend can
+    // bypass the mutation. Otherwise the final shell gate below is sufficient;
+    // each full shell inspection also scans the frontend build inputs.
+    if (app.isPackaged && frontendCheckedForReuse && !frontendReleaseChanged) {
       try {
         const status = await inspectCurrentDesktopShell();
         packagedShellBlocksReuse = Boolean(status.launchBlocking);
@@ -3713,7 +3662,7 @@ async function orchestrateLauncherLifecycle(
   });
   if (shouldInspectDesktopShellBeforeLifecycle(lifecycleOperation, app.isPackaged)) {
     try {
-      const status = await inspectCurrentDesktopShell();
+      const status = await inspectCurrentDesktopShellLaunchReadiness(lifecycleSignal);
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
@@ -3755,6 +3704,8 @@ async function orchestrateLauncherLifecycle(
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
+      ...(fastCloseTiming && preconfirmedCloseAuthorization("main", payload)
+        ? { fastCloseTiming, controlToken: desktopActionContext?.controlToken } : {}),
       // Never cache the earlier reuse probe: queueing can overlap source
       // changes, and a rejected reuse must revalidate before spawning.
       ensureFrontend: async ({ signal: buildSignal }) => {
@@ -4911,7 +4862,7 @@ function scheduleLauncherStateFileHint(): void {
 function startLauncherStateFileHints(paths: DesktopPaths): void {
   stopLauncherStateFileHints();
   const localAppData = String(desktopEnvironment().LOCALAPPDATA || "").trim();
-  const runtimeDir = resolve(paths.workspaceRoot, ".runtime", "launcher");
+  const runtimeDir = dirname(launcherStatePath(paths.workspaceRoot));
   const statTargets = [
     resolve(runtimeDir, "state.json"),
     resolve(runtimeDir, "ports.json"),
@@ -4928,7 +4879,13 @@ function startLauncherStateFileHints(paths: DesktopPaths): void {
   }
   for (const target of watchTargets) {
     try {
-      const watcher = watch(target, { persistent: false }, () => scheduleLauncherStateFileHint());
+      const watcher = watch(target, { persistent: false }, (_event, filename) => {
+        // Runtime logs and atomic-write temporary files share this directory.
+        // Only finalized state/port observations should trigger inventory work.
+        if (target === runtimeDir && filename !== null
+          && !["state.json", "ports.json"].includes(filename.toString())) return;
+        scheduleLauncherStateFileHint();
+      });
       watcher.on("error", () => undefined);
       launcherStateWatchers.push(watcher);
     } catch {

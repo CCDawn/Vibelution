@@ -9,6 +9,7 @@ import {
   shouldProbePeriodicDesktopShell,
   formatTrayLauncherFreshness,
   inspectDesktopShell,
+  inspectDesktopShellLaunchReadiness,
   parseDesktopShellStatus,
   scheduleDesktopShellRefresh,
   ensureLatestLauncher,
@@ -260,6 +261,31 @@ describe("desktop shell freshness", () => {
     const inspectSource = source.slice(start, end);
     expect(inspectSource).toContain("timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS");
     expect(inspectSource).not.toContain("PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS");
+  });
+
+  it("reads launch readiness through a hidden read-only Python bridge", async () => {
+    const spawnImpl = fakeSpawnWithOutput(JSON.stringify({
+      schemaVersion: 1, launchBlocking: false, reason: "active_frontend_release"
+    }));
+    const result = await inspectDesktopShellLaunchReadiness({
+      workspaceRoot: "C:/repo", pythonPath: "C:/repo/.venv/Scripts/python.exe", spawnImpl
+    });
+    expect(result).toEqual({ schemaVersion: 1, launchBlocking: false, reason: "active_frontend_release" });
+    const [, args, options] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(args[0]).toBe("-c");
+    expect(args[1]).toContain("inspect_desktop_shell_launch_readiness");
+    expect(args.at(-1)).toBe("C:/repo");
+    expect(options.windowsHide).toBe(true);
+  });
+
+  it.each([
+    { schemaVersion: 1, reason: "missing_blocking_field" },
+    { schemaVersion: 1, launchBlocking: "false", reason: "invalid_boolean" },
+    { schemaVersion: 2, launchBlocking: false, reason: "invalid_schema" },
+  ])("rejects malformed launch readiness %j", async (payload) => {
+    await expect(inspectDesktopShellLaunchReadiness({
+      workspaceRoot: "C:/repo", pythonPath: "python.exe", spawnImpl: fakeSpawnWithOutput(JSON.stringify(payload))
+    })).rejects.toThrow("invalid result shape");
   });
 
   it("schedules a detached refresh helper with the live Electron pid", async () => {

@@ -3080,7 +3080,8 @@ def _source_collection_stage_session_task_message(
             "- 如果任一检查项无法完成，不要自然语言声称完成；调用 `source_collection_stage_writeback_tool` 写入 blocked/failed/needs_review 和失败原因。",
             "",
             "## 执行要求",
-            f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
+            f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`（这组参数只属于读取工具；`stage_id`/`run_id` 等不要带入写回工具）。",
+            "- 写回用 `source_collection_stage_writeback_tool`，其参数只有：`team_id`、`task_id`、`status`、`summary`、`result_json`、`evidence_refs_json`、`next_actions_json`、`recorded_by_agent`、`metadata_json`；没有 `stage_id` 参数。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             (
                 "- 本轮是覆盖缺口重试：`context_mode=retry_missing` 只返回上一轮未覆盖 ID；只补 `retryFocus.missingCandidateIds` / `missingRecordIds`，不要重做已处理资料。"

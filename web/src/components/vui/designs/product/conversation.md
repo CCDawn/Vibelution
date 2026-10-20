@@ -122,6 +122,8 @@
 ### 功能
 运行中回合的紧凑状态行：一条心跳文案（阶段 + 秒数/重试进度），并叠加流连通性提示——连接断开重连、长时间无输出可停止、备用模型路由切换。让 SSE 断流与输出停滞从"无限累加的秒数"升级为可读的轻量提示。断流提示附一个「重新连接」小 ghost 按钮：自动重连卡住（keep-warm 租约异常、浏览器挂起恢复）时用户可手动触发硬重连。
 
+普通对话已有可见原生过程记录时，由现有 `ConversationProcessDisclosure` 的同一个展开入口承载「工作中 / 已工作」、工作耗时与步骤数，不再叠加常规阶段心跳。运行时的工作耗时从服务端 `turnStartedAt`（缺省为消息 timestamp）计算，跨思考与工具阶段连续增长；没有有效起点时只显示「工作中」，不拿工具耗时之和冒充总时长。落定后继续使用现有权威 work summary。`advisoriesOnly` 只抑制常规心跳，停止、可见重试、断线重连、停滞和备用路由提示仍保留。思考片段继续使用自身的展开入口与片段耗时；commentary 是用户可见进展，最终回答仍在过程记录之外。
+
 ### 适用范围
 - **适用**：直连会话活跃回合的状态占位（`ConversationView` 时间线内）；需要流连通性可见性的位置。
 - **不适用**：陪伴模式（`companionMode` 收敛为单一 typing 提示，不渲染提示条）；群聊房间（走 `ChatGroupMessageStream` 自身的断线文案）。
@@ -144,6 +146,7 @@
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
 | message | 活跃回合消息（turnItems/timestamp/可选 routeFallback） | routeFallback 缺字段则整条不渲染 |
+| advisoriesOnly | 已有过程摘要时仅显示异常或停止反馈 | 无提示时不渲染空占位；不改变 Companion typing 语义 |
 | lang | 语言 | 新文案一律走 `dictionaryChat`，禁止内联三目 |
 | streamState（context） | `streamConnected` 三态 + 断连起点 + 最近 delta 时间 + `reconnectSessionStream` 回调 | 不是第二套状态通道，只是 `useSessionDetailStream` 状态的跨层投影 |
 
@@ -1101,6 +1104,8 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 - 禁止为 live tail 另开第二套行内渲染或样式 map；新增行内语法只在 `conversationInlineMarkdown` 一处扩展。
 
 ## ConversationTurnModelControl
+
+只读会话不显示此模型参数控件，也不读取当前模型或预算参数；必须先取得当前会话的完整、可写详情后才启用这些请求。所属助手已归档时，输入区说明“所属助手已归档，此会话仅供查看”。打开历史不解除归档、不修改会话记录，普通可写会话保持原有操作。
 
 ### 功能
 普通 Agent 会话的 composer 工具栏展示当前 Agent 绑定的对话模型。点击模型名旁的参数图标，只能为当前绑定模型编辑上下文窗口和思考强度；不展示模型目录、候选列表或模型切换入口。模型绑定仍由 Agent 管理页现有的 `AgentModelPicker` 修改。`/模型` 导航到当前 Agent 的配置页，并保留返回当前会话的路径。

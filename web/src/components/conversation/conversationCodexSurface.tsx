@@ -21,6 +21,7 @@ import {
 } from "./conversationInternalStatus";
 import { isAgentInboxMessage, isGroupRoomTranscriptMessage, isTurnErrorMessage } from "./conversationMessagePredicates";
 import { resolveConversationTurnWorkSummary } from "./conversationTurnWorkStatus";
+import { resolveActiveTurnProgressStage } from "./conversationActiveTurnStatusPresentation";
 import { conversationChangedFilesFromMetadata, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
 import { buildConversationToolActivityDetailRows } from "./conversationToolActivityDetail";
 import { buildTurnErrorDiagnosticRows } from "./conversationTurnErrorPresentation";
@@ -60,6 +61,7 @@ type ResponseBlocks = Pick<
 
 export type ConversationCodexSurfaceDeps = CodexCellRenderers & CodexToolDetails & ResponseBlocks & {
   lang: "zh" | "en";
+  phase?: string;
   sessionId: string;
   toolApproval: ConversationToolApprovalSurface | null;
   toolApprovalConsumedRef: RefObject<boolean>;
@@ -82,6 +84,7 @@ export type ConversationCodexSurfaceDeps = CodexCellRenderers & CodexToolDetails
  */
 export function createConversationCodexSurface({
   lang,
+  phase = "",
   sessionId,
   toolApproval,
   toolApprovalConsumedRef,
@@ -452,19 +455,22 @@ export function createConversationCodexSurface({
       && !assistantTurnIsStreaming(message)
       ? resolveConversationTurnWorkSummary(message)
       : null;
-    return (
+    const hasWorkDisclosure = processCells.length > 0 || Boolean(transcriptWorkSummary);
+    const node = (
       <div
         className={styles.codexTranscriptSurface}
         data-codex-transcript-surface="true"
         data-conversation-part-key={`${rowIdentity.messageKey}:codex-transcript`}
       >
-        {processCells.length > 0 || transcriptWorkSummary ? (
+        {hasWorkDisclosure ? (
           <ConversationProcessDisclosure
             cells={processCells}
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
             turnStreaming={assistantTurnIsStreaming(message)}
+            turnStartedAt={(message as ConversationMessage & { turnStartedAt?: string }).turnStartedAt || message.timestamp}
+            activeStage={phase === "stopping" ? "stopping" : resolveActiveTurnProgressStage(message)}
             workSummary={transcriptWorkSummary}
           >
             {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
@@ -493,6 +499,7 @@ export function createConversationCodexSurface({
         ) : null}
       </div>
     );
+    return { hasWorkDisclosure, node };
   }
 
   return {
