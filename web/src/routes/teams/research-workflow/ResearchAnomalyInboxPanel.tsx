@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  executeAnomalyInboxHumanGateAction,
   executeHypothesisFirstInboxExtendBudget,
   fetchHypothesisFirstAnomalyInbox,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import type {
   AnomalyInboxExtendBudgetAction,
+  AnomalyInboxHumanGateAction,
   AnomalyInboxItem,
   AnomalySeverity,
 } from "../../../api/types/hypothesisFirst";
@@ -129,9 +131,7 @@ type AnomalyInboxExtendCtaProps = {
   zh: boolean;
   /** Fires after a confirmed execution so the parent refreshes the inbox. */
   onExtended: () => void;
-};
-
-/**
+};/**
  * One-click extend CTA (误触防护): the amount is displayed up front, the
  * first click only arms the confirmation, and the execution itself sends the
  * explicit `confirmed: true` flag — the server refuses anything else (428).
@@ -223,6 +223,113 @@ export function AnomalyInboxExtendCta({
       {errorText ? (
         <span className={styles.ctaError} data-testid="anomaly-extend-error">
           {zh ? "补预算失败：" : "Top-up failed: "}
+          {errorText}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+type AnomalyInboxHumanGateCtaProps = {
+  teamId: string;
+  /** One entry per decision variant (accept / reject), server-built. */
+  actions: AnomalyInboxHumanGateAction[];
+  zh: boolean;
+  /** Fires after a confirmed decision so the parent refreshes the inbox. */
+  onResolved: () => void;
+};
+
+/**
+ * Inline accept/reject CTA for needs_human_gate rows (误触防护): accept submits
+ * directly through the action's own confirmation endpoint; reject first arms
+ * an inline confirmation, mirroring the extend-budget CTA interaction.
+ */
+export function AnomalyInboxHumanGateCta({
+  teamId,
+  actions,
+  zh,
+  onResolved,
+}: AnomalyInboxHumanGateCtaProps) {
+  const [armedDecision, setArmedDecision] = useState<string | null>(null);
+  const [executing, setExecuting] = useState(false);
+  const [errorText, setErrorText] = useState("");
+
+  function labelFor(action: AnomalyInboxHumanGateAction): string {
+    const label = String(action.label || "").trim();
+    if (label) return label;
+    return action.decision === "accept" ? (zh ? "接受" : "Accept") : (zh ? "驳回" : "Reject");
+  }
+
+  async function execute(action: AnomalyInboxHumanGateAction) {
+    if (executing) return;
+    setExecuting(true);
+    setErrorText("");
+    try {
+      await executeAnomalyInboxHumanGateAction(teamId, action);
+      setArmedDecision(null);
+      onResolved();
+    } catch (reason) {
+      setErrorText(errorMessage(reason));
+    } finally {
+      setExecuting(false);
+    }
+  }
+
+  return (
+    <span className={styles.cta} data-testid="anomaly-human-gate-cta">
+      {actions.map((action) => {
+        const label = labelFor(action);
+        const needsConfirm = action.decision !== "accept";
+        const armed = needsConfirm && armedDecision === action.decision;
+        if (!armed) {
+          return (
+            <VButton
+              key={action.decision}
+              type="button"
+              variant="secondary"
+              density="compact"
+              isDisabled={executing}
+              data-testid={`anomaly-human-gate-${action.decision}`}
+              onClick={() => {
+                if (needsConfirm) {
+                  setArmedDecision(action.decision);
+                  return;
+                }
+                void execute(action);
+              }}
+            >
+              {executing ? (zh ? "提交中…" : "Submitting…") : label}
+            </VButton>
+          );
+        }
+        return (
+          <span key={action.decision} className={styles.ctaAmount}>
+            <VButton
+              type="button"
+              variant="danger"
+              density="compact"
+              isDisabled={executing}
+              data-testid="anomaly-human-gate-confirm"
+              onClick={() => void execute(action)}
+            >
+              {zh ? `确认${label}` : `Confirm ${label}`}
+            </VButton>
+            <VButton
+              type="button"
+              variant="ghost"
+              density="compact"
+              isDisabled={executing}
+              data-testid="anomaly-human-gate-cancel"
+              onClick={() => setArmedDecision(null)}
+            >
+              {zh ? "取消" : "Cancel"}
+            </VButton>
+          </span>
+        );
+      })}
+      {errorText ? (
+        <span className={styles.ctaError} data-testid="anomaly-human-gate-error">
+          {zh ? "审批失败：" : "Approval failed: "}
           {errorText}
         </span>
       ) : null}
@@ -335,9 +442,12 @@ export function ResearchAnomalyInboxPanel({
               <ul className={styles.list}>
                 {group.items.map((item) => {
                   const action = item.action ?? null;
+                  const gateActions = item.actions ?? [];
                   // A row with an interactive CTA must not nest buttons inside
                   // the row-level click-through button, so it renders plain.
-                  const link = onOpenItem && !action ? anomalyInboxDeepLink(item, normalizedQuestionId) : null;
+                  const link = onOpenItem && !action && gateActions.length === 0
+                    ? anomalyInboxDeepLink(item, normalizedQuestionId)
+                    : null;
                   const scopeText = anomalyInboxScopeText(item, zh);
                   const key = `${anomalyItemKey(item)}:${item.lastSeenAt}`;
                   const body = (
@@ -358,6 +468,21 @@ export function ResearchAnomalyInboxPanel({
                           action={action}
                           zh={zh}
                           onExtended={() => {
+                            void queryClient.invalidateQueries({
+                              queryKey: queryKeys.hypothesisFirstChainAnomalyInbox(
+                                teamId,
+                                normalizedQuestionId,
+                              ),
+                            });
+                          }}
+                        />
+                      ) : null}
+                      {gateActions.length > 0 ? (
+                        <AnomalyInboxHumanGateCta
+                          teamId={teamId}
+                          actions={gateActions}
+                          zh={zh}
+                          onResolved={() => {
                             void queryClient.invalidateQueries({
                               queryKey: queryKeys.hypothesisFirstChainAnomalyInbox(
                                 teamId,

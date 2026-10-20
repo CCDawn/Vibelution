@@ -1,6 +1,9 @@
 """Attention aggregation sources feed the assistant overview without side effects."""
 
 
+import dataclasses
+
+
 import json
 
 
@@ -16,6 +19,11 @@ from core.research.workflow.contracts.anomaly_inbox import (
     AnomalyInboxScope,
 
 )
+
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+from core.research.workflow.definition_registry import register_or_resolve
+
 
 from core.web.app import create_app
 
@@ -39,9 +47,27 @@ from core.web.services.team_workflow.research_runtime import (
 
     anomaly_inbox_service,
 
+    formal_read_runtime,
+
     hypothesis_first_chain,
 
     hypothesis_first_state_v2,
+
+)
+
+from tests._support.workflow_ledger_helpers import (
+
+    FIXED_NOW_MS,
+
+    build_attempt_record,
+
+    build_command_record,
+
+    build_event_record,
+
+    build_run_record,
+
+    open_ledger_store,
 
 )
 
@@ -956,3 +982,195 @@ def test_overview_attaches_affair_reminders_without_touching_session_attention(m
     attached = attention.attach_attention_to_overview(payload)
     assert attached["humanAttention"] == [reminder]
     assert attached["attention"] == []
+
+
+# -- 研究工作流人工门（ledger pending human tasks → humanAttention） ----------
+
+
+def _ledger_store_with_human_gate(
+    tmp_path,
+    *,
+    run_status: str = "waiting_human",
+    team_id: str = "research-team",
+    task_id: str = "ht-gate-1",
+):
+    """Real ledger: one run + waiting node attempt + pending human task."""
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    definition = build_challenge_cup_workflow_definition()
+    identity = register_or_resolve(definition)
+    run = dataclasses.replace(
+        build_run_record(
+            run_id="run-gate",
+            team_id=team_id,
+            status=run_status,
+            last_event_sequence=1,
+        ),
+        workflow_id=definition.workflowId,
+        workflow_version_id=identity.workflowVersionId,
+        structure_hash=identity.structureHash,
+    )
+    attempt = build_attempt_record(
+        node_run_id="nr-gate-1",
+        run_id="run-gate",
+        node_id="problem_understanding",
+        status="waiting_human",
+    )
+    command = build_command_record(
+        command_id="cmd-gate-1",
+        run_id="run-gate",
+        node_id="problem_understanding",
+    )
+    attempt = dataclasses.replace(attempt, command_id="cmd-gate-1")
+
+    def mutate(uow):
+        uow.repository.insert_run(run)
+        uow.repository.insert_event(
+            build_event_record(1, run_id="run-gate", event_id="evt-created-run-gate")
+        )
+        uow.repository.insert_command(command)
+        uow.repository.insert_attempt(attempt)
+        uow.repository.insert_human_task(
+            task_id=task_id,
+            run_id="run-gate",
+            node_run_id="nr-gate-1",
+            handoff_id=None,
+            task_kind="knowledge_gate",
+            prompt_json="{}",
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+    store.submit(mutate, force_flush=True).result(timeout=10)
+    return store
+
+
+def _patch_read_store(monkeypatch, store) -> None:
+    monkeypatch.setattr(formal_read_runtime, "get_formal_read_store", lambda: store)
+
+
+def test_human_gate_attention_exposes_pending_ledger_gate_rows(
+    personal_env, monkeypatch, tmp_path
+):
+    _patch_formal_root(monkeypatch, tmp_path)
+    store = _ledger_store_with_human_gate(tmp_path)
+    try:
+        _patch_read_store(monkeypatch, store)
+        _patch_teams(monkeypatch, _team("research-team"))
+        entries = attention._collect_human_gate_attention()
+        assert [row["id"] for row in entries] == ["human-gate:ht-gate-1"]
+        row = entries[0]
+        assert row["kind"] == "human_gate"
+        assert row["severity"] == "high"
+        assert row["title"] == "研究工作流等待人工审批"
+        # run 标题降级链：questionId（SCI-096）优先；节点标签来自固定定义。
+        assert row["body"] == "SCI-096 · 问题理解 等待人工确认"
+        assert "teamId=research-team" in row["targetUrl"]
+        assert "runId=run-gate" in row["targetUrl"]
+        assert "node=problem_understanding" in row["targetUrl"]
+        assert "panel=node" in row["targetUrl"]
+        assert row["actions"] == [
+            {"label": "接受", "decision": "accept"},
+            {"label": "驳回", "decision": "reject"},
+        ]
+        assert row["meta"] == {
+            "teamId": "research-team",
+            "runId": "run-gate",
+            "nodeId": "problem_understanding",
+            "taskId": "ht-gate-1",
+            "decisions": ["accept", "reject", "revise"],
+        }
+        # id 跨轮询稳定
+        assert attention._collect_human_gate_attention() == entries
+    finally:
+        store.close()
+
+
+def test_human_gate_attention_disappears_after_resolve(
+    personal_env, monkeypatch, tmp_path
+):
+    _patch_formal_root(monkeypatch, tmp_path)
+    store = _ledger_store_with_human_gate(tmp_path)
+    try:
+        _patch_read_store(monkeypatch, store)
+        _patch_teams(monkeypatch, _team("research-team"))
+        assert attention._collect_human_gate_attention()
+
+        def resolve(uow):
+            assert uow.repository.update_human_task_decision(
+                "ht-gate-1", "accepted", FIXED_NOW_MS + 1000
+            )
+
+        store.submit(resolve, force_flush=True).result(timeout=10)
+        # 行是派生读：决策落账后自动消失，无需任何清理写入。
+        assert attention._collect_human_gate_attention() == []
+    finally:
+        store.close()
+
+
+def test_human_gate_attention_filters_and_fails_closed(
+    personal_env, monkeypatch, tmp_path
+):
+    _patch_formal_root(monkeypatch, tmp_path)
+    _patch_teams(monkeypatch, _team("research-team"))
+    # 只收集 waiting_human 停靠：running run 上的 pending task 不投影。
+    running = _ledger_store_with_human_gate(tmp_path / "running", run_status="running")
+    try:
+        _patch_read_store(monkeypatch, running)
+        assert attention._collect_human_gate_attention() == []
+    finally:
+        running.close()
+    # 团队不在活动清单：跳过。
+    foreign = _ledger_store_with_human_gate(tmp_path / "foreign", team_id="other-team")
+    try:
+        _patch_read_store(monkeypatch, foreign)
+        assert attention._collect_human_gate_attention() == []
+    finally:
+        foreign.close()
+    # read runtime 未配置：fail-closed 为空，绝不抛出。
+    def _unavailable():
+        raise formal_read_runtime.FormalReadRuntimeUnavailable()
+
+    monkeypatch.setattr(formal_read_runtime, "get_formal_read_store", _unavailable)
+    assert attention._collect_human_gate_attention() == []
+    # ledger 读取失败（store 已关闭）同样降级为空。
+    closed = _ledger_store_with_human_gate(tmp_path / "closed")
+    closed.close()
+    _patch_read_store(monkeypatch, closed)
+    assert attention._collect_human_gate_attention() == []
+
+
+def test_overview_route_serializes_human_gate_rows_with_actions_and_meta(
+    personal_env, monkeypatch, tmp_path
+):
+    _patch_formal_root(monkeypatch, tmp_path)
+    store = _ledger_store_with_human_gate(tmp_path)
+    try:
+        _patch_read_store(monkeypatch, store)
+        _patch_teams(monkeypatch, _team("research-team"))
+        monkeypatch.setattr(
+            pet_activity_service,
+            "get_pet_activity",
+            lambda: {
+                "generatedAt": "2026-10-18T00:00:00+00:00",
+                "sessions": [
+                    {"sessionId": "live", "tone": "running", "title": "运行中"},
+                ],
+            },
+        )
+        client = TestClient(
+            create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()}
+        )
+        response = client.get("/api/personal-assistant/overview")
+        assert response.status_code == 200
+        human = response.json()["humanAttention"]
+        assert [row["kind"] for row in human] == ["human_gate"]
+        row = human[0]
+        assert row["id"] == "human-gate:ht-gate-1"
+        assert row["severity"] == "high"
+        assert row["actions"] == [
+            {"label": "接受", "decision": "accept"},
+            {"label": "驳回", "decision": "reject"},
+        ]
+        assert row["meta"]["taskId"] == "ht-gate-1"
+        assert row["meta"]["runId"] == "run-gate"
+    finally:
+        store.close()
