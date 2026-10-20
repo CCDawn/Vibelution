@@ -850,6 +850,90 @@ def test_busy_rejection_is_retryable_only_when_original_submission_is_absent(mon
     assert not runs.financial_team_synthesis_busy_retry_is_safe("owner-1", "run-1")
 
 
+@pytest.mark.parametrize("detail", [None, [], {"messages": None}])
+def test_synthesis_busy_retry_rejects_unavailable_native_transcript(monkeypatch, detail):
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    captured["run"]["synthesis"]["submissionState"] = "reserved"
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: detail)
+    assert not runs.financial_team_synthesis_busy_retry_is_safe("owner-1", "run-1")
+
+
+def _stub_completed_analysts_for_synthesis(monkeypatch):
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    for role, ref in run["analysts"].items():
+        ref["turnId"] = f"turn-{role}"
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda *_args: "已完成分析")
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+    monkeypatch.setattr(team_evidence, "synthesis_tool_references", lambda *_args: [])
+    return captured
+
+
+def test_shared_advisor_synthesis_busy_preserves_user_turn_and_run_submission(monkeypatch):
+    captured = _stub_completed_analysts_for_synthesis(monkeypatch)
+    ref = captured["run"]["synthesis"]
+    calls = []
+    user_detail = {"activeTurnId": "user-turn", "status": "running", "messages": [
+        {"role": "user", "metadata": {"clientSubmissionId": "older-run", "turnId": "older-turn"}},
+    ]}
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: copy.deepcopy(user_detail))
+
+    def busy(session_id, prompt, **kwargs):
+        calls.append((session_id, kwargs))
+        raise session_service.SessionBusyError("user is talking")
+
+    monkeypatch.setattr(runs.session_service, "submit_session_message_lightweight", busy)
+    with pytest.raises(session_service.SessionBusyError):
+        runs.submit_financial_team_synthesis("owner-1", "run-1")
+    assert len(calls) == 1
+    assert calls[0][0] == "session-owner"
+    assert calls[0][1]["queue_if_busy"] is False
+    assert calls[0][1]["client_submission_id"] == "submission-synthesis"
+    assert ref["turnId"] == ""
+    assert ref["submissionState"] == "reserved"
+    assert runs.financial_team_synthesis_busy_retry_is_safe("owner-1", "run-1")
+    assert user_detail["activeTurnId"] == "user-turn"
+
+
+@pytest.mark.parametrize("uncertain", ["transport", "receipt", "stored_unknown", "missing_transcript"])
+def test_shared_advisor_unknown_synthesis_is_never_resent(monkeypatch, uncertain):
+    captured = _stub_completed_analysts_for_synthesis(monkeypatch)
+    ref = captured["run"]["synthesis"]
+    attempts = []
+
+    def submit(session_id, prompt, **kwargs):
+        attempts.append(session_id)
+        if uncertain == "transport":
+            raise RuntimeError("unknown transport outcome")
+        return {"sessionId": session_id, "turnId": "old-turn", "clientSubmissionId": "older-run"}
+
+    monkeypatch.setattr(runs.session_service, "submit_session_message_lightweight", submit)
+    if uncertain == "stored_unknown":
+        ref["submissionState"] = "unknown"
+    if uncertain == "missing_transcript":
+        monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: None)
+    with pytest.raises((RuntimeError, runs.FinancialTeamRunError, runs.FinancialTeamRunNotReadyError)):
+        runs.submit_financial_team_synthesis("owner-1", "run-1")
+    with pytest.raises(runs.FinancialTeamRunNotReadyError):
+        runs.submit_financial_team_synthesis("owner-1", "run-1")
+    assert len(attempts) == (1 if uncertain in {"transport", "receipt"} else 0)
+    assert ref["turnId"] == ""
+    assert not runs.financial_team_synthesis_busy_retry_is_safe("owner-1", "run-1")
+
+
+def test_shared_advisor_recovers_only_this_runs_exact_submission(monkeypatch):
+    captured = _stub_completed_analysts_for_synthesis(monkeypatch)
+    detail = {"messages": [
+        {"role": "user", "metadata": {"clientSubmissionId": "older-run", "turnId": "older-turn"}},
+        {"role": "assistant", "turnId": "older-turn", "content": "旧研究结论"},
+        {"role": "user", "metadata": {"clientSubmissionId": "submission-synthesis", "turnId": "this-run-turn"}},
+    ]}
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: detail)
+    recovered = runs.submit_financial_team_synthesis("owner-1", "run-1")
+    assert recovered["synthesis"]["turnId"] == "this-run-turn"
+    assert captured["submissions"] == []
+
+
 def _native_final_answer_item(
     text: str,
     *,
@@ -1668,6 +1752,7 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
     )
     monkeypatch.setattr(runs, "_role_agents", lambda _agent_id: roles)
     monkeypatch.setattr(runs, "_native_session_model_is_executable", lambda *_args: True)
+    monkeypatch.setattr(runs, "_native_direct_session_matches_agent", lambda *_args: True)
     created_sessions = []
 
     def create_synthesis_session(**kwargs):
@@ -1706,10 +1791,7 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
     assert retry["runId"] == first["runId"]
     assert retry["synthesis"]["sessionId"] == first["synthesis"]["sessionId"]
     assert "createIdempotency" not in retry
-    assert len(created_sessions) == 1
-    assert created_sessions[0][1]["agent_id"] == "owner-1"
-    assert created_sessions[0][1]["activate"] is False
-    assert created_sessions[0][1]["session_metadata"]["source"] == "financial_team_synthesis"
+    assert created_sessions == []
 
     with pytest.raises(runs.FinancialTeamRunConflictError, match="不同的研究参数"):
         runs.create_financial_team_run("owner-1", **{**arguments, "symbol": "SZ000001"})
@@ -1719,8 +1801,9 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
         **{**arguments, "idempotency_key": "request-key-20261005-0002"},
     )
     assert fresh["runId"] != first["runId"]
-    assert fresh["synthesis"]["sessionId"] != first["synthesis"]["sessionId"]
-    assert len(created_sessions) == 2
+    assert fresh["synthesis"]["sessionId"] == first["synthesis"]["sessionId"] == "session-owner"
+    assert fresh["synthesis"]["clientSubmissionId"] != first["synthesis"]["clientSubmissionId"]
+    assert created_sessions == []
     assert [args[2] for args, _kwargs in events] == [
         "financial_team.run.created",
         "financial_team.run.create_replayed",
@@ -1740,7 +1823,7 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
         assert not {"prompt", "answer", "content", "text"}.intersection(event["fields"])
 
 
-def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
+def test_new_runs_share_the_owners_direct_advisor_session(
     financial_team_env, monkeypatch
 ):
     assistant_id = financial_team_env["assistant"]["agentId"]
@@ -1748,6 +1831,7 @@ def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
     team = provisioning.provision_financial_team(assistant_id)
     assert team["status"] == "ready"
     direct_session_id = owner["directSessionId"]
+    direct_before = session_service.load_session_chat_state(session_service.PROJECT_ROOT, direct_session_id)
     active_session_id = load_chat_state(session_service.PROJECT_ROOT)[
         "active_conversation_id"
     ]
@@ -1779,9 +1863,10 @@ def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
 
     first_session_id = first["synthesis"]["sessionId"]
     assert first["synthesis"]["agentId"] == assistant_id
-    assert first_session_id != direct_session_id
+    assert first_session_id == direct_session_id
     assert replay["synthesis"]["sessionId"] == first_session_id
-    assert second["synthesis"]["sessionId"] != first_session_id
+    assert second["synthesis"]["sessionId"] == first_session_id
+    assert second["synthesis"]["clientSubmissionId"] != first["synthesis"]["clientSubmissionId"]
     assert (
         agent_directory_service.get_agent(assistant_id)["directSessionId"]
         == direct_session_id
@@ -1790,25 +1875,18 @@ def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
     raw_session = session_service.load_session_chat_state(
         session_service.PROJECT_ROOT, first_session_id
     )
-    assert raw_session["agentId"] == assistant_id
-    assert raw_session["sessionRole"] == "workspace"
-    assert raw_session["conversationIndexKind"] == (
-        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
-    )
-    assert "SH600519" in raw_session["title"]
-    assert "2026-10-05" in raw_session["title"]
-    assert raw_session["metadata"]["source"] == "financial_team_synthesis"
+    assert raw_session == direct_before
     run_record = runs._load_run(
         runs._run_path(assistant_id, first["runId"]), assistant_id
     )
-    assert raw_session["metadata"]["externalTaskId"] == run_record["synthesis"]["sessionBindingKey"]
-    assert run_record["synthesis"]["sessionBindingKind"] == runs._SYNTHESIS_OWNER_SCOPED_BINDING
-    assert runs._native_owner_scoped_synthesis_session_matches_agent(
-        assistant_id,
-        first_session_id,
-        run_record["synthesis"]["sessionBindingKey"],
-    )
+    assert run_record["synthesis"]["sessionBindingKind"] == "direct_advisor_v1"
+    assert run_record["synthesis"]["sessionBindingKey"]
     runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
+    tampered_ref = {**run_record["synthesis"], "sessionBindingKey": "different-owner-or-session"}
+    runs._write_run(runs._run_path(assistant_id, first["runId"]), {**run_record, "synthesis": tampered_ref})
+    with pytest.raises(runs.FinancialTeamRunConflictError, match="身份已变化"):
+        runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
+    runs._write_run(runs._run_path(assistant_id, first["runId"]), run_record)
     queried = session_service.query_sessions(agent_id=assistant_id)
     queried_summary = next(
         item for item in queried["items"] if item["id"] == first_session_id
@@ -1825,10 +1903,22 @@ def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
         == active_session_id
     )
 
-    # Runs created before this visibility change keep their owner-scoped hidden
-    # Native Session binding and remain recoverable.
+    # Existing owner-scoped runs retain their exact Session binding, including
+    # the older hidden-index variant.
+    old_session = session_service.create_chat_session(
+        title="旧研究汇总", agent_id=assistant_id, created_by="test",
+        conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+        session_metadata={"source": "financial_team_synthesis", "externalTaskId": "old-binding"},
+        lightweight=True, activate=False,
+    )
+    old_session_id = old_session["id"]
+    old_raw = session_service.load_session_chat_state(session_service.PROJECT_ROOT, old_session_id)
+    old_ref = {**run_record["synthesis"], "sessionId": old_session_id,
+               "sessionBindingKind": "owner_scoped_v1", "sessionBindingKey": "old-binding"}
+    runs._write_run(runs._run_path(assistant_id, first["runId"]), {**run_record, "synthesis": old_ref})
+    runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
     legacy_hidden_session = {
-        **raw_session,
+        **old_raw,
         "conversation_index_kind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
         "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
     }
@@ -1837,13 +1927,13 @@ def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
             session_service,
             "load_session_chat_state",
             lambda _root, session_id: (
-                legacy_hidden_session if session_id == first_session_id else None
+                legacy_hidden_session if session_id == old_session_id else None
             ),
         )
         assert runs._native_owner_scoped_synthesis_session_matches_agent(
             assistant_id,
-            first_session_id,
-            run_record["synthesis"]["sessionBindingKey"],
+            old_session_id,
+            "old-binding",
         )
 
     legacy_synthesis = dict(run_record["synthesis"])
@@ -1877,17 +1967,21 @@ def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
     with pytest.raises(runs.FinancialTeamRunConflictError, match="身份已变化"):
         runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
 
-    archived_session = {**raw_session, "archive_state": {"status": "archived"}}
-    monkeypatch.setattr(
-        session_service,
-        "load_session_chat_state",
-        lambda _root, session_id: archived_session if session_id == first_session_id else None,
-    )
-    assert not runs._native_owner_scoped_synthesis_session_matches_agent(
-        assistant_id,
-        first_session_id,
-        run_record["synthesis"]["sessionBindingKey"],
-    )
+    for invalid_session in (
+        {**raw_session, "archive_state": {"status": "archived"}},
+        {**raw_session, "read_only": True},
+        {**raw_session, "agentId": "another-owner", "agent_id": "another-owner"},
+    ):
+        original_load = session_service.load_session_chat_state
+        with monkeypatch.context() as invalid:
+            invalid.setattr(session_service, "load_session_chat_state", lambda root, session_id: (
+                invalid_session if session_id == first_session_id else original_load(root, session_id)
+            ))
+            assert not runs._native_direct_session_matches_agent(assistant_id, first_session_id)
+            with pytest.raises(runs.FinancialTeamRunConflictError):
+                runs.require_current_financial_team_run_bindings(assistant_id, second["runId"])
+            with pytest.raises((runs.FinancialTeamRunNotReadyError, provisioning.FinancialTeamConflictError)):
+                runs.create_financial_team_run(assistant_id, symbol="SH600519")
 
 
 def test_create_retry_reuses_synthesis_session_after_run_record_write_failure(
@@ -1927,9 +2021,8 @@ def test_create_retry_reuses_synthesis_session_after_run_record_write_failure(
     monkeypatch.setattr(runs, "_write_run", original_write)
     recovered = runs.create_financial_team_run(assistant_id, **arguments)
 
-    assert len(create_results) == 2
-    assert create_results[0]["id"] == create_results[1]["id"]
-    assert recovered["synthesis"]["sessionId"] == create_results[0]["id"]
+    assert create_results == []
+    assert recovered["synthesis"]["sessionId"] == agent_directory_service.get_agent(assistant_id)["directSessionId"]
 
 
 def test_record_turn_requires_native_submission_turn_binding(monkeypatch, tmp_path):

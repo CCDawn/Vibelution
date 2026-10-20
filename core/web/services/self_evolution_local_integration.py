@@ -200,6 +200,9 @@ class AuthorizedLocalIntegration:
         if context and context.get("_recoverySource"):
             from .team_workflow.generic.code_repair import recovery_role_bindings
             bindings = recovery_role_bindings(context)
+        elif context:
+            from .self_evolution_campaign_binding import campaign_bindings
+            bindings = campaign_bindings(context)
         if bindings is None:
             bindings = self.load_bindings()
         principals: dict[str, dict[str, str]] = {}
@@ -244,7 +247,7 @@ class AuthorizedLocalIntegration:
             from .self_evolution_campaign_service import delegated_authorization
             grant = delegated_authorization(context)
             self._file_scope(grant["allowedFiles"])
-            if grant["principals"] != self._principals(grant["teamId"]):
+            if grant["principals"] != self._principals(grant["teamId"], context=context):
                 raise LocalIntegrationError("Campaign role binding or permissions changed.")
             return grant
         if context.get("_recoverySource"):
@@ -260,9 +263,9 @@ class AuthorizedLocalIntegration:
         run_id = normalize_run_id(context.get("runId", ""))
         request = normalize_request((context.get("request") or {}).get("localIntegration"))
         self._file_scope(request["allowedFiles"])
-        principals = self._principals(request["teamId"])
+        principals = self._principals(request["teamId"], context=context)
         issued = self._now()
-        return {
+        grant = {
             "authorizationId": f"local-integration-{uuid.uuid4().hex}",
             "operatorId": operator.operator_id, "runId": run_id,
             "issuedAt": issued.isoformat(),
@@ -271,6 +274,8 @@ class AuthorizedLocalIntegration:
             "teamId": request["teamId"], "principals": principals,
             "requestDigest": _digest(request),
         }
+        from .self_evolution_campaign_binding import bind_campaign_authority
+        return bind_campaign_authority(context, grant)
 
     def _fresh(self, context: dict[str, Any]) -> dict[str, Any]:
         run_id = normalize_run_id(context.get("runId", ""))
@@ -539,9 +544,10 @@ class AuthorizedLocalIntegration:
 
     @contextmanager
     def guard(self, context: dict[str, Any]) -> Iterator[None]:
+        from .self_evolution_campaign_binding import binding_guard
         from .team_workflow.generic.code_repair import source_guard
         from .self_evolution_campaign_service import source_guard as campaign_guard
-        with campaign_guard(context), source_guard(context), authorization_lock(self.store, context.get("runId", "")):
+        with binding_guard(context), campaign_guard(context), source_guard(context), authorization_lock(self.store, context.get("runId", "")):
             fresh = self._fresh(context)
             candidate = fresh.get("candidate")
             receipt = fresh.get("independentReview")

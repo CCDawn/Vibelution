@@ -300,6 +300,8 @@ def test_run_binding_guard_checks_team_revision_roles_and_synthesis_session(monk
     monkeypatch.setattr(runs, "_run_path", lambda *_args: object())
     monkeypatch.setattr(runs, "_load_run", lambda *_args: copy.deepcopy(run))
     monkeypatch.setattr(runs, "get_financial_team", lambda _assistant_id: team)
+    monkeypatch.setattr(runs, "_native_direct_session_matches_agent", lambda *_args: True)
+    monkeypatch.setattr(runs, "_native_session_model_is_executable", lambda *_args: True)
     monkeypatch.setattr(runs, "_record_financial_team_event", lambda *_args, **_kwargs: None)
 
     runs.require_current_financial_team_run_bindings("assistant-1", "run-1")
@@ -422,6 +424,58 @@ def test_synthesis_busy_retry_exhaustion_blocks_after_three_retries(tmp_path):
     assert "有限自动重试已结束" in native.run["coordinationError"]
     assert state["status"] == "blocked"
     assert state["financialTeamSynthesisBusyRetryCount"] == 3
+
+
+def test_two_runs_share_advisor_session_without_reusing_previous_run_final(tmp_path):
+    first = FakeNativeFinancialService()
+    second = FakeNativeFinancialService()
+    second.run["runId"] = "run-2"
+    second.run["synthesis"]["clientSubmissionId"] = "submission-run-2"
+    shared_finals = {}
+    for native in (first, second):
+        native.final_answers = shared_finals
+        _accept_all_analyst_finals(native)
+    natives = {"run-1": first, "run-2": second}
+    second.synthesis_error = session_service.SessionBusyError("advisor is busy")
+    clock = [100.0]
+
+    def submit_synthesis(owner, run_id):
+        native = natives[run_id]
+        native.submit_synthesis(owner, run_id)
+        native.run["synthesis"]["turnId"] = f"summary-{run_id}"
+        return copy.deepcopy(native.run)
+
+    store = RuntimeTaskStore(tmp_path / "runtime_tasks", branch_generation_reader=lambda _session_id: 0)
+    coordinator = FinancialTeamCoordinator(
+        store=store,
+        run_loader=lambda owner, run_id: natives[run_id].load_run(owner, run_id),
+        status_writer=lambda owner, run_id, status, error="": natives[run_id].update_status(owner, run_id, status, error),
+        final_answer_for_turn=first.final_answer_for_turn,
+        completion_snapshot=first.completion_snapshot_for_turn,
+        binding_validator=lambda owner, run_id: natives[run_id].validate_current_bindings(owner, run_id),
+        submit_debate=lambda owner, run_id: natives[run_id].submit_debate(owner, run_id),
+        submit_synthesis=submit_synthesis,
+        synthesis_busy_retry_is_safe=lambda _owner, run_id: not natives[run_id].run["synthesis"]["turnId"],
+        epoch_time=lambda: clock[0],
+    )
+    for run_id in natives:
+        assert coordinator.register_after_primary_acceptance("assistant-1", run_id)
+    coordinator.process_pending_once()
+    assert first.synthesis_calls == second.synthesis_calls == 1
+    assert second.run["synthesis"]["turnId"] == ""
+    shared_finals[("session-synthesis", "summary-run-1")] = "第一轮最终回答"
+    second.synthesis_error = None
+    clock[0] = 101.0
+    coordinator.process_pending_once()
+    assert first.run["coordinationStatus"] == "completed"
+    assert second.run["coordinationStatus"] == "running"
+    assert second.run["synthesis"]["turnId"] == "summary-run-2"
+    coordinator.process_pending_once()
+    assert second.run["coordinationStatus"] == "running"
+    assert second.synthesis_calls == 2
+    shared_finals[("session-synthesis", "summary-run-2")] = "第二轮最终回答"
+    coordinator.process_pending_once()
+    assert second.run["coordinationStatus"] == "completed"
 
 
 def test_expired_blocked_synthesis_recovery_renews_coordination_deadline(

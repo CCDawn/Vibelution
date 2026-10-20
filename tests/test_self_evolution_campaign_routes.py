@@ -42,6 +42,22 @@ def test_campaign_start_binds_server_operator_and_keeps_default_budget(env):
     assert current_server_operator() is None
 
 
+def test_campaign_can_reference_existing_team_recovery_binding(env):
+    client, calls, _ = env
+    response = client.post("/api/evolution/self/campaigns", json=_body(
+        roleBindingFlowId="harness-diagnosis-v1"))
+    assert response.status_code == 202
+    assert calls[0][0]["roleBindingFlowId"] == "harness-diagnosis-v1"
+
+
+@pytest.mark.parametrize("value", ["", "../flow", " flow", "flow/other", 1, True])
+def test_campaign_rejects_invalid_binding_reference(env, value):
+    client, calls, _ = env
+    assert client.post("/api/evolution/self/campaigns", json=_body(
+        roleBindingFlowId=value)).status_code == 422
+    assert calls == []
+
+
 @pytest.mark.parametrize("extra", [{"rounds": 11}, {"rounds": True}, {"rounds": "3"},
                                    {"operatorId": "forged"}, {"_campaignSource": {}}, {"idempotencyKey": ""}])
 def test_campaign_request_rejects_invalid_or_private_fields(env, extra):

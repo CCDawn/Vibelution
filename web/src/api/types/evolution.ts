@@ -1258,6 +1258,7 @@ export type SelfEvolutionCampaignStartRequest = {
   goal: string;
   rounds?: number;
   idempotencyKey: string;
+  roleBindingFlowId?: string;
   localIntegration: {
     acknowledge: true;
     allowedFiles: string[];

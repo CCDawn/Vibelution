@@ -93,6 +93,59 @@ def test_success_continues_three_rounds_with_one_unrenewed_grant(env):
     assert {r["localIntegrationAuthorization"]["expiresAt"] for r in child.records.values()} == {result["localIntegrationAuthorization"]["expiresAt"]}
 
 
+def test_bound_campaign_freezes_reference_and_does_not_rebind_children(env):
+    actor, child, _, _, issued = env
+    original = actor.authorize
+
+    def authorize(context):
+        grant = original(context)
+        grant.update(roleBindingSource="campaign_role_binding_v1", campaignRoleBinding={
+            "teamId": "existing-team", "flowId": "diagnosis", "bindingId": "binding-1",
+            "expiresAt": grant["expiresAt"],
+        })
+        return grant
+
+    actor.authorize = authorize
+    queued = actor.queue(request(roleBindingFlowId="diagnosis"))
+    result = actor.run(queued["runId"])
+    assert result["status"] == "completed"
+    assert len(issued) == 1
+    assert result["request"]["roleBindingFlowId"] == "diagnosis"
+    for child_run in child.records.values():
+        assert "roleBindingFlowId" not in child_run["request"]
+        assert child_run["localIntegrationAuthorization"]["campaignRoleBinding"] == {
+            "teamId": "existing-team", "flowId": "diagnosis", "bindingId": "binding-1",
+            "expiresAt": queued["deadline"],
+        }
+
+
+def test_campaign_rejects_missing_or_changed_binding_authority(env):
+    from core.web.services.self_evolution_campaign_service import _validate_parent
+
+    actor, _, _, clock, _ = env
+    original = actor.authorize
+
+    def authorize(context):
+        grant = original(context)
+        grant.update(roleBindingSource="campaign_role_binding_v1", campaignRoleBinding={
+            "teamId": "existing-team", "flowId": "diagnosis", "bindingId": "binding-1",
+            "expiresAt": grant["expiresAt"],
+        })
+        return grant
+
+    actor.authorize = authorize
+    parent = actor.queue(request(roleBindingFlowId="diagnosis"))
+    changed = deepcopy(parent)
+    changed["localIntegrationAuthorization"]["campaignRoleBinding"]["flowId"] = "other"
+    with pytest.raises(LocalIntegrationError):
+        _validate_parent(changed, clock[0])
+    changed = deepcopy(parent)
+    changed["request"].pop("roleBindingFlowId")
+    changed["requestDigest"] = _digest(changed["request"])
+    with pytest.raises(LocalIntegrationError):
+        _validate_parent(changed, clock[0])
+
+
 @pytest.mark.parametrize("status", ["failed", "partial", "running", "awaiting_user_approval"])
 def test_unverified_outcome_never_starts_another_round(env, status):
     actor, child, *_ = env

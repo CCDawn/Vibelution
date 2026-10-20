@@ -123,6 +123,9 @@ def build_autonomous_loop_hooks(
             if context.get("_recoverySource"):
                 from .team_workflow.generic.code_repair import recovery_role_bindings
                 bindings = recovery_role_bindings(context)
+            else:
+                from .self_evolution_campaign_binding import campaign_bindings
+                bindings = campaign_bindings(context)
             if bindings is None:
                 bindings = loader()
             if not isinstance(bindings, dict):
