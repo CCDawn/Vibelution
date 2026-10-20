@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -280,6 +282,107 @@ def test_build_inputs_scans_once_and_detects_added_changed_and_removed_files(
     assert scan_count == 4
     assert removed["productionInputCount"] == changed["productionInputCount"]
     assert frontend_build.compute_build_key(removed) == frontend_build.compute_build_key(changed)
+
+
+def _input_symlink(link: Path, target: Path, *, directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
+
+
+def test_source_scan_deduplicates_canonical_link_targets(tmp_path):
+    web = _write_project(tmp_path)
+    original = frontend_build._scan_production_inputs(web)
+    _input_symlink(web / "src/Alias.tsx", web / "src/App.tsx")
+    (web / "public").mkdir()
+    _input_symlink(web / "public/OtherAlias.tsx", web / "src/App.tsx")
+
+    assert frontend_build._scan_production_inputs(web) == original
+
+
+def test_source_scan_rejects_link_targets_outside_web(tmp_path):
+    web = _write_project(tmp_path)
+    outside = tmp_path / "outside.ts"
+    outside.write_text("export const outside = true;", encoding="utf-8")
+    _input_symlink(web / "src/Outside.ts", outside)
+
+    with pytest.raises(ValueError):
+        frontend_build._scan_production_inputs(web)
+
+
+def test_source_scan_resolves_linked_source_directory_fresh_each_time(tmp_path):
+    web = _write_project(tmp_path)
+    first = web / "source-a"
+    second = web / "source-b"
+    (web / "src").rename(first)
+    second.mkdir()
+    (second / "App.tsx").write_text("export const app = 2;", encoding="utf-8")
+    _input_symlink(web / "src", first, directory=True)
+    before = frontend_build._scan_production_inputs(web)
+
+    (web / "src").unlink()
+    _input_symlink(web / "src", second, directory=True)
+    after = frontend_build._scan_production_inputs(web)
+
+    assert before[1] == after[1]
+    assert before[0] != after[0] and before[2] != after[2]
+    assert (second / "App.tsx").resolve() in frontend_build._production_input_paths(web)
+
+
+def test_source_path_resolution_scales_with_directories(monkeypatch, tmp_path):
+    web = _write_project(tmp_path)
+    source_dir = web / "src"
+    for index in range(64):
+        (source_dir / f"module-{index}.ts").write_text(f"export const value = {index};", encoding="utf-8")
+    resolve = Path.resolve
+    calls = []
+
+    def count_resolutions(path, *args, **kwargs):
+        calls.append(path)
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", count_resolutions)
+    paths = frontend_build._production_input_paths(web)
+
+    assert len([path for path in paths if path.parent == source_dir]) == 65
+    assert calls.count(source_dir) == 1
+    assert not any(path.parent == source_dir for path in calls)
+
+
+def test_non_symlink_windows_reparse_input_still_gets_full_resolution(monkeypatch, tmp_path):
+    web = _write_project(tmp_path)
+    source = web / "src/App.tsx"
+    lstat = Path.lstat
+    resolve = Path.resolve
+    calls = []
+
+    def reparse_metadata(path, *args, **kwargs):
+        metadata = lstat(path, *args, **kwargs)
+        if path == source:
+            return SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        return metadata
+
+    def count_resolutions(path, *args, **kwargs):
+        calls.append(path)
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", reparse_metadata)
+    monkeypatch.setattr(Path, "resolve", count_resolutions)
+    assert source in frontend_build._production_input_paths(web)
+    assert source in calls
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows case-insensitive input lookup")
+def test_source_paths_keep_on_disk_casing_for_explicit_inputs(tmp_path):
+    web = _write_project(tmp_path)
+    (web / "package.json").rename(web / "PACKAGE.json")
+
+    paths = frontend_build._production_input_paths(web)
+
+    assert [path.name for path in paths if path.name.lower() == "package.json"] == ["PACKAGE.json"]
 
 
 def test_build_inputs_caches_commit_tree_but_rescans_working_files(monkeypatch, tmp_path):

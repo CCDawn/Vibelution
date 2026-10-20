@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -222,11 +223,29 @@ def _production_input_paths(web_dir: Path) -> list[Path]:
         root = web_dir / relative_root
         if root.is_dir():
             paths.extend(path for path in root.rglob("*") if path.is_file() and not _is_test_path(path.relative_to(web_dir)))
+    resolved_paths: set[Path] = set()
+    resolved_parents: dict[Path, Path] = {}
+    for path in paths:
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or (
+            getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            resolved_paths.add(path.resolve())
+            continue
+        # rglob yields the on-disk filename. Ordinary sibling files share the
+        # same canonical parent, so resolve it once in this scan. Links and
+        # Windows reparse points still need their complete target resolved.
+        parent = resolved_parents.get(path.parent)
+        if parent is None:
+            parent = path.parent.resolve()
+            resolved_parents[path.parent] = parent
+        resolved_paths.add(parent / path.name)
     for relative in _BUILD_INPUT_FILES:
         candidate = web_dir / relative
         if candidate.is_file():
-            paths.append(candidate)
-    return sorted({path.resolve() for path in paths}, key=lambda item: item.as_posix().lower())
+            # Explicit names may differ in casing on a case-insensitive FS.
+            resolved_paths.add(candidate.resolve())
+    return sorted(resolved_paths, key=lambda item: item.as_posix().lower())
 
 
 def _scan_production_inputs(web_dir: Path) -> tuple[str, int, str]:
