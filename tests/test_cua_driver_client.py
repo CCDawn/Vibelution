@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -178,20 +179,78 @@ def test_close_does_not_wait_for_inflight_call_lock(fake_server):
         thread.join(3)
 
 
-def test_cancel_during_blocked_input_pipe(fake_server):
+def test_cancel_during_blocked_input_pipe(fake_server, monkeypatch):
     factory, trace, owners, _ = fake_server
     client = factory("no-read", timeout=3)
-    checks = []
+    marker = Path(str(trace) + ".waiting")
+    writing = threading.Event()
+    written = threading.Event()
+    done = threading.Event()
+    watchdog_fired = threading.Event()
+    caller = threading.current_thread()
+    cycles = []
+
+    class ObservedInput:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def write(self, payload):
+            if len(payload) <= 65536:
+                return self.stream.write(payload)
+            writing.set()
+            try:
+                return self.stream.write(payload)
+            finally:
+                written.set()
+
+    class ObservedEvent(threading.Event):
+        def wait(self, timeout=None):
+            result = super().wait(timeout)
+            if (threading.current_thread() is caller and not result
+                    and writing.is_set() and not written.is_set() and marker.exists()):
+                # Observe the real wait budget, excluding OS scheduling delay.
+                assert timeout is not None and 0 < timeout <= .05
+                cycles.append("wait")
+            return result
+
+    monkeypatch.setattr(transport, "threading", SimpleNamespace(
+        **{**vars(threading), "Event": ObservedEvent}
+    ))
+    start = client._start
+
+    def observed_start():
+        start()
+        owners[0].process.stdin = ObservedInput(owners[0].process.stdin)
+
+    monkeypatch.setattr(client, "_start", observed_start)
+
     def checker():
-        if Path(str(trace) + ".waiting").exists():
-            checks.append(time.monotonic())
-        return "stop" if len(checks) > 3 else ""
-    with pytest.raises(transport.CuaDriverCancelledError):
-        client.call("type", {"text": "x" * 1_000_000}, cancel_checker=checker)
-    assert Path(str(trace) + ".waiting").exists()
-    assert max(b - a for a, b in zip(checks, checks[1:])) < .1
-    assert owners[0].process.poll() is not None
-    assert owners[0].process.stdin.closed
+        if cycles and cycles[-1] == "wait":
+            assert marker.exists() and writing.is_set() and not written.is_set()
+            cycles.append("check")
+        return "stop" if len(cycles) >= 6 else ""
+
+    def watchdog():
+        if not done.wait(10):
+            watchdog_fired.set()
+            client.close()
+
+    guard = threading.Thread(target=watchdog, daemon=True)
+    guard.start()
+    try:
+        with pytest.raises(transport.CuaDriverCancelledError):
+            client.call("type", {"text": "x" * 1_000_000}, cancel_checker=checker)
+        assert cycles == ["wait", "check"] * 3
+        assert not watchdog_fired.is_set()
+        assert owners[0].process.poll() is not None
+        assert owners[0].process.stdin.closed
+    finally:
+        done.set()
+        client.close()
+        guard.join(1)
 
 
 @pytest.mark.parametrize("retirement_fails", [False, True])
