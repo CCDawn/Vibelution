@@ -263,3 +263,5 @@
 | `FinanceKnowledgeCenter` | [product/financial-assistant.md](./product/financial-assistant.md#financeknowledgecenter) |
 
 | `FinanceInvestmentSettings` | [product/financial-assistant.md](./product/financial-assistant.md#financeinvestmentsettings) |
+| `FinanceAdvisorPanel` | [product/financial-assistant.md](./product/financial-assistant.md#financeadvisorpanel) |
+| `FinanceAdvisorExecution` | [product/financial-assistant.md](./product/financial-assistant.md#financeadvisorexecution) |

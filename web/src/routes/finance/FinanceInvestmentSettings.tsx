@@ -29,6 +29,7 @@ function InvestmentForm({ initial, pending, zh, onSave }: {
   const gate = useRef(false);
   const [values, setValues] = useState(() => ({
     budgetCny: String(initial?.budgetCny ?? ""), horizonMonths: String(initial?.horizonMonths ?? ""),
+    availableCashCny: String(initial?.availableCashCny ?? ""),
     maxLossCny: String(initial?.maxLossCny ?? ""), cashReserveCny: String(initial?.cashReserveCny ?? ""),
     maxPositionPct: String(initial?.maxPositionPct ?? ""),
   }));
@@ -55,6 +56,7 @@ function InvestmentForm({ initial, pending, zh, onSave }: {
     <p className={styles.caption}>{zh ? "仅供这个助手使用。保存后每轮分析都会读取；留空表示未确认。" : "Private to this advisor and read on each turn. Blank means unknown."}</p>
     <div className={styles.fields}>
       {field("budgetCny", zh ? "投资预算（元）" : "Budget (CNY)")}
+      {field("availableCashCny", zh ? "当前可用现金（元）" : "Available cash (CNY)")}
       {field("horizonMonths", zh ? "预计持有（月）" : "Horizon (months)")}
       {field("maxLossCny", zh ? "最大可接受亏损（元）" : "Loss tolerance (CNY)")}
     </div>

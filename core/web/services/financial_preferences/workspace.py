@@ -19,8 +19,9 @@ from .investment import normalize_investment_profile
 
 _LOCK = threading.RLock()
 _SECTIONS = {"selectedStock", "watchlist", "profiles", "manualPositions", "reviewCases", "investmentProfile"}
-_PERSISTED_FIELDS = {"schemaVersion", "agentId", "revision", "updatedAt", *_SECTIONS}
+_PERSISTED_FIELDS = {"schemaVersion", "agentId", "revision", "updatedAt", "investmentPlans", *_SECTIONS}
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+_MAX_STATE_BYTES = 250_000
 
 
 def _text(value: Any, limit: int, *, empty: bool = False) -> str:
@@ -129,14 +130,14 @@ def _path(agent_id: str) -> Path:
 
 
 def _empty(agent_id: str) -> dict:
-    return {"schemaVersion": 1, "agentId": agent_id, "revision": 0, "updatedAt": "", "selectedStock": None, "watchlist": [], "profiles": [], "manualPositions": [], "reviewCases": [], "investmentProfile": None}
+    return {"schemaVersion": 1, "agentId": agent_id, "revision": 0, "updatedAt": "", "selectedStock": None, "watchlist": [], "profiles": [], "manualPositions": [], "reviewCases": [], "investmentProfile": None, "investmentPlans": []}
 
 
 def _load(path: Path, agent_id: str) -> dict:
     if not path.exists():
         return _empty(agent_id)
     try:
-        if path.stat().st_size > 250_000:
+        if path.stat().st_size > _MAX_STATE_BYTES:
             raise ValueError("oversize")
         raw = json.loads(path.read_text(encoding="utf-8"))
         if (
@@ -149,14 +150,29 @@ def _load(path: Path, agent_id: str) -> dict:
             or set(raw) - _PERSISTED_FIELDS
         ):
             raise ValueError("identity")
-        return {**_empty(agent_id), "revision": raw["revision"], "updatedAt": _text(raw.get("updatedAt", ""), 80, empty=True), **{key: _section(key, raw.get(key, None if key in {"selectedStock", "investmentProfile"} else [])) for key in _SECTIONS}}
+        from .advisor import normalize_plans
+
+        return {**_empty(agent_id), "revision": raw["revision"], "updatedAt": _text(raw.get("updatedAt", ""), 80, empty=True), "investmentPlans": normalize_plans(raw.get("investmentPlans", [])), **{key: _section(key, raw.get(key, None if key in {"selectedStock", "investmentProfile"} else [])) for key in _SECTIONS}}
     except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
         raise FinancialPreferenceError("设置文件无法安全读取，未覆盖现有数据", 409) from exc
 
 
 def get_workspace(agent_id: str) -> dict:
+    from .advisor import project_workspace
+
     _agent(agent_id)
-    return _load(_path(agent_id), agent_id)
+    return project_workspace(_load(_path(agent_id), agent_id))
+
+
+def _write_state(path: Path, state: dict) -> None:
+    # Size the actual UTF-8 serialization before replacing the existing file.
+    # Dynamic projections never become persisted assertions about freshness.
+    persisted = {key: value for key, value in state.items() if key != "investmentStateFingerprint"}
+    persisted["investmentPlans"] = [{key: value for key, value in plan.items() if key != "needsReview"} for plan in state["investmentPlans"]]
+    serialized = json.dumps(persisted, ensure_ascii=False, indent=2, allow_nan=False)
+    if len(serialized.encode("utf-8")) > _MAX_STATE_BYTES:
+        raise FinancialPreferenceError("私有工作区已达存储上限，请精简历史记录后重试", 409)
+    atomic_write_json(path, persisted, ensure_ascii=False, indent=2, strict_replace=True)
 
 
 def update_workspace(agent_id: str, expected_revision: int, patch: dict) -> dict:
@@ -184,5 +200,7 @@ def update_workspace(agent_id: str, expected_revision: int, patch: dict) -> dict
                     raise FinancialPreferenceError("复盘书签必须来自此助手的已完成研究", 409) from exc
         state.update(sections)
         state.update(revision=state["revision"] + 1, updatedAt=datetime.now(timezone.utc).isoformat())
-        atomic_write_json(path, state, ensure_ascii=False, indent=2, strict_replace=True)
-        return state
+        _write_state(path, state)
+        from .advisor import project_workspace
+
+        return project_workspace(state)

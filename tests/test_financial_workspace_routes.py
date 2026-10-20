@@ -14,7 +14,7 @@ def test_workspace_patch_remains_partial_and_revision_checked(monkeypatch):
     seen = []
     def save(agent_id, revision, patch):
         seen.append((agent_id, revision, patch))
-        return {"schemaVersion": 1, "agentId": agent_id, "revision": revision + 1, "updatedAt": "", "selectedStock": None, "watchlist": [], "profiles": [], "manualPositions": [], "reviewCases": []}
+        return {"schemaVersion": 1, "agentId": agent_id, "revision": revision + 1, "updatedAt": "", "selectedStock": None, "watchlist": [], "profiles": [], "manualPositions": [], "reviewCases": [], "investmentStateFingerprint": "a" * 64}
     monkeypatch.setattr(service, "update_workspace_settings", save)
     response = client.patch("/api/financial-preferences/agent-1/workspace", json={"expectedRevision": 3, "patch": {"watchlist": []}})
     assert response.status_code == 200 and seen == [("agent-1", 3, {"watchlist": []})]

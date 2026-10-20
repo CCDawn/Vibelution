@@ -43,7 +43,7 @@ it("keeps unknown conditions empty and saves an explicit budget only to the owni
   await input("投资预算（元）", "6000");
   await save();
   expect(updateFinancialWorkspace).toHaveBeenCalledWith("a", 2, {
-    investmentProfile: { budgetCny: 6000, horizonMonths: null, maxLossCny: null, cashReserveCny: null, maxPositionPct: null, flexibleHorizon: null, market: "CN", holdingsStatus: "unknown" },
+    investmentProfile: { budgetCny: 6000, availableCashCny: null, horizonMonths: null, maxLossCny: null, cashReserveCny: null, maxPositionPct: null, flexibleHorizon: null, market: "CN", holdingsStatus: "unknown" },
   });
   expect(host.textContent).toContain("已保存");
   await save();

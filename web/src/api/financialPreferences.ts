@@ -1,6 +1,7 @@
 import { fetchJson } from "./client";
 import type { FinancialPreference, FinancialPreferences } from "./types/financialPreferences";
 import type { FinancialWorkspacePatch, FinancialWorkspaceSettings } from "./types/financialPreferences";
+import type { FinancialAdvisorCheck, FinancialAdvisorCommand, FinancialAdvisorProposal } from "./types/financialPreferences";
 export type { FinancialPreference, FinancialPreferences } from "./types/financialPreferences";
 export type { FinancialWatchStock, FinancialResearchProfile, FinancialManualPosition, FinancialReviewCase, FinancialWorkspacePatch, FinancialWorkspaceSettings } from "./types/financialPreferences";
 
@@ -10,6 +11,17 @@ export function fetchFinancialWorkspace(agentId: string, options?: { signal?: Ab
 }
 export function updateFinancialWorkspace(agentId: string, expectedRevision: number, patch: FinancialWorkspacePatch): Promise<FinancialWorkspaceSettings> {
   return fetchJson(`/api/financial-preferences/${encodeURIComponent(agentId)}/workspace`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedRevision, patch }) });
+}
+
+export function fetchFinancialAdvisorProposal(agentId: string, sessionId: string, turnId: string, options?: { signal?: AbortSignal }): Promise<{ proposal: FinancialAdvisorProposal | null }> {
+  const params = new URLSearchParams({ sessionId, turnId });
+  return fetchJson(`/api/financial-preferences/${encodeURIComponent(agentId)}/workspace/advisor/proposal?${params}`, { signal: options?.signal });
+}
+export function financialAdvisorCommand(agentId: string, command: FinancialAdvisorCommand): Promise<FinancialWorkspaceSettings> {
+  return fetchJson(`/api/financial-preferences/${encodeURIComponent(agentId)}/workspace/advisor/command`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+}
+export function checkFinancialAdvisorPlan(agentId: string, planId: string): Promise<FinancialAdvisorCheck> {
+  return fetchJson(`/api/financial-preferences/${encodeURIComponent(agentId)}/workspace/advisor/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId }) });
 }
 
 export const financialPreferenceKeys = { agent: (agentId: string) => ["finance", "preferences", agentId] as const };

@@ -7,6 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services import financial_preferences_service as service
 from core.web.services.financial_preferences.investment import InvestmentProfile
+from core.web.services.financial_preferences import advisor, advisor_proposals
+from core.web.services.financial_preferences.advisor_contract import (
+    AdvisorCommand, InvestmentPlan, ManualPosition, WorkspaceStock,
+    PlanCheckRequest, PlanCheckResponse, ProposalResponse,
+)
 
 router = APIRouter(tags=["financial-preferences"])
 
@@ -35,14 +40,6 @@ class RemovedPreference(BaseModel):
     removed: bool
 
 
-class WorkspaceStock(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    symbol: str = Field(min_length=1, max_length=24)
-    ticker: str = Field(min_length=1, max_length=24)
-    name: str = Field(min_length=1, max_length=60)
-    market: str = Field(min_length=1, max_length=30)
-
-
 class WorkspaceWatch(WorkspaceStock):
     tags: list[str] = Field(default_factory=list, max_length=10)
     note: str = Field(default="", max_length=500)
@@ -57,16 +54,6 @@ class ResearchProfile(BaseModel):
     period: str = Field(default="", max_length=100)
     instructions: str = Field(default="", max_length=1000)
     isDefault: bool = False
-
-
-class ManualPosition(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=160)
-    stock: WorkspaceStock
-    quantity: float = Field(gt=0, le=1e12, allow_inf_nan=False)
-    costPrice: float = Field(gt=0, le=1e8, allow_inf_nan=False)
-    currency: Literal["CNY", "HKD", "USD"]
-    note: str = Field(default="", max_length=500)
 
 
 class ReviewCase(BaseModel):
@@ -94,6 +81,8 @@ class WorkspaceSettings(WorkspaceSections):
     agentId: str
     revision: int
     updatedAt: str
+    investmentPlans: list[InvestmentPlan] = Field(default_factory=list, max_length=20)
+    investmentStateFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class WorkspaceUpdate(BaseModel):
@@ -137,3 +126,18 @@ def workspace_settings_get(agent_id: str) -> dict:
 @router.patch("/financial-preferences/{agent_id}/workspace", response_model=WorkspaceSettings)
 def workspace_settings_update(agent_id: str, payload: WorkspaceUpdate) -> dict:
     return _call(lambda: service.update_workspace_settings(agent_id, payload.expectedRevision, payload.patch.model_dump(exclude_unset=True)))
+
+
+@router.get("/financial-preferences/{agent_id}/workspace/advisor/proposal", response_model=ProposalResponse)
+def advisor_proposal_get(agent_id: str, sessionId: str, turnId: str) -> dict:
+    return _call(lambda: advisor_proposals.get_proposal(agent_id, sessionId, turnId))
+
+
+@router.post("/financial-preferences/{agent_id}/workspace/advisor/command", response_model=WorkspaceSettings)
+def advisor_command(agent_id: str, payload: AdvisorCommand) -> dict:
+    return _call(lambda: advisor.command(agent_id, payload.model_dump()))
+
+
+@router.post("/financial-preferences/{agent_id}/workspace/advisor/check", response_model=PlanCheckResponse)
+def advisor_check(agent_id: str, payload: PlanCheckRequest) -> dict:
+    return _call(lambda: advisor.check_plan(agent_id, payload.planId))
