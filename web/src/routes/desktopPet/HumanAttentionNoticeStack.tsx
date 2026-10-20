@@ -9,6 +9,7 @@ import {
   subscribeHumanAttentionEvents,
   type HumanAttentionNotificationPayload,
 } from "../personalAssistant/humanAttentionNotifications";
+import { humanGateScopeFor, submitHumanGateDecision } from "../personalAssistant/humanGateDecision";
 import styles from "./HumanAttentionNoticeStack.styles";
 
 const DISMISS_AFTER_MS = 12_000;
@@ -20,14 +21,22 @@ const COPY = {
     close: "关闭通知",
     open: "查看该事项",
     fallbackTitle: "需要你的关注",
-    kinds: { knowledge_review: "知识复核", anomaly: "研究异常", affair_reminder: "事务提醒" },
+    kinds: { knowledge_review: "知识复核", anomaly: "研究异常", affair_reminder: "事务提醒", human_gate: "人工审批" },
+    confirmPrefix: "确认",
+    cancel: "取消",
+    submitting: "提交中…",
+    failedPrefix: "审批失败：",
   },
   en: {
     region: "Attention notifications",
     close: "Dismiss notification",
     open: "Open the related item",
     fallbackTitle: "Needs your attention",
-    kinds: { knowledge_review: "Knowledge review", anomaly: "Anomaly", affair_reminder: "Affair" },
+    kinds: { knowledge_review: "Knowledge review", anomaly: "Anomaly", affair_reminder: "Affair", human_gate: "Human gate" },
+    confirmPrefix: "Confirm ",
+    cancel: "Cancel",
+    submitting: "Submitting…",
+    failedPrefix: "Approval failed: ",
   },
 } as const;
 
@@ -36,13 +45,30 @@ type NoticeCard = {
   payload: HumanAttentionNotificationPayload;
 };
 
+type GateCardState = {
+  submitting: boolean;
+  errorText: string;
+  /** Decision currently armed for its two-step confirmation. */
+  armedDecision: string | null;
+};
+
+const IDLE_GATE_STATE: GateCardState = { submitting: false, errorText: "", armedDecision: null };
+
+/** Inline approve buttons need the meta routing facts; anything less is a plain card. */
+function isActionableCard(payload: HumanAttentionNotificationPayload): boolean {
+  return (payload.actions?.length ?? 0) > 0 && humanGateScopeFor(payload) !== null;
+}
+
 /**
  * In-window notice cards for dual-channel human-attention notifications.
  * The Electron shell delivers assistant-window notifications through the
  * preload subscription (`launcher:human-attention-opened` channel exposed as
  * `onHumanAttentionOpened`); full payloads become stacked cards (title, body,
  * severity styling, click-to-locate, 12s auto-dismiss with hover pause, max
- * 3), bare opened clicks navigate immediately.
+ * 3), bare opened clicks navigate immediately. Cards carrying human-gate
+ * actions render inline accept/reject buttons instead of auto-dismissing:
+ * accept submits directly through the run snapshot + command offer; any other
+ * decision arms a two-step inline confirmation first.
  */
 export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
   /** Called before an in-window navigation (e.g. expand the collapsed pet). */
@@ -52,6 +78,7 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
   const copy = COPY[lang];
   const navigate = useNavigate();
   const [cards, setCards] = useState<NoticeCard[]>([]);
+  const [gateStates, setGateStates] = useState<Record<string, GateCardState>>({});
   const sequence = useRef(0);
   const timers = useRef(new Map<string, number>());
   const beforeNavigateRef = useRef(onBeforeNavigate);
@@ -70,6 +97,14 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
   const dismissCard = useCallback((key: string) => {
     clearDismissTimer(key);
     setCards(previous => previous.filter(card => card.key !== key));
+    setGateStates(previous => {
+      if (!(key in previous)) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
   }, [clearDismissTimer]);
 
   const scheduleDismiss = useCallback((key: string) => {
@@ -94,6 +129,35 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
     }
   }, [dismissCard, openTarget]);
 
+  const patchGateState = useCallback((key: string, patch: Partial<GateCardState>) => {
+    setGateStates(previous => ({ ...previous, [key]: { ...IDLE_GATE_STATE, ...previous[key], ...patch } }));
+  }, []);
+
+  const runGateDecision = useCallback(async (card: NoticeCard, decision: string) => {
+    const scope = humanGateScopeFor(card.payload);
+    if (!scope) {
+      openCard(card);
+      return;
+    }
+    patchGateState(card.key, { submitting: true, errorText: "", armedDecision: null });
+    let outcome;
+    try {
+      outcome = await submitHumanGateDecision({ ...scope, decision });
+    } catch (reason) {
+      patchGateState(card.key, {
+        submitting: false,
+        errorText: `${COPY[lang].failedPrefix}${reason instanceof Error ? reason.message : String(reason)}`,
+      });
+      return;
+    }
+    if (outcome.outcome === "submitted") {
+      dismissCard(card.key);
+      return;
+    }
+    // The gate offer expired or was already decided: fall back to the run panel.
+    openCard(card);
+  }, [dismissCard, lang, openCard, patchGateState]);
+
   useEffect(() => {
     return subscribeHumanAttentionEvents(humanAttentionBridge(), event => {
       if (event.type === "opened") {
@@ -112,9 +176,10 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
   }, [openTarget]);
 
   // Schedule auto-dismiss for new cards and drop timers of removed cards.
+  // Actionable gate cards stay until answered so the user is never raced.
   useEffect(() => {
     for (const card of cards) {
-      if (!timers.current.has(card.key)) {
+      if (!timers.current.has(card.key) && !isActionableCard(card.payload)) {
         scheduleDismiss(card.key);
       }
     }
@@ -142,14 +207,20 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
     <div className={styles.stack} data-vui-domain-recipe="desktop-assistant" role="region" aria-label={copy.region}>
       {cards.map(card => {
         const kindLabel = copy.kinds[card.payload.kind];
+        const gateActions = isActionableCard(card.payload) ? card.payload.actions ?? [] : [];
+        const gateState = gateStates[card.key] ?? IDLE_GATE_STATE;
         return (
           <div
             key={card.key}
-            className={styles.card}
+            className={gateActions.length > 0 ? `${styles.card} ${styles.cardColumn}` : styles.card}
             data-severity={card.payload.severity}
             data-vui="human-attention-notice"
             onMouseEnter={() => clearDismissTimer(card.key)}
-            onMouseLeave={() => scheduleDismiss(card.key)}
+            onMouseLeave={() => {
+              if (gateActions.length === 0) {
+                scheduleDismiss(card.key);
+              }
+            }}
           >
             <VNativeButton
               className={styles.cardMain}
@@ -165,6 +236,60 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
                 {kindLabel ? <span className={styles.cardKind}>{kindLabel}</span> : null}
               </span>
             </VNativeButton>
+            {gateActions.length > 0 ? (
+              <div className={styles.cardActions} data-testid="notice-gate-actions">
+                {gateActions.map(action => {
+                  const needsConfirm = action.decision !== "accept";
+                  const armed = gateState.armedDecision === action.decision;
+                  if (!needsConfirm || !armed) {
+                    return (
+                      <VNativeButton
+                        key={action.decision}
+                        className={action.decision === "accept" ? styles.gateAcceptButton : styles.gateActionButton}
+                        data-testid={`notice-gate-${action.decision}`}
+                        disabled={gateState.submitting}
+                        aria-label={`${action.label}: ${card.payload.title}`}
+                        onClick={() => {
+                          if (needsConfirm) {
+                            patchGateState(card.key, { armedDecision: action.decision, errorText: "" });
+                            return;
+                          }
+                          void runGateDecision(card, action.decision);
+                        }}
+                      >
+                        {gateState.submitting ? copy.submitting : action.label}
+                      </VNativeButton>
+                    );
+                  }
+                  return (
+                    <span key={action.decision} className={styles.gateConfirmRow}>
+                      <VNativeButton
+                        className={styles.gateDangerButton}
+                        data-testid="notice-gate-confirm"
+                        disabled={gateState.submitting}
+                        aria-label={`${copy.confirmPrefix}${action.label}: ${card.payload.title}`}
+                        onClick={() => void runGateDecision(card, action.decision)}
+                      >
+                        {gateState.submitting ? copy.submitting : `${copy.confirmPrefix}${action.label}`}
+                      </VNativeButton>
+                      <VNativeButton
+                        className={styles.gateActionButton}
+                        data-testid="notice-gate-cancel"
+                        disabled={gateState.submitting}
+                        onClick={() => patchGateState(card.key, { armedDecision: null })}
+                      >
+                        {copy.cancel}
+                      </VNativeButton>
+                    </span>
+                  );
+                })}
+                {gateState.errorText ? (
+                  <span className={styles.gateError} data-testid="notice-gate-error">
+                    {gateState.errorText}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <VIconButton
               variant="ghost"
               className={styles.cardClose}

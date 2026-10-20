@@ -546,6 +546,34 @@ class AnomalyInboxExtendBudgetRequest(BaseModel):
     expectedRunVersion: int = Field(0, ge=0)
 
 
+class AnomalyInboxResolveHumanGateRequest(BaseModel):
+    """One-click human-gate resolve CTA (inbox anomaly → resolve_human_task).
+
+    Frozen frontend contract body ``{teamId, runId, taskId, decision,
+    confirmed}``: ``confirmed`` is the human-authorization flag (误触防护,
+    the frontend always sends ``true`` after its own confirm step; the
+    endpoint still refuses without it).  ``teamId`` must echo the CTA's team
+    and match the route path team (a mismatch is a scope error, mirroring
+    the command service semantics).  ``decision`` is the one-click choice
+    advertised by the CTA action (accept/reject; ``revise`` needs fromNodeId
+    and stays on the workflow surface).  Execution reuses the single
+    ``resolve_human_task`` command authority — this endpoint is a thin
+    confirmation wrapper, never a second decision write path.  The
+    idempotency key is derived from (runId, taskId, decision), so a repeated
+    identical confirmation replays instead of double-resolving.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    questionId: str = Field("", max_length=200)
+    teamId: str = Field(..., min_length=1, max_length=200)
+    runId: str = Field(..., min_length=1, max_length=200)
+    taskId: str = Field(..., min_length=1, max_length=200)
+    decision: str = Field(..., min_length=1, max_length=16)
+    confirmed: StrictBool = False
+    expectedRunVersion: int = Field(0, ge=0)
+
+
 class RoundFailureRetryRequest(BaseModel):
     """One confirmed manual retry of an open round-generation failure trace.
 
