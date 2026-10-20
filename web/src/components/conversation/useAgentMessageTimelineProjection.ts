@@ -185,11 +185,57 @@ function assistantTurnDuplicateRank(message: ConversationMessage): number {
   return hasContent ? 3 : 1;
 }
 
+function userSubmissionIdentity(message: ConversationMessage): string {
+  if (message.role !== "user") {
+    return "";
+  }
+  return String(message.metadata?.clientSubmissionId ?? "").trim();
+}
+
+function isOptimisticUserRow(message: ConversationMessage): boolean {
+  return message.role === "user"
+    && (message.metadata?.optimisticUserMessage === true || message.id.startsWith("optimistic-user-"));
+}
+
+/**
+ * The optimistic user row and its canonical twin share one `clientSubmissionId`
+ * identity, so they must never paint as two bubbles. Resolving the duplicate on
+ * that identity keeps the single-row contract independent of the settle delete,
+ * which still falls back to content and time heuristics when the projection
+ * drops the metadata on the way back.
+ */
+export function dedupeSettledUserSubmissions(
+  messages: ConversationMessage[],
+): ConversationMessage[] {
+  const winners = new Map<string, ConversationMessage>();
+  for (const message of messages) {
+    const identity = userSubmissionIdentity(message);
+    if (!identity) {
+      continue;
+    }
+    const current = winners.get(identity);
+    // The committed row always wins; on an optimistic-only tie the first row
+    // keeps the painted identity instead of remounting mid-stream.
+    if (!current || (isOptimisticUserRow(current) && !isOptimisticUserRow(message))) {
+      winners.set(identity, message);
+    }
+  }
+  if (winners.size === 0) {
+    return messages;
+  }
+  return messages.filter((message) => {
+    const identity = userSubmissionIdentity(message);
+    if (!identity) {
+      return true;
+    }
+    return winners.get(identity) === message;
+  });
+}
+
 function dedupeAssistantTurnOverlays(
   messages: ConversationMessage[],
   activeTurnMessage?: ConversationMessage,
-): ConversationMessage[] {
-  const isOverlay = (message: ConversationMessage) => (
+): ConversationMessage[] {  const isOverlay = (message: ConversationMessage) => (
     message === activeTurnMessage
     || message.metadata?.kind === "session_active_turn_layer"
     || message.metadata?.kind === "session_live_overlay"
@@ -251,11 +297,10 @@ export function projectAgentMessageTimelineMessages({
     ? normalizeConversationMessageForRenderer(projectConversationMessageFromTurnItemsV2(activeTurnMessage))
     : undefined;
   const folded = projectTimelineProcessMessages(
-    dedupeAssistantTurnOverlays([
+dedupeSettledUserSubmissions(dedupeAssistantTurnOverlays([
       ...canonicalTimeline,
       ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
-    ], canonicalActiveTurn),
-  );
+    ], canonicalActiveTurn)),  );
   const orderedMessages = chronologicalConversationMessages(folded).filter(hasVisibleTurnData);
   const messages = companionMode
     ? suppressCompanionRestatedFollowups(
