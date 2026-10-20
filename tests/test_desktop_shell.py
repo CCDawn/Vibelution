@@ -789,8 +789,8 @@ def test_run_desktop_shell_refresh_packaged_kind_promotes_even_from_unpackaged_s
         calls.append("rebuild")
         return {"rebuilt": True}
 
-    def fake_launch_packaged(*, project_root, then_lifecycle=""):
-        calls.append(f"launch_packaged:{then_lifecycle}")
+    def fake_launch_packaged(*, project_root, then_lifecycle="", open_workbench=False):
+        calls.append(f"launch_packaged:{then_lifecycle}:{open_workbench}")
         return {"launched": True, "pid": 11}
 
     monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", fail_unpackaged)
@@ -805,7 +805,7 @@ def test_run_desktop_shell_refresh_packaged_kind_promotes_even_from_unpackaged_s
         shell_kind="packaged",
     )
     assert result["refreshed"] is True
-    assert calls == ["rebuild", "launch_packaged:rebuild-and-start"]
+    assert calls == ["rebuild", "launch_packaged:rebuild-and-start:True"]
 
 
 def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_path, monkeypatch):
@@ -816,8 +816,8 @@ def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_pat
         calls.append("rebuild")
         return {"rebuilt": True}
 
-    def fake_launch_packaged(*, project_root, then_lifecycle=""):
-        calls.append(f"launch_packaged:{then_lifecycle}")
+    def fake_launch_packaged(*, project_root, then_lifecycle="", open_workbench=False):
+        calls.append(f"launch_packaged:{then_lifecycle}:{open_workbench}")
         return {"launched": True, "pid": 12}
 
     monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fake_rebuild)
@@ -825,7 +825,7 @@ def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_pat
 
     result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
     assert result["refreshed"] is True
-    assert calls == ["rebuild", "launch_packaged:"]
+    assert calls == ["rebuild", "launch_packaged::True"]
 
 
 def test_run_desktop_shell_refresh_unpackaged_kind_keeps_unpackaged_relaunch(tmp_path, monkeypatch):
@@ -856,6 +856,123 @@ def test_run_desktop_shell_refresh_unpackaged_kind_keeps_unpackaged_relaunch(tmp
     assert result["refreshed"] is True
     assert result["kind"] == "unpackaged"
     assert calls == ["ensure_unpackaged", "launch:unpackaged:restart"]
+
+
+def test_run_desktop_shell_refresh_rebuild_failure_still_launches_packaged_shell(tmp_path, monkeypatch):
+    """Contract: a failed rebuild must not leave the workspace shell-less.
+
+    Incident shape: the old shell already exited, the rebuild failed with
+    "still stale after rebuild", and the helper returned without relaunching.
+    The packaged exe still exists, so the helper must bring the shell back
+    (even from the stale package) with the requested recovery lifecycle.
+    """
+    exe = desktop_shell.packaged_desktop_exe(tmp_path)
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"mz")
+    events: list[tuple[str, dict]] = []
+    launches: list[dict] = []
+
+    def fail_rebuild(*_args, **_kwargs):
+        raise RuntimeError("desktop shell is still stale after rebuild: frontend_source_mismatch")
+
+    def fake_launch(**kwargs):
+        launches.append(kwargs)
+        return {"launched": True, "pid": 21}
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fail_rebuild)
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch)
+    monkeypatch.setattr(
+        desktop_shell, "_append_refresh_log", lambda _root, event, **fields: events.append((event, fields))
+    )
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, then_lifecycle="start", project_root=tmp_path)
+    assert result["refreshed"] is False
+    assert result["reason"] == "rebuild_failed"
+    assert result["fallbackLaunch"]["pid"] == 21
+    assert launches == [{"project_root": tmp_path, "then_lifecycle": "start", "open_workbench": True}]
+    names = [name for name, _fields in events]
+    assert "refresh.aborted" in names
+    assert "refresh.fallback_launch" in names
+    assert "refresh.aborted_no_shell" not in names
+    # The cooldown marker stays recorded: the rebuild really did fail.
+    assert desktop_shell.recent_desktop_shell_refresh_failure(tmp_path) is not None
+
+
+def test_run_desktop_shell_refresh_rebuild_failure_without_exe_aborts_with_warning(tmp_path, monkeypatch):
+    """Contract: only a missing packaged exe may abort without relaunching."""
+    events: list[tuple[str, dict]] = []
+
+    def fail_rebuild(*_args, **_kwargs):
+        raise RuntimeError("promote rejected: frontend_release_mismatch")
+
+    def fail_launch(*_args, **_kwargs):
+        raise AssertionError("must not launch when the packaged exe is missing")
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fail_rebuild)
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fail_launch)
+    monkeypatch.setattr(
+        desktop_shell, "_append_refresh_log", lambda _root, event, **fields: events.append((event, fields))
+    )
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, then_lifecycle="start", project_root=tmp_path)
+    assert result["refreshed"] is False
+    assert result["reason"] == "rebuild_failed"
+    assert "fallbackLaunch" not in result
+    names = [name for name, _fields in events]
+    assert "refresh.aborted_no_shell" in names
+    assert "refresh.fallback_launch" not in names
+
+
+def test_run_desktop_shell_refresh_packaged_relaunch_opens_workbench(tmp_path, monkeypatch):
+    """Contract: a packaged replacement shell must come up with the workbench.
+
+    The unpackaged branch always relaunches with open_workbench=True; the
+    packaged branch previously spawned only `exe --workspace --local-debugging`,
+    so an empty then_lifecycle left the new shell as a bare tray with nothing
+    started. The refresh packaged launch now carries the same semantics.
+    """
+    launches: list[dict] = []
+
+    def fake_rebuild(*_args, **_kwargs):
+        return {"rebuilt": True}
+
+    def fake_launch(**kwargs):
+        launches.append(kwargs)
+        return {"launched": True, "pid": 31}
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fake_rebuild)
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+    assert result["refreshed"] is True
+    assert launches == [{"project_root": tmp_path, "then_lifecycle": "", "open_workbench": True}]
+
+
+def test_launch_packaged_desktop_shell_appends_open_workbench_flag(tmp_path, monkeypatch):
+    exe = desktop_shell.packaged_desktop_exe(tmp_path)
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"mz")
+    captured: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            self.pid = 78
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    result = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, open_workbench=True)
+    args = captured["args"]
+    assert args[0] == str(exe)
+    assert "--open-workbench" in args
+    assert args[-1] == "--open-workbench"
+    assert result["pid"] == 78
+    assert result["openWorkbench"] is True
+    without_flag = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, then_lifecycle="start")
+    second_args = captured["args"]
+    assert "--open-workbench" not in second_args
+    assert second_args[-1] == "start"
+    assert without_flag["openWorkbench"] is False
 
 
 @pytest.mark.skipif(

@@ -416,6 +416,7 @@ let trayRestartLauncherInFlight = false;
 let shellRefreshInFlight = false;
 let lastKnownDesktopShell: DesktopShellStatus | undefined;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
+let periodicAdvisoryStaleNotified = false;
 let workbenchBackendWatchdog: WorkbenchBackendWatchdogHandle | null = null;
 
 type DesktopActionLoopContext = {
@@ -2126,7 +2127,10 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
     // Automatic freshness checks never authorize interrupting active work.
     // Reuse the guarded update transaction: prepare, recheck, confirm stops,
     // then schedule replacement and exit. A failed stop must retain this shell.
-    const result = await restartLauncherToLatestBuild(false, thenLifecycle);
+    // forceRefresh stays off so the refresh cooldown is respected: after a
+    // failed rebuild the automatic path must not stop the workspace again
+    // during the cooldown window (explicit operator updates still bypass).
+    const result = await restartLauncherToLatestBuild(false, thenLifecycle, { forceRefresh: false });
     if (!result.accepted && result.message) {
       notifyDesktopTray("Vibelution", result.message, "warning");
     }
@@ -2685,7 +2689,7 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
 async function restartLauncherToLatestBuild(
   interruptActiveWork = true,
   operationToRestore = "open",
-  options: { shellKind?: "packaged" | "unpackaged" } = {}
+  options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean } = {}
 ): Promise<OrchestratedLifecycleResult> {
   if (shellRefreshInFlight) {
     return {
@@ -2710,7 +2714,11 @@ async function restartLauncherToLatestBuild(
         await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork);
       },
       scheduleReplacement: () => scheduleCurrentDesktopShellRefresh(operationToRestore, {
-        force: true,
+        // Only an explicit operator update may bypass the refresh cooldown.
+        // Automatic freshness refreshes keep force off, so a repeatedly
+        // failing rebuild cannot keep clearing its own cooldown and
+        // re-stopping the workspace.
+        force: options.forceRefresh !== false,
         // Callers that need a real promotion (rebuild-and-start) force the
         // packaged helper path; everyone else keeps the current shell kind.
         shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")
@@ -2790,7 +2798,9 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
   if (decision === "rebuild-and-exit") {
     shellRefreshInFlight = true;
     try {
-      await scheduleCurrentDesktopShellRefresh("", { force: forceRefresh });
+      // The replacement shell must restore the workbench, not only the tray:
+      // carry the start lifecycle so the new shell brings the backend up.
+      await scheduleCurrentDesktopShellRefresh("start", { force: forceRefresh });
     } catch (error: unknown) {
       shellRefreshInFlight = false;
       const detail = error instanceof Error ? error.message : String(error);
@@ -2818,7 +2828,7 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
       // Preparation never replaces a loaded native addon. The same refresh
       // helper as the update button waits for this Electron owner to exit.
       shellRefreshInFlight = true;
-      await scheduleCurrentDesktopShellRefresh("", { force: true, shellKind: "unpackaged" });
+      await scheduleCurrentDesktopShellRefresh("start", { force: true, shellKind: "unpackaged" });
       shutdownApproved = true;
       app.exit(0);
       return;
@@ -3027,7 +3037,7 @@ async function runTrayRestartAll(): Promise<void> {
         shellRefreshScheduled: true
       });
       try {
-        await scheduleCurrentDesktopShellRefresh("", { force: true });
+        await scheduleCurrentDesktopShellRefresh("start", { force: true });
       } catch (error: unknown) {
         shellRefreshInFlight = false;
         const detail = error instanceof Error ? error.message : String(error);
@@ -3219,20 +3229,39 @@ function startPeriodicShellFreshnessWatch(): void {
       } catch {
         return;
       }
-      if (
-        decidePeriodicDesktopShellRefresh({
-          isPackaged: app.isPackaged,
-          smoke: desktopCliArgs.smoke,
-          workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
-          stale: status.stale,
-          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
-          shutdownApproved,
-          refreshBlocked: status.refreshBlocked
-        }) !== "refresh"
-      ) {
+      if (!status.stale) {
+        periodicAdvisoryStaleNotified = false;
+      }
+      const decision = decidePeriodicDesktopShellRefresh({
+        isPackaged: app.isPackaged,
+        smoke: desktopCliArgs.smoke,
+        workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+        stale: status.stale,
+        launchBlocking: status.launchBlocking,
+        refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
+        shutdownApproved,
+        refreshBlocked: status.refreshBlocked
+      });
+      if (decision === "advisory") {
+        // Advisory staleness keeps serving windows from a usable frontend
+        // release; a periodic probe must never stop the workspace for it.
+        if (!periodicAdvisoryStaleNotified) {
+          periodicAdvisoryStaleNotified = true;
+          console.warn(
+            `periodic shell probe: advisory staleness (${status.reason || "unknown"}); automatic shell replacement stays disabled`
+          );
+          notifyDesktopTray(
+            "Vibelution",
+            "桌面壳落后但当前窗口仍可用，已跳过自动更换；可在启动器面板手动更新。",
+            "info"
+          );
+        }
         return;
       }
-      await refreshPackagedDesktopShellIfStale("");
+      if (decision !== "refresh") {
+        return;
+      }
+      await refreshPackagedDesktopShellIfStale("start");
     })().catch((error: unknown) => {
       console.warn(error instanceof Error ? error.message : String(error));
     });

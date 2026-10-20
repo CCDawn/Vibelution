@@ -1305,6 +1305,42 @@ def run_desktop_shell_refresh(
             detail = str(exc)
             record_desktop_shell_refresh_failure(root, reason="rebuild_failed", detail=detail)
             _append_refresh_log(root, "refresh.aborted", wait_pid=int(wait_pid), detail=detail[-800:])
+            # The old shell has already exited, so a failed rebuild must not
+            # leave the workspace without one: relaunch whatever packaged exe
+            # still exists (even a stale package). Only a missing exe aborts.
+            fallback: dict[str, Any] | None = None
+            fallback_error = ""
+            if packaged_desktop_exe(root).is_file():
+                try:
+                    fallback = launch_packaged_desktop_shell(
+                        project_root=root,
+                        then_lifecycle=then_lifecycle,
+                        open_workbench=True,
+                    )
+                except Exception as launch_exc:
+                    fallback_error = str(launch_exc)
+            if fallback is not None:
+                _append_refresh_log(
+                    root,
+                    "refresh.fallback_launch",
+                    wait_pid=int(wait_pid),
+                    helper_launch_pid=int(fallback.get("pid") or 0),
+                    detail=detail[-800:],
+                )
+                return {
+                    "schemaVersion": 1,
+                    "refreshed": False,
+                    "reason": "rebuild_failed",
+                    "message": detail[-800:],
+                    "fallbackLaunch": fallback,
+                }
+            _append_refresh_log(
+                root,
+                "refresh.aborted_no_shell",
+                wait_pid=int(wait_pid),
+                detail=detail[-800:],
+                fallback_detail=fallback_error[-800:],
+            )
             return {
                 "schemaVersion": 1,
                 "refreshed": False,
@@ -1312,7 +1348,11 @@ def run_desktop_shell_refresh(
                 "message": detail[-800:],
             }
         try:
-            launched = launch_packaged_desktop_shell(project_root=root, then_lifecycle=then_lifecycle)
+            launched = launch_packaged_desktop_shell(
+                project_root=root,
+                then_lifecycle=then_lifecycle,
+                open_workbench=True,
+            )
         except Exception as exc:
             detail = str(exc)
             record_desktop_shell_refresh_failure(root, reason="launch_failed", detail=detail)
@@ -2096,6 +2136,7 @@ def launch_packaged_desktop_shell(
     *,
     project_root: Path | str = PROJECT_ROOT,
     then_lifecycle: str = "",
+    open_workbench: bool = False,
 ) -> dict[str, Any]:
     root = Path(project_root)
     exe = packaged_desktop_exe(root)
@@ -2103,6 +2144,10 @@ def launch_packaged_desktop_shell(
         raise FileNotFoundError(f"packaged desktop shell was not found: {exe}")
     args = [str(exe), "--workspace", str(root), "--local-debugging"]
     lifecycle = str(then_lifecycle or "").strip().lower()
+    if open_workbench:
+        # Align with the unpackaged refresh launch: a replacement shell must
+        # come up serving the workbench, not only the tray.
+        args.append("--open-workbench")
     if lifecycle:
         args.append(lifecycle)
     process = _spawn_visible_electron(args, cwd=root)
@@ -2110,6 +2155,7 @@ def launch_packaged_desktop_shell(
         "launched": True,
         "pid": int(getattr(process, "pid", 0) or 0),
         "thenLifecycle": lifecycle,
+        "openWorkbench": bool(open_workbench),
     }
 
 
