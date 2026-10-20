@@ -129,7 +129,7 @@ def test_legacy_identity_match_distinguishes_same_name_and_role_by_source(fresh_
 
 
 @pytest.mark.parametrize("archive_after_seed", [False, True])
-def test_completed_marker_preserves_user_changes_and_lifecycle(fresh_deployment, preset, archive_after_seed):
+def test_completed_marker_preserves_user_changes_and_lifecycle(fresh_deployment, preset, archive_after_seed, monkeypatch):
     agent_id = public_presets.ensure_public_agent_presets()["publicPresetAgentIds"][0]
     directory.update_agent_instance(agent_id, display_name="用户改名", direct_session_id="",
                                     task_profile={"mission": "用户新的任务"},
@@ -137,8 +137,17 @@ def test_completed_marker_preserves_user_changes_and_lifecycle(fresh_deployment,
     if archive_after_seed:
         directory.archive_agent_instance(agent_id)
     before = directory.get_agent(agent_id, include_archived=True)
+    list_agents = directory.list_agents
+    queries = []
+
+    def summaries(**kwargs):
+        queries.append(kwargs)
+        return list_agents(**kwargs)
+
+    monkeypatch.setattr(directory, "list_agents", summaries)
     assert public_presets.ensure_public_agent_presets() == {"publicPresetAgentIds": [agent_id], "createdAgentIds": []}
     assert directory.get_agent(agent_id, include_archived=True) == before
+    assert queries == [{"include_archived": True, "detail": "summary"}]
 
 
 def test_interrupted_seed_resumes_same_identity_and_finishes_once(fresh_deployment, preset, monkeypatch):
