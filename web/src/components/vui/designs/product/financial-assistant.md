@@ -385,4 +385,14 @@ FinanceAIBacktest 复用既有 VSelect 提供原有简化费用和沪深历史�
 
 ## FinanceInvestmentSettings
 
-The conversation settings menu opens the existing VDialog with three primary VInput fields: budget, horizon and loss tolerance. Optional cash/position/holdings conditions stay collapsed behind VButton. VCheckbox expresses flexible holding, VSelect records holdings status, and VStateSurface exposes load/save conflicts. Unknown values are blank, never defaulted to zero or a specific operator budget. Save remains explicit and revision checked. The existing workspace recipe and native conversation stay authoritative; research actions continue the owner’s direct Session.
+### 功能
+
+在原有设置菜单中打开 VDialog，使用 VInput 填写预算、期限和最大可接受亏损。现金预留、仓位上限和持仓状态默认折叠；复用 VCheckbox、VSelect、VButton 与 VStateSurface 显示选项及保存结果。
+
+### 适用范围
+
+仅用于当前金融助手的私有投资条件，复用现有工作台布局与原生主会话。桌面排列三项主输入，窄屏单列；样式由 FinanceInvestmentSettings.styles.ts 管理。
+
+### 使用方式
+
+用户显式保存后每轮读取，空值表示未确认，不默认填零或特定预算。保存检查版本冲突，失败保留输入；附加研究继续当前助手的固定主会话，不新建替代会话或推定用户已交易。
