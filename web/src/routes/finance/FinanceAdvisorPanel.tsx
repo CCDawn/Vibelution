@@ -85,7 +85,7 @@ export function FinanceAdvisorPanel({ agentId, view, zh, onConditions, onResearc
       <VButton variant="ghost" onPress={() => setOpen(true)}>{freshProposal ? (zh ? "查看待确认内容" : "Review proposal") : amountIssues.length || unrecognizedProposal || proposalQuery.isError ? (zh ? "建议需要重新核对" : "Proposal needs attention") : `${zh ? "当前方案" : "Plan"} · ${status}`}</VButton>
       {current?.reviewAfter ? <span className={styles.caption}>{zh ? "下次复核 " : "Next review "}{new Date(current.reviewAfter).toLocaleDateString()}</span> : null}
     </div>
-    {amountIssues.length ? <VStateSurface tone="error" density="compact" title={zh ? "本轮回答金额不一致，请重新分析" : "Budget statements conflict; reassess before using this answer"}>{amountIssues.join(" ")}</VStateSurface> : null}
+    {amountIssues.length ? <VStateSurface tone="error" density="compact" title={zh ? "本轮回答存在核对问题，请重新分析" : "Answer checks found issues; reassess before using this answer"}>{amountIssues.join(" ")}</VStateSurface> : null}
     <VDialog open={open} onOpenChange={setOpen} title={zh ? "我的投资方案" : "My investment plan"} size="lg">
       <div className={styles.root}>
         {workspace.query.isError ? <VStateSurface tone="error" title={zh ? "投资状态读取失败" : "Cannot read investment state"} actions={<VButton onPress={() => void workspace.query.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !state ? <p>{zh ? "正在读取…" : "Loading…"}</p> : <>

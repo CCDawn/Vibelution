@@ -88,6 +88,10 @@ def build_investment_context_lines(agent: dict) -> list[str]:
         # Do not reuse a previous turn's budget or interrupt unrelated context.
         return [*lines, "本轮投资配置读取失败：预算不可确认，禁止依据旧预算给出金额；请先恢复读取或请用户重新确认。"]
     from .advisor import advisor_context_lines
+    from core.web.services.financial_backtest.fees import stamp_duty_rate
+    from datetime import datetime, timedelta, timezone
+
+    stamp_rate = stamp_duty_rate(datetime.now(timezone(timedelta(hours=8))).date().isoformat(), "sell")
 
     return [
         *lines,
@@ -95,6 +99,7 @@ def build_investment_context_lines(agent: dict) -> list[str]:
         f"InvestmentProfile: {profile}",
         "null 表示未知或未配置，不等于零；未确认预算不得猜测金额，holdingsStatus=unknown 不得当作空仓。",
         "回答涉及金额时，先明确本轮投资预算及来源，再据此计算；预算、实际现金、最大亏损与波动参考是不同条件，不能互相代替。检查正文和配置提案中的预算是否一致，条件不足只给参考比较。",
+        f"共享股票费用模型的当前卖出印花税率为 {stamp_rate * 100:g}%，仅卖出收取；百分比、千分比、万分比不能混写。佣金及最低收费须说明是假设，ETF不套用股票税费核算，ETF申赎费用不能说成均已计入净值。",
         *holding_lines,
         *advisor_context_lines(state),
     ]

@@ -19,6 +19,11 @@ volatility amounts are not budget assertions. An ambiguous source blocks
 confirmation. These bounded checks do not certify unmentioned numbers or advice
 quality; the answer and journal remain unchanged. The proposal read/confirmation
 path shares this assessment, including for ordinary answers without a proposal.
+For a CN investment profile, self-contained current stock-sell stamp-duty claims
+also use the shared historical fee schedule as a cross-check. This narrow check
+does not infer a stock fee from context in preceding comma clauses, and does not
+certify ETF, foreign-market, historical or unspecified fee claims. Percent,
+per-mille and Chinese fraction units retain their full numeric value.
 `position_evidence.py` quarantines explicitly labelled acceptance/test/simulation
 records from model asset context, quote fetches and portfolio calculations while
 retaining the original workspace records. Such records block adoption and cannot
