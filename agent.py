@@ -143,6 +143,7 @@ from tools.token_manager import (
     EnhancedTokenCompressor,
     estimate_messages_tokens,
     estimate_messages_tokens_for_threshold,
+    estimate_messages_tokens_with_tool_payloads,
     estimate_tokens_precise,
     is_compression_requested,
     compression_request_source,
@@ -1239,7 +1240,12 @@ class AgentRuntime:
             candidate = list(history_messages or [])
             if not candidate:
                 return None
-            estimate = estimate_messages_tokens_for_threshold(candidate, micro_trigger)
+            # Seed/ledger replay messages carry tool call/result payloads in
+            # ``tool_calls`` with an empty ``content``; a content-only estimate
+            # collapses to the text-only tail for tool-heavy sessions and the
+            # gate never sees real pressure. Meter on the same basis as the
+            # assembled model input.
+            estimate = estimate_messages_tokens_with_tool_payloads(candidate, micro_trigger)
             if estimate < micro_trigger:
                 return None
         except Exception:

@@ -11,6 +11,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Iterable
 
+from .projection_stickiness import (
+    LOCK_MODE_REPLACEMENT,
+    ProjectionLockIndex,
+    content_digest,
+)
+
 
 DEFAULT_TOOL_RESULT_REPLACEMENT_CHAR_LIMIT = 12_000
 
@@ -123,6 +129,86 @@ def replace_large_tool_results_for_compression(
         )
         replaced.append(_with_replacement_content(message, replacement_content, reference))
     return replaced, state
+
+
+def apply_sticky_tool_result_replacements(
+    messages: Iterable[Any],
+    *,
+    projection_locks: ProjectionLockIndex | None,
+    session_id: str = "",
+    state: dict[str, Any] | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Replay locked compression replacement forms byte-identically.
+
+    Sticky read-side overlay for ``replace_large_tool_results_for_compression``:
+    a tool result that already entered an assembled output in replacement form
+    keeps that exact form even when the current derivation would no longer
+    replace it (char-limit change, tier disabled, rollback). The placeholder is
+    rebuilt from the original content with the locked limits, so the replayed
+    bytes match the previously sent ones exactly; the replacement builder logic
+    itself is untouched. Entries already in replacement form are skipped.
+    """
+
+    source = list(messages or [])
+    replacement_state = state if isinstance(state, dict) else empty_tool_result_replacement_state()
+    locks = projection_locks if isinstance(projection_locks, ProjectionLockIndex) else None
+    if not source or locks is None or not locks.has_mode(LOCK_MODE_REPLACEMENT):
+        return source, replacement_state
+    projected = list(source)
+    restored = 0
+    for index, message in enumerate(projected):
+        role = _message_role(message)
+        semantic_tool_result = _is_semantic_tool_result(message)
+        if role != "tool" and not semantic_tool_result:
+            continue
+        if _message_is_replacement(message):
+            continue
+        content = _message_content(message)
+        basis = _semantic_tool_result_payload(content) if semantic_tool_result else content
+        digest = content_digest(basis)
+        tool_call_id = _message_tool_call_id(message) or f"tool_message_{index}"
+        record = locks.lookup(mode=LOCK_MODE_REPLACEMENT, tool_call_id=tool_call_id, sha256=digest)
+        if record is None:
+            continue
+        reference = _replacement_reference(
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            digest=digest,
+        )
+        preview_limit = record.preview_limit if record.preview_limit > 0 else min(800, DEFAULT_TOOL_RESULT_REPLACEMENT_CHAR_LIMIT)
+        replacement_content = _replacement_content(
+            reference=reference,
+            tool_call_id=tool_call_id,
+            tool_name=record.tool_name,
+            original_chars=len(basis),
+            digest=digest,
+            preview=_bounded_preview(basis, limit=preview_limit),
+        )
+        if semantic_tool_result:
+            replacement_content = _semantic_replacement_content(content, replacement_content)
+        projected[index] = _with_replacement_content(message, replacement_content, reference)
+        restored += 1
+        replacement_state["replacements"].append(
+            {
+                "reference": reference,
+                "toolCallId": tool_call_id,
+                "toolName": record.tool_name,
+                "messageIndex": index,
+                "originalChars": len(basis),
+                "sha256": digest,
+                "stickyRestored": True,
+            }
+        )
+    if restored:
+        replacement_state["stickyRestored"] = int(replacement_state.get("stickyRestored") or 0) + restored
+    return projected, replacement_state
+
+
+def _message_is_replacement(message: Any) -> bool:
+    if _message_content(message).lstrip().startswith(TOOL_RESULT_PLACEHOLDER_HEADER):
+        return True
+    metadata = _message_metadata(message)
+    return "toolResultReplacement" in metadata
 
 
 def _message_role(message: Any) -> str:
@@ -269,6 +355,7 @@ def _bounded_preview(content: str, *, limit: int) -> str:
 __all__ = [
     "DEFAULT_TOOL_RESULT_REPLACEMENT_CHAR_LIMIT",
     "TOOL_RESULT_PLACEHOLDER_HEADER",
+    "apply_sticky_tool_result_replacements",
     "build_tool_result_placeholder",
     "empty_tool_result_replacement_state",
     "replace_large_tool_results_for_compression",

@@ -22,6 +22,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Syst
 from config import AppConfig, get_config
 from config.llm_security import is_llm_local_network_base_url
 from config.models import (
+    DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS,
     DEFAULT_LLM_ROUTE_CONCURRENCY,
     DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS,
     DEFAULT_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS,
@@ -38,6 +39,7 @@ from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import ProtocolResolutionError, resolve_model_protocol
 from .protocols import ModelProtocol, WireProtocol
+from .prompt_cache_observation import observe_prompt_cache_usage
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .resilience_policy import CONNECTION_BACKOFF_CAP_CATEGORIES
 from .responses_websocket import (
@@ -1841,6 +1843,18 @@ def _record_usage_ledger_event(
         # Startup warmup probes (core.llm.warmup) are synthetic traffic: they
         # must not enter the usage ledger, quota or cost rollups.
         return
+    # Per-call prompt cache observation rides the same finalize point (after
+    # the warmup filter); it must never break the ledger write itself.
+    try:
+        observe_prompt_cache_usage(
+            usage=usage,
+            metadata=meta,
+            provider=provider,
+            model=model,
+            profile_id=profile_id,
+        )
+    except Exception:  # noqa: BLE001 - observation must never fail the ledger
+        pass
     provider_usage = getattr(usage, "provider_raw_usage", {}) if usage is not None else {}
     provider_usage_keys = sorted(str(key) for key in provider_usage.keys()) if isinstance(provider_usage, dict) else []
     input_tokens = max(0, int(getattr(usage, "input_tokens", 0) or 0))
@@ -2350,11 +2364,86 @@ def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
                     _PROXY_ENV_CONDITION.notify_all()
 
 
-#: _llm_new_httpx_client 的连接保活上限（秒）。httpx 默认 keepalive_expiry=5s
-#: 会在回合内工具执行的间隙回收连接，导致每通重付 DNS+TLS；客户端按
-#: (api_key, base_url, timeout, ssl) 缓存且随 LLMClient 长持，300s 足够覆盖
-#: 回合内复用又有界。语义见 _llm_new_httpx_client docstring。
-_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS = 300.0
+#: 自建 httpx 客户端连接池的闲置保活上限（秒）。httpx 默认 keepalive_expiry=5s
+#: 会在回合内工具执行的间隙回收连接，导致每通重付 DNS+TLS。默认值/钳制范围/
+#: env 名（VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS）登记在
+#: config/models.py；解析优先级与安全范围见 _llm_httpx_keepalive_expiry_seconds。
+_LLM_HTTPX_KEEPALIVE_EXPIRY_ENV = "VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS"
+_LLM_HTTPX_KEEPALIVE_EXPIRY_DEFAULT_SECONDS = DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+_LLM_HTTPX_KEEPALIVE_EXPIRY_MIN_SECONDS = 5.0
+_LLM_HTTPX_KEEPALIVE_EXPIRY_MAX_SECONDS = 86400.0
+#: In-process override（测试/嵌入方），优先于 env 与 operator config。
+_LLM_HTTPX_KEEPALIVE_EXPIRY_OVERRIDE: float | None = None
+
+
+def _llm_httpx_keepalive_expiry_seconds() -> float:
+    """Resolve the pooled keep-alive expiry: override > env > llm config > default.
+
+    Lazily resolved per client build (clients are cached per slot and long
+    held, so config changes only affect newly built clients — same semantics
+    as the rest of the slot cache key). The operator config read is guarded:
+    a config-load failure must never break a provider call, it just falls
+    back to the env/default tier.
+    """
+
+    override = _LLM_HTTPX_KEEPALIVE_EXPIRY_OVERRIDE
+    if (
+        isinstance(override, (int, float))
+        and not isinstance(override, bool)
+        and override > 0
+    ):
+        return float(override)
+    raw_env = os.environ.get(_LLM_HTTPX_KEEPALIVE_EXPIRY_ENV)
+    if raw_env is not None and str(raw_env).strip():
+        return _clamp_env_seconds(
+            raw_env,
+            default=_LLM_HTTPX_KEEPALIVE_EXPIRY_DEFAULT_SECONDS,
+            minimum=_LLM_HTTPX_KEEPALIVE_EXPIRY_MIN_SECONDS,
+            maximum=_LLM_HTTPX_KEEPALIVE_EXPIRY_MAX_SECONDS,
+        )
+    configured: Any = None
+    try:
+        configured = getattr(get_config().llm, "http_keepalive_expiry_seconds", None)
+    except Exception:
+        configured = None
+    if (
+        isinstance(configured, (int, float))
+        and not isinstance(configured, bool)
+        and configured > 0
+    ):
+        return _clamp_env_seconds(
+            configured,
+            default=_LLM_HTTPX_KEEPALIVE_EXPIRY_DEFAULT_SECONDS,
+            minimum=_LLM_HTTPX_KEEPALIVE_EXPIRY_MIN_SECONDS,
+            maximum=_LLM_HTTPX_KEEPALIVE_EXPIRY_MAX_SECONDS,
+        )
+    return _LLM_HTTPX_KEEPALIVE_EXPIRY_DEFAULT_SECONDS
+
+
+def _bump_httpx_pool_keepalive(client: Any, keepalive_expiry_seconds: float) -> None:
+    """Best-effort keepalive bump for third-party-owned httpx clients.
+
+    litellm's ``HTTPHandler`` builds its own ``httpx.Client`` with httpx's
+    default ``Limits`` (5s keepalive), far below our pooled expiry. httpcore
+    reads ``pool._keepalive_expiry`` when creating each new connection, so a
+    post-construction assignment extends idle retention for future requests.
+    This touches httpx/httpcore private attributes on purpose and must stay
+    fully defensive: any shape drift degrades to litellm's own default.
+    """
+
+    try:
+        pool = getattr(getattr(client, "_transport", None), "_pool", None)
+        if pool is None:
+            return
+        current = getattr(pool, "_keepalive_expiry", None)
+        try:
+            current_value = float(current)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            current_value = -1.0
+        if current_value < float(keepalive_expiry_seconds):
+            pool._keepalive_expiry = float(keepalive_expiry_seconds)  # type: ignore[attr-defined]
+    except Exception:
+        return
 
 
 def _llm_new_httpx_client(
@@ -2374,13 +2463,15 @@ def _llm_new_httpx_client(
     lease scope; outside a lease the client is a direct connection, which
     matches the lease semantics (it pops ambient proxy env while active).
 
-    ``keepalive_expiry`` is pinned well above httpx's 5s default: these
-    clients are cached per (api_key, base_url, timeout, ssl) and long-held
-    by each LLMClient, but an intra-turn gap (tool execution between two
-    provider calls) routinely exceeds 5s, after which the pooled connection
-    was recycled and every call re-paid DNS+TLS. 300s comfortably covers
-    turn-internal reuse while staying bounded. Connection-count knobs are
-    pinned to httpx's own defaults so only the expiry semantics change.
+    ``keepalive_expiry`` is pinned well above httpx's 5s default (resolved by
+    ``_llm_httpx_keepalive_expiry_seconds``: override > env > llm config >
+    default 1800s): these clients are cached per (api_key, base_url, timeout,
+    ssl) and long-held by each LLMClient, but an intra-turn gap (tool
+    execution between two provider calls) or an inter-turn gap (the user
+    reading the reply) routinely exceeds 5s, after which the pooled
+    connection was recycled and every call re-paid DNS+TLS. Connection-count
+    knobs are pinned to httpx's own defaults so only the expiry semantics
+    change.
     """
 
     import httpx
@@ -2394,7 +2485,7 @@ def _llm_new_httpx_client(
         limits=httpx.Limits(
             max_connections=100,
             max_keepalive_connections=20,
-            keepalive_expiry=_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS,
+            keepalive_expiry=_llm_httpx_keepalive_expiry_seconds(),
         ),
     )
 
@@ -2600,7 +2691,13 @@ def _new_cancellable_responses_http_handler(payload: Dict[str, Any]) -> Any:
 
     timeout = payload.get("timeout")
     ssl_verify = payload.get("ssl_verify")
-    return HTTPHandler(timeout=timeout, ssl_verify=ssl_verify)
+    handler = HTTPHandler(timeout=timeout, ssl_verify=ssl_verify)
+    # litellm builds its internal httpx.Client with httpx's 5s default
+    # keepalive; bump the pooled expiry so this long-held handler keeps the
+    # same idle-connection retention as every self-built client. Best effort:
+    # litellm-internal shape drift degrades to its own default.
+    _bump_httpx_pool_keepalive(handler.client, _llm_httpx_keepalive_expiry_seconds())
+    return handler
 
 
 def _new_cancellable_completion_http_handler(payload: Dict[str, Any]) -> Any:

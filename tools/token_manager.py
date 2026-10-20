@@ -595,6 +595,91 @@ def estimate_messages_tokens_for_threshold(messages: list, threshold: int) -> in
     return estimate_messages_tokens(messages)
 
 
+_TOOL_PAYLOAD_TEXT_KEYS = (
+    "result",
+    "resultPreview",
+    "result_preview",
+    "summary",
+    "error",
+)
+
+
+def _message_tool_payload_parts(message: Any) -> list:
+    """Text-bearing tool payload pieces of one message.
+
+    Seed/ledger replay messages carry the tool call name/arguments and the
+    tool result under ``tool_calls``/``toolCalls`` while ``content`` stays
+    empty, so a content-only estimate collapses to the text-only tail for
+    tool-heavy sessions. Both shapes are supported:
+
+    - ledger shape: ``{"name", "arguments", "result", "summary", ...}``
+    - provider shape: ``{"function": {"name", "arguments"}}``
+    """
+    if not isinstance(message, dict):
+        return []
+    raw = message.get("tool_calls")
+    if not isinstance(raw, list) or not raw:
+        raw = message.get("toolCalls")
+    if not isinstance(raw, list):
+        return []
+    parts: list = []
+    for item in raw:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        function_block = item.get("function") if isinstance(item.get("function"), dict) else {}
+        for key in ("name", "tool_name", "toolName"):
+            value = item.get(key)
+            if value is None:
+                value = function_block.get("name")
+            text = str(value or "").strip()
+            if text:
+                parts.append(text)
+        for key in ("arguments", "args", *_TOOL_PAYLOAD_TEXT_KEYS):
+            value = item.get(key)
+            if value is None:
+                value = function_block.get(key)
+            if value is None or isinstance(value, bool):
+                continue
+            if isinstance(value, str):
+                text = value
+            else:
+                try:
+                    text = json.dumps(value, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    text = str(value)
+            if text:
+                parts.append(text)
+    return parts
+
+
+def estimate_messages_tokens_with_tool_payloads(messages: list, threshold: int) -> int:
+    """Threshold estimate that also counts tool-call/result payloads.
+
+    Same contract as :func:`estimate_messages_tokens_for_threshold` (cheap
+    conservative char bound when clearly under the threshold, precise walk
+    otherwise), but messages whose tool payloads sit in
+    ``tool_calls``/``toolCalls`` (seed/ledger replay shape) are metered as if
+    the payloads sat in ``content`` — keeping the estimate on the same basis
+    as the assembled model input so seed-path gates see real pressure.
+    """
+    limit = max(0, int(threshold or 0))
+    rough = rough_upper_bound_messages_tokens(messages)
+    payload_bound = 0
+    for message in list(messages or []):
+        payload_bound += sum(len(part) for part in _message_tool_payload_parts(message))
+    if rough + payload_bound <= limit:
+        return rough + payload_bound
+    total = 0
+    for message in list(messages or []):
+        text_parts: list = [_message_content_text(message)]
+        text_parts.extend(_message_tool_payload_parts(message))
+        total += estimate_tokens_precise("\n".join(part for part in text_parts if part))
+    return total
+
+
 def estimate_messages_tokens_uncached(messages: list) -> int:
     """直接计算，跳过缓存。用于校验或测试。"""
     return _estimate_messages_tokens_uncached(messages)
