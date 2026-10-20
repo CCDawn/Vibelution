@@ -198,6 +198,103 @@ def test_dirty_electron_worktree_is_stale_only_when_source_is_newer(tmp_path, mo
     assert status["launchBlocking"] is stale
 
 
+@pytest.mark.parametrize("kind", ["packaged", "unpackaged"])
+@pytest.mark.parametrize("source_mtime", [1_000, 2_000_000_000])
+def test_electron_source_mtimes_that_cannot_block_skip_git_status(tmp_path, monkeypatch, kind, source_mtime):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    artifact = desktop_shell.packaged_asar_path(tmp_path)
+    if kind == "unpackaged":
+        _write_unpackaged_electron(tmp_path, tree_hash="a" * 40, main_mtime=2_000_000_000)
+        artifact = desktop_shell.unpackaged_main_js(tmp_path)
+    source = tmp_path / desktop_shell.ELECTRON_SRC_RELATIVE / "main.ts"
+    os.utime(source, (source_mtime, source_mtime))
+
+    def unexpected(root):
+        pytest.fail("Git status cannot change the result when no source timestamp is newer")
+
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", unexpected)
+
+    assert desktop_shell._electron_sources_newer_than(tmp_path, artifact) is False
+
+
+def test_electron_source_newer_mtime_uses_fresh_git_status_each_time(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=1_000_000)
+    source = tmp_path / desktop_shell.ELECTRON_SRC_RELATIVE / "main.ts"
+    os.utime(source, (1_000_001, 1_000_001))
+    statuses = iter([False, True, None])
+    calls = []
+
+    def current_status(root):
+        calls.append(root)
+        return next(statuses)
+
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", current_status)
+    artifact = desktop_shell.packaged_asar_path(tmp_path)
+
+    assert [desktop_shell._electron_sources_newer_than(tmp_path, artifact) for _ in range(3)] == [False, True, True]
+    assert calls == [tmp_path] * 3
+
+
+@pytest.mark.parametrize("dirty", [False, True, None])
+@pytest.mark.parametrize("failure", ["artifact_stat", "source_scan"])
+def test_electron_mtime_probe_errors_keep_existing_git_fallback(tmp_path, monkeypatch, dirty, failure):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    artifact = desktop_shell.packaged_asar_path(tmp_path)
+    source_root = tmp_path / desktop_shell.ELECTRON_SRC_RELATIVE
+    calls = []
+
+    def git_status(root):
+        calls.append(root)
+        return dirty
+
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", git_status)
+    if failure == "artifact_stat":
+        stat = Path.stat
+        artifact_reads = 0
+
+        def fail_second_artifact_stat(path, *args, **kwargs):
+            nonlocal artifact_reads
+            if path == artifact:
+                artifact_reads += 1
+                if artifact_reads == 2:
+                    raise PermissionError("artifact metadata unavailable")
+            return stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", fail_second_artifact_stat)
+    else:
+        rglob = Path.rglob
+
+        def fail_source_scan(path, *args, **kwargs):
+            if path == source_root:
+                raise PermissionError("source scan unavailable")
+            return rglob(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "rglob", fail_source_scan)
+
+    if failure == "source_scan" and dirty is not False:
+        with pytest.raises(PermissionError, match="source scan unavailable"):
+            desktop_shell._electron_sources_newer_than(tmp_path, artifact)
+    else:
+        assert desktop_shell._electron_sources_newer_than(tmp_path, artifact) is (dirty is not False)
+    assert calls == [tmp_path]
+
+
+@pytest.mark.parametrize("missing", ["artifact", "source"])
+def test_electron_mtime_probe_missing_inputs_do_not_query_git(tmp_path, monkeypatch, missing):
+    artifact = tmp_path / "artifact.js"
+    source_root = tmp_path / desktop_shell.ELECTRON_SRC_RELATIVE
+    if missing == "source":
+        artifact.write_text("compiled", encoding="utf-8")
+    else:
+        source_root.mkdir(parents=True)
+
+    def unexpected(root):
+        pytest.fail("missing inputs keep the existing false result without Git")
+
+    monkeypatch.setattr(desktop_shell, "_electron_worktree_dirty", unexpected)
+    assert desktop_shell._electron_sources_newer_than(tmp_path, artifact) is False
+
+
 def test_inspect_desktop_shell_package_frontend_bytes_must_match_provenance(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)

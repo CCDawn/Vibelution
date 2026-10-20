@@ -2198,22 +2198,31 @@ def _electron_sources_newer_than(project_root: Path, artifact: Path) -> bool:
     src_root = project_root / ELECTRON_SRC_RELATIVE
     if not artifact.is_file() or not src_root.is_dir():
         return False
-    dirty = _electron_worktree_dirty(project_root)
-    if dirty is False:
-        return False
     try:
         artifact_mtime = artifact.stat().st_mtime
     except OSError:
-        return True
-    for path in src_root.rglob("*"):
-        if not path.is_file():
-            continue
-        try:
-            if path.stat().st_mtime > artifact_mtime:
-                return True
-        except OSError:
-            continue
-    return False
+        return _electron_worktree_dirty(project_root) is not False
+    # No newer timestamp can block launch, even for a dirty worktree. Only
+    # query Git when it can dismiss a timestamp-only change (for example checkout).
+    scan_error: OSError | None = None
+    try:
+        for path in src_root.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                if path.stat().st_mtime > artifact_mtime:
+                    break
+            except OSError:
+                continue
+        else:
+            return False
+    except OSError as error:
+        scan_error = error
+    if _electron_worktree_dirty(project_root) is False:
+        return False
+    if scan_error is not None:
+        raise scan_error
+    return True
 
 
 class UnpackagedElectronPublishBusy(RuntimeError):
