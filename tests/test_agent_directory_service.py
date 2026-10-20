@@ -358,3 +358,159 @@ def test_ensure_agent_shared_workspace_tolerates_extended_length_prefix_form(
     assert str(shared_root).startswith("\\\\?\\") is False
     for subdir in ("memory", "artifacts", "notes", "logs", "research", "tmp"):
         assert (shared_root / subdir).is_dir()
+
+
+def test_runtime_context_block_split_renderers_are_byte_identical_to_join(
+    tmp_path, monkeypatch
+):
+    """static/dynamic 渲染器直出 == 兼容 wrapper + 旧 split 语义（P4a 硬门）。"""
+
+    from core.orchestration.context_engine import _split_agent_runtime_context_block
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Split Render Agent"
+    )
+    agent_id = agent["agentId"]
+    agent_directory_service.write_group_context_event(
+        agent_id,
+        {
+            "sourceRoomId": "room-split",
+            "sourceRoundId": "round-split",
+            "topic": "拆分等价",
+            "summary": "静态与动态半段拼接必须与整块逐字节一致",
+            "ownMessage": "覆盖群事件路径",
+        },
+    )
+    agent_directory_service.write_agent_inbox_message(
+        agent_id, content="覆盖收件箱路径", summary="收件箱", created_by="test"
+    )
+
+    joined = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    static_via_split, dynamic_via_split = _split_agent_runtime_context_block(joined)
+
+    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(agent_id)
+    static_direct = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_static_lines(
+            agent_id, tool_policy_snapshot=tool_policy
+        )
+        if line is not None
+    ).strip()
+    dynamic_direct = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_dynamic_lines(agent_id)
+        if line is not None
+    ).strip()
+
+    assert static_direct == static_via_split
+    assert dynamic_direct == dynamic_via_split
+    assert joined == "\n".join([static_direct, dynamic_direct]).strip()
+    # 冻结边界假设：动态半段首行必须命中动态标记，静态半段不含任何标记行。
+    markers = ("## 个人记忆", "PersonalEpisodes:", "GroupContextEvents:", "AgentInboxMessages:")
+    assert dynamic_direct
+    first_line = dynamic_direct.splitlines()[0].strip()
+    assert any(first_line.startswith(marker) for marker in markers)
+    for line in static_direct.splitlines():
+        stripped = line.strip()
+        assert not any(stripped.startswith(marker) for marker in markers)
+    # 不传 tool_policy_snapshot（内部自行解析）与传入解析结果字节一致。
+    static_self_resolved = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_static_lines(agent_id)
+        if line is not None
+    ).strip()
+    assert static_self_resolved == static_direct
+
+
+def test_workspace_write_decision_cache_reuses_allowed_and_keeps_blocked_fresh(
+    tmp_path, monkeypatch
+):
+    """allowed 决策键控缓存命中；blocked 决策每次都重新评估并重复记录事件。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Decision Cache Agent")
+    agent_id = agent["agentId"]
+    workspace = agent_directory_service._ensure_agent_workspace(agent["workspacePath"])
+    # get_agent(include_archived=True) 的 repair 分支自带解析噪声（每轮还可能
+    # 不同）；固定为静态记录，把断言面收敛到 evaluate 自身的解析行为。
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda aid, include_archived=True: dict(agent),
+    )
+
+    resolve_calls: list[str] = []
+    real_resolve = agent_directory_service._resolve_project_path
+
+    def counting_resolve(path_value):
+        resolve_calls.append(str(path_value))
+        return real_resolve(path_value)
+
+    monkeypatch.setattr(agent_directory_service, "_resolve_project_path", counting_resolve)
+    blocked_events: list[Any] = []
+    real_record = agent_directory_service._record_agent_territory_write_blocked
+
+    def counting_record(agent, decision, *, purpose=""):
+        blocked_events.append(decision)
+        return real_record(agent, decision, purpose=purpose)
+
+    monkeypatch.setattr(
+        agent_directory_service, "_record_agent_territory_write_blocked", counting_record
+    )
+
+    first = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, workspace, purpose="test"
+    )
+    assert first.allowed is True
+    assert first.scope == "private"
+    baseline_resolves = len(resolve_calls)
+
+    second = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, workspace, purpose="test"
+    )
+    assert second.allowed is True
+    assert second is first
+    assert len(resolve_calls) == baseline_resolves
+    assert blocked_events == []
+
+    outside = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, tmp_path / "outside.txt", purpose="test"
+    )
+    assert outside.allowed is False
+    assert blocked_events, "blocked decision must record territory events"
+
+    outside_again = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, tmp_path / "outside.txt", purpose="test"
+    )
+    assert outside_again.allowed is False
+    assert len(blocked_events) == 2, "blocked decisions must not be cached"
+
+    # 快照直传：跳过目录读取仍得到同一缓存决策（worker 热路径形态）。
+    def _fail_get_agent(*args, **kwargs):
+        raise AssertionError("agent_snapshot must bypass directory lookup")
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", _fail_get_agent)
+    via_snapshot = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id,
+        workspace,
+        purpose="test",
+        agent_snapshot=dict(agent),
+    )
+    assert via_snapshot.allowed is True
+    assert via_snapshot is first
+
+
+def test_ensure_agent_workspace_cache_heals_deleted_subdirs(tmp_path, monkeypatch):
+    """缓存命中要求全部子目录仍在；外部删除后回落全量 ensure 重建。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Ensure Cache Agent")
+    workspace = agent_directory_service._ensure_agent_workspace(agent["workspacePath"])
+    assert workspace.is_dir()
+
+    import shutil
+
+    shutil.rmtree(workspace / "memory")
+    healed = agent_directory_service._ensure_agent_workspace(agent["workspacePath"])
+    assert (healed / "memory").is_dir()

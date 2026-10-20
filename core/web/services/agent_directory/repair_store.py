@@ -880,8 +880,25 @@ def _is_challenge_cup_agent_config_authority(agent: dict[str, Any]) -> bool:
     )
 
 
+# 每回合 chat turn 都会 ensure 一次 agent workspace；目录结构稳定后这是
+# 纯重复的 realpath + stat 风暴。命中缓存后只做 root+子目录的 is_dir 校验
+# （外部删除任一子目录即回落全量 ensure 重建），首次全量结果已含
+# agents-root 校验；resolve 结果随缓存复用，不再每回合 realpath。
+_AGENT_WORKSPACE_ENSURE_CACHE: dict[str, Path] = {}
+
+
+def _agent_workspace_cache_entry_valid(s: Any, cached: Path) -> bool:
+    if not cached.is_dir():
+        return False
+    return all((cached / subdir).is_dir() for subdir in s.AGENT_WORKSPACE_SUBDIRS)
+
+
 def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> Path:
     s = _service()
+    raw = str(path_value or "").strip()
+    cached = _AGENT_WORKSPACE_ENSURE_CACHE.get(raw)
+    if cached is not None and _agent_workspace_cache_entry_valid(s, cached):
+        return cached
     path = s._resolve_project_path(path_value)
     agents_root = s._workspace_path("agents").resolve()
     if not path.is_relative_to(agents_root):
@@ -894,6 +911,7 @@ def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> P
             target.mkdir(parents=True, exist_ok=True)
     if ensure_shared:
         s.ensure_agent_shared_workspace()
+    _AGENT_WORKSPACE_ENSURE_CACHE[raw] = path
     return path
 
 

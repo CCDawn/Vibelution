@@ -657,6 +657,13 @@ def _prompt_snapshot_context_segment(snapshot_block: str, snapshot: Any) -> dict
     }
 
 
+# "reused" 是会话稳态：每回合都命中同一条快照复用，逐回合落事件只会写放大
+# （场景事件 + child log 各一条）。同一 (session, agent, contentHash) 只记首条；
+# 快照变化（contentHash 变）或 failed/created 等非稳态结果照常记录。
+_PROMPT_SNAPSHOT_REUSE_EVENT_SEEN: set[tuple[str, str, str]] = set()
+_PROMPT_SNAPSHOT_REUSE_EVENT_SEEN_LIMIT = 1024
+
+
 def _record_session_prompt_snapshot_event(
     session_id: str,
     *,
@@ -666,6 +673,18 @@ def _record_session_prompt_snapshot_event(
 ) -> None:
     s = _service()
     try:
+        normalized_outcome = str(outcome or "observed").strip() or "observed"
+        if normalized_outcome == "reused":
+            reuse_key = (
+                str(session_id or "").strip(),
+                str(agent_id or "").strip(),
+                str(snapshot.get("contentHash") or "").strip(),
+            )
+            if reuse_key in _PROMPT_SNAPSHOT_REUSE_EVENT_SEEN:
+                return
+            if len(_PROMPT_SNAPSHOT_REUSE_EVENT_SEEN) >= _PROMPT_SNAPSHOT_REUSE_EVENT_SEEN_LIMIT:
+                _PROMPT_SNAPSHOT_REUSE_EVENT_SEEN.clear()
+            _PROMPT_SNAPSHOT_REUSE_EVENT_SEEN.add(reuse_key)
         s.record_runtime_scene_event(
             "conversation",
             "prompt_snapshot",
