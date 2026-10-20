@@ -872,7 +872,41 @@ def _last_registry_cache_hit() -> bool:
     return bool(timing["toolRegistryCacheHit"])
 
 
+def _pin_dependency_probes(monkeypatch, *, available: bool = True):
+    """固定依赖探测返回值，隔离 autoglm 后台异步刷新对 registry 内容的翻转。
+
+    autoglm 探针首次调用会启动后台刷新线程，几秒后 status 从 "checking"
+    翻到真实值；registry 内容（dependencyStatus 字符串）随之异步变化，
+    会让跨重建的 payload 等价断言在刷新恰好落进测试窗口时随机失败。
+    """
+
+    import tools.financial_report_tools as financial_report_tools
+    import tools.web_search_tool as web_search_tool
+
+    monkeypatch.setattr(
+        web_search_tool,
+        "autoglm_search_tool_availability",
+        lambda **kwargs: {
+            "available": available,
+            "dependency": "autoglm_token_service",
+            "stage": "token_fetch",
+            "status": "available" if available else "unavailable",
+            "availabilityProvisional": False,
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_tools,
+        "financial_report_availability",
+        lambda **kwargs: {
+            "available": False,
+            "status": "not_configured",
+            "blockReason": "financial report probe pinned for test",
+        },
+    )
+
+
 def test_tool_registry_signature_cache_hit_is_equivalent_and_independent(tmp_path, monkeypatch):
+    _pin_dependency_probes(monkeypatch)
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     _reset_registry_cache_state()
 
@@ -896,6 +930,7 @@ def test_tool_registry_signature_cache_hit_is_equivalent_and_independent(tmp_pat
 
 
 def test_tool_registry_signature_cache_invalidates_on_generated_tools_file_change(tmp_path, monkeypatch):
+    _pin_dependency_probes(monkeypatch)
     generated_path = tmp_path / "generated_tools.json"
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", generated_path)
     _reset_registry_cache_state()
@@ -962,6 +997,7 @@ def test_tool_registry_signature_cache_invalidates_on_generated_tools_file_chang
 
 
 def test_tool_registry_signature_cache_invalidates_when_content_entry_is_patched(tmp_path, monkeypatch):
+    _pin_dependency_probes(monkeypatch)
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     _reset_registry_cache_state()
 
@@ -997,6 +1033,7 @@ def test_tool_registry_signature_cache_invalidates_when_content_entry_is_patched
 
 
 def test_tool_registry_signature_cache_invalidates_on_availability_probe_change(tmp_path, monkeypatch):
+    _pin_dependency_probes(monkeypatch)
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     _reset_registry_cache_state()
 
@@ -1034,3 +1071,46 @@ def test_peek_cached_tool_registry_returns_signature_validated_shared_payload(tm
 
     registry.invalidate_tool_registry_cache()
     assert registry.peek_cached_tool_registry() is None
+
+
+def test_tool_registry_signature_ignores_probe_status_string_but_not_availability_flip(
+    tmp_path, monkeypatch
+):
+    """探针 status 字符串抖动（checking↔available）不再触发重建；布尔翻转仍触发。"""
+
+    import tools.financial_report_tools as financial_report_tools
+    import tools.web_search_tool as web_search_tool
+
+    monkeypatch.setattr(
+        financial_report_tools,
+        "financial_report_availability",
+        lambda **kwargs: {"available": False, "status": "not_configured", "blockReason": "pinned"},
+    )
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    _reset_registry_cache_state()
+
+    state = {"available": True, "status": "checking"}
+
+    def fake_availability(*, force: bool = False):
+        return dict(state)
+
+    monkeypatch.setattr(web_search_tool, "autoglm_search_tool_availability", fake_availability)
+
+    registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+
+    # 诊断字符串在 "checking" ↔ "available" 间抖动，available 不变：必须命中。
+    state["status"] = "available"
+    assert registry.get_tool_registry() is not None
+    assert _last_registry_cache_hit() is True
+    state["status"] = "checking"
+    assert registry.get_tool_registry() is not None
+    assert _last_registry_cache_hit() is True
+
+    # 行为面翻转（available False）必须立即失效重建。
+    state["available"] = False
+    rebuilt = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    web_items = [item for item in rebuilt["tools"] if item.get("name") == "web_search_tool"]
+    for item in web_items:
+        assert item.get("llmVisible") is False
