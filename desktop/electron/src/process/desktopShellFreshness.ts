@@ -101,25 +101,32 @@ export function decidePackagedDesktopShellRefresh(input: {
   return "refresh";
 }
 
+// The periodic probe is not a user action, so it may never stop a usable
+// shell: advisory staleness (a usable frontend release still serves windows,
+// launchBlocking false) downgrades to "advisory" — the caller notifies and
+// logs instead of entering the stop-and-replace transaction. Only a
+// launch-blocking shell may be replaced automatically. Explicit operator
+// update requests keep the fuller decidePackagedDesktopShellRefresh contract.
 export function decidePeriodicDesktopShellRefresh(input: {
   isPackaged: boolean;
   smoke: boolean;
   workbenchCloseCanary?: boolean;
   stale: boolean;
+  launchBlocking?: boolean;
   refreshInFlight: boolean;
   shutdownApproved: boolean;
   refreshBlocked?: boolean;
-}): "skip" | "refresh" {
+}): "skip" | "advisory" | "refresh" {
   if (input.refreshInFlight || input.shutdownApproved || input.refreshBlocked) {
     return "skip";
   }
-  return decidePackagedDesktopShellRefresh({
-    isPackaged: input.isPackaged,
-    smoke: input.smoke,
-    workbenchCloseCanary: input.workbenchCloseCanary,
-    stale: input.stale,
-    refreshBlocked: input.refreshBlocked
-  });
+  if (!input.isPackaged || input.smoke || input.workbenchCloseCanary || !input.stale) {
+    return "skip";
+  }
+  if (input.launchBlocking !== true) {
+    return "advisory";
+  }
+  return "refresh";
 }
 
 /**

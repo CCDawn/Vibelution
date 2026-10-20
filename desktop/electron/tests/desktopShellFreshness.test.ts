@@ -100,6 +100,7 @@ describe("desktop shell freshness", () => {
         isPackaged: true,
         smoke: false,
         stale: true,
+        launchBlocking: true,
         refreshInFlight: false,
         shutdownApproved: true
       })
@@ -109,6 +110,7 @@ describe("desktop shell freshness", () => {
         isPackaged: true,
         smoke: false,
         stale: true,
+        launchBlocking: true,
         refreshInFlight: false,
         shutdownApproved: false
       })
@@ -189,14 +191,47 @@ describe("desktop shell freshness", () => {
     })).toBe(false);
   });
 
-  it("keeps periodic refresh observing full stale so frontend-only staleness still converges", () => {
-    // Advisory frontend staleness (launchBlocking false) must still schedule a
-    // background package rebuild until the snapshot returns to "current".
+  it("keeps periodic refresh from stopping for advisory staleness; only launch-blocking staleness refreshes", () => {
+    // A periodic probe is not a user action. Advisory frontend staleness
+    // (launchBlocking false, windows still served from a usable release)
+    // downgrades to "advisory": the caller notifies/logs and must not enter
+    // the stop-and-replace transaction. Only a launch-blocking shell may be
+    // replaced automatically; unknown launchBlocking is treated as advisory.
     expect(
       decidePeriodicDesktopShellRefresh({
         isPackaged: true,
         smoke: false,
         stale: true,
+        launchBlocking: false,
+        refreshInFlight: false,
+        shutdownApproved: false
+      })
+    ).toBe("advisory");
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        refreshInFlight: false,
+        shutdownApproved: false
+      })
+    ).toBe("advisory");
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: false,
+        launchBlocking: false,
+        refreshInFlight: false,
+        shutdownApproved: false
+      })
+    ).toBe("skip");
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        launchBlocking: true,
         refreshInFlight: false,
         shutdownApproved: false
       })

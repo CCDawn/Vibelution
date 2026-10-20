@@ -40,7 +40,7 @@ describe("guarded local Launcher update", () => {
       bestEffortStopIsolatedInstancesForShutdown: sandbox.stopIsolatedInstancesForApprovedShutdown,
       stopManagedRuntime: sandbox.stopMainRuntimeForApprovedShutdown,
     });
-    const code = transpileModule(refresh + restart + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;", {
+    const code = transpileModule(refresh + restart + "\nglobalThis.refresh = refreshPackagedDesktopShellIfStale;\nglobalThis.restartLatest = restartLauncherToLatestBuild;", {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText;
     runInNewContext(code, sandbox);
@@ -89,14 +89,45 @@ describe("guarded local Launcher update", () => {
     expect(input.stopIsolatedInstancesForApprovedShutdown).toHaveBeenCalledWith(false);
     expect(input.stopIsolatedInstancesForApprovedShutdown.mock.invocationCallOrder[0])
       .toBeLessThan(input.scheduleCurrentDesktopShellRefresh.mock.invocationCallOrder[0]);
-    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: true, shellKind: "packaged" });
+    // The automatic path must not force: force clears the refresh cooldown,
+    // which would let a repeatedly failing rebuild keep re-stopping the shell.
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: false, shellKind: "packaged" });
     expect(input.app.exit).toHaveBeenCalledOnce();
     expect(input.shutdownApproved).toBe(true);
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     const watch = main.slice(main.indexOf("function startPeriodicShellFreshnessWatch("), main.indexOf("async function runTrayBranchInstance("));
-    expect(watch).toContain('refreshPackagedDesktopShellIfStale("")');
+    expect(watch).toContain('refreshPackagedDesktopShellIfStale("start")');
     // The shared transaction owns this flag, including rejected overlapping probes.
     expect(watch).not.toContain("shellRefreshInFlight =");
+  });
+
+  it("rejects the automatic refresh before stopping while the refresh cooldown is active", async () => {
+    const input = automaticRefreshHarness();
+    input.inspectCurrentDesktopShell.mockResolvedValue({
+      stale: true,
+      launchBlocking: true,
+      refreshBlocked: true,
+      refreshBlockedReason: "rebuild_failed",
+      refreshBlockedDetail: "still stale after rebuild: frontend_source_mismatch"
+    });
+    expect(await input.refresh("start")).toBe(false);
+    // Cooldown rejection must land before the transaction stops anything.
+    expect(input.ensureLatestLauncher).not.toHaveBeenCalled();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.stopIsolatedInstancesForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    expect(input.notifyDesktopTray).toHaveBeenCalled();
+  });
+
+  it("lets an explicit operator update keep bypassing the refresh cooldown", async () => {
+    const input = automaticRefreshHarness();
+    await (input.restartLatest as () => Promise<unknown>)();
+    // restart-latest-shell is the user-clicked update entry: it still forces
+    // so the Python scheduler clears any cooldown marker before scheduling.
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: true, shellKind: "packaged" });
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(true);
+    expect(input.app.exit).toHaveBeenCalledOnce();
   });
 
   it.each(["active", "unknown"] as const)("does not build, stop or schedule when tasks are %s", async (state) => {
@@ -208,7 +239,9 @@ describe("guarded local Launcher update", () => {
     runInNewContext(code, sandbox);
     await (sandbox.restart as () => Promise<void>)();
     expect(events).toEqual(["prepare", "schedule", "exit"]);
-    expect(schedule).toHaveBeenCalledWith("", { force: true, shellKind: "unpackaged" });
+    // The replacement shell carries the start lifecycle so it restores the
+    // workbench/backend instead of coming up as a bare tray.
+    expect(schedule).toHaveBeenCalledWith("start", { force: true, shellKind: "unpackaged" });
     expect(relaunch).not.toHaveBeenCalled();
     expect(sandbox.shutdownApproved).toBe(true);
   });
