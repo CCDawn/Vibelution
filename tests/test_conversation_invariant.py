@@ -19,9 +19,11 @@ from core.chat.conversation_invariant import (
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_BRANCH_REBASE,
+    EVENT_COMPACTION_CHECKPOINT,
     EVENT_TOOL_RESULT,
     EVENT_USER_MESSAGE,
     append_conversation_event,
+    apply_context_compression_checkpoints,
     load_conversation_events,
 )
 from core.infrastructure.runtime_input import build_chat_user_message
@@ -129,6 +131,61 @@ def test_canonical_replay_folds_branch_rebase_events(tmp_path):
         "原始回答",
         "编辑后的需求",
     ]
+
+
+@pytest.mark.parametrize("operation", ["edit", "regenerate", "head_select"])
+def test_history_seed_ignores_checkpoint_from_inactive_branch(tmp_path, operation):
+    session_id = "session-rebased-checkpoint"
+    user = append_conversation_event(
+        tmp_path, session_id, "turn-original", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "original request"},
+    )
+    answer = append_conversation_event(
+        tmp_path, session_id, "turn-original", EVENT_ASSISTANT_MESSAGE,
+        status="completed", payload={"content": "original answer"},
+    )
+    checkpoint = append_conversation_event(
+        tmp_path, session_id, "turn-abandoned", EVENT_COMPACTION_CHECKPOINT,
+        status="checkpointed",
+        payload={
+            "summary": "abandoned summary",
+            "coveredEventIds": [user.event_id, answer.event_id],
+            "coveredEventSeqStart": user.sequence,
+            "coveredEventSeqEnd": answer.sequence,
+        },
+        visible_in_model=True,
+        projection_kind="context_compression_checkpoint",
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-retry", EVENT_BRANCH_REBASE,
+        status="recorded",
+        payload={"operation": operation, "fromEventId": answer.event_id},
+        parent_event_id=answer.event_id,
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-retry", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "retry request"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-current", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "current request"},
+    )
+    events = load_conversation_events(tmp_path, session_id)
+
+    replayed = apply_context_compression_checkpoints(events, current_turn_id="turn-current")
+    assert checkpoint.event_id not in {event.event_id for event in replayed}
+    assert {user.event_id, answer.event_id} <= {event.event_id for event in replayed}
+    assembled = assemble_conversation_context(
+        [], session_id=session_id, current_turn_id="turn-current",
+        recent_message_limit=None, ledger_events=events,
+    )
+    assert [message["content"] for message in assembled.history_messages] == [
+        "original request", "original answer", "retry request",
+    ]
+    assert not assembled.checkpoint_event_id
+    assert conversation_layer_fingerprint(assembled.history_messages) == conversation_layer_fingerprint(
+        canonical_conversation_messages_from_events(events, current_turn_id="turn-current")
+    )
 
 
 def test_assembled_history_fingerprint_matches_ledger_reconstruction(tmp_path):

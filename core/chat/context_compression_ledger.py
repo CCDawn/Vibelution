@@ -18,6 +18,7 @@ from .turn_journal import (
     EVENT_COMPRESSION_ATTEMPT,
     TurnJournalEvent,
     append_turn_event,
+    fold_active_events,
     load_turn_events,
 )
 
@@ -375,9 +376,12 @@ def apply_context_compression_checkpoints(
     current_turn_id: str = "",
     expected_scope: Mapping[str, Any] | None = None,
 ) -> list[TurnJournalEvent]:
-    """Return ledger events with checkpoint-covered historical events omitted."""
+    """Apply checkpoints from the active branch to its historical events."""
 
-    event_list = list(events or [])
+    # A checkpoint on a superseded branch must not cover active history.
+    # Folding after compression is too late: the stale checkpoint may already
+    # have removed the events needed to reconstruct the selected branch.
+    event_list = fold_active_events(events)
     if not event_list:
         return []
     normalized_current_turn_id = str(current_turn_id or "").strip()
