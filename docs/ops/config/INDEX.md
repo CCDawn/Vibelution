@@ -69,7 +69,7 @@
 | `[git]` | 08 |
 | `[ui]` | 08 |
 | `[user_profile]` | 08 |
-| `[research_workflow]` | 根节仅剩零散键：`auto_advance_policy_path` 及 auto-advance 策略文档读者已随 T8 自动推进机器退役（封存模式下 ladder 从未激活）；保留的只有通用 kill switch 语义（`VIBELUTION_AUTO_ADVANCE_DISABLED` env + 封存模式，见 `core/web/services/team_workflow/research_runtime/automation_policy_executor.py` 与 `archive_mode.py`）。历史模板 `auto-advance-policy.active.json`、部署脚本 `deploy_auto_advance_policy.py` 与影子转写 `shadow_to_g12_judgements.py` 均已删除；`Documents\Vibelution\config` 下的旧部署副本不再被运行时读取，可自行清理 |
+| `[research_workflow]` | 根节仅剩零散键：`auto_advance_policy_path` 及 auto-advance 策略文档读者已随 T8 自动推进机器退役（ladder 从未激活）；保留的只有通用 kill switch 语义（`VIBELUTION_AUTO_ADVANCE_DISABLED` env，见 `core/web/services/team_workflow/research_runtime/automation_policy_executor.py`）。历史模板 `auto-advance-policy.active.json`、部署脚本 `deploy_auto_advance_policy.py` 与影子转写 `shadow_to_g12_judgements.py` 均已删除；`Documents\Vibelution\config` 下的旧部署副本不再被运行时读取，可自行清理 |
 
 ## 业务服务连接
 

@@ -209,6 +209,11 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("state.json");
     expect(mainSource).toContain("ports.json");
     expect(mainSource).toContain("instances.json");
+    const hintsStart = mainSource.indexOf("function startLauncherStateFileHints(");
+    const hintsEnd = mainSource.indexOf("function stopLauncherStateFileHints(", hintsStart);
+    const hints = mainSource.slice(hintsStart, hintsEnd);
+    expect(hints).toContain("dirname(launcherStatePath(paths.workspaceRoot))");
+    expect(hints).not.toContain('resolve(paths.workspaceRoot, ".runtime", "launcher")');
     const statLoopStart = mainSource.indexOf("launcherStateStatTimer = setInterval");
     const statLoopEnd = mainSource.indexOf("}, 30_000);", statLoopStart);
     const statLoop = mainSource.slice(statLoopStart, statLoopEnd);

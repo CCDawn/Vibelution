@@ -398,6 +398,30 @@ def isolate_team_workflow_review_llm(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_candidate_doi_enrichment_network(monkeypatch):
+    """Candidate DOI enrichment must never hit OpenAlex from unrelated tests.
+
+    ``doi_enrichment`` reverse-looks-up missing candidate DOIs against the
+    real OpenAlex endpoint from finding writebacks and extraction context
+    reads.  Unrelated source-collection tests would otherwise issue real
+    network calls (one per DOI-less lead), so the single transport seam is
+    pinned to a negative result and the process cache is cleared per test;
+    tests that exercise the lookup monkeypatch their own fake transport.
+    """
+    try:
+        from core.web.services.team_workflow.source_collection import doi_enrichment
+    except Exception:  # noqa: BLE001 - test isolation must never fail collection
+        return
+
+    monkeypatch.setattr(
+        doi_enrichment,
+        "_openalex_transport_fetch",
+        lambda url: None,
+    )
+    monkeypatch.setattr(doi_enrichment, "_ENRICHMENT_CACHE", {})
+
+
+@pytest.fixture(autouse=True)
 def isolate_review_wave_stagger(monkeypatch):
     """Review wave stagger must never add sleeps to unrelated tests.
 

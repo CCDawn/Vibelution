@@ -479,6 +479,20 @@ def sync_conversation_record(
         return
     try:
         revision_id = _ensure_agent_revision(store, agent_id)
+        existing = store.repository.get_session(session_id, include_archived=True)
+        if existing is not None and str(existing.get("agentId") or "") != agent_id:
+            agent = _service().get_agent(agent_id, include_archived=True)
+            archive = conversation.get("archive_state") or conversation.get("archiveState") or {}
+            if (isinstance(agent, dict) and agent.get("createdBy") == "session_repair"
+                    and str(agent.get("directSessionId") or "") == session_id
+                    and isinstance(archive, Mapping) and archive.get("source") == "agent_archive"):
+                result = store.repository.repair_archived_directory_owner(
+                    session_id=session_id, expected_agent_id=str(existing["agentId"]),
+                    agent_id=agent_id, agent_config_revision_id=revision_id,
+                ).result(timeout=_SYNC_TIMEOUT_SECONDS)
+                directory_runtime._record(
+                    "session_directory.owner.repaired", outcome="completed", fields=result,
+                )
         future = store.repository.upsert_directory_session(
             session_id=session_id,
             agent_id=agent_id,
@@ -512,13 +526,17 @@ def sync_conversation_record(
             team_id=str(conversation.get("team_id") or conversation.get("teamId") or "").strip(),
             last_preview=str(last_preview or ""),
             touch_recency=touch_recency,
+            archived=_directory_archived_from_payload(conversation),
         )
         if wait:
             future.result(timeout=_SYNC_TIMEOUT_SECONDS)
     except Exception as exc:
         logger.warning(
-            "Session directory upsert failed (%s).",
-            type(exc).__name__,
+            "Session directory upsert failed for %s (%s).", session_id, type(exc).__name__,
+        )
+        directory_runtime._record(
+            "session_directory.sync.failed", outcome="failed", level="warning",
+            fields={"sessionId": session_id, "agentId": agent_id, "errorType": type(exc).__name__},
         )
 
 
@@ -631,6 +649,20 @@ def _ensure_agent_revision(store: Any, agent_id: str) -> str:
     if not snapshots:
         raise ValueError("Session directory Agent snapshot import returned no revision.")
     return str(snapshots[0]["configRevisionId"])
+
+
+def _directory_archived_from_payload(conversation: Mapping[str, Any]) -> bool:
+    """Derive the directory seal from the payload archive_state.
+
+    Every directory sync re-derives archived from the authoritative payload,
+    so an unrelated upsert can no longer silently unseal an archived session
+    (the historical agent_archive bug: payload sealed, directory row live).
+    """
+
+    raw = conversation.get("archive_state") or conversation.get("archiveState")
+    if not isinstance(raw, Mapping):
+        return False
+    return str(raw.get("status") or "").strip().lower() == "archived"
 
 
 def _directory_hidden_from_index(conversation: Mapping[str, Any]) -> bool:

@@ -50,6 +50,13 @@ function retryCell(status: CodexTranscriptCell["status"] = "running"): CodexTran
 }
 
 describe("ConversationProcessDisclosure", () => {
+  it("uses total turn elapsed time for running work, independently of tool durations", () => {
+    expect(processLabel([processCell("completed")], "zh", undefined, true, null, 65))
+      .toBe("工作中 1 分 5 秒");
+    expect(processLabel([], "en", undefined, true, null, 0)).toBe("Working for 0s");
+    expect(processLabel([processCell("running")], "zh", undefined, true, null, null))
+      .toBe("工作中");
+  });
   it("renders a completed process collapsed with only its state and duration", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("completed")]} language="zh">
@@ -85,7 +92,9 @@ describe("ConversationProcessDisclosure", () => {
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("工作中 2.9s");
+    expect(html).toContain("工作中");
+    // A completed tool's duration is not the live turn's elapsed time.
+    expect(html).not.toContain("2.9s");
     expect(html).not.toContain("个阶段");
     expect(html).toContain('open=""');
     expect(html).toContain('data-codex-process-expanded="true"');

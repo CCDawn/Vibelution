@@ -1006,6 +1006,22 @@ def _usable_active_frontend_release(root: Path) -> bool:
         return False
 
 
+def _electron_package_block_reason(
+    root: Path, *, current_tree: str, packaged_tree: str, source_newer: bool,
+) -> str:
+    if not packaged_desktop_exe(root).is_file() or not packaged_asar_path(root).is_file():
+        return "missing_package"
+    if not packaged_tree:
+        return "missing_provenance"
+    if not current_tree:
+        return "current_electron_tree_unavailable"
+    if packaged_tree != current_tree:
+        return "provenance_mismatch"
+    if source_newer:
+        return "source_newer_than_asar"
+    return ""
+
+
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Return whether the packaged Electron shell and Launcher frontend are current."""
 
@@ -1055,20 +1071,11 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         except Exception:
             # A failure to inspect current source cannot establish package freshness.
             frontend_build_current = None
-    if not exe_path.is_file() or not asar_path.is_file():
-        reason = "missing_package"
-        stale = True
-    elif not packaged_tree:
-        reason = "missing_provenance"
-        stale = True
-    elif not current_tree:
-        reason = "current_electron_tree_unavailable"
-        stale = True
-    elif packaged_tree != current_tree:
-        reason = "provenance_mismatch"
-        stale = True
-    elif source_newer:
-        reason = "source_newer_than_asar"
+    package_block_reason = _electron_package_block_reason(
+        root, current_tree=current_tree, packaged_tree=packaged_tree, source_newer=source_newer,
+    )
+    if package_block_reason:
+        reason = package_block_reason
         stale = True
     elif not packaged_frontend_path.is_dir() or not expected_frontend_hash or not packaged_frontend_tree:
         reason = "missing_frontend_provenance"
@@ -1138,6 +1145,44 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
             }
         )
     return payload
+
+
+def inspect_desktop_shell_launch_readiness(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Return only the launch blocker, never a full freshness observation.
+
+    With a usable workspace release, frontend-only problems are already advisory
+    in inspect_desktop_shell. Its source is verified again at backend admission;
+    neither hashing the packaged snapshot nor rescanning sources can change this
+    shell gate. Without that release the packaged frontend is used, so retain the
+    complete inspection and its content proof.
+    """
+    root = Path(project_root)
+    if not _usable_active_frontend_release(root):
+        status = inspect_desktop_shell(root)
+        return {
+            "schemaVersion": 1, "launchBlocking": status["launchBlocking"], "reason": status["reason"],
+            "currentElectronTree": str(status.get("currentElectronTree") or ""),
+        }
+    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    provenance = _read_json(packaged_provenance_path(root))
+    reason = _electron_package_block_reason(
+        root,
+        current_tree=current_tree,
+        packaged_tree=str(provenance.get("electronTreeHash") or "").strip(),
+        source_newer=_electron_sources_newer_than_asar(root),
+    )
+    # Admission may outlive an active-pointer change. Do not skip the packaged
+    # frontend proof if the workspace release disappeared during the shell read.
+    if not reason and not _usable_active_frontend_release(root):
+        status = inspect_desktop_shell(root)
+        return {
+            "schemaVersion": 1, "launchBlocking": status["launchBlocking"], "reason": status["reason"],
+            "currentElectronTree": str(status.get("currentElectronTree") or ""),
+        }
+    return {
+        "schemaVersion": 1, "launchBlocking": bool(reason), "reason": reason or "active_frontend_release",
+        "currentElectronTree": current_tree,
+    }
 
 
 def schedule_desktop_shell_refresh(
@@ -1967,10 +2012,9 @@ def resolve_desktop_shell_launch(
                     shell_root=shell_root, slot_root=slot_root, open_workbench=open_workbench,
                     lifecycle=lifecycle, hidden_presentation=hidden_presentation),
             }
-    packaged_status = inspect_desktop_shell(shell_root)
-    # launchBlocking, not stale: advisory frontend staleness still launches the
-    # packaged exe because the launcher window follows the workspace active
-    # release, and reporting the real reason keeps downstream status honest.
+    packaged_status = inspect_desktop_shell_launch_readiness(shell_root)
+    # Admission only needs the launch blocker. The active workspace release
+    # serves the launcher, while full freshness remains a separate observation.
     if not packaged_status.get("launchBlocking"):
         args = _desktop_shell_electron_args(
             str(packaged_desktop_exe(shell_root)),

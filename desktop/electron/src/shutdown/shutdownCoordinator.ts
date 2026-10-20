@@ -162,7 +162,7 @@ export async function fetchLauncherActiveWorkStatus(input: {
   fetchImpl?: typeof fetch;
 }): Promise<ActiveWorkStatus> {
   const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(`${new URL(input.launcherOrigin).origin}/api/launcher/status`, {
+  const response = await fetcher(`${new URL(input.launcherOrigin).origin}/api/launcher/status?projection=active-work`, {
     signal: input.signal,
     headers: {
       "X-Vibelution-Control-Token": input.controlToken

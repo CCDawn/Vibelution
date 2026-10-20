@@ -632,11 +632,13 @@ rules:
       - "tests/test_gym_*.py"
       - "tests/test_self_evolution_autonomous_loop_*.py"
       - "tests/test_self_evolution_local_integration.py"
+      - "tests/test_self_evolution_campaign_*.py"
       - "tests/test_self_evolution_candidate_workspace.py"
       - "tests/test_supervised_candidate_integration_service.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_evolution_routes.py tests/test_evolution_harness.py tests/test_gym_engine.py tests/test_gym_runner.py tests/test_gym_promotion.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_self_evolution_autonomous_loop_service.py tests/test_self_evolution_autonomous_loop_runtime.py tests/test_self_evolution_autonomous_loop_orchestrator.py tests/test_self_evolution_local_integration.py tests/test_self_evolution_candidate_workspace.py tests/test_supervised_candidate_integration_service.py tests/test_evolution_route_contract.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_self_evolution_campaign_service.py tests/test_self_evolution_campaign_child.py tests/test_self_evolution_campaign_integration.py tests/test_self_evolution_campaign_routes.py tests/test_self_evolution_campaign_orchestrator.py -q"
     notes:
       - "Keep evolution route tests serial unless the touched file is known to be isolated."
 

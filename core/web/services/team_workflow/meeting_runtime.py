@@ -4099,11 +4099,17 @@ def _merge_llm_digest_with_deterministic_markers(
     made the digest response large and then discarded that work. The ledger
     remains authoritative for those facts. ``factLedger`` is the approved
     source snapshot, and the existing top-level buckets are compatibility
-    projections at draft time while current consumers migrate.
+    projections at draft time while current consumers migrate. When the
+    speeches carry no marker lines at all, the unstructured fallback keeps
+    parity with the deterministic drafter: cited per-speech entries backfill
+    ``agreements`` so the digest still captures the discussion.
     """
 
     completed_messages = meeting_rounds.completed_meeting_source_messages(meeting_round)
-    markers = meeting_rounds.extract_discussion_markers(completed_messages)
+    markers = meeting_rounds.apply_unstructured_digest_fallback(
+        meeting_rounds.extract_discussion_markers(completed_messages),
+        completed_messages,
+    )
     merged = dict(drafted)
     for key in _LLM_DIGEST_MARKER_BUCKETS:
         merged[key] = list(markers.get(key) or [])

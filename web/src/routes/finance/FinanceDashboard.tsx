@@ -19,7 +19,7 @@ import {
   type VDenseTableColumn,
 } from "../../components/vui";
 import { ACTIVE_FINANCIAL_BATCH_STATUSES } from "./financialJobModel";
-import { quoteCurrency } from "./financeMarketDisplay";
+import { formatQuoteTimestamp, quoteCurrency } from "./financeMarketDisplay";
 import { researchRecordStatus } from "./stockResearchModel";
 import styles from "./FinanceDashboard.styles";
 
@@ -47,13 +47,6 @@ function formatNumber(value: number | null | undefined, digits = 2, zh = true): 
 function formatChange(value: number | null | undefined, zh: boolean): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${value > 0 ? "+" : ""}${formatNumber(value, 2, zh)}%`;
-}
-
-function formatUpdatedAt(value: string, zh: boolean): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? (zh ? "时间未知" : "Time unavailable")
-    : date.toLocaleTimeString(zh ? "zh-CN" : "en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function statusLabel(assistant: FinancialAssistant, zh: boolean): { label: string; tone: "neutral" | "success" | "warning" } {
@@ -129,16 +122,16 @@ export function FinanceDashboard({
         <span className={styles.stockIdentity}><strong>{row.stock.name}</strong><small>{row.stock.ticker} · {row.stock.market}</small></span>
       </VButton>,
     },
-    { id: "price", header: zh ? "最新价" : "Price", width: 94, align: "right", render: (row) => row.result?.quote ? <span className={styles.number}>{formatNumber(row.result.quote.price, 3, zh)} {quoteCurrency(row.result.quote, zh)}</span> : <span className={styles.number}>—</span> },
+    { id: "price", header: zh ? "最新价" : "Price", width: 148, align: "right", truncate: false, render: (row) => row.result?.quote ? <span className={styles.number}>{formatNumber(row.result.quote.price, 3, zh)} {quoteCurrency(row.result.quote, zh)}</span> : <span className={styles.number}>—</span> },
     {
-      id: "change", header: zh ? "涨跌幅" : "Change", width: 98, align: "right",
+      id: "change", header: zh ? "涨跌幅" : "Change", width: 112, align: "right", truncate: false,
       render: (row) => {
         const change = row.result?.quote?.changePercent;
         const tone = change === null || change === undefined ? styles.muted : change >= 0 ? styles.rise : styles.fall;
         return <span className={`${styles.number} ${tone}`}>{formatChange(change, zh)}</span>;
       },
     },
-    { id: "pe", header: "PE", width: 78, align: "right", render: (row) => <span className={styles.number}>{formatNumber(row.result?.quote?.peRatio, 2, zh)}</span> },
+    { id: "pe", header: "PE", width: 88, align: "right", truncate: false, render: (row) => <span className={styles.number}>{formatNumber(row.result?.quote?.peRatio, 2, zh)}</span> },
   ], [onNavigate, onSelectStock, zh]);
 
   async function refresh() {
@@ -161,7 +154,7 @@ export function FinanceDashboard({
               : quotes.isPending ? <div className={styles.skeleton} aria-label={zh ? "加载自选行情" : "Loading watchlist quotes"}><VSkeleton /><VSkeleton /><VSkeleton /></div>
                 : <>
                   <div className={styles.tableWrap}><VDenseTable ariaLabel={zh ? "自选股票行情" : "Watchlist market quotes"} columns={quoteColumns} rows={quoteRows} getRowKey={(row) => row.stock.symbol} resizable emptyText={zh ? "暂无行情" : "No quotes"} /></div>
-                  <div className={styles.quoteFooter}><span>{quotes.data?.source ?? ""} · {quotes.data ? formatUpdatedAt(quotes.data.fetchedAt, zh) : "—"}</span><VButton variant="ghost" onPress={() => onNavigate("screen")}>{zh ? "智能选股" : "Stock screener"}</VButton></div>
+                  <div className={styles.quoteFooter}><span>{quotes.data?.source ?? ""} · {quotes.data ? formatQuoteTimestamp(quotes.data.fetchedAt, zh) : "—"}</span><VButton variant="ghost" onPress={() => onNavigate("screen")}>{zh ? "智能选股" : "Stock screener"}</VButton></div>
                 </>}
         </VSurface>
         <VSurface className={styles.panel} padding="normal" ariaLabel={zh ? "最近研究" : "Recent research"}>

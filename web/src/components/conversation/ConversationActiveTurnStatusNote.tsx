@@ -33,6 +33,8 @@ export type ConversationActiveTurnStatusNoteProps = {
   companionMode?: boolean;
   /** Session phase. `"stopping"` replaces the heartbeat on the first paint. */
   phase?: string;
+  /** A visible work disclosure owns routine progress; keep only exceptional feedback here. */
+  advisoriesOnly?: boolean;
 };
 
 /**
@@ -46,6 +48,7 @@ export function ConversationActiveTurnStatusNote({
   statusLabel,
   companionMode = false,
   phase = "",
+  advisoriesOnly = false,
 }: ConversationActiveTurnStatusNoteProps) {
   const resolvedStage = resolveActiveTurnProgressStage(message);
   const stopping = phase === "stopping";
@@ -191,13 +194,17 @@ export function ConversationActiveTurnStatusNote({
     streamState.reconnectSessionStream?.();
   };
   const reconnectLabel = dictionaryChat[langKey].reconnectStream;
+  const showHeartbeat = !advisoriesOnly || companionMode || stopping || Boolean(visibleRetryProgress);
+  if (!showHeartbeat && disconnectSeconds === null && !showNoOutputStall && !routeFallback) {
+    return null;
+  }
 
   return (
     <div
-      className={styles.note}
+      className={showHeartbeat ? styles.note : styles.advisoryNote}
       role="status"
       aria-live="polite"
-      aria-label={companionMode ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
+      aria-label={companionMode || !showHeartbeat ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
       data-active-turn-stage={displayStage}
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
       data-active-turn-retry-attempt={visibleRetryProgress ? visibleRetryProgress.attempt : undefined}
@@ -206,16 +213,18 @@ export function ConversationActiveTurnStatusNote({
       data-active-turn-route-fallback={routeFallback ? "true" : undefined}
       data-companion-typing-status={companionMode ? "true" : undefined}
     >
-      {!companionMode ? <span className={styles.label}>{resolvedStatusLabel}</span> : null}
+      {!companionMode && showHeartbeat ? <span className={styles.label}>{resolvedStatusLabel}</span> : null}
       <div className={styles.body}>
-        <span className={styles.textRow}>
-          <LoaderCircle className={styles.spinner} size={14} aria-hidden="true" />
-          <span
-            className={visibleRetryProgress ? `${styles.text} ${styles.retryShimmer}` : styles.text}
-          >
-            {heartbeatText}
+        {showHeartbeat ? (
+          <span className={styles.textRow}>
+            <LoaderCircle className={styles.spinner} size={14} aria-hidden="true" />
+            <span
+              className={visibleRetryProgress ? `${styles.text} ${styles.retryShimmer}` : styles.text}
+            >
+              {heartbeatText}
+            </span>
           </span>
-        </span>
+        ) : null}
         {disconnectSeconds !== null ? (
           <VStatusChip
             tone="warning"

@@ -3941,10 +3941,10 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
                     "replacementDirectSessionId": "",
                 }
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-        s._ensure_session_mutable(
-            conversation_id,
-            conversation=target_conversation,
-        )
+        # Deliberately no `_ensure_session_mutable` here: an archived (read-only)
+        # session must stay deletable — sealing is reversible only by delete or
+        # restore, so blocking delete wedged archived sessions forever. The busy
+        # guard below still refuses deletes of running/stopping turns.
         s._ensure_conversation_workspace_metadata(target_conversation)
         target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
         target_agent = s.get_agent(target_agent_id, include_archived=False) if target_agent_id else None
@@ -4343,6 +4343,22 @@ def _read_agent_session_purge_manifest(
     return payload if isinstance(payload, dict) else None
 
 
+def _restore_token_conversation_deleted(raw: Any) -> bool:
+    """True when a restore-token snapshot is an agent-deleted tombstone."""
+
+    if not isinstance(raw, dict):
+        return False
+    if bool(raw.get("agentMissing")):
+        return True
+    tombstone = raw.get("agentDeletedTombstone")
+    if isinstance(tombstone, dict) and str(tombstone.get("agentId") or "").strip():
+        return True
+    return any(
+        str(raw.get(key) or "").strip()
+        for key in ("agent_deleted_id", "agentDeletedId", "agent_missing_id", "agentMissingId")
+    )
+
+
 def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> bool:
     s = _service()
     token = restore_token if isinstance(restore_token, dict) else {}
@@ -4375,6 +4391,10 @@ def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> boo
         ):
             raw = item.get("conversation")
             if not isinstance(raw, dict):
+                continue
+            if _restore_token_conversation_deleted(raw):
+                # Deleted/tombstoned snapshots are dead history; replaying
+                # them would resurrect sessions the user already lost.
                 continue
             index = max(0, min(int(item.get("index") or 0), len(conversations)))
             conversations.insert(index, s.copy.deepcopy(raw))

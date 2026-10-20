@@ -138,7 +138,9 @@ HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
     "personal_assistant_overview_tool",
+    "personal_assistant_query_tool",
     "personal_assistant_manage_tool",
+    "personal_assistant_platform_api_tool",
     "personal_assistant_desktop_observe_tool",
     "personal_assistant_desktop_action_tool",
     "personal_assistant_computer_observe_tool",
@@ -906,11 +908,25 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": [],
         "permissionTier": LOW_PERMISSION_TIER,
     },
+    "personal_assistant_query_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["project_query", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+        "approval": "never",
+    },
     "personal_assistant_manage_tool": {
         "category": "runtime_control",
         "capabilityTags": ["platform_management", "agent_lifecycle", "session_lifecycle"],
         "riskTags": ["delete_or_cleanup", "permission_management", "runtime_restart"],
         "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "personal_assistant_platform_api_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["platform_api", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+        "approval": "never",
     },
     "personal_assistant_desktop_observe_tool": {
         "category": "runtime_control",

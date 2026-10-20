@@ -17,7 +17,23 @@ Retry may create a new attempt only after canonical evidence permits it. Unknown
 
 Tests use temporary Team storage and a substituted native port. Those tests prove orchestration and adapters, not real model output quality or a live application's restart acceptance.
 
+New runs include a bounded `TaskRoster` in the host prompt: frozen role IDs and
+the latest native attempt's run/node/Session/Turn references. Undispatched nodes
+are explicitly unaddressable; terminal attempts are historical evidence. Ordinary
+Agent `directSessionId` values are never substituted for task addresses. Discovery
+does not grant tools; the existing message tool still validates Session ownership
+and organization admission. The native Turn receipt remains the step result
+authority even if another message wakes a historical Session. Existing runs keep
+their old prompt format so persisted dispatch hashes remain recoverable.
+
 ## Opt-in failure recovery
+
+New code-repair delegations resolve the source flow's director/developer/reviewer
+binding rather than unrelated global self-evolution slots. The original grant
+freezes these principals, including the independent reviewer's read-only ceiling;
+each stage rechecks the live parent authorization and those same identities.
+Legacy grants retain their original global-slot fingerprints. Neither path
+rewrites global slots or changes any Agent's tool policy.
 
 `Flow.failureRecovery` is the sole stored authorization for the new role binding;
 there is no second role registry. Binding requires the canonical, ready Personal

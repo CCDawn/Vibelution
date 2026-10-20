@@ -399,11 +399,6 @@ def get_session_detail(
     # directory write and follow-up persisted-state reload for that path while
     # preserving idle recovery and full-detail behavior.
     light_running_poll = not include_secondary_lists and session_running
-    if include_secondary_lists:
-        from . import directory_bridge
-
-        directory_bridge.sync_conversation_record(conversation, touch_recency=False)
-
     s._reconcile_stale_session_ledger(
         normalized_session_id,
         active_turn_id=active_turn_id if session_running else "",
@@ -420,6 +415,13 @@ def get_session_detail(
         lightweight=window_requested,
     )
     if target is not None:
+        if include_secondary_lists:
+            from . import directory_bridge
+
+            # Sync only after the reload-repair pass so the directory row
+            # follows the conversation state that pass produced.
+            repaired = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+            directory_bridge.sync_conversation_record(repaired or conversation, touch_recency=False)
         return s._build_session_detail(
             target,
             message_limit=message_limit,

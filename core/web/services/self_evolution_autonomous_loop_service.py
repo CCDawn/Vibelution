@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from core.infrastructure.process_liveness import is_pid_alive
+from core.infrastructure.file_lock import cross_process_file_lock
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.self_evolution_candidate_target_contract import (
@@ -127,17 +128,43 @@ class SelfEvolutionAutonomousLoopService:
                 return previous
             return self._queue(request, recovery_source=source, recovery_run_id=run_id)
 
+    def queue_campaign(self, request: dict[str, Any], *, source: dict, run_id: str) -> dict:
+        """Admit an exact child from the internal finite campaign owner."""
+        from core.runtime_manager.work_run_store import normalize_run_id
+        run_id = normalize_run_id(run_id)
+        normalized = _normalize_request(request)
+        if not normalized.get("localIntegration"):
+            raise AutonomousLoopValidationError("Campaign requires scoped local integration.")
+        with _LOCK:
+            previous = self.get_campaign(run_id, source=source)
+            if previous is not None:
+                if previous.get("request") != normalized:
+                    raise AutonomousLoopConflictError("Campaign child request changed.")
+                return previous
+            return self._queue(request, campaign_source=source, recovery_run_id=run_id)
+
+    def get_campaign(self, run_id: str, *, source: dict) -> dict | None:
+        return self._get_owned_child(run_id, source=source, source_key="_campaignSource")
+
+    def cancel_campaign(self, run_id: str, *, source: dict) -> dict | None:
+        return self._cancel_owned_child(run_id, source=source, source_key="_campaignSource")
+
     def _queue(self, request: dict[str, Any], *, recovery_source: dict | None = None,
-               recovery_run_id: str = "") -> dict[str, Any]:
+               recovery_run_id: str = "", campaign_source: dict | None = None) -> dict[str, Any]:
 
         normalized_request = _normalize_request(request)
-        with _LOCK:
+        with _LOCK, cross_process_file_lock(self._store.kind_dir(RUN_KIND) / "candidate-admission"):
             self._ensure_not_retiring()
             active = self._store.load_active_snapshot(RUN_KIND)
             if active is not None:
                 raise AutonomousLoopConflictError(
                     "An active self-evolution autonomous loop already exists."
                 )
+            for path in self._store.runs_dir(RUN_KIND).glob("*.json"):
+                previous = self._store.load_snapshot(RUN_KIND, path.stem)
+                if previous and (previous.get("_campaignExecutionSettled") is False
+                                 or previous.get("_recoveryExecutionSettled") is False):
+                    raise AutonomousLoopConflictError("A previous delegated candidate execution is not settled.")
             run_id = recovery_run_id or str(self._run_id_factory() or "").strip()
             if not run_id:
                 raise AutonomousLoopValidationError("run_id_factory returned an empty run id.")
@@ -161,6 +188,9 @@ class SelfEvolutionAutonomousLoopService:
             if recovery_source is not None:
                 snapshot["_recoverySource"] = deepcopy(recovery_source)
                 snapshot["_recoveryExecutionSettled"] = True
+            if campaign_source is not None:
+                snapshot["_campaignSource"] = deepcopy(campaign_source)
+                snapshot["_campaignExecutionSettled"] = True
             if normalized_request.get("localIntegration"):
                 if self._hooks.authorize is None or self._hooks.review is None or self._hooks.check_authorization is None:
                     raise AutonomousLoopValidationError("Local integration requires scoped authorization and independent review.")
@@ -169,23 +199,31 @@ class SelfEvolutionAutonomousLoopService:
 
     def cancel_recovery(self, run_id: str, *, source: dict) -> dict | None:
         """Cancel exactly one owned child, without retiring the shared service."""
+        return self._cancel_owned_child(run_id, source=source, source_key="_recoverySource")
+
+    def _cancel_owned_child(self, run_id: str, *, source: dict, source_key: str) -> dict | None:
         with _LOCK:
             snapshot = self._store.load_snapshot(RUN_KIND, run_id)
             if snapshot is None:
                 return None
-            if snapshot.get("_recoverySource") != source:
-                raise AutonomousLoopConflictError("Recovery cancellation source mismatch.")
+            if snapshot.get(source_key) != source:
+                raise AutonomousLoopConflictError("Child cancellation source mismatch.")
             if snapshot.get("status") in {"completed", "stopped", "failed", "rejected"}:
                 return snapshot
-            self._restart_requests[run_id] = "recovery_source_cancelled"
-            if run_id in self._inflight_atomic_hooks:
+            reason = "campaign_source_cancelled" if source_key == "_campaignSource" else "recovery_source_cancelled"
+            self._restart_requests[run_id] = reason
+            if run_id in self._inflight_atomic_hooks or snapshot.get("phase") in {"integrating", "cleanup_pending"}:
                 # The owner may already have merged. It must save its receipt
                 # before settling cancellation; never wait while parent locks
                 # are held, as the hook may still need the source merge guard.
-                return self._advance(snapshot, phase=snapshot["phase"], updates={"stopRequested": True})
-            return self._mark_interrupted(snapshot, "recovery_source_cancelled")
+                return self._advance(snapshot, phase=snapshot["phase"],
+                                     updates={"stopRequested": True, "stopReason": reason})
+            return self._mark_interrupted(snapshot, reason)
 
     def get_recovery(self, run_id: str, *, source: dict) -> dict | None:
+        return self._get_owned_child(run_id, source=source, source_key="_recoverySource")
+
+    def _get_owned_child(self, run_id: str, *, source: dict, source_key: str) -> dict | None:
         from core.runtime_manager.work_run_store import normalize_run_id
         run_id = normalize_run_id(run_id)
         with _LOCK:
@@ -200,29 +238,30 @@ class SelfEvolutionAutonomousLoopService:
                 if run_id in known:
                     raise AutonomousLoopValidationError("Known recovery snapshot is missing.")
                 return None
-            if snapshot.get("_recoverySource") != source:
+            if snapshot.get(source_key) != source:
                 raise AutonomousLoopConflictError("Recovery source mismatch.")
             return snapshot
 
     def run_until_review(self, run_id: str) -> dict[str, Any]:
         with _LOCK:
             snapshot = self._load_required(run_id)
-            recovery = bool(snapshot.get("_recoverySource"))
-            if recovery:
+            settled_key = ("_campaignExecutionSettled" if snapshot.get("_campaignSource") else
+                           "_recoveryExecutionSettled" if snapshot.get("_recoverySource") else "")
+            if settled_key:
                 if _is_restart_interrupted(snapshot):
                     return snapshot
-                if (snapshot.get("_recoveryExecutionSettled") is False
+                if (snapshot.get(settled_key) is False
                         or (snapshot.get("runtimeOwner") or {}).get("pid") != self._process_id):
                     raise AutonomousLoopConflictError("Recovery execution already belongs to another worker.")
-                snapshot["_recoveryExecutionSettled"] = False
+                snapshot[settled_key] = False
                 self._persist(snapshot, active=True)
         try:
             return self._run_until_review(run_id)
         finally:
-            if recovery:
+            if settled_key:
                 with _LOCK:
                     current = self._load_required(run_id)
-                    current["_recoveryExecutionSettled"] = True
+                    current[settled_key] = True
                     self._persist(current, active=current.get("status") in {"queued", "running", "awaiting_user_approval"})
 
     def _run_until_review(self, run_id: str) -> dict[str, Any]:
@@ -415,7 +454,8 @@ class SelfEvolutionAutonomousLoopService:
             if _is_restart_interrupted(current):
                 self._finish_atomic_hook(run_key, integration_event)
                 return current
-            restart_reason = self._restart_requests.get(run_key)
+            restart_reason = self._restart_requests.get(run_key) or (
+                current.get("stopReason") if current.get("stopRequested") else None)
             if restart_reason:
                 result = self._mark_interrupted(current, restart_reason)
                 self._finish_atomic_hook(run_key, integration_event)
@@ -434,7 +474,8 @@ class SelfEvolutionAutonomousLoopService:
                 if _is_restart_interrupted(current):
                     result = current
                 else:
-                    restart_reason = self._restart_requests.get(run_key)
+                    restart_reason = self._restart_requests.get(run_key) or (
+                        current.get("stopReason") if current.get("stopRequested") else None)
                     result = self._fail(
                         current,
                         phase="integration_failed",
@@ -458,7 +499,8 @@ class SelfEvolutionAutonomousLoopService:
             if _is_restart_interrupted(snapshot):
                 self._finish_atomic_hook(run_key, integration_event)
                 return snapshot
-            restart_reason = self._restart_requests.get(run_key)
+            restart_reason = self._restart_requests.get(run_key) or (
+                snapshot.get("stopReason") if snapshot.get("stopRequested") else None)
             if restart_reason:
                 result = self._mark_interrupted(snapshot, restart_reason)
                 self._finish_atomic_hook(run_key, integration_event)
@@ -726,7 +768,20 @@ class SelfEvolutionAutonomousLoopService:
                     },
                 )
         if resume_cleanup:
-            return self._run_cleanup(snapshot)
+            try:
+                self._run_cleanup(snapshot)
+            finally:
+                # Only this proven dead-owner recovery may settle a delegated
+                # execution: Git was recovered exactly and synchronous cleanup
+                # has returned. Unknown candidates keep their unsettled fence.
+                with _LOCK:
+                    current = self._load_required(snapshot["runId"])
+                    for source_key, settled_key in (("_campaignSource", "_campaignExecutionSettled"),
+                                                    ("_recoverySource", "_recoveryExecutionSettled")):
+                        if current.get(source_key):
+                            current[settled_key] = True
+                    self._persist(current, active=current.get("status") in {"queued", "running", "awaiting_user_approval"})
+            return current
         return snapshot
 
     def _run_cleanup(
@@ -792,7 +847,9 @@ class SelfEvolutionAutonomousLoopService:
                     terminal=True,
                     updates=updates,
                 )
-                if current.get("_recoverySource") and (reason := self._restart_requests.get(run_id)):
+                reason = self._restart_requests.get(run_id) or (
+                    current.get("stopReason") if current.get("stopRequested") else None)
+                if (current.get("_recoverySource") or current.get("_campaignSource")) and reason:
                     result = self._mark_interrupted(result, reason)
             self._finish_atomic_hook(run_id, atomic_event)
             return result
@@ -844,6 +901,9 @@ class SelfEvolutionAutonomousLoopService:
             # Late worker updates, including stale grant fields, cannot undo revoke.
             if current is not None and (current.get("localIntegrationAuthorization") or {}).get("revoked"):
                 next_snapshot["localIntegrationAuthorization"] = deepcopy(current["localIntegrationAuthorization"])
+            if current is not None and current.get("stopRequested"):
+                next_snapshot["stopRequested"] = True
+                next_snapshot["stopReason"] = current.get("stopReason", "source_cancelled")
             if terminal:
                 next_snapshot["finishedAt"] = self._now()
             return self._persist(next_snapshot, active=not terminal)

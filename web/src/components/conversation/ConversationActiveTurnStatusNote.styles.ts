@@ -10,6 +10,7 @@ const styles = {
     "min-w-0 inline-flex max-w-[min(100%,920px)] items-center gap-2 border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-vui-sm leading-tight text-[var(--fg-secondary)]",
   ),
   body: cv("body", "min-w-0 inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1"),
+  advisoryNote: cv("advisory-note", "min-w-0 max-w-full text-vui-sm"),
   textRow: cv("textRow", "min-w-0 inline-flex max-w-full items-center gap-1.5"),
   spinner: cv("spinner", "shrink-0 animate-spin text-[var(--accent-cool)]"),
   text: cv(

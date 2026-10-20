@@ -333,6 +333,7 @@ def test_inspect_desktop_shell_frontend_reasons_follow_active_release_availabili
     assert status["reason"] == reason
     assert status["activeFrontendReleaseUsable"] is True
     assert status["launchBlocking"] is False
+    assert desktop_shell.inspect_desktop_shell_launch_readiness(tmp_path)["launchBlocking"] is False
 
     # Without a usable workspace active release the packaged launcher window
     # would serve the stale packaged snapshot, so the same reason blocks again.
@@ -342,6 +343,69 @@ def test_inspect_desktop_shell_frontend_reasons_follow_active_release_availabili
     assert blocked["reason"] == reason
     assert blocked["activeFrontendReleaseUsable"] is False
     assert blocked["launchBlocking"] is True
+    launch = desktop_shell.inspect_desktop_shell_launch_readiness(tmp_path)
+    assert launch["launchBlocking"] is True
+    assert launch["reason"] == reason
+
+
+def test_launch_readiness_does_not_hash_frontends_when_active_release_is_usable(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: "a" * 40)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("launch readiness must leave frontend diagnostics to the existing owners")
+
+    monkeypatch.setattr(desktop_shell, "inspect_frontend_build", unexpected)
+    monkeypatch.setattr(desktop_shell, "_frontend_directory_content_sha256", unexpected)
+    result = desktop_shell.inspect_desktop_shell_launch_readiness(tmp_path)
+    assert result["launchBlocking"] is False
+    assert result["reason"] == "active_frontend_release"
+    # This narrow result must not claim that the full package is fresh.
+    assert "stale" not in result
+
+
+def test_launch_readiness_rechecks_active_release_after_electron_inspection(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: "a" * 40)
+    (desktop_shell.packaged_frontend_dist(tmp_path) / "index.html").write_text("tampered", encoding="utf-8")
+
+    def remove_active(root):
+        (root / "web" / ".vibelution-builds" / "active.json").unlink(missing_ok=True)
+        return False
+
+    monkeypatch.setattr(desktop_shell, "_electron_sources_newer_than_asar", remove_active)
+    result = desktop_shell.inspect_desktop_shell_launch_readiness(tmp_path)
+    assert result["launchBlocking"] is True
+    assert result["reason"] == "frontend_package_content_mismatch"
+
+
+@pytest.mark.parametrize("fault,reason", [
+    ("package", "missing_package"),
+    ("provenance", "missing_provenance"),
+    ("current_tree", "current_electron_tree_unavailable"),
+    ("tree_mismatch", "provenance_mismatch"),
+    ("source_newer", "source_newer_than_asar"),
+])
+def test_launch_readiness_retains_every_electron_package_blocker(tmp_path, monkeypatch, fault, reason):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    electron_exe = _write_unpackaged_electron(tmp_path, tree_hash="a" * 40, main_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    current_tree = "" if fault == "current_tree" else "b" * 40 if fault == "tree_mismatch" else "a" * 40
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: current_tree)
+    monkeypatch.setattr(desktop_shell, "_electron_sources_newer_than_asar", lambda root: fault == "source_newer")
+    if fault == "package":
+        desktop_shell.packaged_asar_path(tmp_path).unlink()
+    elif fault == "provenance":
+        desktop_shell.packaged_provenance_path(tmp_path).write_text("{}", encoding="utf-8")
+    full = desktop_shell.inspect_desktop_shell(tmp_path)
+    launch = desktop_shell.inspect_desktop_shell_launch_readiness(tmp_path)
+    assert launch["launchBlocking"] is full["launchBlocking"] is True
+    assert launch["reason"] == full["reason"] == reason
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda root: {"currentElectronTree": current_tree})
+    selected = desktop_shell.resolve_desktop_shell_launch(tmp_path)
+    assert selected["kind"] == "unpackaged"
+    assert selected["args"][0] == str(electron_exe)
 
 
 def test_refresh_lock_reclaims_dead_holder_without_unlink_race(tmp_path, monkeypatch):
@@ -937,8 +1001,17 @@ def test_resolve_desktop_shell_launch_prefers_current_packaged(tmp_path, monkeyp
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
     _mock_frontend_inspection(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    def unexpected(*args, **kwargs):
+        pytest.fail("launch selection must not repeat full frontend freshness inspection")
+
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", unexpected)
+    monkeypatch.setattr(desktop_shell, "inspect_frontend_build", unexpected)
+    monkeypatch.setattr(desktop_shell, "_frontend_directory_content_sha256", unexpected)
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
     assert spec["kind"] == "packaged"
+    assert spec["reason"] == "active_frontend_release"
+    assert spec["currentElectronTree"] == tree
+    assert "stale" not in spec
     assert "--local-debugging" in spec["args"]
     assert spec["args"][0] == str(desktop_shell.packaged_desktop_exe(tmp_path))
     assert spec["cwd"] == str(tmp_path)
@@ -973,10 +1046,37 @@ def test_resolve_desktop_shell_launch_launches_packaged_with_advisory_frontend_s
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
 
     assert spec["kind"] == "packaged"
-    # Advisory frontend staleness keeps the packaged exe but must not be
-    # reported as "current"; downstream status shows the real reason.
-    assert spec["reason"] == "frontend_release_mismatch"
+    # Admission proves that the active release can serve the launcher; it
+    # must not claim a full freshness result that it deliberately did not read.
+    assert spec["reason"] == "active_frontend_release"
     assert spec["args"][0] == str(desktop_shell.packaged_desktop_exe(tmp_path))
+
+
+def test_launch_desktop_shell_rechecks_release_before_spawning_packaged(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    electron_exe = _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    (desktop_shell.packaged_frontend_dist(tmp_path) / "index.html").write_text("tampered", encoding="utf-8")
+
+    def remove_active(root):
+        (root / "web" / ".vibelution-builds" / "active.json").unlink(missing_ok=True)
+        return False
+
+    monkeypatch.setattr(desktop_shell, "_electron_sources_newer_than_asar", remove_active)
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda root: {"currentElectronTree": tree})
+    spawned = []
+    monkeypatch.setattr(desktop_shell, "_spawn_visible_electron", lambda args, **kwargs: (
+        spawned.append(args) or types.SimpleNamespace(pid=88)
+    ))
+
+    result = desktop_shell.launch_desktop_shell(project_root=tmp_path, then_lifecycle="restart")
+
+    assert result["kind"] == "unpackaged"
+    assert result["currentElectronTree"] == tree
+    assert result["pid"] == 88
+    assert spawned[0][0] == str(electron_exe)
 
 
 def test_resolve_desktop_shell_launch_falls_back_when_launch_blocking(tmp_path, monkeypatch):

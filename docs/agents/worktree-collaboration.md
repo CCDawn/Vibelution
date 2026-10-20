@@ -272,6 +272,25 @@ Get-ChildItem .worktrees -Directory | Select-Object -ExpandProperty Name
 
 **2026-08-17 盘点（示例）：** 注册 4（含本任务）· 磁盘 15 · orphan 11（如 `session-list-bulk-remove`、`tray-restart-launcher-unified` 等，均无对应 `codex/*` 分支）→ **全部保留**，待 owner 确认无 WIP 后再清。
 
+## Dormant Claim Auto-Demotion
+
+The `git_claim_guard` pre-commit hook now resolves `claim_overlap` against dormant foreign claims automatically, instead of leaving the takeover to manual triple verification:
+
+- **Evidence model**（`scripts/claim_dormancy.py`）：claim 的 coordination 记录仍新鲜（updatedAt 在阈值内）→ 视为活跃；否则看 owning worktree 的最新文件 mtime（排除 `.git`；测试缓存算活动）。超过阈值、无 worktree、worktree 目录不存在或 owner 未登记 → 判定 dormant。
+- **Threshold**：默认 30 分钟，可用 `VIBELUTION_CLAIM_DORMANCY_MINUTES` 覆盖，下限 5 分钟。
+- **行为**：守卫只释放与本任务写入路径重叠、非本 agent、且判定 dormant 的 active claim；release 时注明 `Auto-demoted by claim guard`，**分支与 worktree 原样保留**，owner 会话回来后 rebase 即可复活。活跃 claim 仍然硬阻断（`claim_overlap`），不误伤。
+
+## Unmerged Branch Sweep
+
+「已提交未合入」的任务分支没有自动清单时会被动搁置（owner 会话被切断是典型成因）。只读巡检脚本补上这层可见性：
+
+```powershell
+cd <project-root>
+python scripts/task_branch_sweeper.py --stale-minutes 30 [--json]
+```
+
+输出每个未合入 `codex/*` 分支的 ahead 数、最后提交时间、dormancy 判定（`dormant` / `active` / `no-worktree` / `unverified`）、claim id 与 reason；coordination 不可用时降级为 `unverified` 只报分支证据。脚本**只读**：不释放 claim、不删分支、不删 worktree；对 `dormant` 行的处置仍按上节的证据模型人工裁决（接管、等待或清理，均需符合本文件的 claim 与 cleanup 规则）。
+
 ## Handoff Report
 
 Every worker completion report should include:

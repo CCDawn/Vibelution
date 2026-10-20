@@ -46,7 +46,9 @@ def _session_budget_agent(session_id: str, *, source: str, sync_wait: bool = Tru
     ):
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     agent_id = s._session_agent_id_snapshot(normalized_session_id)
-    agent = s.get_agent(agent_id, include_archived=False) if agent_id else None
+    agent = s.get_agent(agent_id, include_archived=True) if agent_id else None
+    if isinstance(agent, dict) and str(agent.get("status") or "").strip() == "archived":
+        raise s.SessionValidationError("会话所属 Agent 已归档，此会话仅供只读查看。")
     if not isinstance(agent, dict):
         raise s.SessionValidationError("当前会话没有可用的 Agent 配置。")
     return agent

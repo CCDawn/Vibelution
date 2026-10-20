@@ -16,13 +16,24 @@ import hashlib
 import json
 import os
 import re
+import sys
 from typing import Any
 
 from ..research_runtime.evidence_graph_gaps import evidence_graph_gap_counts
 from ..source_collection_common import project_source_version_families
+from .doi_enrichment import enrich_missing_doi
 from .relation_endpoints import (
     build_relation_endpoint_registry,
     resolve_relation_endpoint,
+)
+from .writeback_remediation_contract import (
+    WRITEBACK_REMEDIATION_KIND_RELATION_REFS,
+    build_writeback_remediation_contract,
+    classify_relation_graph_rejection_error,
+    collect_relation_ref_violations,
+    next_writeback_remediation_attempt,
+    relation_missing_field_findings,
+    writeback_remediation_hint_block,
 )
 
 # finding 阶段写回批次硬上限（finding 闭合化第一步，O5）：滚动写回仍然成立，
@@ -695,8 +706,17 @@ def _materialize_source_collection_stage_writeback_content_extraction(
             )
             if evidence_ledger:
                 normalized_extraction["evidenceLedger"] = evidence_ledger
-                normalized_extraction["evidenceStatus"] = evidence_ledger["status"]
-                evidence_ledgers.append({"candidateId": candidate_id, "evidenceStatus": evidence_ledger["status"]})
+                if normalized_extraction["decision"] in s.SOURCE_COLLECTION_EXCLUSION_DECISIONS:
+                    # Honest exclusion (SCI-021): an excluded candidate is
+                    # processed-and-dropped, not an evidence gap.  Keep the
+                    # ledger for audit, but never stamp it
+                    # ``missing_evidence_anchor`` — that would downgrade the
+                    # whole completed batch and re-open the candidate in the
+                    # retry_evidence focus forever.
+                    normalized_extraction["evidenceStatus"] = "excluded"
+                else:
+                    normalized_extraction["evidenceStatus"] = evidence_ledger["status"]
+                    evidence_ledgers.append({"candidateId": candidate_id, "evidenceStatus": evidence_ledger["status"]})
             metadata["contentExtraction"] = normalized_extraction
             candidate["metadata"] = metadata
             candidate["updatedAt"] = now
@@ -1575,11 +1595,150 @@ def _source_collection_stage_writeback_closure_summary(
     }
 
 
+def _persist_source_collection_stage_writeback_remediation_contract(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    contract: dict[str, Any],
+) -> None:
+    """Record the one-shot remediation contract on the canonical task record.
+
+    This runs at a deterministic rejection, right before the writeback raises:
+    the contract is upserted into the task store and a workflow event is
+    emitted so the next ``source_collection_context_tool`` read can inject
+    ``writebackRemediation``.  Persistence must never mask or alter the
+    rejection itself — any store failure is swallowed with a stderr breadcrumb
+    (same shape as ``_record_workflow_event``).  The task status is untouched:
+    only the rejection semantics decide that.
+    """
+    s = _service()
+    task["writebackRemediationContract"] = contract
+    try:
+        s._upsert_source_collection_stage_session_task(team_id, run_id, task)
+    except Exception as exc:  # noqa: BLE001 - diagnostic breadcrumb, never masks the rejection
+        try:
+            print(
+                "[team-workflow] writeback remediation contract persist failed "
+                f"teamId={team_id} taskId={task.get('taskId', '')} "
+                f"errorType={type(exc).__name__} error={str(exc)[:200]}",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001, S110 - breadcrumb must never raise
+            pass
+    s._record_workflow_event(
+        "source_collection.stage_session_task_writeback_remediation_contract",
+        team_id,
+        fields={
+            "runId": run_id,
+            "taskId": s._trim_text(task.get("taskId"), max_length=160),
+            "stageId": s._trim_text(task.get("stageId"), max_length=80),
+            "agentId": s._trim_text(task.get("agentId"), max_length=160),
+            "kind": contract.get("kind", ""),
+            "findingCount": len(contract.get("findings") or []),
+            "remediationAttempt": int(contract.get("attempt") or 1),
+            "exhausted": bool(contract.get("exhausted")),
+        },
+        level="warning",
+        outcome="rejected",
+    )
+
+
+def _prepare_relation_graph_writeback_remediation(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    result_payload: dict[str, Any],
+    error_text: str,
+) -> str:
+    """Build + persist the relations-graph rejection contract; return the hint block.
+
+    At the rejection point the system holds both the allowed canonical refs
+    and the submitted result, so the diff is deterministic (production session
+    session-20261017-203847-419417: the relations agent re-read context 11
+    times and still submitted ``dprec-*`` record ids as evidenceRefs because
+    nothing told it exactly what to change).  The historical rejection prefix
+    is preserved byte-for-byte; only an appended ``补救提示`` block is new.
+    Graceful degradation: when the error is not classifiable, or the allowed
+    list cannot be loaded, the block degrades (allowed list only / absent) —
+    no validation is ever relaxed to manufacture a diff.
+
+    Lives here (not in stage_writeback) so both deterministic relation-graph
+    rejection points — the read-back wrap and the agent-graph payload shape
+    guard below — share one builder without a cross-module import cycle.
+    """
+    s = _service()
+    kind = classify_relation_graph_rejection_error(error_text)
+    if not kind:
+        return ""
+    from ..research_runtime.artifact_readback_registry import (
+        load_allowed_evidence_refs,
+        load_relation_evidence_context,
+    )
+
+    workflow_run_id = s._trim_text(task.get("workflowRunId"), max_length=160)
+    try:
+        allowed_refs = list(
+            load_allowed_evidence_refs(
+                team_id=team_id,
+                authority_run_id=run_id,
+                workflow_run_id=workflow_run_id,
+            )
+        )
+    except Exception:  # noqa: BLE001 - diff degrades to violations-only
+        allowed_refs = []
+    try:
+        # Same authority as the allowed list: pair each inlined ref with its
+        # candidateId so the agent can bind refs without an extra context read.
+        evidence_context = {
+            str(card.get("claimEvidenceId")): str(card.get("candidateId") or "")
+            for card in load_relation_evidence_context(
+                team_id=team_id,
+                authority_run_id=run_id,
+                workflow_run_id=workflow_run_id,
+            )
+            if isinstance(card, dict)
+            and isinstance(card.get("claimEvidenceId"), str)
+            and card["claimEvidenceId"].strip()
+        }
+    except Exception:  # noqa: BLE001 - hint degrades to refs without pairing
+        evidence_context = {}
+    if kind == WRITEBACK_REMEDIATION_KIND_RELATION_REFS:
+        findings = collect_relation_ref_violations(
+            result_payload if isinstance(result_payload, dict) else {},
+            set(allowed_refs),
+        )
+    else:
+        findings = relation_missing_field_findings(error_text)
+    attempt, exhausted = next_writeback_remediation_attempt(
+        task.get("writebackRemediationContract")
+        if isinstance(task.get("writebackRemediationContract"), dict)
+        else None,
+        kind,
+    )
+    contract = build_writeback_remediation_contract(
+        kind,
+        findings,
+        recorded_at=s.utc_now_iso(),
+        attempt=attempt,
+    )
+    contract["exhausted"] = exhausted
+    _persist_source_collection_stage_writeback_remediation_contract(
+        team_id,
+        run_id,
+        task,
+        contract,
+    )
+    return writeback_remediation_hint_block(kind, findings, allowed_refs, evidence_context)
+
+
 def _materialize_source_collection_stage_writeback_candidate_graph(
     team_id: str,
     run_id: str,
     task: dict[str, Any],
     writeback: dict[str, Any],
+    *,
+    raise_on_agent_graph_invalid: bool = False,
 ) -> dict[str, Any]:
     s = _service()
     stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
@@ -1610,6 +1769,22 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
             },
         )
     except (s.team_service.TeamServiceError, s.TeamWorkflowOrchestrationError) as exc:
+        if raise_on_agent_graph_invalid and str(exc).startswith("evidence_relation_graph_invalid:"):
+            # Live writeback shape rejection (agent-graph payload guard): the
+            # historical rejection text is preserved byte-for-byte and a
+            # deterministic remediation block is appended — same contract the
+            # read-back wrap uses. Stored-replay callers keep the degrade
+            # path below (``raise_on_agent_graph_invalid`` defaults False).
+            remediation_hint = _prepare_relation_graph_writeback_remediation(
+                team_id,
+                run_id,
+                task,
+                result,
+                str(exc),
+            )
+            if remediation_hint:
+                raise s.TeamWorkflowOrchestrationError(f"{exc}{remediation_hint}") from exc
+            raise
         summary = s._source_collection_stage_writeback_candidate_graph_summary(
             status="failed",
             failed=[{"reason": "candidate_graph_build_failed", "error": str(exc)}],
@@ -3504,6 +3679,13 @@ def _source_collection_stage_writeback_record_payload(
     elif doi:
         source_ref = source_ref or f"https://doi.org/{doi}"
     title = s._trim_text(lead.get("title"), max_length=260)
+    if not doi and title:
+        # SCI-021: leads from providers without DOI metadata (bare mdpi.com
+        # URLs) leave nothing to reroute a publisher 403 through the
+        # doi.org/EuropePMC mirror fallback.  Fill the gap from the exact
+        # title before the record/candidate metadata freezes; fail-open (a
+        # miss keeps the historical DOI-less shape).
+        doi = enrich_missing_doi(title) or ""
     year = s._trim_text(lead.get("year") or lead.get("published"), max_length=80)
     container = s._trim_text(lead.get("container") or lead.get("venue") or lead.get("journal"), max_length=240)
     if not source_ref and not source_url:

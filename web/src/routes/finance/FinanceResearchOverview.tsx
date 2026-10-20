@@ -7,7 +7,7 @@ import { financeResearchProcessSummary } from "./FinanceResearchProcess";
 import type { ReportCitation, StockResearchReport } from "./stockResearchModel";
 import styles, { researchStatusDotClass } from "./FinanceResearchOverview.styles";
 
-export function FinanceResearchOverview({ view, activeTurn, stock, report, topicTitle, zh, onCitation, onOpenLibrary, onOpenProcess, onOpenAttention }: {
+export function FinanceResearchOverview({ view, activeTurn, stock, report, topicTitle, zh, onCitation, onOpenLibrary, onOpenProcess, onOpenAttention, onNewResearch }: {
   view: FinancialSessionView | null;
   activeTurn: AssistantConversationTurn | null;
   stock: StockIdentity;
@@ -18,6 +18,7 @@ export function FinanceResearchOverview({ view, activeTurn, stock, report, topic
   onOpenLibrary: () => void;
   onOpenProcess: () => void;
   onOpenAttention: () => void;
+  onNewResearch?: () => void;
 }) {
   const summary = financeResearchProcessSummary(view, activeTurn, zh);
   const attention = summary.reviewTools.length > 0 || summary.failedTools.length > 0;
@@ -30,6 +31,8 @@ export function FinanceResearchOverview({ view, activeTurn, stock, report, topic
         <strong className={styles.name} title={topicTitle || `${stock.name} · ${stock.ticker}`}>{topicTitle || `${stock.name} · ${stock.ticker}`}</strong>
         {!topicTitle ? <p className={styles.meta}>{stock.market}</p> : null}
       </section>
+
+      {!view?.messages?.length && onNewResearch ? <section className={styles.start} aria-label={zh ? "开始使用" : "Get started"}><h2 className={styles.startTitle}>{zh ? "从一只股票开始" : "Start with a stock"}</h2><p className={styles.empty}>{zh ? "选择股票和研究范围，发起研究后查看真实执行过程、来源资料与研究报告。" : "Choose a stock and scope, then follow activity, sources and the report."}</p><VButton variant="primary" onPress={onNewResearch}>{zh ? "设置并开始研究" : "Set up research"}</VButton></section> : null}
 
       <section className={styles.section} aria-label={zh ? "研究状态" : "Research status"}>
         <h2 className={styles.sectionTitle}>{zh ? "研究状态" : "Research status"}</h2>

@@ -60,11 +60,33 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
 _ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
 
 # DOI path segment for cross-host receipt bridging: a registrant prefix plus
-# suffix ending the URL path, e.g. ``/10.21656/1000-0887.390245`` on doi.org
-# itself or ``/EN/10.21656/1000-0887.390245`` / ``/doi/10.21656/...`` /
-# ``/article/doi/10.21656/...`` on a publisher mirror.  The leading-slash
-# boundary keeps version-ish substrings (``.../v10.1234/...``) from matching.
-_DOI_PATH_SEGMENT = re.compile(r"(?<=/)(10\.\d{4,9}/\S+)$")
+# suffix, e.g. ``/10.21656/1000-0887.390245`` on doi.org itself or
+# ``/EN/10.21656/1000-0887.390245`` / ``/doi/10.21656/...`` on a publisher
+# mirror.  The leading-slash boundary keeps version-ish substrings
+# (``.../v10.1234/...``) from matching.  The suffix charset excludes ``/``, so
+# a DOI embedded mid-path (``/articles/10.3389/fmicb.2023.1104454/full`` on
+# frontiersin.org) bridges without swallowing the trailing path segment — the
+# old end-anchored ``\S+$`` form produced ``doi:...1104454/full``, a key no
+# candidate could ever emit.  Legacy slash-bearing DOI suffixes stay
+# unbridgeable by this key rather than risking overmatch.
+_DOI_PATH_SEGMENT = re.compile(r"(?<=/)(10\.\d{4,9}/[^\s/?#]+)")
+
+# Publisher article URLs that embed the DOI *suffix* while the prefix is
+# implicit in the host's URL scheme — pure normalization cannot derive these.
+# Scoped exactly like the PMC mirror hosts: host + path shape must both match.
+_HOST_DOI_ARTICLE_PATHS = {
+    # nature.com/articles/<doi-suffix> ↔ doi:<prefix>/<doi-suffix>
+    "nature.com": ("10.1038", re.compile(r"^/articles/(?P<suffix>[^/?#]+)/?$")),
+}
+
+# PMC article id as one complete path segment (slash-bounded both sides), e.g.
+# ``/articles/PMC1234567/`` on pmc.ncbi.nlm.nih.gov or
+# ``/europepmc/webservices/rest/PMC1234567/fullTextXML`` on ebi.ac.uk.
+_PMC_PATH_SEGMENT = re.compile(r"(?i)(?<=/)PMC\d+(?=/|$)")
+
+# The two official PMC mirrors whose URLs may carry the article id anywhere in
+# the path.  Other hosts never emit a ``pmc:`` key even with a PMC-ish segment.
+_PMC_ARTICLE_HOSTS = ("pmc.ncbi.nlm.nih.gov", "ebi.ac.uk")
 
 
 def _doi_locator_key(path: str) -> str:
@@ -82,6 +104,41 @@ def _doi_locator_key(path: str) -> str:
     return f"doi:{doi.lower()}" if doi else ""
 
 
+def _host_doi_locator_key(host: str, path: str) -> str:
+    """``doi:<prefix>/<suffix>`` key for hosts whose article URL embeds only the DOI suffix.
+
+    nature.com serves ``https://www.nature.com/articles/<doi-suffix>`` where the
+    registrant prefix (10.1038) is carried by the host, not the path — the
+    generic path-segment key can never fire.  Registration is deliberately
+    narrow (one host, one path shape) and mirrors the PMC mirror-host rule.
+    """
+    entry = _HOST_DOI_ARTICLE_PATHS.get(host)
+    if not entry:
+        return ""
+    doi_prefix, path_shape = entry
+    match = path_shape.match(path)
+    if not match:
+        return ""
+    suffix = match.group("suffix").rstrip(".,;:")
+    return f"doi:{doi_prefix}/{suffix.lower()}" if suffix else ""
+
+
+def _pmc_locator_key(host: str, path: str) -> str:
+    """Canonical ``pmc:PMC1234567`` bridge key for one PMC mirror URL, or ``""``.
+
+    Pure URL normalization — no DOI↔PMCID network lookup. The same full text is
+    served under both mirrors, so a candidate on one host should match a fetch
+    receipt on the other. The key requires a complete PMC id path segment on the
+    two official mirror hosts, keeping the bridge narrow enough not to overmatch.
+    """
+    if host not in _PMC_ARTICLE_HOSTS:
+        return ""
+    match = _PMC_PATH_SEGMENT.search(path)
+    if not match:
+        return ""
+    return f"pmc:{match.group(0).upper()}"
+
+
 def _normalized_locator_keys(url: Any) -> list[str]:
     """Candidate match keys for one source locator: raw form first, then one
     normalized form.
@@ -93,8 +150,13 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     ``/abs/`` pages — strip the optional trailing ``vN`` version suffix from
     the paper id (``/abs/2502.01542v2`` and ``/abs/2502.01542`` serve the same
     page).  Paths on every other site are never rewritten; URLs whose path
-    ends in a DOI segment additionally emit a scheme-free ``doi:<doi>`` bridge
-    key so a DOI locator matches its publisher-mirror fetch receipt.
+    carries a DOI segment (anywhere, bounded by ``/``) additionally emit a
+    scheme-free ``doi:<doi>`` bridge key so a DOI locator matches its
+    publisher-mirror fetch receipt, registered hosts whose article URL embeds
+    only the DOI suffix (nature.com) emit their implicit-prefix ``doi:`` key,
+    and URLs on the two PMC mirrors additionally emit ``pmc:<PMC id>`` so a
+    pmc.ncbi.nlm.nih.gov candidate matches an ebi.ac.uk receipt (and vice
+    versa) for the same article.
     """
     raw = _clean(url)
     if not raw:
@@ -124,6 +186,12 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     doi_key = _doi_locator_key(path)
     if doi_key and doi_key not in keys:
         keys.append(doi_key)
+    host_doi_key = _host_doi_locator_key(host, path)
+    if host_doi_key and host_doi_key not in keys:
+        keys.append(host_doi_key)
+    pmc_key = _pmc_locator_key(host, path)
+    if pmc_key and pmc_key not in keys:
+        keys.append(pmc_key)
     return keys
 
 
@@ -135,6 +203,8 @@ def source_quotable_blocks(
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
 ) -> list[dict[str, Any]]:
     """Bind a source locator to original text from this task's fetch receipts."""
+    from .doi_enrichment import source_metadata_doi
+
     records = [source]
     metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
     linked_id = _clean(metadata.get("sourceRecordId"))
@@ -161,9 +231,21 @@ def source_quotable_blocks(
     blocks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for record in records:
-        for key in ("sourceUrl", "sourceRef", "rawLocation"):
+        locator_keys = [_clean(record.get(key)) for key in ("sourceUrl", "sourceRef", "rawLocation")]
+        # SCI-021: a candidate enriched with ``metadata.doi`` must bind a
+        # receipt fetched through its ``https://doi.org/<doi>`` form — the
+        # publisher 403 hint reroutes exactly there, and the EuropePMC mirror
+        # fallback answers inside that same tool call.  The DOI locator emits
+        # the ``doi:<doi>`` bridge key on the candidate side, matching the
+        # doi.org receipt (or any publisher-mirror URL ending in the DOI).
+        record_doi = source_metadata_doi(record)
+        if record_doi:
+            doi_locator = f"https://doi.org/{record_doi}"
+            if doi_locator not in locator_keys:
+                locator_keys.append(doi_locator)
+        for key in locator_keys:
             receipt = None
-            for candidate_key in _normalized_locator_keys(record.get(key)):
+            for candidate_key in _normalized_locator_keys(key):
                 receipt = fetched_by_key.get(candidate_key)
                 if receipt:
                     break
@@ -317,6 +399,8 @@ def _quotable_source_entry(
     fetch_failure: Mapping[str, Any] | None,
     budget_left: int,
 ) -> dict[str, Any]:
+    from .doi_enrichment import source_metadata_doi
+
     kept_blocks: list[dict[str, Any]] = []
     omitted = False
     for block in blocks:
@@ -333,6 +417,20 @@ def _quotable_source_entry(
             break
         kept_blocks.append(block)
         budget_left -= len(text)
+    # Fetchable locator surface (SCI-021): the original URL stays first and a
+    # known DOI additionally surfaces as its fetchable ``https://doi.org/``
+    # form, so the agent can follow the 403 hint onto the DOI link (whose
+    # EuropePMC mirror fallback answers inside the same tool call).
+    locators: list[str] = []
+    for key in ("sourceUrl", "sourceRef", "rawLocation"):
+        value = _clean(source.get(key))
+        if value.startswith(("http://", "https://")) and value not in locators:
+            locators.append(value[:1000])
+    doi = source_metadata_doi(source)
+    if doi:
+        doi_link = f"https://doi.org/{doi}"[:1000]
+        if doi_link not in locators:
+            locators.append(doi_link)
     entry: dict[str, Any] = {
         "sourceId": source_id,
         "sourceKind": source_kind,
@@ -342,6 +440,10 @@ def _quotable_source_entry(
         "blockOrigin": kept_blocks[0]["origin"] if kept_blocks else "",
         "sourceAccess": source_access_marker(blocks, fetch_failure=fetch_failure),
     }
+    if doi:
+        entry["doi"] = doi[:240]
+    if locators:
+        entry["locators"] = locators
     if omitted:
         entry["blockOmitted"] = "budget_exhausted"
     # ``blocks`` stays explicit even when empty: "no quotable text" is a

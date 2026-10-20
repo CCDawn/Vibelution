@@ -45,6 +45,37 @@ def _error(message: str) -> str:
     )
 
 
+def personal_assistant_query_tool(resource: str = "index", operation: str = "list", object_id: str = "",
+                                  query: str = "", path: str = "", offset: int = 0, limit: int = 20,
+                                  line: int = 1, max_lines: int = 80) -> str:
+    """Discover and read registered project sources with canonical identity."""
+    try:
+        runtime = _identity()
+    except (ValueError, TypeError, directory.AgentDirectoryError):
+        return _error("个人助理原生身份或配置未就绪，请先核对绑定。")
+    from core.web.services.personal_assistant_project.query import query_project
+
+    return json.dumps(query_project(runtime, resource=resource, operation=operation, object_id=object_id,
+        query=query, path=path, offset=offset, limit=limit, line=line, max_lines=max_lines), ensure_ascii=False)
+
+
+def personal_assistant_platform_api_tool(path: str = "index", query: str = "", tag: str = "") -> str:
+    """Read platform management state through the loopback workbench API (GET-only)."""
+    try:
+        _identity()
+    except (ValueError, TypeError, directory.AgentDirectoryError):
+        return _error("个人助理原生身份或配置未就绪，请先核对绑定。")
+    from core.web.services.personal_assistant_platform_api import (
+        platform_api_get,
+        platform_api_index,
+    )
+
+    normalized = str(path or "").strip()
+    if normalized == "index":
+        return json.dumps(platform_api_index(tag=tag), ensure_ascii=False)
+    return json.dumps(platform_api_get(normalized, query=query), ensure_ascii=False)
+
+
 def _receipt(raw: str) -> str:
     """Preserve native outcome and object ids without returning private objects."""
     result = json.loads(raw)
@@ -95,9 +126,9 @@ def personal_assistant_overview_tool(offset: int = 0, limit: int = 100, team_id:
                       for row in workflow.list_runs(team_id, flow_id=flow_id, limit=20)["runs"]
                       if row["flow"]["id"] == flow_id][:20]
             return json.dumps({"ok": True, "binding": binding, "recentRuns": recent}, ensure_ascii=False)
-        return json.dumps(
-            {"ok": True, **service.get_platform_overview(offset=offset, limit=limit)}, ensure_ascii=False
-        )
+        from core.web.services.personal_attention_service import attach_attention_to_overview
+        return json.dumps({"ok": True, **attach_attention_to_overview(
+            service.get_platform_overview(offset=offset, limit=limit))}, ensure_ascii=False)
     except (ValueError, directory.AgentDirectoryError) as exc:
         return _error(str(exc))
 

@@ -19,7 +19,7 @@ def ensure_builtin_agents() -> dict[str, Any]:
     from core.web.services import session_service, team_service
 
     with _BOOTSTRAP_LOCK:
-        agents = directory.list_agents(include_archived=True)
+        agents = directory.list_agents(include_archived=True, detail="summary")
         created_ids: list[str] = []
         general = next(
             (agent for agent in agents if (agent.get("metadata") or {}).get("builtinPreset") == GENERAL_ASSISTANT_PRESET),

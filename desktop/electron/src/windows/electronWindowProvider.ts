@@ -614,7 +614,7 @@ export class ElectronWindowProvider {
     return this.stateFor("workbench");
   }
 
-  async approveWorkbenchCloseOnce(): Promise<ManagedWindowState> {
+  async approveWorkbenchCloseOnce(options: { deadlineAt?: number } = {}): Promise<ManagedWindowState> {
     this.reconcileCurrentWorkbenchWindow();
     const workbenchWindow = this.workbenchWindow;
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
@@ -624,7 +624,10 @@ export class ElectronWindowProvider {
     this.workbenchCloseAuthorized = true;
     workbenchWindow.close();
     if (!workbenchWindow.isDestroyed()) {
-      const outcome = await waitForWindowClosed(workbenchWindow, this.hungCloseDestroyAfterMs);
+      const remainingMs = typeof options.deadlineAt === "number" && Number.isFinite(options.deadlineAt)
+        ? Math.max(0, options.deadlineAt - Date.now())
+        : this.hungCloseDestroyAfterMs;
+      const outcome = await waitForWindowClosed(workbenchWindow, Math.min(this.hungCloseDestroyAfterMs, remainingMs));
       if (outcome === "timeout" && !workbenchWindow.isDestroyed()) {
         try {
           workbenchWindow.destroy();
@@ -837,9 +840,11 @@ export class ElectronWindowProvider {
         return;
       }
       const report = role === "pet" ? undefined : this.reportState(closedWindowState(role));
+      void Promise.resolve(report).catch(() => undefined);
       if (wasWorkbench) {
-        void Promise.resolve(report)
-          .catch(() => undefined)
+        // Native closure is already proven. A stalled state mirror must not
+        // hold the local transaction open and block the next close after reopen.
+        void Promise.resolve()
           .then(() => this.onWorkbenchClosed())
           .catch(() => undefined);
       }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import runtime as sqlite3
+from .directory_lifecycle import archived_payload_owner, repair_archived_directory_owner
 from .schema import MIGRATIONS, SCHEMA_VERSION
 
 DEFAULT_BUSY_TIMEOUT_MS = 250
@@ -191,6 +193,7 @@ class ConversationDatabase:
                     )
                 connection.execute(f"PRAGMA user_version={migration.version}")
                 current_version = migration.version
+            _repair_payload_archived_directory_seals(connection)
             connection.commit()
             migration_active = False
             self._validate_schema(connection)
@@ -546,6 +549,80 @@ def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
         (table,),
     ).fetchone()
     return row is not None
+
+
+def _repair_payload_archived_directory_seals(connection: sqlite3.Connection) -> int:
+    """Re-seal directory rows whose runtime payload says archived.
+
+    One-shot data repair for the historical agent_archive inconsistency: the
+    payload carried archive_state=archived while the sessions row stayed live
+    (archived_at_ms NULL), so the sessions leaked into agent-scoped lists.
+    Runs inside the initialize() transaction on every store open; the WHERE
+    guards make it a no-op once consistent.
+
+    The same single scan also closes the owner half of the inconsistency:
+    when the payload carries a canonical agent_archive seal (payload agent id
+    == seal agentId), that seal proves the owning Agent, and a directory row
+    still bound to a different Agent is CAS-rebound to the sealed owner.
+    """
+
+    if not _table_exists(connection, "session_runtime_state"):
+        return 0
+    rows = connection.execute(
+        "SELECT session_id, payload_json FROM session_runtime_state "
+        "WHERE payload_json LIKE '%\"archive_state\"%' "
+        "OR payload_json LIKE '%\"archiveState\"%'"
+    ).fetchall()
+    repaired = 0
+    for row in rows:
+        try:
+            decoded = json.loads(str(row["payload_json"] or "{}"))
+        except ValueError:
+            continue
+        if not isinstance(decoded, dict):
+            continue
+        archive_state = decoded.get("archive_state") or decoded.get("archiveState")
+        if not isinstance(archive_state, dict):
+            continue
+        if str(archive_state.get("status") or "").strip().lower() != "archived":
+            continue
+        session_id = str(row["session_id"] or "").strip()
+        current = connection.execute(
+            "SELECT agent_id, archived_at_ms FROM sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        if current is None:
+            continue
+        now_ms = _now_ms()
+        if current[1] is None:
+            connection.execute(
+                "UPDATE sessions SET archived_at_ms=?, updated_at_ms=? WHERE session_id=?",
+                (now_ms, now_ms, session_id),
+            )
+            repaired += 1
+        proven_owner = archived_payload_owner(decoded)
+        if proven_owner and str(current[0] or "").strip() != proven_owner:
+            revision_row = connection.execute(
+                "SELECT current_config_revision_id FROM agents WHERE agent_id=?",
+                (proven_owner,),
+            ).fetchone()
+            try:
+                repair_archived_directory_owner(
+                    connection,
+                    session_id=session_id,
+                    expected_agent_id=str(current[0] or ""),
+                    agent_id=proven_owner,
+                    agent_config_revision_id=(
+                        str(revision_row[0] or "") if revision_row is not None else ""
+                    ),
+                    now_ms=now_ms,
+                )
+            except ValueError:
+                # Guarded legacy rows (session families, active admissions,
+                # missing Agent snapshots) keep the seal-only repair above.
+                continue
+            repaired += 1
+    return repaired
 
 
 def _normalize_version(version: Sequence[int] | str) -> tuple[int, int, int]:

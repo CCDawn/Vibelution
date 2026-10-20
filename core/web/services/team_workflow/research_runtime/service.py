@@ -28,6 +28,7 @@ from core.research.workflow.projection import build_canvas_projection
 
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
 from .durable_index import DurableWorkflowIndex
+from .errors import ResearchWorkflowError
 from .evidence_remediation_fork import (
     EvidenceRemediationForkError,
     fork_evidence_remediation,
@@ -150,12 +151,6 @@ def _agent_display_name(agent_id: str) -> str:
     if not agent_id:
         return ""
     return str(_agent_display_name_map().get(agent_id) or "") or agent_id
-
-
-class ResearchWorkflowError(Exception):
-    def __init__(self, message: str, *, code: str = "workflow_error"):
-        super().__init__(message)
-        self.code = code
 
 
 def _definition_meta_from(

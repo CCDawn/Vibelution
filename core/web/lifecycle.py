@@ -18,6 +18,7 @@ from .server_shutdown import mark_server_shutdown_clean
 from .startup_jobs import StartupJobGroup, remaining_seconds, run_sync_bounded
 
 logger = logging.getLogger(__name__)
+shutdown_logger = logging.getLogger("uvicorn.error")
 LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS = 25.0
 
 
@@ -118,24 +119,8 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
 
 
 def _start_meeting_driver_recovery_job(startup_jobs: StartupJobGroup):
-    """Schedule the startup meeting-driver recovery scan unless archived.
+    """Schedule the startup meeting-driver recovery scan."""
 
-    挑战杯封存模式（archive_mode，只读可看）下跳过这次扫描：它会遍历
-    全部 open 会议并补写 fence 记录（改写状态），封存语义要求启动期不再
-    改写任何 workflow 状态。返回 None 表示任务未创建；其余启动逻辑不受
-    影响。开关读取集中在 research_runtime.archive_mode。
-    """
-
-    from .services.team_workflow.research_runtime.archive_mode import (
-        challenge_archive_mode_enabled,
-    )
-
-    if challenge_archive_mode_enabled():
-        logger.info(
-            "challenge archive mode: skipping startup meeting-driver "
-            "recovery scan (read-only archive)"
-        )
-        return None
     return startup_jobs.start_thread(
         "startup-meeting-driver-recovery", _recover_challenge_meeting_drivers_on_startup
     )
@@ -227,18 +212,12 @@ def _start_research_task_recovery_job(startup_jobs: StartupJobGroup, session_rec
     # Other lifespan tests must never repair the operator's live task store.
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return None
-    from .services.team_workflow.research_runtime.archive_mode import challenge_archive_mode_enabled
-
-    # 封存模式不做业务对账推进，但注册表僵尸收口（账本真相同步，只写注册表
-    # 展示状态）仍要跑，否则顶栏任务卡 running 的僵尸行永远无人收口。
-    settle_only = challenge_archive_mode_enabled()
     from .services.research_task_recovery import run_research_task_recovery
 
     return startup_jobs.start_async(
         "research-task-recovery",
         run_research_task_recovery(
             startup_jobs=startup_jobs, session_recovery=session_recovery,
-            settle_only=settle_only,
         ),
     )
 
@@ -358,7 +337,7 @@ def _startup_cache_prewarm_gate_enabled() -> bool:
     """Operator switch for the routes-ready prewarm gate (default: enabled).
 
     Set ``VIBELUTION_DEFER_STARTUP_CACHE_PREWARM=0`` (or false/no/off) to
-    restore the legacy behavior of starting the scans immediately at boot.
+    restore the legacy behavior of starting optional cache work immediately at boot.
     """
 
     raw = str(os.environ.get("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM") or "").strip().lower()
@@ -420,14 +399,7 @@ async def _run_prewarm_heavy_after_routes_ready(
 ) -> Any:
     """Shared ready→settle→to_thread gate for the CPU-heavy startup prewarms."""
 
-    waited_ms = await _await_web_routes_ready_for_prewarm(app)
-    stagger_seconds = _startup_prewarm_stagger_seconds()
-    if stagger_seconds > 0:
-        await asyncio.sleep(stagger_seconds)
-    gate_timings = {
-        "waitedForRoutesMs": waited_ms,
-        "staggerMs": max(0, int(round(stagger_seconds * 1000))),
-    }
+    gate_timings = await _await_startup_prewarm_gate(app)
     if startup_jobs is not None:
         return await startup_jobs.run_sync(worker_name, heavy, gate_timings)
     worker = asyncio.create_task(asyncio.to_thread(heavy, gate_timings), name=worker_name)
@@ -439,6 +411,19 @@ async def _run_prewarm_heavy_after_routes_ready(
         with suppress(asyncio.CancelledError):
             await asyncio.shield(worker)
         raise
+
+
+async def _await_startup_prewarm_gate(app: FastAPI | None) -> dict[str, int]:
+    """Give functional routes and their first requests priority over caches."""
+
+    waited_ms = await _await_web_routes_ready_for_prewarm(app)
+    stagger_seconds = _startup_prewarm_stagger_seconds()
+    if stagger_seconds > 0:
+        await asyncio.sleep(stagger_seconds)
+    return {
+        "waitedForRoutesMs": waited_ms,
+        "staggerMs": max(0, int(round(stagger_seconds * 1000))),
+    }
 
 
 async def _run_config_workspace_prewarm_after_routes_ready(
@@ -533,7 +518,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-cli-terminal-reconcile", _reconcile_cli_agent_terminal_states_on_startup
     )
     startup_cache_prewarm_task = startup_jobs.start_async(
-        "startup-ui-cache-prewarm", prewarm_ui_caches_on_startup(startup_jobs=startup_jobs)
+        "startup-ui-cache-prewarm", prewarm_ui_caches_on_startup(app=app, startup_jobs=startup_jobs)
     )
     from .services.session.directory_runtime import (
         begin_directory_startup,
@@ -674,12 +659,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
-    if startup_meeting_driver_recovery_task is not None:
-        startup_meeting_driver_recovery_task.add_done_callback(
-            lambda task: consume_startup_task_result(
-                task, message="Challenge meeting driver recovery failed during startup."
-            )
+    startup_meeting_driver_recovery_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Challenge meeting driver recovery failed during startup."
         )
+    )
     startup_chat_room_round_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Chat room round startup recovery failed during startup."
@@ -900,6 +884,14 @@ def _sync_owner_result_is_clean(result: Any) -> bool:
 
 
 async def _run_shutdown_step(name: str, awaitable: Any, *, deadline: float) -> Any:
+    started = time.perf_counter()
+    try:
+        return await _run_shutdown_step_owned(name, awaitable, deadline=deadline)
+    finally:
+        shutdown_logger.info("Shutdown stage %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
+
+
+async def _run_shutdown_step_owned(name: str, awaitable: Any, *, deadline: float) -> Any:
     """Isolate one owner failure/cancellation and still run later cleanup."""
 
     try:
@@ -1026,6 +1018,7 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
     )
 
     async def _shutdown_owner(name: str, callback: Callable[..., Any], kwargs: dict[str, Any]) -> bool:
+        started = time.perf_counter()
         try:
             completed, result = await run_sync_bounded(
                 callback,
@@ -1039,6 +1032,8 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
         except Exception as exc:  # noqa: BLE001 - isolate each runtime owner
             logger.error("Owned runtime shutdown failed: %s (%s)", name, type(exc).__name__)
             return False
+        finally:
+            shutdown_logger.info("Shutdown owner %s settled in %.1f ms", name, (time.perf_counter() - started) * 1000)
         if not completed or not isinstance(result, dict) or result.get("closed") is not True:
             logger.error("Owned runtime shutdown incomplete: %s", name)
             return False
@@ -1086,12 +1081,7 @@ async def _start_generic_workflows_after_session_recovery(
 
 
 def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
-    """Initialize formal reads even when archive mode disables workflow workers.
-
-    The startup job finishes after configuring reader connections in archive
-    mode; no research writer, outbox pump or research worker is started.
-    The independent user-workflow owner may recover its own saved runs.
-    """
+    """Start the Ledger-backed research workflow runtime (workers + reads)."""
 
     return startup_jobs.start_thread(
         "startup-workflow-runtime", _start_research_workflow_runtime
@@ -1234,25 +1224,40 @@ def _prewarm_agent_registry_on_startup(gate_timings: dict[str, Any] | None = Non
     return timings
 
 
+def _prewarm_key_tool_definitions() -> Any:
+    from tools import Key_Tools
+
+    return Key_Tools.prewarm_key_tool_definitions()
+
+
+def _prewarm_web_search_availability() -> Any:
+    from tools import web_search_tool
+
+    return web_search_tool.autoglm_search_tool_availability(force=True)
+
+
 async def prewarm_ui_caches_on_startup(
-    *, startup_jobs: StartupJobGroup | None = None
+    *, app: FastAPI | None = None, startup_jobs: StartupJobGroup | None = None
 ) -> None:
-    from tools import Key_Tools, web_search_tool
+    # Creating an async owner does not move its imports off the event loop.
+    # Defer optional caches, including their imports, until serving is ready.
+    gate_timings = {"waitedForRoutesMs": 0, "staggerMs": 0}
+    if app is not None and _startup_cache_prewarm_gate_enabled():
+        gate_timings = await _await_startup_prewarm_gate(app)
 
     started = time.perf_counter()
     if startup_jobs is None:
         jobs = (
-            asyncio.to_thread(Key_Tools.prewarm_key_tool_definitions),
-            asyncio.to_thread(web_search_tool.autoglm_search_tool_availability, force=True),
+            asyncio.to_thread(_prewarm_key_tool_definitions),
+            asyncio.to_thread(_prewarm_web_search_availability),
             asyncio.to_thread(_prewarm_git_memory_on_startup),
         )
     else:
         jobs = (
-            startup_jobs.run_sync("startup-key-tools-prewarm", Key_Tools.prewarm_key_tool_definitions),
+            startup_jobs.run_sync("startup-key-tools-prewarm", _prewarm_key_tool_definitions),
             startup_jobs.run_sync(
                 "startup-web-search-prewarm",
-                web_search_tool.autoglm_search_tool_availability,
-                force=True,
+                _prewarm_web_search_availability,
             ),
             startup_jobs.run_sync("startup-git-memory-prewarm", _prewarm_git_memory_on_startup),
         )
@@ -1264,9 +1269,10 @@ async def prewarm_ui_caches_on_startup(
         "runtime_manager",
         "startup_prewarm",
         "runtime.startup.git_memory_prewarmed",
-        message="Git memory was prewarmed before the first chat turn.",
+        message="Git memory startup prewarm completed.",
         outcome="completed",
         fields={
+            **gate_timings,
             "durationMs": git_duration_ms,
             "totalPrewarmMs": max(0, int((time.perf_counter() - started) * 1000)),
             "available": bool(getattr(git_state, "available", False)),

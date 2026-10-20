@@ -593,6 +593,79 @@ def project_tool_result_for_model(content: str) -> str:
     return _project_text_for_model(normalized)
 
 
+# source_collection_context_tool 的分派查询投影参数：assignments[].assignedQueries[]
+# 是正式检索唯一合法的服务端冻结查询来源，压缩输出必须保留逐字回放所需的最小
+# 字段（queryId/perspective/query），任何裁剪都要显式标记，绝不静默丢弃。
+_SOURCE_CONTEXT_QUERY_TEXT_CHARS = 200
+_SOURCE_CONTEXT_QUERY_TRUNCATION_MARKER = "…[query truncated]"
+_SOURCE_CONTEXT_MAX_VISIBLE_ASSIGNMENTS = 12
+_SOURCE_CONTEXT_MAX_VISIBLE_QUERIES = 48
+# 该工具的模型可见字符下限：服务端上下文（含 36 条冻结查询）典型 13-23KB，
+# 低于下限原样直通；超过后仍走结构化压缩，压缩输出保底携带分派查询投影。
+# 调用方显式传入更小的 max_chars 也会被抬到该下限——冻结查询清单无法压进
+# 4000 字符默认预算，压掉即断掉正式检索（source_search_receipt_missing）。
+_SOURCE_CONTEXT_RESULT_MAX_CHARS = 16000
+
+
+def _clip_source_context_query_text(value: Any) -> str:
+    raw = str(value or "")
+    if len(raw) <= _SOURCE_CONTEXT_QUERY_TEXT_CHARS:
+        return raw
+    return raw[:_SOURCE_CONTEXT_QUERY_TEXT_CHARS] + _SOURCE_CONTEXT_QUERY_TRUNCATION_MARKER
+
+
+def _compact_source_collection_context_assignments(
+    assignments: list[dict[str, Any]],
+    *,
+    include_query_text: bool = True,
+    include_query_ids: bool = True,
+) -> dict[str, Any]:
+    """投影 assignments[].assignedQueries[]，让模型能逐字回放服务端冻结查询。
+
+    裁剪永不静默：被丢弃的查询计入 ``truncatedQueryCount``，被丢弃的
+    assignment 计入 ``omittedAssignmentCount``，超长 query 文本带显式截断
+    标记；降到只剩计数时用 ``queryProjection`` 说明投影已降档。
+    """
+    visible: list[dict[str, Any]] = []
+    for item in assignments[:_SOURCE_CONTEXT_MAX_VISIBLE_ASSIGNMENTS]:
+        raw_queries = [
+            query
+            for query in list(item.get("assignedQueries") or [])
+            if isinstance(query, dict)
+        ]
+        kept_queries = raw_queries[:_SOURCE_CONTEXT_MAX_VISIBLE_QUERIES]
+        projected_queries: list[dict[str, Any]] = []
+        for query in kept_queries:
+            entry: dict[str, Any] = {}
+            if include_query_ids:
+                entry["queryId"] = str(query.get("queryId") or "")[:160]
+                entry["perspective"] = str(
+                    query.get("perspective") or query.get("perspectiveId") or ""
+                )[:80]
+            if include_query_text:
+                entry["query"] = _clip_source_context_query_text(query.get("query"))
+            if entry:
+                projected_queries.append(entry)
+        assignment_view: dict[str, Any] = {
+            "assignmentId": str(item.get("assignmentId") or "")[:128],
+            "status": str(item.get("status") or "")[:80],
+            "returnedQueryCount": len(kept_queries),
+        }
+        if include_query_ids or include_query_text:
+            assignment_view["assignedQueries"] = projected_queries
+        else:
+            assignment_view["queryProjection"] = "counts_only_truncated"
+        dropped_queries = len(raw_queries) - len(kept_queries)
+        if dropped_queries > 0:
+            assignment_view["truncatedQueryCount"] = dropped_queries
+        visible.append(assignment_view)
+    return {
+        "assignments": visible,
+        "visibleAssignmentCount": len(visible),
+        "omittedAssignmentCount": max(0, len(assignments) - len(visible)),
+    }
+
+
 def _compact_source_collection_context_result(result_str: str, max_chars: int, continuation_hint: str) -> Optional[str]:
     payload = _try_parse_json_object(result_str)
     if not payload:
@@ -687,6 +760,13 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     for key in ("retryInstruction", "evidenceInstruction"):
         if raw_usage.get(key):
             compact_usage[key] = str(raw_usage.get(key))[:1000]
+    assignment_view = _compact_source_collection_context_assignments(
+        [
+            item
+            for item in list(payload.get("assignments") or [])
+            if isinstance(item, dict)
+        ]
+    )
     compact = {
         "status": payload.get("status"),
         "contextKind": payload.get("contextKind"),
@@ -709,6 +789,9 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
             "message": "structured_compact; governed_evidence_summary" if evidence_mode else "structured_compact; previews_not_evidence",
         },
     }
+    if assignment_view["assignments"]:
+        # 分派查询是正式检索的唯一合法冻结查询来源，任何降档形态都保留投影。
+        compact.update(assignment_view)
     if compact_records or record_page.get("hasMore") or record_page.get("total"):
         compact["visibleRecordCount"] = len(compact_records)
         compact["omittedReturnedRecordCount"] = max(0, int(record_page.get("returned") or len(compact_records)) - len(compact_records))
@@ -821,6 +904,9 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
                     "message": "structured_compact; evidence anchors retained while the visible candidate page was reduced",
                 },
             }
+            if assignment_view["assignments"]:
+                # 证据降档只缩候选页；分派查询投影原样保留，重试轮仍要逐字回放。
+                evidence_only.update(assignment_view)
             content = json.dumps(evidence_only, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             if len(content) <= max_chars + 700:
                 return content
@@ -1097,6 +1183,9 @@ def package_tool_result(
     else:
         result_str = str(result)
     result_kind = _infer_result_kind(tool_name, result_str)
+    if result_kind == "source_collection_context":
+        # 抬到工具契约下限，避免默认 4000 预算把冻结查询压成只有计数。
+        max_chars = max(int(max_chars or 0), _SOURCE_CONTEXT_RESULT_MAX_CHARS)
     range_info = _extract_range_info(result_kind, result_str)
     continuation_hint = _extract_continuation_hint(result_kind, result_str)
     semantics = extract_tool_result_semantics(result)
@@ -1287,6 +1376,9 @@ def render_tool_result_for_model(
     shell 既有标记位于非空 content 内，不受影响。
     """
     bounded_limit = max(1, int(max_chars or DEFAULT_MAX_CHARS))
+    if str(facts.result_kind or "") == "source_collection_context":
+        # 与打包层同一工具契约下限：直通的分派查询不能在渲染层被二次截断。
+        bounded_limit = max(bounded_limit, _SOURCE_CONTEXT_RESULT_MAX_CHARS)
     effective_truncated = bool(facts.truncated)
     model_content = str(facts.content or "")
     if not model_content.strip():

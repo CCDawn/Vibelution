@@ -2013,16 +2013,30 @@ def _collection_source_states_from_events(
 def _load_collection_source_facts(
     team_id: str,
     run_ids: Sequence[str],
-) -> dict[str, list[dict[str, Any]]]:
+    *,
+    question_id: str = "",
+) -> tuple[dict[str, list[dict[str, Any]]], frozenset[str]]:
     """Load per-source facts for each referenced collection child run.
 
     Read-only: missing event logs mean the child run has not recorded any
     per-source progress yet and project as an empty list.  Present-but-broken
     logs degrade the same way plus one scene event; they never fabricate
     progress and never block the durable projection.
+
+    Returns the per-run facts plus the set of orphaned run ids whose storage
+    artifacts are unresolvable because the owning research project no longer
+    exists (``ResearchProjectNotFoundError``).  Callers must project those as
+    a recoverable terminal state: the frozen ``collectionRunStatus`` can never
+    be advanced by any worker, so a live projection would keep the snapshot
+    polling forever on a dead run.
     """
 
+    from core.web.services.team_workflow.research_projects import (
+        ResearchProjectNotFoundError,
+    )
+
     facts: dict[str, list[dict[str, Any]]] = {}
+    orphaned_run_ids: set[str] = set()
     seen: set[str] = set()
     for raw_run_id in run_ids:
         run_id = str(raw_run_id or "").strip()
@@ -2038,12 +2052,22 @@ def _load_collection_source_facts(
                 "searchEventsPath"
             ]
         except Exception as exc:  # noqa: BLE001 - telemetry read must not break projection
-            _record_projection_scene_event(
-                "collection_source_events.unavailable",
-                team_id=team_id,
-                question_id="",
-                source_error_type=type(exc).__name__,
-            )
+            if isinstance(exc, ResearchProjectNotFoundError):
+                # Orphaned child run: the owner project was deleted/reset, a
+                # stable expected state rather than an anomaly.  The snapshot
+                # itself surfaces the ``collection_child_orphaned`` problem,
+                # which is the durable, actionable signal; skipping the
+                # warning scene event here keeps the ~4s snapshot poll loop
+                # from flooding runtime-scene telemetry.  Other error types
+                # keep the per-occurrence event below.
+                orphaned_run_ids.add(run_id)
+            else:
+                _record_projection_scene_event(
+                    "collection_source_events.unavailable",
+                    team_id=team_id,
+                    question_id=question_id,
+                    source_error_type=type(exc).__name__,
+                )
             facts[run_id] = []
             continue
         try:
@@ -2054,19 +2078,20 @@ def _load_collection_source_facts(
             _record_projection_scene_event(
                 "collection_source_events.unavailable",
                 team_id=team_id,
-                question_id="",
+                question_id=question_id,
                 source_error_type=type(exc).__name__,
             )
             facts[run_id] = []
             continue
         facts[run_id] = _collection_source_states_from_events(events)
-    return facts
+    return facts, frozenset(orphaned_run_ids)
 
 
 def _collection_request_state(
     request: Mapping[str, Any],
     *,
     source_facts: Sequence[Mapping[str, Any]] | None = None,
+    child_orphaned: bool = False,
 ) -> dict[str, Any]:
     status = str(request.get("status") or "").strip().lower()
     run_status = str(request.get("collectionRunStatus") or "").strip().lower()
@@ -2124,6 +2149,32 @@ def _collection_request_state(
             child = _phase("failed", "none", "available", updated_at=updated_at)
     elif run_status in {"succeeded", "completed"}:
         child = _phase("completed", "succeeded", "terminal", updated_at=updated_at)
+    elif run_id and child_orphaned:
+        # Orphaned child run: the owning research project no longer exists,
+        # so no worker can ever advance the frozen ``collectionRunStatus``.
+        # Project a recoverable terminal state instead of
+        # ``running/waiting_system`` — a live projection would keep the
+        # snapshot "active" forever and the frontend would never stop its
+        # poll loop on this dead run.  ``available`` keeps the human
+        # recovery route (retry/reset) open, mirroring the plain failed
+        # branch above.
+        child = _phase(
+            "failed",
+            "none",
+            "available",
+            updated_at=updated_at,
+            problems=[
+                _problem(
+                    "collection_child_orphaned",
+                    "资料搜集子运行所属研究项目已不存在，存储证据无法解析；请重试或重置该请求。",
+                    category="execution",
+                    severity="warning",
+                    source_kind="collection_run",
+                    source_id=run_id,
+                    detected_at=updated_at or _EPOCH,
+                )
+            ],
+        )
     elif run_id:
         child = _phase("running", "none", "waiting_system", updated_at=updated_at)
     else:
@@ -3597,15 +3648,20 @@ def project_state_from_records(
         [record for record in chain if record.get("recordKind") == _COLLECTION_REQUEST_KIND],
         "requestId",
     )
-    collection_source_facts = _load_collection_source_facts(
+    collection_source_facts, orphaned_collection_run_ids = _load_collection_source_facts(
         team_id,
         [str(item.get("collectionRunId") or "") for item in request_records],
+        question_id=normalized_question_id,
     )
     collection_requests = [
         _collection_request_state(
             item,
             source_facts=collection_source_facts.get(
                 str(item.get("collectionRunId") or "").strip()
+            ),
+            child_orphaned=(
+                str(item.get("collectionRunId") or "").strip()
+                in orphaned_collection_run_ids
             ),
         )
         for item in request_records

@@ -147,7 +147,7 @@ def ensure_public_agent_presets() -> dict[str, Any]:
 
     presets = load_public_agent_presets()
     with _SEED_LOCK:
-        agents = directory.list_agents(include_archived=True)
+        agents = directory.list_agents(include_archived=True, detail="summary")
         created: list[str] = []
         ids: list[str] = []
         for preset in presets:

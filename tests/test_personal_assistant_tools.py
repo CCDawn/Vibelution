@@ -142,8 +142,11 @@ def test_overview_tool_delegates_only_after_canonical_identity(
     monkeypatch.setattr(
         service, "get_platform_overview", lambda **_kwargs: calls.append(1) or payload
     )
+    from core.web.services import personal_attention_service as attention
+    monkeypatch.setattr(attention, "attach_attention_to_overview", lambda value: {**value, "humanAttention": []})
     assert json.loads(tools.personal_assistant_overview_tool()) == {
         "ok": True,
+        "humanAttention": [],
         **payload,
     }
     assert calls == [1]

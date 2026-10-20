@@ -34,6 +34,7 @@ import {
   ToolTestResponse,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { RouteLoadingShell } from "../app/RouteLoadingShell";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
   VButton,
@@ -1045,7 +1046,7 @@ function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRe
 }
 
 export function ToolsRoute() {
-  const { lang, t } = useAppI18n({ domains: ["tools"] });
+  const { lang, t, dictionaryReady } = useAppI18n({ domains: ["tools"] });
   const [searchParams, setSearchParams] = useSearchParams();
   const workspaceView = resolveToolsWorkspaceView(searchParams);
   const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
@@ -1912,6 +1913,10 @@ export function ToolsRoute() {
       onPress={() => setLeftPanelCollapsed((current) => !current)}
     />
   );
+
+  if (!dictionaryReady) {
+    return <RouteLoadingShell layout="tools" label={lang === "zh" ? "正在打开工具工作台" : "Opening tools workspace"} />;
+  }
 
   return (
     <VDenseOpsPage
