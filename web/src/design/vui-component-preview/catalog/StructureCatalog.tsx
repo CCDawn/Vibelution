@@ -25,6 +25,7 @@ import { ConversationToolActivity } from "../../../components/conversation/Conve
 import { createCodexTranscriptToolActivity } from "../../../components/conversation/conversationToolActivityModel";
 import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
 import { ConversationTodoProgressButton } from "../../../components/conversation/ConversationTodoProgressButton";
+import { ConversationTokenSpeedIndicator } from "../../../components/conversation/ConversationTokenSpeedIndicator";
 import { ConversationFileDeliveries } from "../../../components/conversation/ConversationFileDeliveries";
 import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
 import conversationViewStyles from "../../../components/conversation/ConversationView.styles";
@@ -235,6 +236,13 @@ export function StructureCatalog() {
       <VuiPreviewCard name="ConversationTranscriptLoadingState" className="col-span-full min-h-0">
         <div className="h-[360px] w-full overflow-hidden rounded-xl border border-vui-border-subtle bg-vui-surface-panel">
           <ConversationTranscriptLoadingState label="正在加载会话消息" />
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationTokenSpeedIndicator" className="min-h-0">
+        <div className="flex flex-wrap items-center gap-3">
+          <ConversationTokenSpeedIndicator tokensPerSecond={42.3} lang="zh" />
+          <ConversationTokenSpeedIndicator tokensPerSecond={null} lang="zh" />
+          <ConversationTokenSpeedIndicator tokensPerSecond={245.8} lang="en" />
         </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="ComposerContextRing" className="col-span-full min-h-0">

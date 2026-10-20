@@ -24,6 +24,7 @@ export type ChatCenterTabStripProps = {
   fileTabs: ReactNode;
   sessionBrowserControl?: ReactNode;
   taskProgressControl?: ReactNode;
+  tokenSpeedControl?: ReactNode;
   sessionActionsControl?: ReactNode;
   companionHeader?: ReactNode;
   conversationIndexControl?: ReactNode;
@@ -60,6 +61,7 @@ export function ChatCenterTabStrip({
   fileTabs,
   sessionBrowserControl,
   taskProgressControl,
+  tokenSpeedControl,
   sessionActionsControl,
   companionHeader,
   conversationIndexControl,
@@ -114,8 +116,9 @@ export function ChatCenterTabStrip({
         )}
         {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
-      {sessionBrowserControl || taskProgressControl || sessionActionsControl || !leftOverlayVisible || showRightToggle ? (
+      {tokenSpeedControl || sessionBrowserControl || taskProgressControl || sessionActionsControl || !leftOverlayVisible || showRightToggle ? (
         <div className={styles.overlayPaneControls} role="group" aria-label={lang === "zh" ? "会话视图与操作" : "Session views and actions"}>
+          {tokenSpeedControl}
           {sessionBrowserControl}
           {taskProgressControl}
           {!leftOverlayVisible ? (
