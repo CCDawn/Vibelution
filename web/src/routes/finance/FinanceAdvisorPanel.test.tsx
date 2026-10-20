@@ -61,7 +61,7 @@ it("checks a plain completed answer and shows the budget conflict without offeri
   vi.mocked(api.fetchFinancialAdvisorProposal).mockResolvedValue({ proposal: null, assessment: { budgetCny: 6000, budgetSource: "conversation", issues: ["回答预算600元与6000元不一致"] } });
   await render([{ ...message, turnItems: [{ ...message.turnItems![0], text: "以600元起步。" }] }] as ConversationMessage[]);
   expect(api.fetchFinancialAdvisorProposal).toHaveBeenCalled();
-  expect(document.body.textContent).toContain("本轮回答金额不一致");
+  expect(document.body.textContent).toContain("本轮回答存在核对问题");
   await click("建议需要重新核对");
   expect([...document.querySelectorAll("button")].some(button => button.textContent === "确认保存")).toBe(false);
   expect(api.financialAdvisorCommand).not.toHaveBeenCalled();

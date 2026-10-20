@@ -70,6 +70,30 @@ def test_ambiguous_budget_is_not_arbitrarily_selected_and_unknown_is_not_a_pass(
     assert unknown == {"budgetCny": None, "budgetSource": "unknown", "issues": []}
 
 
+@pytest.mark.parametrize("rate", ["千分之五", "0.5%", "5‰", "万分之五十", "万分之五十五", "百分之零点五", "为成交额的0.5%"])
+def test_stock_stamp_duty_order_of_magnitude_errors_are_not_confirmable(rate):
+    result = assess_budget(f"预算6000元。股票卖出另有印花税约{rate}。", _turn(request="预算6000元"), "turn-1", {"budgetCny": 6000, "market": "CN"}, None)
+    assert any("印花税" in issue for issue in result["issues"])
+
+
+@pytest.mark.parametrize("text", [
+    "股票卖出印花税0.05%", "股票卖出印花税万分之五", "股票卖出印花税0.5‰",
+    "ETF卖出印花税0%", "历史2019年股票卖出印花税0.1%",
+    "港股卖出时，印花税率0.1%", "ETF交易时，印花税0%",
+    "历史2019年股票卖出时，印花税0.1%",
+])
+def test_current_stock_fee_units_and_unrelated_market_claims_are_not_false_conflicts(text):
+    assert not assess_budget(text, _turn(request="预算6000元"), "turn-1", {"budgetCny": 6000, "market": "CN"}, None)["issues"]
+
+
+@pytest.mark.parametrize("text", [
+    "ETF免印花税，股票卖出印花税0.5%。",
+    "股票买入和卖出印花税均为0.5%。",
+])
+def test_explicit_stock_sell_fee_assertion_is_checked_after_other_market_clause(text):
+    assert assess_budget(text, _turn(request="预算6000元"), "turn-1", {"budgetCny": 6000, "market": "CN"}, None)["issues"]
+
+
 def test_wrong_budget_proposal_cannot_be_confirmed_or_write_native_state(env):
     path, events = env
     profile = {"budgetCny": 600}
@@ -91,6 +115,20 @@ def test_plain_answer_without_proposal_is_checked_and_preserved(env):
     result = advisor_proposals.get_proposal("owner", "session-1", "turn-1")
     assert result["proposal"] is None and result["assessment"]["budgetCny"] == 6000
     assert result["assessment"]["issues"] and events == before and not path.exists()
+
+
+def test_stock_fee_conflict_blocks_profile_confirmation_without_mutating_workspace(env):
+    path, events = env
+    from core.web.services.financial_preferences.investment import InvestmentProfile
+
+    proposal = {"kind": "profile", "baseFingerprint": workspace.get_workspace("owner")["investmentStateFingerprint"], "profile": InvestmentProfile(budgetCny=6000).model_dump()}
+    events[:] = _turn(request="预算6000元", answer="预算6000元。股票卖出印花税为成交额的0.5%。\n" + _fence(proposal))
+    before = deepcopy(events)
+    result = advisor_proposals.get_proposal("owner", "session-1", "turn-1")
+    assert result["proposal"] is None and any("印花税" in issue for issue in result["assessment"]["issues"])
+    with pytest.raises(FinancialPreferenceError):
+        _confirm()
+    assert not path.exists() and events == before
 
 
 @pytest.mark.parametrize("code, expected", [("510300", "sh510300"), ("sh510880", "sh510880"), ("510500", "sh510500"), ("159915", "sz159915"), ("sz159919", "sz159919")])
