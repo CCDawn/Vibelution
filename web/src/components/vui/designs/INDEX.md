@@ -226,6 +226,7 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `ComposerContextRing` | [product/composer-context.md](./product/composer-context.md#composercontextring) |
+| `ConversationTokenSpeedIndicator` | [product/token-speed.md](./product/token-speed.md#conversationtokenspeedindicator) |
 
 ## Provider
 
