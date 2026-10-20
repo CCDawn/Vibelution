@@ -601,6 +601,17 @@ DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS = 120.0
 DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS = 900.0
 DEFAULT_LLM_STREAM_IDLE_CHUNK_DEADLINE_SECONDS = 300.0
 
+# 自建 httpx 客户端连接池的 keep-alive 上限（秒）。httpx 默认 keepalive_expiry=5s
+# 会在回合内工具执行间隙回收连接，每通重付 DNS+TLS。默认 1800s 的权衡：
+# - 太短（如 httpx 的 5s 或旧值 300s）：闲置几分钟（用户阅读回复、长工具执行）
+#   后重付建连，且很多 provider 的显式 prompt cache TTL 本身约 5 分钟，连接与
+#   cache 往往一起失效，建连成本叠加 cache 重建成本；
+# - 太长（数小时）：连接被长期占用，provider 侧负载均衡/网关可能已单方面断开，
+#   池内陈旧连接反而增加首通重试。30 分钟覆盖一个会话的常见回合间隙，又不会
+#   让空闲连接无限期占用。env 覆盖：VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+# （钳制 5-86400s，惰性逐请求解析，见 core/llm/client.py）。
+DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS = 1800.0
+
 
 class LLMConfig(BaseModel):
     """新的 LLM 根配置：providers / profiles / model_library。"""
@@ -621,6 +632,16 @@ class LLMConfig(BaseModel):
     # runs on the deferred background channel; see core.llm.warmup. The env
     # kill switch VIBELUTION_LLM_STARTUP_WARMUP=0 disables it regardless.
     startup_warmup: bool = Field(default=True)
+    # Pooled provider HTTP connections' keep-alive expiry (seconds). Raised
+    # from httpx's 5s default so an idle gap between turns (user reading the
+    # reply, long tool runs) does not re-pay DNS+TLS. 1800s trades connection
+    # occupancy against rebuild cost (see DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_
+    # SECONDS above for the full rationale); env override
+    # VIBELUTION_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS wins over this field.
+    http_keepalive_expiry_seconds: float = Field(
+        default=DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS,
+        description="自建 httpx 连接池的闲置连接保活上限（秒）；合法值钳制 5-86400s，非法值回退默认",
+    )
 
     @field_validator("route_concurrency", mode="before")
     @classmethod
@@ -629,6 +650,18 @@ class LLMConfig(BaseModel):
         if isinstance(value, bool) or not isinstance(value, int):
             return DEFAULT_LLM_ROUTE_CONCURRENCY
         return value if value >= 1 else DEFAULT_LLM_ROUTE_CONCURRENCY
+
+    @field_validator("http_keepalive_expiry_seconds", mode="before")
+    @classmethod
+    def _clamp_invalid_keepalive_expiry(cls, value: Any) -> float:
+        # 非法类型（bool/字符串/None）与 NaN/Inf 回退默认；数值（含 0/负数）
+        # 钳制到 5-86400s，与 core/llm/client.py 的 env 钳制范围一致。
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+        value = float(value)
+        if value != value or value in (float("inf"), float("-inf")):
+            return DEFAULT_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS
+        return max(5.0, min(86400.0, value))
 
     @model_validator(mode="after")
     def ensure_defaults(self) -> "LLMConfig":
