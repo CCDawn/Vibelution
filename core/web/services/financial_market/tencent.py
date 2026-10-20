@@ -25,6 +25,7 @@ _MARKET_TIME_ZONE = {
     "US": "America/New_York",
 }
 _CN_SYMBOL_RE = re.compile(r"(?:sh6\d{5}|sz[03]\d{5}|bj[489]\d{5})")
+_ETF_SYMBOL_RE = re.compile(r"(?:sh(?:510|511|512|513|515|516|517|518|520|530|560|561|562|563|588)\d{3}|sz159\d{3})")
 _HK_SYMBOL_RE = re.compile(r"hk\d{5}")
 _US_SYMBOL_RE = re.compile(r"us[A-Z][A-Z0-9.-]{0,9}")
 _US_EXCHANGE_SUFFIX_RE = re.compile(r"\.(?:OQ|N|AM|PK|PNK|NYSE|NASDAQ)$", re.IGNORECASE)
@@ -47,7 +48,7 @@ def normalize_symbol(value: str) -> str:
     lowered = raw.lower()
 
     if re.fullmatch(r"\d{6}", lowered):
-        lowered = ("sh" if lowered[0] == "6" else "sz" if lowered[0] in "03" else "bj") + lowered
+        lowered = ("sh" if lowered[0] in "56" else "sz" if lowered[0] in "013" else "bj") + lowered
     elif lowered.startswith("hk"):
         code = lowered[2:]
         if code.isdigit() and 1 <= len(code) <= 5:
@@ -59,13 +60,17 @@ def normalize_symbol(value: str) -> str:
         ticker = _US_EXCHANGE_SUFFIX_RE.sub("", ticker).upper()
         lowered = "us" + ticker
 
-    if _CN_SYMBOL_RE.fullmatch(lowered):
+    if _CN_SYMBOL_RE.fullmatch(lowered) or _ETF_SYMBOL_RE.fullmatch(lowered):
         return lowered
     if _HK_SYMBOL_RE.fullmatch(lowered):
         return lowered
     if _US_SYMBOL_RE.fullmatch(lowered):
         return lowered
     raise MarketDataError("请输入有效的 A 股、港股或美股代码")
+
+
+def is_etf_symbol(value: str) -> bool:
+    return bool(_ETF_SYMBOL_RE.fullmatch(str(value).lower()))
 
 
 def normalize_a_share_symbol(value: str) -> str:
@@ -77,7 +82,7 @@ def normalize_a_share_symbol(value: str) -> str:
         normalized = normalize_symbol(raw)
     except MarketDataError as exc:
         raise MarketDataError("模拟交易账本仅支持 A 股") from exc
-    if market_code_for_symbol(normalized) != "CN":
+    if not _CN_SYMBOL_RE.fullmatch(normalized):
         raise MarketDataError("模拟交易账本仅支持 A 股")
     return normalized
 
@@ -287,8 +292,11 @@ def parse_quote(raw: str, symbol: str) -> dict:
     market_cap = None
     if market_cap_source is not None and market_cap_source > 0:
         market_cap = market_cap_source * 100_000_000
-    pe_ratio = _number(values[39], optional=True)
-    pb_ratio = _number(values[46], optional=True) if code == "CN" else None
+    etf = is_etf_symbol(normalized)
+    pe_ratio = None if etf else _number(values[39], optional=True)
+    pb_ratio = _number(values[46], optional=True) if code == "CN" and not etf else None
+    if etf:
+        market_cap = None
     identity = market_identity(code, normalized, ticker)
     return {
         "symbol": normalized,

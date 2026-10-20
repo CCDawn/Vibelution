@@ -14,6 +14,7 @@ from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcont
 from typing import Any
 
 from core.web.services.financial_backtest.fees import VERIFIED_FEE_MODEL, calculate_fees
+from .position_evidence import actual_positions
 from core.web.services.financial_backtest.quantity_rules import (
     ASHARE_QUANTITY_V2,
     floor_buy_quantity,
@@ -131,6 +132,10 @@ def _calculate(state: dict, orders: list[dict], quotes: dict, *, now: datetime) 
     if not isinstance(positions, list) or len(positions) > 50:
         blockers.append("手动持仓列表未知或超过50条")
         positions = []
+    actual = actual_positions([row for row in positions if isinstance(row, dict)])
+    if len(actual) != len(positions):
+        blockers.append("持仓含测试、验收或模拟记录，实际持仓需重新核对，不能计入真实资产")
+        positions = actual
     if status == "none" and positions:
         blockers.append("空仓声明与已录入持仓不一致")
     if status == "recorded" and not positions:

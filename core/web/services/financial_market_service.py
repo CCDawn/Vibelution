@@ -16,6 +16,7 @@ MarketDataError = tencent.MarketDataError
 StockNotFound = tencent.StockNotFound
 normalize_symbol = tencent.normalize_symbol
 normalize_a_share_symbol = tencent.normalize_a_share_symbol
+is_etf_symbol = tencent.is_etf_symbol
 market_code_for_symbol = tencent.market_code_for_symbol
 parse_quote = tencent.parse_quote
 parse_candles = tencent.parse_candles
@@ -159,7 +160,9 @@ def get_stock_snapshot(symbol: str, period: str = "day") -> dict:
         )
     except MarketDataError as exc:
         candles, candle_error = [], str(exc)
-    if market_code == "CN":
+    if is_etf_symbol(normalized):
+        notice = "公开ETF行情可能延迟；价格按每份计，成交量统一字段为份（旧字段为手，每手100份）；不提供股票PE/PB或股票市值，行情可查不代表支持ETF交易核算。"
+    elif market_code == "CN":
         notice = "公开行情可能延迟；A股K线前复权，成交量统一字段为股（旧字段为手）。"
     else:
         notice = f"公开行情可能延迟；{market_code} K线未复权，成交量单位为股。"

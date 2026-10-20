@@ -61,13 +61,15 @@ def _safe_text(value, fallback: str, limit: int) -> str:
 
 def _market_metadata(symbol: str | None) -> dict:
     code = market.market_code_for_symbol(symbol) if symbol else None
+    etf = bool(symbol and market.is_etf_symbol(symbol))
     currency = {"CN": "CNY", "HK": "HKD", "US": "USD"}.get(code)
     return {
         "marketCode": code,
         "currency": currency,
         "adjustment": market.adjustment_for_market(code) if code else None,
-        "priceUnit": "元" if code == "CN" else f"{currency}/share" if currency else None,
-        "volumeUnit": "手（1手=100股）" if code == "CN" else "shares" if code else None,
+        "priceUnit": "元/份" if etf else "元" if code == "CN" else f"{currency}/share" if currency else None,
+        "volumeUnit": "手（1手=100份）" if etf else "手（1手=100股）" if code == "CN" else "shares" if code else None,
+        **({"instrumentType": "etf", "tradingCalculationSupported": False} if etf else {}),
     }
 
 
@@ -165,7 +167,9 @@ def financial_market_snapshot_tool(
     """Return a bounded public CN/HK/US quote and its latest K lines.
 
     ``ticker`` must be a six-digit code or an exchange-prefixed code such as
-    ``600519``, ``sh600519``, ``sz000001``, or ``bj430047``; use an explicit
+    ``600519``, ``sh600519``, ``sz000001``, or ``bj430047``. Listed ETF quotes
+    accept e.g. ``510300``, ``sh510880`` and ``159915`` (prices per fund unit,
+    one lot=100 units); ETF trading/fee calculations are not supported. Use an explicit
     ``hk`` prefix for HK stocks (``hk00700``) and ``us`` for US (``usNVDA``).
     ``period`` is ``day``, ``week``, or
     ``month``; ``limit`` is an integer from 1 through 120. This tool does not
@@ -184,14 +188,14 @@ def financial_market_snapshot_tool(
     # actual one-letter stock D remains addressable as canonical "usD".
     if not isinstance(ticker, str) or ticker.strip() == "USD":
         return _invalid_request(
-            "ticker 须为 A 股代码，或带 hk/us 前缀的港股/美股代码。",
+            "ticker 须为 A 股或场内ETF代码，或带 hk/us 前缀的港股/美股代码。",
             error_code="invalid_ticker",
         )
     try:
         symbol = market.normalize_symbol(ticker)
     except Exception:
         return _invalid_request(
-            "ticker 须为有效 A 股代码，或带 hk/us 前缀的港股/美股代码。",
+            "ticker 须为有效 A 股或场内ETF代码，或带 hk/us 前缀的港股/美股代码。",
             error_code="invalid_ticker",
         )
 

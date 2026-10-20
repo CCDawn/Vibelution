@@ -415,6 +415,8 @@ FinanceAIBacktest 复用既有 VSelect 提供原有简化费用和沪深历史�
 
 ## FinanceAdvisorExecution
 
+金额核对沿用 `FinanceAdvisorPanel` 的 `VStateSurface` 紧凑错误状态。每条成功的最终回答都由服务端读取原生来源核对明确预算，包括未附提案的普通分析；发现冲突时在投资摘要旁显示具体问题并停止提供确认按钮。未检出冲突不显示“金额已核验正确”。核对只作只读投影，不修改回答、Journal 或普通会话；当配置版本变化时重新读取，不复用旧诊断。
+
 ### 功能
 
 在方案对话框中用 VInput 编辑实际可用现金与完整实际持仓，用 VCheckbox 明确确认已核对完整状态后才允许 VButton 保存。失败通过 VStateSurface 展示并保留输入。
