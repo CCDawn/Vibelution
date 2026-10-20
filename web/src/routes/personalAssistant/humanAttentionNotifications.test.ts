@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PersonalAssistantAttentionRow } from "./humanAttentionNotifications";
 import {
   HUMAN_ATTENTION_FALLBACK_TITLES,
+  HUMAN_ATTENTION_KINDS,
   buildHumanAttentionNotificationPayload,
   createHumanAttentionLedger,
   emitNewHumanAttentionNotifications,
@@ -70,6 +71,60 @@ describe("human attention payload building", () => {
       targetUrl: "/teams?researchView=workflow",
     });
   });
+  it("accepts human_gate rows and carries sanitized actions and meta", () => {
+    // Unknown meta keys must not fail the type check while proving they are dropped.
+    const noisyMeta = {
+      teamId: "team-1",
+      runId: "run-7",
+      nodeId: "node-gate",
+      taskId: "task-9",
+      decisions: ["accept", "reject", "revise", ""],
+      ignored: "dropped",
+    } as unknown as PersonalAssistantAttentionRow["meta"];
+    const payload = buildHumanAttentionNotificationPayload(attentionRow({
+      id: "gate-1",
+      kind: "human_gate",
+      severity: "high",
+      title: "研究结论等待审批",
+      targetUrl: "/teams?researchView=workflow&runId=run-7",
+      actions: [
+        { label: "接受", decision: "accept" },
+        { label: "驳回", decision: "reject" },
+        // Malformed entries are dropped instead of poisoning the payload.
+        { label: "", decision: "accept" },
+        { label: "x", decision: 42 as unknown as string },
+      ],
+      meta: noisyMeta,
+    }));
+    expect(payload).toEqual({
+      id: "gate-1",
+      kind: "human_gate",
+      severity: "high",
+      title: "研究结论等待审批",
+      targetUrl: "/teams?researchView=workflow&runId=run-7",
+      actions: [
+        { label: "接受", decision: "accept" },
+        { label: "驳回", decision: "reject" },
+      ],
+      meta: {
+        teamId: "team-1",
+        runId: "run-7",
+        nodeId: "node-gate",
+        taskId: "task-9",
+        decisions: ["accept", "reject", "revise"],
+      },
+    });
+  });
+  it("drops malformed actions/meta entirely instead of emitting empty husks", () => {
+    const payload = buildHumanAttentionNotificationPayload(attentionRow({
+      id: "gate-2",
+      kind: "human_gate",
+      actions: [{ label: "  ", decision: "accept" }],
+      meta: { teamId: "   " },
+    }));
+    expect(payload?.actions).toBeUndefined();
+    expect(payload?.meta).toBeUndefined();
+  });
 });
 
 describe("human attention target resolution", () => {
@@ -91,6 +146,20 @@ describe("human attention target resolution", () => {
     expect(humanAttentionTargetFor({ kind: "affair_reminder" })).toBe("/personal-assistant");
     expect(HUMAN_ATTENTION_FALLBACK_TITLES.affair_reminder).toContain("事务");
   });
+  it("keeps human_gate in the whitelist with the research-workflow default target", () => {
+    expect(isHumanAttentionKind("human_gate")).toBe(true);
+    expect(isHumanAttentionKind("human-gate")).toBe(false);
+    expect(humanAttentionTargetFor({ kind: "human_gate" })).toBe("/teams?researchView=workflow");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.human_gate).toContain("审批");
+  });
+  it("whitelists exactly the four dual-channel kinds (mirrored by the Electron shell)", () => {
+    expect([...HUMAN_ATTENTION_KINDS].sort()).toEqual([
+      "affair_reminder",
+      "anomaly",
+      "human_gate",
+      "knowledge_review",
+    ]);
+  });
 });
 
 describe("human attention event parsing", () => {
@@ -100,6 +169,39 @@ describe("human attention event parsing", () => {
       type: "delivered",
       payload: { id: "kr-3", kind: "knowledge_review", severity: "critical", title: "T", body: "B", targetUrl: "/memory/knowledge" },
     });
+  });
+  it("keeps human-gate actions and meta on window deliveries from the shell", () => {
+    const event = parseHumanAttentionEvent({
+      id: "gate-3",
+      kind: "human_gate",
+      severity: "high",
+      title: "等待人工审批",
+      actions: [{ label: "接受", decision: "accept" }, { label: "驳回", decision: "reject" }],
+      meta: { teamId: "team-1", runId: "run-7", nodeId: "n-1", taskId: "task-9", decisions: ["accept", "reject", "revise"] },
+    });
+    expect(event).toEqual({
+      type: "delivered",
+      payload: {
+        id: "gate-3",
+        kind: "human_gate",
+        severity: "high",
+        title: "等待人工审批",
+        actions: [{ label: "接受", decision: "accept" }, { label: "驳回", decision: "reject" }],
+        meta: { teamId: "team-1", runId: "run-7", nodeId: "n-1", taskId: "task-9", decisions: ["accept", "reject", "revise"] },
+      },
+    });
+  });
+  it("strips malformed actions instead of delivering them to the card", () => {
+    const event = parseHumanAttentionEvent({
+      id: "gate-4",
+      kind: "human_gate",
+      title: "等待人工审批",
+      actions: "accept",
+      meta: [],
+    });
+    expect(event?.type).toBe("delivered");
+    expect(event && event.type === "delivered" ? event.payload.actions : undefined).toBeUndefined();
+    expect(event && event.type === "delivered" ? event.payload.meta : undefined).toBeUndefined();
   });
   it("parses bare ids as opened clicks and rejects invalid ids", () => {
     expect(parseHumanAttentionEvent({ id: "kr-4", targetUrl: "/memory/knowledge" })).toEqual({

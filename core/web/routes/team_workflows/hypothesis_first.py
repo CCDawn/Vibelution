@@ -61,6 +61,7 @@ from ._router import router
 from .research_runtime import _submit_workflow_command
 from .hypothesis_first_models import (
     AnomalyInboxExtendBudgetRequest,
+    AnomalyInboxResolveHumanGateRequest,
     AnomalyInboxResponse,
     CandidateEvidenceTrailResponse,
     CloseReviewMeetingResponse,
@@ -1101,6 +1102,78 @@ def _collect_budget_precheck_blocks(
     return blocks
 
 
+def _collect_pending_human_gate_tasks(
+    team_id: str, question_id: str
+) -> list[dict[str, Any]]:
+    """Ledger pending human tasks of this (team, question) scope (read-only).
+
+    Derived rows only: runs parked at ``waiting_human`` joined with their
+    pending human tasks via the repository's status-indexed listing; resolving
+    the gate (``resolve_human_task``) makes the row disappear on the next
+    read. Any failure (read runtime unconfigured, migration barrier, ledger
+    read error) fails closed to ``[]`` — the inbox must never break because
+    the ledger is unavailable. Rows carry the identity the resolve CTA needs
+    (teamId/runId/taskId/nodeId/taskKind) plus an ISO ``createdAt``.
+    """
+
+    from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
+        get_formal_read_store,
+    )
+
+    normalized_question = str(question_id or "").strip().upper()
+    try:
+        store = get_formal_read_store()
+        rows = store.list_pending_human_tasks_for_waiting_runs(limit=200)
+    except Exception:  # noqa: BLE001 - an unavailable ledger is not an inbox error
+        return []
+    entries: list[dict[str, Any]] = []
+    for row in rows:
+        (
+            task_id,
+            run_id,
+            _node_run_id,
+            _handoff_id,
+            task_kind,
+            _prompt_json,
+            _status,
+            _decision_json,
+            created_at_ms,
+            _resolved_at_ms,
+            row_team_id,
+            row_question_id,
+            _workflow_id,
+            _workflow_version_id,
+            _structure_hash,
+            _run_status,
+            _active_node_id,
+            node_id,
+        ) = row
+        normalized_task = str(task_id or "").strip()
+        normalized_run = str(run_id or "").strip()
+        if not normalized_task or not normalized_run:
+            continue
+        if str(row_team_id or "").strip() != team_id:
+            continue
+        if str(row_question_id or "").strip().upper() != normalized_question:
+            continue
+        try:
+            created_at = _iso_from_ms(int(created_at_ms))
+        except (TypeError, ValueError):
+            created_at = ""
+        entries.append(
+            {
+                "taskId": normalized_task,
+                "runId": normalized_run,
+                "nodeId": str(node_id or "").strip(),
+                "taskKind": str(task_kind or "").strip(),
+                "teamId": team_id,
+                "questionId": normalized_question,
+                "createdAt": created_at,
+            }
+        )
+    return entries
+
+
 def _resolve_run_version(team_id: str, run_id: str) -> int:
     """Current ledger run version for CAS; 0 when the run cannot be seen.
 
@@ -1157,11 +1230,13 @@ def team_workflow_hypothesis_first_anomaly_inbox(
     """R4.3 anomaly inbox: one read-only projection for the operations console.
 
     薄路由：把该题目的 canonical state-v2 快照交给纯投影服务
-    ``build_anomaly_inbox``，并附上三类「无推送断点」的只读信号——
+    ``build_anomaly_inbox``，并附上四类「无推送断点」的只读信号——
     digest 审批 TTL 止损（口径复用 meeting runtime）、人工门等待超阈值
-    （knowledge_handoff / H1-H4，阈值可配）、阶段预算预检阻塞（带
-    extend_budget CTA action）。响应在合同投影之上只增不删
-    （``attach_inbox_actions``），排序/合并/完整性全部由合同保证。
+    （knowledge_handoff / H1-H4，阈值可配）、ledger 停靠人工门的 pending
+    human tasks（waiting_human 运行，无阈值：解析后自动消失，带
+    resolve CTA action）、阶段预算预检阻塞（带 extend_budget CTA
+    action）。响应在合同投影之上只增不删（``attach_inbox_actions``），
+    排序/合并/完整性全部由合同保证。
     未给 questionId 时返回合法的空收件箱（无信号的合法状态）。
     """
 
@@ -1191,12 +1266,16 @@ def team_workflow_hypothesis_first_anomaly_inbox(
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.anomaly_inbox", team_id, exc)
     budget_precheck_blocks = _collect_budget_precheck_blocks(team_id, snapshot)
+    human_gate_tasks = _collect_pending_human_gate_tasks(
+        team_id, normalized_question_id
+    )
     inbox = anomaly_inbox_service.build_anomaly_inbox(
         snapshot,
         digest_ttl_overdues=_collect_digest_ttl_overdues(
             team_id, normalized_question_id
         ),
         gate_waits=anomaly_inbox_service.derive_gate_waits(snapshot),
+        human_gate_tasks=human_gate_tasks,
         budget_precheck_blocks=budget_precheck_blocks,
         gate_wait_threshold_ms=_gate_wait_threshold_ms(),
     )
@@ -1207,6 +1286,7 @@ def team_workflow_hypothesis_first_anomaly_inbox(
         "inbox": anomaly_inbox_service.attach_inbox_actions(
             inbox.to_dict(),
             blocks=budget_precheck_blocks,
+            human_gate_tasks=human_gate_tasks,
         ),
     }
 
@@ -1361,6 +1441,75 @@ def team_workflow_hypothesis_first_anomaly_inbox_extend_budget(
             "limits": {"stageTokens": {payload.stageId: new_stage_tokens}},
             "recovery": {"command": "extend_budget", "then": "retry_node"},
         },
+        request=request,
+    )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/anomaly-inbox/actions/resolve-human-gate",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_anomaly_inbox_resolve_human_gate(
+    team_id: str,
+    payload: AnomalyInboxResolveHumanGateRequest,
+    request: Request,
+) -> dict:
+    """Execute the inbox human-gate resolve CTA (human decision, confirmed).
+
+    Frozen frontend body ``{teamId, runId, taskId, decision, confirmed}`` —
+    the action element's ``endpoint`` points here. 误触防护在服务端闭合：
+    缺少显式 ``confirmed=true``、task/run 缺失或 decision 不在 accept/reject
+    时直接拒绝（428 语义）；body ``teamId`` 与路径 team 不一致按 scope 错误
+    返回 404（不泄露跨团队存在性）。执行复用 ``resolve_human_task`` 单一
+    命令权威（与工作流面板同一 handler、同一 CAS 守卫），本端点只是收件箱
+    侧的薄确认包装，不引入第二决策写路径；幂等键由 run/task/decision 决定，
+    同一确认重复提交幂等重放。``questionId`` 只作请求上下文。
+    """
+
+    if str(payload.teamId or "").strip() != team_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "team_scope_mismatch",
+                "message": "anomaly inbox human-gate teamId does not match the route team",
+            },
+        )
+    try:
+        anomaly_inbox_service.assert_resolve_human_gate_confirmation(
+            confirmed=payload.confirmed,
+            run_id=payload.runId,
+            task_id=payload.taskId,
+            decision=payload.decision,
+        )
+    except anomaly_inbox_service.InboxActionConfirmationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    expected_run_version = payload.expectedRunVersion or _resolve_run_version(
+        team_id, payload.runId
+    )
+    if expected_run_version < 1:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "run_not_found",
+                "message": f"workflow run {payload.runId} not found",
+            },
+        )
+    idempotency_key = (
+        f"inbox-resolve-human-gate:{payload.runId}:{payload.taskId}"
+        f":{payload.decision}"
+    )
+    return _submit_workflow_command(
+        run_id=payload.runId,
+        team_id=team_id,
+        kind=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+        node_id=None,
+        expected_run_version=expected_run_version,
+        idempotency_key=idempotency_key,
+        payload={"taskId": payload.taskId, "decision": payload.decision},
         request=request,
     )
 

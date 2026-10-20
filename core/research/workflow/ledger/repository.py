@@ -1393,6 +1393,41 @@ class WorkflowLedgerRepository:
             (run_id,),
         ).fetchall()
 
+    def list_pending_human_tasks_for_waiting_runs(
+        self, *, limit: int = 100
+    ) -> list[tuple]:
+        """Pending human tasks of runs parked at the human gate, run-scoped.
+
+        Derived overview/inbox read (personal assistant + anomaly inbox): one
+        statement instead of per-run N+1 scans.  Query shape: drives from
+        ``idx_workflow_runs_status`` (``workflow_runs.status ==
+        'waiting_human'``, a small bounded set), then joins the run's pending
+        ``human_tasks`` rows and the task's node attempt for node identity.
+        Rows carry the human-task columns (same order as
+        ``list_pending_human_tasks``) followed by the run/attribution columns
+        the projections need: team_id, question_id, workflow_id,
+        workflow_version_id, structure_hash, run status, active_node_id and
+        the attempt's node_id (empty when the attempt row is gone).
+        """
+        return self.execute(
+            """
+            SELECT ht.task_id, ht.run_id, ht.node_run_id, ht.handoff_id,
+                   ht.task_kind, ht.prompt_json, ht.status, ht.decision_json,
+                   ht.created_at_ms, ht.resolved_at_ms,
+                   r.team_id, r.question_id, r.workflow_id,
+                   r.workflow_version_id, r.structure_hash, r.status,
+                   r.active_node_id, na.node_id
+            FROM workflow_runs r
+            JOIN human_tasks ht
+              ON ht.run_id = r.run_id AND ht.status = 'pending'
+            LEFT JOIN node_attempts na ON na.node_run_id = ht.node_run_id
+            WHERE r.status = 'waiting_human'
+            ORDER BY r.updated_at_ms ASC, ht.created_at_ms ASC, ht.task_id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
     def update_human_task_decision(
         self,
         task_id: str,

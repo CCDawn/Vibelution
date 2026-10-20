@@ -166,6 +166,58 @@ def test_build_inputs_caches_commit_tree_but_rescans_working_files(monkeypatch, 
     assert calls.count(["rev-parse", f"{commit}:web"]) == 1
 
 
+def test_git_audit_overlaps_file_scan_and_keeps_commit_pinned(monkeypatch, tmp_path):
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE", {})
+    audit_entered = threading.Event()
+    scan_entered = threading.Event()
+    original_scan = frontend_build._scan_production_inputs
+    commit = "c" * 40
+
+    def capture_git(_root, args):
+        if args == ["rev-parse", "HEAD"]:
+            audit_entered.set()
+            assert scan_entered.wait(5), "file inspection must not wait for Git"
+            return commit
+        assert args == ["rev-parse", f"{commit}:web"]
+        return "d" * 40
+
+    def scan(web_dir):
+        scan_entered.set()
+        assert audit_entered.wait(5), "Git audit must start during file inspection"
+        return original_scan(web_dir)
+
+    monkeypatch.setattr(frontend_build, "_capture_git", capture_git)
+    monkeypatch.setattr(frontend_build, "_scan_production_inputs", scan)
+    result = frontend_build.build_inputs(tmp_path)
+    assert result["sourceCommit"] == commit
+    assert result["frontendTree"] == "d" * 40
+    assert result["productionInputCount"] > 0
+
+
+def test_failed_file_scan_joins_git_audit_before_releasing_inspection(monkeypatch, tmp_path):
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    scan_failed = threading.Event()
+    audit_finished = threading.Event()
+
+    def audit(_root):
+        assert scan_failed.wait(5)
+        audit_finished.set()
+        return {"sourceCommit": "", "frontendTree": ""}
+
+    def scan(_web_dir):
+        scan_failed.set()
+        raise OSError("production input disappeared")
+
+    monkeypatch.setattr(frontend_build, "_git_audit_inputs", audit)
+    monkeypatch.setattr(frontend_build, "_scan_production_inputs", scan)
+    with pytest.raises(OSError, match="production input disappeared"):
+        frontend_build.build_inputs(tmp_path)
+    assert audit_finished.is_set()
+
+
 @pytest.mark.parametrize("object_id_length", [40, 64])
 def test_commit_tree_cache_is_bound_to_checkout_and_pinned_commit(monkeypatch, tmp_path, object_id_length):
     monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE", {})

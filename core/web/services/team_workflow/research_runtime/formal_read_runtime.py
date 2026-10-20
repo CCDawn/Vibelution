@@ -86,6 +86,24 @@ def get_query_service() -> WorkflowQueryService:
         return _QUERY
 
 
+def get_formal_read_store() -> WorkflowLedgerStore:
+    """Read-only ledger store behind the query/replay facades.
+
+    Same fail-closed semantics as ``get_query_service`` (migration barrier and
+    unconfigured runtime raise); read-only projections (personal-attention
+    human-gate collector, anomaly-inbox ledger inputs) use this for direct
+    bounded repository reads instead of widening the query-service surface.
+    """
+    from .formal_write_runtime import WorkflowMigrationRequired, is_migration_required
+
+    with _LOCK:
+        if is_migration_required():
+            raise WorkflowMigrationRequired()
+        if _STORE is None:
+            raise FormalReadRuntimeUnavailable()
+        return _STORE
+
+
 def release_formal_read_runtime(store: WorkflowLedgerStore) -> None:
     """Detach only the facade owned by the store being closed."""
     global _QUERY, _REPLAY, _STREAM, _STORE

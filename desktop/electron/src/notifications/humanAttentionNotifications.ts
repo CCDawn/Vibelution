@@ -1,5 +1,20 @@
-export type HumanAttentionKind = "knowledge_review" | "anomaly";
+export type HumanAttentionKind = "knowledge_review" | "anomaly" | "affair_reminder" | "human_gate";
 export type HumanAttentionSeverity = "critical" | "high" | "medium";
+
+/** Server-labeled approve affordance forwarded to the assistant window card. */
+export type DesktopHumanAttentionAction = {
+  label: string;
+  decision: string;
+};
+
+/** Research human-gate routing facts forwarded to the assistant window card. */
+export type DesktopHumanAttentionMeta = {
+  teamId?: string;
+  runId?: string;
+  nodeId?: string;
+  taskId?: string;
+  decisions?: string[];
+};
 
 export type DesktopHumanAttentionNotification = {
   id: string;
@@ -8,6 +23,8 @@ export type DesktopHumanAttentionNotification = {
   title: string;
   body?: string;
   targetUrl?: string;
+  actions?: DesktopHumanAttentionAction[];
+  meta?: DesktopHumanAttentionMeta;
 };
 
 export type HumanAttentionDelivery =
@@ -72,7 +89,17 @@ export type HumanAttentionNotificationService = {
   notify(payload: unknown): Promise<DesktopHumanAttentionNotifyResult>;
 };
 
-const KINDS: ReadonlySet<string> = new Set(["knowledge_review", "anomaly"]);
+/**
+ * Must mirror the web whitelist (`HUMAN_ATTENTION_KINDS` in
+ * `web/src/routes/personalAssistant/humanAttentionNotifications.ts`); the
+ * desktop test suite asserts both sets stay identical.
+ */
+const KINDS: ReadonlySet<string> = new Set([
+  "knowledge_review",
+  "anomaly",
+  "affair_reminder",
+  "human_gate"
+]);
 const SEVERITIES: ReadonlySet<string> = new Set(["critical", "high", "medium"]);
 const DEFAULT_DEDUP_WINDOW_MS = 60_000;
 const MAX_TRACKED_IDS = 500;
@@ -80,6 +107,10 @@ const MAX_ID_LENGTH = 128;
 const MAX_TITLE_LENGTH = 160;
 const MAX_BODY_LENGTH = 400;
 const MAX_TARGET_URL_LENGTH = 500;
+const MAX_ACTIONS = 4;
+const MAX_ACTION_LABEL_LENGTH = 40;
+const MAX_ACTION_DECISION_LENGTH = 24;
+const MAX_META_VALUE_LENGTH = 128;
 const ATTENTION_FALLBACK_DESCRIPTION = "Human attention required";
 
 type DeliveredRecord = {
@@ -96,6 +127,65 @@ function normalizeText(value: unknown, maxLength: number): string | undefined {
     return undefined;
   }
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+/**
+ * Bounded pass-through of the server-built approve actions. The assistant
+ * window re-normalizes on parse, so the shell only guarantees shape safety:
+ * well-formed entries survive, anything else is dropped silently.
+ */
+function normalizeActions(raw: unknown): DesktopHumanAttentionAction[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const actions: DesktopHumanAttentionAction[] = [];
+  const seenDecisions = new Set<string>();
+  for (const entry of raw.slice(0, MAX_ACTIONS)) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const source = entry as { label?: unknown; decision?: unknown };
+    if (typeof source.label !== "string" || typeof source.decision !== "string") {
+      continue;
+    }
+    const label = source.label.replace(/\s+/g, " ").trim().slice(0, MAX_ACTION_LABEL_LENGTH);
+    const decision = source.decision.replace(/\s+/g, " ").trim().slice(0, MAX_ACTION_DECISION_LENGTH);
+    if (!label || !decision || seenDecisions.has(decision)) {
+      continue;
+    }
+    seenDecisions.add(decision);
+    actions.push({ label, decision });
+  }
+  return actions.length > 0 ? actions : undefined;
+}
+
+/** Bounded pass-through of the known human-gate routing keys. */
+function normalizeMeta(raw: unknown): DesktopHumanAttentionMeta | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const source = raw as Record<string, unknown>;
+  const value = (key: string): string | undefined => {
+    if (typeof source[key] !== "string") {
+      return undefined;
+    }
+    const text = (source[key] as string).replace(/\s+/g, " ").trim().slice(0, MAX_META_VALUE_LENGTH);
+    return text || undefined;
+  };
+  const decisions = Array.isArray(source.decisions)
+    ? source.decisions
+      .filter((decision): decision is string => typeof decision === "string")
+      .map(decision => decision.replace(/\s+/g, " ").trim().slice(0, MAX_ACTION_DECISION_LENGTH))
+      .filter(Boolean)
+    : undefined;
+  const meta: DesktopHumanAttentionMeta = {
+    ...(value("teamId") ? { teamId: value("teamId") } : {}),
+    ...(value("runId") ? { runId: value("runId") } : {}),
+    ...(value("nodeId") ? { nodeId: value("nodeId") } : {}),
+    ...(value("taskId") ? { taskId: value("taskId") } : {}),
+    ...(decisions && decisions.length > 0 ? { decisions } : {})
+  };
+  return Object.keys(meta).length > 0 ? meta : undefined;
 }
 
 function validateHumanAttentionPayload(
@@ -118,7 +208,7 @@ function validateHumanAttentionPayload(
   if (typeof raw.kind !== "string" || !KINDS.has(raw.kind)) {
     return {
       ok: false,
-      error: "Human attention notification kind must be one of knowledge_review, anomaly."
+      error: `Human attention notification kind must be one of ${[...KINDS].join(", ")}.`
     };
   }
   if (typeof raw.severity !== "string" || !SEVERITIES.has(raw.severity)) {
@@ -136,6 +226,8 @@ function validateHumanAttentionPayload(
   }
   const body = normalizeText(raw.body, MAX_BODY_LENGTH);
   const targetUrl = normalizeText(raw.targetUrl, MAX_TARGET_URL_LENGTH);
+  const actions = normalizeActions(raw.actions);
+  const meta = normalizeMeta(raw.meta);
   return {
     ok: true,
     value: {
@@ -144,7 +236,9 @@ function validateHumanAttentionPayload(
       severity: raw.severity as HumanAttentionSeverity,
       title,
       ...(body ? { body } : {}),
-      ...(targetUrl ? { targetUrl } : {})
+      ...(targetUrl ? { targetUrl } : {}),
+      ...(actions ? { actions } : {}),
+      ...(meta ? { meta } : {})
     }
   };
 }

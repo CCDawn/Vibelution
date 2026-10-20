@@ -920,6 +920,153 @@ def test_gate_wait_with_unusable_since_is_skipped() -> None:
     assert inbox.items == ()
 
 
+# -- ledger pending human tasks (formal runs parked at waiting_human) ---------
+
+
+def _human_gate_task(**overrides: Any) -> dict[str, Any]:
+    entry = {
+        "taskId": "ht-1",
+        "runId": "run-ledger-1",
+        "nodeId": "knowledge_handoff",
+        "taskKind": "knowledge_gate",
+        "teamId": "team-1",
+        "questionId": "Q-1",
+        # Just created: far below the state-v2 wait threshold.
+        "createdAt": "2026-08-28T00:59:00Z",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_human_gate_task_surfaces_without_wait_threshold() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        human_gate_tasks=[_human_gate_task()],
+        gate_wait_threshold_ms=2 * 60 * 60 * 1000,
+        generated_at=_GENERATED_AT,
+    )
+    assert [item.kind for item in inbox.items] == [ANOMALY_KIND_NEEDS_HUMAN_GATE]
+    item = inbox.items[0]
+    assert item.severity == "high"
+    assert item.scope.runId == "run-ledger-1"
+    assert item.scope.nodeId == "knowledge_handoff"
+    assert "人工门 knowledge_gate 停靠等待人工审批" in item.summary
+    assert "humanGateTask:ht-1" in item.evidence
+    assert "gateKind:knowledge_gate" in item.evidence
+    # firstSeenAt follows the task's durable createdAt, not the projection.
+    assert item.firstSeenAt == "2026-08-28T00:59:00Z"
+
+
+def test_human_gate_task_without_identity_is_skipped() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        human_gate_tasks=[
+            _human_gate_task(taskId=""),
+            _human_gate_task(runId=""),
+        ],
+        generated_at=_GENERATED_AT,
+    )
+    assert inbox.items == ()
+
+
+def test_resolve_human_gate_actions_carry_frozen_frontend_contract() -> None:
+    actions = anomaly_inbox_service.resolve_human_gate_actions(_human_gate_task())
+    assert actions is not None
+    assert [action["decision"] for action in actions] == ["accept", "reject"]
+    endpoint = actions[0]["endpoint"]
+    # 前端净化层强制校验同站 /api/ 前缀。
+    assert endpoint.startswith("/api/")
+    assert endpoint == anomaly_inbox_service.HUMAN_GATE_RESOLVE_ENDPOINT_TEMPLATE.format(
+        team_id="team-1"
+    )
+    for action in actions:
+        assert action["command"] == "resolve_human_task"
+        assert action["teamId"] == "team-1"
+        assert action["runId"] == "run-ledger-1"
+        assert action["taskId"] == "ht-1"
+        assert action["decision"] in ("accept", "reject")
+        assert action["label"] in ("接受", "驳回")
+        assert action["requiresConfirmation"] is True
+
+
+def test_resolve_human_gate_actions_require_full_identity() -> None:
+    assert anomaly_inbox_service.resolve_human_gate_actions({"taskId": "ht-1"}) is None
+    assert (
+        anomaly_inbox_service.resolve_human_gate_actions(
+            {"taskId": "ht-1", "runId": "run-1"}
+        )
+        is None
+    )
+    # 没有 teamId 就无法构造同站确认端点：fail-closed，不给不可点的 CTA。
+    assert (
+        anomaly_inbox_service.resolve_human_gate_actions(
+            {"taskId": "ht-1", "runId": "run-1", "teamId": ""}
+        )
+        is None
+    )
+
+
+def test_attach_inbox_actions_decorates_human_gate_items() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        human_gate_tasks=[_human_gate_task()],
+        generated_at=_GENERATED_AT,
+    )
+    payload = anomaly_inbox_service.attach_inbox_actions(
+        inbox.to_dict(),
+        human_gate_tasks=[_human_gate_task()],
+    )
+    gate_rows = [
+        item
+        for item in payload["items"]
+        if "humanGateTask:ht-1" in item.get("evidence", [])
+    ]
+    assert len(gate_rows) == 1
+    actions = gate_rows[0]["actions"]
+    assert [action["decision"] for action in actions] == ["accept", "reject"]
+    assert actions[0]["taskId"] == "ht-1"
+    assert actions[0]["runId"] == "run-ledger-1"
+    assert actions[0]["endpoint"].startswith("/api/")
+    # 非 ledger 来源的 needs_human_gate 行（awaitingHumanCount 等）不带 CTA。
+    other = anomaly_inbox_service.build_anomaly_inbox(
+        _state(awaiting_human_count=1), generated_at=_GENERATED_AT
+    )
+    undecorated = anomaly_inbox_service.attach_inbox_actions(other.to_dict())
+    assert all("actions" not in item for item in undecorated["items"])
+
+
+def test_resolve_human_gate_confirmation_guard_closes_server_side() -> None:
+    from pytest import raises
+
+    base = {"confirmed": True, "run_id": "run-1", "task_id": "ht-1", "decision": "accept"}
+    with raises(
+        anomaly_inbox_service.InboxActionConfirmationError, match="confirmed"
+    ):
+        anomaly_inbox_service.assert_resolve_human_gate_confirmation(
+            **{**base, "confirmed": False}
+        )
+    with raises(
+        anomaly_inbox_service.InboxActionConfirmationError, match="runId"
+    ):
+        anomaly_inbox_service.assert_resolve_human_gate_confirmation(
+            **{**base, "run_id": ""}
+        )
+    with raises(
+        anomaly_inbox_service.InboxActionConfirmationError, match="taskId"
+    ):
+        anomaly_inbox_service.assert_resolve_human_gate_confirmation(
+            **{**base, "task_id": ""}
+        )
+    # revise 需要工作流面板的 fromNodeId，不属于一键 CTA 集。
+    with raises(
+        anomaly_inbox_service.InboxActionConfirmationError, match="accept 或 reject"
+    ):
+        anomaly_inbox_service.assert_resolve_human_gate_confirmation(
+            **{**base, "decision": "revise"}
+        )
+    anomaly_inbox_service.assert_resolve_human_gate_confirmation(**base)
+
+
 # -- budget precheck block + one-click extend CTA ----------------------------
 
 

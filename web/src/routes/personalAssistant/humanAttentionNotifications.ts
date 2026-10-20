@@ -13,9 +13,24 @@ import { reportHumanAttentionDeliveryFailure } from "../../api/personalAttention
 
 export type PersonalAssistantAttentionRow = PersonalAssistantOverview["attention"][number];
 
-export type HumanAttentionKind = "knowledge_review" | "anomaly" | "affair_reminder";
+export type HumanAttentionKind = "knowledge_review" | "anomaly" | "affair_reminder" | "human_gate";
 export type HumanAttentionSeverity = "critical" | "high" | "medium";
 export type HumanAttentionDelivery = "assistant_window" | "system_notification" | "attention_fallback";
+
+/** Server-labeled approve affordance (human_gate rows render these inline). */
+export type HumanAttentionNotificationAction = {
+  label: string;
+  decision: string;
+};
+
+/** Research human-gate routing facts (used to locate the resolve offer). */
+export type HumanAttentionNotificationMeta = {
+  teamId?: string;
+  runId?: string;
+  nodeId?: string;
+  taskId?: string;
+  decisions?: string[];
+};
 
 export type HumanAttentionNotificationPayload = {
   id: string;
@@ -24,6 +39,8 @@ export type HumanAttentionNotificationPayload = {
   title: string;
   body?: string;
   targetUrl?: string;
+  actions?: HumanAttentionNotificationAction[];
+  meta?: HumanAttentionNotificationMeta;
 };
 
 export type HumanAttentionOpenedPayload = {
@@ -42,31 +59,97 @@ export type HumanAttentionBridge = {
 };
 
 const ATTENTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-const HUMAN_ATTENTION_KINDS = new Set<string>(["knowledge_review", "anomaly", "affair_reminder"]);
+/**
+ * Single source of truth for human-attention kinds. The Electron shell keeps
+ * its own copy (`desktop/electron/src/notifications/humanAttentionNotifications.ts`);
+ * both sides must accept the same set and `desktop/electron/tests/humanAttentionNotifications.test.ts`
+ * asserts they stay in sync.
+ */
+export const HUMAN_ATTENTION_KINDS = new Set<string>(["knowledge_review", "anomaly", "affair_reminder", "human_gate"]);
 const SEVERITIES = new Set<string>(["critical", "high", "medium"]);
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 400;
 const MAX_TARGET_LENGTH = 500;
+const MAX_ACTIONS = 4;
+const MAX_ACTION_LABEL_LENGTH = 40;
+const MAX_ACTION_DECISION_LENGTH = 24;
+const MAX_META_VALUE_LENGTH = 128;
 const TARGET_PATTERN = /^\/(?!\/)[A-Za-z0-9\-._~!$&'()*+,;=:@/?%]*$/;
 
 const NOTIFIED_STORAGE_KEY = "vibelution.human-attention.notified.v1";
 const MAX_NOTIFIED_IDS = 400;
 
-/** Default workbench deep links for the two human-attention kinds. */
+/** Default workbench deep links for the human-attention kinds. */
 export const HUMAN_ATTENTION_DEFAULT_TARGETS: Record<HumanAttentionKind, string> = {
   knowledge_review: "/memory/knowledge",
   anomaly: "/teams?researchView=workflow",
   affair_reminder: "/personal-assistant",
+  human_gate: "/teams?researchView=workflow",
 };
 
 export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string> = {
   knowledge_review: "知识待复核",
   anomaly: "研究流程异常待处理",
   affair_reminder: "事务提醒待处理",
+  human_gate: "研究流程等待人工审批",
 };
 
 function normalizeText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Keep only well-formed server actions (label + decision); bounded and deduped by decision. */
+export function normalizeHumanAttentionActions(raw: unknown): HumanAttentionNotificationAction[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const actions: HumanAttentionNotificationAction[] = [];
+  const seenDecisions = new Set<string>();
+  for (const entry of raw.slice(0, MAX_ACTIONS)) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const source = entry as { label?: unknown; decision?: unknown };
+    if (typeof source.label !== "string" || typeof source.decision !== "string") {
+      continue;
+    }
+    const label = source.label.replace(/\s+/g, " ").trim().slice(0, MAX_ACTION_LABEL_LENGTH);
+    const decision = source.decision.replace(/\s+/g, " ").trim().slice(0, MAX_ACTION_DECISION_LENGTH);
+    if (!label || !decision || seenDecisions.has(decision)) {
+      continue;
+    }
+    seenDecisions.add(decision);
+    actions.push({ label, decision });
+  }
+  return actions.length > 0 ? actions : undefined;
+}
+
+/** Keep the known human-gate routing keys; every value is a trimmed non-empty string. */
+export function normalizeHumanAttentionMeta(raw: unknown): HumanAttentionNotificationMeta | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const source = raw as Record<string, unknown>;
+  const value = (key: string): string | undefined => {
+    if (typeof source[key] !== "string") {
+      return undefined;
+    }
+    const text = (source[key] as string).replace(/\s+/g, " ").trim().slice(0, MAX_META_VALUE_LENGTH);
+    return text || undefined;
+  };
+  const decisions = Array.isArray(source.decisions)
+    ? source.decisions
+      .map(decision => normalizeText(decision).slice(0, MAX_ACTION_DECISION_LENGTH))
+      .filter(Boolean)
+    : undefined;
+  const meta: HumanAttentionNotificationMeta = {
+    ...(value("teamId") ? { teamId: value("teamId") } : {}),
+    ...(value("runId") ? { runId: value("runId") } : {}),
+    ...(value("nodeId") ? { nodeId: value("nodeId") } : {}),
+    ...(value("taskId") ? { taskId: value("taskId") } : {}),
+    ...(decisions && decisions.length > 0 ? { decisions } : {}),
+  };
+  return Object.keys(meta).length > 0 ? meta : undefined;
 }
 
 export function isHumanAttentionKind(value: unknown): value is HumanAttentionKind {
@@ -118,6 +201,8 @@ export function buildHumanAttentionNotificationPayload(
   const title = normalizeText(row.title).slice(0, MAX_TITLE_LENGTH) || HUMAN_ATTENTION_FALLBACK_TITLES[row.kind];
   const body = normalizeText(row.body).slice(0, MAX_BODY_LENGTH);
   const targetUrl = sanitizeHumanAttentionTargetUrl(row.targetUrl);
+  const actions = normalizeHumanAttentionActions(row.actions);
+  const meta = normalizeHumanAttentionMeta(row.meta);
   return {
     id,
     kind: row.kind,
@@ -125,6 +210,8 @@ export function buildHumanAttentionNotificationPayload(
     title,
     ...(body ? { body } : {}),
     ...(targetUrl ? { targetUrl } : {}),
+    ...(actions ? { actions } : {}),
+    ...(meta ? { meta } : {}),
   };
 }
 
@@ -137,7 +224,16 @@ export function parseHumanAttentionEvent(raw: unknown): HumanAttentionEvent | nu
   if (typeof raw !== "object" || raw === null) {
     return null;
   }
-  const source = raw as { id?: unknown; kind?: unknown; severity?: unknown; title?: unknown; body?: unknown; targetUrl?: unknown };
+  const source = raw as {
+    id?: unknown;
+    kind?: unknown;
+    severity?: unknown;
+    title?: unknown;
+    body?: unknown;
+    targetUrl?: unknown;
+    actions?: unknown;
+    meta?: unknown;
+  };
   const id = normalizeText(source.id);
   if (!ATTENTION_ID_PATTERN.test(id)) {
     return null;
@@ -146,6 +242,8 @@ export function parseHumanAttentionEvent(raw: unknown): HumanAttentionEvent | nu
     const title = normalizeText(source.title).slice(0, MAX_TITLE_LENGTH) || HUMAN_ATTENTION_FALLBACK_TITLES[source.kind];
     const body = normalizeText(source.body).slice(0, MAX_BODY_LENGTH);
     const targetUrl = sanitizeHumanAttentionTargetUrl(source.targetUrl);
+    const actions = normalizeHumanAttentionActions(source.actions);
+    const meta = normalizeHumanAttentionMeta(source.meta);
     return {
       type: "delivered",
       payload: {
@@ -155,6 +253,8 @@ export function parseHumanAttentionEvent(raw: unknown): HumanAttentionEvent | nu
         title,
         ...(body ? { body } : {}),
         ...(targetUrl ? { targetUrl } : {}),
+        ...(actions ? { actions } : {}),
+        ...(meta ? { meta } : {}),
       },
     };
   }

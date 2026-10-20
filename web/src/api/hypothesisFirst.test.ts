@@ -7,6 +7,7 @@ import timelineSource from "../routes/teams/TeamHypothesisRoundTimeline.tsx?raw"
 import meetingPanelSource from "../routes/teams/TeamMeetingRoundPanel.tsx?raw";
 import { clearControlToken, seedControlTokenForTests } from "./client";
 import {
+  executeAnomalyInboxHumanGateAction,
   executeHypothesisFirstCommand,
   fetchCollectionRequests,
   fetchHypothesisFirstStateV2,
@@ -297,6 +298,46 @@ describe("hypothesis-first API", () => {
     expect(meetingOpsSource).not.toContain("closeHypothesisReviewMeeting");
     expect(meetingOpsSource).not.toContain("submitMeetingDigestDraft");
     expect(timelineSource).toContain("fetchHypothesisRounds");
+  });
+
+  it("confirms human-gate decisions on the action's own /api endpoint and refuses anything else", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    seedControlTokenForTests();
+    const action = {
+      command: "resolve_human_task" as const,
+      teamId: "team-1",
+      runId: "run-7",
+      taskId: "task-9",
+      decision: "accept" as const,
+      endpoint: "/api/research/workflow-runs/run-7/human-gate/confirm",
+    };
+    try {
+      await executeAnomalyInboxHumanGateAction("team-1", action);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [input, init] = fetchMock.mock.calls[0];
+      expect(String(input)).toBe("/api/research/workflow-runs/run-7/human-gate/confirm");
+      expect(String((init as RequestInit).method).toUpperCase()).toBe("POST");
+      expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+        teamId: "team-1",
+        runId: "run-7",
+        taskId: "task-9",
+        decision: "accept",
+        confirmed: true,
+      });
+
+      await expect(
+        executeAnomalyInboxHumanGateAction("team-1", {
+          ...action,
+          endpoint: "https://evil.example/confirm",
+        }),
+      ).rejects.toThrow("Invalid human-gate action endpoint");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      clearControlToken();
+      vi.unstubAllGlobals();
+    }
   });
 });
 

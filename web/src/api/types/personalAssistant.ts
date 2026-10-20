@@ -46,22 +46,43 @@ export type PersonalAssistantSettings = {
 export type PersonalAssistantResponse = { assistant: PersonalAssistant | null };
 export type PersonalAssistantSettingsResponse = { settings: PersonalAssistantSettings | null };
 export type PersonalAssistantModelResponse = { model: PersonalAssistantModelSettings };
+
+/** Inline approve affordances on human_gate attention rows (server-provided labels). */
+export type PersonalAssistantAttentionAction = {
+  label: string;
+  decision: string;
+};
+
+/** Research human-gate routing facts carried by human_gate attention rows. */
+export type PersonalAssistantAttentionMeta = {
+  teamId?: string;
+  runId?: string;
+  nodeId?: string;
+  taskId?: string;
+  decisions?: string[];
+};
+
+export type PersonalAssistantAttentionRow = {
+  id: string;
+  kind: string;
+  title: string;
+  sessionId?: string;
+  /** Human-attention kinds (knowledge_review/anomaly/human_gate) carry severity/body/targetUrl. */
+  severity?: string;
+  body?: string;
+  targetUrl?: string;
+  /** Present on human_gate rows so the assistant window can approve inline. */
+  actions?: PersonalAssistantAttentionAction[];
+  meta?: PersonalAssistantAttentionMeta;
+};
+
 export type PersonalAssistantOverview = {
   generatedAt: string;
   counts: { agents: number; sessions: number; running: number; waiting: number; failed: number };
   agents: Array<{ id: string; displayName: string; status: string }>;
   sessions: Array<{ id: string; agentId: string; title: string; status: string; currentPhase: string; turnId?: string }>;
-  attention: Array<{
-    id: string;
-    kind: string;
-    title: string;
-    sessionId?: string;
-    /** Human-attention kinds (knowledge_review/anomaly) carry severity/body/targetUrl. */
-    severity?: string;
-    body?: string;
-    targetUrl?: string;
-  }>;
-  /** Human-attention lane (knowledge_review/anomaly), separate so session-derived attention keeps its counts invariant. */
-  humanAttention?: Array<{ id: string; kind: string; title: string; sessionId?: string; severity?: string; body?: string; targetUrl?: string }>;
+  attention: PersonalAssistantAttentionRow[];
+  /** Human-attention lane (knowledge_review/anomaly/human_gate), separate so session-derived attention keeps its counts invariant. */
+  humanAttention?: PersonalAssistantAttentionRow[];
   pagination?: { offset: number; limit: number; nextOffset: number | null; revision?: string };
 };

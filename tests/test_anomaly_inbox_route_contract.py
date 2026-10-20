@@ -8,16 +8,28 @@ HTTP 路由契约：URL 注册、questionId 归一化、state-v2 快照原样交
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from fastapi.testclient import TestClient
 
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import hypothesis_first as hf_routes
 from core.web.services.team_workflow.research_runtime import (
     anomaly_inbox_service,
+    formal_read_runtime,
     hypothesis_first_state_v2,
+)
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_attempt_record,
+    build_command_record,
+    build_event_record,
+    build_run_record,
+    open_ledger_store,
 )
 
 _TEAM = "team-1"
@@ -806,3 +818,243 @@ def test_extend_budget_action_resolves_child_run_version_via_sideflow_listing(
     ]
     assert captured["run_id"] == "child-run-x"
     assert captured["expected_run_version"] == 6
+
+
+# -- ledger human-gate rows (waiting_human runs) + resolve CTA ------------------
+
+
+def _ledger_store_with_pending_gate(tmp_path, *, team_id: str = _TEAM):
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    definition = build_challenge_cup_workflow_definition()
+    identity = register_or_resolve(definition)
+    run = dataclasses.replace(
+        build_run_record(
+            run_id="run-gate-http",
+            team_id=team_id,
+            status="waiting_human",
+            last_event_sequence=1,
+        ),
+        workflow_id=definition.workflowId,
+        workflow_version_id=identity.workflowVersionId,
+        structure_hash=identity.structureHash,
+    )
+    attempt = build_attempt_record(
+        node_run_id="nr-gate-http-1",
+        run_id="run-gate-http",
+        node_id="problem_understanding",
+        status="waiting_human",
+    )
+    command = build_command_record(
+        command_id="cmd-gate-http-1",
+        run_id="run-gate-http",
+        node_id="problem_understanding",
+    )
+    attempt = dataclasses.replace(attempt, command_id="cmd-gate-http-1")
+
+    def mutate(uow):
+        uow.repository.insert_run(run)
+        uow.repository.insert_event(
+            build_event_record(
+                1, run_id="run-gate-http", event_id="evt-created-run-gate-http"
+            )
+        )
+        uow.repository.insert_command(command)
+        uow.repository.insert_attempt(attempt)
+        uow.repository.insert_human_task(
+            task_id="ht-gate-http-1",
+            run_id="run-gate-http",
+            node_run_id="nr-gate-http-1",
+            handoff_id=None,
+            task_kind="knowledge_gate",
+            prompt_json="{}",
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+    store.submit(mutate, force_flush=True).result(timeout=10)
+    return store
+
+
+def test_collect_pending_human_gate_tasks_reads_waiting_runs(monkeypatch, tmp_path):
+    store = _ledger_store_with_pending_gate(tmp_path)
+    try:
+        monkeypatch.setattr(
+            formal_read_runtime, "get_formal_read_store", lambda: store
+        )
+        entries = hf_routes._collect_pending_human_gate_tasks(_TEAM, "sci-096")
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["taskId"] == "ht-gate-http-1"
+        assert entry["runId"] == "run-gate-http"
+        assert entry["nodeId"] == "problem_understanding"
+        assert entry["taskKind"] == "knowledge_gate"
+        assert entry["teamId"] == _TEAM
+        assert entry["questionId"] == "SCI-096"
+        assert entry["createdAt"]
+        # team / question 归属不匹配时为空（题目作用域收件箱）。
+        assert hf_routes._collect_pending_human_gate_tasks(_TEAM, "SCI-OTHER") == []
+        assert (
+            hf_routes._collect_pending_human_gate_tasks("other-team", "SCI-096") == []
+        )
+    finally:
+        store.close()
+    # read runtime 未配置：fail-closed 为空。
+    def _unavailable():
+        raise formal_read_runtime.FormalReadRuntimeUnavailable()
+
+    monkeypatch.setattr(formal_read_runtime, "get_formal_read_store", _unavailable)
+    assert hf_routes._collect_pending_human_gate_tasks(_TEAM, "SCI-096") == []
+
+
+def test_anomaly_inbox_route_surfaces_ledger_human_gate_rows_with_cta(
+    monkeypatch, tmp_path
+):
+    store = _ledger_store_with_pending_gate(tmp_path)
+    try:
+        monkeypatch.setattr(
+            formal_read_runtime, "get_formal_read_store", lambda: store
+        )
+        snapshot = {
+            "schemaVersion": 2,
+            "teamId": _TEAM,
+            "questionId": "SCI-096",
+            "computedAt": "2026-08-28T01:00:00Z",
+            "awaitingHumanCount": 0,
+            "problems": [],
+        }
+        monkeypatch.setattr(
+            hypothesis_first_state_v2,
+            "project_hypothesis_first_state_v2",
+            lambda team_id, question_id, **kwargs: snapshot,
+        )
+        response = _client().get(_ROUTE, params={"questionId": "SCI-096"})
+        assert response.status_code == 200
+        items = response.json()["inbox"]["items"]
+        gate_rows = [item for item in items if "humanGateTask:ht-gate-http-1" in item.get("evidence", [])]
+        assert len(gate_rows) == 1
+        item = gate_rows[0]
+        assert item["kind"] == "needs_human_gate"
+        assert item["scope"]["runId"] == "run-gate-http"
+        assert item["scope"]["nodeId"] == "problem_understanding"
+        # 定稿契约：顶层 actions 数组，扁平 teamId/runId/taskId/decision +
+        # 同站 /api/ 确认端点（前端净化层强制校验前缀）。
+        actions = item["actions"]
+        assert [action["decision"] for action in actions] == ["accept", "reject"]
+        for action in actions:
+            assert action["command"] == "resolve_human_task"
+            assert action["teamId"] == _TEAM
+            assert action["runId"] == "run-gate-http"
+            assert action["taskId"] == "ht-gate-http-1"
+            assert action["endpoint"].startswith("/api/")
+            assert action["endpoint"] == _RESOLVE_ROUTE
+            assert action["requiresConfirmation"] is True
+    finally:
+        store.close()
+
+
+_RESOLVE_ROUTE = (
+    f"/api/teams/{_TEAM}/workflow-orchestration"
+    "/hypothesis-first/chain/anomaly-inbox/actions/resolve-human-gate"
+)
+
+
+def _resolve_payload(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "questionId": "SCI-096",
+        "teamId": _TEAM,
+        "runId": "run-gate-http",
+        "taskId": "ht-gate-http-1",
+        "decision": "accept",
+        "confirmed": True,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_human_gate_action_refuses_missing_confirmation(monkeypatch) -> None:
+    submitted: list[Any] = []
+
+    def fail_submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(hf_routes, "_submit_workflow_command", fail_submit)
+    response = _client().post(_RESOLVE_ROUTE, json=_resolve_payload(confirmed=False))
+    assert response.status_code == 428
+    assert (
+        response.json()["detail"]["code"] == "inbox_action_confirmation_required"
+    )
+    assert submitted == []
+
+
+def test_resolve_human_gate_action_refuses_team_scope_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(
+        hf_routes,
+        "_submit_workflow_command",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not submit")),
+    )
+    response = _client().post(_RESOLVE_ROUTE, json=_resolve_payload(teamId="other-team"))
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "team_scope_mismatch"
+
+
+def test_resolve_human_gate_action_refuses_non_oneclick_decision(monkeypatch) -> None:
+    monkeypatch.setattr(
+        hf_routes,
+        "_submit_workflow_command",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not submit")),
+    )
+    response = _client().post(_RESOLVE_ROUTE, json=_resolve_payload(decision="revise"))
+    assert response.status_code == 428
+    assert response.json()["detail"]["code"] == "inbox_action_decision_invalid"
+
+
+def test_resolve_human_gate_action_executes_confirmed_contract(monkeypatch) -> None:
+    """确认后走 resolve_human_task 单一命令权威（同 handler、同 CAS 语义）。"""
+
+    captured: dict[str, Any] = {}
+
+    def fake_submit(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "accepted", "commandId": "cmd-gate"}
+
+    monkeypatch.setattr(hf_routes, "_submit_workflow_command", fake_submit)
+    monkeypatch.setattr(hf_routes, "_resolve_run_version", lambda team, run: 5)
+    response = _client().post(_RESOLVE_ROUTE, json=_resolve_payload())
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert captured["run_id"] == "run-gate-http"
+    assert captured["team_id"] == _TEAM
+    assert captured["node_id"] is None
+    assert captured["expected_run_version"] == 5
+    assert str(captured["kind"].value) == "resolve_human_task"
+    assert captured["payload"] == {"taskId": "ht-gate-http-1", "decision": "accept"}
+    # 幂等键由 run/task/decision 决定：同一确认重复提交幂等重放。
+    assert captured["idempotency_key"] == (
+        "inbox-resolve-human-gate:run-gate-http:ht-gate-http-1:accept"
+    )
+
+
+def test_resolve_human_gate_action_without_resolvable_run_version_returns_404(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        hf_routes,
+        "_submit_workflow_command",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not submit")),
+    )
+    monkeypatch.setattr(hf_routes, "_resolve_run_version", lambda team, run: 0)
+    response = _client().post(_RESOLVE_ROUTE, json=_resolve_payload())
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "run_not_found"
+
+
+def test_resolve_human_gate_action_is_registered_on_the_router() -> None:
+    posted = {
+        route.path
+        for route in hf_routes.router.routes
+        if getattr(route, "methods", None) and "POST" in route.methods
+    }
+    assert (
+        "/teams/{team_id}/workflow-orchestration"
+        "/hypothesis-first/chain/anomaly-inbox/actions/resolve-human-gate"
+    ) in posted
