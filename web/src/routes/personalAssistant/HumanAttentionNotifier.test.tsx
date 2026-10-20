@@ -98,6 +98,39 @@ describe("main workbench human-attention trigger chain", () => {
     });
   });
 
+  it("forwards human_gate rows with their inline actions and meta to the shell", async () => {
+    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(overviewWith([
+      {
+        id: "gate-1",
+        kind: "human_gate",
+        title: "研究结论等待审批",
+        severity: "high",
+        body: "阶段结论需要人工确认",
+        targetUrl: "/teams?researchView=workflow&runId=run-7",
+        actions: [
+          { label: "接受", decision: "accept" },
+          { label: "驳回", decision: "reject" },
+        ],
+        meta: { teamId: "team-1", runId: "run-7", nodeId: "node-gate", taskId: "task-9", decisions: ["accept", "reject", "revise"] },
+      },
+    ]));
+    await mountNotifier();
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(1);
+    expect(notifyHumanAttention).toHaveBeenCalledWith({
+      id: "gate-1",
+      kind: "human_gate",
+      severity: "high",
+      title: "研究结论等待审批",
+      body: "阶段结论需要人工确认",
+      targetUrl: "/teams?researchView=workflow&runId=run-7",
+      actions: [
+        { label: "接受", decision: "accept" },
+        { label: "驳回", decision: "reject" },
+      ],
+      meta: { teamId: "team-1", runId: "run-7", nodeId: "node-gate", taskId: "task-9", decisions: ["accept", "reject", "revise"] },
+    });
+  });
+
   it("does not re-notify across page refreshes (localStorage day dedup)", async () => {
     vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(
       overviewWith([{ id: "an-1", kind: "anomaly", title: "研究异常", severity: "high" }]),

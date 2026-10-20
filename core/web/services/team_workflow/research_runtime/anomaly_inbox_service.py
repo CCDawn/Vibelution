@@ -36,6 +36,9 @@ state ``convergence.outcome ==             ``needs_human_gate`` (one item)      
 from ``meeting_digest_ttl_mute_state``)    meeting round)                        digest surface)
 ``gate_waits`` input (knowledge_handoff /  ``needs_human_gate`` (one item per    none (gate-specific approval
 H1-H4 gate waiting past threshold)         overdue gate)                         surface)
+``human_gate_tasks`` input (ledger          ``needs_human_gate`` (one item per    none (resolve CTA ``action``;
+pending human tasks of runs parked          pending task, NO wait threshold —     see ``attach_inbox_actions``)
+at ``waiting_human``)                       an authoritative dock)
 ``budget_precheck_blocks`` input (the      ``budget_exhausted`` (one item per    ``retry_node`` (via the
 ``budget_precheck_blocked`` event payload) blocked stage boundary)              structured extend_budget CTA
                                                                                  ``action``; see
@@ -116,6 +119,26 @@ BUDGET_PRECHECK_RECOVERY_FOLLOWUP_COMMAND = "retry_node"
 # override so this module stays a pure function of its inputs); each gate-wait
 # entry may also carry its own ``thresholdMs``.
 DEFAULT_GATE_WAIT_THRESHOLD_MS = 2 * 60 * 60 * 1000
+
+# Ledger-side pending human tasks (formal runs parked at waiting_human) enter
+# through the ``human_gate_tasks`` companion input: unlike state-v2 gate waits
+# they are authoritative docks (the task row exists exactly while a human
+# decision is pending), so they surface without the wait threshold.  The
+# evidence prefix lets ``attach_inbox_actions`` match the serialized item back
+# to its task payload and decorate the structured resolve CTA.
+HUMAN_GATE_TASK_EVIDENCE_PREFIX = "humanGateTask:"
+HUMAN_GATE_RESOLVE_COMMAND = "resolve_human_task"
+# One-click CTA decisions.  ``revise`` needs fromNodeId and stays on the
+# workflow surface, so the inbox action never offers it.
+HUMAN_GATE_RESOLVE_DECISIONS = ("accept", "reject")
+HUMAN_GATE_RESOLVE_DECISION_LABELS = {"accept": "接受", "reject": "驳回"}
+# Same-site confirmation endpoint (the frontend validates the ``/^\/api\//``
+# prefix); the decision itself always lands on the single
+# ``resolve_human_task`` command authority.
+HUMAN_GATE_RESOLVE_ENDPOINT_TEMPLATE = (
+    "/api/teams/{team_id}/workflow-orchestration"
+    "/hypothesis-first/chain/anomaly-inbox/actions/resolve-human-gate"
+)
 
 # Problem source kinds whose sourceId is a run id (scope.runId).
 _RUN_SOURCE_KINDS = frozenset({"formal_run", "collection_run"})
@@ -744,6 +767,91 @@ def _budget_precheck_items(
     return items
 
 
+def _human_gate_task_items(
+    entries: list[Any],
+    base: AnomalyInboxScope,
+    fallback_at: str,
+) -> list[AnomalyInboxItem]:
+    """One ``needs_human_gate`` item per ledger pending human task.
+
+    Entries are the route-collected ledger rows (``taskId`` / ``runId`` /
+    ``nodeId`` / ``taskKind`` / ``createdAt`` ISO; team/question scope travels
+    on ``base``).  A pending human task is an authoritative dock, so — unlike
+    ``_gate_wait_items`` — no wait threshold applies: the row exists exactly
+    while the decision is pending and disappears on resolve.  Entries without
+    a usable ``taskId``/``runId`` are skipped (fail-closed: no unattributable
+    actionable row).
+    """
+
+    items: list[AnomalyInboxItem] = []
+    for entry in entries:
+        task_id = _text(entry, "taskId")
+        run_id = _text(entry, "runId")
+        if not task_id or not run_id:
+            continue
+        node_id = _text(entry, "nodeId")
+        task_kind = _text(entry, "taskKind") or "human_gate"
+        created_at = _capped_iso(_text(entry, "createdAt"), fallback_at)
+        scope_text = node_id or task_kind
+        items.append(
+            AnomalyInboxItem.create(
+                kind=ANOMALY_KIND_NEEDS_HUMAN_GATE,
+                scope=_with_scope_ids(base, run_id=run_id, node_id=node_id),
+                first_seen_at=created_at,
+                last_seen_at=fallback_at,
+                summary=(
+                    f"人工门 {task_kind} 停靠等待人工审批"
+                    f"（{scope_text}），需批准或驳回"
+                ),
+                recommended_action=None,
+                evidence=_clean_evidence(
+                    _evidence_ref("humanGateTask", task_id),
+                    _evidence_ref("gateKind", task_kind),
+                    _evidence_ref("node", node_id),
+                ),
+            )
+        )
+    return items
+
+
+def resolve_human_gate_actions(entry: Any) -> list[dict[str, Any]] | None:
+    """Structured resolve CTA variants for one ledger pending human-gate row.
+
+    The frozen frontend contract: the serialized item carries a top-level
+    ``actions`` array (one element per one-click decision, usually accept +
+    reject) whose elements are flat — ``command`` / ``teamId`` / ``runId`` /
+    ``taskId`` / ``decision`` / ``endpoint`` (same-site ``/api/...`` POST
+    confirmation endpoint) plus the optional button ``label`` and
+    ``requiresConfirmation`` flag.  Executing a decision MUST go through the
+    single command authority (``resolve_human_task``); these entries are
+    display metadata, never a second write path.  An entry without a usable
+    team/run/task identity yields no actions (fail-closed: no unattributable
+    clickable CTA).
+    """
+
+    task_id = _text(entry, "taskId")
+    run_id = _text(entry, "runId")
+    team_id = _text(entry, "teamId")
+    if not task_id or not run_id or not team_id:
+        return None
+    endpoint = HUMAN_GATE_RESOLVE_ENDPOINT_TEMPLATE.format(team_id=team_id)
+    actions: list[dict[str, Any]] = []
+    for decision in HUMAN_GATE_RESOLVE_DECISIONS:
+        actions.append(
+            {
+                "command": HUMAN_GATE_RESOLVE_COMMAND,
+                "teamId": team_id,
+                "runId": run_id,
+                "taskId": task_id,
+                "decision": decision,
+                "endpoint": endpoint,
+                "label": HUMAN_GATE_RESOLVE_DECISION_LABELS.get(decision, decision),
+                "requiresConfirmation": True,
+            }
+        )
+    return actions
+
+
 def derive_gate_waits(state: Any) -> list[dict[str, Any]]:
     """Pure derivation of human-gate wait entries from one state-v2 snapshot.
 
@@ -887,14 +995,18 @@ def attach_inbox_actions(
     inbox_payload: Mapping[str, Any],
     *,
     blocks: Any = None,
+    human_gate_tasks: Any = None,
 ) -> dict[str, Any]:
-    """Decorate the serialized inbox with the extend CTA ``action`` fields.
+    """Decorate the serialized inbox with the structured CTA ``action`` fields.
 
-    Pure pass-through decorator: items are copied verbatim and only
-    ``budget_precheck`` items gain an ``action`` (when a matching block with
-    a computable extend contract exists).  Blocks are matched by
-    ``(runId, nodeId)`` scope; the latest ``occurredAt`` wins when several
-    blocks share a scope.
+    Pure pass-through decorator: items are copied verbatim; only two item
+    families gain CTA fields — ``budget_precheck`` budget_exhausted items
+    (extend CTA on the singular ``action``, matched by ``(runId, nodeId)``
+    scope against ``blocks``) and ledger human-gate ``needs_human_gate``
+    items (resolve CTA on the top-level ``actions`` array, matched by the
+    ``humanGateTask:<taskId>`` evidence ref against ``human_gate_tasks``).
+    Blocks are matched by ``(runId, nodeId)`` scope; the latest
+    ``occurredAt`` wins when several blocks share a scope.
     """
 
     latest_by_scope: dict[tuple[str, str], Mapping[str, Any]] = {}
@@ -918,12 +1030,20 @@ def attach_inbox_actions(
         if existing is None or _occurred_at(block) >= _occurred_at(existing):
             latest_by_scope[key] = block
 
+    gate_task_by_id: dict[str, Any] = {}
+    for entry in _as_iterable(human_gate_tasks):
+        if isinstance(entry, Mapping):
+            task_id = _text(entry, "taskId")
+            if task_id:
+                gate_task_by_id[task_id] = entry
+
     payload = dict(inbox_payload)
     items: list[dict[str, Any]] = []
     for raw_item in payload.get("items") or []:
         item = dict(raw_item) if isinstance(raw_item, Mapping) else raw_item
         if isinstance(item, dict):
-            evidence = " ".join(str(ref) for ref in (item.get("evidence") or []))
+            evidence_refs = [str(ref) for ref in (item.get("evidence") or [])]
+            evidence = " ".join(evidence_refs)
             scope = item.get("scope") if isinstance(item.get("scope"), Mapping) else {}
             key = (str(scope.get("runId") or ""), str(scope.get("nodeId") or ""))
             if (
@@ -934,6 +1054,20 @@ def attach_inbox_actions(
                 action = extend_budget_action(block) if block else None
                 if action is not None:
                     item["action"] = action
+            elif item.get("kind") == ANOMALY_KIND_NEEDS_HUMAN_GATE:
+                task_id = next(
+                    (
+                        ref[len(HUMAN_GATE_TASK_EVIDENCE_PREFIX) :]
+                        for ref in evidence_refs
+                        if ref.startswith(HUMAN_GATE_TASK_EVIDENCE_PREFIX)
+                    ),
+                    "",
+                )
+                entry = gate_task_by_id.get(task_id) if task_id else None
+                if entry is not None:
+                    actions = resolve_human_gate_actions(entry)
+                    if actions is not None:
+                        item["actions"] = actions
         items.append(item)
     payload["items"] = items
     return payload
@@ -993,6 +1127,44 @@ def assert_extend_budget_confirmation(
         )
 
 
+def assert_resolve_human_gate_confirmation(
+    *,
+    confirmed: Any,
+    run_id: Any,
+    task_id: Any,
+    decision: Any,
+) -> None:
+    """误触防护 gate for the human-gate resolve CTA execution.
+
+    Resolving a research-workflow human gate is a human decision: the
+    execution endpoint MUST call this before submitting the command and
+    refuse the request when the explicit ``confirmed`` flag is missing/false,
+    the task/run identity is incomplete, or the decision is outside the
+    one-click set (accept/reject; ``revise`` needs fromNodeId and stays on
+    the workflow surface).  The endpoint then submits through the single
+    ``resolve_human_task`` command authority — never a second write path.
+    """
+
+    if confirmed is not True:
+        raise InboxActionConfirmationError(
+            "inbox_action_confirmation_required",
+            "人工门裁决是人工授权动作：缺少显式确认（confirmed=true），已拒绝执行",
+        )
+    if not str(run_id or "").strip():
+        raise InboxActionConfirmationError(
+            "inbox_action_run_required", "缺少目标运行 runId，已拒绝执行"
+        )
+    if not str(task_id or "").strip():
+        raise InboxActionConfirmationError(
+            "inbox_action_task_required", "缺少目标人工任务 taskId，已拒绝执行"
+        )
+    if str(decision or "").strip() not in HUMAN_GATE_RESOLVE_DECISIONS:
+        raise InboxActionConfirmationError(
+            "inbox_action_decision_invalid",
+            "decision 必须是 accept 或 reject（revise 请走工作流面板），已拒绝执行",
+        )
+
+
 def build_anomaly_inbox(
     state: Any = None,
     *,
@@ -1002,6 +1174,7 @@ def build_anomaly_inbox(
     retry_exhausted_nodes: Any = None,
     digest_ttl_overdues: Any = None,
     gate_waits: Any = None,
+    human_gate_tasks: Any = None,
     budget_precheck_blocks: Any = None,
     gate_wait_threshold_ms: int = DEFAULT_GATE_WAIT_THRESHOLD_MS,
     generated_at: str | None = None,
@@ -1040,6 +1213,9 @@ def build_anomaly_inbox(
         _gate_wait_items(
             _as_iterable(gate_waits), base, fallback_at, gate_wait_threshold_ms
         )
+    )
+    items.extend(
+        _human_gate_task_items(_as_iterable(human_gate_tasks), base, fallback_at)
     )
     items.extend(
         _budget_precheck_items(

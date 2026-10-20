@@ -16,6 +16,24 @@ const OPENED_CHANNEL = "launcher:human-attention-opened";
 
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 const preloadSource = readFileSync(fileURLToPath(new URL("../src/preload.ts", import.meta.url)), "utf8");
+const webNotificationsSource = readFileSync(
+  fileURLToPath(
+    new URL("../../../web/src/routes/personalAssistant/humanAttentionNotifications.ts", import.meta.url)
+  ),
+  "utf8"
+);
+
+/** The web layer owns the kind whitelist; the shell must accept the same set. */
+function webKindWhitelist(): string[] {
+  const match = webNotificationsSource.match(
+    /HUMAN_ATTENTION_KINDS = new Set<string>\(\[([^\]]*)\]\)/
+  );
+  expect(match).toBeTruthy();
+  return (match?.[1] ?? "")
+    .split(",")
+    .map((entry) => entry.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
+}
 
 function attention(
   overrides: Partial<DesktopHumanAttentionNotification> = {}
@@ -284,6 +302,107 @@ describe("human attention notification service", () => {
     });
     expect(JSON.stringify(event.fields)).not.toContain("SECRET");
     expect(JSON.stringify(event.fields)).not.toContain("评审意见");
+  });
+});
+
+describe("human attention kind whitelist parity with the web layer", () => {
+  it("accepts exactly the web whitelist, including affair_reminder and human_gate", async () => {
+    const webKinds = [...new Set(webKindWhitelist())].sort();
+    expect(webKinds).toEqual(["affair_reminder", "anomaly", "human_gate", "knowledge_review"]);
+
+    for (const kind of webKinds) {
+      const harness = makeService();
+      const result = await harness.service.notify(
+        attention({ id: `ha-${kind}`, kind: kind as DesktopHumanAttentionNotification["kind"] })
+      );
+      expect(result).toEqual({ delivered: "assistant_window" });
+      expect((harness.assistantMessages[0]?.payload as { kind?: string }).kind).toBe(kind);
+    }
+  });
+
+  it("rejects a kind that is not on the shared whitelist", async () => {
+    const harness = makeService();
+
+    const result = await harness.service.notify(
+      attention({ kind: "human-gate" as unknown as DesktopHumanAttentionNotification["kind"] })
+    );
+
+    expect(result.delivered).toBe("invalid_payload");
+    expect(harness.assistantMessages).toHaveLength(0);
+    expect(harness.notifications).toHaveLength(0);
+  });
+});
+
+describe("human gate inline approval payload forwarding", () => {
+  it("forwards sanitized human-gate actions and meta to the assistant window card", async () => {
+    const harness = makeService();
+
+    const result = await harness.service.notify(
+      attention({
+        id: "gate-1",
+        kind: "human_gate",
+        actions: [
+          { label: "接受", decision: "accept" },
+          { label: "驳回", decision: "reject" },
+          { label: "   ", decision: "accept" },
+          { label: "junk", decision: 7 as unknown as string }
+        ],
+        meta: {
+          teamId: "team-1",
+          runId: "run-7",
+          nodeId: "node-gate",
+          taskId: "task-9",
+          decisions: ["accept", "reject", "revise"],
+          junk: "dropped"
+        } as unknown as DesktopHumanAttentionNotification["meta"]
+      })
+    );
+
+    expect(result).toEqual({ delivered: "assistant_window" });
+    expect(harness.assistantMessages[0]?.payload).toEqual({
+      id: "gate-1",
+      kind: "human_gate",
+      severity: "high",
+      title: "知识评审需要处理",
+      body: "有 3 条新评审意见等待确认。",
+      targetUrl: "/knowledge?review=1",
+      actions: [
+        { label: "接受", decision: "accept" },
+        { label: "驳回", decision: "reject" }
+      ],
+      meta: {
+        teamId: "team-1",
+        runId: "run-7",
+        nodeId: "node-gate",
+        taskId: "task-9",
+        decisions: ["accept", "reject", "revise"]
+      }
+    });
+  });
+
+  it("keeps the system toast navigation-only when the assistant window is closed", async () => {
+    const harness = makeService({ assistantOpen: false });
+
+    const result = await harness.service.notify(
+      attention({
+        id: "gate-toast",
+        kind: "human_gate",
+        actions: [{ label: "接受", decision: "accept" }]
+      })
+    );
+
+    // The toast path receives only title/body/click — inline approval buttons
+    // exist solely on the assistant-window card.
+    expect(result).toEqual({ delivered: "system_notification" });
+    expect(harness.notifications).toHaveLength(1);
+    expect(harness.notifications[0]).toMatchObject({
+      title: "知识评审需要处理",
+      body: "有 3 条新评审意见等待确认。"
+    });
+    harness.notifications[0].clicked();
+    expect(harness.workbenchMessages).toEqual([
+      { channel: OPENED_CHANNEL, payload: { id: "gate-toast", targetUrl: "/knowledge?review=1" } }
+    ]);
   });
 });
 
