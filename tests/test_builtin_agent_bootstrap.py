@@ -33,7 +33,7 @@ def test_fresh_deployment_supplies_selectable_chat_and_six_research_roles(fresh_
     with pytest.raises(team_service.TeamServiceError, match="AgentDirectory asset is missing"):
         team_service.bootstrap_challenge_cup_research_team()
     seeded = ensure_builtin_agents()
-    assert len(seeded["createdAgentIds"]) == 7
+    assert len(seeded["createdAgentIds"]) == 8
     general = directory.get_agent(seeded["generalAssistantId"])
     assert general["primaryMode"] == "chat"
     assert general["directSessionId"]
@@ -45,6 +45,93 @@ def test_fresh_deployment_supplies_selectable_chat_and_six_research_roles(fresh_
     assert all(agent["taskProfile"]["mission"] for agent in research)
     result = team_service.bootstrap_challenge_cup_research_team()
     assert len(result["team"]["members"]) == 6
+
+
+def test_platform_planner_builtin_contract(fresh_deployment):
+    from core.web.services.agent_directory import bootstrap
+
+    seeded = ensure_builtin_agents()
+    planner_id = seeded["platformPlannerId"]
+    assert planner_id in seeded["createdAgentIds"]
+    planner = directory.get_agent(planner_id)
+    assert planner["displayName"] == "平台规划师"
+    assert planner["primaryMode"] == "chat"
+    assert planner["roleKey"] == "platform_planner"
+    assert planner["metadata"]["builtinPreset"] == "platform_planner"
+    assert planner["directSessionId"]
+    assert planner["conversationIndexVisibility"] == "user_visible"
+    # Profiles are stored exactly as the normalizers accept them: no truncation.
+    assert planner["personaProfile"] == directory.normalize_persona_profile(
+        bootstrap.PLATFORM_PLANNER_PERSONA_PROFILE
+    )
+    assert planner["taskProfile"] == directory.normalize_task_profile(
+        bootstrap.PLATFORM_PLANNER_TASK_PROFILE
+    )
+    assert planner["taskProfile"]["mission"]
+    # Coordination-only strict whitelist; nothing else is callable.
+    assert planner["toolPolicy"]["allowedTools"] == [
+        "personal_assistant_query_tool",
+        "agent_message_tool",
+    ]
+    assert planner["toolPolicy"]["networkAccess"] == "none"
+    assert planner["toolPolicy"]["mutationAccess"] == "restricted"
+    assert planner["toolPolicyId"] == f"tool-{planner_id}"
+    assert directory.evaluate_tool_policy(
+        "agent_message_tool", {}, policy=planner["toolPolicy"], agent_id=planner_id
+    ).allowed
+    assert directory.evaluate_tool_policy(
+        "personal_assistant_query_tool", {}, policy=planner["toolPolicy"], agent_id=planner_id
+    ).allowed
+    for forbidden in ("exec_command", "write_file_tool", "personal_assistant_manage_tool"):
+        assert not directory.evaluate_tool_policy(
+            forbidden, {}, policy=planner["toolPolicy"], agent_id=planner_id
+        ).allowed
+
+
+def test_platform_planner_seed_is_idempotent_and_keeps_operator_configuration(fresh_deployment):
+    seeded = ensure_builtin_agents()
+    planner_id = seeded["platformPlannerId"]
+    directory.update_agent_instance(
+        planner_id, task_profile={"mission": "保留我的统筹约定"}
+    )
+    before = directory.get_agent(planner_id)
+    second = ensure_builtin_agents()
+    assert second["createdAgentIds"] == []
+    assert second["platformPlannerId"] == planner_id
+    assert directory.get_agent(planner_id) == before
+
+
+def test_archived_platform_planner_is_not_resurrected(fresh_deployment):
+    seeded = ensure_builtin_agents()
+    planner_id = seeded["platformPlannerId"]
+    directory.archive_agent_instance(planner_id)
+    second = ensure_builtin_agents()
+    assert second["createdAgentIds"] == []
+    assert second["platformPlannerId"] == planner_id
+    assert directory.get_agent(planner_id, include_archived=True)["status"] == "archived"
+
+
+def test_interrupted_platform_planner_seed_recovers_profiles_without_duplicate(fresh_deployment, monkeypatch):
+    original = directory.update_agent_instance
+    interrupted = [False]
+
+    def interrupt_planner(agent_id, **kwargs):
+        if kwargs.get("persona_profile") is not None and not interrupted[0]:
+            interrupted[0] = True
+            raise RuntimeError("interrupted planner seed")
+        return original(agent_id, **kwargs)
+
+    monkeypatch.setattr(directory, "update_agent_instance", interrupt_planner)
+    with pytest.raises(RuntimeError, match="interrupted planner seed"):
+        ensure_builtin_agents()
+    monkeypatch.setattr(directory, "update_agent_instance", original)
+    second = ensure_builtin_agents()
+    assert second["platformPlannerId"] not in second["createdAgentIds"]
+    planner = directory.get_agent(second["platformPlannerId"])
+    assert planner["personaProfile"]["personality"]
+    assert planner["taskProfile"]["mission"]
+    assert planner["metadata"]["platformPlannerSeedComplete"] is True
+    assert planner["directSessionId"]
 
 
 def test_restart_preserves_operator_configuration_and_does_not_duplicate(fresh_deployment, monkeypatch):
