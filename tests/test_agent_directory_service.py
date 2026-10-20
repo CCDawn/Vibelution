@@ -385,7 +385,7 @@ def test_workspace_write_decision_cache_reuses_allowed_and_keeps_blocked_fresh(
         return real_resolve(path_value)
 
     monkeypatch.setattr(agent_directory_service, "_resolve_project_path", counting_resolve)
-    blocked_events: list[Any] = []
+    blocked_events: list = []
     real_record = agent_directory_service._record_agent_territory_write_blocked
 
     def counting_record(agent, decision, *, purpose=""):
