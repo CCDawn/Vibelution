@@ -85,10 +85,7 @@ from core.web.services.team_workflow.research_runtime.question_lineage_service i
 from core.web.services.team_workflow.research_runtime.run_creation import (
     create_question_run,
 )
-from core.web.services.team_workflow.research_runtime.service import (
-    ResearchWorkflowError,
-    get_research_workflow_runtime_service,
-)
+from core.web.services.team_workflow.research_runtime.errors import ResearchWorkflowError
 
 from ._router import router
 from .research_runtime_models import (
@@ -181,6 +178,16 @@ class EvidenceGraphMissingLinkWaivePayload(BaseModel):
     @classmethod
     def normalize_optional_team_id(cls, value: str) -> str:
         return str(value or "").strip()
+
+
+def get_research_workflow_runtime_service():
+    # Preserve the route's injection seam without loading the legacy runtime
+    # while registering the formal Ledger routes and their DTOs.
+    from core.web.services.team_workflow.research_runtime.service import (
+        get_research_workflow_runtime_service as get_service,
+    )
+
+    return get_service()
 
 
 def _svc():

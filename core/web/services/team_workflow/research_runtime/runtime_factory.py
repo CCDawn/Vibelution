@@ -15,32 +15,26 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from core.research.workflow.challenge_cup_runtime import (
-    ChallengeCupGraphCoordinator,
-)
-from core.research.workflow.ledger import WorkflowLedgerStore
+if TYPE_CHECKING:
+    from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordinator
+    from core.research.workflow.ledger import WorkflowLedgerStore
 
-from .action_registry import ActionRegistry
-from .adapter_dispatch_worker import AdapterDispatchWorker
-from .adapters.domain_adapters import register_default_adapters
-from .checkpoint_fork_worker import CheckpointForkWorker
-from .checkpoint_lifecycle import latest_checkpoint_id
-from .cancel_run_cleanup import CancelRunCleanupWorker
-from .command_service import WorkflowCommandService
-from .delivery_worker import DeliveryOrchestrationWorker
-from .event_publish_worker import EventPublishWorker
-from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
-from .formal_write_runtime import configure_formal_write_runtime
-from .graph_dispatch_worker import GraphDispatchWorker
-from .outbox_pump import WorkflowOutboxPump
-from .readiness import NodeReadinessService
-from .readiness.common import RunSnapshot
-from .readiness.knowledge_recheck import build_knowledge_readiness_recheck
-from .real_domain_ports import RealDomainPorts
-from .real_readiness_context import RealDomainReadinessContext
-from .receipt_persistence import ReceiptPersistenceWorker
+    from .action_registry import ActionRegistry
+    from .adapter_dispatch_worker import AdapterDispatchWorker
+    from .checkpoint_fork_worker import CheckpointForkWorker
+    from .cancel_run_cleanup import CancelRunCleanupWorker
+    from .command_service import WorkflowCommandService
+    from .delivery_worker import DeliveryOrchestrationWorker
+    from .event_publish_worker import EventPublishWorker
+    from .graph_dispatch_worker import GraphDispatchWorker
+    from .outbox_pump import WorkflowOutboxPump
+    from .readiness import NodeReadinessService
+    from .readiness.common import RunSnapshot
+    from .real_domain_ports import RealDomainPorts
+    from .real_readiness_context import RealDomainReadinessContext
+    from .receipt_persistence import ReceiptPersistenceWorker
 
 logger = logging.getLogger(__name__)
 
@@ -624,6 +618,9 @@ class WorkflowRuntime:
 
 
 def _build_readiness_service(store: WorkflowLedgerStore) -> NodeReadinessService:
+    from .readiness import NodeReadinessService
+    from .readiness.common import RunSnapshot
+
     def run_source(run_id: str) -> RunSnapshot | None:
         record = store.get_run(run_id)
         if record is None:
@@ -669,6 +666,28 @@ def build_workflow_runtime(
     wake_worker: Callable[[], None] | None = None,
 ) -> WorkflowRuntime:
     """Assemble the production runtime from the Ledger and LangGraph pieces."""
+    # Resolve execution dependencies only when building a runtime. Keep imports
+    # before opening stores so a failed import cannot leave a partial runtime.
+    from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordinator
+    from core.research.workflow.ledger import WorkflowLedgerStore
+
+    from .action_registry import ActionRegistry
+    from .adapter_dispatch_worker import AdapterDispatchWorker
+    from .adapters.domain_adapters import register_default_adapters
+    from .checkpoint_fork_worker import CheckpointForkWorker
+    from .checkpoint_lifecycle import latest_checkpoint_id
+    from .cancel_run_cleanup import CancelRunCleanupWorker
+    from .command_service import WorkflowCommandService
+    from .delivery_worker import DeliveryOrchestrationWorker
+    from .event_publish_worker import EventPublishWorker
+    from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
+    from .formal_write_runtime import configure_formal_write_runtime
+    from .graph_dispatch_worker import GraphDispatchWorker
+    from .readiness.knowledge_recheck import build_knowledge_readiness_recheck
+    from .real_domain_ports import RealDomainPorts
+    from .real_readiness_context import RealDomainReadinessContext
+    from .receipt_persistence import ReceiptPersistenceWorker
+
     checkpoint = Path(checkpoint_path) if checkpoint_path else (
         ledger_path.parent / "checkpoints.sqlite"
     )
@@ -885,6 +904,8 @@ def start_production_workflow_runtime() -> str:
         if legacy_json_runs_exist(data_root) and not is_activated(data_root):
             mark_migration_required()
             return "migration_required"
+        from .outbox_pump import WorkflowOutboxPump
+
         pump = WorkflowOutboxPump(workers=workflow_worker_count())
         try:
             _PRODUCTION = build_workflow_runtime(
