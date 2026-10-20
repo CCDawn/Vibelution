@@ -337,7 +337,7 @@ def _startup_cache_prewarm_gate_enabled() -> bool:
     """Operator switch for the routes-ready prewarm gate (default: enabled).
 
     Set ``VIBELUTION_DEFER_STARTUP_CACHE_PREWARM=0`` (or false/no/off) to
-    restore the legacy behavior of starting the scans immediately at boot.
+    restore the legacy behavior of starting optional cache work immediately at boot.
     """
 
     raw = str(os.environ.get("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM") or "").strip().lower()
@@ -399,14 +399,7 @@ async def _run_prewarm_heavy_after_routes_ready(
 ) -> Any:
     """Shared ready→settle→to_thread gate for the CPU-heavy startup prewarms."""
 
-    waited_ms = await _await_web_routes_ready_for_prewarm(app)
-    stagger_seconds = _startup_prewarm_stagger_seconds()
-    if stagger_seconds > 0:
-        await asyncio.sleep(stagger_seconds)
-    gate_timings = {
-        "waitedForRoutesMs": waited_ms,
-        "staggerMs": max(0, int(round(stagger_seconds * 1000))),
-    }
+    gate_timings = await _await_startup_prewarm_gate(app)
     if startup_jobs is not None:
         return await startup_jobs.run_sync(worker_name, heavy, gate_timings)
     worker = asyncio.create_task(asyncio.to_thread(heavy, gate_timings), name=worker_name)
@@ -418,6 +411,19 @@ async def _run_prewarm_heavy_after_routes_ready(
         with suppress(asyncio.CancelledError):
             await asyncio.shield(worker)
         raise
+
+
+async def _await_startup_prewarm_gate(app: FastAPI | None) -> dict[str, int]:
+    """Give functional routes and their first requests priority over caches."""
+
+    waited_ms = await _await_web_routes_ready_for_prewarm(app)
+    stagger_seconds = _startup_prewarm_stagger_seconds()
+    if stagger_seconds > 0:
+        await asyncio.sleep(stagger_seconds)
+    return {
+        "waitedForRoutesMs": waited_ms,
+        "staggerMs": max(0, int(round(stagger_seconds * 1000))),
+    }
 
 
 async def _run_config_workspace_prewarm_after_routes_ready(
@@ -512,7 +518,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-cli-terminal-reconcile", _reconcile_cli_agent_terminal_states_on_startup
     )
     startup_cache_prewarm_task = startup_jobs.start_async(
-        "startup-ui-cache-prewarm", prewarm_ui_caches_on_startup(startup_jobs=startup_jobs)
+        "startup-ui-cache-prewarm", prewarm_ui_caches_on_startup(app=app, startup_jobs=startup_jobs)
     )
     from .services.session.directory_runtime import (
         begin_directory_startup,
@@ -1218,25 +1224,40 @@ def _prewarm_agent_registry_on_startup(gate_timings: dict[str, Any] | None = Non
     return timings
 
 
+def _prewarm_key_tool_definitions() -> Any:
+    from tools import Key_Tools
+
+    return Key_Tools.prewarm_key_tool_definitions()
+
+
+def _prewarm_web_search_availability() -> Any:
+    from tools import web_search_tool
+
+    return web_search_tool.autoglm_search_tool_availability(force=True)
+
+
 async def prewarm_ui_caches_on_startup(
-    *, startup_jobs: StartupJobGroup | None = None
+    *, app: FastAPI | None = None, startup_jobs: StartupJobGroup | None = None
 ) -> None:
-    from tools import Key_Tools, web_search_tool
+    # Creating an async owner does not move its imports off the event loop.
+    # Defer optional caches, including their imports, until serving is ready.
+    gate_timings = {"waitedForRoutesMs": 0, "staggerMs": 0}
+    if app is not None and _startup_cache_prewarm_gate_enabled():
+        gate_timings = await _await_startup_prewarm_gate(app)
 
     started = time.perf_counter()
     if startup_jobs is None:
         jobs = (
-            asyncio.to_thread(Key_Tools.prewarm_key_tool_definitions),
-            asyncio.to_thread(web_search_tool.autoglm_search_tool_availability, force=True),
+            asyncio.to_thread(_prewarm_key_tool_definitions),
+            asyncio.to_thread(_prewarm_web_search_availability),
             asyncio.to_thread(_prewarm_git_memory_on_startup),
         )
     else:
         jobs = (
-            startup_jobs.run_sync("startup-key-tools-prewarm", Key_Tools.prewarm_key_tool_definitions),
+            startup_jobs.run_sync("startup-key-tools-prewarm", _prewarm_key_tool_definitions),
             startup_jobs.run_sync(
                 "startup-web-search-prewarm",
-                web_search_tool.autoglm_search_tool_availability,
-                force=True,
+                _prewarm_web_search_availability,
             ),
             startup_jobs.run_sync("startup-git-memory-prewarm", _prewarm_git_memory_on_startup),
         )
@@ -1248,9 +1269,10 @@ async def prewarm_ui_caches_on_startup(
         "runtime_manager",
         "startup_prewarm",
         "runtime.startup.git_memory_prewarmed",
-        message="Git memory was prewarmed before the first chat turn.",
+        message="Git memory startup prewarm completed.",
         outcome="completed",
         fields={
+            **gate_timings,
             "durationMs": git_duration_ms,
             "totalPrewarmMs": max(0, int((time.perf_counter() - started) * 1000)),
             "available": bool(getattr(git_state, "available", False)),
