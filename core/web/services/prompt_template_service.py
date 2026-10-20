@@ -1410,15 +1410,30 @@ def _get_prompt_template_for_project(template_id: str, *, project_root: Path | N
     return get_prompt_template(template_id, project_root=project_root)
 
 
+# 模板索引的进程内读缓存：签名 = (mtime_ns, size)。每回合的快照版本校验
+# （get_agent_prompt_snapshot_versions）都要读这份 JSON，未缓存时等于每回合
+# 一次全量读盘+解析。_save_prompt_templates 走原子写必然推进 mtime，签名
+# 自然失效；两个调用方（版本校验 / repair）都只读不写返回值，共享对象安全。
+_PROMPT_TEMPLATES_LOAD_CACHE: dict[str, tuple[int, int, dict[str, Any]]] = {}
+
+
 def _load_prompt_templates(*, project_root: Path | None = None) -> dict[str, Any]:
     path = prompt_template_path(project_root=project_root)
-    if not path.exists():
+    try:
+        stat = path.stat()
+    except OSError:
         return {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
+    cache_key = str(path)
+    cached = _PROMPT_TEMPLATES_LOAD_CACHE.get(cache_key)
+    if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
-    return payload if isinstance(payload, dict) else {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
+    payload = payload if isinstance(payload, dict) else {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
+    _PROMPT_TEMPLATES_LOAD_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, payload)
+    return payload
 
 
 def _save_prompt_templates(payload: dict[str, Any], *, project_root: Path | None = None) -> None:
