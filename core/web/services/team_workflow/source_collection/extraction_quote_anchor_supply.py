@@ -510,16 +510,69 @@ def supplied_quotes(entry: Mapping[str, Any]) -> list[str]:
     return quotes
 
 
+# Typographic variants that PDF/HTML extraction routinely introduces and
+# LLM tokenizers cannot reliably reproduce byte-for-byte.  They carry no
+# evidence semantics, so verbatim anchoring folds them to ASCII form:
+# curly quotes → " ', NBSP → space, zero-width characters dropped,
+# en/em dashes → "-".
+_VERBATIM_TYPOGRAPHIC_ASCII = str.maketrans({
+    "\u201c": '"',  # LEFT DOUBLE QUOTATION MARK
+    "\u201d": '"',  # RIGHT DOUBLE QUOTATION MARK
+    "\u2018": "'",  # LEFT SINGLE QUOTATION MARK
+    "\u2019": "'",  # RIGHT SINGLE QUOTATION MARK
+    "\u00a0": " ",  # NO-BREAK SPACE
+    "\u200b": "",   # ZERO WIDTH SPACE
+    "\u200c": "",   # ZERO WIDTH NON-JOINER
+    "\u200d": "",   # ZERO WIDTH JOINER
+    "\ufeff": "",   # ZERO WIDTH NO-BREAK SPACE / BOM
+    "\u2013": "-",  # EN DASH
+    "\u2014": "-",  # EM DASH
+})
+
+# Every whitespace run (spaces, tabs, newlines, NBSP folded above) collapses
+# to a single space, and the single spaces are then dropped from the
+# containment key: extraction artifacts both duplicate and LOSE inter-word
+# spaces (the production incident had ``ends withZ = 164`` where the quote
+# read ``ends with Z = 164``), and whitespace placement carries no evidence
+# semantics.
+_VERBATIM_WHITESPACE_RUN = re.compile(r"\s+")
+
+
+def _normalize_verbatim_text(text: str) -> str:
+    """Whitespace/typographic-insensitive containment key for verbatim quotes.
+
+    Verbatim means identical except whitespace runs and typographic
+    artifacts, with case still sensitive.  Whitespace runs collapse to a
+    single space, the ends are stripped, and the remaining spaces drop out
+    of the key; typographic variants fold to their ASCII forms.  Wording and
+    case are never touched — a paraphrase or a case change still mismatches.
+    """
+    collapsed = _VERBATIM_WHITESPACE_RUN.sub(
+        " ", text.translate(_VERBATIM_TYPOGRAPHIC_ASCII)
+    ).strip()
+    return collapsed.replace(" ", "")
+
+
 def has_verbatim_anchor(entry: Mapping[str, Any], blocks: list[Mapping[str, Any]]) -> bool:
     """True when any nested claim/evidenceRef quote is a verbatim block substring.
 
-    Mirrors the pre-existing acceptance rule exactly: nested
+    Verbatim = identical except whitespace runs and typographic artifacts
+    (case-sensitive): both the quote and every block text pass through
+    ``_normalize_verbatim_text`` before the containment check, so an
+    extraction artifact like ``ends withZ = 164`` still anchors the quote
+    ``ends with Z = 164``, while a paraphrase or a case change still
+    mismatches.
+
+    Mirrors the pre-existing acceptance rule otherwise: nested
     ``claims[]``/``keyFindings[]`` items with a verbatim ``quote``, or
     ``evidenceRefs[]`` items with ``{id, quote}`` whose quote is verbatim
     (the ref id is required on that path — a bare quote there was never an
     anchor).
     """
-    block_texts = [str(block.get("text") or "") for block in blocks]
+    # Normalize each block once per call; quotes normalize once each below.
+    block_keys = [
+        _normalize_verbatim_text(str(block.get("text") or "")) for block in blocks
+    ]
     for list_key in _CLAIM_LIST_KEYS:
         items = entry.get(list_key)
         if not isinstance(items, list):
@@ -527,17 +580,17 @@ def has_verbatim_anchor(entry: Mapping[str, Any], blocks: list[Mapping[str, Any]
         for item in items:
             if not isinstance(item, dict):
                 continue
-            quote = _quote_text(item.get("quote"))
-            if quote and any(quote in text for text in block_texts):
+            quote_key = _normalize_verbatim_text(_quote_text(item.get("quote")))
+            if quote_key and any(quote_key in key for key in block_keys):
                 return True
     refs = entry.get("evidenceRefs") or entry.get("evidence_refs")
     if isinstance(refs, list):
         for item in refs:
             if not isinstance(item, dict):
                 continue
-            quote = _quote_text(item.get("quote"))
+            quote_key = _normalize_verbatim_text(_quote_text(item.get("quote")))
             ref_id = _clean(item.get("id") or item.get("evidenceRefId") or item.get("refId"))
-            if ref_id and quote and any(quote in text for text in block_texts):
+            if ref_id and quote_key and any(quote_key in key for key in block_keys):
                 return True
     return False
 
