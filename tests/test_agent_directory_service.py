@@ -360,6 +360,69 @@ def test_ensure_agent_shared_workspace_tolerates_extended_length_prefix_form(
         assert (shared_root / subdir).is_dir()
 
 
+def test_runtime_context_block_split_renderers_are_byte_identical_to_join(
+    tmp_path, monkeypatch
+):
+    """static/dynamic 渲染器直出 == 兼容 wrapper + 旧 split 语义（P4a 硬门）。"""
+
+    from core.orchestration.context_engine import _split_agent_runtime_context_block
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Split Render Agent"
+    )
+    agent_id = agent["agentId"]
+    agent_directory_service.write_group_context_event(
+        agent_id,
+        {
+            "sourceRoomId": "room-split",
+            "sourceRoundId": "round-split",
+            "topic": "拆分等价",
+            "summary": "静态与动态半段拼接必须与整块逐字节一致",
+            "ownMessage": "覆盖群事件路径",
+        },
+    )
+    agent_directory_service.write_agent_inbox_message(
+        agent_id, content="覆盖收件箱路径", summary="收件箱", created_by="test"
+    )
+
+    joined = agent_directory_service.build_agent_runtime_context_block(agent_id)
+    static_via_split, dynamic_via_split = _split_agent_runtime_context_block(joined)
+
+    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(agent_id)
+    static_direct = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_static_lines(
+            agent_id, tool_policy_snapshot=tool_policy
+        )
+        if line is not None
+    ).strip()
+    dynamic_direct = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_dynamic_lines(agent_id)
+        if line is not None
+    ).strip()
+
+    assert static_direct == static_via_split
+    assert dynamic_direct == dynamic_via_split
+    assert joined == "\n".join([static_direct, dynamic_direct]).strip()
+    # 冻结边界假设：动态半段首行必须命中动态标记，静态半段不含任何标记行。
+    markers = ("## 个人记忆", "PersonalEpisodes:", "GroupContextEvents:", "AgentInboxMessages:")
+    assert dynamic_direct
+    first_line = dynamic_direct.splitlines()[0].strip()
+    assert any(first_line.startswith(marker) for marker in markers)
+    for line in static_direct.splitlines():
+        stripped = line.strip()
+        assert not any(stripped.startswith(marker) for marker in markers)
+    # 不传 tool_policy_snapshot（内部自行解析）与传入解析结果字节一致。
+    static_self_resolved = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_static_lines(agent_id)
+        if line is not None
+    ).strip()
+    assert static_self_resolved == static_direct
+
+
 def test_workspace_write_decision_cache_reuses_allowed_and_keeps_blocked_fresh(
     tmp_path, monkeypatch
 ):
