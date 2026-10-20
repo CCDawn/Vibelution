@@ -437,6 +437,326 @@ def test_formal_completion_waits_for_durable_receipt_projection() -> None:
     assert raised.value.snapshot["challengeTaskStartedAtMs"] == 123
 
 
+# --- Formal receipt gate: true-failure terminal release (receipt wedge) ----
+#
+# Incident: a research_project problem_understanding turn ended
+# ``failed_provider`` with no model invocation receipt; the receipt gate
+# re-raised ``CompletionDependencyPending``, defer_completion's unavailable
+# branch failed the outbox and blocked the run without closing the attempt,
+# and retry_node (failed/blocked/cancelled only) never offered recovery.
+
+_WAIVER_FAILURE_TERMINALS = (
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "error",
+    "cancelled",
+    "canceled",
+    "stopped",
+    "stopped_by_user",
+    "superseded",
+    "timed_out",
+)
+
+
+def _formal_routing() -> dict:
+    return {
+        "requiredModelPolicy": {"provider": "relay_autodl"},
+        "modelPolicySha256": "a" * 64,
+        "routes": {"problem_understanding": "relay_autodl/GLM-5.3-flash"},
+    }
+
+
+@pytest.mark.parametrize("terminal_status", _WAIVER_FAILURE_TERMINALS)
+def test_formal_receipt_gate_releases_true_failure_terminal_without_receipt(
+    terminal_status,
+) -> None:
+    """research_project verdict handoff: a turn already terminal in a true
+    failure status with no receipt anywhere must not re-defer; the project
+    task authority adjudicates the outcome instead."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    atc._require_formal_model_invocation_receipt(
+        _snapshot(terminal_status, "turn-main"),
+        input_snapshot={"modelRoutingPolicy": _formal_routing()},
+        task_started_at_ms=123,
+        failure_terminal_releasable=True,
+    )
+
+
+@pytest.mark.parametrize("terminal_status", _WAIVER_FAILURE_TERMINALS)
+def test_formal_receipt_gate_keeps_strict_raise_without_release_flag(
+    terminal_status,
+) -> None:
+    """Families without the downstream terminal adjudicator (source_collection
+    and every other family) keep the strict raise on failure terminals."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.completion_dependency import (
+        CompletionDependencyPending,
+    )
+
+    with pytest.raises(CompletionDependencyPending):
+        atc._require_formal_model_invocation_receipt(
+            _snapshot(terminal_status, "turn-main"),
+            input_snapshot={"modelRoutingPolicy": _formal_routing()},
+            task_started_at_ms=123,
+        )
+
+
+@pytest.mark.parametrize("parked_status", ["needs_continue", "paused_limit"])
+def test_formal_receipt_gate_never_releases_parked_terminals(parked_status) -> None:
+    """Parked semantics must keep waiting: needs_continue/paused_limit still
+    defer even for the research_project verdict handoff."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.completion_dependency import (
+        CompletionDependencyPending,
+    )
+
+    with pytest.raises(CompletionDependencyPending):
+        atc._require_formal_model_invocation_receipt(
+            _snapshot(parked_status, "turn-main"),
+            input_snapshot={"modelRoutingPolicy": _formal_routing()},
+            task_started_at_ms=123,
+            failure_terminal_releasable=True,
+        )
+
+
+def test_formal_receipt_gate_release_requires_receipt_missing_evidence() -> None:
+    """The release is bounded by receipt-missing evidence: a present (but
+    unvalidated) receipt is a validation defect, not a lost one, and a
+    recorded usage source that is not ``missing`` keeps the strict raise."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.completion_dependency import (
+        CompletionDependencyPending,
+    )
+
+    present_receipt_snapshot = {
+        **_snapshot("failed_provider", "turn-main"),
+        "modelInvocationReceipts": [{"receiptId": "present"}],
+        "modelInvocationReceipt": {"receiptId": "present"},
+    }
+    with pytest.raises(CompletionDependencyPending):
+        atc._require_formal_model_invocation_receipt(
+            present_receipt_snapshot,
+            input_snapshot={"modelRoutingPolicy": _formal_routing()},
+            task_started_at_ms=123,
+            failure_terminal_releasable=True,
+        )
+
+    with pytest.raises(CompletionDependencyPending):
+        atc._require_formal_model_invocation_receipt(
+            {
+                **_snapshot("failed_provider", "turn-main"),
+                "llmUsage": {"source": "canonical_turn_outcome"},
+            },
+            input_snapshot={"modelRoutingPolicy": _formal_routing()},
+            task_started_at_ms=123,
+            failure_terminal_releasable=True,
+        )
+
+    # The canonical zero-usage marker persisted by the failure path is the
+    # strongest release evidence when the snapshot ever projects it.
+    atc._require_formal_model_invocation_receipt(
+        {
+            **_snapshot("failed_provider", "turn-main"),
+            "llmUsage": {"source": "missing"},
+        },
+        input_snapshot={"modelRoutingPolicy": _formal_routing()},
+        task_started_at_ms=123,
+        failure_terminal_releasable=True,
+    )
+
+
+def _project_task_authority(monkeypatch: pytest.MonkeyPatch, *, task: dict) -> list[str]:
+    """Patch the project-task store behind _require_project_task_terminal."""
+
+    import core.web.services.team_workflow.research_project_agent_tasks as tasks
+
+    reconciled: list[str] = []
+
+    def _reconcile(*_args, **_kwargs):
+        reconciled.append("reconcile")
+        return {"tasks": []}
+
+    monkeypatch.setattr(
+        tasks, "reconcile_research_project_agent_task_statuses", _reconcile
+    )
+    monkeypatch.setattr(
+        tasks, "_read_research_project_agent_task_record", lambda *_a, **_k: dict(task)
+    )
+    return reconciled
+
+
+def test_problem_understanding_provider_failure_fails_attempt_with_retry(
+    monkeypatch,
+) -> None:
+    """Wedge reproduction, failed-task leg: the released failed_provider
+    snapshot routes to the project-task verdict (task failed ->
+    ``project_agent_task_terminal_failed``), the problem the dispatch worker's
+    generic failure branch turns into a failed attempt with an available
+    retry_node offer -- never an unretryable completion cursor."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+    )
+
+    released_events: list[str] = []
+    monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: [])
+    monkeypatch.setattr(
+        atc,
+        "wait_for_agent_turn_terminal",
+        lambda *_a, **_k: _snapshot("failed_provider", "turn-main"),
+    )
+    monkeypatch.setattr(atc, "_canonical_agent_task_started_at_ms", lambda **_k: 0)
+    monkeypatch.setattr(
+        atc,
+        "_record_turn_continuation_scene_event",
+        lambda event_code, **_kwargs: released_events.append(event_code),
+    )
+    reconciled = _project_task_authority(
+        monkeypatch,
+        task={
+            "taskId": "task-1",
+            "status": "failed",
+            "failureCode": "session_failed_provider",
+        },
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        atc.complete_agent_turn_outputs(
+            action=_action(node_id="problem_understanding"),
+            handle=_handle(),
+            input_snapshot={
+                "teamId": "team-1",
+                "projectId": "proj-1",
+                "modelRoutingPolicy": _formal_routing(),
+            },
+            required_kinds=(),
+        )
+
+    detail = json.loads(str(excinfo.value))
+    assert detail["code"] == "project_agent_task_terminal_failed"
+    assert detail["status"] == "failed"
+    assert detail["failureCode"] == "session_failed_provider"
+    assert reconciled == ["reconcile"]
+    assert "agent_turn.completion_receipt_unavailable_terminal_failure" in released_events
+
+    # Recovery entry: the attempt state this verdict produces (failed, via
+    # _fail_attempt) is exactly what retry_node offers recovery for.
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.web.services.team_workflow.research_runtime.command_offers.retry_node import (
+        build_retry_node_offers,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_run_record,
+    )
+
+    definition = build_challenge_cup_workflow_definition()
+    node_id = next(
+        node.nodeId for node in definition.nodes
+        if node.nodeId == "problem_understanding"
+    )
+    run = build_run_record(run_id="run-test", status="blocked")
+    attempt = build_attempt_record(
+        "nr-run-test-problem_understanding-a1",
+        run_id="run-test",
+        node_id=node_id,
+        status="failed",
+    )
+    offer = next(
+        item for item in build_retry_node_offers(
+            run=run, definition=definition, attempts=[attempt]
+        )
+        if item.node_id == node_id
+    )
+    assert offer.available is True
+
+
+def test_problem_understanding_provider_failure_after_writeback_succeeds(
+    monkeypatch,
+) -> None:
+    """Wedge reproduction, rescued leg: a task that completed its writeback
+    before the provider failure keeps its authoritative success -- the node
+    completes through the ordinary refs chain instead of deferring."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+    )
+
+    monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: [])
+    monkeypatch.setattr(
+        atc,
+        "wait_for_agent_turn_terminal",
+        lambda *_a, **_k: _snapshot("failed_provider", "turn-main"),
+    )
+    monkeypatch.setattr(atc, "_canonical_agent_task_started_at_ms", lambda **_k: 0)
+    monkeypatch.setattr(
+        atc, "_record_turn_continuation_scene_event", lambda *_a, **_k: None
+    )
+    reconciled = _project_task_authority(
+        monkeypatch,
+        task={
+            "taskId": "task-1",
+            "status": "completed",
+            "challengeTaskContract": None,
+        },
+    )
+
+    refs = atc.complete_agent_turn_outputs(
+        action=_action(node_id="problem_understanding"),
+        handle=_handle(),
+        input_snapshot={
+            "teamId": "team-1",
+            "projectId": "proj-1",
+            "modelRoutingPolicy": _formal_routing(),
+        },
+        required_kinds=(),
+    )
+
+    assert refs == []
+    assert reconciled == ["reconcile"]
+
+
+def test_problem_understanding_parked_turn_still_defers_on_receipt(
+    monkeypatch,
+) -> None:
+    """Parked leg of the same gate: a needs_continue turn without a receipt
+    keeps deferring (waiting semantics), even for research_project."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+    )
+    from core.web.services.team_workflow.research_runtime.completion_dependency import (
+        CompletionDependencyPending,
+    )
+
+    monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: [])
+    monkeypatch.setattr(
+        atc,
+        "wait_for_agent_turn_terminal",
+        lambda *_a, **_k: _snapshot("needs_continue", "turn-main"),
+    )
+    monkeypatch.setattr(atc, "_canonical_agent_task_started_at_ms", lambda **_k: 0)
+    monkeypatch.setattr(
+        atc, "_record_turn_continuation_scene_event", lambda *_a, **_k: None
+    )
+
+    with pytest.raises(CompletionDependencyPending):
+        atc.complete_agent_turn_outputs(
+            action=_action(node_id="problem_understanding"),
+            handle=_handle(),
+            input_snapshot={
+                "teamId": "team-1",
+                "projectId": "proj-1",
+                "modelRoutingPolicy": _formal_routing(),
+            },
+            required_kinds=(),
+        )
+
+
 def test_continuation_does_not_submit_after_logical_task_deadline(monkeypatch) -> None:
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
     from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (

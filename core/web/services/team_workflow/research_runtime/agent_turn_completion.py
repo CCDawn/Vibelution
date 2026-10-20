@@ -62,6 +62,29 @@ AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES = frozenset(
     {"needs_continue", "paused_limit"}
 )
 
+# True-failure turn terminals that can never grow a model invocation receipt
+# anymore: the producing invocation is over (provider/runtime error, user or
+# supervisor stop, supersession, logical deadline).  Parked semantics
+# ("needs_continue" / "paused_limit") are deliberately absent -- those turns
+# are waiting for an explicit continue, not failed, and must keep deferring.
+# Kept distinct from _FAILURE_TERMINAL_STATUSES on purpose: that set is a
+# failure-classification table which includes the parked statuses; this one is
+# the receipt-gate waiver table which excludes them.
+_RECEIPT_WAIVER_FAILURE_TERMINAL_STATUSES = frozenset(
+    {
+        "failed",
+        "failed_provider",
+        "failed_runtime",
+        "error",
+        "cancelled",
+        "canceled",
+        "stopped",
+        "stopped_by_user",
+        "superseded",
+        "timed_out",
+    }
+)
+
 # Consecutive no-progress allowance per complete_agent_turn_outputs call. Every
 # continuation remains a first-class protocol step on the SAME session. New
 # canonical progress resets this counter; the logical-task deadline remains
@@ -275,6 +298,31 @@ def _formal_receipt_writeback_context(
     return receipt.to_dict(), stage_id, policy_sha256, usage
 
 
+def _snapshot_receipt_missing_evidence(snapshot: dict[str, Any]) -> bool:
+    """True when the snapshot itself proves no receipt can still arrive.
+
+    ``llmUsage.source == "missing"`` is the canonical zero-usage marker the
+    failure path persists (persist.py records it on the EVENT_TURN_FAILED
+    journal event), but the turn completion snapshot does not project
+    ``llmUsage`` today.  The equivalent in-snapshot evidence is therefore the
+    absence of any attached receipt: both durable reads that feed this gate
+    (the journal readback in ``get_session_turn_completion_snapshot`` and the
+    registry attachment in ``_attach_registered_model_invocation_receipts``)
+    must have come back empty.  A present-but-unvalidated receipt keeps the
+    strict raise -- that is a validation defect, not a lost receipt.
+    """
+
+    usage = snapshot.get("llmUsage")
+    if isinstance(usage, dict):
+        source = str(usage.get("source") or "").strip().lower()
+        if source:
+            return source in {"missing", "not_called"}
+    receipts = snapshot.get("modelInvocationReceipts")
+    if isinstance(receipts, list):
+        return not receipts and not snapshot.get("modelInvocationReceipt")
+    return not snapshot.get("modelInvocationReceipt")
+
+
 def _require_formal_model_invocation_receipt(
     snapshot: dict[str, Any],
     *,
@@ -282,6 +330,7 @@ def _require_formal_model_invocation_receipt(
     task_started_at_ms: int,
     formal_receipt: dict[str, Any] | None = None,
     stage_authority_complete: bool = False,
+    failure_terminal_releasable: bool = False,
     identity: dict[str, str] | None = None,
 ) -> None:
     """Keep a formal task retryable until its durable receipt is visible.
@@ -292,6 +341,21 @@ def _require_formal_model_invocation_receipt(
     never become visible, so re-raising would block a gate-verified finished
     node forever; the gap stays visible as a structured warning scene event
     instead of being swallowed.  Every other path keeps the strict raise.
+
+    ``failure_terminal_releasable`` (research_project tasks only) releases a
+    turn that already ended in a TRUE failure terminal (provider/runtime
+    error, user stop, supersession, logical deadline) with receipt-missing
+    evidence: no invocation means no receipt can ever appear, and re-raising
+    wedges the run permanently -- defer_completion's unavailable branch fails
+    the outbox and blocks the run without closing the attempt, so retry_node
+    (which only offers recovery for failed/blocked/cancelled attempts) never
+    fires.  The released snapshot hands the verdict to the downstream project
+    task authority (``_require_project_task_terminal``): a failed task fails
+    the attempt with retry available; a task that completed its writeback
+    before the failure still succeeds.  Parked terminals ("needs_continue" /
+    "paused_limit") never release -- they must keep waiting for their explicit
+    continue -- and families without a terminal adjudicator keep the strict
+    raise, so source_collection semantics are unchanged.
     """
 
     routing = input_snapshot.get("modelRoutingPolicy")
@@ -314,6 +378,25 @@ def _require_formal_model_invocation_receipt(
                 "turnId": str((identity or {}).get("turnId") or ""),
                 "taskId": str((identity or {}).get("taskId") or ""),
                 "terminalStatus": str(snapshot.get("terminalStatus") or ""),
+            },
+        )
+        return
+    terminal_status = str(snapshot.get("terminalStatus") or "").strip().lower()
+    if (
+        failure_terminal_releasable
+        and bool(snapshot.get("terminal"))
+        and terminal_status in _RECEIPT_WAIVER_FAILURE_TERMINAL_STATUSES
+        and _snapshot_receipt_missing_evidence(snapshot)
+    ):
+        _record_turn_continuation_scene_event(
+            "agent_turn.completion_receipt_unavailable_terminal_failure",
+            level="warning",
+            outcome="resolved_by_terminal_failure_verdict",
+            fields={
+                "sessionId": str((identity or {}).get("sessionId") or ""),
+                "turnId": str((identity or {}).get("turnId") or ""),
+                "taskId": str((identity or {}).get("taskId") or ""),
+                "terminalStatus": terminal_status,
             },
         )
         return
@@ -1267,6 +1350,13 @@ def complete_agent_turn_outputs(
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
     )
+    # Only the research_project family has the downstream terminal adjudicator
+    # (_require_project_task_terminal) that turns a released failure-terminal
+    # snapshot into a verdict; every other family keeps the strict raise so
+    # source_collection semantics stay exactly as they were.
+    failure_terminal_releasable = (
+        adapter_spec is not None and adapter_spec.family == "research_project"
+    )
     try:
         _require_formal_model_invocation_receipt(
             snapshot,
@@ -1274,6 +1364,7 @@ def complete_agent_turn_outputs(
             task_started_at_ms=task_started_at_ms,
             formal_receipt=formal_receipt,
             stage_authority_complete=stage_authority_complete,
+            failure_terminal_releasable=failure_terminal_releasable,
             identity={
                 "sessionId": handle.session_id,
                 "turnId": handle.turn_id,
