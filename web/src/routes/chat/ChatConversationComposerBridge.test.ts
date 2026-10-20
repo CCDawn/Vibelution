@@ -27,6 +27,7 @@ describe("ChatConversationComposerBridge", () => {
       value: "preserved draft",
     });
     expect(state.value).toBe("preserved draft");
+    expect(state.readOnly).toBe(true);
     expect(state.disabled).toBe(true);
     expect(state.actionDisabled).toBe(true);
     expect(state.attachmentInputDisabled).toBe(true);

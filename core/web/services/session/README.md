@@ -46,6 +46,8 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 
 ## Model parameter acceptance
 
+Opening a sealed read-only session through `/select` returns its existing detail without repairing metadata, saving the session, or changing the last-viewed pointer. Writable sessions retain their existing selection behavior. Archiving and all write-admission checks remain unchanged. The frontend waits for the selected session's authoritative writable detail before requesting model or budget parameters; read-only history omits the parameter editor.
+
 The composer shows the Agent's bound dialogue model. Parameter edits write only
 that Agent's current model entry; they never change the binding or shared model
 library. `turn_model_parameters.py` freezes model identity, context window,

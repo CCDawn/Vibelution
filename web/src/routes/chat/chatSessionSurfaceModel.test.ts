@@ -5,9 +5,19 @@ import {
   buildChatActiveSkillViewModel,
   buildChatMentalStateViewModel,
   buildChatSessionStateViewModel,
+  canLoadSessionParameters,
 } from "./chatSessionSurfaceModel";
 
 describe("chatSessionSurfaceModel", () => {
+  it("loads parameters only after the selected session has an authoritative writable detail", () => {
+    const detail = { id: "current", readOnly: false } as import("../../api/types").SessionDetail;
+    expect(canLoadSessionParameters("current", undefined)).toBe(false);
+    expect(canLoadSessionParameters("other", detail)).toBe(false);
+    expect(canLoadSessionParameters("current", { ...detail, provisionalTranscript: true })).toBe(false);
+    expect(canLoadSessionParameters("current", { ...detail, readOnly: true })).toBe(false);
+    expect(canLoadSessionParameters("current", detail)).toBe(true);
+    expect(canLoadSessionParameters("current", { ...detail, archiveState: { status: "archived", source: "session_archive" } })).toBe(true);
+  });
   it("builds active skill summary and status labels", () => {
     const model = buildChatActiveSkillViewModel({
       contract: {

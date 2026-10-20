@@ -52,6 +52,7 @@ export type ChatConversationComposerBridgeInput = {
 };
 
 export type ChatConversationComposerBridgeState = {
+  readOnly?: boolean;
   actionDisabled: boolean;
   actionMode: "send" | "stop";
   attachmentInputDisabled: boolean;
@@ -181,6 +182,7 @@ export function buildConversationComposerBridgeState(
         : input.labels.messageInputPlaceholder;
 
   return {
+    readOnly: Boolean(input.readOnly),
     actionDisabled,
     actionMode,
     // Image capability applies to image files only. The route filters those
@@ -238,6 +240,7 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   return (
     <LazyConversationView
       {...props}
+      turnModelControl={composer.readOnly ? undefined : props.turnModelControl}
       sessionId={sessionId}
       messages={messages}
       activeTurnMessage={streamedActiveTurnMessage}
