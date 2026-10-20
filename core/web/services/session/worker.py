@@ -1395,6 +1395,13 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         )
         prepare_timings["agentContextBuildMs"] = s._elapsed_ms(stage_started_at)
         prepare_timings["agentContextBuildSkipped"] = bool(agent_id and agent_context_packet is None)
+        if agent_context_packet is not None:
+            # 与 chat_room_service 的 agentContext. 前缀透出保持同一形态：
+            # packet 内部子段（runtimeContextBlockMs 等）进 journal，线上可直接定位。
+            for timing_key, timing_value in dict(getattr(agent_context_packet, "timings", {}) or {}).items():
+                normalized_key = str(timing_key or "").strip()
+                if normalized_key:
+                    prepare_timings[f"agentContext.{normalized_key}"] = timing_value
         if _abort_session_turn_for_stop(
             session_id=session_id,
             turn_id=turn_id,

@@ -652,7 +652,15 @@ def _sync_compact_team_chat_room_metadata(
         "teamSource": str(team.get("teamSource") or "").strip(),
         "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
     }
-    needs_config = any(str((linked_room.get("config") or {}).get(key) or "").strip() != value for key, value in config.items() if value)
+    # 两侧都按字符串比较：房间 config 里的数值/布尔字段（participantCount、
+    # devTeamTemplate 等）若只把一侧 str() 会永久判不等，导致每次只读查询都
+    # 触发 update_chat_room + teams.json 重写（内容不变），写放大且踢翻一切
+    # mtime 签名缓存。
+    needs_config = any(
+        str((linked_room.get("config") or {}).get(key) or "").strip() != str(value).strip()
+        for key, value in config.items()
+        if value
+    )
     if current_purpose == next_purpose and not needs_config:
         return False
     try:

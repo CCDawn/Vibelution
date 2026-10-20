@@ -102,6 +102,12 @@ def _team_knowledge_storage_signature() -> tuple[object, ...] | None:
     只 stat 不读内容、不触发 seeded 播种复制：teams index 路径用
     ``sandboxed_workspace_path``（seed=False 语义）重建，与 ``_teams_index_path``
     解析结果一致但无写副作用。
+
+    四类存储文件只可能出现在 ``agents/<ownerId>/knowledge`` 与
+    ``teams/<ownerId>/knowledge``（store 全部经 ``_knowledge_root*`` 构造），
+    因此 walk 只覆盖这两个 owner 级 knowledge 子树。此前遍历整个 workspace：
+    真实实例 2 万+ 条目导致 ``_TEAM_KNOWLEDGE_WALK_ENTRY_LIMIT`` 必然触顶返回
+    None，访问缓存在生产上从未生效，每轮重付全量 overview 成本。
     """
 
     try:
@@ -112,14 +118,23 @@ def _team_knowledge_storage_signature() -> tuple[object, ...] | None:
         root = team_knowledge_service._route_team_knowledge_workspace_path(seed=False)
         parts.append(("root", str(root)))
         visited = 0
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames.sort()
-            for name in sorted(filenames):
-                visited += 1
-                if visited > _TEAM_KNOWLEDGE_WALK_ENTRY_LIMIT:
-                    return None
-                if name in _TEAM_KNOWLEDGE_STORAGE_FILENAMES:
-                    parts.append(("file", *_path_stat_signature(Path(dirpath) / name)))
+        for owner_scope in ("agents", "teams"):
+            try:
+                owner_ids = sorted(os.listdir(root / owner_scope))
+            except OSError:
+                owner_ids = []
+            for owner_id in owner_ids:
+                knowledge_dir = root / owner_scope / owner_id / "knowledge"
+                if not knowledge_dir.is_dir():
+                    continue
+                for dirpath, dirnames, filenames in os.walk(knowledge_dir):
+                    dirnames.sort()
+                    for name in sorted(filenames):
+                        visited += 1
+                        if visited > _TEAM_KNOWLEDGE_WALK_ENTRY_LIMIT:
+                            return None
+                        if name in _TEAM_KNOWLEDGE_STORAGE_FILENAMES:
+                            parts.append(("file", *_path_stat_signature(Path(dirpath) / name)))
         project_root = Path(team_service.PROJECT_ROOT).resolve()
         teams_index = developer_sandbox.sandboxed_workspace_path(project_root, "teams") / "teams.json"
         parts.append(("teamsIndex", *_path_stat_signature(teams_index)))
