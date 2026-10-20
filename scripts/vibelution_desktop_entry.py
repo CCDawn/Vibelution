@@ -2315,6 +2315,7 @@ def _ensure_frontend_build_bridge(args: argparse.Namespace) -> dict[str, object]
         skipped=bool(payload["skipped"]),
         rebuilt=bool(payload["rebuilt"]),
         build_key=str(payload["buildKey"]),
+        timings_ms=dict(build.get("timingsMs") or {}),
     )
     return payload
 
