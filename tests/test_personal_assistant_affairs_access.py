@@ -47,7 +47,10 @@ def test_existing_query_default_upgrades_only_on_explicit_setup(personal_env, cu
     # platform tool joined TOOLS the synthetic "TOOLS minus affairs" hybrid is
     # no longer one of them.
     prior_tools = list(assistant._PRE_AFFAIRS_TOOLS)
-    policy = {**assistant.current_policy(), "allowedTools": prior_tools, "preferredTools": prior_tools}
+    # That generation predates approvalOverrides; mixing in today's policy
+    # produces a custom snapshot that explicit setup correctly leaves intact.
+    policy = {**assistant.PRIVATE_V2_POLICY, "networkAccess": "restricted",
+        "allowedTools": prior_tools, "preferredTools": prior_tools}
     if custom == "network":
         policy["networkAccess"] = "none"
     elif custom == "blocked":
