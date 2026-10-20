@@ -1356,6 +1356,7 @@ export const ConversationView = React.memo(function ConversationView({
     renderCodexTranscriptCells,
   } = createConversationCodexSurface({
     lang,
+    phase,
     sessionId,
     toolApproval,
     toolApprovalConsumedRef,

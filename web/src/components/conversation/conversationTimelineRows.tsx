@@ -794,7 +794,7 @@ export function createConversationTimelineRows({
             const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
               ? getCachedResponseSegments(responseText)
               : [];
-            const codexTranscriptNode = (
+            const codexTranscript = (
               displayPlan.shouldRenderCodexSurface
               && !agentInboxMessage
               && !groupTranscriptMessage
@@ -807,6 +807,7 @@ export function createConversationTimelineRows({
                 companionVisibleSpeech,
               )
               : null;
+            const codexTranscriptNode = codexTranscript?.node ?? null;
             // Todo checklist card: client-derived from the latest journaled
             // todo_write call in this turn (no extra SSE event). Companion and
             // private-message surfaces stay minimal by contract.
@@ -916,7 +917,7 @@ export function createConversationTimelineRows({
               hasFeedbackTimeline,
               hasActiveProcess: hasRunningToolOperation,
               turnErrorMessage,
-              // Avoid "状态" placeholder stacking above an already-visible codex process trail.
+              // The visible work disclosure owns routine progress; its advisories remain below.
               hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
             });
             // Prefer compact active-turn note over projected turnStatus for in-flight shells.
@@ -928,11 +929,14 @@ export function createConversationTimelineRows({
                 <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
               </div>
             ) : null;
-            const compactActiveTurnPlaceholderNode = !companionMode && showCompactActiveTurnPlaceholder ? (
+            const hasVisibleWorkDisclosure = Boolean(codexTranscript?.hasWorkDisclosure);
+            const showWorkAdvisories = hasVisibleWorkDisclosure && assistantTurnIsInFlight(message) && !turnErrorMessage;
+            const compactActiveTurnPlaceholderNode = !companionMode && (showCompactActiveTurnPlaceholder || showWorkAdvisories) ? (
               <ConversationActiveTurnStatusNote
                 message={message}
                 lang={lang}
                 phase={phase}
+                advisoriesOnly={hasVisibleWorkDisclosure}
                 statusLabel={lang === "zh" ? "状态" : "Status"}
               />
             ) : null;

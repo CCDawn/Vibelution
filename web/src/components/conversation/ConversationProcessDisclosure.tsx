@@ -6,9 +6,11 @@ import React, {
   useId,
   useEffect,
   useRef,
+  useState,
 } from "react";
 
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
+import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresentation";
 import {
   codexTranscriptToolDurationSeconds,
   codexTranscriptToolRawName,
@@ -37,6 +39,9 @@ type ConversationProcessDisclosureProps = {
    * the process rail collapses to "已处理" mid-turn and hides the trail.
    */
   turnStreaming?: boolean;
+  /** Canonical turn start (message timestamp fallback); never a reasoning-segment clock. */
+  turnStartedAt?: string;
+  activeStage?: string;
   /**
    * Settled-turn work summary (ZCode AssistantHistoryStatus parity): supplies
    * the authoritative worked time and lets the same trigger degrade to 「已处理」
@@ -150,6 +155,7 @@ export function processLabel(
   messageOrder?: ReadonlyMap<string, number>,
   turnStreaming = false,
   workSummary?: ConversationTurnWorkSummary | null,
+  liveElapsedSeconds?: number | null,
 ) {
   const state = processState(cells, messageOrder, turnStreaming);
   const labels = language === "zh"
@@ -157,22 +163,28 @@ export function processLabel(
       completed: "已处理",
       completedWithDuration: "已工作",
       failed: "工具失败",
-      running: "处理中",
+      running: "工作中",
       runningWithDuration: "工作中",
     }
     : {
       completed: "Processed",
       completedWithDuration: "Worked for",
       failed: "Tool failed",
-      running: "Processing",
+      running: "Working",
       runningWithDuration: "Working for",
     };
   const duration = processDuration(cells);
-  // Turn-level worked time outranks the tool-duration sum: it is the fact the
-  // backend measured, and it is what makes 「已工作」 possible at all.
-  const durationLabel = workSummary
-    ? formatConversationTurnWorkDuration(workSummary.durationMs, language)
-    : (duration === null ? "" : formatCodexTranscriptDuration(duration));
+  // Live work uses the turn clock; a sum of tool durations cannot describe a
+  // running turn. Settled work keeps the backend summary as its first choice.
+  const durationLabel = state === "running"
+    ? liveElapsedSeconds == null
+      ? ""
+      : liveElapsedSeconds === 0
+        ? (language === "zh" ? "0 秒" : "0s")
+        : formatConversationTurnWorkDuration(liveElapsedSeconds * 1000, language)
+    : workSummary
+      ? formatConversationTurnWorkDuration(workSummary.durationMs, language)
+      : (duration === null ? "" : formatCodexTranscriptDuration(duration));
   // Codex shows model retries only as a live status heartbeat; the settled
   // process summary never carries a retry row or a retry note.
   const retryFreeCells = cells.filter((cell) => !isRetryCell(cell));
@@ -248,10 +260,22 @@ export function ConversationProcessDisclosure({
   messageOrder,
   onUserToggle,
   turnStreaming = false,
+  turnStartedAt,
+  activeStage,
   workSummary = null,
 }: ConversationProcessDisclosureProps) {
   const state = processState(cells, messageOrder, turnStreaming);
   const running = state === "running";
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running || activeTurnElapsedSeconds(turnStartedAt, Date.now()) === null) {
+      return undefined;
+    }
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running, turnStartedAt]);
+  const elapsedSeconds = running ? activeTurnElapsedSeconds(turnStartedAt, nowMs) : null;
   const {
     expanded,
     handleContentTransitionEnd,
@@ -266,7 +290,7 @@ export function ConversationProcessDisclosure({
       summaryRef.current?.focus({ preventScroll: true });
     }
   }, [expanded]);
-  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary);
+  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary, elapsedSeconds);
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
     : "Expand or collapse process details";
@@ -282,6 +306,8 @@ export function ConversationProcessDisclosure({
       data-codex-process-state={state}
       data-codex-process-expanded={expanded ? "true" : "false"}
       data-codex-process-turn-streaming={turnStreaming ? "true" : undefined}
+      data-active-turn-stage={turnStreaming ? activeStage : undefined}
+      data-codex-process-elapsed-seconds={elapsedSeconds ?? undefined}
       aria-live={running ? "polite" : undefined}
       open={mounted || turnStreaming}
     >
