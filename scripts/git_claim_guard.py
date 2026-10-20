@@ -12,6 +12,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TextIO
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from scripts import claim_dormancy  # noqa: E402
+
 PERMIT_SCHEMA_VERSION = 1
 PERMIT_TTL_SECONDS = 60
 ACTIVE_CLAIM_STATUSES = {"active", "ready"}
@@ -225,6 +231,74 @@ def _auto_agent_id(root: Path, branch: str) -> str:
     return f"worktree-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16]}"
 
 
+def _overlaps_any_path(claim: dict[str, object], paths: Sequence[str]) -> bool:
+    scopes = claim.get("scopes")
+    if not isinstance(scopes, list):
+        return False
+    return any(
+        _scope_covers(str(scope), path) or _scope_covers(path, str(scope))
+        for scope in scopes
+        if isinstance(scope, str)
+        for path in paths
+    )
+
+
+def release_dormant_blocking_claims(
+    root: Path,
+    *,
+    claims: Sequence[dict[str, object]],
+    agents: Sequence[dict[str, object]],
+    own_agent_id: str,
+    paths: Sequence[str],
+    now: datetime | None = None,
+) -> list[str]:
+    """Auto-demote foreign overlapping claims whose owner worktree is dormant.
+
+    A session cut off mid-task (locked machine, closed client) never releases
+    its claim, which then blocks sibling commits for the full TTL. Dormancy is
+    evidence-based (see scripts/claim_dormancy.py): no coordination activity
+    AND no file activity in the owning worktree for longer than the threshold.
+    The released claim's branch and worktree are left intact for revival.
+    """
+
+    released: list[str] = []
+    current = now or _utc_now()
+    for item in claims:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("agentId") or "") == own_agent_id:
+            continue
+        if item.get("status") not in ACTIVE_CLAIM_STATUSES:
+            continue
+        if not _overlaps_any_path(item, paths):
+            continue
+        verdict = claim_dormancy.assess_claim_dormancy(
+            item,
+            agents,
+            now=current,
+        )
+        if not verdict.dormant:
+            continue
+        claim_id = str(item.get("id") or "")
+        coordination_call(
+            root,
+            "release",
+            "--claim-id",
+            claim_id,
+            "--status",
+            "released",
+            "--reason",
+            "Auto-demoted by claim guard: "
+            f"{verdict.reason}; branch and worktree left intact for revival",
+        )
+        released.append(claim_id)
+        print(
+            f"[claim-guard] auto-demoted dormant claim {claim_id}: {verdict.reason}",
+            file=sys.stderr,
+        )
+    return released
+
+
 def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
     root_path = repository_root(root)
     branch = _git_value(root_path, "branch", "--show-current")
@@ -290,6 +364,13 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
                 "--ttl-minutes",
                 "240",
             )
+        release_dormant_blocking_claims(
+            root_path,
+            claims=claims,
+            agents=agents,
+            own_agent_id=agent_id,
+            paths=paths,
+        )
         for existing in claims:
             if (
                 isinstance(existing, dict)

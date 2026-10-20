@@ -292,6 +292,7 @@ def test_real_hook_blocks_manual_main_update_and_accepts_one_permit(
     project_root = Path(__file__).resolve().parents[1]
     (root / "scripts").mkdir()
     shutil.copy2(project_root / "scripts" / "git_claim_guard.py", root / "scripts")
+    shutil.copy2(project_root / "scripts" / "claim_dormancy.py", root / "scripts")
     hooks = root / ".githooks"
     hooks.mkdir()
     shutil.copy2(project_root / ".githooks" / "reference-transaction", hooks)
@@ -403,3 +404,97 @@ def test_closeout_identity_can_be_loaded_from_worktree_binding(
         "claim-auto",
         "agent-auto",
     )
+
+
+def _aged_foreign_claim(root: Path, tmp_path: Path, *, age_minutes: int) -> tuple[dict[str, object], list[dict[str, object]], Path]:
+    sibling = tmp_path / "sibling-worktree"
+    sibling.mkdir()
+    (sibling / "hot.py").write_text("foreign = 1\n", encoding="utf-8")
+    stamp = (
+        datetime.now(timezone.utc) - timedelta(minutes=age_minutes)
+    ).timestamp()
+    for path in sibling.rglob("*"):
+        os.utime(path, (stamp, stamp))
+    claim = {
+        "id": "claim-foreign",
+        "agentId": "worktree-sibling",
+        "status": "active",
+        "scopes": ["hot.py"],
+        "updatedAt": (
+            datetime.now(timezone.utc) - timedelta(minutes=age_minutes)
+        )
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+    agents = [
+        {
+            "id": "worktree-sibling",
+            "state": "active",
+            "branch": "codex/sibling-task",
+            "worktree": str(sibling),
+        }
+    ]
+    return claim, agents, sibling
+
+
+def test_ensure_claim_auto_releases_dormant_overlapping_foreign_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _repo(tmp_path)
+    _git(root, "switch", "-c", "codex/example")
+    (root / "hot.py").write_text("value = 1\n", encoding="utf-8")
+    _git(root, "add", "hot.py")
+    claim, agents, _sibling = _aged_foreign_claim(root, tmp_path, age_minutes=45)
+    calls: list[tuple[str, ...]] = []
+
+    def coordination(_root: Path, *arguments: str) -> dict[str, object]:
+        calls.append(arguments)
+        if arguments[0] == "status":
+            return {"agents": agents, "claims": [claim]}
+        if arguments[0] in {"join", "release"}:
+            return {"ok": True}
+        assert arguments[0] == "claim"
+        return {
+            "ok": True,
+            "claim": {
+                "id": "claim-auto",
+                "agentId": arguments[arguments.index("--agent-id") + 1],
+                "scopes": ["hot.py"],
+            },
+        }
+
+    monkeypatch.setattr(guard, "coordination_call", coordination)
+
+    binding = guard.ensure_development_claim(root)
+
+    release_call = next(item for item in calls if item[0] == "release")
+    assert release_call[release_call.index("--claim-id") + 1] == "claim-foreign"
+    assert "Auto-demoted by claim guard" in release_call[release_call.index("--reason") + 1]
+    assert binding.claim_id == "claim-auto"
+
+
+def test_ensure_claim_keeps_blocking_on_active_overlapping_foreign_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _repo(tmp_path)
+    _git(root, "switch", "-c", "codex/example")
+    (root / "hot.py").write_text("value = 1\n", encoding="utf-8")
+    _git(root, "add", "hot.py")
+    claim, agents, _sibling = _aged_foreign_claim(root, tmp_path, age_minutes=4)
+    calls: list[tuple[str, ...]] = []
+
+    def coordination(_root: Path, *arguments: str) -> dict[str, object]:
+        calls.append(arguments)
+        if arguments[0] == "status":
+            return {"agents": agents, "claims": [claim]}
+        if arguments[0] == "join":
+            return {"id": arguments[arguments.index("--agent-id") + 1]}
+        assert arguments[0] == "claim"
+        raise guard.ClaimGuardError("claim_overlap")
+
+    monkeypatch.setattr(guard, "coordination_call", coordination)
+
+    with pytest.raises(guard.ClaimGuardError, match="claim_overlap"):
+        guard.ensure_development_claim(root)
+
+    assert not any(item[0] == "release" for item in calls)
