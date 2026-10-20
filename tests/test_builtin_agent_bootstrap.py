@@ -75,6 +75,10 @@ def test_platform_planner_builtin_contract(fresh_deployment):
     ]
     assert planner["toolPolicy"]["networkAccess"] == "none"
     assert planner["toolPolicy"]["mutationAccess"] == "restricted"
+    # Dispatch is the planner's core loop, not a risky mutation: exempt it
+    # from the HIGH tier's default on_request approval wait; the receiving
+    # Agent's own native approval chain stays the safety boundary.
+    assert planner["toolPolicy"]["approvalOverrides"] == {"agent_message_tool": "never"}
     assert planner["toolPolicyId"] == f"tool-{planner_id}"
     assert directory.evaluate_tool_policy(
         "agent_message_tool", {}, policy=planner["toolPolicy"], agent_id=planner_id
