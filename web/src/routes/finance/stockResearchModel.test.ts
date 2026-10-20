@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary, SessionTurnItem } from "../../api/types";
-import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockFromResearchRequest, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
+import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, latestResearchSubject, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockFromResearchRequest, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
 
 const stock = { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" };
 function turn(status = "completed", items: unknown[] = []): AssistantConversationTurn { return { role: "assistant", id: "a", turnId: "t", status: status as AssistantConversationTurn["status"], timestamp: "2026-10-04T12:00:00Z", turnItems: items as SessionTurnItem[] }; }
@@ -97,6 +97,75 @@ describe("stock research projections", () => {
     const resumed = { ...original, turnId: "resumed" };
     expect(projectStockReport([stopped, resumed], { terminalReason: "success" })?.turnId).toBe("resumed");
     expect(projectStockReport([original], { terminalReason: "needs_continue", lastTurnTerminalTurnId: "original" })).toBeNull();
+  });
+
+  it("selects the latest completed topic research after stock research and ordinary follow-ups", () => {
+    const request = (id: string, content: string): ConversationMessage => ({ role: "user", id, timestamp: "", content });
+    const answer = (turnId: string, text: string) => ({ ...turn("completed", [{ ...final, text }]), turnId });
+    const messages: ConversationMessage[] = [
+      request("stock", stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")),
+      answer("stock-report", "## 结论\n原单股报告。"),
+      request("topic", "请对以下主题开展投资研究：降息对银行业的影响。分析截至 2026-10-05。生成完整研究报告。"),
+      answer("topic-report", "## 结论\n银行业主题报告。"),
+      request("topic-next", "请对以下主题开展投资研究：600519 与消费行业。分析截至 2026-10-06。生成完整研究报告。"),
+      answer("topic-next-report", "## 结论\n最新消费主题报告。"),
+      request("follow", "用三句话总结，600519有什么风险？"),
+      answer("follow-report", "三句话的追问答复。"),
+    ];
+    expect(projectStockReport(messages)?.turnId).toBe("topic-next-report");
+    expect(projectStockReport(messages)?.text).toBe("## 结论\n最新消费主题报告。");
+    expect(latestResearchSubject(messages)).toEqual({ kind: "topic" });
+    expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(false);
+    messages.push(request("rewrite-follow", "600519呢？"), answer("rewrite-follow-answer", "追问答复。"), request("rewrite-topic", "重写完整研究报告"), answer("rewritten-topic-report", "## 结论\n重新核对后的消费主题报告。"));
+    expect(projectStockReport(messages)?.turnId).toBe("rewritten-topic-report");
+    expect(latestResearchSubject(messages)).toEqual({ kind: "topic" });
+    expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(false);
+    expect(latestResearchSubject(messages.slice(0, 2))).toEqual({ kind: "stock", stock });
+    expect(latestResearchSubject([request("follow-only", "600519现金流如何？")])).toBeNull();
+  });
+
+  it("uses each new native team synthesis as a research report and keeps its stock", () => {
+    const messages: ConversationMessage[] = [];
+    for (const symbol of ["sh600519", "sz000001", "usBRK.B"]) {
+      const content = `你是主助手的股票研究汇总角色。请综合股票 ${symbol} 的多分析师研究。研究日期：2026-10-07；观察周期：近30天。\n引用：600519`;
+      messages.push({ role: "user", id: symbol, timestamp: "", content }, { ...turn("completed", [final]), turnId: symbol });
+      expect(projectStockReport(messages)?.turnId).toBe(symbol);
+      expect(latestResearchSubject(messages)).toMatchObject({ kind: "stock", stock: { symbol } });
+      expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(symbol === stock.symbol);
+    }
+    messages.push({ role: "user", id: "follow", timestamp: "", content: "用三句话总结" }, { ...turn("completed", [final]), turnId: "follow" });
+    expect(projectStockReport(messages)?.turnId).toBe("usBRK.B");
+    expect(latestResearchSubject(messages)).toMatchObject({ kind: "stock", stock: { symbol: "usBRK.B" } });
+  });
+
+  it("retains the last completed report when a newer topic is stopped or unfinished", () => {
+    const request = (id: string): ConversationMessage => ({ role: "user", id, timestamp: "", content: `请对以下主题开展投资研究：${id}。分析截至 2026-10-06。` });
+    const original = { ...turn("completed", [final]), turnId: "original-topic" };
+    for (const [status, text, outcome] of [
+      ["completed", "本轮已按请求停止。", "stopped_by_user"],
+      ["completed", "This turn was stopped as requested.", "success"],
+      ["running", "未完成的主题报告。", ""],
+      ["completed", "待继续的主题报告。", "needs_continue"],
+      ["completed", "失败的主题报告。", "failed_provider"],
+    ]) {
+      const messages = [request("topic-one"), original, request("topic-two"), { ...turn(status, [{ ...final, text }]), turnId: "new-topic" }];
+      expect(projectStockReport(messages, { terminalReason: outcome, lastTurnTerminalTurnId: "new-topic" })?.turnId).toBe("original-topic");
+      expect(latestResearchSubject(messages)).toEqual({ kind: "topic" });
+    }
+  });
+
+  it("recognizes screening and explicit report rewrites without losing the existing subject", () => {
+    const stockRequest: ConversationMessage = { role: "user", id: "stock", timestamp: "", content: stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief") };
+    for (const content of ["重新生成完整研究报告", "更新研报", "rewrite the full research report"]) {
+      const messages: ConversationMessage[] = [stockRequest, { ...turn("completed", [final]), turnId: "old" }, { role: "user", id: "rewrite", timestamp: "", content }, { ...turn("completed", [final]), turnId: "rewrite" }];
+      expect(projectStockReport(messages)?.turnId).toBe("rewrite");
+      expect(latestResearchSubject(messages)).toEqual({ kind: "stock", stock });
+      expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(true);
+    }
+    const screening: ConversationMessage = { role: "user", id: "screen", timestamp: "", content: "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。按条件筛选股票，列出候选、筛选依据和数据限制。\n用户选股条件：比较600519" };
+    const messages: ConversationMessage[] = [stockRequest, { ...turn("completed", [final]), turnId: "stock" }, screening, { ...turn("completed", [final]), turnId: "screen" }];
+    expect(latestResearchSubject(messages)).toEqual({ kind: "topic" });
+    expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(false);
   });
 
   it("distinguishes native terminal outcomes from the ready phase", () => {

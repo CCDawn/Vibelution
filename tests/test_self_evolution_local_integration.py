@@ -127,6 +127,21 @@ def harness(tmp_path, monkeypatch):
                            prepare_calls=prepare_calls, save=save, authorize=authorize)
 
 
+def test_campaign_principal_checks_use_bound_roles_instead_of_global_slots(harness, monkeypatch):
+    from core.web.services import self_evolution_campaign_binding as binding
+
+    context = deepcopy(harness.snapshot)
+    context["request"]["roleBindingFlowId"] = "diagnosis"
+    captured = []
+    monkeypatch.setattr(binding, "campaign_bindings",
+                        lambda item: captured.append(item) or deepcopy(harness.bindings))
+    harness.adapter.load_bindings = lambda: pytest.fail("Campaign used global roles")
+    principals = harness.adapter._principals("existing-team", context=context)
+    assert captured == [context]
+    assert {role: value["agentId"] for role, value in principals.items()} == {
+        role: role for role in local._ROLES}
+
+
 @pytest.mark.parametrize("patch", [
     {"acknowledge": False}, {"acknowledge": "true"}, {"validForSeconds": True},
     {"validForSeconds": "600"}, {"validForSeconds": 59}, {"validForSeconds": 3601},

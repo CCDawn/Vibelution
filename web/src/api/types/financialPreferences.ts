@@ -15,11 +15,18 @@ export type FinancialManualPosition = {
 export type FinancialReviewCase = {
   id: string; sessionId: string; turnId: string; title: string; tags: string[]; note: string;
 };
+export type FinancialInvestmentProfile = {
+  budgetCny?: number | null; horizonMonths?: number | null;
+  flexibleHorizon?: boolean | null; maxLossCny?: number | null;
+  cashReserveCny?: number | null; maxPositionPct?: number | null;
+  market?: "CN"; holdingsStatus?: "unknown" | "none" | "recorded";
+};
 export type FinancialWorkspaceSettings = {
   schemaVersion: 1; agentId: string; revision: number; updatedAt: string;
   selectedStock: StockIdentity | null; watchlist: FinancialWatchStock[];
   profiles: FinancialResearchProfile[]; manualPositions: FinancialManualPosition[];
   reviewCases: FinancialReviewCase[];
+  investmentProfile?: FinancialInvestmentProfile | null;
 };
 export type FinancialWorkspacePatch = Partial<Pick<FinancialWorkspaceSettings,
-  "selectedStock" | "watchlist" | "profiles" | "manualPositions" | "reviewCases">>;
+  "selectedStock" | "watchlist" | "profiles" | "manualPositions" | "reviewCases" | "investmentProfile">>;

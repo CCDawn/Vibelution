@@ -15,9 +15,10 @@ from core.infrastructure.file_lock import cross_process_file_lock
 from core.web.services import financial_market_service as market
 from core.web.services.financial_preferences_service import FinancialPreferenceError, _agent
 from core.web.services.financial_team import runs
+from .investment import normalize_investment_profile
 
 _LOCK = threading.RLock()
-_SECTIONS = {"selectedStock", "watchlist", "profiles", "manualPositions", "reviewCases"}
+_SECTIONS = {"selectedStock", "watchlist", "profiles", "manualPositions", "reviewCases", "investmentProfile"}
 _PERSISTED_FIELDS = {"schemaVersion", "agentId", "revision", "updatedAt", *_SECTIONS}
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
@@ -108,6 +109,8 @@ def _case(row: Any) -> dict:
 
 
 def _section(key: str, value: Any) -> Any:
+    if key == "investmentProfile":
+        return normalize_investment_profile(value)
     if key == "selectedStock":
         return None if value is None else _stock(value)
     limits = {"watchlist": (50, _watch, "symbol"), "profiles": (20, _profile, "id"), "manualPositions": (50, _position, "id"), "reviewCases": (100, _case, "id")}
@@ -126,7 +129,7 @@ def _path(agent_id: str) -> Path:
 
 
 def _empty(agent_id: str) -> dict:
-    return {"schemaVersion": 1, "agentId": agent_id, "revision": 0, "updatedAt": "", "selectedStock": None, "watchlist": [], "profiles": [], "manualPositions": [], "reviewCases": []}
+    return {"schemaVersion": 1, "agentId": agent_id, "revision": 0, "updatedAt": "", "selectedStock": None, "watchlist": [], "profiles": [], "manualPositions": [], "reviewCases": [], "investmentProfile": None}
 
 
 def _load(path: Path, agent_id: str) -> dict:
@@ -146,7 +149,7 @@ def _load(path: Path, agent_id: str) -> dict:
             or set(raw) - _PERSISTED_FIELDS
         ):
             raise ValueError("identity")
-        return {**_empty(agent_id), "revision": raw["revision"], "updatedAt": _text(raw.get("updatedAt", ""), 80, empty=True), **{key: _section(key, raw.get(key, None if key == "selectedStock" else [])) for key in _SECTIONS}}
+        return {**_empty(agent_id), "revision": raw["revision"], "updatedAt": _text(raw.get("updatedAt", ""), 80, empty=True), **{key: _section(key, raw.get(key, None if key in {"selectedStock", "investmentProfile"} else [])) for key in _SECTIONS}}
     except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
         raise FinancialPreferenceError("设置文件无法安全读取，未覆盖现有数据", 409) from exc
 

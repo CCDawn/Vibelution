@@ -8,6 +8,8 @@ export type FinancialDraftRequest = {
   sessionId: string;
   text: string;
   submit?: boolean;
+  /** Persistent advisor sessions may already contain an unsent user draft. */
+  preserveExistingDraft?: boolean;
   depth?: ResearchDepth;
   /** Explicit selection from the source research view; undefined keeps the target session's existing pin. */
   modelSelection?: SessionModelSelection | null;
@@ -39,6 +41,7 @@ type FinancialResearchBridgeValue = {
   draftRequest: FinancialDraftRequest | null;
   onSessionView: (view: FinancialSessionView) => void;
   onDraftSubmitted?: (id: number) => void;
+  onDraftBlocked?: (id: number, reason: "busy" | "unsent_draft") => void;
   onActiveTurn?: (sessionId: string, turn: AssistantConversationTurn | null) => void;
 };
 export const FinancialResearchBridgeContext = createContext<FinancialResearchBridgeValue | null>(null);
@@ -158,6 +161,13 @@ export function useFinancialResearchSessionBridge({
   useEffect(() => {
     if (!authorized || !request || request.sessionId !== sessionId || consumedRequest.current === request.id) return;
     consumedRequest.current = request.id;
+    if (request.submit && request.preserveExistingDraft
+      && (busy || stopping || submitPending || transcriptPending || (composerValue?.trim() && composerValue !== request.text))) {
+      submittedRequest.current = request.id;
+      bridge?.onDraftBlocked?.(request.id, busy || stopping || submitPending || transcriptPending ? "busy" : "unsent_draft");
+      onFocusComposer(sessionId);
+      return;
+    }
     const previousPending = pendingModelSelection.current;
     const previousSelection = previousPending?.sessionId === sessionId
       ? previousPending.previous
@@ -189,7 +199,7 @@ export function useFinancialResearchSessionBridge({
       : request.text;
     if (text !== composerValue) onComposerChange(text);
     onFocusComposer(sessionId);
-  }, [authorized, composerValue, onComposerChange, onFocusComposer, onTurnModelSelectionChange, request, sessionId, sessionLlmOptions, sessionLlmOptionsError, sessionLlmOptionsLoading, turnModelSelection]);
+  }, [authorized, composerValue, onComposerChange, onFocusComposer, onTurnModelSelectionChange, request, sessionId, sessionLlmOptions, sessionLlmOptionsError, sessionLlmOptionsLoading, turnModelSelection, busy, stopping, submitPending, transcriptPending, bridge]);
   useEffect(() => {
     const pending = pendingModelSelection.current;
     if (!pending || (!pending.waitingForOptions && !pending.blocked) || !authorized || !request || request.id !== pending.requestId || request.sessionId !== sessionId
@@ -219,6 +229,15 @@ export function useFinancialResearchSessionBridge({
   }, [authorized, composerValue, onTurnModelSelectionChange, request, sessionId]);
   const submitted = bridge?.onDraftSubmitted;
   useEffect(() => {
+    if (authorized && request?.submit && request.preserveExistingDraft && request.sessionId === sessionId
+      && consumedRequest.current === request.id && submittedRequest.current !== request.id && (busy || stopping || submitPending)) {
+      submittedRequest.current = request.id;
+      const pending = pendingModelSelection.current;
+      pendingModelSelection.current = null;
+      if (pending) onTurnModelSelectionChange?.(pending.sessionId, pending.previous);
+      bridge?.onDraftBlocked?.(request.id, "busy");
+      return;
+    }
     if (!authorized || !request?.submit || request.sessionId !== sessionId || submittedRequest.current === request.id
       || consumedRequest.current !== request.id || composerValue !== request.text || busy || stopping || submitPending || transcriptPending
       || (request.depth && sessionLlmOptionsLoading) || !onSubmit) return;
@@ -237,7 +256,7 @@ export function useFinancialResearchSessionBridge({
         onTurnModelSelectionChange?.(pending.sessionId, pending.previous);
       }
     }
-  }, [authorized, busy, composerValue, onSubmit, onTurnModelSelectionChange, request, sessionId, sessionLlmOptionsLoading, stopping, submitPending, submitted, transcriptPending, turnModelSelection]);
+  }, [authorized, busy, composerValue, onSubmit, onTurnModelSelectionChange, request, sessionId, sessionLlmOptionsLoading, stopping, submitPending, submitted, transcriptPending, turnModelSelection, bridge]);
   const publish = bridge?.onSessionView;
   const publishedSessionLlmOptions = optionsMatchSession ? sessionLlmOptions : undefined;
   const publishedSessionLlmOptionsLoading = sessionLlmOptionsLoading || Boolean(sessionLlmOptions && !optionsMatchSession);
@@ -250,6 +269,6 @@ export function useFinancialResearchSessionBridge({
       sessionLlmOptionsError, turnModelSelection: turnModelSelection ?? null,
       onTurnModelSelectionChange,
     });
-  }, [agentId, approvalPending, authorized, busy, error, lastTurnStatus, lastTurnTerminalTurnId, messages, onTurnModelSelectionChange, phase, publish, publishedSessionLlmOptions, publishedSessionLlmOptionsLoading, sessionId, sessionLlmOptionsError, status, stopping, submitPending, terminalReason, title, transcriptPending, turnModelSelection]);
+  }, [agentId, approvalPending, authorized, busy, error, lastTurnStatus, lastTurnTerminalTurnId, messages, onTurnModelSelectionChange, phase, publish, publishedSessionLlmOptions, publishedSessionLlmOptionsLoading, sessionId, sessionLlmOptionsError, status, stopping, submitPending, terminalReason, title, transcriptPending, turnModelSelection, bridge]);
   return bridge !== null;
 }
