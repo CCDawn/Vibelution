@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, OrderedDict
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from threading import Lock
 from time import perf_counter
@@ -180,6 +180,133 @@ class AuthorizationReport:
     deny_code_counts: tuple[tuple[str, int], ...]
     registry_fingerprint: str
     duration_ms: int
+    # TTFT 批五任务 C：turn 无关决策模板缓存身份。命中时非空且表示本决策由
+    # 输入完全相同的上一次评估模板重建（含本轮 turn_id/时间戳/指纹）。
+    decision_cache_key: str = ""
+    # 本决策是否来自模板缓存命中（False = 全量评估）。
+    decision_cache_hit: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Turn-independent decision template cache (TTFT batch 5 task C)
+#
+# ``evaluate_tool_policy`` 的输出中只有 turn_id、generated_at 与
+# decision_fingerprint（含 turnId）是回合相关的；其余（visible/executable/
+# denied/approval_requirements）是以下回合无关输入的纯函数：
+#   agent_id、policy 投影、grant 去掉 turnId 的投影、registry descriptors、
+#   registry 版本/指纹、available_tool_names、externally_blocked_tools。
+# （``_role_policy_projection`` 只读 ``agent_role_tool_profile_service`` 的
+# 模块内常量表，无外部 I/O，因此 policy 投影由这些输入完全决定。）
+# 对这些输入做 sha256 签名，签名未变时跳过全量 rule 评估，用模板重建本回合
+# 决策（新 turn_id + 相同口径重算指纹）。策略/注册表/封禁名单任一变化都会
+# 改变签名并自动失效。
+# ---------------------------------------------------------------------------
+_TURN_DECISION_TEMPLATE_CACHE_MAX = 16
+_TURN_DECISION_TEMPLATE_LOCK = Lock()
+_TURN_DECISION_TEMPLATES: "OrderedDict[str, tuple[AuthorizationDecision, dict[str, Any]]]" = OrderedDict()
+
+
+def _fingerprint_canonical(value: Any) -> str:
+    # 与 evaluator 的 _fingerprint 使用同一序列化参数，保证重建指纹与全量
+    # 评估产生的指纹逐位一致（同包内私有复用，避免口径漂移）。
+    from .tool_policy_evaluator import _fingerprint
+
+    return _fingerprint(value)
+
+
+def _descriptor_cache_projection(descriptors: Sequence[_RegistryDescriptor]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": descriptor.name,
+            "enabled": bool(descriptor.enabled),
+            "capabilities": list(descriptor.capabilities),
+            "risk": descriptor.risk,
+            "approval": descriptor.approval,
+            "aliases": list(descriptor.aliases),
+            "writeScopeGated": bool(descriptor.write_scope_gated),
+        }
+        for descriptor in descriptors
+    ]
+
+
+def _turn_decision_cache_key(
+    *,
+    agent_id: str,
+    policy: Any,
+    grant: TurnToolGrant,
+    descriptors: Sequence[_RegistryDescriptor],
+    registry_version: int,
+    registry_fingerprint: str,
+    available_names: Sequence[str],
+    externally_blocked_tools: Sequence[str],
+) -> str:
+    grant_projection = grant.public_projection()
+    grant_projection.pop("turnId", None)
+    payload = {
+        "agentId": str(agent_id or "").strip(),
+        "policy": policy.public_projection(),
+        "grantBase": grant_projection,
+        "descriptors": _descriptor_cache_projection(descriptors),
+        "registryVersion": int(registry_version),
+        "registryFingerprint": str(registry_fingerprint or "").strip(),
+        "availableToolNames": sorted({str(name or "").strip() for name in available_names if str(name or "").strip()}),
+        "externallyBlockedTools": sorted({str(name or "").strip() for name in externally_blocked_tools if str(name or "").strip()}),
+    }
+    return _fingerprint_canonical(payload)
+
+
+def _rehydrate_turn_decision(
+    template: AuthorizationDecision,
+    *,
+    policy_projection: Mapping[str, Any],
+    grant: TurnToolGrant,
+    registry_fingerprint: str,
+    generated_at: str,
+) -> AuthorizationDecision:
+    """Rebuild one turn-scoped decision from a cached turn-independent template."""
+
+    decision_payload = {
+        "agentId": template.agent_id,
+        "turnId": grant.turn_id,
+        "policy": dict(policy_projection),
+        "grant": grant.public_projection(),
+        "registryVersion": template.registry_version,
+        "registryFingerprint": str(registry_fingerprint or "").strip(),
+        "visibleTools": list(template.visible_tools),
+        "executableTools": list(template.executable_tools),
+        "preferredTools": list(template.preferred_tools),
+        "denied": {name: reason.public_projection() for name, reason in template.denied},
+        "approvalRequirements": [list(item) for item in template.approval_requirements],
+    }
+    return replace(
+        template,
+        turn_id=grant.turn_id,
+        generated_at=str(generated_at or ""),
+        decision_fingerprint=_fingerprint_canonical(decision_payload),
+    )
+
+
+def _cached_turn_decision_template(key: str) -> tuple[AuthorizationDecision, dict[str, Any]] | None:
+    with _TURN_DECISION_TEMPLATE_LOCK:
+        entry = _TURN_DECISION_TEMPLATES.get(key)
+        if entry is not None:
+            _TURN_DECISION_TEMPLATES.move_to_end(key)
+        return entry
+
+
+def _store_turn_decision_template(key: str, decision: AuthorizationDecision, policy_projection: dict[str, Any]) -> None:
+    with _TURN_DECISION_TEMPLATE_LOCK:
+        _TURN_DECISION_TEMPLATES[key] = (decision, policy_projection)
+        _TURN_DECISION_TEMPLATES.move_to_end(key)
+        while len(_TURN_DECISION_TEMPLATES) > _TURN_DECISION_TEMPLATE_CACHE_MAX:
+            _TURN_DECISION_TEMPLATES.popitem(last=False)
+
+
+def clear_turn_decision_template_cache() -> None:
+    """Drop all cached turn-decision templates (tests and explicit invalidation)."""
+
+    with _TURN_DECISION_TEMPLATE_LOCK:
+        _TURN_DECISION_TEMPLATES.clear()
 
 
 def _resolve_authorization(
@@ -232,23 +359,47 @@ def _resolve_authorization(
         runtime_values.get("externallyBlockedTools")
         or runtime_values.get("externally_blocked_tools")
     )
-    decision = evaluate_tool_policy(
+    turn_cache_key = _turn_decision_cache_key(
         agent_id=_coerce_text(runtime_values.get("agentId") or agent.get("agentId")).strip(),
         policy=policy,
         grant=grant,
         descriptors=descriptors,
         registry_version=_safe_int(payload.get("registryVersion"), 0),
         registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
-        available_tool_names=available_names,
+        available_names=available_names,
         externally_blocked_tools=externally_blocked_tools,
-        generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
     )
+    cached_template = _cached_turn_decision_template(turn_cache_key)
+    if cached_template is not None:
+        cached_decision, cached_policy_projection = cached_template
+        decision = _rehydrate_turn_decision(
+            cached_decision,
+            policy_projection=cached_policy_projection,
+            grant=grant,
+            registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
+            generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
+        )
+    else:
+        decision = evaluate_tool_policy(
+            agent_id=_coerce_text(runtime_values.get("agentId") or agent.get("agentId")).strip(),
+            policy=policy,
+            grant=grant,
+            descriptors=descriptors,
+            registry_version=_safe_int(payload.get("registryVersion"), 0),
+            registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
+            available_tool_names=available_names,
+            externally_blocked_tools=externally_blocked_tools,
+            generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
+        )
+        _store_turn_decision_template(turn_cache_key, decision, policy.public_projection())
     deny_counts = Counter(reason.code.value for _, reason in decision.denied)
     return AuthorizationReport(
         decision=decision,
         deny_code_counts=tuple(sorted(deny_counts.items())),
         registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
         duration_ms=max(0, int((perf_counter() - started) * 1000)),
+        decision_cache_key=turn_cache_key,
+        decision_cache_hit=cached_template is not None,
     )
 
 
@@ -839,9 +990,10 @@ def _record_execution_denial_reason(
 def _load_registry_payload(registry_loader: Callable[[], Mapping[str, Any]] | None) -> Mapping[str, Any]:
     if registry_loader is not None:
         return registry_loader()
-    from core.web.services.tool_registry_service import get_tool_registry
+    # 热态优先走签名校验后的共享缓存（只读、无深拷贝）；未命中再全量取。
+    from core.web.services.tool_registry_service import get_tool_registry, peek_cached_tool_registry
 
-    return get_tool_registry()
+    return peek_cached_tool_registry() or get_tool_registry()
 
 
 def _descriptors_from_registry(payload: Mapping[str, Any]) -> tuple[_RegistryDescriptor, ...]:
