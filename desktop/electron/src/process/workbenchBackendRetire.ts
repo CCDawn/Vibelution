@@ -6,6 +6,7 @@ export const PORT_RELEASE_POLL_MS = 100;
 export const PID_TERMINATE_WAIT_MS = 8_000;
 export const GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS = 12_000;
 export const USER_RESTART_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 20_000;
+export const USER_RESTART_POST_ACK_EXIT_TIMEOUT_MS = 2_000;
 
 const HANDLE_KEYS = [
   "backendPid",
@@ -174,7 +175,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
     : GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS;
   const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? defaultTimeoutMs));
   const now = input.now ?? Date.now;
-  const deadline = now() + timeoutMs;
+  let deadline = now() + timeoutMs;
   const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
   let controlToken = String(input.controlToken ?? process.env.VIBELUTION_WEB_CONTROL_TOKEN ?? "").trim();
   const pidAlive = input.pidAlive ?? knownPidIsAlive;
@@ -264,6 +265,16 @@ export async function requestGracefulWorkbenchShutdown(input: {
     }
 
     accepted = true;
+    if (input.interruptActiveWork) {
+      // Saving active work keeps the original budget. Once acknowledged, bound
+      // only process exit; the caller retains verified retirement authority.
+      deadline = Math.min(deadline, now() + USER_RESTART_POST_ACK_EXIT_TIMEOUT_MS);
+      clearTimeout(timeoutTimer!);
+      timeoutTimer = setTimeout(
+        () => controller.abort(new Error("graceful shutdown timed out")),
+        Math.max(1, deadline - now())
+      );
+    }
     const delay = input.delay ?? ((ms) => abortableDelay(ms, controller.signal));
     while (now() < deadline) {
       controller.signal.throwIfAborted();
