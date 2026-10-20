@@ -659,6 +659,68 @@ def test_session_purge_restore_reports_workspace_loss_or_conflict(
     assert session_service.get_session_detail(child["id"]) is not None
 
 
+def test_restore_replay_does_not_resurrect_deleted_tombstoned_sessions(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    timestamp = session_service._now_timestamp()
+    # A lifecycle restore token whose snapshot list still carries a session
+    # that was deleted through the agent-deleted tombstone path.
+    token = {
+        "agentId": direct["agentId"],
+        "sessionIds": [direct["id"], "deleted-session"],
+        "previousConversations": [
+            {
+                "index": 0,
+                "conversation": {
+                    "conversation_id": direct["id"],
+                    "agent_id": direct["agentId"],
+                    "title": "live session",
+                    "messages": [],
+                },
+            },
+            {
+                "index": 1,
+                "conversation": {
+                    "conversation_id": "deleted-session",
+                    "agent_id": "",
+                    "agentId": "",
+                    "agent_deleted_id": direct["agentId"],
+                    "agentDeletedId": direct["agentId"],
+                    "agentMissing": True,
+                    "agentStatusCode": "deleted_agent",
+                    "agentDeletedTombstone": {
+                        "agentId": direct["agentId"],
+                        "sessionId": "deleted-session",
+                        "deletedAt": timestamp,
+                        "previousStatus": "ready",
+                        "historyRetention": "preserved_tombstone",
+                    },
+                    "title": "deleted session",
+                    "messages": [],
+                },
+            },
+        ],
+        "previousActiveConversationId": direct["id"],
+        "previousUpdatedAt": "",
+        "previousVersion": 1,
+        "createdReplacementSessionId": "",
+        "workspaceMoves": [],
+    }
+
+    assert session_service._restore_agent_session_lifecycle_state(token) is True
+
+    payload = session_service.load_chat_state(session_service.PROJECT_ROOT)
+    restored_ids = [
+        str(raw.get("conversation_id") or "").strip()
+        for raw in list(payload.get("conversations") or [])
+        if isinstance(raw, dict)
+    ]
+    assert direct["id"] in restored_ids
+    assert "deleted-session" not in restored_ids
+
+
 def test_cleanup_retry_rejects_a_staging_reparse_point(
     tmp_path,
     monkeypatch,

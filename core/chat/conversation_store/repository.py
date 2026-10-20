@@ -375,14 +375,14 @@ class SessionDao:
         )
         return {"sessionId": session_id, "agentId": agent_id}
 
-    def get(self, session_id: str) -> dict[str, Any] | None:
+    def get(self, session_id: str, *, include_archived: bool = False) -> dict[str, Any] | None:
         row = self._connection.execute(
             f"""
             SELECT {_DIRECTORY_SESSION_COLUMNS}
             FROM sessions
-            WHERE session_id=? AND archived_at_ms IS NULL
+            WHERE session_id=? AND (? OR archived_at_ms IS NULL)
             """,
-            (session_id,),
+            (session_id, include_archived),
         ).fetchone()
         return None if row is None else _session_row(row)
 
@@ -1544,9 +1544,14 @@ class ConversationRepository:
         with self._database.reader() as connection:
             return AgentDao(connection).get(agent_id)
 
-    def get_session(self, session_id: str) -> dict[str, Any] | None:
+    def get_session(
+        self,
+        session_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> dict[str, Any] | None:
         with self._database.reader() as connection:
-            return SessionDao(connection).get(session_id)
+            return SessionDao(connection).get(session_id, include_archived=include_archived)
 
     def get_current_agent_config(self, agent_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
@@ -1597,6 +1602,19 @@ class ConversationRepository:
             return result
 
         return self._writer.submit(upsert_with_parent_edge, force_flush=True)
+
+    def repair_archived_directory_owner(self, **values: Any) -> Future[dict[str, str]]:
+        """CAS-rebind a sealed legacy session to its payload-proven Agent."""
+
+        from .directory_lifecycle import repair_archived_directory_owner
+
+        frozen = dict(values)
+        return self._writer.submit(
+            lambda unit_of_work: repair_archived_directory_owner(
+                unit_of_work.sessions._connection, **frozen, now_ms=_now_ms(),
+            ),
+            force_flush=True,
+        )
 
     def touch_directory_session(self, **values: Any) -> Future[dict[str, Any] | None]:
         return self._writer.submit(

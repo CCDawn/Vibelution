@@ -138,6 +138,17 @@ describe("chatSessionSurfaceModel", () => {
     expect(tabs.map((item) => item.id)).toEqual(["primary", "child", "other"]);
   });
 
+  it("removes archived sessions from ordinary Agent tabs even when cached lists retain them", () => {
+    const tabs = buildAgentSessionTabs({
+      sessions: [
+        { id: "active", createdAt: "2026-01-01", updatedAt: "2026-08-14T12:00:00Z" } as never,
+        { id: "archived", createdAt: "2026-01-02", updatedAt: "2026-08-14T12:00:01Z", archiveState: { status: "archived" } } as never,
+      ],
+      selectedChatAgentDirectSessionId: "active",
+    });
+    expect(tabs.map((item) => item.id)).toEqual(["active"]);
+  });
+
   it("does not reshuffle tabs when a background session becomes more recent", () => {
     const first = buildAgentSessionTabs({
       sessions: [
