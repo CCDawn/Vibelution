@@ -187,16 +187,18 @@ def _source_collection_stage_writeback_quote_anchor_audit(
     honestly declare ``evidenceStatus=missing_evidence_anchor`` (the
     materializer skips those).  Returns ``hard_errors`` (rendered
     human-readable rejections: missing quote, dishonest empty source),
-    ``mismatches`` (structured mismatch findings for the one-shot
-    remediation) and the ``blocks_by_id`` index backing the feedback.
+    ``hard_findings`` (the same findings, structured, for the mixed-batch
+    remediation payload), ``mismatches`` (structured mismatch findings for
+    the one-shot remediation) and the ``blocks_by_id`` index backing the
+    feedback.
     """
     s = _service()
     stage_id = s._trim_text(task.get("stageId"), max_length=80)
     agent_role = s._trim_text(task.get("agentRole"), max_length=80)
     if stage_id != "extraction" and agent_role != "source_extractor":
-        return {"hard_errors": [], "mismatches": [], "blocks_by_id": {}}
+        return {"hard_errors": [], "hard_findings": [], "mismatches": [], "blocks_by_id": {}}
     if not _source_collection_stage_writeback_formal_claim_bound(task, run_id):
-        return {"hard_errors": [], "mismatches": [], "blocks_by_id": {}}
+        return {"hard_errors": [], "hard_findings": [], "mismatches": [], "blocks_by_id": {}}
     blocks_by_id, _known_source_ids = _source_collection_stage_writeback_quote_anchor_blocks(
         team_id,
         run_id,
@@ -247,6 +249,7 @@ def _source_collection_stage_writeback_quote_anchor_audit(
     mismatches = [item for item in findings if item.get("finding") == "mismatched_quote"]
     return {
         "hard_errors": quote_anchor_error_message(hard_findings),
+        "hard_findings": hard_findings,
         "mismatches": mismatches,
         "blocks_by_id": blocks_by_id,
     }
@@ -307,9 +310,14 @@ def _park_source_collection_stage_task_quote_anchor_remediation(
     Mirrors the ``needs_review``/remediation shape of the claim-materialization
     gate: the canonical task lands at ``needs_review`` with a structured
     ``quoteAnchorRemediation`` payload (nearest block snippets + similarity)
-    instead of raising.  Deliberately minimal persistence: the agent's raw
-    result payload is NOT stored on the task and no materializer runs, so a
-    paraphrased quote can never leak into candidate stores or a later merge;
+    instead of raising.  Mixed batches (production incident
+    session-20261020-211800-790319: a 403 candidate with no original text
+    next to fetchable candidates whose quotes are paraphrased) park with the
+    same one-shot budget; the hard-error candidates ride along as
+    ``honestSkipFindings`` (candidate id + declare-skip guidance) so a single
+    rewrite fixes both classes.  Deliberately minimal persistence: the agent's
+    raw result payload is NOT stored on the task and no materializer runs, so
+    a paraphrased quote can never leak into candidate stores or a later merge;
     the stale result of a rejected writeback stays unwritten exactly like the
     hard-rejection path.
     """
@@ -318,11 +326,15 @@ def _park_source_collection_stage_task_quote_anchor_remediation(
     stage_id = s._trim_text(task.get("stageId"), max_length=80)
     agent_role = s._trim_text(task.get("agentRole"), max_length=80)
     now = s.utc_now_iso()
+    hard_findings = quote_audit.get("hard_findings")
+    if not isinstance(hard_findings, list):
+        hard_findings = []
     remediation = build_quote_anchor_remediation(
         quote_audit["mismatches"],
         quote_audit["blocks_by_id"],
         recorded_at=now,
         attempt=1,
+        hard_findings=hard_findings,
     )
     parked_task = dict(task)
     parked_task["status"] = "needs_review"
@@ -349,6 +361,7 @@ def _park_source_collection_stage_task_quote_anchor_remediation(
             "agentId": s._trim_text(task.get("agentId"), max_length=160),
             "parkedStatus": "needs_review",
             "mismatchCount": len(quote_audit["mismatches"]),
+            "honestSkipCount": len(hard_findings),
             "remediationAttempt": 1,
         },
         level="warning",
@@ -605,9 +618,17 @@ def writeback_source_collection_stage_session_task(
         # all supplied but never verbatim is not rejected outright — the task
         # is parked at needs_review with a structured ``quoteAnchorRemediation``
         # payload (nearest matching block snippets) so the agent can copy the
-        # exact text and rewrite.  A second mismatch, any missing-quote /
-        # dishonest-empty-source error, or an empty quote falls through to the
-        # historical hard rejection, so the loop is bounded by construction.
+        # exact text and rewrite.  Mixed batches park too (production incident
+        # session-20261020-211800-790319: "403 candidate without original
+        # text" + "fetchable candidate with a paraphrased quote" is the
+        # common combination): whenever at least one mismatch exists and no
+        # remediation was parked before, the parking wins even if hard errors
+        # sit in the same batch — its ``honestSkipFindings`` carries the exact
+        # declare-skip guidance for the hard-error candidates, so one rewrite
+        # fixes both classes.  Hard errors with no mismatch at all, and any
+        # second attempt after a prior parking (new mismatches or new hard
+        # errors alike), fall through to the historical hard rejection, so
+        # the loop stays bounded by construction.
         quote_audit = _source_collection_stage_writeback_quote_anchor_audit(
             normalized_team_id,
             run_id,
@@ -620,7 +641,7 @@ def writeback_source_collection_stage_session_task(
                 if isinstance(task.get("quoteAnchorRemediation"), dict)
                 else {}
             )
-            if quote_audit["hard_errors"] or prior_quote_remediation:
+            if not quote_audit["mismatches"] or prior_quote_remediation:
                 rejection_errors = list(quote_audit["hard_errors"]) + quote_anchor_error_message(
                     quote_audit["mismatches"]
                 )
@@ -1392,8 +1413,12 @@ def get_source_collection_stage_task_context(
             "必须声明 evidenceStatus=missing_evidence_anchor（诚实跳过，不物化），不产空 quote；"
             "(5) quote 非逐字子串时，首次回写不拒绝：任务停靠 needs_review 并返回"
             " quoteAnchorRemediation 结构化修正反馈（含最近匹配块片段），只有一次机会；"
-            "修正后重写 completed 即清掉该标记；再次不匹配按契约直接拒绝；"
-            "(6) 空 quote/缺锚的 completed 回写始终被直接拒绝，不进入修正反馈。"
+            "同批若还有无原文/缺锚条目，反馈会同时给出 honestSkipFindings 指引"
+            "（声明 evidenceStatus=missing_evidence_anchor 且 decision=exclude 诚实跳过），"
+            "一次重写同时修两类问题；修正后重写 completed 即清掉该标记；"
+            "再次出现任何不匹配或硬错按契约直接拒绝；"
+            "(6) 只含硬错（无原文不诚实跳过/缺锚）、无不匹配 quote 的 completed 回写"
+            "始终被直接拒绝，不进入修正反馈。"
         )
     context["usage"]["continuationHint"] = s._source_collection_context_continuation_hint(
         context["candidatePage"],

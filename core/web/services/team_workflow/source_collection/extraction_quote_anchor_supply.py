@@ -640,19 +640,41 @@ def audit_extraction_quote_anchors(
     return findings
 
 
+# Per-kind one-line guidance for honest-skip findings: mixed batches park
+# with both mismatch snippets and hard-error candidates, so the agent can fix
+# both classes in a single rewrite.  The wording mirrors the historical
+# hard-rejection contract text (``quote_anchor_error_message``).
+_HONEST_SKIP_GUIDANCE = {
+    "empty_source": (
+        "该来源没有真实抓取原文：声明 evidenceStatus=missing_evidence_anchor"
+        " 且 decision=exclude 诚实跳过，不要保留空 quote 或声称证据。"
+    ),
+    "missing_quote": (
+        "该来源有可引用原文但条目缺少逐字 quote 锚：从 quotableSources[].blocks[].text"
+        " 原样复制 quote 补上，或声明 evidenceStatus=missing_evidence_anchor"
+        " 且 decision=exclude 跳过。"
+    ),
+}
+
+
 def build_quote_anchor_remediation(
     mismatch_findings: list[Mapping[str, Any]],
     blocks_by_id: Mapping[str, list[dict[str, Any]]],
     *,
     recorded_at: str,
     attempt: int = 1,
+    hard_findings: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Render the structured one-shot remediation payload.
 
     Each finding carries the nearest matching block snippet plus a similarity
     score, so the agent can copy the exact verbatim text on its single
-    rewrite.  The payload explicitly warns that a second mismatch is a hard
-    rejection — the loop is bounded by construction.
+    rewrite.  ``hard_findings`` (mixed batches: e.g. a 403 candidate with no
+    original text next to a fetchable candidate whose quote is paraphrased)
+    render as ``honestSkipFindings`` — candidate ids plus the exact
+    declare-skip guidance — so one rewrite fixes both classes.  The payload
+    explicitly warns that a second mismatch is a hard rejection — the loop is
+    bounded by construction.
     """
     rendered: list[dict[str, Any]] = []
     for finding in mismatch_findings[:_REMEDIATION_FINDING_LIMIT]:
@@ -676,22 +698,45 @@ def build_quote_anchor_remediation(
         if hint:
             item["nearestMatch"] = hint
         rendered.append({key: value for key, value in item.items() if value not in ("", None)})
-    return {
+    honest_skip: list[dict[str, Any]] = []
+    for finding in (hard_findings or [])[:_REMEDIATION_FINDING_LIMIT]:
+        kind = _clean(finding.get("finding"))
+        guidance = _HONEST_SKIP_GUIDANCE.get(kind)
+        if not guidance:
+            continue
+        honest_skip.append({
+            "finding": kind,
+            "sourceId": _clean(finding.get("sourceId")),
+            "sourceKind": _clean(finding.get("sourceKind")),
+            "entryPath": _clean(finding.get("entryPath")),
+            "guidance": guidance,
+        })
+    instruction = (
+        "至少一个 quote 不是该来源 quotableSources[].blocks 原文块的逐字子串。"
+        "请打开最新 source_collection_context_tool 读取 quotableSources，"
+        "把 findings[] 里每个 sourceId 的 quote 原样替换为对应 blocks[].text 中的逐字片段"
+        "（禁止改写、拼接、凭记忆重写或写空串），然后重新回写 completed。"
+        "这是唯一一次修正机会：再次出现不匹配 quote 将按契约直接拒绝。"
+        "没有 blocks 的来源跳过 quote（evidenceStatus=missing_evidence_anchor）。"
+    )
+    if honest_skip:
+        instruction += (
+            " 同批还有无真实抓取原文/缺锚的条目：按 honestSkipFindings[] 里每个"
+            " sourceId 的指引声明 evidenceStatus=missing_evidence_anchor 且"
+            " decision=exclude 诚实跳过，一次重写同时修两类问题。"
+        )
+    remediation: dict[str, Any] = {
         "schemaVersion": 1,
         "attempt": attempt,
         "reason": "quote_not_verbatim",
         "parkedStatus": "needs_review",
-        "instruction": (
-            "至少一个 quote 不是该来源 quotableSources[].blocks 原文块的逐字子串。"
-            "请打开最新 source_collection_context_tool 读取 quotableSources，"
-            "把 findings[] 里每个 sourceId 的 quote 原样替换为对应 blocks[].text 中的逐字片段"
-            "（禁止改写、拼接、凭记忆重写或写空串），然后重新回写 completed。"
-            "这是唯一一次修正机会：再次出现不匹配 quote 将按契约直接拒绝。"
-            "没有 blocks 的来源跳过 quote（evidenceStatus=missing_evidence_anchor）。"
-        ),
+        "instruction": instruction,
         "findings": rendered,
         "recordedAt": recorded_at,
     }
+    if honest_skip:
+        remediation["honestSkipFindings"] = honest_skip
+    return remediation
 
 
 def quote_anchor_error_message(
