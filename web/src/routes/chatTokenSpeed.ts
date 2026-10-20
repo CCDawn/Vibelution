@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../api/types";
+import type { ActiveTurnLayerState } from "./chatActiveTurnLayer";
 import {
   assistantFinalAnswerText,
   assistantReasoningText,
@@ -14,10 +15,34 @@ export type TokenSpeedSample = {
 
 export type TokenSpeedTrackerState = TokenSpeedSample & {
   tokensPerSecond: number | null;
+  samples: TokenSpeedSample[];
 };
 
 const CJK_CHARACTER_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/u;
 const MIN_SAMPLE_INTERVAL_MS = 250;
+const SAMPLE_WINDOW_MS = 2000;
+const STALE_AFTER_MS = 1500;
+
+/** Only live generated text; snapshots establish a baseline, never a burst. */
+export function tokenSpeedTextFromLayer(layer: ActiveTurnLayerState | undefined) {
+  if (!layer || layer.status !== "running") return null;
+  let boundary = -1;
+  let latest: Extract<ActiveTurnLayerState["turnItems"][number], { type: "reasoning" | "agent_message" }> | undefined;
+  for (const item of layer.turnItems) {
+    if (item.type === "tool_call" && (item.status === "running" || item.status === "pending")) return null;
+    if (item.type === "tool_call" || item.type === "retry") boundary = Math.max(boundary, item.sequence);
+    if ((item.type === "reasoning" || item.type === "agent_message") && item.status !== "failed"
+      && (!latest || item.sequence > latest.sequence)) latest = item;
+  }
+  return latest && latest.sequence > boundary
+    ? { key: JSON.stringify([layer.turnId, latest.itemId]), text: latest.text }
+    : null;
+}
+
+export function tokenSpeedValueAt(tracker: TokenSpeedTrackerState | null, nowMs: number): number | null {
+  return tracker && nowMs >= tracker.timestampMs && nowMs - tracker.timestampMs <= STALE_AFTER_MS
+    ? tracker.tokensPerSecond : null;
+}
 
 export function estimateGeneratedTokens(content: string): number {
   let cjkCharacters = 0;
@@ -140,10 +165,12 @@ export function updateTokenSpeedTracker(
     || previous.sessionId !== sample.sessionId
     || previous.messageId !== sample.messageId
     || sample.tokenCount < previous.tokenCount
+    || sample.timestampMs < previous.timestampMs
   ) {
     return {
       ...sample,
       tokensPerSecond: null,
+      samples: [sample],
     };
   }
 
@@ -156,17 +183,17 @@ export function updateTokenSpeedTracker(
     return previous;
   }
 
-  const elapsedMs = sample.timestampMs - previous.timestampMs;
-  const tokenDelta = sample.tokenCount - previous.tokenCount;
-  if (elapsedMs < MIN_SAMPLE_INTERVAL_MS || tokenDelta <= 0) {
-    return {
-      ...sample,
-      tokensPerSecond: previous.tokensPerSecond,
-    };
+  if (sample.timestampMs - previous.timestampMs > STALE_AFTER_MS) {
+    return { ...sample, tokensPerSecond: null, samples: [sample] };
   }
-
+  const samples = [...previous.samples, sample]
+    .filter(point => point.timestampMs >= sample.timestampMs - SAMPLE_WINDOW_MS).slice(-128);
+  const first = samples[0];
+  const elapsedMs = sample.timestampMs - first.timestampMs;
   return {
     ...sample,
-    tokensPerSecond: tokenDelta / (elapsedMs / 1000),
+    samples,
+    tokensPerSecond: elapsedMs >= MIN_SAMPLE_INTERVAL_MS
+      ? (sample.tokenCount - first.tokenCount) / (elapsedMs / 1000) : null,
   };
 }
