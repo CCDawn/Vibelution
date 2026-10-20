@@ -450,6 +450,7 @@ export function buildAgentSessionTabs(options: {
   void options.selectedChatAgentDirectSessionId;
   return sessions
     .filter((session): session is SessionSummary => Boolean(session))
+    .filter((session) => String(session.archiveState?.status || "").toLowerCase() !== "archived")
     .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index)
     .sort(compareAgentSessionTabOrder);
 }

@@ -181,6 +181,20 @@ def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest
     assert "models" not in payload
 
 
+def test_session_llm_options_names_archived_agent_read_only(monkeypatch: pytest.MonkeyPatch):
+    """An archived Agent must surface the read-only archive reason, not a misleading 'no config'."""
+
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: True)
+    monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda _session_id: "agent-archived")
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {"agentId": agent_id, "status": "archived"},
+    )
+    with pytest.raises(session_service.SessionValidationError, match="已归档"):
+        session_service.get_session_llm_options("session-archived")
+
+
 def test_session_llm_options_chain_ensures_and_loads_chat_state_once(monkeypatch: pytest.MonkeyPatch):
     """One GET must ensure once, read chat state once, and never block on the directory write."""
     ensure_calls: list[dict] = []

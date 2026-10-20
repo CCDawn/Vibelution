@@ -4343,6 +4343,22 @@ def _read_agent_session_purge_manifest(
     return payload if isinstance(payload, dict) else None
 
 
+def _restore_token_conversation_deleted(raw: Any) -> bool:
+    """True when a restore-token snapshot is an agent-deleted tombstone."""
+
+    if not isinstance(raw, dict):
+        return False
+    if bool(raw.get("agentMissing")):
+        return True
+    tombstone = raw.get("agentDeletedTombstone")
+    if isinstance(tombstone, dict) and str(tombstone.get("agentId") or "").strip():
+        return True
+    return any(
+        str(raw.get(key) or "").strip()
+        for key in ("agent_deleted_id", "agentDeletedId", "agent_missing_id", "agentMissingId")
+    )
+
+
 def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> bool:
     s = _service()
     token = restore_token if isinstance(restore_token, dict) else {}
@@ -4375,6 +4391,10 @@ def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> boo
         ):
             raw = item.get("conversation")
             if not isinstance(raw, dict):
+                continue
+            if _restore_token_conversation_deleted(raw):
+                # Deleted/tombstoned snapshots are dead history; replaying
+                # them would resurrect sessions the user already lost.
                 continue
             index = max(0, min(int(item.get("index") or 0), len(conversations)))
             conversations.insert(index, s.copy.deepcopy(raw))
