@@ -102,7 +102,8 @@ def test_registered_wrapper_is_executable_under_native_default_policy(assistant_
 @pytest.mark.parametrize("custom", [False, True])
 def test_explicit_setup_upgrades_old_default_but_preserves_custom_denial_and_prompt(personal_env, custom):
     row = service.create_personal_assistant()["assistant"]
-    previous = {**service.current_policy(), "allowedTools": list(service._COMPUTER_TOOLS),
+    # This generation predates approvalOverrides in today's policy.
+    previous = {**service.PRIVATE_V2_POLICY, "allowedTools": list(service._COMPUTER_TOOLS),
         "preferredTools": list(service._COMPUTER_TOOLS), "networkAccess": "none" if custom else "restricted"}
     task = {**service._PRE_QUERY_TASK, **({"responsibilities": "我的职责"} if custom else {})}
     tools.directory.update_agent_instance(row["agentId"], tool_policy=previous, task_profile=task)
@@ -121,10 +122,12 @@ def test_explicit_setup_upgrades_old_default_but_preserves_custom_denial_and_pro
 
 def test_upgrade_does_not_overwrite_custom_task_profile(personal_env):
     row = service.create_personal_assistant()["assistant"]
-    previous = {**service.current_policy(), "allowedTools": list(service._COMPUTER_TOOLS), "preferredTools": list(service._COMPUTER_TOOLS)}
+    previous = {**service.PRIVATE_V2_POLICY, "networkAccess": "restricted",
+        "allowedTools": list(service._COMPUTER_TOOLS), "preferredTools": list(service._COMPUTER_TOOLS)}
     tools.directory.update_agent_instance(row["agentId"], tool_policy=previous, task_profile={"responsibilities": "自定义"})
     before = tools.directory.get_agent(row["agentId"])["taskProfile"]
     service.create_personal_assistant()
+    assert "personal_assistant_query_tool" in tools.directory.get_agent(row["agentId"])["toolPolicy"]["allowedTools"]
     assert tools.directory.get_agent(row["agentId"])["taskProfile"] == before
 
 
