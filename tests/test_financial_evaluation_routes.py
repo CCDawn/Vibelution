@@ -17,6 +17,7 @@ def _client():
 def test_claim_response_matches_frontend_shape_and_rejects_extra_input(monkeypatch):
     row = {"id": "check-1", "agentId": "a", "sessionId": "s", "turnId": "t", "symbol": "sz000001", "analysisDate": "2026-10-01", "dueDate": "2026-10-09", "direction": "up", "thresholdPct": 3, "claimText": "上涨至少3%", "status": "pending", "registeredBeforeDue": True, "retrospective": False, "outcome": None, "checkedAt": None, "revision": 1, "evidence": None, "error": None, "lesson": None}
     calls = []
+    row.update(lessonState="absent", lessonHistory=[])
     monkeypatch.setattr(service, "create_report_validation", lambda agent, payload: (calls.append((agent, payload)), row)[1])
     payload = {key: row[key] for key in ("sessionId", "turnId", "symbol", "dueDate", "direction", "thresholdPct", "claimText")}
     payload["clientRequestId"] = "e4a17e5b-ea69-4ba9-a5f5-a5b425c2b113"
