@@ -81,6 +81,7 @@ def test_stock_stamp_duty_order_of_magnitude_errors_are_not_confirmable(rate):
     "ETF卖出印花税0%", "历史2019年股票卖出印花税0.1%",
     "港股卖出时，印花税率0.1%", "ETF交易时，印花税0%",
     "历史2019年股票卖出时，印花税0.1%",
+    "美国股票卖出印花税0%", "境外股票卖出印花税0%",
 ])
 def test_current_stock_fee_units_and_unrelated_market_claims_are_not_false_conflicts(text):
     assert not assess_budget(text, _turn(request="预算6000元"), "turn-1", {"budgetCny": 6000, "market": "CN"}, None)["issues"]

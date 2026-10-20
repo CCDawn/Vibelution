@@ -62,7 +62,7 @@ def _stock_fee_issues(answer: str) -> list[str]:
         # preceding ETF/foreign-market/historical scope and turn it into A shares.
         if not re.search(r"(?:股票|A\s*股).*卖出", clause, re.I):
             continue
-        if re.search(r"ETF|基金|港股|美股|历史|回测", clause, re.I):
+        if re.search(r"ETF|基金|港股|美股|香港|美国|境外|海外|历史|回测", clause, re.I):
             continue
         if any(int(year) != today.year for year in re.findall(r"(20\d{2})年", clause)):
             continue
