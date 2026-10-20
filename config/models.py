@@ -617,6 +617,10 @@ class LLMConfig(BaseModel):
         default=DEFAULT_LLM_ROUTE_CONCURRENCY,
         description="单条 LLM 路由（provider|base_url|model|profile）的最大并发请求数",
     )
+    # Startup warmup (import preload + one minimal probe per active provider)
+    # runs on the deferred background channel; see core.llm.warmup. The env
+    # kill switch VIBELUTION_LLM_STARTUP_WARMUP=0 disables it regardless.
+    startup_warmup: bool = Field(default=True)
 
     @field_validator("route_concurrency", mode="before")
     @classmethod
