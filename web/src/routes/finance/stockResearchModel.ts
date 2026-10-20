@@ -114,6 +114,31 @@ export function stockFromResearchRequest(text: string): StockIdentity | null {
   const symbol = /^\d{6}$/.test(ticker) ? (ticker.startsWith("6") ? "sh" : "03".includes(ticker[0]) ? "sz" : "bj") + ticker : /^\d{5}$/.test(ticker) ? `hk${ticker}` : `us${canonicalUsTicker(ticker) ?? ""}`;
   return stockIdentityFromUnknown({ symbol, ticker, name, market });
 }
+
+type ResearchSubject = { kind: "stock"; stock: StockIdentity } | { kind: "topic" };
+function researchRequestFromText(text: string): ResearchSubject | { kind: "rewrite" } | null {
+  // A topic or screening task may mention tickers without becoming single-stock
+  // research. Inspect its native header before looking for any stock identity.
+  if (/^\s*请对以下主题开展投资研究/.test(text) || isScreeningReportPrompt(text)) return { kind: "topic" };
+  const stock = stockFromResearchRequest(text);
+  if (stock) return { kind: "stock", stock };
+  if (/分析日期 \d{4}-\d{2}-\d{2}[\s\S]*使用 Markdown 二级标题/.test(text)) return { kind: "topic" };
+  if (/(?:重新生成|更新|重写)(?:完整)?(?:研究报告|研报)|(?:regenerate|update|rewrite) (?:the )?(?:full )?(?:research )?report/i.test(text)) return { kind: "rewrite" };
+  return null;
+}
+
+export function latestResearchSubject(messages: readonly ConversationMessage[]): ResearchSubject | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "user") continue;
+    const request = researchRequestFromText(message.content);
+    // Rewriting a full report keeps the last explicit subject. Ordinary
+    // follow-ups also leave it intact; a topic itself stops the backward scan.
+    if (request && request.kind !== "rewrite") return request;
+  }
+  return null;
+}
+
 function stockResearchParametersFromRequest(request: string): StockResearchParameters | undefined {
   const parameters: StockResearchParameters = {};
   const stock = stockFromResearchRequest(request);
@@ -138,10 +163,13 @@ function stockResearchParametersFromRequest(request: string): StockResearchParam
 export function reportMatchesStock(report: StockResearchReport | null, messages: readonly ConversationMessage[], stock: StockIdentity) {
   if (!report) return false;
   const index = messages.findIndex((message) => message.role === "assistant" && message.turnId === report.turnId);
+  if (index < 0) return false;
+  const subject = latestResearchSubject(messages.slice(0, index));
+  if (subject) return subject.kind === "stock" && subject.stock.symbol === stock.symbol;
+  // Legacy conversations may lack a native request header. Only then use the
+  // older name/ticker matching, so follow-up numbers cannot override a topic.
   for (const message of messages.slice(0, index).reverse()) {
     if (message.role !== "user") continue;
-    const requestedStock = stockFromResearchRequest(message.content);
-    if (requestedStock) return requestedStock.symbol === stock.symbol;
     const requestHeader = message.content.slice(0, 500).split("\n", 1)[0];
     const internationalTicker = new RegExp(`(?:[（(]\\s*|\\b)${stock.ticker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s*[,，）)]|\\b)`, "i");
     if (stock.symbol.startsWith("hk") || stock.symbol.startsWith("us")) {
@@ -174,10 +202,7 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
   }
   // Native finance starts carry this request contract. Ordinary follow-ups stay
   // in the conversation, leaving the full report and its export stable.
-  const isResearchRequest = (text: string) => /分析日期 \d{4}-\d{2}-\d{2}[\s\S]*使用 Markdown 二级标题/.test(text)
-    || isScreeningReportPrompt(text)
-    || /(?:重新生成|更新|重写)(?:完整)?(?:研究报告|研报)|(?:regenerate|update|rewrite) (?:the )?(?:full )?(?:research )?report/i.test(text);
-  const selected = candidates.filter((candidate) => isResearchRequest(candidate.request)).at(-1) ?? candidates[0];
+  const selected = candidates.filter((candidate) => researchRequestFromText(candidate.request)).at(-1) ?? candidates[0];
   if (!selected) return null;
   const { turn, text: answer, request: selectedRequest } = selected;
   // The stored answer stays exact. This report hides a conclusion amount that

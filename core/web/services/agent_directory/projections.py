@@ -432,6 +432,10 @@ def build_agent_runtime_context_block(
     from core.web.services import team_service
 
     lines.extend(team_service.build_team_roster_context_lines(str(agent.get("agentId") or agent_id or "").strip()))
+    if (agent.get("metadata") or {}).get("financialAssistantProfile"):
+        from ..financial_preferences.investment import build_investment_context_lines
+
+        lines.extend(build_investment_context_lines(agent))
     return "\n".join(line for line in lines if line is not None).strip()
 
 

@@ -261,3 +261,5 @@
 | `FinanceGroundedReportBody` / `FinanceReportReadState` / `FinanceReportEvidenceNotice` | [product/financial-assistant.md](./product/financial-assistant.md#financegroundedreportbody--financereportreadstate--financereportevidencenotice) |
 | `FinanceEvidenceImport` | [product/financial-assistant.md](./product/financial-assistant.md#financeevidenceimport) |
 | `FinanceKnowledgeCenter` | [product/financial-assistant.md](./product/financial-assistant.md#financeknowledgecenter) |
+
+| `FinanceInvestmentSettings` | [product/financial-assistant.md](./product/financial-assistant.md#financeinvestmentsettings) |
