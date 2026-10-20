@@ -9,15 +9,17 @@ throttle must never block another provider's requests.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 
 import pytest
-from pyrate_limiter import Rate
 
 from core.web.services.team_workflow.source_collection import search_execution
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 _CROSSREF_PAYLOAD = {
     "message": {
@@ -54,9 +56,9 @@ def unlimited_rate_limits(monkeypatch):
         search_execution,
         "_SOURCE_COLLECTION_PROVIDER_RATE_LIMITS",
         {
-            "arxiv_api": Rate(1000, 1),
-            "crossref_rest_api": Rate(1000, 1),
-            "openalex_api": Rate(1000, 1),
+            "arxiv_api": (1000, 1),
+            "crossref_rest_api": (1000, 1),
+            "openalex_api": (1000, 1),
         },
     )
     search_execution._SOURCE_COLLECTION_RATE_LIMITERS.clear()
@@ -95,6 +97,43 @@ def _run_crossref_query(provider: str = "crossref_rest_api") -> dict:
     )
 
 
+def test_limiter_dependency_loads_only_on_first_provider_request():
+    code = """
+import sys
+from core.web.services.team_workflow.source_collection import search_execution as search
+assert 'pyrate_limiter' not in sys.modules
+assert search._source_collection_rate_limiter('unsupported') is None
+assert 'pyrate_limiter' not in sys.modules
+first = search._source_collection_rate_limiter('arxiv_api')
+assert 'pyrate_limiter' in sys.modules
+assert first is search._source_collection_rate_limiter('arxiv_api')
+assert first is not search._source_collection_rate_limiter('crossref_rest_api')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True,
+        timeout=30, **no_window_subprocess_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("provider,limit,interval_ms", [
+    ("arxiv_api", 1, 3000),
+    ("crossref_rest_api", 3, 1000),
+    ("openalex_api", 5, 1000),
+    ("qwen_web_search", 1, 1000),
+])
+def test_lazy_limiter_preserves_provider_rate_units(monkeypatch, provider, limit, interval_ms):
+    import pyrate_limiter
+
+    captured = []
+    monkeypatch.setattr(search_execution, "_SOURCE_COLLECTION_RATE_LIMITERS", {})
+    monkeypatch.setattr(pyrate_limiter, "Limiter", lambda rate: captured.append(rate) or object())
+    search_execution._source_collection_rate_limiter(provider)
+    assert len(captured) == 1
+    assert captured[0].limit == limit
+    assert captured[0].interval == interval_ms
+
+
 # ---------------------------------------------------------------------------
 # 1. Parallel threads share one rate-limit window per provider.
 # ---------------------------------------------------------------------------
@@ -104,7 +143,7 @@ def test_parallel_threads_share_one_rate_limit_window(monkeypatch, unlimited_rat
     monkeypatch.setitem(
         search_execution._SOURCE_COLLECTION_PROVIDER_RATE_LIMITS,
         "crossref_rest_api",
-        Rate(1, 200),
+        (1, 200),
     )
     search_execution._SOURCE_COLLECTION_RATE_LIMITERS.clear()
     stamps: list[float] = []
@@ -254,7 +293,7 @@ def test_limiters_are_independent_per_provider(monkeypatch, unlimited_rate_limit
     monkeypatch.setitem(
         search_execution._SOURCE_COLLECTION_PROVIDER_RATE_LIMITS,
         "arxiv_api",
-        Rate(1, 1000),
+        (1, 1000),
     )
     search_execution._SOURCE_COLLECTION_RATE_LIMITERS.clear()
 
