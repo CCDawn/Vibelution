@@ -419,7 +419,8 @@ def test_redrive_is_idempotent_under_replays(tmp_path, monkeypatch) -> None:
 
 def test_formal_receipt_gate_only_relaxes_for_authority_complete() -> None:
     """The receipt gate keeps its strict raise everywhere; the durable-cursor
-    resume onto gate-verified completed work is the single relaxation."""
+    resume onto gate-verified completed work and the research_project
+    true-failure-terminal release (receipt wedge) are the only relaxations."""
     routing = {
         "requiredModelPolicy": {"providerIds": ["p"]},
         "modelPolicySha256": "h" * 64,
@@ -453,3 +454,39 @@ def test_formal_receipt_gate_only_relaxes_for_authority_complete() -> None:
         task_started_at_ms=1,
         formal_receipt={"scope": {"stageId": "generation"}},
     )
+    # Research_project verdict handoff: a true-failure terminal with no
+    # receipt releases to the project-task authority; without the release
+    # flag (every other family) the strict raise survives.
+    failed_snapshot = {
+        "terminal": True,
+        "terminalStatus": "failed_provider",
+        "modelInvocationReceipts": [],
+    }
+    agent_turn_completion._require_formal_model_invocation_receipt(
+        failed_snapshot,
+        input_snapshot={"modelRoutingPolicy": routing},
+        task_started_at_ms=1,
+        failure_terminal_releasable=True,
+        identity={"sessionId": "session-1", "turnId": "turn-1", "taskId": "task-1"},
+    )
+    with pytest.raises(CompletionDependencyPending):
+        agent_turn_completion._require_formal_model_invocation_receipt(
+            failed_snapshot,
+            input_snapshot={"modelRoutingPolicy": routing},
+            task_started_at_ms=1,
+        )
+    # Parked terminals never release, flag or not: waiting semantics.
+    with pytest.raises(CompletionDependencyPending):
+        agent_turn_completion._require_formal_model_invocation_receipt(
+            {"terminal": True, "terminalStatus": "needs_continue"},
+            input_snapshot={"modelRoutingPolicy": routing},
+            task_started_at_ms=1,
+            failure_terminal_releasable=True,
+        )
+    with pytest.raises(CompletionDependencyPending):
+        agent_turn_completion._require_formal_model_invocation_receipt(
+            {"terminal": True, "terminalStatus": "paused_limit"},
+            input_snapshot={"modelRoutingPolicy": routing},
+            task_started_at_ms=1,
+            failure_terminal_releasable=True,
+        )
