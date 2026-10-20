@@ -495,20 +495,26 @@ def build_agent_context(
     timings["inboxMessagesMs"] = _elapsed_ms(stage_started_at)
     _stop("runtime_context_block")
     stage_started_at = _perf_counter()
-    raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(
-        normalized_agent_id,
-        limit=bounded_limit,
-        agent_snapshot=agent,
-        group_events_snapshot=group_events,
-        inbox_messages_snapshot=inbox_messages,
-        episodic_events_snapshot=episodic_events,
-        memory_policy_snapshot=memory_policy,
-    )
-    timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
+    # tool_policy 在此一次解析：静态半段的额度行与下方 packet 共用同一结果，
+    # 取代旧路径「整块渲染内部 + packet 尾部」的每回合二次解析。
+    _stop("tool_policy")
+    tool_policy_started_at = _perf_counter()
+    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id)
+    timings["toolPolicyMs"] = _elapsed_ms(tool_policy_started_at)
 
     def _produce_agent_static_block() -> str:
-        static_part, _dynamic_part = _split_agent_runtime_context_block(raw_runtime_context_block)
-        return static_part
+        # 静态半段（身份 / 记忆根 / 额度 / 知识授权 / persona / task）整体
+        # 放进冻结闭包：会话内冻结命中时，本渲染连同其中的额度解析一起跳过。
+        return "\n".join(
+            line
+            for line in agent_directory_service.build_agent_runtime_static_lines(
+                normalized_agent_id,
+                agent_snapshot=agent,
+                memory_policy_snapshot=memory_policy,
+                tool_policy_snapshot=tool_policy,
+            )
+            if line is not None
+        ).strip()
 
     agent_static_context_block, agent_static_frozen = _session_frozen_context_block(
         "agent_runtime",
@@ -517,9 +523,22 @@ def build_agent_context(
         produce=_produce_agent_static_block,
     )
     timings["agentRuntimeStaticFrozen"] = bool(agent_static_frozen)
-    # The dynamic half (episodes / group events / inbox) stays per-turn fresh;
-    # only the static header bytes are session-frozen.
-    _static_probe, agent_dynamic_context_block = _split_agent_runtime_context_block(raw_runtime_context_block)
+    # The dynamic half (episodes / group events / inbox / roster) stays
+    # per-turn fresh; only the static header bytes are session-frozen.
+    agent_dynamic_context_block = "\n".join(
+        line
+        for line in agent_directory_service.build_agent_runtime_dynamic_lines(
+            normalized_agent_id,
+            limit=bounded_limit,
+            agent_snapshot=agent,
+            group_events_snapshot=group_events,
+            inbox_messages_snapshot=inbox_messages,
+            episodic_events_snapshot=episodic_events,
+            memory_policy_snapshot=memory_policy,
+        )
+        if line is not None
+    ).strip()
+    timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
     research_org_context_block = ""
     research_org_frozen = False
     if _agent_needs_research_organization_context(agent):
@@ -716,10 +735,7 @@ def build_agent_context(
     static_context_block = _join_context_segments(context_segments, "cache_prefix")
     dynamic_context_block = _join_context_segments(context_segments, "volatile_turn")
     runtime_context_block = _join_context_blocks(static_context_block, dynamic_context_block)
-    _stop("tool_policy")
-    stage_started_at = _perf_counter()
-    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id)
-    timings["toolPolicyMs"] = _elapsed_ms(stage_started_at)
+    # tool_policy 已在 runtime_context_block 段前一次性解析（额度行 + packet 共用）。
     timings["staticContextChars"] = len(static_context_block)
     timings["dynamicContextChars"] = len(dynamic_context_block)
     timings["staticContextHash"] = _context_hash(static_context_block)

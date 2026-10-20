@@ -145,6 +145,8 @@ from .agent_directory.lifecycle import (
 )
 from .agent_directory.projections import (
     build_agent_runtime_context_block,
+    build_agent_runtime_static_lines,
+    build_agent_runtime_dynamic_lines,
     _agent_to_api,
     _build_agent_api_hydration_context,
     list_agents,

@@ -298,7 +298,77 @@ def _runtime_tool_budget_lines(max_calls: int, allowed_tools: list[str] | None) 
     ]
 
 
-def build_agent_runtime_context_block(
+def build_agent_runtime_static_lines(
+    agent_id: str,
+    *,
+    agent_snapshot: dict[str, Any] | None = None,
+    memory_policy_snapshot: dict[str, Any] | None = None,
+    tool_policy_snapshot: dict[str, Any] | None = None,
+) -> list[str]:
+    """Render the session-frozen (cache-prefix) half of the runtime block.
+
+    身份 / 记忆根 / 额度 / 知识授权 / persona / task 行在会话内字节稳定；
+    ContextEngine 把本函数放进冻结 produce 闭包，冻结命中时整段跳过。
+    与 dynamic 半段（``build_agent_runtime_dynamic_lines``）拼接后必须与
+    旧整块渲染逐字节一致；动态标记（个人记忆 / GroupContextEvents /
+    AgentInboxMessages）只会出现在 dynamic 半段的首部。
+    """
+    s = _service()
+    agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else s.get_agent(agent_id)
+    if not agent:
+        return []
+    memory_policy = (
+        dict(memory_policy_snapshot)
+        if isinstance(memory_policy_snapshot, dict)
+        else s.resolve_memory_policy_for_agent(agent_id)
+    )
+    resolved_agent_id = str(agent.get("agentId") or agent_id or "").strip()
+    tool_policy = (
+        agent.get("toolPolicy")
+        if isinstance(agent.get("toolPolicy"), dict)
+        else (
+            tool_policy_snapshot
+            if isinstance(tool_policy_snapshot, dict)
+            else s.resolve_tool_policy_for_agent(resolved_agent_id)
+        )
+    )
+    allowed_tools: list[str] = []
+    if isinstance(tool_policy, dict):
+        raw_allowed = tool_policy.get("allowedTools")
+        if isinstance(raw_allowed, list):
+            allowed_tools = [str(item or "") for item in raw_allowed]
+    # 额度数字必须与授权层一致：会话覆盖 > 模型家族 > 策略 base，
+    # 不再直接引用 toolPolicy 的 base 值。
+    from core.orchestration.tool_budget_text import resolve_agent_scoped_max_calls_per_turn
+
+    max_calls, _budget_family = resolve_agent_scoped_max_calls_per_turn(
+        agent,
+        tool_policy if isinstance(tool_policy, dict) else None,
+        agent_id=resolved_agent_id,
+    )
+    budget_lines = _runtime_tool_budget_lines(max_calls, allowed_tools)
+    lines = [
+        "## Agent Runtime Context",
+        f"AgentId: {agent.get('agentId') or ''}",
+        f"AgentCode: {agent.get('agentCode') or ''}",
+        f"AgentName: {agent.get('displayName') or ''}",
+        f"AgentWorkspace: {agent.get('workspacePath') or ''}",
+        f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
+        f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
+        *budget_lines,
+        *_team_knowledge_access_lines(resolved_agent_id, memory_policy),
+        "- Knowledge bodies are tool-readable only; do not treat team knowledge as prompt-injected memory.",
+    ]
+    persona_lines = s._format_persona_profile_context(agent.get("personaProfile"))
+    if persona_lines:
+        lines.extend(persona_lines)
+    task_lines = s._format_task_profile_context(agent.get("taskProfile"))
+    if task_lines:
+        lines.extend(task_lines)
+    return lines
+
+
+def build_agent_runtime_dynamic_lines(
     agent_id: str,
     *,
     limit: int = 6,
@@ -307,11 +377,17 @@ def build_agent_runtime_context_block(
     inbox_messages_snapshot: list[dict[str, Any]] | None = None,
     episodic_events_snapshot: list[dict[str, Any]] | None = None,
     memory_policy_snapshot: dict[str, Any] | None = None,
-) -> str:
+) -> list[str]:
+    """Render the per-turn (volatile) half: episodes / group events / inbox / roster.
+
+    只做已获取快照的纯格式化（快照缺省时按原语义现取），每回合新鲜渲染；
+    首行必然命中动态标记之一，与 static 半段的边界和旧
+    ``_split_agent_runtime_context_block`` 切分点一致。
+    """
     s = _service()
     agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else s.get_agent(agent_id)
     if not agent:
-        return ""
+        return []
     events = (
         list(group_events_snapshot)
         if group_events_snapshot is not None
@@ -348,44 +424,7 @@ def build_agent_runtime_context_block(
     else:
         # 记忆开关关闭：与个人记忆零接触——既不读 episodic JSONL，也不注入该段。
         episodes = []
-    tool_policy = (
-        agent.get("toolPolicy")
-        if isinstance(agent.get("toolPolicy"), dict)
-        else s.resolve_tool_policy_for_agent(str(agent.get("agentId") or "").strip())
-    )
-    allowed_tools: list[str] = []
-    if isinstance(tool_policy, dict):
-        raw_allowed = tool_policy.get("allowedTools")
-        if isinstance(raw_allowed, list):
-            allowed_tools = [str(item or "") for item in raw_allowed]
-    # 额度数字必须与授权层一致：会话覆盖 > 模型家族 > 策略 base，
-    # 不再直接引用 toolPolicy 的 base 值。
-    from core.orchestration.tool_budget_text import resolve_agent_scoped_max_calls_per_turn
-
-    max_calls, _budget_family = resolve_agent_scoped_max_calls_per_turn(
-        agent,
-        tool_policy if isinstance(tool_policy, dict) else None,
-        agent_id=str(agent.get("agentId") or agent_id or "").strip(),
-    )
-    budget_lines = _runtime_tool_budget_lines(max_calls, allowed_tools)
-    lines = [
-        "## Agent Runtime Context",
-        f"AgentId: {agent.get('agentId') or ''}",
-        f"AgentCode: {agent.get('agentCode') or ''}",
-        f"AgentName: {agent.get('displayName') or ''}",
-        f"AgentWorkspace: {agent.get('workspacePath') or ''}",
-        f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
-        f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
-        *budget_lines,
-        *_team_knowledge_access_lines(str(agent.get("agentId") or agent_id or "").strip(), memory_policy),
-        "- Knowledge bodies are tool-readable only; do not treat team knowledge as prompt-injected memory.",
-    ]
-    persona_lines = s._format_persona_profile_context(agent.get("personaProfile"))
-    if persona_lines:
-        lines.extend(persona_lines)
-    task_lines = s._format_task_profile_context(agent.get("taskProfile"))
-    if task_lines:
-        lines.extend(task_lines)
+    lines: list[Any] = []
     if bool(memory_policy.get("enabled", True)):
         lines.extend(_format_personal_episodes_context(episodes))
     if events:
@@ -432,7 +471,44 @@ def build_agent_runtime_context_block(
     from core.web.services import team_service
 
     lines.extend(team_service.build_team_roster_context_lines(str(agent.get("agentId") or agent_id or "").strip()))
-    return "\n".join(line for line in lines if line is not None).strip()
+    return [line for line in lines if line is not None]
+
+
+def build_agent_runtime_context_block(
+    agent_id: str,
+    *,
+    limit: int = 6,
+    agent_snapshot: dict[str, Any] | None = None,
+    group_events_snapshot: list[dict[str, Any]] | None = None,
+    inbox_messages_snapshot: list[dict[str, Any]] | None = None,
+    episodic_events_snapshot: list[dict[str, Any]] | None = None,
+    memory_policy_snapshot: dict[str, Any] | None = None,
+) -> str:
+    """Compatibility facade: static + dynamic halves joined byte-identically.
+
+    生产路径（ContextEngine）直接分别调用两个渲染器，静态半段进会话冻结
+    闭包；本函数保留旧整块语义，供既有调用方与等价性测试使用。
+    """
+    agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else _service().get_agent(agent_id)
+    if not agent:
+        return ""
+    static_lines = build_agent_runtime_static_lines(
+        agent_id,
+        agent_snapshot=agent,
+        memory_policy_snapshot=memory_policy_snapshot,
+    )
+    dynamic_lines = build_agent_runtime_dynamic_lines(
+        agent_id,
+        limit=limit,
+        agent_snapshot=agent,
+        group_events_snapshot=group_events_snapshot,
+        inbox_messages_snapshot=inbox_messages_snapshot,
+        episodic_events_snapshot=episodic_events_snapshot,
+        memory_policy_snapshot=memory_policy_snapshot,
+    )
+    return "\n".join(
+        line for line in [*static_lines, *dynamic_lines] if line is not None
+    ).strip()
 
 
 def _agent_to_api(
