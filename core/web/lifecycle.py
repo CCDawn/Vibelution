@@ -456,6 +456,35 @@ async def _run_agent_registry_prewarm_after_routes_ready(
     )
 
 
+def _llm_startup_warmup_worker(gate_timings: dict[str, Any] | None = None) -> Any:
+    from core.llm.warmup import run_llm_startup_warmup
+
+    return run_llm_startup_warmup(gate_timings=gate_timings)
+
+
+async def _run_llm_warmup_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> Any:
+    """Defer the LLM cold-start warmup (litellm import + provider probes) behind the same gate.
+
+    The first LLM call of a fresh process pays ~5s of ``from litellm import
+    completion`` plus per-provider lazy init; warming them in the stagger
+    window means the first user turn only pays connection establishment.
+    Network probes never run under pytest (same guard as the other prewarms).
+    """
+
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _llm_startup_warmup_worker,
+        worker_name="llm-startup-warmup-worker",
+        startup_jobs=startup_jobs,
+    )
+
+
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     if os.name != "nt":
         return False
@@ -519,6 +548,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
     )
     startup_cache_prewarm_task = startup_jobs.start_async(
         "startup-ui-cache-prewarm", prewarm_ui_caches_on_startup(app=app, startup_jobs=startup_jobs)
+    )
+    # LLM cold-start warmup (heavy litellm import + one minimal probe per
+    # active provider) rides the same deferred gate; it never blocks route
+    # readiness and no-ops fast when the operator kill switch is set.
+    startup_llm_warmup_task = startup_jobs.start_async(
+        "startup-llm-warmup", _run_llm_warmup_after_routes_ready(app, startup_jobs=startup_jobs)
     )
     from .services.session.directory_runtime import (
         begin_directory_startup,
@@ -637,6 +672,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     )
     startup_cache_prewarm_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="UI cache prewarm failed during startup.")
+    )
+    startup_llm_warmup_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="LLM startup warmup failed during startup.")
     )
     startup_directory_task.add_done_callback(
         lambda task: consume_startup_task_result(

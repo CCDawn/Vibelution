@@ -374,6 +374,11 @@ PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 # values are ignored and the profile default stays authoritative; the
 # invocation budget preflight still clamps on top of the result.
 MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY = "llmMaxOutputTokensOverride"
+# Startup warmup probe marker (core.llm.warmup): one minimal best-effort
+# request per active provider whose only purpose is paying litellm/proxy/TLS
+# init before the first user turn. Carried in invocation metadata; the usage
+# ledger choke point skips it so quota/cost rollups never count warmup.
+LLM_WARMUP_METADATA_KEY = "llmWarmup"
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
 _PROVIDER_ABORT_UNAVAILABLE_EVENT_CODE = "llm.provider_abort_unavailable"
 # Bounded residual-risk diagnostics: emit at most one scene event per
@@ -1832,6 +1837,10 @@ def _record_usage_ledger_event(
     estimated_output_tokens: int = 0,
 ) -> None:
     meta = metadata if isinstance(metadata, dict) else {}
+    if meta.get(LLM_WARMUP_METADATA_KEY):
+        # Startup warmup probes (core.llm.warmup) are synthetic traffic: they
+        # must not enter the usage ledger, quota or cost rollups.
+        return
     provider_usage = getattr(usage, "provider_raw_usage", {}) if usage is not None else {}
     provider_usage_keys = sorted(str(key) for key in provider_usage.keys()) if isinstance(provider_usage, dict) else []
     input_tokens = max(0, int(getattr(usage, "input_tokens", 0) or 0))
