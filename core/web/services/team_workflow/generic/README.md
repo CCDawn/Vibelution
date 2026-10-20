@@ -327,3 +327,21 @@ whose real effect verdict controls safe replay. Ordinary Session replay still
 requires its native user action. Failed/interrupted code execution blocks rather
 than starting another potentially overlapping candidate. Persistent multi-round
 evolution and a supervision configuration UI remain separate capabilities.
+
+## Bounded campaigns using the same dedicated roles
+
+`POST /api/evolution/self/campaigns` optionally accepts `roleBindingFlowId`,
+referencing an already-ready recovery flow in `localIntegration.teamId`.
+It selects that flow's director, developer and independent reviewer without
+changing global self-evolution slots or creating agents. Omitting the field
+preserves the existing global-slot contract and stored request digests.
+
+The campaign grant freezes the binding ID and expiry alongside its existing
+principal fingerprints. Child requests inherit this authority through their
+canonical campaign parent rather than accepting caller-supplied Agent IDs.
+Every authorization stage rechecks the live binding; revocation, rebinding,
+expiry, assistant readiness or policy drift block further execution. The grant
+cannot outlive the binding, and the flow lock is held before campaign and child
+authorization locks across final integration. Native tool approval, candidate
+validation, independent review and operator-controlled deployment remain in force.
+These contracts do not claim a successful unattended live candidate campaign.

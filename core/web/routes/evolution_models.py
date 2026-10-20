@@ -23,6 +23,8 @@ class SelfEvolutionCampaignStartPayload(BaseModel):
     rounds: int = Field(default=3, ge=1, le=10, strict=True)
     idempotencyKey: str = Field(min_length=1, max_length=120, strict=True)
     localIntegration: LocalIntegrationRequest
+    roleBindingFlowId: str | None = Field(default=None, min_length=1, max_length=80,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$", strict=True)
 
 
 class SelfEvolutionCampaignActionPayload(BaseModel):
