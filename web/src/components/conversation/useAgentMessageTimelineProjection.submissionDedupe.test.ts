@@ -71,6 +71,28 @@ describe("dedupeSettledUserSubmissions", () => {
 
     const rows = dedupeSettledUserSubmissions([assistant]);
 
+expect(rows).toHaveLength(1);
+  });
+
+  it("keeps two identical prompts that carry different submission identities", () => {
+    const first = userMessage("session-1-message-11", { clientSubmissionId: "sub-a" });
+    const second = userMessage("session-1-message-12", { clientSubmissionId: "sub-b" });
+
+    const rows = dedupeSettledUserSubmissions([first, second]);
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "session-1-message-11",
+      "session-1-message-12",
+    ]);
+  });
+
+  it("keeps the first committed row when two committed rows share one submission identity", () => {
+    const first = userMessage("session-1-message-13", { clientSubmissionId: "sub-c" });
+    const second = userMessage("session-1-message-14", { clientSubmissionId: "sub-c" });
+
+    const rows = dedupeSettledUserSubmissions([first, second]);
+
     expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe("session-1-message-13");
   });
 });
