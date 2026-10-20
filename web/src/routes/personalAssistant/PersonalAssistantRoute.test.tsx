@@ -196,6 +196,26 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector("[data-native-session-chat]")).not.toBeNull();
     expect(container.querySelector("output")?.textContent).toBe("/desktop-assistant?session=assistant-session");
   });
+  it("verifies a server window once and makes it reusable by native chat", async () => {
+    const detail = { id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main", messages: [], transcriptScope: "window" } as SessionDetail;
+    vi.mocked(fetchSessionDetail).mockResolvedValue(detail);
+    await render("/desktop-assistant", true);
+    expect(fetchSessionDetail).toHaveBeenCalledWith(assistant.directSessionId, expect.objectContaining({ transcriptScope: "window", messageLimit: 40, includeSecondary: true }));
+    expect(client.getQueryData(queryKeys.session(assistant.directSessionId))).toEqual(detail);
+    const nativeChatFetch = vi.fn().mockResolvedValue(detail);
+    const cached = await client.fetchQuery({ queryKey: queryKeys.session(assistant.directSessionId), queryFn: nativeChatFetch, staleTime: 1500 });
+    expect(cached).toEqual(detail);
+    expect(nativeChatFetch).not.toHaveBeenCalled();
+  });
+  it("does not admit chat from a fresh optimistic shell when the server binding is wrong", async () => {
+    client.setQueryData(queryKeys.session(assistant.directSessionId), { id: assistant.directSessionId, agentId: assistant.agentId,
+      sessionKind: "main", provisionalTranscript: true, messages: [] });
+    vi.mocked(fetchSessionDetail).mockResolvedValue({ id: assistant.directSessionId, agentId: "other", sessionKind: "main" } as SessionDetail);
+    await render("/desktop-assistant", true);
+    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
+    expect(fetchSessionDetail).toHaveBeenCalled();
+    expect(container.querySelector('[data-native-session-chat]')).toBeNull();
+  });
   it("keeps the whale collapsed when native expansion fails", async () => {
     vi.mocked(setDesktopPetExpanded).mockRejectedValue(new Error("桌面壳需要更新"));
     await render("/desktop-assistant", true);
@@ -203,6 +223,26 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector("[data-native-session-chat]")).toBeNull();
     expect(container.querySelector('[data-expanded="false"]')).not.toBeNull();
     expect(container.textContent).toContain("桌面壳需要更新");
+  });
+  it("closes only the chat and returns to the desktop character", async () => {
+    const close = vi.spyOn(window, "close").mockImplementation(() => {});
+    await render("/desktop-assistant", true);
+    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
+    await act(async () => (container.querySelector('[data-expanded="true"] [aria-label="关闭聊天"]') as HTMLButtonElement).click()); await settle();
+    expect(setDesktopPetExpanded).toHaveBeenLastCalledWith(false);
+    expect(container.querySelector('[data-expanded="false"]')).not.toBeNull();
+    expect(container.querySelector('[data-native-session-chat]')).toBeNull();
+    expect(close).not.toHaveBeenCalled();
+  });
+  it("keeps chat and shows the error if returning to the character fails", async () => {
+    const close = vi.spyOn(window, "close").mockImplementation(() => {});
+    await render("/desktop-assistant", true);
+    await act(async () => (container.querySelector('[aria-label="展开个人助理聊天"]') as HTMLButtonElement).click()); await settle();
+    vi.mocked(setDesktopPetExpanded).mockRejectedValueOnce(new Error("窗口调整失败"));
+    await act(async () => (container.querySelector('[data-expanded="true"] [aria-label="关闭聊天"]') as HTMLButtonElement).click()); await settle();
+    expect(container.querySelector('[data-expanded="true"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("窗口调整失败");
+    expect(close).not.toHaveBeenCalled();
   });
   it.each([
     ["running", "tooling", "正在陪你工作"], ["approval", "waiting", "需要你确认"], ["error", "alert", "有任务遇到问题"],

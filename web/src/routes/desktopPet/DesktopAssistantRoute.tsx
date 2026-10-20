@@ -1,11 +1,10 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ExternalLink, MessageCircle, RefreshCw, Settings, Sparkles, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ExternalLink, MessageCircle, RefreshCw, Settings, Sparkles, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { getDesktopAssistantContext, setDesktopPetExpanded } from "../../api/desktopPet";
 import { VButton, VCheckbox, VIconButton, VInput, VNativeButton, VStateSurface } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
-import { ChatCodingRoute } from "../ChatCodingRoute";
 import { PersonalAssistantState } from "../personalAssistant/PersonalAssistantState";
 import { useAssistantActivity } from "../personalAssistant/useAssistantActivity";
 import { usePersonalAssistant } from "../personalAssistant/usePersonalAssistant";
@@ -26,6 +25,9 @@ import {
 import petStyles from "./DesktopAssistantRoute.styles";
 import { HumanAttentionNoticeStack } from "./HumanAttentionNoticeStack";
 
+// The collapsed character must not wait for the full workbench chat bundle.
+const ChatCodingRoute = lazy(() => import("../ChatCodingRoute").then(module => ({ default: module.ChatCodingRoute })));
+
 const COPY = {
   zh: {
     names: { xiaoluo: "小洛", dafeiyu: "DeepSeek 大肥鲸" },
@@ -41,11 +43,12 @@ const COPY = {
     fullSettings: "名称、外观与模型",
     chat: "聊一聊",
     expand: "展开个人助理聊天",
-    collapse: "收起个人助理聊天",
     openFailed: "未能返回工作台，请稍后重试",
     unread: "条未读提醒",
     returnToWorkbench: "返回工作台",
     close: "关闭个人助理",
+    closeChat: "关闭聊天",
+    loadingChat: "正在打开会话…",
     titleFallback: "个人助理",
     checkingIdentity: "正在确认窗口身份…",
     readingStatus: "正在读取平台状态…",
@@ -68,11 +71,12 @@ const COPY = {
     fullSettings: "Name, appearance and model",
     chat: "Chat",
     expand: "Open the assistant chat",
-    collapse: "Collapse the assistant chat",
     openFailed: "Could not return to the workbench. Try again.",
     unread: "unread updates",
     returnToWorkbench: "Return to workbench",
     close: "Close the personal assistant",
+    closeChat: "Close chat",
+    loadingChat: "Opening conversation…",
     titleFallback: "Personal assistant",
     checkingIdentity: "Verifying this window…",
     readingStatus: "Reading platform status…",
@@ -359,11 +363,10 @@ export function DesktopAssistantRoute() {
       <div className={petStyles.chatActions}>
         <VIconButton variant="ghost" label={copy.returnToWorkbench} icon={<ExternalLink size={14} aria-hidden="true" />} isDisabled={!state.verified}
           onClick={() => { if (state.verified && state.assistant) void openSession(state.assistant.directSessionId); }} />
-        <VIconButton variant="ghost" label={copy.collapse} icon={<ChevronDown size={14} aria-hidden="true" />} isDisabled={pending} onClick={() => void toggle()} />
-        <VIconButton variant="ghost" label={copy.close} icon={<X size={14} aria-hidden="true" />} onClick={() => window.close()} />
+        <VIconButton variant="ghost" label={copy.closeChat} icon={<X size={14} aria-hidden="true" />} isDisabled={pending} onClick={() => void toggle()} />
       </div>
     </header>
-    <div className={petStyles.chatBody}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</div>
+    <div className={petStyles.chatBody}><Suspense fallback={<VStateSurface fill tone="loading" title={copy.loadingChat} />}>{state.verified ? nativeWorkspace : <PersonalAssistantState state={state} />}</Suspense></div>
     {noticeStack}
   </div>;
 }

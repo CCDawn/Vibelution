@@ -43,12 +43,14 @@ AppShell 中唯一桌面助理返回订阅；普通桌宠和其他会话通知�
 仅原生验证的 `/desktop-assistant`；旧 `/desktop-pet` 是重定向别名（旧壳与书签兼容），不再有独立页面。不适用于普通 `/chat`、Companion 人物会话正文或第二套 transcript；这些仍由原生 Session、Journal 与 SSE 拥有。无 3D 引擎、模型导入或市场：小洛 Cubism Live2D 与大肥鲸 Anime2.5DRig 分层 WebGL 骨骼是仅有的两个外观 renderer。
 
 ### 使用方式
-先用 `getDesktopAssistantContext` 核实 role/mode，再验证助理 Agent/Session 绑定。`setDesktopPetExpanded` 申请固定安全尺寸（收起 300×330 / 展开 760×600）。收起态身体为 `DesktopPetCharacter`，外观跟随 `vibelution.desktop-pet.preferences.v1` 的 characterId（默认大肥鲸，可切小洛）；4px 移动阈值区分单击与拖动，拖动经 Electron IPC（desktopPetWindowDrag）移动窗口并沿用位置持久化。工具栏提供状态提示、助理设置（状态/标题隐私/完成提示/空闲文案，保存失败明确提示仅本次有效）、外观切换与关闭。展开态使用 `VSplitWorkspace` 与 `WORKBENCH_LAYOUT_IDS.desktopAssistant`：main 为 `ChatCodingRoute` 原生会话，aside 为实时对话列表（`/api/pet/activity` 轮询，活动 1s/空闲 3s）与 `PersonalAssistantOverview`。会话跳转只调用 `openConversationFromPet(sessionId)`，必须得到主进程 `opened: true`，失败保留列表并提示；标题隐私开关隐藏会话标题与智能体名。supportedModes 门（"pet"|"assistant"）对旧壳保持兼容，Electron 的 desktopPetWindowUrl 把两种模式请求都收敛到 `/desktop-assistant`。
+先用 `getDesktopAssistantContext` 核实 role/mode，再验证助理 Agent/Session 绑定。`setDesktopPetExpanded` 申请固定安全尺寸（收起 300×330 / 展开 400×530，并限制在屏幕工作区内）。收起态身体为 `DesktopPetCharacter`，外观跟随 `vibelution.desktop-pet.preferences.v1` 的 characterId（默认大肥鲸，可切小洛）；4px 移动阈值区分单击与拖动，拖动经 Electron IPC（desktopPetWindowDrag）移动窗口并沿用位置持久化。工具栏提供状态提示、助理设置（状态/标题隐私/完成提示/空闲文案，保存失败明确提示仅本次有效）、外观切换与关闭个人助理。展开态仅内嵌同一 `ChatCodingRoute` 原生会话；聊天代码局部按需加载，读取服务端原生初始消息窗口完成身份验证后，复用同一 `queryKeys.session` 缓存，不能用乐观会话壳替代服务端身份校验。聊天头部的收起与「关闭聊天」均通过原生尺寸桥返回桌面形象，不关闭原生窗口或停止会话；尺寸调整失败保留聊天并显示错误。会话跳转只调用 `openConversationFromPet(sessionId)`，必须得到主进程 `opened: true`，失败保留当前窗口并提示。supportedModes 门（"pet"|"assistant"）对旧壳保持兼容，Electron 的 desktopPetWindowUrl 把两种模式请求都收敛到 `/desktop-assistant`。
 
 ### 非职责
 不以 URL marker 证明原生身份，不停止会话，不保存消息、不判断 Turn 权威、不创建 Companion mailbox，也不修改普通 Session admission、worker、projection 或 composer；不显示用户消息、工具参数、审批 payload 或模型推理正文。
 
 ### 视觉与状态
+紧凑聊天头部仅保留身份、返回工作台与关闭聊天。正文取消头像列缩进，保留原生作者/时间与消息操作；输入区使用 48px 起始文本框，模型、权限、上下文和发送控件复用原组件，在窄尺寸下换行而非裁掉权限或模型名。所有紧凑规则均限定在 `data-assistant-chat="compact"` 下，不改变工作台或普通会话的呈现。
+
 窗口透明、无边框、置顶；收起态复用桌宠舞台（toolbar / HUD / character stage），状态、关闭与设置入口收拢在身体周围的紧凑舞台内。状态优先级由后端投影固定为 `approval > error > running > completed > idle`；异常仅最近五分钟占用聚合提醒优先级，待审批不超时隐藏；完成仅由成功结果触发且受偏好开关控制。两个 renderer 只消费活动投影，不持有会话；显示模型加载与失败状态，不静默切回旧 PNG，保留各自作者标注。`prefers-reduced-motion` 下停止全部非必要动画；标签页隐藏时停止渲染，卸载时释放模型资源。本机集成不代表已获公开发布许可，详见 `web/live2d/README.md`。旧壳与身份错误明确提示；读取中与读取失败有独立文案，不伪造空闲状态。
 
 ### 实现落点

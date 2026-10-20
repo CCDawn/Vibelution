@@ -1,16 +1,19 @@
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { fetchSessionDetail } from "../../api/chat";
 import { createPersonalAssistant, fetchPersonalAssistant } from "../../api/personalAssistant";
 import { queryKeys } from "../../api/queryKeys";
 import { useChatRouteSelection } from "../chat/useChatRouteSelection";
 import { personalAssistantSessionMatches, validPersonalAssistant } from "./personalAssistantModel";
+import { fetchSessionDetailWindow } from "../chat/chatSessionDetailHelpers";
+import { sessionDetailStructuralSharing } from "../chat/chatSessionQuerySeams";
 
 /** A page visit explicitly provisions/restores the singleton; reads elsewhere stay pure. */
 export function usePersonalAssistant(enabled = true) {
   const route = useChatRouteSelection();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const setup = useQuery({
     queryKey: queryKeys.personalAssistant(),
     queryFn: async ({ signal }) => {
@@ -24,7 +27,22 @@ export function usePersonalAssistant(enabled = true) {
   const ready = validPersonalAssistant(assistant);
   const binding = useQuery({
     queryKey: queryKeys.personalAssistantBinding(assistant?.agentId ?? "", assistant?.directSessionId ?? ""),
-    queryFn: ({ signal }) => fetchSessionDetail(assistant!.directSessionId, { signal, transcriptScope: "none", includeSecondary: false }),
+    queryFn: async ({ signal }) => {
+      if (location.pathname !== "/desktop-assistant") {
+        return fetchSessionDetail(assistant!.directSessionId, { signal, transcriptScope: "none", includeSecondary: false });
+      }
+      // Verify against the server even when an optimistic shell is cached. The
+      // native chat then reuses this same full initial window, rather than
+      // waiting for a second serial detail request after admission.
+      const detail = await queryClient.fetchQuery({
+        queryKey: queryKeys.session(assistant!.directSessionId),
+        queryFn: ({ signal: detailSignal }) => fetchSessionDetailWindow(assistant!.directSessionId, { signal: detailSignal, includeSecondary: true }),
+        staleTime: 0,
+        structuralSharing: sessionDetailStructuralSharing,
+      });
+      signal.throwIfAborted();
+      return detail;
+    },
     enabled: enabled && ready, staleTime: 0, retry: false,
   });
   useEffect(() => {
