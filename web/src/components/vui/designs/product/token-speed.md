@@ -10,7 +10,7 @@
 
 ### 使用方式
 由 ChatTokenSpeedIndicator 订阅当前 session 的 active-turn store，传入 `tokensPerSecond: number | null` 和 `lang: "zh" | "en"`。
-展示组件组合 VTooltip 与只读 SVG，无展开面板。键盘可聚焦阅读估算说明，不添加高频 aria-live。
+展示组件仅用只读 SVG 与速度数值，无悬停提示、说明浮层或展开面板。使用 aria-label 提供读屏名称，不占用键盘焦点，不添加高频 aria-live。
 
 ### 视觉与状态
 28px 高，数字等宽；使用现有语义颜色。半圆刻度 0–200 tok/s，指针封顶但数值不截断；不以颜色表示速度优劣。无数据、等待首字、执行工具、暂停或完成均显示 `— tok/s`。不添加动效。
@@ -24,4 +24,4 @@
 `components/conversation/ConversationTokenSpeedIndicator.tsx` 与 `.styles.ts`；`routes/chat/ChatTokenSpeedIndicator.tsx`；`routes/chatTokenSpeed.ts`。不修改 Session、SSE、worker 或 transcript 权威。
 
 ### 非职责与反冗余
-不承担模型切换、请求耗时、计费、性能诊断或历史统计；复用 VTooltip 和现有 active-turn store，不创建第二 SSE、状态仓库或公共 VUI primitive。
+不承担模型切换、请求耗时、计费、性能诊断或历史统计；复用现有 active-turn store，不创建第二 SSE、状态仓库或公共 VUI primitive。
