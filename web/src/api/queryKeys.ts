@@ -3,6 +3,7 @@ export const queryKeys = {
   personalAssistantComputer: () => ["personal-assistant", "computer"] as const,
   personalAssistantComputerWindows: () => ["personal-assistant", "computer-windows"] as const,
   personalAssistantOverview: () => ["personal-assistant", "overview"] as const,
+  personalAssistantHumanAttention: () => ["personal-assistant", "human-attention"] as const,
   personalAssistantBinding: (agentId: string, sessionId: string) => ["personal-assistant", "binding", agentId, sessionId] as const,
   personalAssistantReplies: (agentId: string, sessionId: string) => ["personal-assistant", "replies", agentId, sessionId] as const,
   challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,

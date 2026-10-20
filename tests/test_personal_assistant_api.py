@@ -7,6 +7,8 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service as directory
 from core.web.services import personal_assistant_service as service
+from core.web.services import personal_attention_service as attention
+from core.web.services import session_service
 from tests.test_personal_assistant_service import (
     finance_env as _finance_env,
 )
@@ -159,6 +161,47 @@ def test_overview_route_returns_typed_safe_contract(client, monkeypatch):
     response = client.get("/api/personal-assistant/overview")
     assert response.status_code == 200
     assert response.json() == _overview()
+
+
+@pytest.mark.parametrize("rows", [[], [
+    {"id": "gate-1", "kind": "human_gate", "title": "等待审批",
+     "actions": [{"label": "接受", "decision": "accept"}],
+     "meta": {"teamId": "team-1", "runId": "run-7", "decisions": ["accept"]}},
+    {"id": "review-1", "kind": "knowledge_review", "title": "知识待复核"},
+]])
+def test_human_attention_read_skips_session_overview_and_preserves_row_contract(
+    client, monkeypatch, rows
+):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Notification read enumerated the Session overview")
+
+    monkeypatch.setattr(service, "get_platform_overview", forbidden)
+    monkeypatch.setattr(session_service, "list_sessions", forbidden)
+    monkeypatch.setattr(session_service, "current_session_turn_id", forbidden)
+    for index, name in enumerate((
+        "collect_knowledge_review_attention", "collect_anomaly_attention",
+        "_collect_human_gate_attention", "_collect_affair_reminder_attention",
+    )):
+        monkeypatch.setattr(attention, name, lambda index=index: rows[index:index + 1])
+    response = client.get("/api/personal-assistant/human-attention")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"humanAttention": rows}
+    schema = client.app.openapi()["components"]["schemas"]["HumanAttentionResponse"]
+    assert schema["required"] == ["humanAttention"]
+    assert schema["properties"]["humanAttention"]["items"] == {
+        "$ref": "#/components/schemas/Attention"
+    }
+
+
+def test_human_attention_response_rejects_unknown_notification_kinds(client, monkeypatch):
+    monkeypatch.setattr(attention, "collect_human_attention", lambda: [
+        {"id": "bad-1", "kind": "unrecognized", "title": "Invalid"}
+    ])
+    unchecked_client = TestClient(
+        client.app, headers={CONTROL_TOKEN_HEADER: get_control_token()},
+        raise_server_exceptions=False,
+    )
+    assert unchecked_client.get("/api/personal-assistant/human-attention").status_code == 500
 
 
 def test_overview_route_passes_bounded_page_parameters(client, monkeypatch):

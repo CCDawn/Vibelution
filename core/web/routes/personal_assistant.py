@@ -250,6 +250,10 @@ class Attention(BaseModel):
 
 
 
+class HumanAttentionResponse(BaseModel):
+    humanAttention: list[Attention]
+
+
 class OverviewPagination(BaseModel):
 
     offset: StrictInt = Field(ge=0)
@@ -369,6 +373,15 @@ def overview(
 
     return personal_attention_service.attach_attention_to_overview(payload)
 
+
+
+@router.get(
+    "/personal-assistant/human-attention",
+    response_model=HumanAttentionResponse,
+    response_model_exclude_unset=True,
+)
+def human_attention() -> dict:
+    return {"humanAttention": personal_attention_service.collect_human_attention()}
 
 
 @router.post(

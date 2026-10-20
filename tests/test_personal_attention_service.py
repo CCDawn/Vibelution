@@ -88,6 +88,45 @@ personal_env = _personal_env
 _NEW_ENTRY_FIELDS = {"id", "kind", "severity", "title", "targetUrl", "body"}
 
 
+_HUMAN_ATTENTION_COLLECTORS = (
+    "collect_knowledge_review_attention",
+    "collect_anomaly_attention",
+    "_collect_human_gate_attention",
+    "_collect_affair_reminder_attention",
+)
+
+
+def test_human_attention_feed_and_overview_share_all_four_sources(monkeypatch):
+    rows = []
+    for name, kind in zip(_HUMAN_ATTENTION_COLLECTORS, (
+        "knowledge_review", "anomaly", "human_gate", "affair_reminder"
+    )):
+        row = {"id": name, "kind": kind, "title": name}
+        rows.append(row)
+        monkeypatch.setattr(attention, name, lambda row=row: [row])
+    assert attention.collect_human_attention() == rows
+    payload = {"attention": [{"id": "approval-1", "kind": "approval"}]}
+    assert attention.attach_attention_to_overview(payload)["humanAttention"] == rows
+    assert payload["attention"] == [{"id": "approval-1", "kind": "approval"}]
+
+
+def test_human_attention_feed_isolates_each_failed_source_and_keeps_empty_overview_shape(monkeypatch):
+    def fail():
+        raise RuntimeError("Source unavailable")
+
+    for broken in _HUMAN_ATTENTION_COLLECTORS:
+        with monkeypatch.context() as patch:
+            for name in _HUMAN_ATTENTION_COLLECTORS:
+                patch.setattr(attention, name, fail if name == broken else lambda name=name: [{"id": name}])
+            assert attention.collect_human_attention() == [
+                {"id": name} for name in _HUMAN_ATTENTION_COLLECTORS if name != broken
+            ]
+    for name in _HUMAN_ATTENTION_COLLECTORS:
+        monkeypatch.setattr(attention, name, lambda: [])
+    assert attention.collect_human_attention() == []
+    assert attention.attach_attention_to_overview({"attention": []}) == {"attention": []}
+
+
 
 def _team(team_id: str, name: str = "科研团队") -> dict:
 

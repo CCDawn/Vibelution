@@ -4,22 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchPersonalAssistantOverview } from "../../api/personalAssistant";
-import type { PersonalAssistantOverview } from "../../api/types/personalAssistant";
+import { fetchPersonalAssistantHumanAttention } from "../../api/personalAssistant";
+import { queryKeys } from "../../api/queryKeys";
+import type { PersonalAssistantHumanAttentionResponse } from "../../api/types/personalAssistant";
 import { HumanAttentionNotifier } from "./HumanAttentionNotifier";
 
-vi.mock("../../api/personalAssistant", () => ({ fetchPersonalAssistantOverview: vi.fn() }));
+vi.mock("../../api/personalAssistant", () => ({ fetchPersonalAssistantHumanAttention: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-type AttentionRow = PersonalAssistantOverview["attention"][number];
+type AttentionRow = PersonalAssistantHumanAttentionResponse["humanAttention"][number];
 
-function overviewWith(humanAttention: AttentionRow[]): PersonalAssistantOverview {
+function feedWith(humanAttention: AttentionRow[]): PersonalAssistantHumanAttentionResponse {
   return {
-    generatedAt: "2026-10-18T00:00:00Z",
-    counts: { agents: 0, sessions: 0, running: 0, waiting: 0, failed: 0 },
-    agents: [],
-    sessions: [],
-    attention: [],
     humanAttention,
   };
 }
@@ -40,8 +36,7 @@ function Host() {
   );
 }
 
-async function renderInto(target: Root) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+async function renderInto(target: Root, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   await act(async () => {
     target.render(
       <QueryClientProvider client={client}>
@@ -81,8 +76,22 @@ afterEach(async () => {
 });
 
 describe("main workbench human-attention trigger chain", () => {
+  it("reads the dedicated feed even when the full overview is already cached", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(queryKeys.personalAssistantOverview(), {
+      humanAttention: [{ id: "cached-overview", kind: "anomaly", title: "Old overview" }],
+    });
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(feedWith([
+      { id: "fresh-feed", kind: "knowledge_review", title: "New notification" },
+    ]));
+    await renderInto(root, client);
+    expect(fetchPersonalAssistantHumanAttention).toHaveBeenCalledTimes(1);
+    expect(notifyHumanAttention).toHaveBeenCalledTimes(1);
+    expect(notifyHumanAttention).toHaveBeenCalledWith(expect.objectContaining({ id: "fresh-feed" }));
+  });
+
   it("notifies unseen human-attention rows once with the contract payload", async () => {
-    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(overviewWith([
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(feedWith([
       { id: "kr-1", kind: "knowledge_review", title: "知识待复核", severity: "critical", body: "一条新知识", targetUrl: "/memory/knowledge" },
       { id: "approval-1", kind: "approval", title: "等待确认", sessionId: "s1" },
     ]));
@@ -99,7 +108,7 @@ describe("main workbench human-attention trigger chain", () => {
   });
 
   it("forwards human_gate rows with their inline actions and meta to the shell", async () => {
-    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(overviewWith([
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(feedWith([
       {
         id: "gate-1",
         kind: "human_gate",
@@ -132,8 +141,8 @@ describe("main workbench human-attention trigger chain", () => {
   });
 
   it("does not re-notify across page refreshes (localStorage day dedup)", async () => {
-    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(
-      overviewWith([{ id: "an-1", kind: "anomaly", title: "研究异常", severity: "high" }]),
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(
+      feedWith([{ id: "an-1", kind: "anomaly", title: "研究异常", severity: "high" }]),
     );
     await mountNotifier();
     expect(notifyHumanAttention).toHaveBeenCalledTimes(1);
@@ -150,16 +159,16 @@ describe("main workbench human-attention trigger chain", () => {
 
   it("skips silently when the launcher bridge is absent", async () => {
     vi.unstubAllGlobals();
-    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(
-      overviewWith([{ id: "kr-2", kind: "knowledge_review", title: "知识", severity: "medium" }]),
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(
+      feedWith([{ id: "kr-2", kind: "knowledge_review", title: "知识", severity: "medium" }]),
     );
     await expect(mountNotifier()).resolves.toBeUndefined();
     expect(notifyHumanAttention).not.toHaveBeenCalled();
   });
 
   it("navigates the workbench on opened clicks: targetUrl wins, kind default as fallback", async () => {
-    vi.mocked(fetchPersonalAssistantOverview).mockResolvedValue(
-      overviewWith([{ id: "an-1", kind: "anomaly", title: "研究异常", severity: "high" }]),
+    vi.mocked(fetchPersonalAssistantHumanAttention).mockResolvedValue(
+      feedWith([{ id: "an-1", kind: "anomaly", title: "研究异常", severity: "high" }]),
     );
     await mountNotifier();
     const locationNow = () => router.state.location.pathname + router.state.location.search;
