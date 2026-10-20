@@ -296,6 +296,124 @@ class TestEstimateMessagesTokens:
         assert tokens >= 2_500
 
 
+class TestEstimateMessagesTokensWithToolPayloads:
+    """Seed/ledger 形态（content 为空、payload 在 tool_calls）下的阈值估算。"""
+
+    def test_ledger_shape_payloads_are_counted(self):
+        """tool_calls 里的 result/arguments 必须计入估算，不能塌缩成纯文本尾。"""
+        from tools.token_manager import (
+            estimate_messages_tokens_for_threshold,
+            estimate_messages_tokens_with_tool_payloads,
+        )
+
+        messages = [
+            {"role": "user", "content": "开始调查"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "name": "grep_search_tool",
+                        "arguments": {"query": "历史工具证据"},
+                        "result": "read-only search output\n" * 1_000,
+                    }
+                ],
+            },
+        ]
+        threshold = 5_000
+
+        content_only = estimate_messages_tokens_for_threshold(messages, threshold)
+        with_payloads = estimate_messages_tokens_with_tool_payloads(messages, threshold)
+
+        assert content_only < threshold, "content-only 口径在此形态下永远看不到压力（回归断点）"
+        assert with_payloads >= threshold
+        # 精确口径应显著大于 content-only 口径，且为保守上界
+        assert with_payloads > content_only * 5
+
+    def test_provider_shape_function_arguments_counted(self):
+        """OpenAI 形态 tool_calls（function.name/arguments）同样计入。"""
+        from tools.token_manager import estimate_messages_tokens_with_tool_payloads
+
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "glob_tool", "arguments": '{"pattern": "**/*.py"}'},
+                    }
+                ],
+            }
+        ]
+        without_function = [
+            {"role": "assistant", "content": "", "tool_calls": [{"name": "glob_tool"}]}
+        ]
+        base = estimate_messages_tokens_with_tool_payloads(without_function, 10)
+        value = estimate_messages_tokens_with_tool_payloads(messages, 10)
+        assert value > base
+
+    def test_cheap_path_when_far_under_threshold(self):
+        """远低于阈值时返回保守字符上界，不做逐字符精确扫描。"""
+        from tools import token_manager
+        from tools.token_manager import estimate_messages_tokens_with_tool_payloads
+
+        calls = {"n": 0}
+        original = token_manager.estimate_tokens_precise
+
+        def counting(text):
+            calls["n"] += 1
+            return original(text)
+
+        token_manager.estimate_tokens_precise = counting
+        try:
+            messages = [
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"name": "t", "result": "x" * 100}],
+                },
+            ]
+            from tools.token_manager import (
+                _message_tool_payload_parts,
+                rough_upper_bound_messages_tokens,
+            )
+
+            payload_bound = sum(
+                len(part) for message in messages for part in _message_tool_payload_parts(message)
+            )
+            rough = rough_upper_bound_messages_tokens(messages) + payload_bound
+            assert rough > 100
+            value = estimate_messages_tokens_with_tool_payloads(messages, threshold=rough)
+            assert value == rough
+            assert calls["n"] == 0, "far under threshold must not run precise estimator"
+        finally:
+            token_manager.estimate_tokens_precise = original
+
+    def test_never_below_content_basis_and_empty_history(self):
+        """payload 口径不小于 content 口径；空历史返回 0。"""
+        from tools.token_manager import (
+            estimate_messages_tokens_for_threshold,
+            estimate_messages_tokens_with_tool_payloads,
+        )
+
+        messages = [
+            {"role": "tool", "content": "role-tool 结果文本 " * 100},
+            {
+                "role": "assistant",
+                "content": "正文文本 " * 50,
+                "toolCalls": [{"name": "t", "result": "r" * 300}],
+            },
+        ]
+        assert (
+            estimate_messages_tokens_with_tool_payloads(messages, 10)
+            >= estimate_messages_tokens_for_threshold(messages, 10)
+        )
+        assert estimate_messages_tokens_with_tool_payloads([], 10) == 0
+
+
 def test_compression_preserves_latest_provider_user_message_and_summarizes_older_users():
     from langchain_core.messages import AIMessage, SystemMessage
 
