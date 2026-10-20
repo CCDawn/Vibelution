@@ -471,11 +471,19 @@ def test_original_fetch_receipt_replaces_model_summary_in_context_and_gate(tmp_p
     _append_stage_task_tool_trace(tmp_path, task)
     source = _read_context(setup)["quotableSources"][0]
     assert not source["quoteAvailable"]
-    # A different turn's successful fetch cannot supply this task's evidence.
-    append_conversation_event(tmp_path, task["sessionId"], "unrelated-turn", "tool_result",
+    # Another session's successful fetch still cannot supply this task's evidence.
+    append_conversation_event(tmp_path, "unrelated-session", "turn-foreign", "tool_result",
         status="done", payload={"toolCall": {"name": "web_fetch_tool", "status": "done",
-        "arguments": {"url": candidate["sourceUrl"]}, "result": "[网页内容] " + candidate["sourceUrl"] + "\n\nForeign text"}})
+        "arguments": {"url": candidate["sourceUrl"]}, "result": "[网页内容] " + candidate["sourceUrl"] + "\n\nForeign session text"}})
     assert not _read_context(setup)["quotableSources"][0]["quoteAvailable"]
+    # A1-a：同会话早一 turn 的成功抓取现在供给本任务——修正停靠后 agent 在
+    # 新 turn 复看早前抓取时不再因 turn 边界丢原文块。
+    append_conversation_event(tmp_path, task["sessionId"], "earlier-continuation-turn", "tool_result",
+        status="done", payload={"toolCall": {"name": "web_fetch_tool", "status": "done",
+        "arguments": {"url": candidate["sourceUrl"]}, "result": "[网页内容] " + candidate["sourceUrl"] + "\n\nEarlier turn foreign text"}})
+    earlier = _read_context(setup)["quotableSources"][0]
+    assert earlier["quoteAvailable"] is True
+    assert earlier["blocks"][0]["text"] == "Earlier turn foreign text"
     original = "Measured cell conversion depended on the experimental context."
     append_conversation_event(tmp_path, task["sessionId"], task["turn"]["turnId"], "tool_result",
         status="done", payload={"toolCall": {"name": "web_fetch_tool", "status": "done",
@@ -673,3 +681,70 @@ def test_doiorg_end_of_path_key_still_bridges():
     )
     keys = _normalized_locator_keys("https://doi.org/10.21656/1000-0887.390245")
     assert "doi:10.21656/1000-0887.390245" in keys
+
+
+# ---------------------------------------------------------------------------
+# ⑧ resolvedUrl 重定向变体绑定 + 空 quotableSources 字段保留
+# ---------------------------------------------------------------------------
+
+
+def test_redirected_bare_url_record_binds_receipt_via_resolved_url():
+    """A1-b：裸 URL 重定向变体——record 带最终跳转地址，回执按原始请求抓取 → 命中。
+
+    回执 header 的 resolvedUrl（抓取后的最终 URL）以归一化键进入索引；
+    block 字段仍指向原始回执，不做任何改写。
+    """
+    text = "Redirected landing page abstract body."
+    fetched = {
+        "https://example.org/short-link": {
+            "text": text,
+            "locator": "https://example.org/short-link",
+            "resolvedUrl": "https://www.publisher.example/articles/full-page.html",
+            "eventId": "evt-redir", "sessionId": "s", "turnId": "t",
+        }
+    }
+    record = {"recordId": "r1", "sourceUrl": "https://www.publisher.example/articles/full-page.html"}
+    blocks = source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)
+    assert [b["text"] for b in blocks] == [text]
+    assert blocks[0]["locator"] == "https://example.org/short-link"
+    assert blocks[0]["resolvedUrl"] == "https://www.publisher.example/articles/full-page.html"
+
+
+def test_resolved_url_binding_normalizes_and_does_not_overmatch():
+    """resolvedUrl 键同样走归一化（www 前缀折叠命中）；不同最终地址不误命中。"""
+    text = "Normalized redirect body."
+    fetched = {
+        "https://example.org/short-link": {
+            "text": text,
+            "locator": "https://example.org/short-link",
+            "resolvedUrl": "https://www.publisher.example/articles/full-page.html",
+            "eventId": "evt-redir", "sessionId": "s", "turnId": "t",
+        }
+    }
+    # www. 差异：record 无 www、resolvedUrl 带 www → 归一化后命中。
+    bare_host = {"recordId": "r1", "sourceUrl": "https://publisher.example/articles/full-page.html"}
+    assert source_quotable_blocks(bare_host, {}, fetched_text_by_locator=fetched)[0]["text"] == text
+    # 不同最终地址的 record 不命中。
+    other_page = {"recordId": "r2", "sourceUrl": "https://www.publisher.example/articles/other-page.html"}
+    assert source_quotable_blocks(other_page, {}, fetched_text_by_locator=fetched) == []
+
+
+def test_compact_context_keeps_empty_quotable_sources_field():
+    """A1-c：extraction 空 quotableSources 列表显式保留为空数组，不整字段丢弃。
+
+    与同函数「空 blocks 显式保留」的语义对齐：agent 看到的是明确的
+    「本任务没有任何可引用来源」供给状态，而不是「字段消失」。
+    """
+    from core.web.services.team_workflow.source_collection_context import (
+        compact_source_collection_stage_task_context,
+    )
+
+    compact = compact_source_collection_stage_task_context({
+        "stageId": "extraction", "contextMode": "compact", "quotableSources": [],
+    })
+    assert compact["quotableSources"] == []
+    # 字段本就不存在的上下文（非 extraction）不会凭空多出该字段。
+    without_field = compact_source_collection_stage_task_context({
+        "stageId": "finding", "contextMode": "compact",
+    })
+    assert "quotableSources" not in without_field

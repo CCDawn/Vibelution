@@ -128,3 +128,36 @@ def test_arxiv_pdf_receipt_supplies_quotable_blocks_for_pdf_source(monkeypatch):
 
     assert len(blocks) == 1
     assert blocks[0]["text"] == "Full text paragraph from the mirrored PDF."
+
+
+def test_earlier_turn_fetch_in_same_session_stays_visible(monkeypatch):
+    """A1-a：修正停靠后 agent 在新 turn 继续——早一 turn 的成功抓取不得因 turn 边界丢失。
+
+    供给边界是本 stage task 会话，不是当前 turn；回执仍如实记录来源 turn。
+    """
+    receipt = "[网页内容] https://example.org/paper\n\nEarlier turn fetched body."
+    _install_events(monkeypatch, [_tool_result_event("turn-earlier", "https://example.org/paper", receipt)])
+
+    texts = task_fetched_text(_task(session_id="sess-1", turn_id="turn-current"))
+
+    assert set(texts) == {"https://example.org/paper"}
+    assert texts["https://example.org/paper"]["text"] == "Earlier turn fetched body."
+    assert texts["https://example.org/paper"]["turnId"] == "turn-earlier"
+
+
+def test_same_locator_refetch_in_later_turn_overwrites_earlier(monkeypatch):
+    """同一 locator 跨 turn 重复抓取按 Journal 顺序后者覆盖前者（确定性 last-wins）。"""
+    first = _tool_result_event(
+        "turn-1", "https://example.org/paper",
+        "[网页内容] https://example.org/paper\n\nFirst attempt body.", event_id="evt-1",
+    )
+    second = _tool_result_event(
+        "turn-2", "https://example.org/paper",
+        "[网页内容] https://example.org/paper\n\nRefetched authoritative body.", event_id="evt-2",
+    )
+    _install_events(monkeypatch, [first, second])
+
+    texts = task_fetched_text(_task(session_id="sess-1", turn_id="turn-1"))
+
+    assert texts["https://example.org/paper"]["text"] == "Refetched authoritative body."
+    assert texts["https://example.org/paper"]["turnId"] == "turn-2"

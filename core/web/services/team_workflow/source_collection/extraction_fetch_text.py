@@ -1,7 +1,11 @@
-"""Read original text from successful fetch receipts of the current stage task.
+"""Read original text from successful fetch receipts of the stage task session.
 
 The Session Journal remains the authority. Candidate summaries and Agent
 writeback metadata cannot manufacture a fetch receipt or its source text.
+Every turn of the task's session is in supply scope: the agent may fetch in
+an earlier turn or in a continuation turn (after a remediation parking), and
+those receipts must not vanish at the turn boundary.  The session boundary —
+not the turn boundary — decides what this task can quote.
 """
 
 from __future__ import annotations
@@ -20,16 +24,16 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
 
     turn = task.get("turn") or {}
     session_id = str(task.get("sessionId") or turn.get("sessionId") or "").strip()
-    turn_id = str(turn.get("turnId") or "").strip()
-    if not session_id or not turn_id:
+    if not session_id:
         return {}
     events = s._source_collection_stage_conversation_events(session_id)
     texts: dict[str, dict[str, str]] = {}
     for event in events:
         if str(getattr(event, "event_type", "")) != "tool_result":
             continue
-        if str(getattr(event, "turn_id", "")) != turn_id:
-            continue
+        # 本 stage task 会话内的全部 turn 都在供给范围内：修正停靠后 agent
+        # 在新 turn 继续、或复看早前 turn 的抓取时，回执不因 turn 边界丢失；
+        # 同一 locator 的重复抓取按 Journal 顺序后者覆盖前者。
         for call in s._source_collection_stage_tool_calls_from_event(event):
             if s._source_collection_stage_tool_call_name(call) != "web_fetch_tool":
                 continue
