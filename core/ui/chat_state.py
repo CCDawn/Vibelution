@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import contextvars
+import copy
 import json
 import shutil
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -35,6 +37,38 @@ DEFAULT_CHAT_CONVERSATION_TITLE = "默认对话"
 # keeps the old patience for slow-but-alive holders while a truly hung holder
 # still surfaces as TimeoutError (pytest's 300s per-test cap backstops tests).
 _CHAT_STATE_LOCK_TIMEOUT_SECONDS = 180.0
+
+# --- Session runtime read cache -------------------------------------------------
+#
+# ``load_session_chat_state`` backs per-turn reads (worker perception-source
+# detection, collaboration-mode load, prompt-snapshot reuse, thinking-budget
+# scope, persist paths). A chat turn issues several of these reads between
+# writes, and each uncached read opens a store reader plus a SQLite query and
+# JSON decode. The cache is validated by a (write epoch, store file signature)
+# pair:
+#
+# * epoch: bumped by every write issued through this module, so same-process
+#   write-then-read sequences never observe a stale row even if the OS file
+#   timestamps lag the commit.
+# * signature: (mtime_ns, size) of the SQLite main db and its WAL sidecar,
+#   stat'ed BEFORE the repository read and re-stat'ed after it. Only a read
+#   bracketed by two identical signatures may populate the cache, so any
+#   committed write (this process or an external one using the cross-process
+#   lock, which changes the db or WAL files) forces a reload, and a standalone
+#   store's open/checkpoint/close churn can never be mistaken for a stable
+#   state. Entries therefore can only miss unnecessarily, never return a stale
+#   payload. Outside a live/borrowed store each read opens a fresh store, so
+#   the cache is effectively active only where it pays off: the service process
+#   (live directory store) and explicit ``borrow_chat_state_store`` blocks.
+#
+# Callers mutate returned dicts (read-modify-write through save_session_chat_state),
+# so hits return a deep copy of the cached payload; misses cache a deep copy
+# and return the repository object unchanged. Rows are small (~1 KB) because
+# transcripts live in the conversation ledger, not in the runtime row.
+_SESSION_STATE_READ_CACHE_LOCK = threading.Lock()
+_SESSION_STATE_READ_CACHE: dict[tuple[str, str], tuple[int, tuple[tuple[int, int], ...], dict[str, Any] | None]] = {}
+_SESSION_STATE_READ_CACHE_MAX_ENTRIES = 256
+_CHAT_STATE_WRITE_EPOCH = 0
 
 
 def chat_state_path(project_root: Path) -> Path:
@@ -333,8 +367,10 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
             except Exception as exc:
                 if isinstance(exc, (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError)):
                     _backup_corrupt_chat_state(path, exc)
+                    _bump_chat_state_write_epoch()
                     return {}
                 raise
+            _bump_chat_state_write_epoch()
             return repository.get_chat_state()
 
 
@@ -368,6 +404,7 @@ def save_chat_state(
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
             f"state:{revision}",
         )
+        _bump_chat_state_write_epoch()
 
 
 def mutate_chat_state(
@@ -396,7 +433,41 @@ def mutate_chat_state(
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
             f"state:{revision}",
         )
+        _bump_chat_state_write_epoch()
         return result
+
+
+def _conversation_store_signature(project_root: Path) -> tuple[tuple[int, int], ...]:
+    """Stat the conversation store db + WAL sidecar for read-cache validation."""
+
+    from core.web.services.session import directory_runtime
+
+    db_path = directory_runtime.conversation_store_path(Path(project_root))
+    entries: list[tuple[int, int]] = []
+    for candidate in (db_path, db_path.with_name(f"{db_path.name}-wal")):
+        try:
+            stat = candidate.stat()
+        except OSError:
+            entries.append((-1, -1))
+            continue
+        entries.append((int(stat.st_mtime_ns), int(stat.st_size)))
+    return tuple(entries)
+
+
+def clear_session_chat_state_cache() -> None:
+    """Drop all cached session runtime rows (tests, forced refresh)."""
+
+    with _SESSION_STATE_READ_CACHE_LOCK:
+        _SESSION_STATE_READ_CACHE.clear()
+
+
+def _bump_chat_state_write_epoch() -> None:
+    """Invalidate the session read cache after any chat-state write."""
+
+    global _CHAT_STATE_WRITE_EPOCH
+    with _SESSION_STATE_READ_CACHE_LOCK:
+        _CHAT_STATE_WRITE_EPOCH += 1
+        _SESSION_STATE_READ_CACHE.clear()
 
 
 def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, Any] | None:
@@ -405,8 +476,38 @@ def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, An
     normalized = str(session_id or "").strip()
     if not normalized:
         return None
+    cache_key = (str(project_root), normalized)
+    # The signature must be captured BEFORE the repository read: pairing a
+    # payload with a post-read signature could cache a stale row under a fresh
+    # signature, while the reverse pairing is only ever a wasted miss. A second
+    # stat after the read guards against writes (or a standalone store's
+    # open/checkpoint/close churn) racing the load: only a read bracketed by
+    # two identical signatures may populate the cache.
+    signature_before = _conversation_store_signature(Path(project_root))
+    with _SESSION_STATE_READ_CACHE_LOCK:
+        cached = _SESSION_STATE_READ_CACHE.get(cache_key)
+        if (
+            cached is not None
+            and cached[0] == _CHAT_STATE_WRITE_EPOCH
+            and cached[1] == signature_before
+        ):
+            return copy.deepcopy(cached[2])
     with _chat_state_repository(project_root) as repository:
-        return repository.get_session_runtime_state(normalized)
+        payload = repository.get_session_runtime_state(normalized)
+    signature_after = _conversation_store_signature(Path(project_root))
+    with _SESSION_STATE_READ_CACHE_LOCK:
+        if (
+            signature_after == signature_before
+            and cache_key not in _SESSION_STATE_READ_CACHE
+        ):
+            while len(_SESSION_STATE_READ_CACHE) >= _SESSION_STATE_READ_CACHE_MAX_ENTRIES:
+                _SESSION_STATE_READ_CACHE.pop(next(iter(_SESSION_STATE_READ_CACHE), None), None)
+            _SESSION_STATE_READ_CACHE[cache_key] = (
+                _CHAT_STATE_WRITE_EPOCH,
+                signature_before,
+                copy.deepcopy(payload),
+            )
+    return payload
 
 
 def list_session_runtime_ids(project_root: Path) -> list[str]:
@@ -462,6 +563,7 @@ def save_session_chat_state(
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
             f"state:{revision}",
         )
+    _bump_chat_state_write_epoch()
 
 
 _BORROWED_CHAT_STATE_STORE: contextvars.ContextVar[tuple[Path, Any] | None] = (
