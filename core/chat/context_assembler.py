@@ -127,10 +127,15 @@ class _IdentityListMemo:
     the same sequence of immutable objects.  Entries keep the first/last
     references alive, which rules out id-reuse collisions.  Any mismatch just
     misses and recomputes, so this can only trade a recompute for a recompute.
+
+    Bounded LRU: scopes used to embed ``current_turn_id``, so every turn of
+    every session leaked a fresh set of entries for the process lifetime.
+    Entries now evict oldest-first past ``max_entries``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_entries: int = 256) -> None:
         self._entries: dict[tuple[Any, ...], tuple[Any, Any, int, Any]] = {}
+        self._max_entries = max(8, int(max_entries))
 
     def lookup(self, scope: tuple[Any, ...], items: list[Any]) -> Any:
         entry = self._entries.get(scope)
@@ -140,6 +145,9 @@ class _IdentityListMemo:
         first = items[0] if items else _EMPTY
         last = items[-1] if items else _EMPTY
         if length == len(items) and kept_first is first and kept_last is last:
+            # Refresh recency for the LRU eviction below.
+            self._entries.pop(scope, None)
+            self._entries[scope] = entry
             return value
         return _MISS
 
@@ -147,6 +155,9 @@ class _IdentityListMemo:
         first = items[0] if items else _EMPTY
         last = items[-1] if items else _EMPTY
         self._entries[scope] = (first, last, len(items), value)
+        while len(self._entries) > self._max_entries:
+            oldest = next(iter(self._entries))
+            self._entries.pop(oldest, None)
 
 
 _ASSEMBLY_MEMO = _IdentityListMemo()
@@ -195,7 +206,16 @@ def assemble_conversation_context(
         ledger_event_list,
         current_turn_id=current_turn_id,
     )
-    memo_scope = (session_id, current_turn_id)
+    # Memo scopes: turn-agnostic projections (model replay, fingerprints,
+    # history events) are pure functions of their identity-keyed input lists,
+    # so they key on the session only and can be reused whenever the same
+    # journal state is assembled again — including under a different turn id.
+    # The canonical replay excludes the in-flight turn inside the projection,
+    # so its scope must keep ``current_turn_id`` (the same raw event list under
+    # a different turn id yields a different canonical window). Identity keys
+    # keep every miss on the safe recompute path.
+    memo_scope = (session_id,)
+    canonical_memo_scope = (session_id, current_turn_id)
     memoized_model_messages = _ASSEMBLY_MEMO.lookup(
         ("conversation_model_messages", *memo_scope),
         ledger_replay_events,
@@ -217,7 +237,7 @@ def assemble_conversation_context(
                 details=dict(invariant.details or {}),
             )
         memoized_canonical = _ASSEMBLY_MEMO.lookup(
-            ("canonical_conversation_messages", *memo_scope),
+            ("canonical_conversation_messages", *canonical_memo_scope),
             raw_ledger_event_list,
         )
         if memoized_canonical is _MISS:
@@ -226,7 +246,7 @@ def assemble_conversation_context(
                 current_turn_id=current_turn_id,
             )
             _ASSEMBLY_MEMO.store(
-                ("canonical_conversation_messages", *memo_scope),
+                ("canonical_conversation_messages", *canonical_memo_scope),
                 raw_ledger_event_list,
                 memoized_canonical,
             )
@@ -331,12 +351,20 @@ def assemble_conversation_context(
         # change rebuilds the list contents and misses on purpose. A sticky
         # replacement restore rewrites middle items without moving the list
         # ends, so the identity memo cannot see it: skip the memo read for
-        # that round (the fresh result is stored back instead).
+        # that round (the fresh result is stored back instead). The projection
+        # parameters ride in the scope so a parameter change can never reuse a
+        # stale projection.
         memo_read_enabled = not replacement_state.get("stickyRestored")
+        micro_memo_scope = (
+            *memo_scope,
+            micro_compact_keep_recent_groups,
+            micro_compact_min_savings_tokens,
+            tuple(micro_compact_tool_whitelist or ()),
+        )
         memoized_micro = _MISS
         if memo_read_enabled:
             memoized_micro = _ASSEMBLY_MEMO.lookup(
-                ("micro_compact_projection", *memo_scope),
+                ("micro_compact_projection", *micro_memo_scope),
                 history_messages,
             )
         if memoized_micro is _MISS:
@@ -348,7 +376,7 @@ def assemble_conversation_context(
                 tool_whitelist=micro_compact_tool_whitelist,
             )
             _ASSEMBLY_MEMO.store(
-                ("micro_compact_projection", *memo_scope),
+                ("micro_compact_projection", *micro_memo_scope),
                 history_messages,
                 memoized_micro,
             )
@@ -438,6 +466,17 @@ def assemble_conversation_context(
                 cache_policy="dynamic",
             )
         )
+    memoized_dynamic_hash = _ASSEMBLY_MEMO.lookup(
+        ("dynamic_context_hash", *memo_scope),
+        history_messages,
+    )
+    if memoized_dynamic_hash is _MISS:
+        memoized_dynamic_hash = _hash_messages(history_messages)
+        _ASSEMBLY_MEMO.store(
+            ("dynamic_context_hash", *memo_scope),
+            history_messages,
+            memoized_dynamic_hash,
+        )
     return ContextAssemblyResult(
         history_messages=history_messages,
         events=events,
@@ -452,7 +491,7 @@ def assemble_conversation_context(
         ),
         segments=segments,
         cacheable_prefix_hash=_hash_text("agent_protocol:v1"),
-        dynamic_context_hash=_hash_messages(history_messages),
+        dynamic_context_hash=memoized_dynamic_hash,
         tool_result_replacement_state=replacement_state,
         micro_compact_state=micro_state,
         history_seed_compaction_state=history_compaction_state,

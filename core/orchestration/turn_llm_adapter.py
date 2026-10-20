@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import traceback
 from collections.abc import Mapping
@@ -209,6 +210,10 @@ class AgentLlmAttemptResult:
     # reductions from core/llm/recovery.py). In-memory telemetry only; a
     # successful degraded retry still closes the turn as a normal success.
     degraded_actions: list[str] = field(default_factory=list)
+    # Milliseconds spent in send-time input preparation (sanitize + optional
+    # digest telemetry) before the first route attempt. In-memory telemetry
+    # only; the Agent turn loop copies it into its preflight scene event.
+    invoke_prep_ms: float = 0.0
 
 
 def _resolve_explicit_fallback_profile_id(client: Any) -> str:
@@ -270,6 +275,22 @@ def _message_digest_entries(messages: list) -> list[Dict[str, Any]]:
             }
         )
     return entries
+
+
+def _coerce_flag(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+# Per-message digest telemetry hashes the full text of every outgoing message
+# on every send, yet it only feeds a debug-level scene event used to attribute
+# provider prefix-cache drift. The scene recorder has no level gate, so gate at
+# the producer: default off, enable with VIBELUTION_LLM_MESSAGE_DIGESTS=1 (or
+# by setting the module flag in-process, e.g. from tests). When enabled the
+# event keeps its full field set — the digests must be present whenever the
+# event fires.
+MESSAGE_DIGEST_TELEMETRY_ENABLED = _coerce_flag(
+    os.environ.get("VIBELUTION_LLM_MESSAGE_DIGESTS")
+)
 
 
 def _schema_json_text(schema: Any) -> str:
@@ -370,6 +391,7 @@ def invoke_agent_llm_turn(
     """
     result = AgentLlmAttemptResult()
     ui = hooks.get_ui()
+    invoke_prep_started_at = time.perf_counter()
     clean_messages = sanitize_llm_turn_messages(messages)
     if hooks.structured_output_contract is not None:
         clean_messages = clean_messages + [
@@ -378,13 +400,18 @@ def invoke_agent_llm_turn(
     # Per-message digests cover every caller of this seam (session turns and
     # meeting rounds alike), so provider-cache drift can be attributed to the
     # exact message that changed. Digest only; no payload text is logged.
-    hooks.record_scene_event(
-        "llm_route",
-        "llm_request_messages_digest",
-        message="Outgoing LLM payload per-message SHA-256 digests recorded for cache attribution.",
-        fields={"messageDigests": _message_digest_entries(clean_messages)},
-        level="debug",
-    )
+    # The full-text hashing runs only when digest telemetry is explicitly
+    # enabled (see MESSAGE_DIGEST_TELEMETRY_ENABLED); the event then keeps its
+    # complete field set.
+    if MESSAGE_DIGEST_TELEMETRY_ENABLED:
+        hooks.record_scene_event(
+            "llm_route",
+            "llm_request_messages_digest",
+            message="Outgoing LLM payload per-message SHA-256 digests recorded for cache attribution.",
+            fields={"messageDigests": _message_digest_entries(clean_messages)},
+            level="debug",
+        )
+    result.invoke_prep_ms = max(0.0, (time.perf_counter() - invoke_prep_started_at) * 1000.0)
 
     with ui.thinking("?? 思考中..."), hooks.llm_cancel_context(hooks.current_stop_reason):
         route_attempt = 1
