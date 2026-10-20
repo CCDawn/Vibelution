@@ -181,7 +181,7 @@ def test_default_computer_tools_are_executable_but_network_denial_stays_custom(p
 @pytest.mark.parametrize("custom_task", [False, True])
 def test_pre_computer_upgrade_refreshes_only_untouched_normalized_task_profile(personal_env, custom_task):
     row = service.create_personal_assistant()["assistant"]
-    legacy_task = {**service.TASK, "constraints": service._LEGACY_DESKTOP_CONSTRAINTS}
+    legacy_task = {**service._PRE_MESSAGES_TASK, "constraints": service._LEGACY_DESKTOP_CONSTRAINTS}
     if custom_task:
         legacy_task["mission"] = "用户自己的任务"
     directory.update_agent_instance(row["agentId"], task_profile=legacy_task,
@@ -248,10 +248,10 @@ def test_personal_starters_follow_language_without_changing_identity(personal_en
     before = directory.load_state()
     monkeypatch.setattr(service, "get_web_language", lambda: "en", raising=False)
     starters = service.composer_starters_for_agent(row["agentId"], row["directSessionId"])
-    assert starters[0]["heading"] == "Platform overview"
-    assert "Observe first" in starters[0]["command"]
+    assert starters[0]["heading"] == "Delegate & track"
+    assert "Delegate" in starters[0]["command"]
     starters[0]["heading"] = "edited"
-    assert service.composer_starters_for_agent(row["agentId"], row["directSessionId"])[0]["heading"] == "Platform overview"
+    assert service.composer_starters_for_agent(row["agentId"], row["directSessionId"])[0]["heading"] == "Delegate & track"
     assert service.composer_starters_for_agent(personal_env["owner"], "foreign") is None
     monkeypatch.setattr(service, "get_web_language", lambda: "zh", raising=False)
     assert service.composer_starters_for_agent(row["agentId"], row["directSessionId"]) == list(service.COMPOSER_STARTERS)
@@ -691,6 +691,101 @@ def test_pre_toolset_snapshot_upgrades_to_search_and_compress_tools(personal_env
     assert upgraded["writeScopes"] == ["private"]
     # Toolset upgrade keeps the live budget rather than resetting it.
     assert upgraded["maxCallsPerTurn"] == service.DEFAULT_MAX_CALLS_PER_TURN
+
+
+def test_agent_message_generation_is_provisioned_and_described(personal_env):
+    from core.web.services import tool_catalog
+
+    assert service.TOOLS == (*service._PRE_MESSAGES_TOOLS, "agent_message_tool")
+    row = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    assert "agent_message_tool" in agent["toolPolicy"]["allowedTools"]
+    # The cross-agent collaboration tool must keep a catalog contract entry so
+    # descriptor building for the whole toolset stays possible.
+    descriptor = tool_catalog.build_tool_descriptor("agent_message_tool", args_schema={})
+    assert descriptor.capabilities
+
+
+def test_pre_messages_snapshot_upgrades_to_agent_message_tool(personal_env):
+    row = service.create_personal_assistant()["assistant"]
+    agent_id = row["agentId"]
+    # Frozen restricted-networking default from before the agent_message_tool
+    # generation, exactly as the previous current_policy wrote it.
+    legacy = directory.normalize_tool_policy(
+        {
+            **service.PRIVATE_V2_POLICY,
+            "networkAccess": "restricted",
+            "allowedTools": list(service._PRE_MESSAGES_TOOLS),
+            "preferredTools": list(service._PRE_MESSAGES_TOOLS),
+            "maxCallsPerTurn": service.DEFAULT_MAX_CALLS_PER_TURN,
+        },
+        "tool-" + agent_id,
+    )
+    legacy["policyVersion"] = 2
+    _corrupt_agent(agent_id, toolPolicy=legacy)
+    state = directory.load_state()
+    state["toolPolicies"]["tool-" + agent_id] = legacy
+    directory.save_state(state)
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    assert service.create_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    upgraded = directory.get_agent(agent_id)["toolPolicy"]
+    assert upgraded["allowedTools"] == list(service.TOOLS)
+    assert "agent_message_tool" in upgraded["allowedTools"]
+    assert "agent_message_tool" not in service._PRE_MESSAGES_TOOLS
+
+
+@pytest.mark.parametrize("custom_task", [False, True])
+def test_pre_messages_task_upgrades_to_current_generation_task(personal_env, custom_task):
+    row = service.create_personal_assistant()["assistant"]
+    legacy_task = dict(service._PRE_MESSAGES_TASK)
+    if custom_task:
+        legacy_task["mission"] = "用户自己的任务"
+    directory.update_agent_instance(
+        row["agentId"],
+        task_profile=legacy_task,
+        tool_policy={
+            **service.PRIVATE_V2_POLICY,
+            "networkAccess": "restricted",
+            "allowedTools": list(service._PRE_MESSAGES_TOOLS),
+            "preferredTools": list(service._PRE_MESSAGES_TOOLS),
+        },
+    )
+    stored_task = directory.get_agent(row["agentId"])["taskProfile"]
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    service.create_personal_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert after["taskProfile"] == (
+        stored_task if custom_task else directory.normalize_task_profile(service.TASK)
+    )
+    assert after["toolPolicy"]["allowedTools"] == list(service.TOOLS)
+
+
+def test_default_persona_upgrades_on_reprovision_and_user_persona_stays(personal_env):
+    row = service.create_personal_assistant()["assistant"]
+    directory.update_agent_instance(
+        row["agentId"], persona_profile=dict(service._PRE_MESSAGES_PERSONA)
+    )
+    assert (
+        directory.get_agent(row["agentId"])["personaProfile"]
+        == service._PERSONA_HISTORY_DEFAULTS[0]
+    )
+    service.create_personal_assistant()
+    assert (
+        directory.get_agent(row["agentId"])["personaProfile"]
+        == directory.normalize_persona_profile(service.PERSONA)
+    )
+    # Refresh is idempotent: the upgraded persona is not a historical default.
+    after = directory.load_state()
+    service.create_personal_assistant()
+    assert directory.load_state() == after
+    # A user-authored persona never matches the defaults and stays intact.
+    directory.update_agent_instance(
+        row["agentId"], persona_profile={"identityNotes": "我的自定义身份"}
+    )
+    service.create_personal_assistant()
+    assert directory.get_agent(row["agentId"])["personaProfile"] == (
+        directory.normalize_persona_profile({"identityNotes": "我的自定义身份"})
+    )
 
 
 # --- Settings surface: config knob, preferences, renderer, model binding ---
