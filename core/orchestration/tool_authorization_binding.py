@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
@@ -34,6 +35,69 @@ RESTART_FOCUS_GUARD_MESSAGE = (
     "[短路] 当前处于重启测试模式，只允许任务管理与重启闭环工具。"
     "请优先：创建任务 -> 勾选任务 -> 调用 trigger_self_restart_tool。"
 )
+
+# ---------------------------------------------------------------------------
+# Turn authorization telemetry + scene-event dedupe (TTFT batch 5 task C)
+#
+# 会话热态每 turn 的 resolve_turn_authorization 在输入（agent 策略/注册表/
+# 封禁名单）未变时会产出与上一回合内容完全相同的决策，并每次写两条
+# runtime_scene 事件（tool.authorization.decision / decision_reasons）。
+# 消费者核查：前端与后端没有依赖这两条事件「每轮出现」的读取方（时间线
+# 展示用途）；执行面按调用粒度仍有 tool.authorization.execution_* 事件，
+# 回合诊断仍携带 decision fingerprint。因此当决策来自 turn 无关模板缓存
+# 且与上一次已记录的决策签名一致时跳过重复写事件；输入或决策变化立即
+# 恢复记录（下一次变化后的首轮回合）。
+# ---------------------------------------------------------------------------
+_TURN_AUTHORIZATION_TIMING = threading.local()
+_RECORDED_DECISION_KEYS_LOCK = threading.Lock()
+_RECORDED_DECISION_KEYS: Dict[str, str] = {}
+_RECORDED_DECISION_KEYS_MAX = 64
+
+
+def _record_turn_authorization_timing(duration_ms: float, *, cache_hit: bool) -> None:
+    _TURN_AUTHORIZATION_TIMING.durationMs = max(0, int(duration_ms))
+    _TURN_AUTHORIZATION_TIMING.cacheHit = bool(cache_hit)
+    _TURN_AUTHORIZATION_TIMING.recordedAtMonotonic = time.monotonic()
+
+
+def last_turn_authorization_timing() -> Dict[str, Any] | None:
+    """Return the current thread's most recent turn-authorization telemetry."""
+
+    duration_ms = getattr(_TURN_AUTHORIZATION_TIMING, "durationMs", None)
+    if not isinstance(duration_ms, (int, float)):
+        return None
+    return {
+        "turnAuthorizationMs": int(duration_ms),
+        "turnAuthorizationCacheHit": bool(getattr(_TURN_AUTHORIZATION_TIMING, "cacheHit", False)),
+        "recordedAtMonotonic": float(getattr(_TURN_AUTHORIZATION_TIMING, "recordedAtMonotonic", 0.0) or 0.0),
+    }
+
+
+def clear_turn_authorization_telemetry_state() -> None:
+    """Reset dedupe markers and thread telemetry (tests and explicit resets)."""
+
+    with _RECORDED_DECISION_KEYS_LOCK:
+        _RECORDED_DECISION_KEYS.clear()
+    for attribute in ("durationMs", "cacheHit", "recordedAtMonotonic"):
+        try:
+            delattr(_TURN_AUTHORIZATION_TIMING, attribute)
+        except AttributeError:
+            pass
+
+
+def _decision_already_recorded(agent_id: str, decision_cache_key: str) -> bool:
+    if not decision_cache_key:
+        return False
+    with _RECORDED_DECISION_KEYS_LOCK:
+        return _RECORDED_DECISION_KEYS.get(agent_id) == decision_cache_key
+
+
+def _mark_decision_recorded(agent_id: str, decision_cache_key: str) -> None:
+    with _RECORDED_DECISION_KEYS_LOCK:
+        _RECORDED_DECISION_KEYS[agent_id] = str(decision_cache_key or "")
+        while len(_RECORDED_DECISION_KEYS) > _RECORDED_DECISION_KEYS_MAX:
+            oldest = next(iter(_RECORDED_DECISION_KEYS))
+            _RECORDED_DECISION_KEYS.pop(oldest)
 
 
 def _decode_binary(value: Any) -> Any:
@@ -238,6 +302,7 @@ def resolve_turn_authorization(
     current_runtime_fn: CurrentRuntimeFn | None = None,
 ) -> Any:
     """Bind runtime identity and call the canonical authorization service."""
+
     started = time.perf_counter()
     runtime: Dict[str, Any] = {}
     try:
@@ -256,7 +321,20 @@ def resolve_turn_authorization(
         )
         report = resolve_enforced_authorization(runtime=runtime)
         install_execution_authorization(report)
-        record_authorization_decision(report)
+        # Scene-event dedupe：决策来自 turn 无关模板缓存且与上一次已记录
+        # 签名一致时跳过重复写事件；变化后的首个回合恢复记录。
+        decision = getattr(report, "decision", None)
+        decision_cache_key = str(getattr(report, "decision_cache_key", "") or "")
+        agent_id = str(getattr(decision, "agent_id", "") or "").strip()
+        if _decision_already_recorded(agent_id, decision_cache_key):
+            pass
+        else:
+            record_authorization_decision(report)
+            _mark_decision_recorded(agent_id, decision_cache_key)
+        _record_turn_authorization_timing(
+            (time.perf_counter() - started) * 1000,
+            cache_hit=bool(getattr(report, "decision_cache_hit", False)),
+        )
         return report
     except Exception as exc:
         try:
@@ -271,6 +349,7 @@ def resolve_turn_authorization(
             )
         except Exception:
             pass
+        _record_turn_authorization_timing((time.perf_counter() - started) * 1000, cache_hit=False)
         return None
 
 

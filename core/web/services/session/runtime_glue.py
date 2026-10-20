@@ -2368,6 +2368,14 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
         "chatStateReadMs",
         "contextManagersMs",
         "agentCreateMs",
+        # TTFT 批五任务 C 锚点：agentCreateMs 内部的工具注册表与回合授权
+        # 子段。值由各 service 的线程本地遥测在获取 agent 的同一 worker
+        # 线程上写入；仅在 timings 已含 agentCreateMs（即本轮已完成
+        # AgentRuntime 获取）时注入，worker_started 事件不受字段上限影响。
+        "toolRegistryMs",
+        "toolRegistryCacheHit",
+        "turnAuthorizationMs",
+        "turnAuthorizationCacheHit",
     )
     fields = {
         key: timings[key]
@@ -2383,7 +2391,41 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
             and len(key) <= 64
         ):
             fields[key] = value
+    if "agentCreateMs" in fields:
+        for key, value in _session_turn_acquire_stage_telemetry_fields().items():
+            fields.setdefault(key, value)
     return fields
+
+
+def _session_turn_acquire_stage_telemetry_fields() -> dict[str, Any]:
+    """Collect agent-acquisition sub-stage anchors recorded on this thread.
+
+    ``agentCreateMs`` 包住 worker 线程上的 AgentRuntime 获取（含
+    prepare_for_session_turn_reuse 的回合授权与其内部的工具注册表读取），
+    这些锚点由对应 service 在同一线程记录；journal payload 在同一回合内组
+    装，因此读到的一定是本轮获取段的值。
+    """
+
+    anchors: dict[str, Any] = {}
+    try:
+        from core.web.services.tool_registry_service import last_tool_registry_timing
+
+        registry_timing = last_tool_registry_timing()
+    except Exception:
+        registry_timing = None
+    if registry_timing:
+        anchors["toolRegistryMs"] = int(registry_timing.get("toolRegistryMs") or 0)
+        anchors["toolRegistryCacheHit"] = bool(registry_timing.get("toolRegistryCacheHit"))
+    try:
+        from core.orchestration.tool_authorization_binding import last_turn_authorization_timing
+
+        authorization_timing = last_turn_authorization_timing()
+    except Exception:
+        authorization_timing = None
+    if authorization_timing:
+        anchors["turnAuthorizationMs"] = int(authorization_timing.get("turnAuthorizationMs") or 0)
+        anchors["turnAuthorizationCacheHit"] = bool(authorization_timing.get("turnAuthorizationCacheHit"))
+    return anchors
 
 
 def _session_turn_context_prepare_timings(

@@ -133,8 +133,175 @@ class ToolRegistryPermissionError(ToolRegistryError):
     """Raised when an operation is blocked by registry policy."""
 
 
+# ---------------------------------------------------------------------------
+# Registry signature cache (TTFT batch 5 task C)
+#
+# ``get_tool_registry`` 在会话热态每 turn 被授权解析调用一次，全量重建 142 个
+# 工具描述符实测 264-339ms。registry 内容只由以下输入决定：
+#   1. ``tools`` 包源码（create_key_tools / 探测函数所在模块）；
+#   2. ``core/web/services/tool_catalog.py``（metadata/bundles/allow 名单）；
+#   3. ``core/infrastructure/tool_executor.py``（只读子代理封禁名单）；
+#   4. generated_tools.json（生成工具清单）；
+#   5. 两个可用性探测的紧凑结果（autoglm / financial_report，均已有各自的
+#      TTL/配置缓存，取值便宜且真实影响 llmVisible 与 dependencyStatus）；
+#   6. 本模块内可被测试 monkeypatch 的内容入口函数身份
+#      （``_builtin_tool_items`` / ``_load_generated_tools``）。
+# 对这些输入做签名，签名未变时返回缓存 payload 的深拷贝——与全量重建一样，
+# 每次调用都拿到独立可突变的对象，语义完全等价。
+# ---------------------------------------------------------------------------
+_REGISTRY_CACHE_LOCK = threading.Lock()
+_REGISTRY_CACHE: dict[str, Any] = {"signature": None, "payload": None}
+# 线程内最近一次 registry 调用遥测：runtime_glue 的 prepareTimings 白名单在同
+# 一 worker 线程上读取，把 toolRegistryMs 挂进 agentCreateMs 所在时间线。
+_REGISTRY_TIMING = threading.local()
+
+_REGISTRY_SIGNATURE_SOURCE_FILES: tuple[Path, ...] = (
+    PROJECT_ROOT / "core" / "web" / "services" / "tool_catalog.py",
+    PROJECT_ROOT / "core" / "infrastructure" / "tool_executor.py",
+)
+
+
+def _registry_dependency_probe_signature() -> tuple[tuple[str, Any], ...]:
+    """Compact availability-probe projection included in the registry signature.
+
+    两个探测均已自带缓存（autoglm 15s TTL + 后台刷新；financial_report 仅读
+    配置），取值便宜；它们真实影响 registry 内容（llmVisible、
+    dependencyStatus、unavailableDescriptors 计数），因此纳入签名而不是被
+    排除——签名变化即重建，保证探测结果翻转时 registry 立即反映。
+    """
+
+    probes: list[tuple[str, Any]] = []
+    try:
+        from tools.web_search_tool import autoglm_search_tool_availability
+
+        status = autoglm_search_tool_availability()
+        probes.append(("web_search_tool_dependency_status", (bool(status.get("available")), str(status.get("status") or ""))))
+    except Exception:
+        probes.append(("web_search_tool_dependency_status", "probe_error"))
+    try:
+        from tools.financial_report_tools import financial_report_availability
+
+        status = financial_report_availability()
+        probes.append(("financial_report_dependency_status", (bool(status.get("available")), str(status.get("status") or ""))))
+    except Exception:
+        probes.append(("financial_report_dependency_status", "probe_error"))
+    return tuple(probes)
+
+
+def _registry_file_stat(path: Path) -> tuple[str, int, int]:
+    try:
+        stat = path.stat()
+        return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+    except OSError:
+        return (str(path), -1, -1)
+
+
+def _registry_package_stat() -> tuple[tuple[str, int, int], ...]:
+    package_dir = PROJECT_ROOT / "tools"
+    try:
+        entries = sorted(path for path in package_dir.iterdir() if path.suffix == ".py")
+    except OSError:
+        return ((_registry_file_stat(package_dir),),)
+    if not entries:
+        return ((_registry_file_stat(package_dir),),)
+    return tuple(_registry_file_stat(path) for path in entries)
+
+
+def _registry_content_callable_token(name: str, fn: Any) -> tuple[str, str, int]:
+    """Identity token for an in-module content entry point (monkeypatch aware)."""
+
+    code = getattr(fn, "__code__", None)
+    return (name, str(getattr(fn, "__qualname__", "") or ""), id(code) if code is not None else 0)
+
+
+def _registry_content_signature() -> tuple[Any, ...]:
+    return (
+        ("package", _registry_package_stat()),
+        *(_registry_file_stat(path) for path in _REGISTRY_SIGNATURE_SOURCE_FILES),
+        ("generated_tools", _registry_file_stat(_generated_tools_path())),
+        ("probes", _registry_dependency_probe_signature()),
+        (
+            "entry_points",
+            _registry_content_callable_token("_builtin_tool_items", _builtin_tool_items),
+            _registry_content_callable_token("_load_generated_tools", _load_generated_tools),
+        ),
+    )
+
+
+def _record_registry_timing(started_at: float, *, cache_hit: bool) -> None:
+    _REGISTRY_TIMING.durationMs = max(0, int((time.monotonic() - started_at) * 1000))
+    _REGISTRY_TIMING.cacheHit = bool(cache_hit)
+    _REGISTRY_TIMING.recordedAtMonotonic = time.monotonic()
+
+
+def last_tool_registry_timing() -> dict[str, Any] | None:
+    """Return the current thread's most recent registry-call telemetry, if any."""
+
+    duration_ms = getattr(_REGISTRY_TIMING, "durationMs", None)
+    if not isinstance(duration_ms, (int, float)):
+        return None
+    return {
+        "toolRegistryMs": int(duration_ms),
+        "toolRegistryCacheHit": bool(getattr(_REGISTRY_TIMING, "cacheHit", False)),
+        "recordedAtMonotonic": float(getattr(_REGISTRY_TIMING, "recordedAtMonotonic", 0.0) or 0.0),
+    }
+
+
+def invalidate_tool_registry_cache() -> None:
+    """Drop the signature cache; the next call rebuilds from current inputs."""
+
+    with _REGISTRY_CACHE_LOCK:
+        _REGISTRY_CACHE["signature"] = None
+        _REGISTRY_CACHE["payload"] = None
+
+
+def peek_cached_tool_registry() -> dict[str, Any] | None:
+    """Return the signature-validated cached payload without copying.
+
+    仅供只读消费者（授权解析）避免每 turn 深拷贝整个 payload：先重算内容
+    签名，未变时直接返回共享缓存对象；签名变化或缓存为空返回 None，调用方
+    回落 ``get_tool_registry()`` 重建。返回对象不得突变。
+    """
+
+    signature = _registry_content_signature()
+    with _REGISTRY_CACHE_LOCK:
+        if _REGISTRY_CACHE.get("signature") is not None and _REGISTRY_CACHE["signature"] == signature:
+            payload = _REGISTRY_CACHE.get("payload")
+            return payload if isinstance(payload, dict) else None
+    return None
+
+
 def get_tool_registry() -> dict[str, Any]:
-    """Return built-in and generated tool registry state."""
+    """Return built-in and generated tool registry state.
+
+    内容签名（源文件 stat + 生成工具清单 stat + 探测紧凑结果 + 内容入口函数
+    身份）未变时返回缓存 payload 的深拷贝：与全量重建语义等价（每次独立对
+    象），但跳过 142 工具描述符重建。生成工具变更路径（``_save_generated_tools``
+    及 image2 配置 reload）已接显式失效。
+    """
+
+    started_at = time.monotonic()
+    signature = _registry_content_signature()
+    with _REGISTRY_CACHE_LOCK:
+        cached_signature = _REGISTRY_CACHE.get("signature")
+        cached_payload = _REGISTRY_CACHE.get("payload")
+        cache_hit = cached_signature is not None and cached_payload is not None and cached_signature == signature
+        if cache_hit:
+            payload = copy.deepcopy(cached_payload)
+    if cache_hit:
+        _record_registry_timing(started_at, cache_hit=True)
+        return payload
+
+    payload = _build_tool_registry()
+    with _REGISTRY_CACHE_LOCK:
+        _REGISTRY_CACHE["signature"] = signature
+        _REGISTRY_CACHE["payload"] = payload
+    _record_registry_timing(started_at, cache_hit=False)
+    return copy.deepcopy(payload)
+
+
+def _build_tool_registry() -> dict[str, Any]:
+    """Assemble the registry payload from current inputs (uncached)."""
 
     builtins = _builtin_tool_items()
     generated = _generated_tool_items(_load_generated_tools(), builtin_names={item["name"] for item in builtins})
@@ -1644,6 +1811,8 @@ def _save_generated_tools(records: list[dict[str, Any]]) -> None:
         "tools": records,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # 工具定义变更路径的显式失效：不依赖下一次调用的 stat 签名兜底。
+    invalidate_tool_registry_cache()
 
 
 def _generated_tools_path() -> Path:
