@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services import financial_preferences_service as service
+from core.web.services.financial_preferences.investment import InvestmentProfile
 
 router = APIRouter(tags=["financial-preferences"])
 
@@ -80,6 +81,7 @@ class ReviewCase(BaseModel):
 
 class WorkspaceSections(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    investmentProfile: InvestmentProfile | None = None
     selectedStock: WorkspaceStock | None = None
     watchlist: list[WorkspaceWatch] = Field(default_factory=list, max_length=50)
     profiles: list[ResearchProfile] = Field(default_factory=list, max_length=20)

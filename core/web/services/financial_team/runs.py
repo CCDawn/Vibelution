@@ -41,6 +41,7 @@ from .provisioning import (
     FinancialTeamNotFoundError,
     _agent_config,
     _financial_assistant,
+    _native_direct_session_matches_agent,
     _native_session_model_is_executable,
     _native_owner_scoped_synthesis_session_matches_agent,
     _role_agents,
@@ -62,7 +63,7 @@ _COORDINATION_STATUSES = frozenset({"waiting", "running", "blocked", "completed"
 _COORDINATION_TERMINAL_STATUSES = frozenset({"blocked", "completed"})
 _MAX_COORDINATION_ERROR_CHARS = 500
 _SYNTHESIS_OWNER_SCOPED_BINDING = "owner_scoped_v1"
-_SYNTHESIS_SESSION_SOURCE = "financial_team_synthesis"
+_SYNTHESIS_DIRECT_ADVISOR_BINDING = "direct_advisor_v1"
 _DEPTH_LABELS = {
     "brief": "快速",
     "basic": "基础",
@@ -262,66 +263,11 @@ def _run_create_input_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _create_run_synthesis_session(
-    assistant_agent_id: str,
-    *,
-    run_id: str,
-    symbol: str,
-    period_days: int,
-    research_date: str,
-    depth: str,
-    create_idempotency: dict[str, str] | None,
-) -> tuple[str, str]:
-    """Create or recover one visible Native Session bound to this run's owner."""
-    stable_request = str(
-        (create_idempotency or {}).get("keyHash") or run_id
-    ).strip()
-    binding_key = "financial-team-synthesis-v1:" + hashlib.sha256(
-        f"{assistant_agent_id}\0{stable_request}".encode("utf-8")
+def _direct_advisor_binding_key(agent_id: str, session_id: str) -> str:
+    """Pin a run to the exact owner and persistent advisor Session pair."""
+    return "financial-team-direct-advisor-v1:" + hashlib.sha256(
+        f"{agent_id}\0{session_id}".encode("utf-8")
     ).hexdigest()
-    session_create_key = "financial-team-synthesis-session-v1:" + hashlib.sha256(
-        f"{assistant_agent_id}\0{stable_request}".encode("utf-8")
-    ).hexdigest()
-    title = (
-        f"股票研究汇总 · {str(symbol or '').upper()} · {research_date} · "
-        f"{period_days}天 · {_DEPTH_LABELS.get(depth, '标准')}"
-    )
-    try:
-        created = session_service.create_chat_session(
-            title=title,
-            title_source="manual",
-            agent_id=assistant_agent_id,
-            created_by="financial_analysis_team",
-            conversation_index_kind=directory.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
-            session_metadata={
-                "source": _SYNTHESIS_SESSION_SOURCE,
-                "externalTaskId": binding_key,
-            },
-            lightweight=True,
-            activate=False,
-            idempotency_key=session_create_key,
-        )
-    except session_service.SessionIdempotencyConflictError as exc:
-        raise FinancialTeamRunConflictError(
-            "同一创建请求键不能用于不同的研究参数"
-        ) from exc
-    except session_service.SessionIdempotencyReplayGoneError as exc:
-        raise FinancialTeamRunNotReadyError(
-            "本轮汇总会话已被删除，不能安全复用，请使用新的研究创建请求"
-        ) from exc
-
-    session_id = str(
-        created.get("id") or created.get("sessionId") or ""
-    ).strip() if isinstance(created, dict) else ""
-    if not session_id:
-        raise FinancialTeamRunNotReadyError("主助手汇总原生会话创建未确认")
-    if not _native_owner_scoped_synthesis_session_matches_agent(
-        assistant_agent_id, session_id, binding_key
-    ) or not _native_session_model_is_executable(assistant_agent_id, session_id):
-        raise FinancialTeamRunNotReadyError(
-            "主助手汇总原生会话归属或模型绑定未通过核验"
-        )
-    return session_id, binding_key
 
 
 def _find_run_by_create_key(
@@ -665,6 +611,8 @@ def require_financial_team_synthesis_recovery_ready(
                 transcript_scope="all",
                 include_secondary=False,
             )
+            if not isinstance(detail, dict) or not isinstance(detail.get("messages"), list):
+                raise FinancialTeamRunNotReadyError("无法核验主助手原生会话")
             submission_seen, associated_turn = _submission_association(
                 detail or {}, submission_id
             )
@@ -759,6 +707,8 @@ def financial_team_synthesis_busy_retry_is_safe(
                 transcript_scope="all",
                 include_secondary=False,
             )
+            if not isinstance(detail, dict) or not isinstance(detail.get("messages"), list):
+                return False
             submission_seen, associated_turn = _submission_association(
                 detail or {}, submission_id
             )
@@ -922,15 +872,14 @@ def _create_financial_team_run_record(
 ) -> dict[str, Any]:
     now = _utc_now()
     run_id = str(uuid4())
-    synthesis_session_id, synthesis_binding_key = _create_run_synthesis_session(
-        assistant_agent_id,
-        run_id=run_id,
-        symbol=symbol,
-        period_days=period_days,
-        research_date=research_date,
-        depth=depth,
-        create_idempotency=create_idempotency,
-    )
+    synthesis_session_id = str(owner.get("directSessionId") or "").strip()
+    if (
+        str(owner.get("agentId") or "").strip() != assistant_agent_id
+        or not _native_direct_session_matches_agent(assistant_agent_id, synthesis_session_id)
+        or not _native_session_model_is_executable(assistant_agent_id, synthesis_session_id)
+    ):
+        raise FinancialTeamRunNotReadyError("主助手固定原生会话归属或模型绑定未通过核验")
+    synthesis_binding_key = _direct_advisor_binding_key(assistant_agent_id, synthesis_session_id)
     run = {
         "schemaVersion": _SCHEMA_VERSION,
         "runId": run_id,
@@ -960,7 +909,7 @@ def _create_financial_team_run_record(
         "synthesis": {
             "agentId": assistant_agent_id,
             "sessionId": synthesis_session_id,
-            "sessionBindingKind": _SYNTHESIS_OWNER_SCOPED_BINDING,
+            "sessionBindingKind": _SYNTHESIS_DIRECT_ADVISOR_BINDING,
             "sessionBindingKey": synthesis_binding_key,
             "clientSubmissionId": str(uuid4()),
             "turnId": "",
@@ -1905,12 +1854,21 @@ def require_current_financial_team_run_bindings(
         )
     elif (
         synthesis_agent_id == normalized_assistant_id
-        and not synthesis_binding_kind
+        and synthesis_binding_kind in {"", _SYNTHESIS_DIRECT_ADVISOR_BINDING}
         and synthesis_session_id == direct_session_id
     ):
-        # Runs written before owner-scoped synthesis Sessions retain their exact
-        # direct-session binding and remain eligible for explicit guarded recovery.
-        synthesis_binding_valid = True
+        # No-kind legacy runs retain their exact direct Session. New runs also
+        # persist a binding key so neither owner nor Session can drift on recovery.
+        synthesis_binding_valid = bool(
+            synthesis_session_id
+            and (
+                not synthesis_binding_kind
+                or str(synthesis_ref.get("sessionBindingKey") or "")
+                == _direct_advisor_binding_key(normalized_assistant_id, synthesis_session_id)
+            )
+            and _native_direct_session_matches_agent(normalized_assistant_id, synthesis_session_id)
+            and _native_session_model_is_executable(normalized_assistant_id, synthesis_session_id)
+        )
 
     if not synthesis_binding_valid:
         reject(
@@ -2220,6 +2178,7 @@ def _synthesis_prompt(
     return "\n\n".join(
         [
             f"你是主助手的股票研究汇总角色。请综合股票 {run['symbol']} 的多分析师研究。研究日期：{run.get('researchDate') or '未指定'}；观察周期：近{run['periodDays']}天；研究深度：{_DEPTH_LABELS.get(str(run.get('depth') or 'standard'), '标准')}。以下引用观点不自动等同事实，只依据其中可核验的数据和来源，明确时间、单位、数据空缺与意见分歧。",
+            "这是股票顾问固定主会话中的一次持续跟进。结合本会话已有的投资目标、持仓和风险约束，明确本轮结论相对已确认判断的变化与后续关注条件；历史观点仅作上下文，不能替代本轮证据或冒充截至研究日的事实。保留用户已明确的约束，不推定用户已交易，不承诺自动监控或已启用定时任务。",
             f"本轮执行要求：{_depth_instruction(run, 'synthesis')}",
             f"最终正文不超过 {output_limit} 个汉字（来源链接不计入），优先完成可阅读的最终报告。不要逐字复述分析员全文或历史轮次，不重复整张数字表；只列最关键的已核验证据、分歧、风险和缺口，保留必要来源、日期、单位及财报页码。",
             "本轮仅交付汇总报告，不重新执行研究：不要调用任何工具，也不要发起补充检索。只综合下方本轮已完成的分析和原生来源结果；缺失、冲突、截断或无法核验的数据明确列为证据缺口，不为填满章节继续探查。请直接输出完整最终回答，保留来源与口径，不以思考过程或待办代替报告。",
@@ -2277,6 +2236,8 @@ def submit_financial_team_synthesis(
             transcript_scope="all",
             include_secondary=False,
         )
+        if not isinstance(existing_detail, dict) or not isinstance(existing_detail.get("messages"), list):
+            raise FinancialTeamRunNotReadyError("无法核验主助手原生会话，系统不会重复发送")
         submission_seen, existing_turn = _submission_association(
             existing_detail or {},
             str(synthesis_ref["clientSubmissionId"]),
@@ -2311,7 +2272,7 @@ def submit_financial_team_synthesis(
             raise FinancialTeamRunNotReadyError(
                 "主助手原生会话已记录本次提交，但尚无可恢复 Turn；不会重复发送"
             )
-        if str(synthesis_ref.get("submissionState") or "reserved") == "submitting":
+        if str(synthesis_ref.get("submissionState") or "reserved") != "reserved":
             _record_financial_team_event(
                 "financial_team.synthesis.outcome_unknown",
                 assistant_agent_id=assistant_agent_id,

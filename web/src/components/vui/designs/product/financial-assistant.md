@@ -381,3 +381,8 @@ FinanceAIBacktest 复用既有 VSelect 提供原有简化费用和沪深历史�
 资料库按自身容器宽度决定列表与阅读区双列或上下排列；原文摘录须用户主动展开才读取。来源属性后置折叠，保留所有权、筛选、引用、原PDF页链接及审核边界。技能/学习卡片按内容高度顶部对齐，练习股票明确可见。主题研究限制行长，保留日期、深度及全部研究逻辑。
 
 模拟交易保留费用、T+1及阻断原因；数量/费用说明默认收起，统计与真实交易日表优先，日历为次级展开项。AI回测将输入、预检、运行分步说明，高级细节可展开，预算和幂等约束不变。任务与报告空态可返回新建研究，导出操作紧凑。持仓、自选和总览数值列扩大并使用等宽数字，允许长金额换行，不省略有效数字；横向滚动限制在表格自身。
+
+
+## FinanceInvestmentSettings
+
+The conversation settings menu opens the existing VDialog with three primary VInput fields: budget, horizon and loss tolerance. Optional cash/position/holdings conditions stay collapsed behind VButton. VCheckbox expresses flexible holding, VSelect records holdings status, and VStateSurface exposes load/save conflicts. Unknown values are blank, never defaulted to zero or a specific operator budget. Save remains explicit and revision checked. The existing workspace recipe and native conversation stay authoritative; research actions continue the owner’s direct Session.

@@ -108,6 +108,25 @@ describe("financial native composer bridge", () => {
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ status: "ready", terminalReason: "stopped_by_user", lastTurnStatus: "ready", lastTurnTerminalTurnId: "native-turn" }));
   });
 
+  it("preserves the advisor's unsent draft and requires an explicit retry", async () => {
+    const root = setup(), blocked = vi.fn();
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, preserveExistingDraft: true }, onDraftBlocked: blocked };
+    await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={bridge}><Consumer busy={false} composerValue="用户尚未发送的条件" /></FinancialResearchBridgeContext.Provider>));
+    expect(change).not.toHaveBeenCalled();
+    expect(blocked).toHaveBeenCalledWith(1, "unsent_draft");
+    await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={bridge}><Consumer busy={false} composerValue={bridge.draftRequest.text} /></FinancialResearchBridgeContext.Provider>));
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it("does not auto-submit a persistent advisor request after the busy turn finishes", async () => {
+    const root = setup(), blocked = vi.fn();
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, preserveExistingDraft: true }, onDraftBlocked: blocked };
+    await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={bridge}><Consumer busy composerValue="" /></FinancialResearchBridgeContext.Provider>));
+    expect(blocked).toHaveBeenCalledWith(1, "busy");
+    expect(change).not.toHaveBeenCalled();
+    await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={bridge}><Consumer busy={false} composerValue={bridge.draftRequest.text} /></FinancialResearchBridgeContext.Provider>));
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("submits once in StrictMode only after the exact native draft commits", async () => {
     const root = setup();
     const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true }, onDraftSubmitted: submitted };

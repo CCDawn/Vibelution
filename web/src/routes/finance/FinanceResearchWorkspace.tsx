@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Search, Settings2 } from "lucide-react";
 import { useLocation } from "react-router-dom";
-import { createChatSession, fetchSessionDetail, querySessions } from "../../api/chat";
-import { createFinancialAssistant, type FinancialAssistant } from "../../api/financialAssistant";
+import { fetchSessionDetail, querySessions } from "../../api/chat";
+import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../../api/financialAssistant";
 import { queryKeys } from "../../api/queryKeys";
 import { fetchFinancialStock, financialMarketKeys, searchFinancialStocks, type StockIdentity, type StockMarketCode, type StockPeriod } from "../../api/financialMarket";
 import type { AssistantConversationTurn, SessionSummary } from "../../api/types";
@@ -26,7 +26,7 @@ import { FinanceResearchReport } from "./FinanceResearchReport";
 import { FinanceResearchProcess } from "./FinanceResearchProcess";
 import { FinanceResearchOverview } from "./FinanceResearchOverview";
 import { FinanceResearchHistory } from "./FinanceResearchHistory";
-import { EMPTY_FINANCIAL_MESSAGES, isResearchSearchResult, isValidResearchDate, localResearchDate, projectStockReport, reportMatchesStock, stockFromResearchRequest, stockResearchPrompt, type ReportCitation, type ResearchDepth } from "./stockResearchModel";
+import { EMPTY_FINANCIAL_MESSAGES, isResearchSearchResult, isValidResearchDate, localResearchDate, latestResearchSubject, projectStockReport, reportMatchesStock, stockResearchPrompt, type ReportCitation, type ResearchDepth } from "./stockResearchModel";
 import { useFinanceWatchlist } from "./useFinanceWatchlist";
 import { FinanceGeneralResearch } from "./FinanceGeneralResearch";
 import { FinanceKnowledgeCenter } from "./FinanceKnowledgeCenter";
@@ -48,6 +48,7 @@ import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
 import type { FinanceSessionLifecycle } from "./useFinanceSessionLifecycle";
 import { FinanceDashboard } from "./FinanceDashboard";
 import { FinanceScreenWorkspace } from "./FinanceScreenWorkspace";
+import { FinanceInvestmentSettings } from "./FinanceInvestmentSettings";
 import { FinanceResearchProfiles } from "./FinanceResearchProfiles";
 import { FinanceReportsCenter } from "./FinanceReportsCenter";
 import { FinanceManualPositions } from "./FinanceManualPositions";
@@ -65,7 +66,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const { area, tab, asideTab, portfolioSource, reviewTab, taskTab, reportCollection, preparing, selectedReport } = navigation;
   const isBacktest = area === "backtest" || (area === "review" && reviewTab === "backtest");
   const setArea = (area: string) => navigation.update({ area, ...(area === "review" && reviewTab === "backtest" ? { reviewTab: "trades" } : {}), preparing: false, selectedReport: null, asideTab: "overview" });
-  const setTab = (tab: string) => { if (tab === "research") hydratedSession.current = ""; else if (navigation.tab !== "research" && researchKind === "stock") hydratedSession.current = sessionId; navigation.update({ tab, preparing: false }); };
+  const setTab = (tab: string) => { if (tab === "research") hydratedSession.current = ""; else if (navigation.tab !== "research" && researchKind === "stock") hydratedSession.current = subjectKey; navigation.update({ tab, preparing: false }); };
   const setAsideTab = (asideTab: string) => navigation.update({ asideTab });
   const setPortfolioSource = (portfolioSource: string) => navigation.update({ portfolioSource });
   const setReviewTab = (reviewTab: string) => navigation.update({ reviewTab, selectedReport: null });
@@ -83,6 +84,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const [sessionSearch, setSessionSearch] = useState(""), [sessionQuery, setSessionQuery] = useState("");
   const [sidebarCollection, setSidebarCollection] = useState<FinanceSessionCollection>("recent");
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [investmentOpen, setInvestmentOpen] = useState(false);
   const [conversationRevealKey, setConversationRevealKey] = useState(0);
   const [period, setPeriod] = useState<StockPeriod>("day");
   const [requestedTeamRunId, setRequestedTeamRunId] = useState("");
@@ -96,7 +98,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const [creating, setCreating] = useState(false), [launching, setLaunching] = useState(false), [createError, setCreateError] = useState("");
   const [upgradingMarket, setUpgradingMarket] = useState(false);
   const marketUpgradeGate = useRef(false);
-  const createGate = useRef(false), launchGate = useRef(false), createKey = useRef("");
+  const createGate = useRef(false), launchGate = useRef(false);
   const mounted = useRef(false), requestSequence = useRef(0), hydratedSession = useRef("");
   const recordSequence = useRef(0);
   const [view, setView] = useState<FinancialSessionView | null>(null);
@@ -164,17 +166,23 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const onSessionView = useCallback((next: FinancialSessionView) => setView((current) => current?.sessionId === next.sessionId && Object.keys(next).every((key) => current[key as keyof FinancialSessionView] === next[key as keyof FinancialSessionView]) ? current : next), []);
   const onActiveTurn = useCallback((id: string, turn: AssistantConversationTurn | null) => setActiveTurn((current) => current?.sessionId === id && current.turn === turn ? current : { sessionId: id, turn }), []);
   const onDraftSubmitted = useCallback(() => { launchGate.current = false; setLaunching(false); }, []);
-  const bridge = useMemo(() => ({ agentId: assistant.agentId, draftRequest, onSessionView, onActiveTurn, onDraftSubmitted }), [assistant.agentId, draftRequest, onSessionView, onActiveTurn, onDraftSubmitted]);
+  const onDraftBlocked = useCallback((_id: number, reason: "busy" | "unsent_draft") => {
+    launchGate.current = false; setLaunching(false);
+    setCreateError(reason === "busy" ? (zh ? "主会话正在处理其他内容，请完成后再开始研究。" : "The advisor is busy. Start research after it finishes.") : (zh ? "主会话有未发送的草稿，请先处理草稿，再开始研究。" : "The advisor has an unsent draft. Handle it before starting research."));
+  }, [zh]);
+  const bridge = useMemo(() => ({ agentId: assistant.agentId, draftRequest, onSessionView, onActiveTurn, onDraftSubmitted, onDraftBlocked }), [assistant.agentId, draftRequest, onSessionView, onActiveTurn, onDraftSubmitted, onDraftBlocked]);
   // Keep the native workbench stable when the financial presentation updates.
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const returnTo = `${location.pathname}${location.search}`;
+  const subjectKey = `${sessionId}:${JSON.stringify(latestResearchSubject(messages))}`;
   useEffect(() => {
-    if (preparing || area !== "workspace" || !["research", "report"].includes(tab) || !nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === sessionId) return;
-    hydratedSession.current = sessionId;
-    setResearchKind(currentView?.title.startsWith("主题 ·") ? "topic" : "stock");
-    const identity = [...messages].reverse().flatMap((message) => message.role === "user" ? [stockFromResearchRequest(message.content)] : []).find((item) => item !== null);
+    if (preparing || area !== "workspace" || !["research", "report"].includes(tab) || !nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === subjectKey) return;
+    hydratedSession.current = subjectKey;
+    const subject = latestResearchSubject(messages);
+    setResearchKind(subject?.kind ?? (currentView?.title.startsWith("主题 ·") ? "topic" : "stock"));
+    const identity = subject?.kind === "stock" ? subject.stock : null;
     if (identity && identity.symbol !== stocks.selected.symbol) { stocks.selectStock(identity); setSearchMarket(stockMarketCode(identity)); }
-  }, [preparing, area, tab, currentView?.transcriptPending, messages, nativeReady, sessionId, stocks]);
+  }, [preparing, area, tab, currentView?.transcriptPending, messages, nativeReady, sessionId, stocks, subjectKey]);
   const marketIdentityUpdated = useRef("");
   useEffect(() => { const quote = market.data?.stock; const key = quote ? `${quote.symbol}:${quote.name}` : ""; if (quote?.symbol === stocks.selected.symbol && quote.name !== stocks.selected.name && marketIdentityUpdated.current !== key) { marketIdentityUpdated.current = key; stocks.selectStock(quote); } }, [market.data, stocks]);
   async function openRecord(record: SessionSummary) {
@@ -206,8 +214,8 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
     stocks.selectStock({ symbol, ticker, name: stocks.watchlist.find((item) => item.symbol === symbol)?.name || ticker, market: symbol.startsWith("hk") ? "港交所" : symbol.startsWith("us") ? "美股" : symbol.startsWith("sh") ? "上交所" : symbol.startsWith("bj") ? "北交所" : "深交所" });
     setTeamSelectedRun(null); setRequestedTeamRunId(runId); setArea("team"); setAsideTab("process");
   }
-  function selectStock(stock: StockIdentity) { hydratedSession.current = sessionId; stocks.selectStock(stock); setSearchMarket(stockMarketCode(stock)); setSearch(""); setDebouncedSearch(""); navigation.update(isBacktest ? { area: "backtest", selectedReport: null } : { area: "workspace", tab: "overview", preparing, selectedReport: null }); setResearchKind("stock"); setCitation(null); }
-  function draft(text: string, targetId: string, submit: boolean, depth: ResearchDepth = config.depth) { requestSequence.current += 1; setConversationRevealKey(key => key + 1); setDraftRequest({ id: requestSequence.current, sessionId: targetId, text, submit, depth, ...(submit ? { modelSelection: currentView?.turnModelSelection ?? null } : {}) }); navigation.showSession(targetId); }
+  function selectStock(stock: StockIdentity) { hydratedSession.current = subjectKey; stocks.selectStock(stock); setSearchMarket(stockMarketCode(stock)); setSearch(""); setDebouncedSearch(""); navigation.update(isBacktest ? { area: "backtest", selectedReport: null } : { area: "workspace", tab: "overview", preparing, selectedReport: null }); setResearchKind("stock"); setCitation(null); }
+  function draft(text: string, targetId: string, submit: boolean, depth: ResearchDepth = config.depth) { requestSequence.current += 1; setConversationRevealKey(key => key + 1); setDraftRequest({ id: requestSequence.current, sessionId: targetId, text, submit, depth, preserveExistingDraft: true, ...(submit ? { modelSelection: currentView?.turnModelSelection ?? null } : {}) }); navigation.showSession(targetId); }
   function configuredPrompt(lessons: FinancialLesson[] = reflection.data?.items ?? []) {
     const text = stockResearchPrompt(market.data?.stock ?? stocks.selected, config.period, config.date, config.scope, config.depth, market.data);
     const configured = config.instructions?.trim() ? `${text}\n\n用户研究档案中的分析要点：\n${config.instructions.trim()}` : text;
@@ -215,20 +223,28 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   }
   async function newResearch(start = false, custom?: { text: string; title: string; depth?: ResearchDepth }, prepareDraft = false, refreshedPrompt?: string) {
     if (createGate.current) return;
-    createGate.current = true; createKey.current ||= crypto.randomUUID();
+    createGate.current = true;
     const expected = routeRef.current.selection;
     const expectedLocation = locationRef.current.key;
     const text = custom ? (/^请对以下主题开展投资研究|^请研究/.test(custom.text) ? custom.text : `请对以下主题开展投资研究：${custom.title}。分析截至 ${localResearchDate()}。生成完整研究报告。\n\n${custom.text}`) : refreshedPrompt ?? configuredPrompt();
     setCreating(true); setCreateError("");
     try {
-      const result = await createChatSession({ agentId: assistant.agentId, title: custom ? `主题 · ${custom.title}` : `${stocks.selected.name} (${stocks.selected.ticker}) · ${config.period || config.date}` }, createKey.current);
-      if (!isFinancialSession(result, assistant.agentId)) throw new Error(zh ? "新会话身份不匹配" : "Session identity mismatch");
-      // Reuse the verified create response at the finance entry guard. Otherwise
-      // its loading frame would unmount this workspace and discard the draft.
+      // Resolve the owner's current direct session; never create a new conversation
+      // to bypass a busy, archived or changed advisor binding.
+      const owner = (await listFinancialAssistants()).find(row => row.agentId === assistant.agentId);
+      if (!owner || owner.status !== "active" || owner.setupStatus !== "ready" || !owner.directSessionId || owner.directSessionArchived) {
+        throw new Error(zh ? "主会话不可用，请检查助手状态" : "The advisor conversation is unavailable");
+      }
+      const result = await fetchSessionDetail(owner.directSessionId, { transcriptScope: "none", includeSecondary: false });
+      if (result.id !== owner.directSessionId || !isFinancialSession(result, assistant.agentId) || result.readOnly) {
+        throw new Error(zh ? "主会话不可写，未创建替代会话" : "The advisor conversation is not writable");
+      }
+      if (start && ["running", "queued", "stopping", "paused"].includes(result.status)) {
+        throw new Error(zh ? "主会话正在处理其他内容，请完成后再开始研究。" : "The advisor conversation is busy");
+      }
       client.setQueryData(["finance", "session-binding", assistant.agentId, result.id], result);
-      void client.invalidateQueries({ queryKey: ["sessions", "finance", assistant.agentId] }); createKey.current = "";
-      if (mounted.current && locationRef.current.key === expectedLocation && routeRef.current.replaceIfStillViewing(expected, { kind: "session", sessionId: result.id })) { setResearchKind(custom ? "topic" : "stock"); if (start || prepareDraft) draft(text, result.id, start, custom?.depth); else { setDraftRequest(null); navigation.showSession(result.id); } }
-    } catch (error) { if (mounted.current) setCreateError(error instanceof Error ? error.message : (zh ? "创建失败，请重试" : "Could not create research")); }
+      if (mounted.current && locationRef.current.key === expectedLocation && (result.id === sessionId ? routeRef.current.matchesSelection(expected) : routeRef.current.replaceIfStillViewing(expected, { kind: "session", sessionId: result.id }))) { setResearchKind(custom ? "topic" : "stock"); if (start || prepareDraft) draft(text, result.id, start, custom?.depth); else { setDraftRequest(null); setConversationRevealKey(key => key + 1); navigation.showSession(result.id); } }
+    } catch (error) { if (mounted.current) setCreateError(error instanceof Error ? error.message : (zh ? "主会话读取失败，请重试" : "Could not open the advisor conversation")); }
     finally { createGate.current = false; launchGate.current = false; if (mounted.current) { setCreating(false); setLaunching(false); } }
   }
   async function startResearch() {
@@ -246,8 +262,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
       }
       client.setQueryData(financialEvaluationKeys.lessons(assistant.agentId, stocks.selected.symbol, config.date), fresh);
       const text = configuredPrompt(fresh.items);
-      if (preparing || messages.length) { await newResearch(true, undefined, false, text); return; }
-      draft(text, sessionId, true);
+      await newResearch(true, undefined, false, text);
     } catch (cause) {
       launchGate.current = false;
       if (mounted.current) { setLaunching(false); setCreateError(cause instanceof Error ? cause.message : "复盘参考读取失败，请重试"); }
@@ -318,10 +333,11 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const onOpenResearchChat = () => { hydratedSession.current = ""; setConversationRevealKey(key => key + 1); navigation.update({ area: "workspace", tab: "research", preparing: false, selectedReport: null }); };
   const currentActiveTurn = nativeReady && activeTurn?.sessionId === sessionId ? activeTurn.turn : null;
   const contextTitle = activeGroup.areas.find(item => item.id === area);
+  const subject = latestResearchSubject(messages);
   const currentResearchStock = !preparing && nativeReady && !currentView?.transcriptPending
-    ? [...messages].reverse().flatMap(message => message.role === "user" ? [stockFromResearchRequest(message.content)] : []).find((identity): identity is StockIdentity => identity !== null)
+    ? subject?.kind === "stock" ? subject.stock : undefined
     : undefined;
-  const currentTopic = !preparing && nativeReady && (researchKind === "topic" || (tab === "research" && !currentResearchStock && messages.length > 0));
+  const currentTopic = !preparing && nativeReady && (subject?.kind === "topic" || (!subject && (researchKind === "topic" || (tab === "research" && !currentResearchStock && messages.length > 0))));
   const researchStock = preparing || tab !== "research" ? stocks.selected : currentResearchStock ?? (nativeReady && !messages.length ? stocks.selected : undefined);
   const currentResearchReport = currentTopic ? report : researchStock && reportMatchesStock(report, messages, researchStock) ? report : null;
   const researchContextMatches = currentTopic || !messages.length || researchStock?.symbol === currentResearchStock?.symbol;
@@ -348,7 +364,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   return <FinancialResearchBridgeContext.Provider value={bridge}><FinanceResearchFrame zh={zh} sidebar={sidebar} sessionTabs={sessionTabs} aside={conversation} conversationRevealKey={conversationRevealKey} asideTitle={currentView?.title || activeSession?.title || (zh ? "研究对话" : "Research conversation")}
     title={area === "workspace" ? preparing ? (zh ? "新研究" : "New research") : !researchContextMatches && researchStock ? `${researchStock.name} (${researchStock.ticker})` : currentView?.title || records.find(row => row.id === sessionId)?.title || (zh ? "股票研究" : "Stock research") : zh ? contextTitle?.zh || activeGroup.zh : contextTitle?.en || activeGroup.en}
     meta={area === "workspace" && researchKind === "stock" ? researchStock?.ticker : undefined}
-    actions={area === "workspace" ? <><VDropdownMenu align="end" trigger={<VIconButton variant="ghost" className={styles.workspacePaneAction} label={zh ? "股票资料与研究设置" : "Stock data and research settings"} icon={<Settings2 size={15} />} />} items={[{ id: "overview", label: researchKind === "topic" ? (zh ? "研究设置" : "Research settings") : (zh ? "股票概览与研究设置" : "Overview and settings"), onSelect: () => setTab("overview") }, ...(researchKind === "stock" ? [{ id: "news", label: zh ? "新闻公告" : "News", onSelect: () => setTab("news") }, { id: "fundamentals", label: zh ? "财务指标" : "Financials", onSelect: () => setTab("fundamentals") }] : [])]} />{tab !== "report" ? <VButton variant="ghost" className={styles.workspacePaneAction} icon={<FileText size={14} />} onPress={() => setTab("report")}>{zh ? "报告" : "Report"}</VButton> : null}</> : undefined}>
+    actions={area === "workspace" ? <><VDropdownMenu align="end" trigger={<VIconButton variant="ghost" className={styles.workspacePaneAction} label={zh ? "股票资料与研究设置" : "Stock data and research settings"} icon={<Settings2 size={15} />} />} items={[{ id: "investment", label: zh ? "我的投资条件" : "My investment conditions", onSelect: () => setInvestmentOpen(true) }, { id: "advisor", label: zh ? "回到投资主会话" : "Advisor conversation", onSelect: () => { void newResearch(); } }, { id: "overview", label: researchKind === "topic" ? (zh ? "研究设置" : "Research settings") : (zh ? "股票概览与研究设置" : "Overview and settings"), onSelect: () => setTab("overview") }, ...(researchKind === "stock" ? [{ id: "news", label: zh ? "新闻公告" : "News", onSelect: () => setTab("news") }, { id: "fundamentals", label: zh ? "财务指标" : "Financials", onSelect: () => setTab("fundamentals") }] : [])]} />{tab !== "report" ? <VButton variant="ghost" className={styles.workspacePaneAction} icon={<FileText size={14} />} onPress={() => setTab("report")}>{zh ? "报告" : "Report"}</VButton> : null}</> : undefined}>
     {createError || lifecycle.error ? <VStateSurface tone="error" title={zh ? "操作未完成" : "Could not complete action"}><span className={styles.workspaceErrorText}>{createError || lifecycle.error}</span></VStateSurface> : null}
     {nativeReady && modelGateIssue && !currentView?.sessionLlmOptionsLoading && (currentView?.sessionLlmOptionsError || currentView?.sessionLlmOptions) && !isBacktest ? <VStateSurface tone="error" density="compact" title={currentView?.sessionLlmOptionsError ? (zh ? "模型选项读取失败" : "Could not read model options") : (zh ? "研究模型暂不可用" : "Research model unavailable")} actions={currentView?.sessionLlmOptionsError
       ? <VButton onPress={() => void client.invalidateQueries({ queryKey: queryKeys.sessionLlmOptions(sessionId), exact: true })}>{zh ? "重试读取" : "Retry"}</VButton>
@@ -357,6 +373,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
         : (zh ? "请检查助手默认模型后重新开始研究。" : "Check the assistant's default model before starting research.")}</VStateSurface> : null}
     {canOfferStageReport ? <VStateSurface tone="unavailable" density="compact" title={zh ? "研究待继续" : "Research needs continuation"} actions={<VButton onPress={() => prepareResearchPrompt(stageReportPrompt)}>{zh ? "生成阶段报告" : "Draft stage report"}</VButton>}>{zh ? "本轮受额度或预算限制，可先整理已获得的证据。" : "This turn reached a quota or budget limit. Draft a report from evidence already collected."}</VStateSurface> : null}
     {lifecycle.dialog}
+    <VDialog open={investmentOpen} onOpenChange={setInvestmentOpen} title={zh ? "我的投资条件" : "My investment conditions"} size="lg">{investmentOpen ? <FinanceInvestmentSettings agentId={assistant.agentId} zh={zh} /> : null}</VDialog>
     <VDialog open={sessionsOpen} onOpenChange={setSessionsOpen} title={zh ? "全部会话" : "All sessions"} size="lg" contentClassName={styles.sessionManager}>{sessionManager}</VDialog>
     <VDialog open={asideTab !== "overview" && !(area === "workspace" && tab === "research")} onOpenChange={open => { if (!open) { setCitation(null); setAsideTab("overview"); } }} title={asideTab === "evidence" ? (zh ? "引用资料" : "Referenced sources") : (zh ? "研究过程" : "Research activity")} size="xl" contentClassName={styles.sessionManager}>{asideHeader}{aside}</VDialog>
     {area === "watchlist" || area === "screen" || (area === "workspace" && tab === "report") ? <div className={styles.workspaceInlineContext}>{contextInspector}</div> : null}
