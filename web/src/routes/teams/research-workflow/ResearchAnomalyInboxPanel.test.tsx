@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
+  executeAnomalyInboxHumanGateAction,
   executeHypothesisFirstInboxExtendBudget,
   fetchHypothesisFirstAnomalyInbox,
 } from "../../../api/hypothesisFirst";
@@ -27,6 +28,7 @@ import {
 vi.mock("../../../api/hypothesisFirst", () => ({
   fetchHypothesisFirstAnomalyInbox: vi.fn(),
   executeHypothesisFirstInboxExtendBudget: vi.fn(),
+  executeAnomalyInboxHumanGateAction: vi.fn(),
 }));
 
 vi.mock("../../../i18n/useShellI18n", () => ({
@@ -35,6 +37,7 @@ vi.mock("../../../i18n/useShellI18n", () => ({
 
 const mockedInbox = vi.mocked(fetchHypothesisFirstAnomalyInbox);
 const mockedExtend = vi.mocked(executeHypothesisFirstInboxExtendBudget);
+const mockedHumanGate = vi.mocked(executeAnomalyInboxHumanGateAction);
 
 function item(patch: Partial<AnomalyInboxItem>): AnomalyInboxItem {
   return {
@@ -369,5 +372,120 @@ describe("ResearchAnomalyInboxPanel", () => {
     expect(testId("anomaly-extend-error").textContent).toContain("confirmation_required");
     // Still armed so the operator can retry after fixing the blocker.
     expect(testId("anomaly-extend-confirm")).toBeTruthy();
+  });
+
+  it("renders accept/reject buttons on needs_human_gate rows carrying structured actions", async () => {
+    mockedInbox.mockResolvedValue(inboxPayload([
+      item({
+        kind: "needs_human_gate",
+        severity: "high",
+        scope: { teamId: "team-1", questionId: "SCI-001", runId: "run-7", nodeId: "node-gate", meetingRoundId: "" },
+        summary: "研究结论等待人工审批",
+        recommendedAction: null,
+        actions: [
+          { command: "resolve_human_task", teamId: "team-1", runId: "run-7", taskId: "task-9", decision: "accept", endpoint: "/api/research/workflow-runs/run-7/human-gate/confirm" },
+          { command: "resolve_human_task", teamId: "team-1", runId: "run-7", taskId: "task-9", decision: "reject", endpoint: "/api/research/workflow-runs/run-7/human-gate/confirm" },
+        ],
+      }),
+    ]));
+    renderPanel({ questionId: "SCI-001", onOpenItem: vi.fn() });
+    await flushQueries();
+
+    expect(testId("anomaly-human-gate-cta").textContent).toContain("接受");
+    expect(testId("anomaly-human-gate-cta").textContent).toContain("驳回");
+    // An interactive CTA must not nest inside the row-level link button.
+    expect(container.querySelectorAll('[data-testid="anomaly-inbox-row-link"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="anomaly-inbox-row-plain"]')).toHaveLength(1);
+  });
+
+  it("submits accept directly through the action's confirmation endpoint", async () => {
+    const acceptAction = {
+      command: "resolve_human_task" as const,
+      teamId: "team-1",
+      runId: "run-7",
+      taskId: "task-9",
+      decision: "accept" as const,
+      endpoint: "/api/research/workflow-runs/run-7/human-gate/confirm",
+    };
+    const rejectAction = { ...acceptAction, decision: "reject" as const };
+    mockedInbox.mockResolvedValue(inboxPayload([
+      item({ kind: "needs_human_gate", actions: [acceptAction, rejectAction] }),
+    ]));
+    mockedHumanGate.mockResolvedValue({ status: "accepted" });
+    renderPanel({ questionId: "SCI-001" });
+    await flushQueries();
+
+    await act(async () => {
+      (testId("anomaly-human-gate-accept") as HTMLButtonElement).click();
+    });
+    await flushQueries();
+
+    expect(mockedHumanGate).toHaveBeenCalledTimes(1);
+    expect(mockedHumanGate).toHaveBeenCalledWith("team-1", acceptAction);
+  });
+
+  it("requires a two-step confirmation before reject executes", async () => {
+    const acceptAction = {
+      command: "resolve_human_task" as const,
+      teamId: "team-1",
+      runId: "run-7",
+      taskId: "task-9",
+      decision: "accept" as const,
+      endpoint: "/api/research/workflow-runs/run-7/human-gate/confirm",
+    };
+    const rejectAction = { ...acceptAction, decision: "reject" as const };
+    mockedInbox.mockResolvedValue(inboxPayload([
+      item({ kind: "needs_human_gate", actions: [acceptAction, rejectAction] }),
+    ]));
+    mockedHumanGate.mockResolvedValue({ status: "accepted" });
+    renderPanel({ questionId: "SCI-001" });
+    await flushQueries();
+
+    // First click only arms; nothing is submitted.
+    act(() => {
+      (testId("anomaly-human-gate-reject") as HTMLButtonElement).click();
+    });
+    expect(mockedHumanGate).not.toHaveBeenCalled();
+    expect(testId("anomaly-human-gate-confirm").textContent).toContain("确认驳回");
+
+    // Cancelling disarms without executing.
+    act(() => {
+      (testId("anomaly-human-gate-cancel") as HTMLButtonElement).click();
+    });
+    expect(testId("anomaly-human-gate-reject")).toBeTruthy();
+
+    // Arming again and confirming executes the reject decision.
+    act(() => {
+      (testId("anomaly-human-gate-reject") as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (testId("anomaly-human-gate-confirm") as HTMLButtonElement).click();
+    });
+    await flushQueries();
+    expect(mockedHumanGate).toHaveBeenCalledTimes(1);
+    expect(mockedHumanGate).toHaveBeenCalledWith("team-1", rejectAction);
+  });
+
+  it("surfaces the endpoint refusal inline on the human-gate CTA", async () => {
+    const acceptAction = {
+      command: "resolve_human_task" as const,
+      teamId: "team-1",
+      runId: "run-7",
+      taskId: "task-9",
+      decision: "accept" as const,
+      endpoint: "/api/research/workflow-runs/run-7/human-gate/confirm",
+    };
+    mockedInbox.mockResolvedValue(inboxPayload([
+      item({ kind: "needs_human_gate", actions: [acceptAction] }),
+    ]));
+    mockedHumanGate.mockRejectedValue(new Error("already_resolved"));
+    renderPanel({ questionId: "SCI-001" });
+    await flushQueries();
+
+    await act(async () => {
+      (testId("anomaly-human-gate-accept") as HTMLButtonElement).click();
+    });
+    await flushQueries();
+    expect(testId("anomaly-human-gate-error").textContent).toContain("already_resolved");
   });
 });

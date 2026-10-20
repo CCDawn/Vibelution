@@ -26,6 +26,16 @@ overview ``attention`` 条目。只做轮询聚合（overview GET 已有轮询�
 
   投影；需要进程内 formal read runtime，未配置时整源静默跳过，不阻塞）。
 
+- ``human_gate`` —— 研究工作流 formal ledger 中停靠人工门的运行
+
+  （run 状态 ``waiting_human`` 且存在 pending human task）。行是派生读：
+
+  解析（accept/reject/revise）后自动消失；行携带可选 ``actions``（接受/
+
+  驳回按钮语义）与 ``meta``（teamId/runId/nodeId/taskId/decisions），真实
+
+  决策仍走 ``resolve_human_task`` 单一命令权威，本源不写任何状态。
+
 
 同一条任务既停靠复核又带升级时只按 ``anomaly`` 报一次，避免一条停靠弹
 
@@ -44,7 +54,11 @@ approval/error 条目只增不改：``id``（任务 id / anomaly 键，跨轮询
 
 定）、``kind``、``severity``、``title``、``targetUrl``（前端路由路
 
-径）、可选 ``body``。
+径）、可选 ``body``；``human_gate`` 行额外携带可选 ``actions``（label +
+
+decision 的按钮语义）与 ``meta``（teamId/runId/nodeId/taskId/decisions），
+
+供助理面板内发起决策（真实决策仍走 resolve_human_task 命令权威）。
 
 """
 
@@ -82,10 +96,17 @@ ATTENTION_KIND_ANOMALY = "anomaly"
 
 ATTENTION_KIND_AFFAIR_REMINDER = "affair_reminder"
 
+ATTENTION_KIND_HUMAN_GATE = "human_gate"
+
 
 MAX_KNOWLEDGE_REVIEW_ITEMS = 20
 
 MAX_ANOMALY_ITEMS = 20
+
+MAX_HUMAN_GATE_ITEMS = 20
+
+
+_LEDGER_HUMAN_TASK_ROW_LIMIT = 200
 
 
 _STAGE_ID_INGESTION = "ingestion"
@@ -673,6 +694,177 @@ def collect_anomaly_attention(
 
 
 
+def _node_label_registry(
+    workflow_id: str,
+    workflow_version_id: str,
+    structure_hash: str,
+    run_id: str,
+    cache: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    """``{"labels": {nodeId: label}, "workflowLabel": str}`` for one run's pinned definition.
+
+    Resolved lazily per definition identity and cached; a definition that
+    cannot be resolved degrades to empty labels (the caller then falls back to
+    node_id), never raises.
+    """
+
+    key = (workflow_id, workflow_version_id, structure_hash)
+
+    cached = cache.get(key)
+
+    if cached is not None:
+        return cached
+
+    labels: dict[str, str] = {}
+
+    workflow_label = ""
+
+    try:
+        from core.research.workflow.definition_registry import resolve_definition
+
+        definition = resolve_definition(
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            structure_hash=structure_hash,
+            run_id=run_id,
+        )
+
+        for node in getattr(definition, "nodes", ()) or ():
+            node_id = str(getattr(node, "nodeId", "") or "").strip()
+            if node_id:
+                labels[node_id] = str(getattr(node, "label", "") or "").strip()
+
+        workflow_label = str(getattr(definition, "label", "") or "").strip()
+    except Exception:  # noqa: BLE001 - a missing definition degrades to node ids
+        pass
+
+    resolved = {"labels": labels, "workflowLabel": workflow_label}
+
+    cache[key] = resolved
+    return resolved
+
+
+def _collect_human_gate_attention(
+    *, limit: int = MAX_HUMAN_GATE_ITEMS
+) -> list[dict[str, Any]]:
+    """Pending research-workflow human gates as actionable attention entries.
+
+    Derived read over the formal ledger (repository
+    ``list_pending_human_tasks_for_waiting_runs``: runs parked at
+    ``waiting_human`` joined with their pending human tasks) — rows disappear
+    once the gate is resolved, nothing is persisted here. Every failure mode
+    (read runtime not configured, migration barrier, ledger read error) fails
+    closed to ``[]`` so the overview poll never breaks. Rows carry the
+    contract's optional ``actions`` / ``meta`` fields so the assistant surface
+    can offer 接受/驳回 without a second decision write path (meta.decisions
+    also advertises ``revise``; the real decision always goes through
+    ``resolve_human_task``).
+    """
+
+    from core.web.services.team_workflow.research_runtime import formal_read_runtime
+
+    try:
+        store = formal_read_runtime.get_formal_read_store()
+    except Exception:  # noqa: BLE001 - unconfigured runtime is no attention error
+        return []
+    try:
+        rows = store.list_pending_human_tasks_for_waiting_runs(
+            limit=_LEDGER_HUMAN_TASK_ROW_LIMIT
+        )
+    except Exception:  # noqa: BLE001 - one unreadable ledger degrades to no signal
+        return []
+    team_ids = {team["teamId"] for team in _active_teams()}
+    if not team_ids:
+        return []
+    definitions: dict[tuple[str, str, str], dict[str, Any]] = {}
+    entries: list[dict[str, Any]] = []
+    for row in rows:
+        (
+            task_id,
+            run_id,
+            _node_run_id,
+            _handoff_id,
+            task_kind,
+            _prompt_json,
+            _status,
+            _decision_json,
+            created_at_ms,
+            _resolved_at_ms,
+            team_id,
+            question_id,
+            workflow_id,
+            workflow_version_id,
+            structure_hash,
+            _run_status,
+            _active_node_id,
+            node_id,
+        ) = row
+        normalized_task_id = str(task_id or "").strip()
+        normalized_run_id = str(run_id or "").strip()
+        normalized_team_id = str(team_id or "").strip()
+        if not normalized_task_id or not normalized_run_id:
+            continue
+        if normalized_team_id not in team_ids:
+            continue
+        registry = _node_label_registry(
+            workflow_id,
+            workflow_version_id,
+            structure_hash,
+            normalized_run_id,
+            definitions,
+        )
+        run_label = (
+            str(question_id or "").strip()
+            or str(registry.get("workflowLabel") or "").strip()
+            or normalized_run_id
+        )
+        normalized_node_id = str(node_id or "").strip()
+        node_label = (
+            str(registry["labels"].get(normalized_node_id) or "").strip()
+            if normalized_node_id
+            else ""
+        )
+        if normalized_node_id and node_label:
+            scope_text = node_label
+        elif normalized_node_id:
+            # 拿不到节点标签时降级为运行标题 + node_id。
+            scope_text = normalized_node_id
+        else:
+            scope_text = str(task_kind or "").strip() or "人工门"
+        entries.append(
+            {
+                "id": f"human-gate:{normalized_task_id}",
+                "kind": ATTENTION_KIND_HUMAN_GATE,
+                "severity": ANOMALY_SEVERITY_HIGH,
+                "title": "研究工作流等待人工审批",
+                "targetUrl": _research_workspace_url(
+                    normalized_team_id,
+                    {
+                        "runId": normalized_run_id,
+                        **({"node": normalized_node_id} if normalized_node_id else {}),
+                        "panel": "node",
+                    },
+                ),
+                "body": _clip(
+                    f"{run_label} · {scope_text} 等待人工确认", limit=_TITLE_LIMIT
+                ),
+                "actions": [
+                    {"label": "接受", "decision": "accept"},
+                    {"label": "驳回", "decision": "reject"},
+                ],
+                "meta": {
+                    "teamId": normalized_team_id,
+                    "runId": normalized_run_id,
+                    "nodeId": normalized_node_id,
+                    "taskId": normalized_task_id,
+                    "decisions": ["accept", "reject", "revise"],
+                },
+            }
+        )
+    # ledger 查询已按 (run updated_at, task created_at) 排序，过滤后保持稳定。
+    return entries[: max(0, limit)]
+
+
 def _collect_affair_reminder_attention() -> list[dict[str, str]]:
     """Due/overdue personal-affairs rows; lazy import keeps collector wiring optional."""
     from .personal_affairs_service import collect_affair_reminder_attention
@@ -718,13 +910,15 @@ def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
         return payload
 
-    extension: list[dict[str, str]] = []
+    extension: list[dict[str, Any]] = []
 
     for collector in (
 
         collect_knowledge_review_attention,
 
         collect_anomaly_attention,
+
+        _collect_human_gate_attention,
 
         _collect_affair_reminder_attention,
 
