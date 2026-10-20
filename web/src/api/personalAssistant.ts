@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  PersonalAssistantHumanAttentionResponse,
   PersonalAssistantModelResponse,
   PersonalAssistantOverview,
   PersonalAssistantResponse,
@@ -39,6 +40,10 @@ export function updatePersonalAssistantModel(modelId: string): Promise<PersonalA
     method: "PATCH", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ modelId }),
   });
+}
+
+export function fetchPersonalAssistantHumanAttention(options?: { signal?: AbortSignal }): Promise<PersonalAssistantHumanAttentionResponse> {
+  return fetchJson("/api/personal-assistant/human-attention", { signal: options?.signal });
 }
 
 export async function fetchPersonalAssistantOverview(options?: { signal?: AbortSignal }): Promise<PersonalAssistantOverview> {

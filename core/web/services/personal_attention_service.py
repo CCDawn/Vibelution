@@ -872,6 +872,22 @@ def _collect_affair_reminder_attention() -> list[dict[str, str]]:
     return collect_affair_reminder_attention()
 
 
+def collect_human_attention() -> list[dict[str, Any]]:
+    """Read the notification lane without constructing the Session overview."""
+    extension: list[dict[str, Any]] = []
+    for collector in (
+        collect_knowledge_review_attention,
+        collect_anomaly_attention,
+        _collect_human_gate_attention,
+        _collect_affair_reminder_attention,
+    ):
+        try:
+            extension.extend(collector())
+        except Exception:  # noqa: BLE001 - isolate unavailable attention sources
+            continue
+    return extension
+
+
 def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
     """Attach human-attention entries to every overview page.
@@ -910,27 +926,7 @@ def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:
 
         return payload
 
-    extension: list[dict[str, Any]] = []
-
-    for collector in (
-
-        collect_knowledge_review_attention,
-
-        collect_anomaly_attention,
-
-        _collect_human_gate_attention,
-
-        _collect_affair_reminder_attention,
-
-    ):
-
-        try:
-
-            extension.extend(collector())
-
-        except Exception:  # noqa: BLE001 - one attention source must not break the overview
-
-            continue
+    extension = collect_human_attention()
 
     if extension:
 

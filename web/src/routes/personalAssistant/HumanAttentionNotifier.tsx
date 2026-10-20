@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { fetchPersonalAssistantOverview } from "../../api/personalAssistant";
+import { fetchPersonalAssistantHumanAttention } from "../../api/personalAssistant";
 import { queryKeys } from "../../api/queryKeys";
 import {
   browserHumanAttentionStorage,
@@ -16,9 +16,8 @@ import {
 
 /**
  * Main-workbench owner of the dual-channel human-attention trigger chain.
- * Polls the existing personal-assistant overview attention list (same query
- * key and cadence as the overview aside) and forwards unseen
- * knowledge_review/anomaly rows to `bridge.notifyHumanAttention`. A shell
+ * Polls the dedicated human-attention feed without loading Session overview
+ * pages and forwards unseen rows to `bridge.notifyHumanAttention`. A shell
  * "opened" broadcast navigates the workbench to the entry target. Renders
  * nothing; the assistant window and the system tray own the visible layer.
  */
@@ -33,9 +32,9 @@ export function HumanAttentionNotifier() {
   latestNavigate.current = navigate;
   const kindById = useRef(new Map<string, string>());
 
-  const overview = useQuery({
-    queryKey: queryKeys.personalAssistantOverview(),
-    queryFn: ({ signal }) => fetchPersonalAssistantOverview({ signal }),
+  const attention = useQuery({
+    queryKey: queryKeys.personalAssistantHumanAttention(),
+    queryFn: ({ signal }) => fetchPersonalAssistantHumanAttention({ signal }),
     refetchInterval: 5000,
     // 双通道通知的主场景就是工作台最小化/助理窗关闭：此时窗口 hidden 会暂停
     // 默认后台轮询，人类关注事项将永远无法升级为系统 toast，因此显式保持轮询
@@ -45,14 +44,14 @@ export function HumanAttentionNotifier() {
   });
 
   useEffect(() => {
-    const rows = overview.data?.humanAttention;
+    const rows = attention.data?.humanAttention;
     if (!rows) {
       return;
     }
     for (const payload of emitNewHumanAttentionNotifications({ rows, bridge, ledger })) {
       kindById.current.set(payload.id, payload.kind);
     }
-  }, [overview.data, bridge, ledger]);
+  }, [attention.data, bridge, ledger]);
 
   useEffect(() => {
     if (!bridge) {

@@ -76,6 +76,10 @@ export type PersonalAssistantAttentionRow = {
   meta?: PersonalAssistantAttentionMeta;
 };
 
+export type PersonalAssistantHumanAttentionResponse = {
+  humanAttention: PersonalAssistantAttentionRow[];
+};
+
 export type PersonalAssistantOverview = {
   generatedAt: string;
   counts: { agents: number; sessions: number; running: number; waiting: number; failed: number };
