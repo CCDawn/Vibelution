@@ -42,7 +42,11 @@ def test_new_assistant_can_execute_affairs_tool(personal_env):
 @pytest.mark.parametrize("custom", ["", "network", "blocked", "zero", "prompt"])
 def test_existing_query_default_upgrades_only_on_explicit_setup(personal_env, custom):
     row = assistant.create_personal_assistant()["assistant"]
-    prior_tools = [name for name in assistant.TOOLS if name != TOOL]
+    # Simulate a genuinely provisioned pre-affairs assistant: the snapshot
+    # ladder only recognizes system-written toolset generations, and after the
+    # platform tool joined TOOLS the synthetic "TOOLS minus affairs" hybrid is
+    # no longer one of them.
+    prior_tools = list(assistant._PRE_AFFAIRS_TOOLS)
     policy = {**assistant.current_policy(), "allowedTools": prior_tools, "preferredTools": prior_tools}
     if custom == "network":
         policy["networkAccess"] = "none"
