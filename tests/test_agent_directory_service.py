@@ -358,3 +358,96 @@ def test_ensure_agent_shared_workspace_tolerates_extended_length_prefix_form(
     assert str(shared_root).startswith("\\\\?\\") is False
     for subdir in ("memory", "artifacts", "notes", "logs", "research", "tmp"):
         assert (shared_root / subdir).is_dir()
+
+
+def test_workspace_write_decision_cache_reuses_allowed_and_keeps_blocked_fresh(
+    tmp_path, monkeypatch
+):
+    """allowed 决策键控缓存命中；blocked 决策每次都重新评估并重复记录事件。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Decision Cache Agent")
+    agent_id = agent["agentId"]
+    workspace = agent_directory_service._ensure_agent_workspace(agent["workspacePath"])
+    # get_agent(include_archived=True) 的 repair 分支自带解析噪声（每轮还可能
+    # 不同）；固定为静态记录，把断言面收敛到 evaluate 自身的解析行为。
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda aid, include_archived=True: dict(agent),
+    )
+
+    resolve_calls: list[str] = []
+    real_resolve = agent_directory_service._resolve_project_path
+
+    def counting_resolve(path_value):
+        resolve_calls.append(str(path_value))
+        return real_resolve(path_value)
+
+    monkeypatch.setattr(agent_directory_service, "_resolve_project_path", counting_resolve)
+    blocked_events: list[Any] = []
+    real_record = agent_directory_service._record_agent_territory_write_blocked
+
+    def counting_record(agent, decision, *, purpose=""):
+        blocked_events.append(decision)
+        return real_record(agent, decision, purpose=purpose)
+
+    monkeypatch.setattr(
+        agent_directory_service, "_record_agent_territory_write_blocked", counting_record
+    )
+
+    first = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, workspace, purpose="test"
+    )
+    assert first.allowed is True
+    assert first.scope == "private"
+    baseline_resolves = len(resolve_calls)
+
+    second = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, workspace, purpose="test"
+    )
+    assert second.allowed is True
+    assert second is first
+    assert len(resolve_calls) == baseline_resolves
+    assert blocked_events == []
+
+    outside = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, tmp_path / "outside.txt", purpose="test"
+    )
+    assert outside.allowed is False
+    assert blocked_events, "blocked decision must record territory events"
+
+    outside_again = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id, tmp_path / "outside.txt", purpose="test"
+    )
+    assert outside_again.allowed is False
+    assert len(blocked_events) == 2, "blocked decisions must not be cached"
+
+    # 快照直传：跳过目录读取仍得到同一缓存决策（worker 热路径形态）。
+    def _fail_get_agent(*args, **kwargs):
+        raise AssertionError("agent_snapshot must bypass directory lookup")
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", _fail_get_agent)
+    via_snapshot = agent_directory_service.evaluate_agent_workspace_write(
+        agent_id,
+        workspace,
+        purpose="test",
+        agent_snapshot=dict(agent),
+    )
+    assert via_snapshot.allowed is True
+    assert via_snapshot is first
+
+
+def test_ensure_agent_workspace_cache_heals_deleted_subdirs(tmp_path, monkeypatch):
+    """缓存命中要求全部子目录仍在；外部删除后回落全量 ensure 重建。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Ensure Cache Agent")
+    workspace = agent_directory_service._ensure_agent_workspace(agent["workspacePath"])
+    assert workspace.is_dir()
+
+    import shutil
+
+    shutil.rmtree(workspace / "memory")
+    healed = agent_directory_service._ensure_agent_workspace(agent["workspacePath"])
+    assert (healed / "memory").is_dir()

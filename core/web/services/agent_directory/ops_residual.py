@@ -1608,7 +1608,21 @@ def ensure_agent_shared_workspace() -> Path:
     return native_path
 
 
-def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, purpose: str = "") -> Any:
+# 每回合的 chat turn workspace 决策热路径是"同 agent 同 workspace 路径"的
+# 私有领地放行。该判定只依赖 (agent_id, 私有根, 原始路径) 三元输入，键控缓存
+# 命中时零 realpath、零策略解析。allowed 决策无副作用（不落 territory 事件）；
+# shared/external 分支需要 writeScopes 或带事件副作用，永远走完整评估。
+_WORKSPACE_WRITE_DECISION_CACHE: dict[tuple[str, str, str], Any] = {}
+_WORKSPACE_WRITE_DECISION_CACHE_LIMIT = 256
+
+
+def evaluate_agent_workspace_write(
+    agent_id: str,
+    path_value: str | Path,
+    *,
+    purpose: str = "",
+    agent_snapshot: dict[str, Any] | None = None,
+) -> Any:
     s = _service()
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
@@ -1618,7 +1632,14 @@ def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, pur
             reason="missing_agent",
             message="Agent id is required for workspace writes.",
         )
-    agent = s.get_agent(normalized_agent_id, include_archived=True)
+    raw_path = str(path_value or "")
+    # chat turn 调用方（session worker）已持有同一 agent 记录快照，传入即跳过
+    # 这里的目录读取；快照与注册表记录同源（agentLookup 阶段刚取）。
+    agent = (
+        dict(agent_snapshot)
+        if isinstance(agent_snapshot, dict)
+        else s.get_agent(normalized_agent_id, include_archived=True)
+    )
     if not agent:
         return s.AgentWorkspaceWriteDecision(
             False,
@@ -1628,18 +1649,28 @@ def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, pur
             agent_id=normalized_agent_id,
         )
     territory = s._agent_workspace_territory(agent)
-    target = s._resolve_project_path(str(path_value or ""))
-    private_root = s._resolve_project_path(str(territory.get("privateRoot") or ""))
+    private_root_raw = str(territory.get("privateRoot") or "").strip()
+    cache_key = (normalized_agent_id, private_root_raw, raw_path)
+    cached_decision = _WORKSPACE_WRITE_DECISION_CACHE.get(cache_key)
+    if cached_decision is not None:
+        return cached_decision
+    target = s._resolve_project_path(raw_path)
+    private_root = s._resolve_project_path(private_root_raw)
     shared_root = s._resolve_project_path(str(territory.get("sharedRoot") or s.AGENT_SHARED_WORKSPACE_PATH))
-    tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else s.resolve_tool_policy_for_agent(normalized_agent_id)
-    write_scopes = set(s._normalize_tool_policy_scopes(tool_policy.get("writeScopes") if isinstance(tool_policy, dict) else []))
     if s._path_is_within(target, private_root):
-        return s.AgentWorkspaceWriteDecision(
+        allowed_decision = s.AgentWorkspaceWriteDecision(
             True,
             path=s._relative_project_path(target),
             scope="private",
             agent_id=normalized_agent_id,
         )
+        if len(_WORKSPACE_WRITE_DECISION_CACHE) >= _WORKSPACE_WRITE_DECISION_CACHE_LIMIT:
+            _WORKSPACE_WRITE_DECISION_CACHE.clear()
+        _WORKSPACE_WRITE_DECISION_CACHE[cache_key] = allowed_decision
+        return allowed_decision
+    # writeScopes 只影响 shared 分支；私有分支用不到策略，避免热路径白解析。
+    tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else s.resolve_tool_policy_for_agent(normalized_agent_id)
+    write_scopes = set(s._normalize_tool_policy_scopes(tool_policy.get("writeScopes") if isinstance(tool_policy, dict) else []))
     if s._path_is_within(target, shared_root):
         if "shared" in write_scopes:
             return s.AgentWorkspaceWriteDecision(
@@ -1648,6 +1679,16 @@ def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, pur
                 scope="shared",
                 agent_id=normalized_agent_id,
             )
+            allowed_decision = s.AgentWorkspaceWriteDecision(
+                True,
+                path=s._relative_project_path(target),
+                scope="shared",
+                agent_id=normalized_agent_id,
+            )
+            if len(_WORKSPACE_WRITE_DECISION_CACHE) >= _WORKSPACE_WRITE_DECISION_CACHE_LIMIT:
+                _WORKSPACE_WRITE_DECISION_CACHE.clear()
+            _WORKSPACE_WRITE_DECISION_CACHE[cache_key] = allowed_decision
+            return allowed_decision
         decision = s.AgentWorkspaceWriteDecision(
             False,
             path=s._relative_project_path(target),

@@ -1009,3 +1009,37 @@ def test_prompt_template_reset_restores_default_chat_role_prompt(tmp_path, monke
 
     assert reset["content"] == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
     assert dynamic_path.read_text(encoding="utf-8") == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
+
+
+def test_load_prompt_templates_caches_until_file_signature_changes(tmp_path, monkeypatch):
+    """模板索引读缓存：签名不变命中同一对象；文件重写后立刻可见新内容。"""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service._PROMPT_TEMPLATES_LOAD_CACHE.clear()
+
+    payload = prompt_template_service._load_prompt_templates(project_root=tmp_path)
+    assert payload["templates"] == [], "missing index must fall back to defaults"
+
+    prompt_template_service._save_prompt_templates(
+        {
+            "schemaVersion": prompt_template_service.PROMPT_TEMPLATE_INDEX_VERSION,
+            "templates": [
+                {
+                    "templateId": "prompt-cache-probe",
+                    "name": "Cache Probe",
+                    "content": "cache probe content",
+                    "status": "active",
+                }
+            ],
+        },
+        project_root=tmp_path,
+    )
+    persisted = prompt_template_service._load_prompt_templates(project_root=tmp_path)
+    cached = prompt_template_service._load_prompt_templates(project_root=tmp_path)
+    assert cached is persisted, "unchanged file signature must hit the cache"
+    refreshed = persisted
+    assert refreshed is not payload
+    assert any(
+        str(item.get("templateId") or "") == "prompt-cache-probe"
+        for item in refreshed["templates"]
+    )

@@ -2918,3 +2918,44 @@ def test_repair_conversation_index_records_does_not_drop_sibling_session_rows(tm
         agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     )
     assert by_id["session-concurrent"]["title"] == "并发会话"
+
+
+def test_prompt_snapshot_reused_event_deduped_by_content_hash(monkeypatch):
+    """稳态 reused 事件按 (session, agent, contentHash) 去重；failed/新哈希照常记录。"""
+
+    from core.web.services.session import agent_runtime as session_agent_runtime
+
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        session_service, "record_runtime_scene_event", lambda *a, **k: recorded.append(k)
+    )
+    session_agent_runtime._PROMPT_SNAPSHOT_REUSE_EVENT_SEEN.clear()
+
+    snapshot = {"contentHash": "hash-a", "contentLength": 10}
+    for _ in range(3):
+        session_agent_runtime._record_session_prompt_snapshot_event(
+            "session-dedup", agent_id="agent-dedup", snapshot=snapshot, outcome="reused"
+        )
+    assert len(recorded) == 1
+
+    session_agent_runtime._record_session_prompt_snapshot_event(
+        "session-dedup",
+        agent_id="agent-dedup",
+        snapshot={"contentHash": "hash-b", "contentLength": 11},
+        outcome="reused",
+    )
+    assert len(recorded) == 2
+
+    session_agent_runtime._record_session_prompt_snapshot_event(
+        "session-dedup",
+        agent_id="agent-dedup",
+        snapshot=snapshot,
+        outcome="failed",
+    )
+    session_agent_runtime._record_session_prompt_snapshot_event(
+        "session-dedup",
+        agent_id="agent-dedup",
+        snapshot=snapshot,
+        outcome="failed",
+    )
+    assert len(recorded) == 4, "failed outcomes must never be deduped"

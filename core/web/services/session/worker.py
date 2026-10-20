@@ -1441,7 +1441,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     )
     memory_root = str(memory_policy.get("privateMemoryRoot") or "").strip()
     agent_workspace_path = (
-        s.agent_directory_service._ensure_agent_workspace(str((agent_instance or {}).get("workspacePath") or "")).resolve()
+        # _ensure_agent_workspace 已返回 resolve 后的绝对路径；再 .resolve() 是
+        # 每回合一次的冗余 realpath（Windows 上是真实文件系统查询）。
+        s.agent_directory_service._ensure_agent_workspace(str((agent_instance or {}).get("workspacePath") or ""))
         if agent_instance and str((agent_instance or {}).get("workspacePath") or "").strip()
         else session_workspace
     )
@@ -1452,7 +1454,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         tool_workspace = supervised_workspace_override
     else:
         workspace_decision = (
-            s.evaluate_agent_workspace_write(agent_id, agent_workspace_path, purpose="chat_turn_tool_workspace")
+            s.evaluate_agent_workspace_write(
+                agent_id,
+                agent_workspace_path,
+                purpose="chat_turn_tool_workspace",
+                agent_snapshot=agent_instance,
+            )
             if agent_id
             else None
         )
