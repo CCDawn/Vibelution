@@ -125,24 +125,88 @@ function reportUnsettledOptimisticUserWindow(
   });
 }
 
-function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
-  const committedSubmissionIds = new Set(    messages
-      .filter(isCommittedUserMessage)
-      .map(conversationMessageClientSubmissionId)
-      .filter(Boolean),
-  );
-  if (committedSubmissionIds.size === 0) {
-    return messages;
-  }
-  return messages.filter((message) => {
-    if (!isOptimisticUserMessage(message)) {
-      return true;
-    }
-    const clientSubmissionId = conversationMessageClientSubmissionId(message);
-    return !clientSubmissionId || !committedSubmissionIds.has(clientSubmissionId);
-  });
+/** Canonical user rows can lose `clientSubmissionId` on the way through the
+ * server projection. Falling back to the turn binding and then to a bounded
+ * content+time pairing keeps the optimistic twin from surviving forever, while
+ * one canonical row can only ever settle one optimistic row. */
+const OPTIMISTIC_SETTLE_TIME_WINDOW_MS = 2 * 60 * 1000;
+
+function optimisticMessageTurnId(message: ConversationMessage): string {
+  return String(message.metadata?.turnId ?? message.metadata?.turn_id ?? "")
+    .replace(/^live:/, "")
+    .trim();
 }
 
+function optimisticMessageContentKey(message: ConversationMessage): string {
+  if (message.role !== "user") {
+    return "";
+  }
+  return String(message.content ?? "").replace(/\s+/g, " ").trim();
+}
+function optimisticMessageTimestampMs(message: ConversationMessage): number {
+  const parsed = Date.parse(String(message.timestamp ?? ""));
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function settlesOptimisticByContent(
+  committed: ConversationMessage,
+  optimistic: ConversationMessage,
+): boolean {
+  // A canonical row that still carries its own submission id belongs to a
+  // different submission: only metadata loss justifies content pairing, so two
+  // identical prompts sent back to back both stay visible.
+  if (conversationMessageClientSubmissionId(committed)) {
+    return false;
+  }
+  const optimisticText = optimisticMessageContentKey(optimistic);  if (!optimisticText || optimisticMessageContentKey(committed) !== optimisticText) {
+    return false;
+  }
+  const committedAt = optimisticMessageTimestampMs(committed);
+  const optimisticAt = optimisticMessageTimestampMs(optimistic);
+  if (!Number.isFinite(committedAt) || !Number.isFinite(optimisticAt)) {
+    return false;
+  }
+  return Math.abs(committedAt - optimisticAt) <= OPTIMISTIC_SETTLE_TIME_WINDOW_MS;
+}
+
+function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
+  const optimisticMessages = messages.filter(isOptimisticUserMessage);
+  if (optimisticMessages.length === 0) {
+    return messages;
+  }
+  const committedMessages = messages.filter(isCommittedUserMessage);
+  const committedSubmissionIds = new Set(
+    committedMessages.map(conversationMessageClientSubmissionId).filter(Boolean),
+  );
+  const committedTurnIds = new Set(committedMessages.map(optimisticMessageTurnId).filter(Boolean));
+  // Each canonical row settles at most one optimistic row, so a user who sends
+  // the same text twice never loses the second optimistic row to the first.
+  const claimedCommitted = new Set<ConversationMessage>();
+  const settled = new Set<ConversationMessage>();
+  for (const optimistic of optimisticMessages) {
+    const clientSubmissionId = conversationMessageClientSubmissionId(optimistic);
+    if (clientSubmissionId && committedSubmissionIds.has(clientSubmissionId)) {
+      settled.add(optimistic);
+      continue;
+    }
+    const turnId = optimisticMessageTurnId(optimistic);
+    if (turnId && committedTurnIds.has(turnId)) {
+      settled.add(optimistic);
+      continue;
+    }
+    const contentMatch = committedMessages.find((candidate) => (
+      !claimedCommitted.has(candidate) && settlesOptimisticByContent(candidate, optimistic)
+    ));
+    if (contentMatch) {
+      claimedCommitted.add(contentMatch);
+      settled.add(optimistic);
+    }
+  }
+  if (settled.size === 0) {
+    return messages;
+  }
+  return messages.filter((message) => !settled.has(message));
+}
 const TRANSIENT_LIVE_OVERLAY_KIND = "session_live_overlay";
 
 type AssistantConversationTurnMessage = Extract<ConversationMessage, { role: "assistant" }>;
