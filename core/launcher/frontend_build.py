@@ -19,6 +19,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock, Thread
@@ -325,6 +326,11 @@ def _frontend_tree_for_commit(root: Path, commit: str) -> str:
     return tree
 
 
+def _git_audit_inputs(root: Path) -> dict[str, str]:
+    commit = _capture_git(root, ["rev-parse", "HEAD"])
+    return {"sourceCommit": commit, "frontendTree": _frontend_tree_for_commit(root, commit)}
+
+
 def build_inputs(project_root: Path | str, *, package_manager: str | None = None) -> dict[str, Any]:
     root = Path(project_root).resolve()
     web_dir = root / "web"
@@ -332,10 +338,24 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
     command = shutil.which("bun" if manager == "bun" else ("node.exe" if os.name == "nt" else "node")) or (
         "bun" if manager == "bun" else ("node.exe" if os.name == "nt" else "node")
     )
-    source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
-    node_version = _run_version(command)
-    source_commit = _capture_git(root, ["rev-parse", "HEAD"])
-    inputs = {
+    # Git provenance is independent of the working-file/toolchain fingerprint.
+    # Keep its two dependent queries together, pinned to the captured commit,
+    # while overlapping them with the full (uncached) production-input scan.
+    # The scoped executor joins on failure too; no inspection work outlives its
+    # build lock or publication's final mutation check.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="frontend-git-audit") as audit_pool:
+        audit = audit_pool.submit(_git_audit_inputs, root)
+        source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
+        node_version = _run_version(command)
+        if manager == "bun":
+            manager_version = _run_version("bun")
+        else:
+            try:
+                manager_version = _run_version_command([command, _npm_cli(command), "--version"])
+            except RuntimeError:
+                manager_version = "unavailable"
+        git_inputs = audit.result()
+    return {
         "productionInputDigest": source_digest,
         "productionInputCount": input_count,
         "productionInputStateDigest": input_state_digest,
@@ -347,17 +367,9 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
             else "node tsc -b && node vite build --config vite.config.ts --outDir <staging>"
         ),
         "environment": _build_environment_inputs(),
-        "sourceCommit": source_commit,
-        "frontendTree": _frontend_tree_for_commit(root, source_commit),
+        **git_inputs,
+        "packageManagerVersion": manager_version,
     }
-    if manager == "bun":
-        inputs["packageManagerVersion"] = _run_version("bun")
-    else:
-        try:
-            inputs["packageManagerVersion"] = _run_version_command([command, _npm_cli(command), "--version"])
-        except RuntimeError:
-            inputs["packageManagerVersion"] = "unavailable"
-    return inputs
 
 
 def compute_build_key(inputs: dict[str, Any]) -> str:
