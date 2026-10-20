@@ -35,7 +35,7 @@ from .run_lifecycle import (
     freeze_run_input,
     run_id_for_create,
 )
-from .service import ResearchWorkflowError
+from .errors import ResearchWorkflowError
 from .team_role_source import effective_binding_layers
 
 
