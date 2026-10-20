@@ -3404,6 +3404,10 @@ class AgentRuntime:
                             f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
                             f"（{current_tokens} → {after_tokens} tokens）。"
                         ))
+                    # The send gate and telemetry must measure the compressed
+                    # payload, including the notice appended above. The old
+                    # estimate can exceed the limit even when compression fits.
+                    current_tokens = estimate_messages_tokens(messages)
                 self._raise_if_turn_stop_requested()
                 _record_agent_scene_event(
                     "llm",
@@ -3430,12 +3434,8 @@ class AgentRuntime:
                 # Hard input-limit preflight: never invoke the model when the
                 # estimated input still exceeds the versioned hard limit
                 # (auditable context_budget_exhausted, fail-closed).
-                preflight_tokens = max(
-                    int(current_tokens or 0),
-                    int(after_tokens) if compression_triggered else 0,
-                )
                 if self._context_budget_preflight_guard(
-                    estimated_tokens=preflight_tokens,
+                    estimated_tokens=current_tokens,
                     iteration=iteration,
                     message_count=len(messages),
                 ):
