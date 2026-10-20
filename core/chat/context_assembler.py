@@ -15,12 +15,24 @@ from .history_ledger import (
     latest_checkpoint,
 )
 from .tool_result_replacement import (
+    apply_sticky_tool_result_replacements,
     empty_tool_result_replacement_state,
     replace_large_tool_results_for_compression as replace_tool_results_for_compression,
 )
 from .microcompact import (
     apply_micro_compact_projection,
+    apply_sticky_micro_compact_projection,
     empty_micro_compact_state,
+)
+from .projection_stickiness import (
+    LOCK_MODE_AGENT_INBOX,
+    LOCK_MODE_MICRO_COMPACT,
+    LOCK_MODE_REPLACEMENT,
+    LOCK_AGENT_INBOX_KIND_ASSISTANT,
+    LOCK_AGENT_INBOX_KIND_TOOL,
+    ProjectionLockIndex,
+    content_digest,
+    projection_locks_from_ledger_events,
 )
 from .conversation_ledger import (
     ConversationLedgerEvent,
@@ -172,6 +184,12 @@ def assemble_conversation_context(
         current_turn_id=current_turn_id,
     )
     raw_ledger_event_list = list(ledger_events or [])
+    # Sticky projection locks ride the ledger itself: past assemblies append
+    # out-of-band lock events recording which tool results were sent in a
+    # projected form. Building the index is a cheap type-filtered scan; for
+    # sessions with no lock events yet it stays empty and every overlay below
+    # degrades to today's behavior.
+    projection_locks = projection_locks_from_ledger_events(raw_ledger_event_list)
     ledger_replay_events = apply_context_compression_checkpoints(
         ledger_event_list,
         current_turn_id=current_turn_id,
@@ -292,16 +310,34 @@ def assemble_conversation_context(
             char_limit=tool_result_replacement_char_limit,
             session_id=session_id,
         )
+    # Sticky form locks: a tool result that already entered an assembled
+    # output in a projected (placeholder) form keeps that exact form even
+    # when this round's derivation no longer selects it, so previously sent
+    # prefix bytes stay stable for DeepSeek-style exact-match prefix caches.
+    # The overlay rebuilds the projection from the original content with the
+    # locked parameters, so the replayed bytes match what was sent before.
+    history_messages, replacement_state = apply_sticky_tool_result_replacements(
+        history_messages,
+        projection_locks=projection_locks if projection_locks.has_mode(LOCK_MODE_REPLACEMENT) else None,
+        session_id=session_id,
+        state=replacement_state,
+    )
     micro_state = empty_micro_compact_state()
     if micro_compact_old_tool_results:
         # Read-time micro-compaction tier: clear old whitelisted tool results
         # into reference+preview placeholders without touching the ledger. The
         # memo scope rides on the assembled history list identity; any ledger
-        # change rebuilds the list contents and misses on purpose.
-        memoized_micro = _ASSEMBLY_MEMO.lookup(
-            ("micro_compact_projection", *memo_scope),
-            history_messages,
-        )
+        # change rebuilds the list contents and misses on purpose. A sticky
+        # replacement restore rewrites middle items without moving the list
+        # ends, so the identity memo cannot see it: skip the memo read for
+        # that round (the fresh result is stored back instead).
+        memo_read_enabled = not replacement_state.get("stickyRestored")
+        memoized_micro = _MISS
+        if memo_read_enabled:
+            memoized_micro = _ASSEMBLY_MEMO.lookup(
+                ("micro_compact_projection", *memo_scope),
+                history_messages,
+            )
         if memoized_micro is _MISS:
             memoized_micro = apply_micro_compact_projection(
                 history_messages,
@@ -316,6 +352,12 @@ def assemble_conversation_context(
                 memoized_micro,
             )
         history_messages, micro_state = memoized_micro
+    history_messages, micro_state = apply_sticky_micro_compact_projection(
+        history_messages,
+        projection_locks=projection_locks if projection_locks.has_mode(LOCK_MODE_MICRO_COMPACT) else None,
+        session_id=session_id,
+        state=micro_state,
+    )
     history_compaction_state = empty_history_seed_compaction_state(profile=history_seed_profile)
     if str(history_seed_profile or "").strip().lower() == "agent_inbox":
         agent_inbox_tool_result_limit = min(
@@ -326,6 +368,7 @@ def assemble_conversation_context(
             history_messages,
             tool_result_char_limit=agent_inbox_tool_result_limit,
             assistant_message_char_limit=AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT,
+            projection_locks=projection_locks if projection_locks.has_mode(LOCK_MODE_AGENT_INBOX) else None,
         )
     history_messages = _promote_leading_context_assistant_messages(history_messages)
     included_event_ids = _included_event_ids(
@@ -423,7 +466,14 @@ def empty_history_seed_compaction_state(*, profile: str = "full") -> dict[str, A
         "trimmedMessageCount": 0,
         "originalChars": 0,
         "compactedChars": 0,
+        "projectionEntries": [],
     }
+
+
+# Bounded per-entry trim records carried in the agent-inbox compaction state;
+# they feed the sticky projection-lock persistence and stay small even for
+# long histories.
+_MAX_INBOX_PROJECTION_ENTRIES = 128
 
 
 def compact_agent_inbox_history_seed_messages(
@@ -431,13 +481,43 @@ def compact_agent_inbox_history_seed_messages(
     *,
     tool_result_char_limit: int = AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT,
     assistant_message_char_limit: int = AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT,
+    projection_locks: ProjectionLockIndex | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Keep private-message wakeups focused without replaying bulky old evidence."""
 
     state = empty_history_seed_compaction_state(profile="agent_inbox")
     compacted_messages: list[dict[str, Any]] = []
+    locks = projection_locks if isinstance(projection_locks, ProjectionLockIndex) else None
     bounded_tool_limit = max(240, min(int(tool_result_char_limit or AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT), 2_000))
     bounded_assistant_limit = max(480, min(int(assistant_message_char_limit or AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT), 4_000))
+
+    def _locked_limit(kind: str, content: str, current_limit: int, tool_call_id: str = "") -> int:
+        """Replay a previously sent trim with its locked limit (byte-stable)."""
+
+        if locks is None or not locks.has_mode(LOCK_MODE_AGENT_INBOX):
+            return current_limit
+        record = locks.lookup(
+            mode=LOCK_MODE_AGENT_INBOX,
+            tool_call_id=tool_call_id,
+            sha256=content_digest(content),
+        )
+        if record is None or record.kind != kind or record.char_limit <= 0:
+            return current_limit
+        return record.char_limit
+
+    def _remember_projection_entry(kind: str, *, original: str, char_limit: int, tool_call_id: str = "") -> None:
+        if len(state["projectionEntries"]) >= _MAX_INBOX_PROJECTION_ENTRIES:
+            return
+        state["projectionEntries"].append(
+            {
+                "kind": kind,
+                "toolCallId": tool_call_id,
+                "sha256": content_digest(original),
+                "charLimit": int(char_limit),
+                "originalChars": len(original),
+            }
+        )
+
     for raw in list(messages or []):
         if not isinstance(raw, dict):
             continue
@@ -456,7 +536,17 @@ def compact_agent_inbox_history_seed_messages(
             continue
         role = str(message.get("role") or "").strip().lower()
         if role == "tool" or _looks_like_historical_tool_result(content):
-            compacted_content, omitted_failure = _compact_historical_tool_result(content, char_limit=bounded_tool_limit)
+            tool_call_id = _inbox_message_tool_call_id(message)
+            effective_tool_limit = _locked_limit(
+                LOCK_AGENT_INBOX_KIND_TOOL,
+                content,
+                bounded_tool_limit,
+                tool_call_id=tool_call_id,
+            )
+            compacted_content, omitted_failure = _compact_historical_tool_result(
+                content,
+                char_limit=effective_tool_limit,
+            )
             if compacted_content != content:
                 message["content"] = compacted_content
                 state["compactedMessageCount"] += 1
@@ -464,29 +554,56 @@ def compact_agent_inbox_history_seed_messages(
                 state["compactedChars"] += len(compacted_content)
                 if omitted_failure:
                     state["omittedToolFailureCount"] += 1
+                else:
+                    # Limit-dependent trims are lockable projection forms;
+                    # failure summaries are limit-free and deterministic.
+                    _remember_projection_entry(
+                        LOCK_AGENT_INBOX_KIND_TOOL,
+                        original=content,
+                        char_limit=effective_tool_limit,
+                        tool_call_id=tool_call_id,
+                    )
             compacted_messages.append(message)
             continue
         # Checkpoint summaries are the compressed history itself, not old
         # evidence noise: keep them whole even in the bounded agent-inbox
         # profile (they now sit at the tail as assistant messages instead of
         # being promoted to a leading system role).
-        if (
-            role == "assistant"
-            and original_chars > bounded_assistant_limit
-            and not _is_history_checkpoint_message(message)
-        ):
-            compacted_content = _trim_history_text(
+        if role == "assistant" and not _is_history_checkpoint_message(message):
+            effective_assistant_limit = _locked_limit(
+                LOCK_AGENT_INBOX_KIND_ASSISTANT,
                 content,
-                char_limit=bounded_assistant_limit,
-                marker="历史 assistant 回复已压缩，仅保留前段摘要；如需全文请查询会话历史。",
+                bounded_assistant_limit,
             )
-            message["content"] = compacted_content
-            state["compactedMessageCount"] += 1
-            state["trimmedMessageCount"] += 1
-            state["originalChars"] += original_chars
-            state["compactedChars"] += len(compacted_content)
+            if original_chars > effective_assistant_limit:
+                compacted_content = _trim_history_text(
+                    content,
+                    char_limit=effective_assistant_limit,
+                    marker="历史 assistant 回复已压缩，仅保留前段摘要；如需全文请查询会话历史。",
+                )
+                message["content"] = compacted_content
+                state["compactedMessageCount"] += 1
+                state["trimmedMessageCount"] += 1
+                state["originalChars"] += original_chars
+                state["compactedChars"] += len(compacted_content)
+                _remember_projection_entry(
+                    LOCK_AGENT_INBOX_KIND_ASSISTANT,
+                    original=content,
+                    char_limit=effective_assistant_limit,
+                )
         compacted_messages.append(message)
     return compacted_messages, state
+
+
+def _inbox_message_tool_call_id(message: dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return str(
+        message.get("tool_call_id")
+        or message.get("toolCallId")
+        or metadata.get("toolCallId")
+        or metadata.get("tool_call_id")
+        or ""
+    ).strip()
 
 
 def _looks_like_historical_source_collection_stage_task_message(message: dict[str, Any]) -> bool:

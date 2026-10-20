@@ -45,6 +45,11 @@ from .tool_result_replacement import (
     TOOL_RESULT_PLACEHOLDER_HEADER,
     build_tool_result_placeholder,
 )
+from .projection_stickiness import (
+    LOCK_MODE_MICRO_COMPACT,
+    ProjectionLockIndex,
+    content_digest,
+)
 
 
 MICRO_COMPACT_SCHEMA_VERSION = 1
@@ -322,6 +327,81 @@ def apply_micro_compact_projection(
         state["reinjection"] = reinjection_state
         projected.extend(reinjection_state["entries"])
     return projected, state
+
+
+def apply_sticky_micro_compact_projection(
+    messages: Iterable[Any] | None,
+    *,
+    projection_locks: ProjectionLockIndex | None,
+    session_id: str = "",
+    state: dict[str, Any] | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Replay locked micro-compaction forms byte-identically.
+
+    Sticky read-side overlay for ``apply_micro_compact_projection``: a tool
+    result that already entered an assembled output as a micro-compaction
+    placeholder keeps that exact form even when this round's derivation no
+    longer selects it (min-savings rollback, keep-recent window change,
+    whitelist change, tier disabled). Placeholders are rebuilt from the
+    original content with the locked preview limit, so the replayed bytes
+    match the previously sent ones exactly; the projection builder logic
+    itself is untouched. Entries already in placeholder form are skipped.
+
+    Working-set re-injection stays derived from the live clearable set: the
+    reminders ride at the conversation tail, so they only append fresh bytes
+    and never rewrite the cached prefix.
+    """
+
+    source = list(messages or [])
+    micro_state = state if isinstance(state, dict) else empty_micro_compact_state()
+    locks = projection_locks if isinstance(projection_locks, ProjectionLockIndex) else None
+    if not source or locks is None or not locks.has_mode(LOCK_MODE_MICRO_COMPACT):
+        return source, micro_state
+    projected = list(source)
+    restored = 0
+    for index, message in enumerate(projected):
+        if not _is_tool_result(message) or _result_is_placeholder(message):
+            continue
+        content = _message_content(message)
+        digest = content_digest(content)
+        tool_call_id = _message_tool_call_id(message)
+        record = locks.lookup(mode=LOCK_MODE_MICRO_COMPACT, tool_call_id=tool_call_id, sha256=digest)
+        if record is None:
+            continue
+        resolved_call_id = tool_call_id or record.tool_call_id
+        tool_name = record.tool_name or _resolve_tool_name([], message, resolved_call_id)
+        preview_limit = record.preview_limit if record.preview_limit > 0 else DEFAULT_PREVIEW_CHAR_LIMIT
+        placeholder, reference, placeholder_digest = build_tool_result_placeholder(
+            content=content,
+            session_id=session_id,
+            tool_call_id=resolved_call_id,
+            tool_name=tool_name,
+            preview_limit=preview_limit,
+        )
+        projected[index] = _with_placeholder_content(
+            projected[index],
+            placeholder,
+            reference=reference,
+            digest=placeholder_digest,
+        )
+        restored += 1
+        micro_state["replacements"].append(
+            {
+                "reference": reference,
+                "toolCallId": resolved_call_id,
+                "toolName": tool_name,
+                "messageIndex": index,
+                "originalChars": len(content),
+                "sha256": placeholder_digest,
+                "stickyRestored": True,
+            }
+        )
+    if restored:
+        micro_state["applied"] = True
+        micro_state["rollbackReason"] = ""
+        micro_state["clearedResults"] = int(micro_state.get("clearedResults") or 0) + restored
+        micro_state["stickyRestored"] = int(micro_state.get("stickyRestored") or 0) + restored
+    return projected, micro_state
 
 
 def build_working_set_reinjection(
@@ -888,6 +968,7 @@ __all__ = [
     "WORKING_SET_REINJECTION_TOOL",
     "append_working_set_reminders",
     "apply_micro_compact_projection",
+    "apply_sticky_micro_compact_projection",
     "build_working_set_reinjection",
     "empty_micro_compact_state",
     "empty_working_set_reinjection_state",

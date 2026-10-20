@@ -61,6 +61,12 @@ EVENT_TURN_STEER = "turn_steer"
 # Never model-visible. Out of band, so it may follow a settled turn.
 EVENT_SUBAGENT_PROGRESS = "subagent_progress"
 EVENT_BRANCH_REBASE = "branch_rebase"
+# Sticky projection-lock decision batch (core.chat.projection_stickiness):
+# records that specific tool results have been sent in a projected
+# (placeholder/truncated) form, so later assemblies replay the same bytes
+# for provider prefix caches. Never model-visible; out of band, so it may
+# follow a settled turn without tripping the post-terminal guard.
+EVENT_TOOL_RESULT_PROJECTION_LOCK = "tool_result_projection_lock"
 
 TERMINAL_EVENTS = {
     EVENT_TURN_COMPLETED,
@@ -213,6 +219,7 @@ TURN_EVENT_PHASES: dict[str, str] = {
     EVENT_SUBAGENT_PROGRESS: TURN_PHASE_OUT_OF_BAND,
     EVENT_BRANCH_REBASE: TURN_PHASE_OUT_OF_BAND,
     EVENT_SESSION_RECOVERY_RESUMED: TURN_PHASE_OUT_OF_BAND,
+    EVENT_TOOL_RESULT_PROJECTION_LOCK: TURN_PHASE_OUT_OF_BAND,
     _EVENT_INTERNAL_TURN_TRIGGER: TURN_PHASE_OUT_OF_BAND,
 }
 
@@ -368,6 +375,7 @@ _LATEST_PREVIEW_IGNORED_EVENT_TYPES = {
     EVENT_LLM_RESILIENCE,
     EVENT_TURN_STEER,
     EVENT_SUBAGENT_PROGRESS,
+    EVENT_TOOL_RESULT_PROJECTION_LOCK,
 }
 _LATEST_PREVIEW_KNOWN_EVENT_TYPES = (
     _LATEST_PREVIEW_PARSED_EVENT_TYPES
@@ -3356,6 +3364,7 @@ __all__ = [
     "MODEL_VISIBLE_EVENT_TYPES",
     "EVENT_TOOL_CALL_STARTED",
     "EVENT_TOOL_RESULT",
+    "EVENT_TOOL_RESULT_PROJECTION_LOCK",
     "VOLATILE_MODEL_EVENT_TYPES",
     "EVENT_TURN_COMPLETED",
     "EVENT_TURN_CONTEXT",
