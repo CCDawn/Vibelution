@@ -1159,7 +1159,10 @@ def inspect_desktop_shell_launch_readiness(project_root: Path | str = PROJECT_RO
     root = Path(project_root)
     if not _usable_active_frontend_release(root):
         status = inspect_desktop_shell(root)
-        return {"schemaVersion": 1, "launchBlocking": status["launchBlocking"], "reason": status["reason"]}
+        return {
+            "schemaVersion": 1, "launchBlocking": status["launchBlocking"], "reason": status["reason"],
+            "currentElectronTree": str(status.get("currentElectronTree") or ""),
+        }
     current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
     provenance = _read_json(packaged_provenance_path(root))
     reason = _electron_package_block_reason(
@@ -1172,8 +1175,14 @@ def inspect_desktop_shell_launch_readiness(project_root: Path | str = PROJECT_RO
     # frontend proof if the workspace release disappeared during the shell read.
     if not reason and not _usable_active_frontend_release(root):
         status = inspect_desktop_shell(root)
-        return {"schemaVersion": 1, "launchBlocking": status["launchBlocking"], "reason": status["reason"]}
-    return {"schemaVersion": 1, "launchBlocking": bool(reason), "reason": reason or "active_frontend_release"}
+        return {
+            "schemaVersion": 1, "launchBlocking": status["launchBlocking"], "reason": status["reason"],
+            "currentElectronTree": str(status.get("currentElectronTree") or ""),
+        }
+    return {
+        "schemaVersion": 1, "launchBlocking": bool(reason), "reason": reason or "active_frontend_release",
+        "currentElectronTree": current_tree,
+    }
 
 
 def schedule_desktop_shell_refresh(
@@ -2003,10 +2012,9 @@ def resolve_desktop_shell_launch(
                     shell_root=shell_root, slot_root=slot_root, open_workbench=open_workbench,
                     lifecycle=lifecycle, hidden_presentation=hidden_presentation),
             }
-    packaged_status = inspect_desktop_shell(shell_root)
-    # launchBlocking, not stale: advisory frontend staleness still launches the
-    # packaged exe because the launcher window follows the workspace active
-    # release, and reporting the real reason keeps downstream status honest.
+    packaged_status = inspect_desktop_shell_launch_readiness(shell_root)
+    # Admission only needs the launch blocker. The active workspace release
+    # serves the launcher, while full freshness remains a separate observation.
     if not packaged_status.get("launchBlocking"):
         args = _desktop_shell_electron_args(
             str(packaged_desktop_exe(shell_root)),
