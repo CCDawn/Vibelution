@@ -32,6 +32,7 @@ vi.mock("./PersonalAssistantOverview", () => ({ PersonalAssistantOverview: ({ he
 vi.mock("./PersonalAssistantComputerPanel", () => ({ PersonalAssistantComputerPanel: ({ active, onCollapse }: { active: boolean; onCollapse: () => void }) =>
   <div data-computer-panel={String(active)}><button onClick={onCollapse}>收起电脑操作栏</button></div> }));
 vi.mock("./PersonalAssistantAffairs", () => ({ PersonalAssistantAffairs: () => <div data-affairs-panel="true">事务面板</div> }));
+vi.mock("./PersonalAssistantDispatches", () => ({ PersonalAssistantDispatches: () => <div data-dispatches-panel="true">派遣面板</div> }));
 vi.mock("../desktopPet/WhaleRigCharacter", () => ({ WhaleRigCharacter: ({ tone, animationState }: { tone: string; animationState: string }) => <span data-whale-tone={tone} data-whale-animation={animationState}>大肥鲸</span> }));
 const locale = vi.hoisted(() => ({ lang: "zh" as "zh" | "en" }));
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: locale.lang }) }));
@@ -76,6 +77,7 @@ describe("personal assistant page admission", () => {
     expect(container.querySelector('[role="tab"][id$="computer"]')?.textContent).toContain("Computer control");
     expect(container.querySelector('[role="tab"][id$="preferences"]')?.textContent).toContain("Dialogue preferences");
     expect(container.querySelector('[role="tab"][id$="affairs"]')?.textContent).toContain("Affairs");
+    expect(container.querySelector('[role="tab"][id$="dispatches"]')?.textContent).toContain("Dispatches");
     expect(container.querySelector('[aria-label="Collapse platform overview"]')).not.toBeNull();
     expect(container.querySelector("[data-native-session-chat]")).toBe(chat);
     expect(container.querySelector("output")?.textContent).toContain("session=assistant-session");
@@ -108,6 +110,13 @@ describe("personal assistant page admission", () => {
     await act(async () => (container.querySelector('[role="tab"][id$="affairs"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await settle();
     expect(container.querySelector("[data-affairs-panel]")?.getAttribute("data-affairs-panel")).toBe("true");
+  });
+  it("mounts the dispatches panel from the rail tab", async () => {
+    await render("/personal-assistant");
+    expect(container.querySelector("[data-dispatches-panel]")).toBeNull();
+    await act(async () => (container.querySelector('[role="tab"][id$="dispatches"]') as HTMLElement).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await settle();
+    expect(container.querySelector("[data-dispatches-panel]")?.getAttribute("data-dispatches-panel")).toBe("true");
   });
   it("opens the existing name/model settings from the real workbench entry", async () => {
     vi.mocked(fetchPersonalAssistantSettings).mockResolvedValue({ settings: {

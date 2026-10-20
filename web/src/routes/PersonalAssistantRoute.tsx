@@ -8,6 +8,7 @@ import { ChatCodingRoute } from "./ChatCodingRoute";
 import { PersonalAssistantOverview } from "./personalAssistant/PersonalAssistantOverview";
 import { PersonalAssistantDialoguePreferences } from "./personalAssistant/PersonalAssistantDialoguePreferences";
 import { PersonalAssistantAffairs } from "./personalAssistant/PersonalAssistantAffairs";
+import { PersonalAssistantDispatches } from "./personalAssistant/PersonalAssistantDispatches";
 import { PersonalAssistantState } from "./personalAssistant/PersonalAssistantState";
 import { usePersonalAssistant } from "./personalAssistant/usePersonalAssistant";
 import { useAssistantNarrowLayout } from "./personalAssistant/useAssistantNarrowLayout";
@@ -31,6 +32,7 @@ export function PersonalAssistantRoute() {
   const [computerOpen, setComputerOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [affairsOpen, setAffairsOpen] = useState(false);
+  const [dispatchesOpen, setDispatchesOpen] = useState(false);
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const assistantAgentId = state.assistant?.agentId ?? "";
   const [desktopPending, setDesktopPending] = useState(false);
@@ -52,6 +54,7 @@ export function PersonalAssistantRoute() {
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setComputerOpen(true)}>{copy.computerControl}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setPreferencesOpen(true)}>{copy.dialoguePreferences}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setAffairsOpen(true)}>{copy.affairs}</VButton>
+      <VButton variant="secondary" isDisabled={!state.verified} onClick={() => setDispatchesOpen(true)}>{copy.dispatches}</VButton>
       <VButton variant="secondary" isDisabled={!state.verified} isPending={desktopPending} onClick={() => void openDesktop()}>{copy.desktopMode}</VButton>
     </div> : null}
     {desktopErrorText ? <p className={styles.error} role="alert">{desktopErrorText}</p> : null}
@@ -75,6 +78,9 @@ export function PersonalAssistantRoute() {
           { id: "affairs", label: copy.affairs, content: <PersonalAssistantAffairs agentId={assistantAgentId}
             headerAction={<VIconButton variant="ghost" label={copy.collapseOverview}
               icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />} /> },
+          { id: "dispatches", label: copy.dispatches, content: <PersonalAssistantDispatches agentId={assistantAgentId}
+            headerAction={<VIconButton variant="ghost" label={copy.collapseOverview}
+              icon={<PanelRightClose size={14} />} onClick={() => setOverviewCollapsed(true)} />} /> },
         ]} /> : undefined} />
     <VDialog open={narrow && overviewOpen} onOpenChange={setOverviewOpen} title={copy.overview} size="sm">
       <div className={styles.narrowOverview}><PersonalAssistantOverview onOpenSession={id => {
@@ -90,6 +96,9 @@ export function PersonalAssistantRoute() {
     </VDialog>
     <VDialog open={narrow && affairsOpen && state.verified} onOpenChange={setAffairsOpen} title={copy.affairs} size="sm">
       <div className={styles.narrowOverview}><PersonalAssistantAffairs agentId={assistantAgentId} /></div>
+    </VDialog>
+    <VDialog open={narrow && dispatchesOpen && state.verified} onOpenChange={setDispatchesOpen} title={copy.dispatches} size="sm">
+      <div className={styles.narrowOverview}><PersonalAssistantDispatches agentId={assistantAgentId} /></div>
     </VDialog>
   </div>;
 }
