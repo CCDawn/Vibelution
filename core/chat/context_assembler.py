@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from .history_ledger import (
-    EVENT_CHECKPOINT,
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     HistoryEvent,
@@ -162,6 +161,10 @@ def assemble_conversation_context(
     ``recent_message_limit=None`` replays the complete post-checkpoint history.
     Callers use it when dropping an uncheckpointed event would lose conversation
     state; explicit numeric limits retain the existing bounded-tail behavior.
+
+    Checkpoint (compression summary) messages always ride at the tail of the
+    assembled history so provider prefix caches stay valid across
+    re-checkpointing; see ``_split_history_checkpoint_messages``.
     """
 
     ledger_event_list = _historical_ledger_events(
@@ -262,13 +265,26 @@ def assemble_conversation_context(
             message_limit=bounded_recent_limit,
         )
     recent_raw_messages = normalized_messages[recent_start_index:]
-    recent_messages = recent_raw_messages
     checkpoint = latest_checkpoint(events)
     ledger_checkpoint = latest_context_compression_checkpoint(ledger_replay_events)
-    checkpoint_message = _checkpoint_seed_message(checkpoint)
     retrieved_list = list(retrieved_events or [])
     retrieved_messages = [_event_seed_message(event) for event in retrieved_list]
-    history_messages = [message for message in [checkpoint_message, *retrieved_messages, *recent_messages] if message]
+    # DeepSeek-style automatic prefix caches match request bytes from the head.
+    # A checkpoint summary at the head of the assembled history invalidates the
+    # whole cached prefix whenever a new checkpoint lands, so checkpoint
+    # messages ride at the conversation tail instead: the assembled prefix
+    # stays byte-stable across re-checkpointing and a new checkpoint only
+    # appends (ZCode-style compact-boundary at the tail).
+    recent_messages, tail_checkpoint_messages = _split_history_checkpoint_messages(recent_raw_messages)
+    if checkpoint is not None and 0 <= checkpoint.message_index < recent_start_index:
+        rescued_checkpoint_message = normalized_messages[checkpoint.message_index]
+        if isinstance(rescued_checkpoint_message, dict):
+            tail_checkpoint_messages = [rescued_checkpoint_message, *tail_checkpoint_messages]
+    history_messages = [
+        message
+        for message in [*retrieved_messages, *recent_messages, *tail_checkpoint_messages]
+        if message
+    ]
     replacement_state = empty_tool_result_replacement_state(char_limit=tool_result_replacement_char_limit)
     if replace_large_tool_results_for_compression:
         history_messages, replacement_state = replace_tool_results_for_compression(
@@ -332,7 +348,7 @@ def assemble_conversation_context(
             key="history_tail",
             label="history tail",
             source="conversation_ledger",
-            item_count=len(recent_raw_messages),
+            item_count=len(recent_messages),
             chars=_message_chars(recent_messages),
             cache_policy="dynamic",
         ),
@@ -450,7 +466,15 @@ def compact_agent_inbox_history_seed_messages(
                     state["omittedToolFailureCount"] += 1
             compacted_messages.append(message)
             continue
-        if role == "assistant" and original_chars > bounded_assistant_limit:
+        # Checkpoint summaries are the compressed history itself, not old
+        # evidence noise: keep them whole even in the bounded agent-inbox
+        # profile (they now sit at the tail as assistant messages instead of
+        # being promoted to a leading system role).
+        if (
+            role == "assistant"
+            and original_chars > bounded_assistant_limit
+            and not _is_history_checkpoint_message(message)
+        ):
             compacted_content = _trim_history_text(
                 content,
                 char_limit=bounded_assistant_limit,
@@ -687,17 +711,36 @@ def _promote_leading_context_assistant_messages(messages: list[dict[str, Any]]) 
     return promoted
 
 
-def _checkpoint_seed_message(event: HistoryEvent | None) -> dict[str, Any] | None:
-    if event is None:
-        return None
-    return {
-        "role": "assistant",
-        "content": f"历史检查点：{event.content or event.summary}",
-        "metadata": {
-            "kind": "history_checkpoint_seed",
-            "eventId": event.event_id,
-        },
-    }
+CHECKPOINT_MESSAGE_KINDS = frozenset({"checkpoint", "compaction_checkpoint"})
+
+
+def _is_history_checkpoint_message(message: dict[str, Any]) -> bool:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return str(metadata.get("kind") or "").strip() in CHECKPOINT_MESSAGE_KINDS
+
+
+def _split_history_checkpoint_messages(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split replayed checkpoint messages out of the conversation body.
+
+    Automatic prefix caches (DeepSeek-style, 64-token blocks) match request
+    bytes from the head.  A checkpoint summary at the head invalidates the
+    whole cached prefix each time a new checkpoint lands (full re-prefill);
+    keeping checkpoint messages at the conversation tail leaves the assembled
+    prefix byte-stable so a new checkpoint only appends fresh bytes.  The
+    checkpoint message itself keeps its replayed role/content untouched —
+    only its position moves.
+    """
+
+    body: list[dict[str, Any]] = []
+    checkpoints: list[dict[str, Any]] = []
+    for raw in list(messages or []):
+        if isinstance(raw, dict) and _is_history_checkpoint_message(raw):
+            checkpoints.append(raw)
+            continue
+        body.append(raw)
+    return body, checkpoints
 
 
 def _event_seed_message(event: HistoryEvent) -> dict[str, Any]:

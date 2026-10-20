@@ -16,6 +16,7 @@ from core.chat.history_ledger import (
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_COMPACTION_CHECKPOINT,
     EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
     EVENT_TURN_FAILED,
@@ -1479,6 +1480,200 @@ def test_context_assembler_replays_every_post_checkpoint_event_when_limit_is_non
         assert f"checkpoint 后事件 {index}" in contents
     assert assembled.omitted_event_count == 0
     assert assembled.checkpoint_event_id
+
+
+def test_context_assembler_places_checkpoint_messages_at_history_tail(tmp_path):
+    """Checkpoint summaries ride at the conversation tail, not the head.
+
+    DeepSeek-style automatic prefix caches match request bytes from the head,
+    so a checkpoint message at the head invalidates the whole cached prefix
+    each time a new checkpoint lands. The checkpoint message keeps its
+    replayed role/content and only its position moves; the legacy duplicated
+    front seed ("历史检查点：…") is gone, so the summary is sent exactly once.
+    """
+    session_id = "session-checkpoint-tail"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "被 checkpoint 覆盖的旧请求"},
+    )
+    append_context_compression_checkpoint(
+        tmp_path,
+        session_id,
+        turn_id="turn-checkpoint",
+        current_turn_id="turn-after",
+        summary="旧阶段已经压缩为摘要。",
+        level="standard",
+        reason="context_limit",
+        before_tokens=1000,
+        after_tokens=300,
+        iteration=1,
+        trigger_source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-after",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "压缩后请求"},
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-after",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "压缩后回答"},
+    )
+    ledger_events = load_conversation_events(tmp_path, session_id)
+
+    full = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        current_turn_id="turn-current",
+        recent_message_limit=None,
+        ledger_events=ledger_events,
+    )
+    assert [(item["role"], item["content"]) for item in full.history_messages] == [
+        ("user", "压缩后请求"),
+        ("assistant", "压缩后回答"),
+        ("assistant", "旧阶段已经压缩为摘要。"),
+    ]
+    checkpoint_indexes = [
+        index
+        for index, message in enumerate(full.history_messages)
+        if str((message.get("metadata") or {}).get("kind") or "") in {"checkpoint", "compaction_checkpoint"}
+    ]
+    assert checkpoint_indexes == [len(full.history_messages) - 1]
+    assert (
+        sum("旧阶段已经压缩为摘要" in str(item.get("content") or "") for item in full.history_messages)
+        == 1
+    )
+
+    bounded = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        current_turn_id="turn-current",
+        recent_message_limit=2,
+        ledger_events=ledger_events,
+    )
+    # Bounded window: the checkpoint falls outside the tail window but the
+    # latest checkpoint is still carried (at the tail), replacing the legacy
+    # front seed that used to rescue it.
+    assert [(item["role"], item["content"]) for item in bounded.history_messages] == [
+        ("user", "压缩后请求"),
+        ("assistant", "压缩后回答"),
+        ("assistant", "旧阶段已经压缩为摘要。"),
+    ]
+    assert all("历史检查点" not in str(item.get("content") or "") for item in bounded.history_messages)
+
+
+def test_context_assembler_new_checkpoint_keeps_assembled_prefix_stable(tmp_path):
+    """A new checkpoint must not rewrite the already-assembled prefix.
+
+    Re-checkpointing the same covered range with a fresh summary keeps every
+    previously assembled message identical (逐条相同) and only appends the new
+    checkpoint at the tail, so provider prefix caches survive re-checkpointing
+    instead of being cleared by a head-placed checkpoint.
+    """
+    from core.chat.context_compression_ledger import (
+        build_context_compression_checkpoint_payload,
+    )
+
+    session_id = "session-checkpoint-prefix"
+    covered_events = []
+    for index in range(2):
+        covered_events.append(
+            append_conversation_event(
+                tmp_path,
+                session_id,
+                f"turn-old-{index}",
+                EVENT_USER_MESSAGE,
+                status="recorded",
+                payload={"content": f"被覆盖旧请求 {index}"},
+            )
+        )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-checkpoint-a",
+        EVENT_COMPACTION_CHECKPOINT,
+        status="checkpointed",
+        payload=build_context_compression_checkpoint_payload(
+            summary="第一版压缩摘要。",
+            level="standard",
+            reason="context_limit",
+            before_tokens=1000,
+            after_tokens=300,
+            iteration=1,
+            trigger_source="test",
+            covered_events=covered_events,
+        ),
+    )
+    for index in range(2):
+        append_conversation_event(
+            tmp_path,
+            session_id,
+            f"turn-after-{index}",
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={"content": f"checkpoint 后消息 {index}"},
+        )
+
+    before = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        current_turn_id="turn-current",
+        recent_message_limit=None,
+        ledger_events=load_conversation_events(tmp_path, session_id),
+    )
+    assert [(item["role"], item["content"]) for item in before.history_messages] == [
+        ("user", "checkpoint 后消息 0"),
+        ("user", "checkpoint 后消息 1"),
+        ("assistant", "第一版压缩摘要。"),
+    ]
+
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-checkpoint-b",
+        EVENT_COMPACTION_CHECKPOINT,
+        status="checkpointed",
+        payload=build_context_compression_checkpoint_payload(
+            summary="第二版压缩摘要。",
+            level="standard",
+            reason="context_limit",
+            before_tokens=1200,
+            after_tokens=320,
+            iteration=2,
+            trigger_source="test",
+            covered_events=covered_events,
+        ),
+    )
+
+    after = assemble_conversation_context(
+        [],
+        session_id=session_id,
+        current_turn_id="turn-current",
+        recent_message_limit=None,
+        ledger_events=load_conversation_events(tmp_path, session_id),
+    )
+    # Every message from the old assembly (before and after the old
+    # checkpoint) is still present, identical and in the same order; the new
+    # checkpoint only appends fresh bytes at the tail.
+    assert after.history_messages[: len(before.history_messages)] == before.history_messages
+    assert [(item["role"], item["content"]) for item in after.history_messages] == [
+        ("user", "checkpoint 后消息 0"),
+        ("user", "checkpoint 后消息 1"),
+        ("assistant", "第一版压缩摘要。"),
+        ("assistant", "第二版压缩摘要。"),
+    ]
+    assert after.cacheable_prefix_hash == before.cacheable_prefix_hash
+    assert after.checkpoint_event_id != before.checkpoint_event_id
 
 
 def test_auto_continue_pause_result_preserves_visible_reply_without_internal_prompt():
