@@ -134,7 +134,8 @@ def test_canonical_replay_folds_branch_rebase_events(tmp_path):
 
 
 @pytest.mark.parametrize("operation", ["edit", "regenerate", "head_select"])
-def test_history_seed_ignores_checkpoint_from_inactive_branch(tmp_path, operation):
+@pytest.mark.parametrize("rebase_turn", ["turn-retry", "turn-current"])
+def test_history_seed_ignores_checkpoint_from_inactive_branch(tmp_path, operation, rebase_turn):
     session_id = "session-rebased-checkpoint"
     user = append_conversation_event(
         tmp_path, session_id, "turn-original", EVENT_USER_MESSAGE,
@@ -157,13 +158,13 @@ def test_history_seed_ignores_checkpoint_from_inactive_branch(tmp_path, operatio
         projection_kind="context_compression_checkpoint",
     )
     append_conversation_event(
-        tmp_path, session_id, "turn-retry", EVENT_BRANCH_REBASE,
+        tmp_path, session_id, rebase_turn, EVENT_BRANCH_REBASE,
         status="recorded",
         payload={"operation": operation, "fromEventId": answer.event_id},
         parent_event_id=answer.event_id,
     )
     append_conversation_event(
-        tmp_path, session_id, "turn-retry", EVENT_USER_MESSAGE,
+        tmp_path, session_id, rebase_turn, EVENT_USER_MESSAGE,
         status="recorded", payload={"content": "retry request"},
     )
     append_conversation_event(
@@ -179,9 +180,10 @@ def test_history_seed_ignores_checkpoint_from_inactive_branch(tmp_path, operatio
         [], session_id=session_id, current_turn_id="turn-current",
         recent_message_limit=None, ledger_events=events,
     )
-    assert [message["content"] for message in assembled.history_messages] == [
-        "original request", "original answer", "retry request",
-    ]
+    expected = ["original request", "original answer"]
+    if rebase_turn != "turn-current":
+        expected.append("retry request")
+    assert [message["content"] for message in assembled.history_messages] == expected
     assert not assembled.checkpoint_event_id
     assert conversation_layer_fingerprint(assembled.history_messages) == conversation_layer_fingerprint(
         canonical_conversation_messages_from_events(events, current_turn_id="turn-current")

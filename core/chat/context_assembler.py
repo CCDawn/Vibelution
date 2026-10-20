@@ -38,6 +38,7 @@ from .conversation_ledger import (
     ConversationLedgerEvent,
     apply_context_compression_checkpoints,
     conversation_model_messages_from_events,
+    fold_active_events,
     latest_context_compression_checkpoint,
 )
 from .conversation_invariant import (
@@ -729,6 +730,9 @@ def _historical_ledger_events(
     *,
     current_turn_id: str = "",
 ) -> list[ConversationLedgerEvent]:
+    # Current-turn branch markers still select the historical path. Resolve
+    # them before excluding the in-flight turn, as canonical replay does.
+    events = fold_active_events(events)
     normalized_current_turn_id = str(current_turn_id or "").strip()
     if not normalized_current_turn_id:
         return list(events or [])
