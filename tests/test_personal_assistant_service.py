@@ -350,6 +350,60 @@ def test_multiple_profile_matches_fail_closed(personal_env):
     assert directory.load_state() == before
 
 
+def test_profile_lookup_hydrates_only_assistant(personal_env, monkeypatch):
+    row = service.create_personal_assistant()["assistant"]
+    hydrated = []
+    real_project = directory._agent_to_api
+
+    def project(agent, **kwargs):
+        hydrated.append(agent["agentId"])
+        return real_project(agent, **kwargs)
+
+    monkeypatch.setattr(directory, "_agent_to_api", project)
+    assert service.get_personal_assistant()["assistant"] == row
+    assert hydrated == [row["agentId"]]
+
+
+def test_duplicate_profile_rejected_before_hydration(personal_env, monkeypatch):
+    service.create_personal_assistant()
+    duplicate = directory.create_agent_instance(
+        display_name="Duplicate", role_key=service.ROLE, primary_mode="general",
+        metadata={"personalAssistantProfile": service.PROFILE},
+    )
+    directory.update_agent_instance(duplicate["agentId"], status="archived")
+    monkeypatch.setattr(directory, "_agent_to_api", _forbid_write)
+    with pytest.raises(directory.AgentStateConflictError):
+        service.get_personal_assistant()
+
+
+@pytest.mark.parametrize("change", ["profile", "role", "mode", "missing", "archived"])
+def test_profile_lookup_rechecks_full_identity(personal_env, monkeypatch, change):
+    row = service.create_personal_assistant()["assistant"]
+    real_get = directory.get_agent
+
+    def changed_get(agent_id, **kwargs):
+        assert agent_id == row["agentId"] and kwargs == {"include_archived": True}
+        agent = real_get(agent_id, **kwargs)
+        if change == "missing":
+            return None
+        if change == "profile":
+            agent["metadata"] = {**agent["metadata"], "personalAssistantProfile": "other"}
+        elif change == "role":
+            agent["roleKey"] = "ordinary"
+        elif change == "mode":
+            agent["primaryMode"] = "chat"
+        else:
+            agent["status"] = "archived"
+        return agent
+
+    monkeypatch.setattr(directory, "get_agent", changed_get)
+    if change == "archived":
+        assert service.get_personal_assistant() == {"assistant": None}
+    else:
+        with pytest.raises(directory.AgentStateConflictError):
+            service.get_personal_assistant()
+
+
 def test_deleted_direct_session_is_only_repaired_on_explicit_create(
     personal_env, monkeypatch
 ):

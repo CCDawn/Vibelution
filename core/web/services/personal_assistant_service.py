@@ -234,16 +234,23 @@ def composer_starters_for_agent(
 def _profile_agent() -> dict | None:
     matches = [
         row
-        for row in directory.list_agents(include_archived=True, detail="config")
+        for row in directory.list_agents(include_archived=True, detail="summary")
         if (row.get("metadata") or {}).get("personalAssistantProfile") == PROFILE
     ]
     if len(matches) > 1:
         raise directory.AgentStateConflictError(
             _text("多个个人助理身份需要在 Agent 管理中核对。", "Multiple personal assistant identities need review in Agent management.")
         )
-    agent = matches[0] if matches else None
-    if agent and (
-        agent.get("roleKey") != ROLE or agent.get("primaryMode") != "general"
+    if not matches:
+        return None
+    # Discover across all identities cheaply, but validate the current full row:
+    # summary projections do not carry the tool policy needed by readiness.
+    agent = directory.get_agent(matches[0]["agentId"], include_archived=True)
+    if (
+        not agent
+        or (agent.get("metadata") or {}).get("personalAssistantProfile") != PROFILE
+        or agent.get("roleKey") != ROLE
+        or agent.get("primaryMode") != "general"
     ):
         raise directory.AgentStateConflictError(
             _text("个人助理身份配置已更改，请在 Agent 管理中核对。", "The personal assistant identity configuration has changed. Review it in Agent management.")
