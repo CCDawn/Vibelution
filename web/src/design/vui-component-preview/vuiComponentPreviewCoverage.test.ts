@@ -80,6 +80,11 @@ const previewExemptDesignSections = new Set([
   // expressed as a static preview. Covered by its add/complete/cancel/reopen/
   // set-due/filter and read-failure interaction tests.
   "PersonalAssistantAffairs",
+  // Server-bound dispatch panel: the dispatch rows, delivery statuses and
+  // receipts come from the personal-assistant dispatches API poll, so its
+  // meaningful state cannot be expressed as a static preview. Covered by its
+  // render/expand-receipts/unmatched and empty-state interaction tests.
+  "PersonalAssistantDispatches",
   "DesktopAssistantReturnNotice",
   // Dual-channel human-attention surfaces bound to the native desktop bridge:
   // the notifier renders null and is driven by overview polling plus

@@ -198,3 +198,20 @@ severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-
 `routes/personalAssistant/PersonalAssistantAffairs.tsx`（组合 VStringSelect/VInput/VButton/VStateSurface）+ 同名 `.styles.ts`；API 客户端 `api/personalAffairs.ts`，DTO `api/types/personalAffairs.ts`，query key `personalAffairs`。
 ### 反冗余
 复用 VUI 表单原语与 fetchJson 客户端模式，不新建第二套列表状态或乐观更新层；counts/dueState/排序全部信任后端投影，前端不重复计算。
+
+## PersonalAssistantDispatches
+
+### 功能
+个人助理的派遣跟踪面板：聚合展示助理派给其他智能体的任务与回执状态。「派出」列表每行展示目标智能体名、摘要、发出时间、投递状态徽标（pending=待对方处理 / consumed=对方已处理 / revoked=已撤销）与已收到回执数徽标，行内可展开查看该派遣的全部回执（来源/摘要/时间/已读状态）；「收到的回执（未配对）」列出尚未与派出任务配对的回执，空时整段隐藏。
+### 适用范围
+`/personal-assistant` 工作台右侧 VTabs 的「派遣」标签（宽屏）与窄屏 VDialog 入口。只读跟踪；派遣的创建入口是对话中的结构化工具，不归本面板。
+### 使用方式
+`<PersonalAssistantDispatches agentId headerAction? />`。列表 GET `/api/personal-assistant/dispatches?limit=50`（5s 轮询，与事务面板节奏一致，隐藏时停止）；类型与 query key 内联在 `api/personalAssistantDispatches.ts`，不改 `api/queryKeys.ts`。读取失败 VStateSurface error + 重试；空态显示「还没有派遣记录」加一句对话引导。回执展开是纯组件本地 state，不进缓存。文案 zh/en 双语。
+### 非职责
+不创建/重发/撤回派遣、不修改 deliveryStatus 或回执已读状态（后端投递链权威）、不持有消息 transcript、不做催办通知（归双通道通知链）。
+### 视觉与状态
+面板结构对齐 PersonalAssistantAffairs（pinned header + 滚动 content）；行卡片化，状态/回执数徽标复用事务面板徽标样式（pending 用主前景色突出）；回执以细分隔线在行内展开，与未配对回执共用同一紧凑行样式；时间显示沿用事务面板的本地 locale 格式；空态复用图标+文案+引导模式。
+### 实现落点
+`routes/personalAssistant/PersonalAssistantDispatches.tsx` + 同名 `.styles.ts`；API 客户端 `api/personalAssistantDispatches.ts`。
+### 反冗余
+复用 VUI 原语（VButton/VStateSurface）、fetchJson 客户端与事务面板的列表/徽标模式，不新建第二套轮询、badge 组件或消息存储；投递状态与回执配对全部信任后端投影，前端不重复计算。
