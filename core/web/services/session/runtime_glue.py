@@ -2339,6 +2339,11 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
     ``worker_started`` already has enough identity and runtime fields to hit the
     telemetry field limit. Emit preparation timings in a dedicated event rather
     than silently dropping the measurements that explain pre-LLM latency.
+
+    ``agentContext.*`` sub-stage timings (runtimeContextBlockMs 等，来自
+    AgentContextPacket.timings 透出) 按前缀放行：仅数值、键名有界，与白名单
+    同一非敏感契约——否则 packet 内部子段会在本过滤器被静默丢弃，journal 与
+    runtime-scene 事件都看不到 8 秒级组装段的钱花在哪个子段。
     """
     s = _service()
 
@@ -2357,11 +2362,21 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
         "llmKeyEnvAlreadyPresentCount",
         "llmKeyEnvMissingCount",
     )
-    return {
+    fields = {
         key: timings[key]
         for key in keys
         if key in timings and isinstance(timings[key], (bool, int, float))
     }
+    for key, value in timings.items():
+        if (
+            key.startswith("agentContext.")
+            and key not in fields
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and len(key) <= 64
+        ):
+            fields[key] = value
+    return fields
 
 
 def _session_turn_context_prepare_timings(

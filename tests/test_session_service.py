@@ -1069,6 +1069,10 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
             "llmKeyEnvAlreadyPresentCount": 2,
             "llmKeyEnvMissingCount": 3,
             "syncedEnvNames": ["DO_NOT_LOG"],
+            "agentContext.runtimeContextBlockMs": 173,
+            "agentContext.episodicEventsMs": 24,
+            "agentContext.agentRuntimeStaticFrozen": True,
+            "agentContext.nested": {"not": "numeric"},
             "unrelated": "not part of the bounded timing event",
         }
     )
@@ -1087,6 +1091,8 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
         "llmKeyEnvSyncedCount": 1,
         "llmKeyEnvAlreadyPresentCount": 2,
         "llmKeyEnvMissingCount": 3,
+        "agentContext.runtimeContextBlockMs": 173,
+        "agentContext.episodicEventsMs": 24,
     }
 
 
