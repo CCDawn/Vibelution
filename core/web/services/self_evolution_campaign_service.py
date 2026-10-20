@@ -6,6 +6,7 @@ It never owns candidate execution, transcripts, Git integration or deployment.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
@@ -39,7 +40,7 @@ def _lock(store: WorkRunStore):
 
 
 def _normalize(request: dict) -> dict:
-    if not isinstance(request, dict) or set(request) - {"goal", "maxIterations", "localIntegration", "rounds", "idempotencyKey"}:
+    if not isinstance(request, dict) or set(request) - {"goal", "maxIterations", "localIntegration", "rounds", "idempotencyKey", "roleBindingFlowId"}:
         raise CampaignValidationError("Campaign request contains unsupported fields.")
     key = request.get("idempotencyKey")
     rounds = request.get("rounds", 3)
@@ -50,12 +51,17 @@ def _normalize(request: dict) -> dict:
     child = _normalize_request(request)
     if not child.get("localIntegration"):
         raise CampaignValidationError("Campaigns require explicit bounded localIntegration authorization.")
+    flow_id = request.get("roleBindingFlowId")
+    if flow_id is not None:
+        if not isinstance(flow_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", flow_id):
+            raise CampaignValidationError("roleBindingFlowId must reference one existing flow.")
+        child["roleBindingFlowId"] = flow_id
     return {**child, "rounds": rounds, "idempotencyKey": key}
 
 
 def _child_request(parent: dict) -> dict:
     return {key: deepcopy(value) for key, value in parent["request"].items()
-            if key not in {"rounds", "idempotencyKey"}}
+            if key not in {"rounds", "idempotencyKey", "roleBindingFlowId"}}
 
 
 def _source(store: WorkRunStore, campaign_id: str, number: int) -> dict:
@@ -88,6 +94,18 @@ def _validate_parent(parent: dict, now: datetime) -> dict:
         expiry = datetime.fromisoformat(grant["expiresAt"])
         issued = datetime.fromisoformat(grant["issuedAt"])
         principals = grant["principals"]
+        binding_ref = grant.get("campaignRoleBinding")
+        flow_id = request.get("roleBindingFlowId")
+        if flow_id:
+            if (grant.get("roleBindingSource") != "campaign_role_binding_v1"
+                    or not isinstance(binding_ref, dict)
+                    or binding_ref.get("teamId") != local["teamId"]
+                    or binding_ref.get("flowId") != flow_id
+                    or not binding_ref.get("bindingId")
+                    or expiry > datetime.fromisoformat(binding_ref["expiresAt"])):
+                raise ValueError("Campaign role binding authority does not match its request.")
+        elif binding_ref is not None or grant.get("roleBindingSource") == "campaign_role_binding_v1":
+            raise ValueError("Campaign role binding request was removed.")
         valid = (parent.get("requestDigest") == _digest(request)
                  and grant.get("runId") == parent["runId"] and grant.get("revoked") is False
                  and grant.get("authorizationId") and grant.get("operatorId")

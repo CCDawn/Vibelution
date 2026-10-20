@@ -92,14 +92,18 @@ def test_delegated_runtime_reuses_existing_bindings_without_provisioning_or_tool
     assert all(turn["runtime_tool_source"] == "" for turn in turns)
 
 
-def test_recovery_runtime_uses_source_roles_without_provisioning_global_roles(monkeypatch):
+@pytest.mark.parametrize("source_kind", ["_recoverySource", "_campaignSource"])
+def test_recovery_runtime_uses_source_roles_without_provisioning_global_roles(monkeypatch, source_kind):
     from core.web.services.team_workflow.generic import code_repair
+    from core.web.services import self_evolution_campaign_binding as campaign_binding
 
     selected = {"observer": {"agentId": "dedicated-director"},
                 "executor": {"agentId": "dedicated-developer"},
                 "reviewer": {"agentId": "dedicated-reviewer"}}
     contexts, turns = [], []
-    monkeypatch.setattr(code_repair, "recovery_role_bindings", lambda context: contexts.append(context) or selected)
+    owner, method = ((code_repair, "recovery_role_bindings") if source_kind == "_recoverySource"
+                     else (campaign_binding, "campaign_bindings"))
+    monkeypatch.setattr(owner, method, lambda context: contexts.append(context) or selected)
 
     def global_loader():
         pytest.fail("Recovery must not use the old global observer/executor/reviewer")
@@ -115,7 +119,7 @@ def test_recovery_runtime_uses_source_roles_without_provisioning_global_roles(mo
         integrate_candidate=lambda context: {}, cleanup_candidate=lambda context: {})
     hooks = build_autonomous_loop_hooks(deps)
     context = _snapshot(request={"goal": "bounded repair", "localIntegration": {"acknowledge": True}},
-                        _recoverySource={"runId": "parent-run"})
+                        **{source_kind: {"runId": "parent-run"}})
     hooks.observe(context)
     hooks.evolve(context)
     assert len(contexts) == 1
