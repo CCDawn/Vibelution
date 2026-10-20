@@ -850,3 +850,187 @@ def test_builtin_tool_test_times_out_without_waiting_for_slow_tool(tmp_path, mon
     assert result["resultFacts"]["semanticStatus"] == "timeout"
     assert result["resultFacts"]["timedOut"] is True
     assert result["agentCompatibility"]["resultFacts"]["semanticStatus"] == "timeout"
+
+
+# ---------------------------------------------------------------------------
+# TTFT 批五任务 C：registry 内容签名缓存矩阵（命中/失效/等价）。
+# ---------------------------------------------------------------------------
+
+
+def _reset_registry_cache_state():
+    registry.invalidate_tool_registry_cache()
+    for attribute in ("durationMs", "cacheHit", "recordedAtMonotonic"):
+        try:
+            delattr(registry._REGISTRY_TIMING, attribute)
+        except AttributeError:
+            pass
+
+
+def _last_registry_cache_hit() -> bool:
+    timing = registry.last_tool_registry_timing()
+    assert timing is not None
+    return bool(timing["toolRegistryCacheHit"])
+
+
+def test_tool_registry_signature_cache_hit_is_equivalent_and_independent(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    _reset_registry_cache_state()
+
+    first = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    second = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is True
+    # 等价性硬门：缓存命中与全量重建的 registry 内容完全一致。
+    assert second == first
+
+    # 命中返回独立对象：调用方突变不污染缓存。
+    second["tools"][0]["name"] = "mutated_tool_name"
+    third = registry.get_tool_registry()
+    assert third == first
+
+    # 显式失效入口：下一次调用重建。
+    registry.invalidate_tool_registry_cache()
+    rebuilt = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    assert rebuilt == first
+
+
+def test_tool_registry_signature_cache_invalidates_on_generated_tools_file_change(tmp_path, monkeypatch):
+    generated_path = tmp_path / "generated_tools.json"
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", generated_path)
+    _reset_registry_cache_state()
+
+    generated_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "updatedAt": "2026-07-14T00:00:00Z",
+                "tools": [
+                    {
+                        "id": "cache_probe_tool",
+                        "name": "cache_probe_tool",
+                        "description": "cache probe",
+                        "argsSchema": {"type": "object", "properties": {}},
+                        "responseTemplate": "probe",
+                        "source": "generated",
+                        "status": "validated",
+                        "enabled": True,
+                        "validated": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    first = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    assert any(item["name"] == "cache_probe_tool" for item in first["tools"])
+    again = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is True
+
+    # 外部改写（绕过 _save_generated_tools 的显式失效）也要被 stat 签名兜住。
+    later = time.time() + 5
+    import os
+
+    os.utime(generated_path, (later, later))
+    generated_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "updatedAt": "2026-07-14T00:01:00Z",
+                "tools": [
+                    {
+                        "id": "cache_probe_two_tool",
+                        "name": "cache_probe_two_tool",
+                        "description": "cache probe two",
+                        "argsSchema": {"type": "object", "properties": {}},
+                        "responseTemplate": "probe",
+                        "source": "generated",
+                        "status": "validated",
+                        "enabled": True,
+                        "validated": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    after_change = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    assert any(item["name"] == "cache_probe_two_tool" for item in after_change["tools"])
+    assert not any(item["name"] == "cache_probe_tool" for item in after_change["tools"])
+
+
+def test_tool_registry_signature_cache_invalidates_when_content_entry_is_patched(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    _reset_registry_cache_state()
+
+    baseline = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    assert registry.get_tool_registry() is not None
+    assert _last_registry_cache_hit() is True
+
+    # 测试 monkeypatch 场景：内容入口函数被替换后签名必须变化并触发重建。
+    original_loader = registry._load_generated_tools
+    extra_record = {
+        "id": "patched_probe_tool",
+        "name": "patched_probe_tool",
+        "description": "patched probe",
+        "argsSchema": {"type": "object", "properties": {}},
+        "responseTemplate": "probe",
+        "source": "generated",
+        "status": "validated",
+        "enabled": True,
+        "validated": True,
+    }
+    try:
+        registry._load_generated_tools = lambda: [dict(extra_record)]
+        patched = registry.get_tool_registry()
+        assert _last_registry_cache_hit() is False
+        assert any(item["name"] == "patched_probe_tool" for item in patched["tools"])
+    finally:
+        registry._load_generated_tools = original_loader
+
+    # 还原后内容回到基线。
+    restored = registry.get_tool_registry()
+    assert restored == baseline
+
+
+def test_tool_registry_signature_cache_invalidates_on_availability_probe_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    _reset_registry_cache_state()
+
+    before = registry.get_tool_registry()
+    before_web_search = next(item for item in before["tools"] if item["name"] == "web_search_tool")
+
+    monkeypatch.setattr(
+        "tools.web_search_tool.autoglm_search_tool_availability",
+        lambda **kwargs: {
+            "available": False,
+            "dependency": "autoglm_token_service",
+            "status": "unavailable",
+            "blockReason": "probe patched",
+        },
+    )
+    after = registry.get_tool_registry()
+    assert _last_registry_cache_hit() is False
+    after_web_search = next(item for item in after["tools"] if item["name"] == "web_search_tool")
+    # 探测翻转为不可用后 registry 必须反映：llmVisible 关闭且带 blockReason。
+    assert after_web_search["llmVisible"] is False
+    assert after_web_search["blockReason"] == "probe patched"
+    if before_web_search["llmVisible"]:
+        assert after_web_search != before_web_search
+
+
+def test_peek_cached_tool_registry_returns_signature_validated_shared_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    _reset_registry_cache_state()
+
+    assert registry.peek_cached_tool_registry() is None
+    built = registry.get_tool_registry()
+    peeked = registry.peek_cached_tool_registry()
+    assert isinstance(peeked, dict)
+    assert peeked == built
+
+    registry.invalidate_tool_registry_cache()
+    assert registry.peek_cached_tool_registry() is None
