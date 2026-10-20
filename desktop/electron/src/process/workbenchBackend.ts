@@ -1906,6 +1906,9 @@ export async function executeMainLineWorkbench(
   });
   input.signal?.throwIfAborted();
   reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
+  const deadHandleReconcileReasons = deadHandleReconcile.reconciledPids.length > 0
+    ? [deadHandleReconcile.reason]
+    : [];
   const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
   const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
   const retainedExtraPids = extraPids.filter((pid) => !reconciledDeadPids.has(pid));
@@ -1969,16 +1972,34 @@ export async function executeMainLineWorkbench(
       && (retainedBackendTreePids.length > 0 || retainedExtraPids.length > 0)) {
       throw new Error("explicit user restart shutdown was not confirmed; registered trees were retained before a new backend could start");
     }
+    if (resolved.port === preferred && retainedRegisteredHandles.length > 0) {
+      // The port reclaim can also retire a distinct pythonw launch wrapper.
+      // Release only identity-bound dead registrations on their original port;
+      // live or unverifiable trees still require the normal retirement path.
+      const postReclaimReconcile = await reconcileDeadRegisteredHandles({
+        pids: retainedRegisteredHandles,
+        port: preferred,
+        host,
+        expectedIdentities,
+        pidAlive: input.pidAlive,
+        connect: input.connect
+      });
+      input.signal?.throwIfAborted();
+      reconciledDeadPids = new Set([...reconciledDeadPids, ...postReclaimReconcile.reconciledPids]);
+      if (postReclaimReconcile.reconciledPids.length > 0) {
+        deadHandleReconcileReasons.push(postReclaimReconcile.reason);
+      }
+    }
     try {
       await retireRegisteredHandles({
-        pids: retainedRegisteredHandles,
+        pids: retainedRegisteredHandles.filter((pid) => !reconciledDeadPids.has(pid)),
         port: resolved.port,
         host,
         signal: input.signal,
         pidAlive: input.pidAlive,
         killPid: input.killPid,
         terminateProcessTree,
-        treePids: [...retainedBackendTreePids, ...retainedExtraPids],
+        treePids: [...retainedBackendTreePids, ...retainedExtraPids].filter((pid) => !reconciledDeadPids.has(pid)),
         expectedIdentities,
         ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
         reportUnverified: (pids) => unverifiedHandles.push(...pids),
@@ -2164,8 +2185,8 @@ export async function executeMainLineWorkbench(
       : {}),
     portRelocationNote: resolved.note,
     lifecycleWarning: [
-      reconciledDeadPids.size > 0
-        ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
+      deadHandleReconcileReasons.length > 0
+        ? `${deadHandleReconcileReasons.join("; ")}; no process was terminated during reconciliation`
         : "",
       unretiredRegisteredNote,
       ignoredStaleDaemonPid > 0
