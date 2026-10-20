@@ -734,6 +734,70 @@ def test_pre_messages_snapshot_upgrades_to_agent_message_tool(personal_env):
     assert "agent_message_tool" not in service._PRE_MESSAGES_TOOLS
 
 
+def test_current_policy_exempts_only_agent_message_tool_from_approval(personal_env):
+    from core.authorization.tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_policy
+    from core.authorization.tool_policy_models import TurnToolGrant
+    from core.web.services import tool_catalog
+
+    policy = service.current_policy()
+    assert policy["approvalOverrides"] == {"agent_message_tool": "never"}
+    row = service.create_personal_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    assert agent["toolPolicy"]["approvalOverrides"] == {"agent_message_tool": "never"}
+    descriptors = [tool_catalog.build_tool_descriptor(name, args_schema={}) for name in service.TOOLS]
+    decision = evaluate_tool_policy(
+        agent_id=row["agentId"],
+        policy=normalize_legacy_tool_policy(
+            agent["toolPolicy"],
+            registered_tool_names=service.TOOLS,
+            policy_id=agent["toolPolicyId"],
+        ),
+        grant=TurnToolGrant(
+            turn_id="dispatch-turn",
+            source="session",
+            allowed_capabilities=tuple({cap for item in descriptors for cap in item.capabilities}),
+            denied_tools=(),
+            approval_mode="on_request",
+        ),
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="test",
+    )
+    modes = {name: mode for name, mode, _risk in decision.approval_requirements}
+    # Dispatch sends immediately instead of stalling on a per-send approval.
+    assert modes["agent_message_tool"] == "never"
+    assert "agent_message_tool" in decision.executable_tools
+    # Governed mutations keep their per-call approval semantics.
+    assert modes["personal_assistant_manage_tool"] == "always"
+
+
+def test_pre_approval_snapshot_upgrades_to_override_policy_and_stays_idempotent(personal_env):
+    row = service.create_personal_assistant()["assistant"]
+    agent_id = row["agentId"]
+    # The first agent_message_tool generation provisioned this exact toolset
+    # before approvalOverrides existed; that stored shape must still upgrade.
+    directory.update_agent_instance(
+        agent_id,
+        tool_policy={
+            **service.PRIVATE_V2_POLICY,
+            "networkAccess": "restricted",
+            "allowedTools": list(service.TOOLS),
+            "preferredTools": list(service.TOOLS),
+        },
+    )
+    before = directory.get_agent(agent_id)["toolPolicy"]
+    assert "approvalOverrides" not in before
+    assert service.get_personal_assistant()["assistant"]["setupStatus"] == "setup_required"
+    assert service.create_personal_assistant()["assistant"]["setupStatus"] == "ready"
+    upgraded = directory.get_agent(agent_id)["toolPolicy"]
+    assert upgraded["approvalOverrides"] == {"agent_message_tool": "never"}
+    assert upgraded["allowedTools"] == list(service.TOOLS)
+    # Upgrading is idempotent: a second reprovision writes nothing new.
+    after = directory.load_state()
+    service.create_personal_assistant()
+    assert directory.load_state() == after
+
+
 @pytest.mark.parametrize("custom_task", [False, True])
 def test_pre_messages_task_upgrades_to_current_generation_task(personal_env, custom_task):
     row = service.create_personal_assistant()["assistant"]
