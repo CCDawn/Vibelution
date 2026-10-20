@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,17 @@ from .config_service import _profile_label
 from .runtime_scene_service import record_research_scene_event
 
 
-_SERVICE = ResearchThemeDiscoveryService()
+_SERVICE: ResearchThemeDiscoveryService | None = None
+_SERVICE_LOCK = threading.Lock()
+
+
+def _get_research_service() -> ResearchThemeDiscoveryService:
+    """Construct storage-backed research dependencies only on first use."""
+    global _SERVICE
+    with _SERVICE_LOCK:
+        if _SERVICE is None:
+            _SERVICE = ResearchThemeDiscoveryService()
+        return _SERVICE
 
 _FLOW_CANVAS_STATUSES = {
     "idle",
@@ -535,7 +546,7 @@ def _research_org_function_label(agent_node: dict[str, Any], agent: dict[str, An
 
 
 def list_theme_discovery_sessions() -> dict[str, Any]:
-    return _SERVICE.list_sessions()
+    return _get_research_service().list_sessions()
 
 
 def get_research_knowledge_base(
@@ -545,19 +556,19 @@ def get_research_knowledge_base(
     category: str = "",
     limit: int = 100,
 ) -> dict[str, Any]:
-    return _SERVICE.get_knowledge_base(query=query, kind=kind, category=category, limit=limit)
+    return _get_research_service().get_knowledge_base(query=query, kind=kind, category=category, limit=limit)
 
 
 def create_theme_discovery_session(payload: dict[str, Any]) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.create_session(payload))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().create_session(payload))
 
 
 def get_theme_discovery_session(session_id: str) -> dict[str, Any]:
-    return _SERVICE.get_session(session_id)
+    return _get_research_service().get_session(session_id)
 
 
 def delete_theme_discovery_session(session_id: str) -> dict[str, Any]:
-    result = _SERVICE.delete_session(session_id)
+    result = _get_research_service().delete_session(session_id)
     _record_research_config_event(
         "research.session.deleted",
         phase="session",
@@ -568,35 +579,35 @@ def delete_theme_discovery_session(session_id: str) -> dict[str, Any]:
 
 
 def run_broad_theme_search(session_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.run_broad_search(session_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().run_broad_search(session_id))
 
 
 def run_deep_theme_search(session_id: str, evidence_requests: list[str] | None = None) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.run_deep_search(session_id, evidence_requests=evidence_requests))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().run_deep_search(session_id, evidence_requests=evidence_requests))
 
 
 def extract_theme_discovery_evidence(session_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.extract_evidence(session_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().extract_evidence(session_id))
 
 
 def generate_candidate_themes(session_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.generate_themes(session_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().generate_themes(session_id))
 
 
 def run_theme_discovery_draft(session_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.run_draft(session_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().run_draft(session_id))
 
 
 def select_candidate_theme(session_id: str, theme_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.select_theme(session_id, theme_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().select_theme(session_id, theme_id))
 
 
 def generate_theme_card(session_id: str, theme_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.generate_theme_card(session_id, theme_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().generate_theme_card(session_id, theme_id))
 
 
 def approve_theme_card(session_id: str, card_id: str) -> dict[str, Any]:
-    return _sync_research_flow_canvas_with_session_payload(_SERVICE.approve_theme_card(session_id, card_id))
+    return _sync_research_flow_canvas_with_session_payload(_get_research_service().approve_theme_card(session_id, card_id))
 
 
 def list_research_prompts() -> dict[str, Any]:
@@ -1395,7 +1406,7 @@ def _persist_research_flow_canvas_state(
 
 def _record_research_capability_event(session_id: str, event_code: str, fields: dict[str, Any]) -> None:
     try:
-        _SERVICE.repository.append_event(
+        _get_research_service().repository.append_event(
             session_id,
             {
                 "eventCode": event_code,
