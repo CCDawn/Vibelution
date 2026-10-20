@@ -185,12 +185,17 @@ def _source_collection_stage_writeback_quote_anchor_audit(
     one verbatim quote anchor and classify any paraphrased quote as a
     remediation-eligible mismatch.  Sources with no stored quotable text must
     honestly declare ``evidenceStatus=missing_evidence_anchor`` (the
-    materializer skips those).  Returns ``hard_errors`` (rendered
-    human-readable rejections: missing quote, dishonest empty source),
-    ``hard_findings`` (the same findings, structured, for the mixed-batch
-    remediation payload), ``mismatches`` (structured mismatch findings for
-    the one-shot remediation) and the ``blocks_by_id`` index backing the
-    feedback.
+    materializer skips those), and the declaration is only honest when the
+    source really has no blocks — an exclude declaring it against a source
+    with real fetched blocks is a ``false_honest_skip`` hard rejection
+    (production incident session-20261020: every quotable candidate excluded
+    as ``missing_evidence_anchor`` materialized zero evidence cards and the
+    node blocked permanently).  Returns ``hard_errors`` (rendered
+    human-readable rejections: missing quote, dishonest empty source, false
+    honest skip), ``hard_findings`` (the same findings, structured, for the
+    mixed-batch remediation payload), ``mismatches`` (structured mismatch
+    findings for the one-shot remediation) and the ``blocks_by_id`` index
+    backing the feedback.
     """
     s = _service()
     stage_id = s._trim_text(task.get("stageId"), max_length=80)
@@ -245,7 +250,16 @@ def _source_collection_stage_writeback_quote_anchor_audit(
             source_kind="record",
         )
     )
-    hard_findings = [item for item in findings if item.get("finding") in {"missing_quote", "empty_source"}]
+    # ``false_honest_skip`` rides the same hard tier as ``empty_source``.  It
+    # deliberately has no ``_HONEST_SKIP_GUIDANCE`` entry, so the mixed-batch
+    # remediation builder drops it instead of rendering declare-skip guidance
+    # for the very declaration this finding forbids — it surfaces through the
+    # hard-rejection wording only.
+    hard_findings = [
+        item
+        for item in findings
+        if item.get("finding") in {"missing_quote", "empty_source", "false_honest_skip"}
+    ]
     mismatches = [item for item in findings if item.get("finding") == "mismatched_quote"]
     return {
         "hard_errors": quote_anchor_error_message(hard_findings),
@@ -1411,13 +1425,17 @@ def get_source_collection_stage_task_context(
             "模型 summary 不得作为引文；"
             "(4) 无可引用原文（sourceAccess=no_quotable_text）的来源，"
             "必须声明 evidenceStatus=missing_evidence_anchor（诚实跳过，不物化），不产空 quote；"
+            "且仅当来源确无真实抓取原文块（quotableSources blocks 为空）时才可声明该状态——"
+            "有块的来源声明 missing_evidence_anchor 排除属虚假诚实跳过，会被直接拒绝；"
+            "有块但确实不相关时按真实理由排除（不得声明 missing_evidence_anchor）；"
             "(5) quote 非逐字子串时，首次回写不拒绝：任务停靠 needs_review 并返回"
             " quoteAnchorRemediation 结构化修正反馈（含最近匹配块片段），只有一次机会；"
             "同批若还有无原文/缺锚条目，反馈会同时给出 honestSkipFindings 指引"
             "（声明 evidenceStatus=missing_evidence_anchor 且 decision=exclude 诚实跳过），"
             "一次重写同时修两类问题；修正后重写 completed 即清掉该标记；"
             "再次出现任何不匹配或硬错按契约直接拒绝；"
-            "(6) 只含硬错（无原文不诚实跳过/缺锚）、无不匹配 quote 的 completed 回写"
+            "(6) 只含硬错（无原文不诚实跳过/缺锚/有块却声明缺锚的虚假诚实跳过）、"
+            "无不匹配 quote 的 completed 回写"
             "始终被直接拒绝，不进入修正反馈。"
         )
     context["usage"]["continuationHint"] = s._source_collection_context_continuation_hint(

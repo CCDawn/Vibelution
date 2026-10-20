@@ -644,15 +644,42 @@ def audit_extraction_quote_anchors(
 
     Returns findings for every non-passing entry; ``has_anchor`` findings are
     omitted (they carry no action).  ``mismatched_quote`` is the only
-    remediation-eligible kind; ``missing_quote`` and ``empty_source`` are
-    hard contract rejections exactly like the pre-existing gate.
-    ``resolve_source_kind`` optionally derives the per-entry source kind
-    (candidate vs record) with the historical resolution order.
+    remediation-eligible kind; ``missing_quote``, ``empty_source`` and
+    ``false_honest_skip`` are hard contract rejections exactly like the
+    pre-existing gate.  ``resolve_source_kind`` optionally derives the
+    per-entry source kind (candidate vs record) with the historical
+    resolution order.
     """
     findings: list[dict[str, Any]] = []
     for index, entry in enumerate(entries):
         decision = _clean(entry.get("decision")).lower()
         if decision == "exclude":
+            # False honest skip: an exclude that declares
+            # ``missing_evidence_anchor`` while the source actually stores
+            # real fetched blocks is a false "no quotable text" declaration
+            # (the production incident excluded every candidate this way and
+            # materialized zero evidence cards).  A genuine ruling — exclude
+            # with a real reason (irrelevant/duplicate/...), a source with no
+            # blocks, or an unknown source id — stays untouched.
+            source_id = resolve_source_id(entry)
+            if not source_id:
+                continue
+            blocks = blocks_by_id.get(source_id)
+            if not blocks:
+                continue
+            if is_honest_skip and is_honest_skip(entry):
+                findings.append(
+                    {
+                        "finding": "false_honest_skip",
+                        "sourceId": source_id,
+                        "sourceKind": (
+                            resolve_source_kind(entry) if resolve_source_kind else source_kind
+                        ),
+                        "entryPath": f"{entry_path_prefix}[{index}]",
+                        "quoteAvailable": True,
+                        "blockCount": len(blocks),
+                    }
+                )
             continue
         source_id = resolve_source_id(entry)
         if not source_id:
@@ -697,6 +724,10 @@ def audit_extraction_quote_anchors(
 # with both mismatch snippets and hard-error candidates, so the agent can fix
 # both classes in a single rewrite.  The wording mirrors the historical
 # hard-rejection contract text (``quote_anchor_error_message``).
+# ``false_honest_skip`` intentionally has no entry: it hard-rejects through
+# ``quote_anchor_error_message`` only — rendering declare-skip guidance for
+# the very declaration it forbids would mislead the agent, and its absence
+# makes the remediation builder drop it silently (no duplicate reporting).
 _HONEST_SKIP_GUIDANCE = {
     "empty_source": (
         "该来源没有真实抓取原文：声明 evidenceStatus=missing_evidence_anchor"
@@ -799,8 +830,8 @@ def quote_anchor_error_message(
 
     Message texts intentionally match the historical gate strings so the
     hard-rejection semantics (missing quote / dishonest empty source /
-    second-attempt mismatch) keep their exact contract wording, including
-    the ``candidate <id>`` / ``record <id>`` source labels.
+    false honest skip / second-attempt mismatch) keep their exact contract
+    wording, including the ``candidate <id>`` / ``record <id>`` source labels.
     """
     errors: list[str] = []
     for finding in findings:
@@ -822,5 +853,14 @@ def quote_anchor_error_message(
             errors.append(
                 f"{source_label} 的 quote 不是 quotableSources 原文块的逐字子串："
                 "quote 必须从 quotableSources[].blocks[].text 原样复制，禁止改写、拼接或凭记忆重写。"
+            )
+        elif kind == "false_honest_skip":
+            block_count = _clean(finding.get("blockCount")) or "0"
+            errors.append(
+                f"{source_label} 存在真实抓取原文块（{block_count} 块）："
+                "声明 evidenceStatus=missing_evidence_anchor 属虚假诚实跳过。"
+                "两条出路：改 decision=keep 并从 quotableSources[].blocks[].text 逐字引用 quote 锚；"
+                "或按真实理由排除（如 irrelevant/duplicate/low_quality），"
+                "不得声明 missing_evidence_anchor。"
             )
     return errors
