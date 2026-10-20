@@ -109,3 +109,43 @@ def test_runtime_cache_fingerprint_tracks_authoritative_agent_compression_policy
     )
 
     assert changed_policy != fingerprint
+
+
+def test_resolved_workspace_path_key_matches_path_resolve_and_memoizes(
+    tmp_path: Path,
+) -> None:
+    """fingerprint 的 workspace resolve memo：值与 Path.resolve() 一致且稳定。
+
+    同一输入重复调用必须返回同一字符串（memo 命中），保证 fingerprint 对
+    相同输入保持稳定，AgentRuntime 缓存命中率不受影响。
+    """
+
+    from core.web.services.session.agent_runtime import (
+        _resolved_workspace_path_key,
+    )
+
+    first = _resolved_workspace_path_key(tmp_path)
+    assert first == str(tmp_path.resolve())
+    assert _resolved_workspace_path_key(tmp_path) == first
+
+
+def test_fingerprint_stable_across_repeated_calls(tmp_path: Path) -> None:
+    agent = {"agentId": "agent-fp-stable", "configRevision": 3}
+    kwargs = {
+        "agent_instance": agent,
+        "llm_slot": "dialogue",
+        "resolved_llm": SimpleNamespace(
+            config={"context_compression": {"enabled": True}},
+            model_id="glm-fp",
+        ),
+        "mode": "chat",
+        "prompt_snapshot_hash": "prompt-v1",
+    }
+    fingerprints = [
+        session_service._session_agent_runtime_cache_fingerprint(
+            session_workspace=tmp_path,
+            **kwargs,
+        )
+        for _ in range(3)
+    ]
+    assert len(set(fingerprints)) == 1
