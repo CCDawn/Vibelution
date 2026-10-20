@@ -15,6 +15,7 @@ import { AgentSessionTabStrip, type AgentSessionTabStripProps, type SessionBarRa
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
 import styles from "../ChatCodingRoute.styles";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
+import { ChatTokenSpeedIndicator } from "./ChatTokenSpeedIndicator";
 import { cliAgentRunTabId, type CliAgentRunView } from "./cliAgentRunModel";
 import type { PaneDockPayload, SessionBarDockChip } from "./chatPaneDock";
 
@@ -43,6 +44,8 @@ export type ChatCodingCenterTabsProps = {
   setSessionBrowserOpen: Dispatch<SetStateAction<boolean>>;
   headerExportVisible: boolean;
   conversationModel: { sessionId: string; messages: ConversationMessage[] } | null;
+  tokenSpeedModelKey?: string;
+  tokenSpeedDisconnectedSinceMs?: number | null;
   conversationIndexOverlayOpen: boolean;
   ordinaryChangeRail: boolean;
   changeRailVisible: boolean;
@@ -111,6 +114,8 @@ export function ChatCodingCenterTabs({
   setSessionBrowserOpen,
   headerExportVisible,
   conversationModel,
+  tokenSpeedModelKey = "",
+  tokenSpeedDisconnectedSinceMs,
   conversationIndexOverlayOpen,
   ordinaryChangeRail,
   changeRailVisible,
@@ -193,6 +198,15 @@ export function ChatCodingCenterTabs({
         />
       ) : null}
       workspaceActiveTab={conversationWorkspaceTab}
+      tokenSpeedControl={!verifiedCompanionMode && !groupPanelActive && !projectBusActive && !activeCliAgentRunId && activeSessionId
+        && conversationModel?.sessionId === activeSessionId ? (
+          <ChatTokenSpeedIndicator
+            key={JSON.stringify([activeSessionId, tokenSpeedModelKey, tokenSpeedDisconnectedSinceMs])}
+            sessionId={activeSessionId}
+            lang={lang}
+            disconnected={tokenSpeedDisconnectedSinceMs != null}
+          />
+        ) : undefined}
       sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
         <VIconButton
           label={lang === "zh" ? "浏览会话" : "Browse sessions"}
