@@ -354,7 +354,66 @@ describe("workbenchBackendRetire", () => {
     }
   });
 
-  it("preserves an external abort after a graceful shutdown was accepted", async () => {
+  it.each([
+    { acknowledgementMs: 0, timeoutMs: undefined, expectedMs: 2_000 },
+    { acknowledgementMs: 15_000, timeoutMs: undefined, expectedMs: 17_000 },
+    { acknowledgementMs: 19_500, timeoutMs: undefined, expectedMs: 20_000 },
+    { acknowledgementMs: 100, timeoutMs: 750, expectedMs: 750 }
+  ])("bounds explicit restart exit after acknowledgement without extending the total budget: %j", async ({ acknowledgementMs, timeoutMs, expectedMs }) => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      let requestSignal: AbortSignal | undefined;
+      const startedAt = Date.now();
+      const shutdown = requestGracefulWorkbenchShutdown({
+        port: 8000,
+        backendPid: 4242,
+        controlToken: "test-control-token",
+        interruptActiveWork: true,
+        timeoutMs,
+        request: async (_url, options) => {
+          requestSignal = options.signal;
+          await new Promise<void>((resolve) => setTimeout(resolve, acknowledgementMs));
+          return { status: 202 };
+        },
+        connect: () => new Promise<boolean>(() => undefined),
+        pidAlive: () => true
+      }).then((result) => { settled = true; return result; });
+
+      await vi.advanceTimersByTimeAsync(expectedMs - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(shutdown).resolves.toMatchObject({ requested: true, completed: false, status: 202 });
+      expect(Date.now() - startedAt).toBe(expectedMs);
+      expect(requestSignal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the explicit restart exit timer when both process and port disappear", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const shutdown = requestGracefulWorkbenchShutdown({
+        port: 8000,
+        backendPid: 4242,
+        controlToken: "test-control-token",
+        interruptActiveWork: true,
+        request: async () => ({ status: 202 }),
+        connect: async () => Date.now() - startedAt < 500,
+        pidAlive: () => Date.now() - startedAt < 400
+      });
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(shutdown).resolves.toMatchObject({ requested: true, completed: true, status: 202 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])("preserves an external abort after a graceful shutdown was accepted (explicit restart: %s)", async (interruptActiveWork) => {
     vi.useFakeTimers();
     try {
       const controller = new AbortController();
@@ -363,6 +422,7 @@ describe("workbenchBackendRetire", () => {
         port: 8000,
         controlToken: "test-control-token",
         signal: controller.signal,
+        interruptActiveWork,
         request: async () => ({ status: 202 }),
         connect: async () => true
       });
