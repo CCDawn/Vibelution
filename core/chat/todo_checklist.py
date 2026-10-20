@@ -9,7 +9,7 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage
 
-from core.chat.conversation_ledger import load_conversation_events
+from core.chat.conversation_ledger import load_conversation_events_cached
 from core.chat.turn_journal import (
     EVENT_TOOL_CALL_STARTED, EVENT_TOOL_RESULT, EVENT_USER_MESSAGE,
     _tool_status_from_event, fold_active_events,
@@ -79,7 +79,7 @@ def restore_todo_context_from_journal(
     if not session_id or not turn_id:
         return clean
     events = fold_active_events([
-        event for event in load_conversation_events(Path(project_root), session_id)
+        event for event in load_conversation_events_cached(Path(project_root), session_id)
         if event.session_id == session_id
     ])
     latest = None
