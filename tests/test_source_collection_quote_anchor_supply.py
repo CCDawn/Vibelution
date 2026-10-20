@@ -14,6 +14,8 @@ claimEvidenceCount=0 → required_artifact_missing: evidence_card_batch。
    remediation 痕迹，且通过后清除停靠标记；
 3. quote 非逐字子串 → 首次不拒绝：停靠 needs_review +
    quoteAnchorRemediation（最近匹配块片段/相似度），修正后重写成功并清标记；
+   同批混有「无原文硬错」条目时同样停靠（不再被硬错短路），反馈附
+   honestSkipFindings 指引一次重写修两类问题；
 4. 二次不匹配 → 走既有契约拒绝语义（无限循环被结构封死）；
 5. 抓取失败且没有原文时不得将模型 summary 当摘要引文；
 6. 无可引用原文候选 → quoteAvailable=false + no_quotable_text，
@@ -342,6 +344,123 @@ def test_mismatched_quote_remediation_cycle_then_hard_rejection(tmp_path, monkey
                 },
             },
         )
+
+
+def test_mixed_batch_hard_error_plus_mismatch_parks_with_honest_skip_guidance(tmp_path, monkeypatch):
+    """混合批次（1 条无原文硬错 + 1 条 quote 不匹配）首次停靠而非硬拒。
+
+    生产实锤（session-20261020-211800-790319）：同一回写里 403 无原文候选
+    与可抓取但引文不逐字候选并存时，旧门因 hard_errors 非空直接硬拒，
+    一次性修正停靠永远不可达，代理烧完轮次后全量 exclude。
+    """
+    setup = _setup_extraction_run(
+        tmp_path, monkeypatch, candidate_summaries=[_CANDIDATE_SUMMARY, ""]
+    )
+    _append_stage_task_tool_trace(tmp_path, setup["task"])
+    fetchable, unfetchable = setup["candidates"]
+
+    parked = _writeback(
+        setup,
+        {
+            "status": "completed",
+            "summary": "混合批次首次回写。",
+            "result": {
+                "candidateExtractions": [
+                    _anchored_entry(fetchable, quote="一段凭记忆改写的引用"),
+                    _anchored_entry(unfetchable, quote=_VERBATIM_QUOTE),
+                ]
+            },
+        },
+    )
+    assert parked["task"]["status"] == "needs_review"
+    remediation = parked["writeback"]["quoteAnchorRemediation"]
+    assert remediation["attempt"] == 1
+    finding = remediation["findings"][0]
+    assert finding["sourceId"] == fetchable["candidateId"]
+    assert finding["finding"] == "mismatched_quote"
+    assert "Predictive coding" in finding["nearestMatch"]["snippet"]
+    honest = remediation["honestSkipFindings"][0]
+    assert honest["sourceId"] == unfetchable["candidateId"]
+    assert honest["finding"] == "empty_source"
+    assert "evidenceStatus=missing_evidence_anchor" in honest["guidance"]
+    assert "decision=exclude" in honest["guidance"]
+    assert "honestSkipFindings" in remediation["instruction"]
+    # 停靠路径不落 agent 原始 result：改写 quote 不得泄漏进 canonical 存储。
+    stored_task, _run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], setup["task"]["taskId"]
+    )
+    assert stored_task["status"] == "needs_review"
+    assert not stored_task.get("result")
+
+    # 一次重写同时修两类问题：逐字 quote + 硬错条目诚实跳过 → completed 清 stale 标记。
+    complete = _writeback(
+        setup,
+        {
+            "status": "completed",
+            "summary": "混合批次修正：quote 已逐字，无原文条目诚实跳过。",
+            "result": {
+                "candidateExtractions": [
+                    _anchored_entry(fetchable, quote=_VERBATIM_QUOTE),
+                    {
+                        "candidateId": unfetchable["candidateId"],
+                        "status": "extracted",
+                        "decision": "exclude",
+                        "evidenceStatus": "missing_evidence_anchor",
+                        "valueSummary": "源站 403 无原文，诚实跳过。",
+                    },
+                ]
+            },
+        },
+    )
+    assert complete["task"]["status"] == "completed"
+    stored_task, _run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], setup["task"]["taskId"]
+    )
+    assert "quoteAnchorRemediation" not in stored_task
+
+
+def test_mixed_batch_second_attempt_after_parking_is_hard_rejected(tmp_path, monkeypatch):
+    """停靠后再次失败（mismatch 或硬错任一/并存）→ 硬拒，环路有界。"""
+    setup = _setup_extraction_run(
+        tmp_path, monkeypatch, candidate_summaries=[_CANDIDATE_SUMMARY, ""]
+    )
+    _append_stage_task_tool_trace(tmp_path, setup["task"])
+    fetchable, unfetchable = setup["candidates"]
+
+    parked = _writeback(
+        setup,
+        {
+            "status": "completed",
+            "summary": "混合批次首次回写。",
+            "result": {
+                "candidateExtractions": [
+                    _anchored_entry(fetchable, quote="一段凭记忆改写的引用"),
+                    _anchored_entry(unfetchable, quote=_VERBATIM_QUOTE),
+                ]
+            },
+        },
+    )
+    assert parked["task"]["status"] == "needs_review"
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+    ) as excinfo:
+        _writeback(
+            setup,
+            {
+                "status": "completed",
+                "summary": "混合批次二次回写仍未修正。",
+                "result": {
+                    "candidateExtractions": [
+                        _anchored_entry(fetchable, quote="还是凭记忆改写的引用"),
+                        _anchored_entry(unfetchable, quote=_VERBATIM_QUOTE),
+                    ]
+                },
+            },
+        )
+    message = str(excinfo.value)
+    assert "真实抓取原文" in message
+    assert "逐字子串" in message
 
 
 def test_nearest_verbatim_hint_bounded_snippet(tmp_path, monkeypatch):
