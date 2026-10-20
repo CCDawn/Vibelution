@@ -1053,6 +1053,7 @@ def test_session_llm_transport_status_updates_one_visible_recovery_event(monkeyp
 
 
 def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
+    _reset_acquire_stage_telemetry()
     fields = session_service._session_turn_prepare_timing_log_fields(
         {
             "totalPrepareMs": 9123,
@@ -1102,6 +1103,56 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
         "agentContext.runtimeContextBlockMs": 173,
         "agentContext.episodicEventsMs": 24,
     }
+
+
+def _reset_acquire_stage_telemetry():
+    from core.orchestration.tool_authorization_binding import clear_turn_authorization_telemetry_state
+    from core.web.services import tool_registry_service
+
+    clear_turn_authorization_telemetry_state()
+    for attribute in ("durationMs", "cacheHit", "recordedAtMonotonic"):
+        try:
+            delattr(tool_registry_service._REGISTRY_TIMING, attribute)
+        except AttributeError:
+            pass
+
+
+def test_session_turn_prepare_timing_fields_inject_acquire_stage_anchors_when_agent_created():
+    _reset_acquire_stage_telemetry()
+    timings = {
+        "totalPrepareMs": 9123,
+        "agentCreateMs": 431,
+    }
+    # 同线程先完成一次获取段子调用：registry 命中遥测 + 授权遥测。
+    import time as _time
+
+    from core.orchestration import tool_authorization_binding
+    from core.web.services import tool_registry_service as registry_module
+
+    registry_module._record_registry_timing(_time.monotonic(), cache_hit=True)
+    tool_authorization_binding._record_turn_authorization_timing(12.5, cache_hit=False)
+
+    fields = session_service._session_turn_prepare_timing_log_fields(timings)
+
+    assert isinstance(fields["toolRegistryMs"], int) and fields["toolRegistryMs"] >= 0
+    assert fields["toolRegistryCacheHit"] is True
+    assert fields["turnAuthorizationMs"] == 12
+    assert fields["turnAuthorizationCacheHit"] is False
+    # timings 已显式提供同键值时遥测不覆盖。
+    explicit = session_service._session_turn_prepare_timing_log_fields(
+        {"agentCreateMs": 5, "toolRegistryMs": 99, "turnAuthorizationMs": 77}
+    )
+    assert explicit["toolRegistryMs"] == 99
+    assert explicit["turnAuthorizationMs"] == 77
+    _reset_acquire_stage_telemetry()
+    # 无 agentCreateMs（worker_started 阶段）不注入获取段锚点，字段上限不受影响。
+    worker_started_fields = session_service._session_turn_prepare_timing_log_fields({"totalPrepareMs": 10})
+    assert "toolRegistryMs" not in worker_started_fields
+    assert "turnAuthorizationMs" not in worker_started_fields
+    # 有 agentCreateMs 但线程上无遥测时不注入。
+    no_telemetry = session_service._session_turn_prepare_timing_log_fields({"agentCreateMs": 3})
+    assert "toolRegistryMs" not in no_telemetry
+    assert "turnAuthorizationMs" not in no_telemetry
 
 
 def test_session_turn_context_prepare_timings_extend_prepare_fields():
