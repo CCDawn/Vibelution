@@ -417,7 +417,8 @@ def test_message_digest_entries_are_stable_for_equal_bytes():
     assert entries_a[0]["sha256"] != entries_c[0]["sha256"]
 
 
-def test_invoke_agent_llm_turn_records_message_digest_event():
+def test_invoke_agent_llm_turn_records_message_digest_event(monkeypatch):
+    monkeypatch.setattr(turn_llm_adapter, "MESSAGE_DIGEST_TELEMETRY_ENABLED", True)
     scene_events = []
 
     class DummyLLM:

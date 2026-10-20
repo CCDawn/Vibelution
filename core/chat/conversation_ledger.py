@@ -175,6 +175,64 @@ def load_conversation_events(project_root: Path, session_id: str) -> list[Conver
     return list(cached)
 
 
+_CONVERSATION_EVENTS_DISK_CACHE_MAX_ENTRIES = 64
+_CONVERSATION_EVENTS_DISK_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+def _conversation_events_disk_signature(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+        return (int(stat.st_mtime_ns), int(stat.st_size))
+    except OSError:
+        return (-1, -1)
+
+
+def load_conversation_events_cached(project_root: Path, session_id: str) -> list[ConversationLedgerEvent]:
+    """Disk-coherent signature cache for full ledger reads.
+
+    Per-request ledger consumers (send-time reconciliation, todo restore)
+    used to take the journal thread lock and re-read the file on every call.
+    This variant keeps the latest parsed tuple keyed on the journal file's
+    ``stat`` signature (mtime_ns, size) — the same coherence rule the journal
+    prefix cache and the session bridge events cache already rely on — so an
+    unchanged file returns the identical event objects without touching the
+    lock, and any append/rewrite reloads through ``load_conversation_events``
+    (which replays incrementally via prefix-object reuse). Inside an explicit
+    ``conversation_event_read_snapshot`` scope the snapshot semantics win.
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    root = Path(project_root)
+    snapshot = _CONVERSATION_EVENT_READ_SNAPSHOT.get()
+    if snapshot is not None:
+        return load_conversation_events(root, normalized_session_id)
+    path = turn_journal_path(root, normalized_session_id)
+    cache_key = (str(root), normalized_session_id)
+    signature = _conversation_events_disk_signature(path)
+    cached = (
+        _CONVERSATION_EVENTS_DISK_CACHE.get(cache_key)
+        if signature != (-1, -1)
+        else None
+    )
+    if cached is not None and tuple(cached.get("signature") or ()) == signature:
+        return list(cached.get("events") or ())
+    # Always read through ``load_conversation_events`` (the monkeypatchable
+    # seam, snapshot-aware); a missing file simply never populates the cache,
+    # so the first journal write loads normally.
+    events = load_conversation_events(root, normalized_session_id)
+    if signature != (-1, -1):
+        _CONVERSATION_EVENTS_DISK_CACHE[cache_key] = {
+            "signature": signature,
+            "events": tuple(events),
+        }
+        while len(_CONVERSATION_EVENTS_DISK_CACHE) > _CONVERSATION_EVENTS_DISK_CACHE_MAX_ENTRIES:
+            oldest = next(iter(_CONVERSATION_EVENTS_DISK_CACHE))
+            _CONVERSATION_EVENTS_DISK_CACHE.pop(oldest, None)
+    return events
+
+
 def conversation_ledger_workspace_root(project_root: Path) -> Path:
     """Resolve the shared ledger workspace for bounded request-level reuse."""
 
@@ -212,6 +270,10 @@ def rewrite_conversation_events(
     ``core.chat.conversation_invariant.LEDGER_REWRITE_EXCEPTION_OWNERS``.
     """
 
+    _CONVERSATION_EVENTS_DISK_CACHE.pop(
+        (str(Path(project_root)), str(session_id or "").strip()),
+        None,
+    )
     rewrite_turn_events(project_root, session_id, events)
 
 
@@ -321,6 +383,7 @@ __all__ = [
     "latest_ledger_sequence",
     "latest_context_compression_checkpoint",
     "load_conversation_events",
+    "load_conversation_events_cached",
     "load_conversation_preview_slice",
     "rewrite_conversation_events",
     "project_conversation_ledger",
