@@ -27,6 +27,11 @@ export function errorsFor(c: Conditions): Record<string, string> {
   if (c.holdings !== "none") errors.holdings = c.holdings === "yes" ? "本预览尚未录入已有持仓，先展示条件检查" : "请确认是否已有持仓";
   return errors;
 }
+/** Starting research does not require inventing optional preferences. */
+export function researchErrorsFor(c: Conditions): Record<string, string> {
+  return Object.fromEntries(Object.entries(errorsFor(c)).filter(([key]) =>
+    key === "budget" || (key !== "holdings" && Boolean(c[key as keyof Conditions].trim()))));
+}
 const stocks = [
   { name: "示例银行 A", price: 18, reason: "演示分红、盈利质量与估值的比较方式。", risk: "重点核对资产质量、息差和分红可持续性。" },
   { name: "示例公用事业 B", price: 12.5, reason: "演示不同行业之间的资金分配方式。", risk: "重点核对现金流、资本开支与负债成本。" },

@@ -31,3 +31,11 @@ Approval boundary: production integration remains pending visual review.
 After approval, extend existing finance workspace config and submit boundaries;
 use server-owned quantities/fees and immutable plan inputs, not this fixture
 calculator. Preserve legacy preferences/ledger and ordinary Session behavior.
+
+Revision after user feedback: show only budget, horizon and tolerated loss by
+default; secondary conditions and detailed reports are collapsed. Unknown
+optional conditions permit a preliminary research-state preview, never numerical
+sizing. Entered invalid values still block. The investment profile should be
+private, Agent-scoped structured configuration explicitly read on every future
+research submission; saving it must not depend on episodic-memory retrieval.
+This preview still has no persistence, and makes no real model calls.

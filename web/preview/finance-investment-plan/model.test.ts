@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculate, demonstration, errorsFor, initial } from "./model";
+import { calculate, demonstration, errorsFor, researchErrorsFor, initial } from "./model";
 
 describe("investment preview constraints (fixtures only)", () => {
   it("does not invent the missing user risk and account conditions", () => {
@@ -37,5 +37,14 @@ describe("investment preview constraints (fixtures only)", () => {
     expect(errorsFor({ ...demonstration, loss: "NaN" })).toHaveProperty("loss");
     expect(errorsFor({ ...demonstration, concentration: "101" })).toHaveProperty("concentration");
     expect(errorsFor({ ...demonstration, holdings: "yes" })).toHaveProperty("holdings");
+  });
+  it("allows preliminary research with unknown conditions without enabling sizing", () => {
+    expect(researchErrorsFor(initial)).toEqual({});
+    expect(errorsFor(initial)).not.toEqual({});
+    expect(initial.loss).toBe("");
+    expect(researchErrorsFor({ ...initial, holdings: "yes" })).toEqual({});
+    expect(researchErrorsFor({ ...initial, budget: "" })).toHaveProperty("budget");
+    expect(researchErrorsFor({ ...initial, loss: "7000" })).toHaveProperty("loss");
+    expect(researchErrorsFor({ ...initial, reserve: "-1" })).toHaveProperty("reserve");
   });
 });
