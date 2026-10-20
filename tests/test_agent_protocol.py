@@ -6099,6 +6099,49 @@ class TestLocalProviderBootstrap:
         )
         return agent
 
+    @pytest.mark.parametrize(
+        "compressed_tokens, notice_tokens, should_invoke",
+        [(110_068, 60, True), (256_001, 0, False), (255_990, 60, False)],
+    )
+    def test_compression_budget_uses_current_payload(
+        self, monkeypatch, compressed_tokens, notice_tokens, should_invoke,
+    ):
+        from tools.token_manager import consume_compression_request
+
+        consume_compression_request()
+        compress_calls, invoke_calls, scene_events = [], [], []
+        agent = self._provider_context_retry_agent(
+            monkeypatch, max_retries=1,
+            invoke=lambda messages, replay_state=None: invoke_calls.append(list(messages)),
+            compress_calls=compress_calls, ui_logs=[],
+        )
+        agent._context_window_limit = 256_000
+        agent._effective_max_token_limit = 256_000
+        agent._context_input_hard_limit = 256_000
+
+        def estimate(messages, *_args, **_kwargs):
+            if not compress_calls:
+                return 293_180
+            has_notice = any("强制进行了一次压缩" in str(getattr(m, "content", "")) for m in messages)
+            return compressed_tokens + (notice_tokens if has_notice else 0)
+
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens", estimate)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens_for_threshold", estimate)
+        monkeypatch.setattr(
+            agent_module, "_record_agent_scene_event",
+            lambda phase, code, **kwargs: scene_events.append((code, kwargs.get("fields", {}))),
+        )
+        agent._run_orchestrated_turn(user_prompt="continue after compression")
+
+        assert len(compress_calls) == 1
+        assert bool(invoke_calls) is should_invoke
+        preflight = next(fields for code, fields in scene_events if code == "agent.llm_preflight.completed")
+        assert preflight["contextEstimatedTokens"] == compressed_tokens + notice_tokens
+        blocked = [fields for code, fields in scene_events if code == "agent.context_budget_exhausted"]
+        assert bool(blocked) is not should_invoke
+        if blocked:
+            assert blocked[0]["estimatedTokens"] == compressed_tokens + notice_tokens
+
     def test_provider_context_length_error_compresses_then_retries_once(self, monkeypatch):
         from tools.token_manager import consume_compression_request, is_compression_requested
 
