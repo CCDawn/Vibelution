@@ -620,6 +620,58 @@ def reconcile_chat_messages_with_ledger(
     return materialized
 
 
+_MISS = object()
+
+
+# Bounded: one entry per live turn id; finished turns stop querying and the
+# LRU eviction below reclaims the slot for long-running processes.
+_SEEDED_HISTORY_FINGERPRINT_MEMO_MAX_ENTRIES = 128
+
+
+class _SeededHistoryFingerprintMemo:
+    """Identity + append-only-prefix memo for ledger seeded-history fingerprints.
+
+    Journal loads reuse parsed prefix objects across appends, so two lists
+    built from the same journal state share object identities. A lookup hits
+    when the stored events tuple is element-wise identical (exact replay), or
+    when the new list only appends events that the canonical replay's
+    current-turn exclusion drops anyway (same turn id, no branch markers —
+    markers can cut the folded active path even when they belong to the
+    current turn). Stored tuples keep the event objects referenced, which
+    rules out id-reuse collisions. Any mismatch just recomputes, so this can
+    only trade a recompute for a recompute.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[str, tuple[tuple[Any, ...], str]] = {}
+
+    def lookup(self, events: Sequence[Any], *, turn_id: str) -> Any:
+        entry = self._entries.get(turn_id)
+        if entry is None:
+            return _MISS
+        stored, value = entry
+        if len(events) < len(stored):
+            return _MISS
+        for index, kept in enumerate(stored):
+            if events[index] is not kept:
+                return _MISS
+        for event in events[len(stored):]:
+            if str(getattr(event, "turn_id", "") or "").strip() != turn_id:
+                return _MISS
+            if str(getattr(event, "event_type", "") or "").strip() == "branch_rebase":
+                return _MISS
+        return value
+
+    def store(self, events: Sequence[Any], *, turn_id: str, value: str) -> None:
+        self._entries[turn_id] = (tuple(events), str(value or ""))
+        while len(self._entries) > _SEEDED_HISTORY_FINGERPRINT_MEMO_MAX_ENTRIES:
+            oldest = next(iter(self._entries))
+            self._entries.pop(oldest, None)
+
+
+_SEEDED_HISTORY_FINGERPRINT_MEMO = _SeededHistoryFingerprintMemo()
+
+
 def ledger_seeded_history_fingerprint(
     events: Iterable[Any],
     *,
@@ -633,6 +685,14 @@ def ledger_seeded_history_fingerprint(
     derived from exactly this ledger state — windowing and compaction applied
     afterwards by the context assembler are deliberate transforms and are not
     required to reproduce the canonical replay verbatim.
+
+    The full replay (fold + projection + json.dumps + SHA-256 over the whole
+    conversation) is memoized per turn: the worker stamp and the send-time gate
+    recompute the same value over the same journal state, and mid-turn appends
+    of current-turn events cannot change it because the canonical replay
+    excludes them. The memo is identity/prefix keyed, so any ledger change the
+    replay can see (other-turn appends, branch markers, rewrites) misses and
+    recomputes.
     """
 
     from core.chat.conversation_invariant import (
@@ -641,11 +701,23 @@ def ledger_seeded_history_fingerprint(
 
     event_list = _coerce_message_list(events)
     normalized_turn_id = _coerce_text(turn_id).strip()
+    memoized = _SEEDED_HISTORY_FINGERPRINT_MEMO.lookup(
+        event_list,
+        turn_id=normalized_turn_id,
+    )
+    if memoized is not _MISS:
+        return memoized
     historical = canonical_conversation_messages_from_events(
         event_list,
         current_turn_id=normalized_turn_id,
     )
-    return _chat_seeded_history_fingerprint(historical)
+    value = _chat_seeded_history_fingerprint(historical)
+    _SEEDED_HISTORY_FINGERPRINT_MEMO.store(
+        event_list,
+        turn_id=normalized_turn_id,
+        value=value,
+    )
+    return value
 
 
 def _chat_seeded_history_fingerprint(items: Sequence[Any]) -> str:

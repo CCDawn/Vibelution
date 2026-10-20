@@ -2468,10 +2468,15 @@ class AgentRuntime:
             self._handle_turn_journal_replay_failure(exc)
             return messages, False
         project_root, session_id, turn_id = identity
+        reconcile_started_at = time.perf_counter()
         try:
-            from core.chat.conversation_ledger import load_conversation_events
+            # Reconciliation is a provenance gate against the live ledger, so
+            # it must see the latest persisted state; the signature-cached
+            # loader is disk-coherent (stat-based) and only avoids the journal
+            # lock plus a re-parse when the file is unchanged.
+            from core.chat.conversation_ledger import load_conversation_events_cached
 
-            events = load_conversation_events(project_root, session_id)
+            events = load_conversation_events_cached(project_root, session_id)
             seeded_ledger_fingerprint = str(
                 getattr(self, "_seeded_history_ledger_fingerprint", "") or ""
             ).strip()
@@ -2495,6 +2500,10 @@ class AgentRuntime:
                     turn_id=turn_id,
                 )
                 if live_fingerprint == seeded_ledger_fingerprint:
+                    self._record_turn_send_timing_anchor(
+                        "reconcileMs",
+                        max(0, int((time.perf_counter() - reconcile_started_at) * 1000)),
+                    )
                     return messages, True
                 self._seeded_history_ledger_fingerprint = ""
             reconciled = reconcile_chat_messages_with_ledger(
@@ -2516,10 +2525,34 @@ class AgentRuntime:
                     },
                 )
             self._ledger_conversation_fingerprint = ledger_conversation_fingerprint_for_messages(reconciled)
+            self._record_turn_send_timing_anchor(
+                "reconcileMs",
+                max(0, int((time.perf_counter() - reconcile_started_at) * 1000)),
+            )
             return reconciled, True
         except TurnJournalReplayError as exc:
+            self._record_turn_send_timing_anchor(
+                "reconcileMs",
+                max(0, int((time.perf_counter() - reconcile_started_at) * 1000)),
+            )
             self._handle_turn_journal_replay_failure(exc)
             return messages, False
+
+    def _record_turn_send_timing_anchor(self, key: str, value_ms: int) -> None:
+        """Stash per-turn send-path timings for the next preflight scene event.
+
+        The preflight event fires before reconcile/invoke of the send it
+        describes, so anchors measured after an emission ride along with the
+        next iteration's event (the final send of a turn stays unreported
+        there; the turn-end outcome keeps its own telemetry).
+        """
+
+        try:
+            anchors = self._turn_send_timing_anchors
+        except AttributeError:
+            anchors = {}
+            self._turn_send_timing_anchors = anchors
+        anchors[str(key or "").strip()] = max(0, int(value_ms))
 
     def _apply_chat_journal_replay(
         self,
@@ -3162,10 +3195,15 @@ class AgentRuntime:
                 from core.chat.todo_checklist import restore_todo_context_from_journal
 
                 journal_root, journal_session_id, journal_turn_id = ledger_identity
+                todo_restore_started_at = time.perf_counter()
                 messages = restore_todo_context_from_journal(
                     messages, project_root=journal_root,
                     session_id=journal_session_id, turn_id=journal_turn_id,
                     user_prompt=user_prompt,
+                )
+                self._record_turn_send_timing_anchor(
+                    "todoRestoreMs",
+                    max(0, int((time.perf_counter() - todo_restore_started_at) * 1000)),
                 )
         resumed_messages = assembled_turn_messages.resumed
         cacheable_prefix_merged = assembled_turn_messages.cacheable_prefix_merged
@@ -3244,6 +3282,7 @@ class AgentRuntime:
         self._last_compression_iteration = 0
         self._context_compression_retry_used = False
         self._stream_recovery_retry_count = 0
+        self._turn_send_timing_anchors = {}
         try:
             from core.chat.stream_recovery import bind_committed_tool_results
 
@@ -3428,6 +3467,17 @@ class AgentRuntime:
                         "promptBuildReused": prompt_build_reused,
                         "contextEstimateMs": context_estimate_ms,
                         "delegationMs": delegation_ms,
+                        # Send-path timing anchors (TTFT dark zone): todo
+                        # restore is measured before the loop, reconcile and
+                        # invoke-prep anchors lag by one send because they are
+                        # measured after this event's emission.
+                        **{
+                            anchor_key: anchor_value
+                            for anchor_key, anchor_value in dict(
+                                getattr(self, "_turn_send_timing_anchors", {}) or {}
+                            ).items()
+                            if anchor_key in {"todoRestoreMs", "reconcileMs", "invokePrepMs"}
+                        },
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
                     },
                 )
@@ -4307,6 +4357,9 @@ class AgentRuntime:
         self._last_llm_error_details = dict(result.last_error_details)
         self._last_llm_failure_attempts = result.last_failure_attempts
         self._last_llm_failure_max_attempts = result.last_failure_max_attempts
+        invoke_prep_ms = float(getattr(result, "invoke_prep_ms", 0.0) or 0.0)
+        if invoke_prep_ms > 0:
+            self._record_turn_send_timing_anchor("invokePrepMs", max(0, int(invoke_prep_ms)))
         return result.payload
 
     def _get_response_processor(self) -> ResponseProcessor:
