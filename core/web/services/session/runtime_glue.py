@@ -2361,6 +2361,13 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
         "llmKeyEnvSyncedCount",
         "llmKeyEnvAlreadyPresentCount",
         "llmKeyEnvMissingCount",
+        # TTFT 批五 worker 暗区锚点：totalPrepareMs 之后的遥测登记段、
+        # chat state 读、上下文管理器 __enter__ 段与 AgentRuntime 获取段。
+        # 用于把 C+D 暗区（批五实测 ~831ms）分解到可归属的子段。
+        "postPrepareEventsMs",
+        "chatStateReadMs",
+        "contextManagersMs",
+        "agentCreateMs",
     )
     fields = {
         key: timings[key]

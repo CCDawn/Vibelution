@@ -1659,6 +1659,11 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         else "",
     )
     prompt_cache_scope = s._session_prompt_cache_scope(agent_id=agent_id)
+    # postPrepareEventsMs：totalPrepareMs 之后、进入上下文管理器之前的一串
+    # 同步遥测登记（worker_started/agent_runtime_resolved/prompt_cache_partition_bound/
+    # execution registry×2/trace state/live output）。TTFT 批五实测这段占 96ms，
+    # 需要独立锚点才能与 chatStateRead/contextManagers/agentCreate 分解对比。
+    stage_started_at = s._perf_counter()
     s._record_session_turn_lifecycle_event(
         session_id,
         "worker_started",
@@ -1762,6 +1767,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         summary="Chat turn worker started.",
     )
     s._set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
+    prepare_timings["postPrepareEventsMs"] = s._elapsed_ms(stage_started_at)
     runtime_agent_cache: dict[str, Any] | None = None
     try:
         if agent_id and (not agent_instance or current_agent_status == "archived"):
@@ -1794,6 +1800,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         from core.web.services.agent_perception.access import host_user_sources, perception_turn_scope
         from core.web.services.agent_perception.runtime import bind_perception_turn
 
+        # chatStateReadMs：perception 来源判定需要读一次 session chat state；
+        # 批五前每次读都走 SQLite reader + JSON decode，是 C 段暗区之一。
+        stage_started_at = s._perf_counter()
         perception_background = str(context.get("user_message_source") or "") == "agent_perception"
         if not perception_background:
             session_state = s.load_session_chat_state(s.PROJECT_ROOT, session_id) or {}
@@ -1802,6 +1811,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 isinstance(session_metadata, dict)
                 and session_metadata.get("source") == "agent_perception"
             )
+        prepare_timings["chatStateReadMs"] = s._elapsed_ms(stage_started_at)
+        # contextManagersMs：五个上下文管理器的 __enter__（active_agent_runtime/
+        # mental override/task workspace/perception bind+scope）每轮执行的探测成本。
+        stage_started_at = s._perf_counter()
         with (
             s.active_agent_runtime(
                 agent_id,
@@ -1821,6 +1834,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 session_id=session_id, turn_id=turn_id,
             ),
         ):
+            prepare_timings["contextManagersMs"] = s._elapsed_ms(stage_started_at)
             if _abort_session_turn_for_stop(
                 session_id=session_id,
                 turn_id=turn_id,
@@ -1876,6 +1890,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 if callable(judge_execution_configurer):
                     judge_execution_configurer(supervised_judge_execution)
                 agent_create_ms = s._elapsed_ms(stage_started_at)
+                # agentCreateMs 透出到 journal prepareTimings（此前只在 agent_created
+                # 事件里），与 postPrepareEvents/chatStateRead/contextManagers 同一
+                # 时间线，便于重启后分解 D 段收益。
+                prepare_timings["agentCreateMs"] = agent_create_ms
                 attachments = s._normalize_message_attachments(context.get("attachments") or [])
                 resolved_llm_model_id = str(getattr(resolved_agent_llm, "model_id", "") or "").strip() or s._session_agent_llm_slot_model_id(
                     agent_instance or historical_agent,

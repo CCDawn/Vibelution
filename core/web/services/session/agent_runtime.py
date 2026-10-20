@@ -824,6 +824,30 @@ def _image_input_unsupported_message(lang: str, *, model_name: str = "") -> str:
     )
 
 
+# ``Path.resolve()`` on Windows is a filesystem round-trip. The runtime-cache
+# fingerprint runs on every turn (hit and miss), so memoize the resolved
+# spelling per raw path. Session workspaces are few and stable, so the memo is
+# capped defensively rather than unbounded.
+_RESOLVED_WORKSPACE_PATH_MEMO: dict[str, str] = {}
+_RESOLVED_WORKSPACE_PATH_MEMO_MAX = 512
+_RESOLVED_WORKSPACE_PATH_MEMO_LOCK = threading.Lock()
+
+
+def _resolved_workspace_path_key(workspace: str | Path) -> str:
+    raw = str(workspace)
+    with _RESOLVED_WORKSPACE_PATH_MEMO_LOCK:
+        cached = _RESOLVED_WORKSPACE_PATH_MEMO.get(raw)
+    if cached is not None:
+        return cached
+    resolved = str(Path(raw).resolve())
+    with _RESOLVED_WORKSPACE_PATH_MEMO_LOCK:
+        if raw not in _RESOLVED_WORKSPACE_PATH_MEMO:
+            while len(_RESOLVED_WORKSPACE_PATH_MEMO) >= _RESOLVED_WORKSPACE_PATH_MEMO_MAX:
+                _RESOLVED_WORKSPACE_PATH_MEMO.pop(next(iter(_RESOLVED_WORKSPACE_PATH_MEMO), None), None)
+            _RESOLVED_WORKSPACE_PATH_MEMO[raw] = resolved
+    return resolved
+
+
 def _session_agent_runtime_cache_fingerprint(
     *,
     session_workspace: Path,
@@ -860,7 +884,7 @@ def _session_agent_runtime_cache_fingerprint(
     }
     raw = json.dumps(
         {
-            "workspacePath": str(Path(session_workspace).resolve()),
+            "workspacePath": _resolved_workspace_path_key(session_workspace),
             "agent": semantic_agent_fields,
             "llmSlot": str(llm_slot or "").strip(),
             "llmModelId": str(getattr(resolved_llm, "model_id", "") or "").strip(),
