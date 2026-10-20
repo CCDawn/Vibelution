@@ -12,6 +12,7 @@ class InvestmentProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     budgetCny: float | None = Field(default=None, gt=0, le=1e8, allow_inf_nan=False)
+    availableCashCny: float | None = Field(default=None, ge=0, le=1e8, allow_inf_nan=False)
     horizonMonths: int | None = Field(default=None, ge=1, le=120)
     flexibleHorizon: bool | None = None
     maxLossCny: float | None = Field(default=None, ge=0, le=1e8, allow_inf_nan=False)
@@ -82,10 +83,13 @@ def build_investment_context_lines(agent: dict) -> list[str]:
     except Exception:
         # Do not reuse a previous turn's budget or interrupt unrelated context.
         return [*lines, "本轮投资配置读取失败：预算不可确认，禁止依据旧预算给出金额；请先恢复读取或请用户重新确认。"]
+    from .advisor import advisor_context_lines
+
     return [
         *lines,
         f"InvestmentProfileRevision: {state['revision']}",
         f"InvestmentProfile: {profile}",
         "null 表示未知或未配置，不等于零；未确认预算不得猜测金额，holdingsStatus=unknown 不得当作空仓。",
         *holding_lines,
+        *advisor_context_lines(state),
     ]

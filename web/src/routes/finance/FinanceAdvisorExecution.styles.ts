@@ -1,0 +1,17 @@
+export default {
+  root: "flex min-w-0 max-w-3xl flex-col gap-4",
+  notice: "m-0 text-sm leading-6 text-vui-fg-secondary",
+  baseline: "m-0 text-sm text-vui-fg-tertiary",
+  field: "flex min-w-0 flex-col gap-1 text-sm",
+  holdings: "flex min-w-0 flex-col gap-3 rounded-vui-panel border border-vui-border-subtle bg-vui-surface-panel p-3",
+  sectionHeading: "flex min-w-0 flex-col gap-1 [&>h3]:m-0 [&>h3]:text-base [&>p]:m-0 [&>p]:text-sm [&>p]:text-vui-fg-tertiary",
+  empty: "m-0 text-sm text-vui-fg-tertiary",
+  positionList: "flex min-w-0 flex-col gap-3",
+  position: "m-0 min-w-0 rounded-vui-panel border border-vui-border-subtle bg-vui-surface-row p-3",
+  positionLegend: "px-1 text-sm font-medium text-vui-fg-secondary",
+  positionIdentity: "m-0 text-xs text-vui-fg-tertiary sm:col-span-full",
+  positionFields: "grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]",
+  actions: "flex flex-wrap items-center gap-2",
+  rowCount: "text-xs text-vui-fg-tertiary",
+  success: "m-0 text-sm text-vui-fg-secondary",
+} as const;

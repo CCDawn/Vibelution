@@ -58,7 +58,7 @@ def test_legacy_file_is_read_only_and_new_profile_preserves_other_sections(setti
     first = service.update_workspace_settings("owner", 0, {"investmentProfile": {"budgetCny": 7000}})
     profile = first["investmentProfile"]
     assert profile == {
-        "budgetCny": 7000, "horizonMonths": None, "flexibleHorizon": None,
+        "budgetCny": 7000, "availableCashCny": None, "horizonMonths": None, "flexibleHorizon": None,
         "maxLossCny": None, "cashReserveCny": None, "maxPositionPct": None,
         "market": "CN", "holdingsStatus": "unknown",
     }
