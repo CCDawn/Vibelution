@@ -25,7 +25,6 @@ import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCur
 import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
-import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
@@ -163,6 +162,7 @@ import { useComputerUseResults } from "./useComputerUseResults";
 import { useConversationComposer } from "./useConversationComposer";
 import { useConversationFind } from "./useConversationFind";
 import { useConversationForkSession } from "./useConversationForkSession";
+import { useConversationImagePreview } from "./useConversationImagePreview";
 import { useConversationSelectionQuote } from "./useConversationSelectionQuote";
 import { VButton } from "../vui";
 import styles from "./ConversationView.styles";
@@ -438,7 +438,11 @@ export const ConversationView = React.memo(function ConversationView({
   const autoScrollToLatestRef = useRef(autoScrollToLatest);
   autoScrollToLatestRef.current = autoScrollToLatest;
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
+  const {
+    previewImage,
+    openImagePreview,
+    closeImagePreview,
+  } = useConversationImagePreview();
   const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
@@ -898,12 +902,6 @@ export const ConversationView = React.memo(function ConversationView({
     return compactConversationPreview(value, maxLength);
   }
 
-  // Stable identities: the markdown renderer is content-memoized, so a fresh
-  // renderImage closure per render would force a full re-parse of every block.
-  const openImagePreview = useCallback((image: ConversationImagePreviewRequest) => {
-    setPreviewImage(image);
-  }, []);
-
   const {
     computerUseSessionResults,
     computerUseSessionPending,
@@ -993,10 +991,6 @@ export const ConversationView = React.memo(function ConversationView({
   });
 
 
-  function closeImagePreview() {
-    setPreviewImage(null);
-  }
-
   const {
     sectionExpansion,
     defaultExpandedResponseIds,
@@ -1083,20 +1077,6 @@ export const ConversationView = React.memo(function ConversationView({
     sessionId,
     streamingTimelineScrollSignal,
   ]);
-
-  useEffect(() => {
-    if (!previewImage) {
-      return undefined;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPreviewImage(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previewImage]);
-
 
   useEffect(() => {
     readingViewportAnchorRef.current = null;
