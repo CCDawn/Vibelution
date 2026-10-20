@@ -17,6 +17,10 @@ PLATFORM_PLANNER_SEED_COMPLETE_KEY = "platformPlannerSeedComplete"
 
 # Coordination-only bundle: query the platform read-only view and message
 # target Agents. No file/command execution capability for this dispatcher.
+# Dispatching via agent_message_tool is the planner's core loop, not a risky
+# mutation (HIGH tier derives approval=on_request and would stall every
+# dispatch behind a human approval); the receiving Agent's own native
+# approval chain remains the safety boundary for actual changes.
 PLATFORM_PLANNER_TOOL_POLICY: dict[str, Any] = {
     "allowedTools": ["personal_assistant_query_tool", "agent_message_tool"],
     "preferredTools": ["personal_assistant_query_tool", "agent_message_tool"],
@@ -28,6 +32,7 @@ PLATFORM_PLANNER_TOOL_POLICY: dict[str, Any] = {
     "networkAccess": "none",
     "mutationAccess": "restricted",
     "maxCallsPerTurn": 12,
+    "approvalOverrides": {"agent_message_tool": "never"},
 }
 
 PLATFORM_PLANNER_PERSONA_PROFILE: dict[str, Any] = {
