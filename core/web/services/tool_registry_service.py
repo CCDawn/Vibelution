@@ -165,9 +165,13 @@ def _registry_dependency_probe_signature() -> tuple[tuple[str, Any], ...]:
     """Compact availability-probe projection included in the registry signature.
 
     两个探测均已自带缓存（autoglm 15s TTL + 后台刷新；financial_report 仅读
-    配置），取值便宜；它们真实影响 registry 内容（llmVisible、
-    dependencyStatus、unavailableDescriptors 计数），因此纳入签名而不是被
-    排除——签名变化即重建，保证探测结果翻转时 registry 立即反映。
+    配置），取值便宜；探测结果真实影响 registry 的行为面（llmVisible、
+    executable、unavailableDescriptors 计数只随 ``available`` 布尔翻转），
+    因此签名只投影该布尔。诊断性 status 字符串（如 autoglm 的
+    "checking"/"available" 在 TTL 到期与后台刷新之间会交替）不纳入签名：
+    纳入会在热会话中反复触发整表重建（实测每其他一轮 235ms），而它变化
+    时 registry 行为并无差异。布尔翻转仍立即重建；重建产物内的
+    dependencyStatus 诊断字符串保持「最近一次重建时」的新鲜度。
     """
 
     probes: list[tuple[str, Any]] = []
@@ -175,16 +179,16 @@ def _registry_dependency_probe_signature() -> tuple[tuple[str, Any], ...]:
         from tools.web_search_tool import autoglm_search_tool_availability
 
         status = autoglm_search_tool_availability()
-        probes.append(("web_search_tool_dependency_status", (bool(status.get("available")), str(status.get("status") or ""))))
+        probes.append(("web_search_tool_available", bool(status.get("available"))))
     except Exception:
-        probes.append(("web_search_tool_dependency_status", "probe_error"))
+        probes.append(("web_search_tool_available", "probe_error"))
     try:
         from tools.financial_report_tools import financial_report_availability
 
         status = financial_report_availability()
-        probes.append(("financial_report_dependency_status", (bool(status.get("available")), str(status.get("status") or ""))))
+        probes.append(("financial_report_available", bool(status.get("available"))))
     except Exception:
-        probes.append(("financial_report_dependency_status", "probe_error"))
+        probes.append(("financial_report_available", "probe_error"))
     return tuple(probes)
 
 
