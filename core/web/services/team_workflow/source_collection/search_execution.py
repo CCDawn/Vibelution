@@ -23,9 +23,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pyrate_limiter import Duration, Limiter, Rate
+if TYPE_CHECKING:
+    from pyrate_limiter import Limiter
 
 
 def _service():
@@ -649,11 +650,13 @@ _SOURCE_COLLECTION_CONTACT_MAILTO = "challenge-cup-research@localhost"
 #   search and has no published per-key RPS contract; serialize at 1 req/s so
 #   overlapping executions cannot burst the account (one call per run by
 #   design, but the limiter still guards concurrent runs).
-_SOURCE_COLLECTION_PROVIDER_RATE_LIMITS: dict[str, Rate] = {
-    "arxiv_api": Rate(1, Duration.SECOND * 3),
-    "crossref_rest_api": Rate(3, Duration.SECOND),
-    "openalex_api": Rate(5, Duration.SECOND),
-    "qwen_web_search": Rate(1, Duration.SECOND),
+# Store (permits, interval milliseconds) without importing the limiter package
+# and its multiprocessing backends while HTTP routes are being registered.
+_SOURCE_COLLECTION_PROVIDER_RATE_LIMITS: dict[str, tuple[int, int]] = {
+    "arxiv_api": (1, 3000),
+    "crossref_rest_api": (3, 1000),
+    "openalex_api": (5, 1000),
+    "qwen_web_search": (1, 1000),
 }
 _SOURCE_COLLECTION_RATE_LIMITER_LOCK = threading.Lock()
 _SOURCE_COLLECTION_RATE_LIMITERS: dict[str, Limiter] = {}
@@ -733,7 +736,9 @@ def _source_collection_rate_limiter(provider: str) -> Limiter | None:
     with _SOURCE_COLLECTION_RATE_LIMITER_LOCK:
         limiter = _SOURCE_COLLECTION_RATE_LIMITERS.get(provider)
         if limiter is None:
-            limiter = Limiter(rate)
+            from pyrate_limiter import Limiter, Rate
+
+            limiter = Limiter(Rate(*rate))
             _SOURCE_COLLECTION_RATE_LIMITERS[provider] = limiter
         return limiter
 
