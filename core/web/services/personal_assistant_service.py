@@ -105,6 +105,13 @@ def current_policy() -> dict:
         "networkAccess": "restricted",
         "allowedTools": list(TOOLS),
         "preferredTools": list(TOOLS),
+        # Dispatch must be genuinely usable: sending a message is not itself a
+        # dangerous operation and the target side keeps its own approvals as
+        # the real line of defense, so each send must not stall on a human
+        # approval that times out fail-closed. Only this tool is exempted;
+        # governed mutations (personal_assistant_manage_tool and friends) keep
+        # their per-call approval semantics untouched.
+        "approvalOverrides": {"agent_message_tool": "never"},
         "maxCallsPerTurn": _max_calls_per_turn(),
     }
 
@@ -280,11 +287,16 @@ def _provisioning_snapshot_bases() -> tuple[dict, ...]:
         )
     # The immediately preceding default used restricted networking. A custom
     # denial on that same toolset must not be mistaken for a system default.
+    # Bases must reproduce the exact shape each era really provisioned: none of
+    # them carry approvalOverrides, which only current_policy adds — including
+    # the first agent_message_tool generation below, whose toolset already
+    # equals TOOLS but whose stored snapshots predate the override key.
     for toolset in (
         _COMPUTER_TOOLS,
         _PRE_AFFAIRS_TOOLS,
         _PRE_PLATFORM_TOOLS,
         _PRE_MESSAGES_TOOLS,
+        TOOLS,
     ):
         bases.append({**PRIVATE_V2_POLICY, "networkAccess": "restricted",
             "allowedTools": list(toolset), "preferredTools": list(toolset)})
