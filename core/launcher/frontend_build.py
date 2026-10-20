@@ -77,6 +77,24 @@ _PENDING_BUILD_CLEANUPS: dict[str, dict[str, Any]] = {}
 _FRONTEND_BUILD_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
     "frontend_build_deadline", default=None
 )
+_FRONTEND_BUILD_TIMINGS: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar(
+    "frontend_build_timings", default=None
+)
+
+
+def _record_build_phase(name: str, started: float) -> None:
+    timings = _FRONTEND_BUILD_TIMINGS.get()
+    if timings is not None:
+        timings[name] = round(timings.get(name, 0.0) + (time.perf_counter() - started) * 1000.0, 1)
+
+
+@contextmanager
+def _build_phase(name: str) -> Iterator[None]:
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        _record_build_phase(name, started)
 
 
 def frontend_releases_dir(project_root: Path | str) -> Path:
@@ -345,16 +363,19 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
     # build lock or publication's final mutation check.
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="frontend-git-audit") as audit_pool:
         audit = audit_pool.submit(_git_audit_inputs, root)
-        source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
-        node_version = _run_version(command)
-        if manager == "bun":
-            manager_version = _run_version("bun")
-        else:
-            try:
-                manager_version = _run_version_command([command, _npm_cli(command), "--version"])
-            except RuntimeError:
-                manager_version = "unavailable"
-        git_inputs = audit.result()
+        with _build_phase("sourceScanMs"):
+            source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
+        with _build_phase("toolchainMs"):
+            node_version = _run_version(command)
+            if manager == "bun":
+                manager_version = _run_version("bun")
+            else:
+                try:
+                    manager_version = _run_version_command([command, _npm_cli(command), "--version"])
+                except RuntimeError:
+                    manager_version = "unavailable"
+        with _build_phase("gitAuditWaitMs"):
+            git_inputs = audit.result()
     return {
         "productionInputDigest": source_digest,
         "productionInputCount": input_count,
@@ -1203,6 +1224,42 @@ def _build_frontend_release(
     }
 
 
+def _current_release_during_build_contention(root: Path, manager: str) -> dict[str, Any] | None:
+    """Observe one complete immutable release without borrowing a builder's lock.
+
+    A changed pointer or missing release falls back to the normal locked check.
+    This is an admission snapshot, not a serving lease: the backend still pins
+    its own release when it starts, as it does after the locked path returns.
+    """
+    try:
+        pointer_path = active_release_path(root)
+        before = json.loads(pointer_path.read_text(encoding="utf-8"))
+        if not isinstance(before, dict):
+            return None
+        name = str(before.get("release") or "")
+        if not name.startswith("release-") or Path(name).name != name:
+            return None
+        releases = frontend_releases_dir(root).resolve()
+        dist = (releases / name).resolve()
+        if dist.parent != releases:
+            return None
+        inspection = inspect_frontend_build(root, package_manager=manager)
+        key = str(inspection["buildKey"])
+        if (not inspection["current"] or Path(inspection["dist"]).resolve() != dist
+                or str(before.get("buildKey") or "") != key):
+            return None
+        # Read provenance from this exact dist, never from a second pointer read.
+        provenance = json.loads((dist / ".vibelution-build.json").read_text(encoding="utf-8"))
+        if not _is_complete_release(dist, build_key=key):
+            return None
+        after = json.loads(pointer_path.read_text(encoding="utf-8"))
+        if before != after:
+            return None
+        return {**inspection, "provenance": provenance}
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def ensure_frontend_build(
     project_root: Path | str,
     *,
@@ -1216,27 +1273,51 @@ def ensure_frontend_build(
     cleanup retry, lock acquisition, dependency installation, and both builds.
     """
 
+    started = time.perf_counter()
+    timings: dict[str, float] = {}
+    timings_token = _FRONTEND_BUILD_TIMINGS.set(timings)
     deadline = time.monotonic() + FRONTEND_BUILD_TIMEOUT_SECONDS
     deadline_token = _FRONTEND_BUILD_DEADLINE.set(deadline)
     try:
         root = Path(project_root).resolve()
         web_dir = root / "web"
         manager = frontend_package_manager(package_manager)
-        _retry_pending_build_cleanup(
-            root,
-            timeout_seconds=min(FRONTEND_BUILD_CLEANUP_TIMEOUT_SECONDS, max(0.0, deadline - time.monotonic())),
-        )
+        with _build_phase("cleanupMs"):
+            _retry_pending_build_cleanup(
+                root,
+                timeout_seconds=min(FRONTEND_BUILD_CLEANUP_TIMEOUT_SECONDS, max(0.0, deadline - time.monotonic())),
+            )
+        # A builder can hold the mutation lock for minutes. Already verified
+        # current assets need no mutation, so avoid queueing a startup behind it.
+        # Without contention keep the original single-inspection path.
+        if frontend_build_lock_path(root).exists():
+            _require_frontend_build_time(deadline, "reuse inspection")
+            with _build_phase("reuseInspectionMs"):
+                current = _current_release_during_build_contention(root, manager)
+            _require_frontend_build_time(deadline, "reuse inspection")
+            if current is not None:
+                return {
+                    **current, "rebuilt": False, "skipped": True, "timingsMs": timings,
+                    "lock": {"acquired": False, "waited": False, "path": str(frontend_build_lock_path(root))},
+                }
         remaining = max(0.0, deadline - time.monotonic())
         _require_frontend_build_time(deadline, "lock acquisition")
+        lock_started = time.perf_counter()
         with frontend_build_lock(
             root,
             timeout_seconds=min(max(0.0, float(lock_timeout_seconds)), remaining),
         ) as lock:
+            _record_build_phase("lockWaitMs", lock_started)
             _require_frontend_build_time(deadline, "initial build inspection")
-            inspection = inspect_frontend_build(root, package_manager=manager)
+            with _build_phase("inspectionMs"):
+                inspection = inspect_frontend_build(root, package_manager=manager)
             _require_frontend_build_time(deadline, "initial build inspection")
             if bool(inspection["current"]):
-                return {"rebuilt": False, "skipped": True, "lock": lock, **inspection}
-            return _build_frontend_release(root, web_dir, manager, lock, inspection, deadline=deadline)
+                return {"rebuilt": False, "skipped": True, "lock": lock, "timingsMs": timings, **inspection}
+            with _build_phase("buildMs"):
+                result = _build_frontend_release(root, web_dir, manager, lock, inspection, deadline=deadline)
+            return {**result, "timingsMs": timings}
     finally:
+        _record_build_phase("totalMs", started)
+        _FRONTEND_BUILD_TIMINGS.reset(timings_token)
         _FRONTEND_BUILD_DEADLINE.reset(deadline_token)

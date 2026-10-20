@@ -60,6 +60,152 @@ def _activate(root: Path, name: str, *, key: str = "old") -> None:
     path.write_text(json.dumps({"schemaVersion": 2, "release": name, "buildKey": key}), encoding="utf-8")
 
 
+def _current_release(root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+    _write_project(root)
+    _stub_build_identity(monkeypatch)
+    key = frontend_build.inspect_frontend_build(root)["buildKey"]
+    dist = _release(root, "release-current", schema=frontend_build.BUILD_SCHEMA_VERSION, key=key)
+    _activate(root, dist.name, key=key)
+    return dist, key
+
+
+def test_current_release_does_not_wait_for_or_mutate_another_builder_lock(monkeypatch, tmp_path):
+    dist, key = _current_release(tmp_path, monkeypatch)
+    with frontend_build.frontend_build_lock(tmp_path) as holder:
+        token = holder["token"]
+        result = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+        assert json.loads((Path(holder["path"]) / "holder.json").read_text())["token"] == token
+        assert result["skipped"] and not result["rebuilt"]
+        assert result["buildKey"] == key and Path(result["dist"]) == dist
+        assert result["lock"]["acquired"] is False
+        assert "token" not in result["lock"]
+        assert result["timingsMs"]["totalMs"] >= result["timingsMs"]["reuseInspectionMs"] >= 0
+    assert frontend_build._FRONTEND_BUILD_TIMINGS.get() is None
+
+
+@pytest.mark.parametrize("change", ["source", "toolchain", "environment", "schema", "missing_asset", "key_prefix", "legacy"])
+def test_contended_reuse_requires_full_current_inputs_and_complete_immutable_release(monkeypatch, tmp_path, change):
+    dist, key = _current_release(tmp_path, monkeypatch)
+    if change == "source":
+        (tmp_path / "web/src/App.tsx").write_text("export const changed = 2;", encoding="utf-8")
+    elif change == "toolchain":
+        monkeypatch.setattr(frontend_build, "_run_version", lambda _command: "v2")
+    elif change == "environment":
+        monkeypatch.setenv("VITE_BUILD_SIGNATURE", "changed")
+    elif change == "missing_asset":
+        (dist / "assets/app.js").unlink()
+    elif change == "legacy":
+        shutil.copytree(dist, tmp_path / "web/dist")
+        frontend_build.active_release_path(tmp_path).unlink()
+    else:
+        metadata_path = dist / ".vibelution-build.json"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["schemaVersion" if change == "schema" else "buildKey"] = 0 if change == "schema" else key[:16]
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    with frontend_build.frontend_build_lock(tmp_path):
+        with pytest.raises(TimeoutError, match="frontend build lock"):
+            frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+
+
+@pytest.mark.parametrize("change", ["pointer", "release_removed"])
+def test_contended_reuse_rejects_publication_or_gc_during_inspection(monkeypatch, tmp_path, change):
+    dist, key = _current_release(tmp_path, monkeypatch)
+    replacement = _release(tmp_path, "release-replacement", schema=frontend_build.BUILD_SCHEMA_VERSION, key=key)
+    inspect = frontend_build.inspect_frontend_build
+
+    def concurrent_change(*args, **kwargs):
+        result = inspect(*args, **kwargs)
+        if change == "pointer":
+            _activate(tmp_path, replacement.name, key=key)
+        else:
+            shutil.rmtree(dist)
+        return result
+
+    monkeypatch.setattr(frontend_build, "inspect_frontend_build", concurrent_change)
+    with frontend_build.frontend_build_lock(tmp_path):
+        with pytest.raises(TimeoutError, match="frontend build lock"):
+            frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+
+
+def test_contended_reuse_reads_provenance_from_the_same_release(monkeypatch, tmp_path):
+    dist, key = _current_release(tmp_path, monkeypatch)
+    inspect = frontend_build.inspect_frontend_build
+
+    def mixed_pointer_observation(*args, **kwargs):
+        return {**inspect(*args, **kwargs), "provenance": {"buildKey": "other-pointer"}}
+
+    monkeypatch.setattr(frontend_build, "inspect_frontend_build", mixed_pointer_observation)
+    with frontend_build.frontend_build_lock(tmp_path):
+        result = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+    assert result["provenance"] == json.loads((dist / ".vibelution-build.json").read_text())
+    assert result["provenance"]["buildKey"] == key
+
+
+def test_stale_observation_is_rechecked_under_lock_after_another_publication(monkeypatch, tmp_path):
+    _dist, key = _current_release(tmp_path, monkeypatch)
+    source = tmp_path / "web/src/App.tsx"
+    original = source.read_text(encoding="utf-8")
+    source.write_text("export const newer = 2;", encoding="utf-8")
+    replacement = _release(tmp_path, "release-replacement", schema=frontend_build.BUILD_SCHEMA_VERSION, key=key)
+    inspect = frontend_build.inspect_frontend_build
+    calls = []
+    holder = frontend_build.frontend_build_lock(tmp_path)
+    holder.__enter__()
+    released = False
+
+    def publication_while_waiting(*args, **kwargs):
+        nonlocal released
+        result = inspect(*args, **kwargs)
+        calls.append(result["current"])
+        if not released:
+            source.write_text(original, encoding="utf-8")
+            _activate(tmp_path, replacement.name, key=key)
+            holder.__exit__(None, None, None)
+            released = True
+        return result
+
+    monkeypatch.setattr(frontend_build, "inspect_frontend_build", publication_while_waiting)
+    try:
+        result = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+    finally:
+        if not released:
+            holder.__exit__(None, None, None)
+    assert calls == [False, True]
+    assert result["skipped"] and Path(result["dist"]) == replacement
+    assert "token" in result["lock"]
+
+
+def test_pending_cleanup_failure_precedes_current_release_reuse(monkeypatch, tmp_path):
+    _current_release(tmp_path, monkeypatch)
+
+    def fail_cleanup(*args, **kwargs):
+        raise RuntimeError("owned build cleanup is pending")
+
+    monkeypatch.setattr(frontend_build, "_retry_pending_build_cleanup", fail_cleanup)
+    with frontend_build.frontend_build_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="owned build cleanup is pending"):
+            frontend_build.ensure_frontend_build(tmp_path)
+
+
+def test_contended_reuse_inspection_counts_toward_original_deadline(monkeypatch, tmp_path):
+    _current_release(tmp_path, monkeypatch)
+    clock = [100.0]
+    inspect = frontend_build.inspect_frontend_build
+    monkeypatch.setattr(frontend_build, "FRONTEND_BUILD_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(frontend_build.time, "monotonic", lambda: clock[0])
+
+    def slow_inspection(*args, **kwargs):
+        result = inspect(*args, **kwargs)
+        clock[0] += 6.0
+        return result
+
+    monkeypatch.setattr(frontend_build, "inspect_frontend_build", slow_inspection)
+    with frontend_build.frontend_build_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="deadline expired during reuse inspection"):
+            frontend_build.ensure_frontend_build(tmp_path)
+    assert frontend_build._FRONTEND_BUILD_TIMINGS.get() is None
+
+
 def _successful_runner(command: list[str], *, cwd: Path, label: str) -> str:
     if label == "vite build":
         stage = Path(command[-1])
@@ -921,13 +1067,21 @@ def test_missing_compiler_entries_trigger_dependency_recovery(monkeypatch: pytes
     assert calls == ["node npm-cli.js ci", "tsc -b", "vite build"]
 
 
-def test_checked_build_timeout_terminates_the_owned_process_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("clock_value", [None, 484.09000000000003])
+def test_checked_build_timeout_terminates_the_owned_process_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, clock_value) -> None:
+    if clock_value is not None:
+        monkeypatch.setattr(frontend_build.time, "monotonic", lambda: clock_value)
+
     class TimedOutProcess:
         returncode: int | None = None
         stdin = stdout = stderr = None
 
         def wait(self, *, timeout: float) -> None:
-            assert 0 < timeout <= frontend_build.FRONTEND_BUILD_TIMEOUT_SECONDS
+            # (clock + budget) - clock can round a few ulps above budget.
+            assert timeout > 0
+            assert timeout <= frontend_build.FRONTEND_BUILD_TIMEOUT_SECONDS or timeout == pytest.approx(
+                frontend_build.FRONTEND_BUILD_TIMEOUT_SECONDS, rel=0, abs=1e-9
+            )
             raise subprocess.TimeoutExpired(["node", "tsc", "-b"], timeout)
 
         def poll(self) -> int | None:
