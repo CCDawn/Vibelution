@@ -19,7 +19,9 @@ claimEvidenceCount=0 → required_artifact_missing: evidence_card_batch。
 4. 二次不匹配 → 走既有契约拒绝语义（无限循环被结构封死）；
 5. 抓取失败且没有原文时不得将模型 summary 当摘要引文；
 6. 无可引用原文候选 → quoteAvailable=false + no_quotable_text，
-   诚实声明 missing_evidence_anchor 跳过即 completed，不产空 quote。
+   诚实声明 missing_evidence_anchor 跳过即 completed，不产空 quote；
+7. 虚假诚实跳过（来源确有真实抓取原文块却声明 missing_evidence_anchor 全排除）→
+   false_honest_skip 硬拒并点名来源与块数；真实理由排除与无块诚实跳过放行。
 """
 
 from __future__ import annotations
@@ -554,7 +556,84 @@ def test_no_quotable_text_candidate_skips_quote_without_empty_quote(tmp_path, mo
     assert complete["task"]["status"] == "completed"
 
 
-def test_audit_classifies_findings_against_blocks(tmp_path, monkeypatch):
+def test_false_honest_skip_exclude_with_blocks_hard_rejected(tmp_path, monkeypatch):
+    """有可引用原文块的来源声明 missing_evidence_anchor 全排除 → 门硬拒并点名来源与块数。"""
+    setup = _setup_extraction_run(tmp_path, monkeypatch)
+    _append_stage_task_tool_trace(tmp_path, setup["task"])
+    candidate = setup["candidates"][0]
+
+    context = _read_context(setup)
+    source = {item["sourceId"]: item for item in context["quotableSources"]}[candidate["candidateId"]]
+    assert source["quoteAvailable"] is True
+    assert source["blocks"], "fetched candidate must carry real quotable blocks"
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="虚假诚实跳过",
+    ) as excinfo:
+        _writeback(setup, {"status": "completed", "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": candidate["candidateId"],
+                    "status": "extracted",
+                    "decision": "exclude",
+                    "evidenceStatus": "missing_evidence_anchor",
+                }
+            ]
+        }})
+    message = str(excinfo.value)
+    assert f"candidate {candidate['candidateId']} 存在真实抓取原文块（1 块）" in message
+    assert "decision=keep" in message
+    assert "不得声明 missing_evidence_anchor" in message
+
+    # 点名具体来源后按指引修正：keep + 逐字引用既有块 → 正常 completed。
+    complete = _writeback(setup, {"status": "completed", "result": {
+        "candidateExtractions": [_anchored_entry(candidate, quote=_VERBATIM_QUOTE)]}})
+    assert complete["task"]["status"] == "completed"
+
+
+def test_exclude_with_real_reason_and_blocks_still_passes(tmp_path, monkeypatch):
+    """有块的来源按真实理由排除（不声明 missing_evidence_anchor）→ 合法裁决放行。"""
+    setup = _setup_extraction_run(tmp_path, monkeypatch)
+    _append_stage_task_tool_trace(tmp_path, setup["task"])
+    candidate = setup["candidates"][0]
+
+    complete = _writeback(setup, {"status": "completed", "result": {
+        "candidateExtractions": [
+            {
+                "candidateId": candidate["candidateId"],
+                "status": "extracted",
+                "decision": "exclude",
+                "evidenceStatus": "unverified",
+                "excludeReason": "irrelevant_to_topic",
+                "valueSummary": "来源与任务主题无关，按真实理由排除。",
+            }
+        ]
+    }})
+    assert complete["task"]["status"] == "completed"
+
+
+def test_honest_skip_without_blocks_not_regressed_by_false_honest_skip_gate(tmp_path, monkeypatch):
+    """无块来源 exclude+missing_evidence_anchor 仍放行；契约文案补「仅当确无块」约束。"""
+    setup = _setup_extraction_run(tmp_path, monkeypatch, candidate_summaries=[""])
+    _append_stage_task_tool_trace(tmp_path, setup["task"])
+    candidate = setup["candidates"][0]
+
+    context = _read_context(setup)
+    assert context["quotableSources"][0]["blocks"] == []
+    assert "仅当来源确无真实抓取原文块" in context["usage"]["extractionWritebackContract"]
+
+    complete = _writeback(setup, {"status": "completed", "result": {
+        "candidateExtractions": [
+            {
+                "candidateId": candidate["candidateId"],
+                "status": "extracted",
+                "decision": "exclude",
+                "evidenceStatus": "missing_evidence_anchor",
+            }
+        ]
+    }})
+    assert complete["task"]["status"] == "completed"
     """纯审计：has_anchor 不报、mismatch/missing/empty 分类正确。"""
     blocks_by_id = {
         "candidate-ok": [{"origin": "fetched_text", "text": _CANDIDATE_SUMMARY}],
@@ -582,6 +661,42 @@ def test_audit_classifies_findings_against_blocks(tmp_path, monkeypatch):
     ]
     assert findings[0]["entryPath"] == "candidateExtractions[1]"
     assert findings[2]["quoteAvailable"] is False
+
+
+def test_audit_false_honest_skip_only_for_declared_missing_anchor_with_blocks(tmp_path, monkeypatch):
+    """exclude 只在「声明 missing_evidence_anchor 且来源确有原文块」时报 false_honest_skip。"""
+    blocks_by_id = {
+        "candidate-blocks": [
+            {"origin": "fetched_text", "text": _CANDIDATE_SUMMARY},
+            {"origin": "fetched_text", "text": "第二段真实原文块"},
+        ],
+        "candidate-none": [],
+    }
+    entries = [
+        # 有块却声明 missing_evidence_anchor 排除 → 虚假诚实跳过，点名块数。
+        {"candidateId": "candidate-blocks", "decision": "exclude", "evidenceStatus": "missing_evidence_anchor"},
+        # 有块但按真实理由排除 → 合法裁决，放行。
+        {"candidateId": "candidate-blocks", "decision": "exclude", "evidenceStatus": "unverified",
+         "excludeReason": "irrelevant"},
+        # 有块、无证据状态声明、只给排除理由 → 放行。
+        {"candidateId": "candidate-blocks", "decision": "exclude", "excludeReason": "duplicate"},
+        # 无块 + 声明 missing_evidence_anchor → 真诚实跳过，放行（既有语义不回归）。
+        {"candidateId": "candidate-none", "decision": "exclude", "evidenceStatus": "missing_evidence_anchor"},
+        # 未知来源 id → 保持现状跳过。
+        {"candidateId": "unknown-id", "decision": "exclude", "evidenceStatus": "missing_evidence_anchor"},
+    ]
+    findings = audit_extraction_quote_anchors(
+        entries,
+        blocks_by_id,
+        resolve_source_id=lambda entry: entry.get("candidateId", ""),
+        is_honest_skip=lambda entry: entry.get("evidenceStatus") == "missing_evidence_anchor",
+    )
+    assert [finding["finding"] for finding in findings] == ["false_honest_skip"]
+    assert findings[0]["sourceId"] == "candidate-blocks"
+    assert findings[0]["sourceKind"] == "candidate"
+    assert findings[0]["entryPath"] == "candidateExtractions[0]"
+    assert findings[0]["quoteAvailable"] is True
+    assert findings[0]["blockCount"] == 2
 
 
 def test_original_fetch_receipt_replaces_model_summary_in_context_and_gate(tmp_path, monkeypatch):
