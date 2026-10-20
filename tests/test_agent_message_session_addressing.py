@@ -1016,3 +1016,213 @@ def test_agent_message_tool_same_team_flat_history_status_follows_kernel(monkeyp
     assert result["route"] == "same_team"
     assert result["wakeStatus"] == "skipped_busy"
     assert result["historyStatus"] == "deferred"
+
+
+# ---------------------------------------------------------------------------
+# Platform coordinator routing: personal assistant / platform planner may
+# dispatch across teams (no researchOrgIntent, no shared team); plain
+# agent-to-agent traffic keeps the original three-branch policy.
+# ---------------------------------------------------------------------------
+
+
+def test_is_platform_coordinator_marker_variants() -> None:
+    assert agent_message_tools._is_platform_coordinator({"createdBy": "user_personal_assistant"}) is True
+    assert agent_message_tools._is_platform_coordinator({"createdBy": " user_personal_assistant "}) is True
+    assert agent_message_tools._is_platform_coordinator({"metadata": {"builtinPreset": "platform_planner"}}) is True
+    assert agent_message_tools._is_platform_coordinator({"createdBy": "user", "metadata": {}}) is False
+    assert agent_message_tools._is_platform_coordinator({"metadata": {"builtinPreset": "general_assistant_v1"}}) is False
+    assert agent_message_tools._is_platform_coordinator({"createdBy": "user_personal_assistant_x"}) is False
+    assert agent_message_tools._is_platform_coordinator({"metadata": "not-a-dict"}) is False
+    assert agent_message_tools._is_platform_coordinator({}) is False
+    assert agent_message_tools._is_platform_coordinator(None) is False
+
+
+def _patch_platform_coordinator_runtime(
+    monkeypatch,
+    *,
+    source_agent_extra: dict,
+    target_agent_extra: dict,
+    wake_status: str = "started",
+):
+    import core.web.services.agent_directory_service as ads
+    from core.web.services import session_service, team_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-target"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+            {"agentId": "agent-target", "agentCode": "A002", "displayName": "Target", "directSessionId": "session-target"},
+        ],
+    )
+
+    def fake_get_agent(agent_id, include_archived=False):
+        payload = {
+            "agentId": agent_id,
+            "agentCode": "A002" if agent_id == "agent-target" else "A001",
+            "displayName": "Target" if agent_id == "agent-target" else "Source",
+            "directSessionId": "session-target" if agent_id == "agent-target" else "session-source",
+            "metadata": {},
+        }
+        payload.update(target_agent_extra if agent_id == "agent-target" else source_agent_extra)
+        return payload
+
+    monkeypatch.setattr(ads, "get_agent", fake_get_agent)
+    # No shared team: platform coordinator dispatch is cross-team by design.
+    monkeypatch.setattr(
+        team_service,
+        "shared_active_team_for_agents",
+        lambda source_agent_id, target_agent_id: None,
+    )
+    captured: dict = {}
+
+    def fake_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "outcome": {
+                "deliveries": [
+                    {
+                        "targetAgentId": "agent-target",
+                        "status": "delivered",
+                        "inboxMessageId": "agentmsg-plat-1",
+                        "targetSessionId": "session-target",
+                        "historyStatus": "" if wake_status == "started" else "deferred",
+                        "historyMessageId": "",
+                        "wake": {
+                            "wakeRequested": True,
+                            "wakeStatus": wake_status,
+                            "messageId": "agentmsg-plat-1",
+                            "targetSessionId": "session-target",
+                            "turnId": "turn-plat-1" if wake_status == "started" else "",
+                            "reason": "session running" if wake_status == "skipped_busy" else "",
+                        },
+                    }
+                ]
+            },
+            "event": {"eventId": "evt-plat-1", "idempotencyKey": "k-plat"},
+            "task": {"taskId": "task-plat-1"},
+            "execution": {"workRunId": "run-plat-1"},
+            "adapter": {"adapterVersion": "1", "eventId": "evt-plat-1", "idempotencyKey": "k-plat"},
+            "reused": False,
+        }
+
+    monkeypatch.setattr("core.agent_kernel.adapters.submit_agent_message_event", fake_submit)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *a, **k: None)
+    return captured
+
+
+def test_agent_message_tool_personal_assistant_source_delivers_cross_team(monkeypatch) -> None:
+    captured = _patch_platform_coordinator_runtime(
+        monkeypatch,
+        source_agent_extra={"createdBy": "user_personal_assistant"},
+        target_agent_extra={},
+    )
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="dispatch work to any agent",
+            target_session="session-target",
+            summary="dispatch",
+        )
+    )
+    assert result["ok"] is True
+    assert result["status"] == "sent"
+    assert result["route"] == "platform_coordinator"
+    assert result["platformCoordinatorSide"] == "source"
+    assert result["targetSessionId"] == "session-target"
+    assert result["targetAgentId"] == "agent-target"
+    assert result["wakeStatus"] == "started"
+    assert result["historyStatus"] == "appended"
+    assert captured["wake_target"] is True
+    routed_metadata = json.loads(captured["metadata"]["agentToolMetadataJson"])
+    assert routed_metadata["route"] == "platform_coordinator"
+    assert routed_metadata["platformCoordinatorSide"] == "source"
+
+
+def test_agent_message_tool_personal_assistant_target_receives_from_plain_agent(monkeypatch) -> None:
+    captured = _patch_platform_coordinator_runtime(
+        monkeypatch,
+        source_agent_extra={},
+        target_agent_extra={"createdBy": "user_personal_assistant"},
+    )
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="report back to the assistant",
+            target_session="session-target",
+            summary="report",
+        )
+    )
+    assert result["ok"] is True
+    assert result["route"] == "platform_coordinator"
+    assert result["platformCoordinatorSide"] == "target"
+    routed_metadata = json.loads(captured["metadata"]["agentToolMetadataJson"])
+    assert routed_metadata["platformCoordinatorSide"] == "target"
+
+
+@pytest.mark.parametrize("side", ["source", "target"])
+def test_agent_message_tool_platform_planner_preset_routes_cross_team(monkeypatch, side) -> None:
+    planner_extra = {"metadata": {"builtinPreset": "platform_planner"}}
+    captured = _patch_platform_coordinator_runtime(
+        monkeypatch,
+        source_agent_extra=planner_extra if side == "source" else {},
+        target_agent_extra=planner_extra if side == "target" else {},
+    )
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="planner coordination message",
+            target_session="session-target",
+            summary="coordination",
+        )
+    )
+    assert result["ok"] is True
+    assert result["route"] == "platform_coordinator"
+    assert result["platformCoordinatorSide"] == side
+
+
+def test_agent_message_tool_platform_coordinator_busy_target_defers(monkeypatch) -> None:
+    _patch_platform_coordinator_runtime(
+        monkeypatch,
+        source_agent_extra={"createdBy": "user_personal_assistant"},
+        target_agent_extra={},
+        wake_status="skipped_busy",
+    )
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="dispatch while target busy",
+            target_session="session-target",
+            summary="dispatch",
+        )
+    )
+    # Busy target is never interrupted: skipped_busy + deferred, same contract
+    # as the same_team route.
+    assert result["ok"] is True
+    assert result["route"] == "platform_coordinator"
+    assert result["wakeStatus"] == "skipped_busy"
+    assert result["historyStatus"] == "deferred"
+
+
+def test_agent_message_tool_plain_agents_cross_team_still_policy_blocked(monkeypatch) -> None:
+    captured = _patch_platform_coordinator_runtime(
+        monkeypatch,
+        source_agent_extra={},
+        target_agent_extra={},
+    )
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="please review",
+            target_session="session-target",
+            wake_target=True,
+        )
+    )
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["route"] == "policy"
+    assert result["error"] == "policy_blocked"
+    assert result["reason"] == "cross_agent_policy_required"
+    assert result["delivery"]["allowed"] is False
+    assert captured == {}

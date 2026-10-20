@@ -754,3 +754,128 @@ def test_registry_projection_carries_write_scope_gate_flag_to_decision():
         {"descriptors": [{key: value for key, value in projection.items() if key != "writeScopeGated"}]}
     )[0]
     assert legacy_parsed.write_scope_gated is True
+
+
+# ---------------------------------------------------------------------------
+# agent_message_tool approval boundary. HIGH tier without an explicit catalog
+# "approval" key derives approval="on_request": allowedTools grants keep the
+# tool executable (write-scope exempt), but execution-time approval follows
+# the descriptor/policy facts. These tests pin both sides of the boundary so
+# any change to it is deliberate: default presets wait for a human (fail
+# closed), while a policy approvalOverrides "never" (or a full_access preset,
+# or an autonomous runtime-source projection) executes without interaction.
+# ---------------------------------------------------------------------------
+
+
+def _agent_message_policy_and_grant(*, approval_overrides=None):
+    descriptors = (
+        tool_catalog.build_tool_descriptor("agent_message_tool", args_schema={"type": "object"}),
+    )
+    raw = {
+        "policyId": "policy-agent-message",
+        "allowedTools": ["agent_message_tool"],
+        "mutationAccess": "controlled",
+        "writeScopes": [],
+    }
+    if approval_overrides is not None:
+        raw["approvalOverrides"] = approval_overrides
+    policy = normalize_legacy_tool_policy(raw, registered_tool_names=["agent_message_tool"])
+    grant = TurnToolGrant(
+        turn_id="turn-agent-message",
+        source="session",
+        allowed_capabilities=tuple(sorted({capability for descriptor in descriptors for capability in descriptor.capabilities})),
+        denied_tools=(),
+        approval_mode="on_request",
+    )
+    return descriptors, policy, grant
+
+
+def _authorize_agent_message_call(*, approval: str, risk: str, call_id: str, permission_preset: str) -> object:
+    from core.web.services.session.tool_approvals import authorize_or_wait
+
+    return authorize_or_wait(
+        session_id="sess-agent-message-approval",
+        turn_id="turn-agent-message",
+        agent_id="agent-pa",
+        call_id=call_id,
+        tool_name="agent_message_tool",
+        tool_args={"content": "dispatch", "target_session": "session-target"},
+        approval=approval,
+        risk=risk,
+        decision_fingerprint="decision-agent-message",
+        config_revision=1,
+        config_hash="hash-agent-message",
+        permission_preset=permission_preset,
+        timeout_seconds=0.2,
+    )
+
+
+def test_agent_message_tool_high_tier_default_keeps_on_request_requirement():
+    descriptors, policy, grant = _agent_message_policy_and_grant()
+    message_descriptor = descriptors[0]
+    assert message_descriptor.risk == "write"
+    assert message_descriptor.approval == "on_request"
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-pa",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-agent-message",
+        generated_at="2026-10-20T00:00:00Z",
+    )
+    # allowedTools grants make the tool executable; the approval requirement
+    # itself is NOT cleared by the grant.
+    assert decision.executable_tools == ("agent_message_tool",)
+    assert decision.approval_requirements == (("agent_message_tool", "on_request", "write"),)
+
+
+def test_agent_message_tool_on_request_waits_and_fails_closed_under_default_preset():
+    outcome = _authorize_agent_message_call(
+        approval="on_request",
+        risk="write",
+        call_id="call-agent-message-wait",
+        permission_preset="request_approval",
+    )
+    assert outcome.allowed is False
+    assert outcome.code == "approval_timeout"
+
+
+def test_agent_message_tool_policy_never_override_executes_without_interaction():
+    from core.web.services.session.tool_approvals import authorize_or_wait  # noqa: F401  (documents the leaf under test)
+
+    descriptors, policy, grant = _agent_message_policy_and_grant(
+        approval_overrides={"agent_message_tool": "never"},
+    )
+    decision = evaluate_tool_policy(
+        agent_id="agent-pa",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-agent-message",
+        generated_at="2026-10-20T00:00:00Z",
+    )
+    assert decision.executable_tools == ("agent_message_tool",)
+    assert decision.approval_requirements == (("agent_message_tool", "never", "write"),)
+
+    outcome = _authorize_agent_message_call(
+        approval="never",
+        risk="write",
+        call_id="call-agent-message-never",
+        permission_preset="request_approval",
+    )
+    assert outcome.allowed is True
+    assert outcome.code == "approval_not_required"
+
+
+def test_agent_message_tool_full_access_preset_auto_approves_on_request():
+    outcome = _authorize_agent_message_call(
+        approval="on_request",
+        risk="write",
+        call_id="call-agent-message-full",
+        permission_preset="full_access",
+    )
+    assert outcome.allowed is True
+    assert outcome.code == "full_access_auto_approved"

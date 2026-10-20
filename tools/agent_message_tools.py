@@ -186,6 +186,26 @@ def agent_message_tool(
         target_agent_id = session_owner_agent_id
         source_agent_payload = get_agent(source_agent_id, include_archived=True) or {}
         if source_agent_id != target_agent_id:
+            # Platform coordinators (personal assistant / platform planner) are
+            # dispatched across teams by design: no researchOrgIntent, no shared
+            # team. Checked before research_org so a coordinator never gets
+            # blocked by that branch's intent requirement.
+            if _is_platform_coordinator(source_agent_payload) or _is_platform_coordinator(target_agent_payload):
+                return _json_result(
+                    _send_platform_coordinator_message(
+                        source_agent=source_agent_payload,
+                        target_agent=target_agent_payload,
+                        source_agent_id=source_agent_id,
+                        source_session_id=source_session_id,
+                        target_agent_id=target_agent_id,
+                        target_session_id=normalized_target_session,
+                        content=message_body,
+                        summary=summary,
+                        wake_target=wake_target,
+                        thread_id=thread_id,
+                        metadata=metadata,
+                    )
+                )
             research_org_result = _try_send_research_org_message(
                 source_agent=source_agent_payload,
                 target_agent=target_agent_payload,
@@ -660,6 +680,101 @@ def _try_send_same_team_message(
     }
 
 
+def _send_platform_coordinator_message(
+    *,
+    source_agent: dict[str, Any],
+    target_agent: dict[str, Any],
+    source_agent_id: str,
+    source_session_id: str,
+    target_agent_id: str,
+    target_session_id: str,
+    content: str,
+    summary: str,
+    wake_target: bool,
+    thread_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Kernel direct delivery for platform coordinator dispatch.
+
+    Same delivery/wake semantics as same_team (kernel submit, target wake gate,
+    busy-defer historyStatus) minus the team lookup: authorization comes from
+    the coordinator role itself, so no researchOrgIntent or shared team is
+    required. Plain agent-to-agent traffic never reaches this path.
+    """
+    source_is_coordinator = _is_platform_coordinator(source_agent)
+    target_is_coordinator = _is_platform_coordinator(target_agent)
+    coordinator_side = (
+        "both" if source_is_coordinator and target_is_coordinator
+        else ("source" if source_is_coordinator else "target")
+    )
+    kernel_result = _send_direct_agent_message_via_kernel(
+        source_agent=source_agent,
+        target_agent=target_agent,
+        source_agent_id=source_agent_id,
+        source_session_id=source_session_id,
+        target_agent_id=target_agent_id,
+        target_session_id=target_session_id,
+        content=content,
+        summary=summary,
+        wake_target=wake_target,
+        thread_id=thread_id,
+        metadata={
+            **metadata,
+            "route": "platform_coordinator",
+            "platformCoordinatorSide": coordinator_side,
+        },
+    )
+    kernel_delivery = _first_kernel_delivery(kernel_result, target_agent_id=target_agent_id)
+    delivery = _flatten_kernel_delivery(
+        kernel_delivery,
+        target_agent_id=target_agent_id,
+        target_session_id=target_session_id,
+        wake_target=bool(wake_target),
+    )
+    sent = str(kernel_delivery.get("status") or "").strip() == "delivered"
+    wake_status = str(delivery.get("wakeStatus") or "").strip()
+    if sent and bool(wake_target) and wake_status in {"failed", "skipped_invalid_session"}:
+        status = "partial"
+        ok = True
+    else:
+        status = "sent" if sent else "blocked"
+        ok = sent
+    message_id = str(delivery.get("messageId") or delivery.get("inboxMessageId") or "").strip()
+    resolved_target_session = str(delivery.get("targetSessionId") or target_session_id).strip()
+    kernel_trace = _kernel_trace_fields(kernel_result)
+    _record_agent_message_tool_event(
+        {
+            "messageId": message_id,
+            "sourceAgentId": source_agent_id,
+            "sourceSessionId": source_session_id,
+            "targetAgentId": target_agent_id,
+            "targetSessionId": resolved_target_session,
+        },
+        delivery,
+        route="platform_coordinator",
+        outcome="sent" if ok else "blocked",
+        extra_fields={**kernel_trace, "platformCoordinatorSide": coordinator_side},
+    )
+    return {
+        "ok": ok,
+        "status": status,
+        "route": "platform_coordinator",
+        "platformCoordinatorSide": coordinator_side,
+        "messageId": message_id,
+        "sourceAgentId": source_agent_id,
+        "sourceSessionId": source_session_id,
+        "targetAgentId": target_agent_id,
+        "targetAgentCode": target_agent.get("agentCode") or "",
+        "targetSessionId": resolved_target_session,
+        "historyStatus": str(delivery.get("historyStatus") or "").strip() or ("appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected")),
+        "inboxStatus": "recorded" if sent else "failed",
+        "wakeStatus": wake_status,
+        "reason": delivery.get("reason") or "",
+        "delivery": delivery,
+        "kernel": kernel_trace,
+    }
+
+
 def _try_send_research_org_message(
     *,
     source_agent: dict[str, Any],
@@ -842,6 +957,26 @@ def _cross_agent_policy_blocked_result(
         "delivery": delivery,
         "kernel": {},
     }
+
+
+_PLATFORM_COORDINATOR_CREATED_BY = "user_personal_assistant"
+_PLATFORM_COORDINATOR_BUILTIN_PRESET = "platform_planner"
+
+
+def _is_platform_coordinator(record: dict[str, Any]) -> bool:
+    """True for platform coordination roles allowed to dispatch across teams.
+
+    Covers the user personal assistant (createdBy marker from provisioning)
+    and the built-in platform planner (metadata.builtinPreset). Plain agents
+    and research-org roles return False and keep the original three-branch
+    routing (research_org / same_team / policy).
+    """
+    if not isinstance(record, dict):
+        return False
+    if str(record.get("createdBy") or "").strip() == _PLATFORM_COORDINATOR_CREATED_BY:
+        return True
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    return str(metadata.get("builtinPreset") or "").strip() == _PLATFORM_COORDINATOR_BUILTIN_PRESET
 
 
 def _agent_has_research_org_scope(agent: dict[str, Any]) -> bool:
