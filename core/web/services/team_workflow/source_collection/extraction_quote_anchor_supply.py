@@ -226,6 +226,11 @@ def source_quotable_blocks(
         keys = _normalized_locator_keys(locator)
         if isinstance(receipt, Mapping):
             keys.extend(_normalized_locator_keys(receipt.get("locator")))
+            # Bare-URL redirect variant: the receipt header carries the final
+            # (resolved) URL of the fetch, so it joins the index under its own
+            # normalized keys — a record whose locator is the post-redirect
+            # form then binds the receipt fetched through the original URL.
+            keys.extend(_normalized_locator_keys(receipt.get("resolvedUrl")))
         for key in keys:
             fetched_by_key.setdefault(key, receipt)
     blocks: list[dict[str, Any]] = []

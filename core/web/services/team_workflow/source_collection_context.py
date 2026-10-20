@@ -269,9 +269,14 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         )
     if isinstance(context.get("retryFocus"), dict):
         compact["retryFocus"] = normalize_metadata(context["retryFocus"])
-    quotable_sources = compact_source_collection_quotable_sources(context.get("quotableSources"))
-    if quotable_sources:
-        compact["quotableSources"] = quotable_sources
+    if isinstance(context.get("quotableSources"), list):
+        # 空 quotableSources 列表也是有效供给状态（本任务没有任何可引用
+        # 来源）：字段显式保留为（可能为空的）数组，与下方 blocks 空数组的
+        # 「显式保留」语义对齐——agent 看到的是明确的供给边界，而不是
+        # 「字段消失」无法区分的诊断空洞。
+        compact["quotableSources"] = compact_source_collection_quotable_sources(
+            context["quotableSources"]
+        )
     if isinstance(context.get("quoteAnchorRemediation"), dict) and context.get("quoteAnchorRemediation"):
         compact["quoteAnchorRemediation"] = normalize_metadata(context["quoteAnchorRemediation"])
     # One-shot writeback remediation contract must survive compaction: the
