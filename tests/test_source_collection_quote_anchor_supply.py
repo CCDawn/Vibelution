@@ -37,6 +37,7 @@ from core.web.services.team_workflow.source_collection.extraction_quote_anchor_s
     QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
     audit_extraction_quote_anchors,
     extraction_quotable_sources,
+    has_verbatim_anchor,
     latest_failed_fetch_attempts,
     nearest_verbatim_hint,
     source_quotable_blocks,
@@ -867,3 +868,108 @@ def test_compact_context_keeps_empty_quotable_sources_field():
         "stageId": "finding", "contextMode": "compact",
     })
     assert "quotableSources" not in without_field
+
+
+# ---------------------------------------------------------------------------
+# ⑨ 逐字锚容忍空白/排版伪影（真实事故回归）
+# ---------------------------------------------------------------------------
+
+# 真实事故（资料提炼阶段）：代理提交的引文与服务端存储的抓取原文块逐词一致，
+# 唯一差异是原文块（PDF/HTML 抽取）丢了 "with" 与 "Z" 之间的一个空格
+# （"ends withZ = 164"）。旧裸包含判定把它判成 mismatched_quote → 节点永久
+# 停靠修正循环，代理最终放弃把全部候选标 exclude。
+_PERIOD_INCIDENT_QUOTE = (
+    "The eighth chemical period ends with Z = 164 located below Mercury. "
+    "The ninth period starts with an alkaline and alkaline earth metal "
+    "and ends immediately similarly to the second and third period"
+)
+_PERIOD_INCIDENT_BLOCK = (
+    "Extended periodic table review. The eighth chemical period ends withZ = 164 "
+    "located below Mercury. The ninth period starts with an alkaline and alkaline "
+    "earth metal and ends immediately similarly to the second and third period, "
+    "closing the discussion."
+)
+
+
+def test_verbatim_anchor_tolerates_lost_space_extraction_artifact():
+    """真实事故回归：块文本丢空格（withZ）时逐字引文仍判锚定、不产 mismatched_quote。"""
+    entry = {
+        "candidateId": "c-period",
+        "decision": "keep",
+        "claims": [{"quote": _PERIOD_INCIDENT_QUOTE}],
+    }
+    blocks = [{"origin": "fetched_text", "text": _PERIOD_INCIDENT_BLOCK}]
+    assert has_verbatim_anchor(entry, blocks) is True
+    findings = audit_extraction_quote_anchors(
+        [entry],
+        {"c-period": blocks},
+        resolve_source_id=lambda item: item.get("candidateId", ""),
+    )
+    assert findings == []
+
+
+def test_verbatim_anchor_matches_curly_quote_and_nbsp_variants():
+    """弯引号/NBSP/零宽/en dash 排版变体归一后命中（两个方向都成立）。"""
+    # 块带弯引号 + NBSP，引文是 ASCII 形态。
+    curly_block = [{"origin": "fetched_text",
+                    "text": "The \u201cpredictive coding\u201d hypothesis\u00a0holds broadly."}]
+    assert has_verbatim_anchor(
+        {"claims": [{"quote": 'The "predictive coding" hypothesis holds broadly'}]},
+        curly_block,
+    )
+    # 反方向：引文带弯单引号，块是 ASCII。
+    assert has_verbatim_anchor(
+        {"claims": [{"quote": "The \u2018predictive coding\u2019 hypothesis holds broadly"}]},
+        [{"origin": "fetched_text", "text": "The 'predictive coding' hypothesis holds broadly."}],
+    )
+    # en dash ↔ 连字符、零宽字符删除。
+    assert has_verbatim_anchor(
+        {"claims": [{"quote": "spaced\u2013out evidence"}]},
+        [{"origin": "fetched_text", "text": "spaced-out\u200bevidence."}],
+    )
+
+
+def test_verbatim_anchor_still_rejects_rewording_and_case_changes():
+    """防过度放宽：换词改写、大小写变化仍判不匹配并产 mismatched_quote finding。"""
+    blocks = [{"origin": "fetched_text", "text": _PERIOD_INCIDENT_BLOCK}]
+    reworded = {
+        "candidateId": "c-reworded",
+        "decision": "keep",
+        "claims": [{"quote": _PERIOD_INCIDENT_QUOTE.replace(
+            "ends with Z = 164", "finishes at Z = 164")}],
+    }
+    case_changed = {
+        "candidateId": "c-case",
+        "decision": "keep",
+        "evidenceRefs": [{"id": "q", "quote": _PERIOD_INCIDENT_QUOTE.replace(
+            "Mercury", "mercury")}],
+    }
+    assert has_verbatim_anchor(reworded, blocks) is False
+    assert has_verbatim_anchor(case_changed, blocks) is False
+    findings = audit_extraction_quote_anchors(
+        [reworded, case_changed],
+        {"c-reworded": blocks, "c-case": blocks},
+        resolve_source_id=lambda entry: entry.get("candidateId", ""),
+    )
+    assert [finding["finding"] for finding in findings] == [
+        "mismatched_quote",
+        "mismatched_quote",
+    ]
+
+
+def test_evidence_refs_path_enjoys_normalized_verbatim_matching():
+    """evidenceRefs 路径（id+quote）同样享受空白/排版归一化匹配。"""
+    entry = {
+        "candidateId": "c-refs",
+        "decision": "keep",
+        "evidenceRefs": [{"id": "period-quote", "type": "quote",
+                          "quote": _PERIOD_INCIDENT_QUOTE}],
+    }
+    blocks = [{"origin": "fetched_text", "text": _PERIOD_INCIDENT_BLOCK}]
+    assert has_verbatim_anchor(entry, blocks) is True
+    findings = audit_extraction_quote_anchors(
+        [entry],
+        {"c-refs": blocks},
+        resolve_source_id=lambda item: item.get("candidateId", ""),
+    )
+    assert findings == []
