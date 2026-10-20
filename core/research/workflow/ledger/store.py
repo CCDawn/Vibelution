@@ -194,6 +194,14 @@ class WorkflowLedgerStore:
     ) -> list[OutboxRecord]:
         return self.read(lambda repo: repo.list_pending_outbox(run_id, limit))
 
+    def list_pending_human_tasks_for_waiting_runs(
+        self, *, limit: int = 100
+    ) -> list[tuple]:
+        """Read-only pending human tasks of waiting_human runs (see repository)."""
+        return self.read(
+            lambda repo: repo.list_pending_human_tasks_for_waiting_runs(limit=limit)
+        )
+
     # ------------------------------------------------- external batches
 
     def register_external_batch(

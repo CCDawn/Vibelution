@@ -18,6 +18,7 @@ import type {
   ActionCommand,
   ActionInputByCommand,
   AnomalyInboxExtendBudgetRequest,
+  AnomalyInboxHumanGateAction,
   AnomalyInboxItem,
   AnomalyInboxResponse,
   CandidateEvidenceTrailResponse,
@@ -657,6 +658,30 @@ export function executeHypothesisFirstInboxExtendBudget(
   );
 }
 
+/**
+ * Confirm one needs_human_gate decision through the action's own server
+ * endpoint: the anomaly-inbox row carries teamId/runId/taskId/decision and the
+ * confirmation endpoint, and 误触防护 requires the explicit `confirmed: true`
+ * flag. Endpoints are restricted to same-site `/api/` paths — an inbox row can
+ * never redirect the client elsewhere.
+ */
+export function executeAnomalyInboxHumanGateAction(
+  teamId: string,
+  action: AnomalyInboxHumanGateAction,
+): Promise<Record<string, unknown>> {
+  const endpoint = String(action.endpoint || "").trim();
+  if (!/^\/api\/[A-Za-z0-9\-._~!$&'()*+,;=:@/?%]+$/.test(endpoint)) {
+    return Promise.reject(new Error("Invalid human-gate action endpoint"));
+  }
+  return writeJson(endpoint, "POST", {
+    teamId: String(action.teamId || "").trim() || teamId,
+    runId: String(action.runId || "").trim(),
+    taskId: String(action.taskId || "").trim(),
+    decision: action.decision,
+    confirmed: true,
+  });
+}
+
 const ANOMALY_SEVERITIES = new Set(["critical", "high", "medium"]);
 
 const ANOMALY_KINDS = new Set([
@@ -700,6 +725,8 @@ function parseAnomalyInboxResponse(payload: unknown): AnomalyInboxResponse {
       && Array.isArray(item.evidence)
       && item.evidence.every((ref) => typeof ref === "string")
       && (item.action === undefined || item.action === null || isRecord(item.action))
+      && (item.actions === undefined || item.actions === null
+        || (Array.isArray(item.actions) && item.actions.every((entry) => isRecord(entry))))
       && ["teamId", "questionId", "runId", "nodeId", "meetingRoundId"]
         .every((field) => typeof scope[field] === "string");
     if (!validScope) {

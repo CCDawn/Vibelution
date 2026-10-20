@@ -1,7 +1,7 @@
 """Typed personal-assistant entry; native services own identity and execution."""
 
 
-from typing import Literal
+from typing import Any, Literal
 
 
 from fastapi import APIRouter, HTTPException, Query
@@ -199,6 +199,16 @@ class SessionSummary(BaseModel):
 
 
 
+class AttentionAction(BaseModel):
+
+    """One actionable decision offered on an attention row (human gates)."""
+
+    label: str
+
+    decision: str
+
+
+
 class Attention(BaseModel):
 
     """Approval/error rows stay as-is; newer kinds add stable fields only."""
@@ -206,7 +216,21 @@ class Attention(BaseModel):
 
     id: str
 
-    kind: Literal["approval", "error", "knowledge_review", "anomaly"]
+    kind: Literal[
+
+        "approval",
+
+        "error",
+
+        "knowledge_review",
+
+        "anomaly",
+
+        "affair_reminder",
+
+        "human_gate",
+
+    ]
 
     title: str
 
@@ -217,6 +241,12 @@ class Attention(BaseModel):
     targetUrl: str = ""
 
     body: str = ""
+
+    # human_gate 行的按钮语义与定位元数据；旧行不铺默认值（exclude_unset）。
+
+    actions: list[AttentionAction] | None = None
+
+    meta: dict[str, Any] | None = None
 
 
 

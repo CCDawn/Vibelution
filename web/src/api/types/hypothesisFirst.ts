@@ -975,6 +975,22 @@ export type AnomalyInboxExtendBudgetAction = {
   confirmHint: string;
 };
 
+/**
+ * Structured human-gate decision CTA on needs_human_gate rows (server-built).
+ * One entry per decision variant; `endpoint` is the server confirmation
+ * endpoint the client POSTs the identity + decision back to.
+ */
+export type AnomalyInboxHumanGateAction = {
+  command: "resolve_human_task";
+  teamId: string;
+  runId: string;
+  taskId: string;
+  decision: "accept" | "reject";
+  endpoint: string;
+  label?: string;
+  requiresConfirmation?: boolean;
+};
+
 export type AnomalyInboxItem = {
   kind: AnomalyKind;
   scope: AnomalyInboxScope;
@@ -986,6 +1002,8 @@ export type AnomalyInboxItem = {
   evidence: string[];
   /** Present only on budget_precheck items with a computable extend contract. */
   action?: AnomalyInboxExtendBudgetAction | null;
+  /** Present on needs_human_gate items: accept/reject decision variants. */
+  actions?: AnomalyInboxHumanGateAction[] | null;
 };
 
 export type AnomalyInboxExtendBudgetRequest = {
