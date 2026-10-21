@@ -25,6 +25,7 @@ import {
   readRegistry,
   recordSpawnPid,
   REGISTRY_OBSERVATION_GRACE_MS,
+  sweepTerminatedRows,
   type RegistryPayload,
   type SweepGraceTracker
 } from "../src/lifecycle/instanceRegistryStore.js";
@@ -1060,5 +1061,66 @@ describe("applySweepTerminatedRows", () => {
     });
     expect(result.removedInstanceIds).toEqual([]);
     expect(payload.instances["worktree:leased"]).toBeDefined();
+  });
+});
+
+describe("mutateRegistry write suppression", () => {
+  it("does not rewrite the registry when a sweep removes nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-noop-sweep-"));
+    tempDirs.push(dir);
+    const registryPath = join(dir, "instances.json");
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      instances: {
+        "worktree:live": {
+          status: "closed",
+          projectRoot: "C:/worktree/live",
+          spawnPid: 42
+        }
+      }
+    };
+    const body = `${JSON.stringify(payload, null, 2)}\n`;
+    writeFileSync(registryPath, body, "utf8");
+
+    const result = await sweepTerminatedRows(registryPath, {
+      pidAlive: () => true,
+      pathExists: () => true,
+      graceTracker: new Map()
+    });
+
+    expect(result.removedInstanceIds).toEqual([]);
+    expect(readFileSync(registryPath, "utf8")).toBe(body);
+  });
+
+  it("writes the registry when a sweep removes a row", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-sweep-write-"));
+    tempDirs.push(dir);
+    const registryPath = join(dir, "instances.json");
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      instances: {
+        "worktree:gone": {
+          status: "closed",
+          projectRoot: "C:/worktree/gone",
+          generation: 1,
+          port: 8001
+        }
+      }
+    };
+    writeFileSync(registryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const result = await sweepTerminatedRows(registryPath, {
+      nowMs: Date.parse("2026-10-02T10:00:00Z"),
+      pidAlive: () => false,
+      pathExists: () => false,
+      graceTracker: new Map([["worktree:gone", { since: 0, fingerprint: "C:/worktree/gone|1|8001" }]])
+    });
+
+    expect(result.removedInstanceIds).toEqual(["worktree:gone"]);
+    const written = await readRegistry(registryPath);
+    expect(written.instances["worktree:gone"]).toBeUndefined();
+    expect(written.updatedAt).not.toBe("2026-01-01T00:00:00.000Z");
   });
 });

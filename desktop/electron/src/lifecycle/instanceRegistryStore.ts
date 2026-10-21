@@ -822,8 +822,13 @@ async function mutateRegistry<T>(
     registryPath,
     async () => {
       const payload = await readRegistry(registryPath);
+      const before = JSON.stringify(payload);
       const result = await mutator(payload);
-      await writeRegistry(registryPath, payload);
+      // The launcher watches instances.json; rewriting an unchanged registry
+      // would re-trigger the state refresh that produced this mutation.
+      if (JSON.stringify(payload) !== before) {
+        await writeRegistry(registryPath, payload);
+      }
       return result;
     },
     options
