@@ -40,9 +40,9 @@ def _health_storage_workspace_root() -> str:
 def create_app() -> FastAPI:
     """Create the local web workbench app.
 
-    Phase 1 (immediate): middleware + /api/health + /api/control-token.
-    Phase 2 (lifespan / first non-health request): API routers + SPA.
-    This lets Launcher mark the backend healthy while heavy route imports continue.
+    Phase 1: middleware + health/control bootstrap, then the pinned static shell.
+    Phase 2: functional API routers after imports and storage initialization.
+    Launcher may show the shell while functional API requests keep waiting.
     """
 
     app = FastAPI(
@@ -96,6 +96,7 @@ def create_app() -> FastAPI:
     app.state.web_routes_error = ""
     app.state.web_routes_ready_event = None  # set by lifespan when background warm is used
     app.state.web_routes_bootstrap = {}
+    app.state.web_shell_ready = False
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "routesReady": routes_ready,
+            "shellReady": bool(getattr(app.state, "web_shell_ready", False)),
             # Identity lets the launcher distinguish a stale same-project backend
             # (safe to reclaim) from a foreign process holding the preferred port.
             "pid": os.getpid(),

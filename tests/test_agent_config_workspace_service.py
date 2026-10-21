@@ -1683,7 +1683,9 @@ def test_agent_directory_list_agents_logs_slow_hydration_breakdown(monkeypatch):
 
 def test_agent_directory_summary_list_skips_heavy_hydration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    created = agent_directory_service.create_agent_instance(display_name="Summary Agent", primary_mode="chat")
+    created = agent_directory_service.create_agent_instance(
+        display_name="Summary Agent", primary_mode="chat", metadata={"virtualHumanCompanion": True}
+    )
     hydration_calls = 0
 
     def fail_hydration(*args, **kwargs):
@@ -1698,6 +1700,8 @@ def test_agent_directory_summary_list_skips_heavy_hydration(tmp_path, monkeypatc
     assert hydration_calls == 0
     agent = next(item for item in agents if item["agentId"] == created["agentId"])
     assert agent["displayName"] == created["displayName"]
+    assert agent["metadata"]["virtualHumanCompanion"] is True
+    assert agent["directSessionId"] == created["directSessionId"]
     assert "toolPolicy" not in agent
     assert "memoryPolicy" not in agent
     assert "toolGovernanceRequests" not in agent

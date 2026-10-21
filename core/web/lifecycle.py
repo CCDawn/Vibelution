@@ -518,11 +518,15 @@ async def web_workbench_lifespan(app: FastAPI | None):
     _begin_owned_runtime_lifecycle()
     loop.set_exception_handler(handle_loop_exception)
     startup_jobs = StartupJobGroup()
-    from .route_bootstrap import warm_web_routes_in_background
+    from .route_bootstrap import register_spa_routes, warm_web_routes_in_background
 
     startup_routes_task: asyncio.Task[Any] | None = None
     startup_scene_retention_task: asyncio.Task[Any] | None = None
     if app is not None:
+        try:
+            register_spa_routes(app)
+        except Exception:  # health remains available; route bootstrap reports the failure
+            logger.warning("Static workbench shell is unavailable during startup", exc_info=True)
         # Enable async waiters for non-health requests while routes mount in background.
         app.state.web_routes_ready_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so

@@ -2,24 +2,27 @@ import { probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 
 export const BACKEND_CONNECT_TIMEOUT_MS = 300;
 export const BACKEND_HEALTH_HTTP_TIMEOUT_MS = 1500;
-// Route warm-up (33 serial module imports) can outlive the old 45s budget under
-// memory pressure; the backend itself holds non-health requests for 120s, so a
-// readiness-aware wait needs headroom above that before failing the start.
+// Route warm-up may outlive the old budget under memory pressure. API callers
+// retain the full readiness wait; window startup explicitly requests the shell.
 export const BACKEND_HEALTH_WAIT_MS = 180_000;
 export const BACKEND_HEALTH_POLL_MS = 100;
 
 export type WorkbenchHealthResponse = { status: number; json?: () => Promise<unknown> };
+export type WorkbenchReadiness = "routes" | "shell";
 
 export function workbenchHealthUrl(port: number, host = "127.0.0.1"): string {
   return `http://${host}:${Math.trunc(port)}/api/health`;
 }
 
-export function workbenchHealthPayloadReady(payload: unknown): boolean {
+export function workbenchHealthPayloadReady(payload: unknown, readiness: WorkbenchReadiness = "routes"): boolean {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return false;
   }
   const body = payload as Record<string, unknown>;
-  return body.status === "ok" && body.routesReady === true;
+  const ready = readiness === "shell"
+    ? body.shellReady === true || (body.shellReady === undefined && body.routesReady === true)
+    : body.routesReady === true;
+  return body.status === "ok" && ready;
 }
 
 export function defaultFetchWorkbenchHealth(input: {
@@ -41,6 +44,7 @@ export function defaultFetchWorkbenchHealth(input: {
 export async function probeBackendHealthy(input: {
   port: number;
   host?: string;
+  readiness?: WorkbenchReadiness;
   connectTimeoutMs?: number;
   httpTimeoutMs?: number;
   signal?: AbortSignal;
@@ -68,12 +72,11 @@ export async function probeBackendHealthy(input: {
     if (response.status !== 200) {
       return false;
     }
-    // HTTP 200 alone only proves the process answers; /api/health must also
-    // report routesReady so the window never opens onto a 503 "starting" page.
+    // HTTP 200 alone is insufficient: the requested readiness must be proven.
     if (typeof response.json !== "function") {
       return false;
     }
-    return workbenchHealthPayloadReady(await response.json());
+    return workbenchHealthPayloadReady(await response.json(), input.readiness);
   } catch {
     input.signal?.throwIfAborted();
     return false;
@@ -83,6 +86,7 @@ export async function probeBackendHealthy(input: {
 export async function waitForBackendHealthy(input: {
   port: number;
   host?: string;
+  readiness?: WorkbenchReadiness;
   timeoutMs?: number;
   pollIntervalMs?: number;
   signal?: AbortSignal;

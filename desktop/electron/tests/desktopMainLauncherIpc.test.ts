@@ -428,9 +428,11 @@ describe("Electron main Launcher IPC facade", () => {
 
   it("checks the verified release before reusing a live workbench", () => {
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
-    // Window covers the serving verification plus the URL refresh gate.
-    const readyBody = mainSource.slice(readyStart, readyStart + 1250);
-    expect(readyBody).toContain("await refreshLiveWorkbenchUrl(paths)");
+    // Reuse this lifecycle's verified port; ordinary open entries keep their gate.
+    const readyBody = mainSource.slice(readyStart, readyStart + 1800);
+    expect(readyBody).toContain("servingVerification.inspection?.port");
+    expect(readyBody).toContain("workbenchLoopbackUrl(verifiedPort)");
+    expect(readyBody).not.toContain("await refreshLiveWorkbenchUrl(paths)");
     expect(readyBody).toContain("verifyRestartedServingVersion");
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));

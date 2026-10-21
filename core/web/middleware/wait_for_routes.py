@@ -1,4 +1,4 @@
-"""Hold non-health requests until API/SPA routes are mounted."""
+"""Serve the pinned shell early while functional API requests wait for routes."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ class WaitForWebRoutesMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         app = request.app
+        if bool(getattr(app.state, "web_shell_ready", False)) and path != "/api" and not path.startswith("/api/"):
+            return await call_next(request)
         ready = await wait_for_web_routes(app, timeout_seconds=self._timeout_seconds)
         if not ready:
             return routes_not_ready_response(app)

@@ -68,6 +68,8 @@ from __future__ import annotations
 
 import json
 
+import logging
+
 import threading
 
 import time
@@ -78,7 +80,6 @@ from typing import Any, Iterator
 
 from urllib.parse import urlencode
 
-
 from core.research.workflow.contracts.anomaly_inbox import (
 
     ANOMALY_SEVERITY_CRITICAL,
@@ -88,6 +89,8 @@ from core.research.workflow.contracts.anomaly_inbox import (
     ANOMALY_SEVERITY_RANK,
 
 )
+
+logger = logging.getLogger(__name__)
 
 
 ATTENTION_KIND_KNOWLEDGE_REVIEW = "knowledge_review"
@@ -475,13 +478,16 @@ def collect_stage_task_attention(
 
 def collect_knowledge_review_attention(
 
-    *, limit: int = MAX_KNOWLEDGE_REVIEW_ITEMS
+    *, limit: int = MAX_KNOWLEDGE_REVIEW_ITEMS,
+    stage_entries: list[dict[str, str]] | None = None,
 
 ) -> list[dict[str, str]]:
 
     """Steward knowledge-review docks as attention entries."""
 
 
+    if stage_entries is not None:
+        return stage_entries[: max(0, limit)]
     return collect_stage_task_attention(knowledge_review_limit=limit, anomaly_limit=0)[0]
 
 
@@ -651,7 +657,8 @@ def _state_v2_anomaly_entries() -> list[dict[str, str]]:
 
 def collect_anomaly_attention(
 
-    *, limit: int = MAX_ANOMALY_ITEMS
+    *, limit: int = MAX_ANOMALY_ITEMS,
+    stage_entries: list[dict[str, str]] | None = None,
 
 ) -> list[dict[str, str]]:
 
@@ -664,7 +671,7 @@ def collect_anomaly_attention(
 
     for source in (
 
-        lambda: collect_stage_task_attention(knowledge_review_limit=0)[1],
+        lambda: stage_entries if stage_entries is not None else collect_stage_task_attention(knowledge_review_limit=0)[1],
 
         _state_v2_anomaly_entries,
 
@@ -874,17 +881,35 @@ def _collect_affair_reminder_attention() -> list[dict[str, str]]:
 
 def collect_human_attention() -> list[dict[str, Any]]:
     """Read the notification lane without constructing the Session overview."""
+    started = time.perf_counter()
+    # Both lanes project the same files. Share one request-local scan, keeping
+    # the independent state-v2/gate/reminder failure boundaries intact.
+    try:
+        stage_review, stage_anomaly = collect_stage_task_attention()
+    except Exception:  # noqa: BLE001 - unavailable stage files must not hide other sources
+        stage_review, stage_anomaly = [], []
+    stage_ms = (time.perf_counter() - started) * 1000.0
     extension: list[dict[str, Any]] = []
-    for collector in (
-        collect_knowledge_review_attention,
-        collect_anomaly_attention,
-        _collect_human_gate_attention,
-        _collect_affair_reminder_attention,
+    source_ms: dict[str, float] = {}
+    for name, collector in (
+        ("knowledge", lambda: collect_knowledge_review_attention(stage_entries=stage_review)),
+        ("anomaly", lambda: collect_anomaly_attention(stage_entries=stage_anomaly)),
+        ("humanGate", _collect_human_gate_attention),
+        ("reminder", _collect_affair_reminder_attention),
     ):
+        source_started = time.perf_counter()
         try:
             extension.extend(collector())
         except Exception:  # noqa: BLE001 - isolate unavailable attention sources
             continue
+        finally:
+            source_ms[name] = round((time.perf_counter() - source_started) * 1000.0, 1)
+    total_ms = (time.perf_counter() - started) * 1000.0
+    if total_ms >= 500:
+        logger.info(
+            "Human attention slow read: totalMs=%.1f stageScanMs=%.1f sourceMs=%s itemCount=%s",
+            total_ms, stage_ms, source_ms, len(extension),
+        )
     return extension
 
 
