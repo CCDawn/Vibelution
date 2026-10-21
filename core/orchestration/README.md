@@ -20,6 +20,7 @@ Agent 单轮编排的现有 SSOT。新逻辑优先扩这里的模块，不要在
 | `context_input_metering.py` | 复用协议消息投影计入工具参数和按协议回传的 reasoning 字段；仅生成有界计数视图，不改模型消息 |
 | `agent_modes.py` | `AgentMode` / `ModePolicy` |
 | `runtime_goal.py` | 运行目标包 |
+| `intent_alignment.py` | 意图对齐工件 store（§3）/ 判定段：规则预筛、回执解析与落账、packet 组装（§4）/ `intent_alignment_card` / `intent_alignment_merge` 确定性工具 handler（§3.5.2，注册面在 `tools/Key_Tools.py`）。被动数据服务 + 确定性 handler，不进单轮调用链（仅 worker gate 注入 packet 与写后刷新）；非 turn coordinator，不在 Gate 2-4 `DO_NOT_CREATE` 禁设范围。设计文档：`docs/plans/2026-10-18-intent-alignment-module.md` |
 
 ## Gate 1 候选抽取
 
