@@ -54,7 +54,16 @@ describe("Electron main startup sequence", () => {
       "startOrFocusWorkbenchFromProductEntryOnShell()"
     );
     expect(source).toContain("if (deferWorkbenchOpen)");
-    expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
+  });
+
+  it("does not open the Launcher as a startup window fallback", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const startupIndex = source.indexOf("if (pendingOpenWorkbenchRequest &&");
+    const deferIndex = source.indexOf("if (deferWorkbenchOpen)", startupIndex);
+
+    expect(startupIndex).toBeGreaterThan(0);
+    expect(deferIndex).toBeGreaterThan(startupIndex);
+    expect(source.slice(startupIndex, deferIndex)).not.toContain("openLauncher");
   });
 });
 

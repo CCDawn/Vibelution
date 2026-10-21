@@ -182,7 +182,10 @@ def test_chat_incomplete_finish_reason_is_preserved(finish_reason):
     tuple(decoded)
 
     assert decoded.outcome.kind == "incomplete"
-    assert decoded.outcome.error == finish_reason
+    expected_error = (
+        "chat.finish.output_length_truncated" if finish_reason == "length" else finish_reason
+    )
+    assert decoded.outcome.error == expected_error
 
 
 def test_chat_tool_started_waits_for_provider_call_id_and_matches_ready_identity():
