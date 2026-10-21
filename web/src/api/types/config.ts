@@ -25,6 +25,12 @@ export type ConfigSummary = {
   }>;
 };
 
+export type ConfigBootstrap = Omit<ConfigSummary, "blockingCount" | "warningCount" | "sections"> & {
+  themeBackgroundImagePath: string;
+  themeBackgroundImageUrl: string;
+  themeBackgroundReadability: "soft" | "standard" | "strong";
+};
+
 export type ConfigDraftMeta = {
   pending_api_keys: Record<string, string>;
   pending_cleared_api_keys: string[];

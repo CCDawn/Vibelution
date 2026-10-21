@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { fetchPublicConfig } from "../api/config";
+import { fetchConfigBootstrap } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
   dictionaryDomainsQueryKey,
@@ -137,7 +137,7 @@ export function useAppI18n(options?: UseAppI18nOptions) {
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchPublicConfig(),
+    queryFn: () => fetchConfigBootstrap(),
   });
 
   const dictionaryQuery = useQuery({

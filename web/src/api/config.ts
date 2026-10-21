@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  ConfigBootstrap,
   ConfigDecisionModelProbe,
   ConfigLlmTestResult,
   ConfigMigrationPreview,
@@ -48,6 +49,14 @@ export function fetchPublicConfig(options?: {
   signal?: AbortSignal;
 }): Promise<ConfigSummary> {
   return fetchJson<ConfigSummary>("/api/config/public", {
+    signal: options?.signal,
+  });
+}
+
+export function fetchConfigBootstrap(options?: {
+  signal?: AbortSignal;
+}): Promise<ConfigBootstrap> {
+  return fetchJson<ConfigBootstrap>("/api/config/bootstrap", {
     signal: options?.signal,
   });
 }

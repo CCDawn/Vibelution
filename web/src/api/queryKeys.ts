@@ -15,6 +15,7 @@ export const queryKeys = {
   launcherStatus: () => ["launcher", "status"] as const,
   launcherFreshness: () => ["launcher", "freshness"] as const,
   launcherState: () => ["launcher", "state"] as const,
+  launcherCurrentInstance: () => ["launcher", "current-instance"] as const,
   launcherBranchInstances: (cleanupMetadata = false) =>
     ["launcher", "branch-instances", cleanupMetadata] as const,
   launcherDeveloperNoiseOverview: () => ["launcher", "developer-mode", "noise-overview"] as const,

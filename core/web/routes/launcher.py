@@ -19,6 +19,7 @@ from core.launcher.api_contract import (
     DeveloperModePayload,
     LauncherAcceptedCommandResponse,
     LauncherBranchInstanceListResponse,
+    LauncherCurrentInstanceIdentityResponse,
     LauncherCleanupMergeResponse,
     LauncherCleanupPlanResponse,
     LauncherDesktopActionResponse,
@@ -113,6 +114,15 @@ def launcher_status(projection: Literal["full", "active-work"] = "full") -> dict
 )
 def launcher_freshness() -> dict:
     return launcher_service.get_launcher_freshness()
+
+
+@router.get(
+    "/launcher/current-instance",
+    response_model=LauncherCurrentInstanceIdentityResponse,
+    response_model_exclude_unset=True,
+)
+def launcher_current_instance() -> dict:
+    return launcher_service.get_launcher_current_instance_identity()
 
 
 @router.get(
