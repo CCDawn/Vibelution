@@ -1976,7 +1976,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(withHandlerButNoNode).not.toContain('aria-label="从此轮分叉新会话"');
   });
 
-  it("renders running-turn steer records without an edit control", () => {
+  it.each(["user_guidance", "user_interrupt_guidance"])("renders received %s without an edit control", (kind) => {
     const html = renderConversation([
       {
         id: "message-user-1",
@@ -1995,14 +1995,17 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
         role: "user",
         content: "这一轮先不要改代码，只汇报。",
         timestamp: "2026-05-22T00:01:30Z",
-        metadata: { kind: "user_guidance", source: "steer" },
+        metadata: { kind, source: "steer" },
       },
     ]);
 
     expect(html).toContain("这一轮先不要改代码，只汇报。");
     expect(html).toContain("引导");
+    expect(html).toContain("已接收");
+    expect(html).toContain('data-conversation-guidance-status="received"');
+    expect(html).not.toContain("已执行");
     expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
-    expect(html).toContain("turnEditBadge");
+    expect(html).toContain('data-vui="chip"');
   });  it("renders user image attachments and composer image chips", () => {
     const userMessage: ConversationMessage = {
       id: "message-user",
