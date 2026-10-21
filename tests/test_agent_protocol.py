@@ -6537,7 +6537,7 @@ class TestLocalProviderBootstrap:
         class DummyLLM:
             pass
 
-        def fake_invoke_agent_llm_turn(*, messages, replay_state, hooks):
+        def fake_invoke_agent_llm_turn(*, messages, replay_state, hooks, initial_fallback_profile_id=""):
             captured["hooks"] = hooks
             captured["llm"] = hooks.get_llm_for_mode()
             hooks.build_invocation_context(prompt_purpose="main_reply", route_attempt=1)
@@ -6826,6 +6826,245 @@ class TestLocalProviderBootstrap:
         assert is_compression_requested() is False
         assert any("上下文超限" in message and "新会话" in message for message in ui_logs)
         consume_compression_request()
+
+    def test_intra_turn_compression_drops_responses_continuation_anchor(self, monkeypatch):
+        """C1 回归：轮内压缩生效后，下一次 send 必须放弃 Responses 续传锚。
+
+        压缩只重写本地 messages；若 replay_state 继续携带旧 response_id，
+        continuation input 只带 pending outputs + 新 user 消息，压缩摘要进
+        不去，provider 侧历史永不缩减，provider_limit 重试梯子注定再超限。
+        压缩实际生效后 replay_state 的 response_id 必须被清空（本回合后续
+        send 走 full_input 全量编码）。
+        """
+        from core.llm.protocols import WireProtocol
+        from core.llm.provider_replay_state import ProviderReplayState, endpoint_fingerprint
+        from tools.token_manager import consume_compression_request, is_compression_requested
+
+        consume_compression_request()
+        replay_observation: list[str | None] = []
+        anchor_state = ProviderReplayState(
+            issuer="responses",
+            provider_id="default",
+            endpoint_fingerprint=endpoint_fingerprint("http://localhost:9/v1"),
+            model_id="demo-model",
+            wire_protocol=WireProtocol.RESPONSES,
+            opaque_items=(),
+            response_id="resp_old_anchor",
+        )
+
+        def fake_invoke(messages, replay_state=None):
+            replay_observation.append(getattr(replay_state, "response_id", None))
+            agent._last_llm_error_category = "context_length_error"
+            agent._last_llm_error_retryable = False
+            agent._last_llm_error_message = "context_length_error: model refused"
+            agent._last_llm_error_details = {}
+            agent._last_llm_failure_attempts = 1
+            agent._last_llm_failure_max_attempts = 5
+            return None
+
+        agent = self._provider_context_retry_agent(
+            monkeypatch,
+            max_retries=4,
+            invoke=fake_invoke,
+            compress_calls=[],
+            ui_logs=[],
+        )
+        agent._chat_provider_replay_state = anchor_state
+
+        agent._run_orchestrated_turn(user_prompt="触发 provider 上下文超限")
+
+        assert len(replay_observation) >= 2
+        # 第一次 send 仍带续传锚；压缩生效后的第二次 send 必须为全量无锚。
+        assert replay_observation[0] == "resp_old_anchor"
+        assert replay_observation[1] == ""
+        consume_compression_request()
+
+    def test_non_compression_retry_keeps_responses_continuation_anchor(self, monkeypatch):
+        """C1 非压缩路径零变化：未触发轮内压缩时，replay_state 原样透传。"""
+        from core.llm.protocols import WireProtocol
+        from core.llm.provider_replay_state import ProviderReplayState, endpoint_fingerprint
+        from tools.token_manager import consume_compression_request
+
+        consume_compression_request()
+        replay_observation: list[str | None] = []
+        anchor_state = ProviderReplayState(
+            issuer="responses",
+            provider_id="default",
+            endpoint_fingerprint=endpoint_fingerprint("http://localhost:9/v1"),
+            model_id="demo-model",
+            wire_protocol=WireProtocol.RESPONSES,
+            opaque_items=(),
+            response_id="resp_keep_anchor",
+        )
+
+        def fake_invoke(messages, replay_state=None):
+            replay_observation.append(getattr(replay_state, "response_id", None))
+            agent._last_llm_error_category = "gateway_timeout"
+            agent._last_llm_error_retryable = False
+            agent._last_llm_error_message = "gateway_timeout: provider down"
+            agent._last_llm_error_details = {}
+            agent._last_llm_failure_attempts = 1
+            agent._last_llm_failure_max_attempts = 5
+            return None
+
+        agent = self._provider_context_retry_agent(
+            monkeypatch,
+            max_retries=2,
+            invoke=fake_invoke,
+            compress_calls=[],
+            ui_logs=[],
+        )
+        agent._chat_provider_replay_state = anchor_state
+
+        agent._run_orchestrated_turn(user_prompt="非压缩失败重试")
+
+        assert replay_observation
+        assert all(value == "resp_keep_anchor" for value in replay_observation)
+        consume_compression_request()
+
+    def test_llm_route_fallback_stickiness_lifecycle(self, monkeypatch):
+        """C4 回归：fallback 会话级粘性 —— 生效后下一 send 起始即 fallback，
+        主路由恢复（探测成功）后复位；粘性 send 的 Responses 续锚走无状态
+        全量编码，无粘性时行为零变化。"""
+        captured: list[dict] = []
+        anchor = object()
+
+        def fake_invoke_agent_llm_turn(
+            *, messages, replay_state, initial_fallback_profile_id="", hooks
+        ):
+            captured.append(
+                {
+                    "initialFallback": initial_fallback_profile_id,
+                    "replayState": replay_state,
+                }
+            )
+            return SimpleNamespace(
+                payload=("stub-outcome", "stub-message"),
+                last_error_category=None,
+                last_error_retryable=False,
+                last_recovery_action=None,
+                last_error_message="",
+                last_error_details={},
+                last_failure_attempts=0,
+                last_failure_max_attempts=3,
+                route_fallback={},
+                degraded_actions=[],
+                invoke_prep_ms=0.0,
+            )
+
+        monkeypatch.setattr(
+            agent_module, "invoke_agent_llm_turn", fake_invoke_agent_llm_turn
+        )
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.name = "fallback-sticky-tester"
+        agent.llm_with_tools = object()
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                profiles={"primary": SimpleNamespace(), "backup_qwen": SimpleNamespace()}
+            )
+        )
+        agent._llm_route_fallback_profile = ""
+        agent._llm_route_fallback_success_streak = 0
+        agent._llm_route_fallback_probe_pending = False
+        scene_events: list[tuple] = []
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: scene_events.append(
+                (args[1] if len(args) > 1 else kwargs.get("event_code", ""))
+            ),
+        )
+
+        def switched_result() -> SimpleNamespace:
+            return SimpleNamespace(
+                payload=None,
+                route_fallback={"from": "primary", "to": "backup_qwen"},
+                invoke_prep_ms=0.0,
+            )
+
+        def ok_result() -> SimpleNamespace:
+            return SimpleNamespace(
+                payload=("stub-outcome", "stub-message"),
+                route_fallback={},
+                invoke_prep_ms=0.0,
+            )
+
+        def failed_result() -> SimpleNamespace:
+            return SimpleNamespace(
+                payload=None,
+                route_fallback={},
+                invoke_prep_ms=0.0,
+            )
+
+        # 无粘性：正常 send，profile 为空、replay 原样透传（零变化）。
+        agent._invoke_llm([build_chat_user_message("hi")], replay_state=anchor)
+        assert captured[-1] == {"initialFallback": "", "replayState": anchor}
+
+        # send 内切换生效 → 粘性建立。
+        agent._update_llm_route_fallback_stickiness(switched_result())
+        assert agent._llm_route_fallback_profile == "backup_qwen"
+        assert agent._llm_route_fallback_success_streak == 0
+
+        # 粘性生效后的下一 send：起始即 fallback 直发；Responses 续锚与
+        # fallback 路由身份不匹配，走无状态全量编码（replay 丢弃）。
+        agent._invoke_llm([build_chat_user_message("hi")], replay_state=anchor)
+        assert captured[-1]["initialFallback"] == "backup_qwen"
+        assert captured[-1]["replayState"] is None
+
+        # 连续成功送满探测阈值 → 粘性复位，探测挂起。
+        # （上面的粘性 send 已计 1 次成功，这里补满到阈值。）
+        probe_sends = agent_module._LLM_ROUTE_FALLBACK_RECOVERY_PROBE_SENDS
+        for _ in range(probe_sends - 1):
+            agent._update_llm_route_fallback_stickiness(ok_result())
+        assert agent._llm_route_fallback_profile == ""
+        assert agent._llm_route_fallback_success_streak == 0
+        assert agent._llm_route_fallback_probe_pending is True
+
+        # 探测 send：直发主路由（无粘性 profile），续锚仍走无状态编码。
+        agent._invoke_llm([build_chat_user_message("hi")], replay_state=anchor)
+        assert captured[-1]["initialFallback"] == ""
+        assert captured[-1]["replayState"] is None
+
+        # 主路由探测成功 → 挂起解除，粘性不再生效，续锚恢复透传。
+        agent._update_llm_route_fallback_stickiness(ok_result())
+        assert agent._llm_route_fallback_probe_pending is False
+        agent._invoke_llm([build_chat_user_message("hi")], replay_state=anchor)
+        assert captured[-1] == {"initialFallback": "", "replayState": anchor}
+
+        # 粘性路由自身失败 → 清除粘性，下一 send 重走常规路由梯子。
+        agent._update_llm_route_fallback_stickiness(switched_result())
+        assert agent._llm_route_fallback_profile == "backup_qwen"
+        agent._update_llm_route_fallback_stickiness(failed_result())
+        assert agent._llm_route_fallback_profile == ""
+        assert agent._llm_route_fallback_probe_pending is False
+        agent._invoke_llm([build_chat_user_message("hi")], replay_state=None)
+        assert captured[-1]["initialFallback"] == ""
+        cleared = [
+            event for event in scene_events if event == "agent.llm_route_fallback_sticky_cleared"
+        ]
+        assert cleared
+
+    def test_llm_route_fallback_stickiness_expires_with_removed_profile(self, monkeypatch):
+        """C4 防御：粘性 profile 被配置移除后自动失效，不传已不存在的 profile。"""
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(profiles={"primary": SimpleNamespace()})
+        )
+        agent._llm_route_fallback_profile = "backup_qwen"
+        agent._llm_route_fallback_success_streak = 4
+        agent._llm_route_fallback_probe_pending = False
+        scene_events: list[str] = []
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: scene_events.append(
+                args[1] if len(args) > 1 else kwargs.get("event_code", "")
+            ),
+        )
+        assert agent._active_llm_route_fallback_profile() == ""
+        assert agent._llm_route_fallback_profile == ""
+        assert agent._llm_route_fallback_success_streak == 0
+        assert "agent.llm_route_fallback_sticky_expired" in scene_events
 
     def test_runtime_agent_llm_slot_binding_maps_subagent_execution_to_primary(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")

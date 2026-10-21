@@ -153,6 +153,12 @@ from tools.token_manager import (
 )
 # Provider context-limit recovery: one retry per turn, bounded per session.
 _MAX_PROVIDER_CONTEXT_COMPRESSION_RETRIES = 2
+# 会话级 LLM 路由 fallback 粘性（C4）：一次 send 内生效的 fallback 切换在本
+# agent runtime 会话内跨 send 保持，后续 send 起始即直发 fallback，不再逐
+# send 重烧主路由重试预算。fallback 连续成功送满该阈值后的下一个 send 回到
+# 主路由做恢复探测：主路由已恢复则粘性复位完成，仍故障则一次重试预算后重新
+# 切换。粘性是会话内存状态，不跨重启持久化（journal 只做审计镜像）。
+_LLM_ROUTE_FALLBACK_RECOVERY_PROBE_SENDS = 10
 # Send-path timing anchors (TTFT dark zone). C-preflight anchors (seed/
 # todo-restore/status-bar/threshold/llm-log + loop head/guidance/compression
 # gate) ride agent.llm_preflight.completed; route-side anchors (reconcile/
@@ -556,6 +562,9 @@ class AgentRuntime:
         self._runtime_context_seeded_by_host: bool = False
         self._core_prompt_snapshot_seeded_by_host: bool = False
         self._chat_provider_replay_state = None
+        self._llm_route_fallback_profile = ""
+        self._llm_route_fallback_success_streak = 0
+        self._llm_route_fallback_probe_pending = False
         self._ledger_conversation_fingerprint: str = ""
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
@@ -3598,6 +3607,25 @@ class AgentRuntime:
                             f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
                             f"（{current_tokens} → {after_tokens} tokens）。"
                         ))
+                        if provider_replay_state is not None:
+                            # Responses 续锚与轮内压缩互斥：压缩只重写本地
+                            # messages，provider 侧历史仍停在旧 response_id；
+                            # continuation input 只带 pending outputs 和新
+                            # user 消息，压缩摘要进不去，provider 侧历史永不
+                            # 缩减，provider_limit 重试梯子会反复超限。压缩
+                            # 生效后本回合内禁用续传锚，后续 send 走 full_input
+                            # 全量编码，provider 侧上下文真实重置为压缩后内容。
+                            responses_continuation_disabled = True
+                            provider_replay_state = provider_replay_state.without_response_id()
+                            _record_agent_scene_event(
+                                "llm",
+                                "agent.responses_continuation.compression_reset",
+                                message="Intra-turn context compression applied; dropping the Responses continuation anchor so the next send replays the compressed payload statelessly.",
+                                fields={
+                                    "iteration": iteration,
+                                    "reason": "context_compression_applied",
+                                },
+                            )
                     # The send gate and telemetry must measure the compressed
                     # payload, including the notice appended above. The old
                     # estimate can exceed the limit even when compression fits.
@@ -4616,9 +4644,17 @@ class AgentRuntime:
             "invokeSetupMs",
             max(0, int((time.perf_counter() - invoke_setup_started_at) * 1000)),
         )
+        sticky_fallback_profile = self._active_llm_route_fallback_profile()
+        effective_replay_state = replay_state
+        if effective_replay_state is not None and self._replay_state_may_cross_routes():
+            # 粘性 fallback / 恢复探测窗口内，会话续锚的签发路由可能与实际
+            # 路由不一致，放弃续传走无状态全量编码（见
+            # _replay_state_may_cross_routes）。
+            effective_replay_state = None
         result = invoke_agent_llm_turn(
             messages=messages,
-            replay_state=replay_state,
+            replay_state=effective_replay_state,
+            initial_fallback_profile_id=sticky_fallback_profile,
             hooks=AgentLlmTurnHooks(
                 get_ui=get_ui,
                 llm_cancel_context=_turn_llm_cancel_context,
@@ -4661,7 +4697,104 @@ class AgentRuntime:
         invoke_prep_ms = float(getattr(result, "invoke_prep_ms", 0.0) or 0.0)
         if invoke_prep_ms > 0:
             self._record_turn_send_timing_anchor("invokePrepMs", max(0, int(invoke_prep_ms)))
+        self._update_llm_route_fallback_stickiness(result)
         return result.payload
+
+    def _active_llm_route_fallback_profile(self) -> str:
+        """会话级 fallback 粘性的当前生效值。
+
+        Operator 从配置里删除该 fallback profile 时粘性自动失效，不把已
+        不存在的 profile 传给路由适配器。空值表示无粘性，行为与旧实现
+        完全一致。
+        """
+        profile_id = str(getattr(self, "_llm_route_fallback_profile", "") or "").strip()
+        if not profile_id:
+            return ""
+        profiles = getattr(getattr(self, "config", None), "llm", None)
+        profiles = getattr(profiles, "profiles", None)
+        if isinstance(profiles, dict) and profile_id not in profiles:
+            self._llm_route_fallback_profile = ""
+            self._llm_route_fallback_success_streak = 0
+            self._llm_route_fallback_probe_pending = False
+            _record_agent_scene_event(
+                "llm_route",
+                "agent.llm_route_fallback_sticky_expired",
+                message="Sticky LLM route fallback profile no longer exists in the active config; session stickiness dropped.",
+                level="warning",
+                fields={"profileId": profile_id, "reason": "profile_removed"},
+            )
+            return ""
+        return profile_id
+
+    def _replay_state_may_cross_routes(self) -> bool:
+        """Responses 续锚是否可能与本 send 的实际路由身份不一致。
+
+        粘性 fallback 生效期间，或恢复探测尚未在主路由上取得成功之前，会话
+        内的 ``ProviderReplayState`` 仍带着上一条路由的签发身份
+        （provider/endpoint/model），而 wire 层 ``require_compatible`` 会直接
+        拒绝跨 profile 复用。此窗口内的 send 一律传 ``replay_state=None`` 走
+        无状态全量编码（与压缩重置路径同语义），宁可放弃续传优化也不让
+        续锚把 fallback 路由炸成 ReplayStateMismatchError。
+        """
+        if str(getattr(self, "_llm_route_fallback_profile", "") or "").strip():
+            return True
+        return bool(getattr(self, "_llm_route_fallback_probe_pending", False))
+
+    def _update_llm_route_fallback_stickiness(self, result: Any) -> None:
+        """消费 route_fallback / send 成败信号，维护会话级 fallback 粘性。
+
+        - 本 send 内发生 fallback 切换：粘住该 profile（连续成功计数清零）。
+        - 粘性生效且本 send 成功：累计连续成功数，达到
+          ``_LLM_ROUTE_FALLBACK_RECOVERY_PROBE_SENDS`` 后清除粘性并挂起
+          恢复探测，下一个 send 回主路由验证。
+        - 粘性生效且本 send 失败：清除粘性，下一个 send 重走常规路由梯子
+          （主路由已恢复即自然复位；仍故障则一次重试预算后重新切换）。
+        - 探测挂起期间主路由 send 失败且未重新切换：保持挂起，续锚继续
+          走无状态编码，直到主路由真正成功一次。
+        - 无粘性、无切换、无挂起：no-op，行为与旧实现完全一致。粘性是
+          会话内存状态，不跨重启持久化；journal 只保留审计镜像。
+        """
+        route_fallback = dict(getattr(result, "route_fallback", {}) or {})
+        switched_to = str(route_fallback.get("to") or "").strip()
+        if switched_to:
+            self._llm_route_fallback_profile = switched_to
+            self._llm_route_fallback_success_streak = 0
+            self._llm_route_fallback_probe_pending = False
+            return
+        sticky = str(getattr(self, "_llm_route_fallback_profile", "") or "").strip()
+        if sticky:
+            if getattr(result, "payload", None) is None:
+                self._llm_route_fallback_profile = ""
+                self._llm_route_fallback_success_streak = 0
+                self._llm_route_fallback_probe_pending = False
+                _record_agent_scene_event(
+                    "llm_route",
+                    "agent.llm_route_fallback_sticky_cleared",
+                    message="Sticky fallback route failed; clearing session stickiness so the next send re-runs the normal route ladder.",
+                    level="warning",
+                    fields={"profileId": sticky, "reason": "sticky_route_failed"},
+                )
+                return
+            streak = int(getattr(self, "_llm_route_fallback_success_streak", 0) or 0) + 1
+            if streak >= _LLM_ROUTE_FALLBACK_RECOVERY_PROBE_SENDS:
+                self._llm_route_fallback_profile = ""
+                self._llm_route_fallback_success_streak = 0
+                self._llm_route_fallback_probe_pending = True
+                _record_agent_scene_event(
+                    "llm_route",
+                    "agent.llm_route_fallback_sticky_probe_reset",
+                    message="Sticky fallback served enough consecutive successful sends; releasing stickiness so the next send probes the primary route again.",
+                    fields={"profileId": sticky, "successfulSends": streak},
+                )
+                return
+            self._llm_route_fallback_success_streak = streak
+            self._llm_route_fallback_probe_pending = False
+            return
+        if getattr(self, "_llm_route_fallback_probe_pending", False):
+            # 恢复探测挂起：主路由成功一次才解除，失败（且未重新切换）时
+            # 继续挂起，避免陈旧续锚在主/备路由之间反复引发身份不匹配。
+            if getattr(result, "payload", None) is not None:
+                self._llm_route_fallback_probe_pending = False
 
     def _get_response_processor(self) -> ResponseProcessor:
         processor = getattr(self, "response_processor", None)

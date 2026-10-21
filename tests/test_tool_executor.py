@@ -1400,6 +1400,142 @@ class TestToolExecutorTimeout:
         assert action is None
         assert "[取消] slow_tool 已因停止请求中断" in str(result)
 
+    def test_execute_returns_real_result_when_stop_arrives_after_completion(self, executor, monkeypatch):
+        """工具已物理完成后再观察到停止请求：返回真实结果，不伪造取消错误。"""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        precheck_passed = threading.Event()
+        checker_calls = {"count": 0}
+
+        def cancel_checker():
+            checker_calls["count"] += 1
+            # 第 1 次是提交前检查，第 2 次是轮询里的 result 前检查；
+            # 工具等第 2 次过后才返回，确保第 3 次（result 后）才观察到停止请求。
+            if checker_calls["count"] >= 2:
+                precheck_passed.set()
+            return "stop now" if checker_calls["count"] >= 3 else ""
+
+        def fast_tool(_cancel_checker=None):
+            assert precheck_passed.wait(2.0)
+            return "real result"
+
+        executor.register_tool("fast_tool", fast_tool, timeout=5)
+        executor.set_cancel_checker(cancel_checker)
+
+        result, action = executor.execute("fast_tool", {})
+
+        assert action is None
+        assert result == "real result"
+        assert not any(event[0][1] == "tool.execute.cancelled" for event in events)
+        completion_events = [
+            event for event in events if event[0][1] == "tool.execute.completed_after_stop"
+        ]
+        assert len(completion_events) == 1
+        assert completion_events[0][1]["fields"]["cancelReason"] == "stop now"
+        success_events = [
+            event for event in events if event[0][1] == "tool.execute.succeeded"
+        ]
+        assert success_events
+        assert success_events[-1][1]["fields"]["stopAfterCompletion"] is True
+
+    def test_cancelled_cli_tool_run_does_not_record_validation_failure(self, executor, monkeypatch):
+        """用户停止 cli_tool 的 pytest 运行：取消不是失败，不得写入验证失败记录。"""
+        reset_session_state()
+
+        release_abandoned = threading.Event()
+        release_tool = threading.Event()
+        abandoned_done = threading.Event()
+
+        def fake_execute_codex_sandbox_command(command, timeout=60, cwd=None, _cancel_checker=None):
+            release_abandoned.set()
+            assert release_tool.wait(2.0)
+            abandoned_done.set()
+            return "partial pytest output"
+
+        fake_module = ModuleType("core.infrastructure.codex_cli_sandbox")
+        fake_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        monkeypatch.setitem(sys.modules, "core.infrastructure.codex_cli_sandbox", fake_module)
+
+        cancel_requested = threading.Event()
+        executor.set_cancel_checker(lambda: "stop now" if cancel_requested.is_set() else "")
+
+        def trigger_cancel():
+            assert release_abandoned.wait(2.0)
+            cancel_requested.set()
+
+        threading.Thread(target=trigger_cancel, daemon=True).start()
+        result, action = executor.execute(
+            "cli_tool",
+            {"command": "python -m pytest tests/test_demo.py -q", "timeout": 30},
+        )
+
+        assert action is None
+        assert "[取消] cli_tool 已因停止请求中断" in str(result)
+
+        release_tool.set()
+        assert abandoned_done.wait(2.0)
+
+        assert get_session_state().recent_validation_results == []
+
+    def test_abandoned_tool_late_completion_leaves_reconciliation_record(self, executor, monkeypatch):
+        """被放弃的 future 物理完成后，必须在 scene 事件里留下迟到对账记录。"""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        cancel_requested = threading.Event()
+        tool_started = threading.Event()
+        release_abandoned = threading.Event()
+
+        def slow_tool():
+            tool_started.set()
+            # 持有到 execute 已按运行中取消返回后才释放，
+            # 钉死时序：execute 返回前 future 绝不完成，避免落入完成后取消分支。
+            release_abandoned.wait(2.0)
+            return "late result"
+
+        executor.register_tool("slow_tool", slow_tool, timeout=5)
+        executor.set_cancel_checker(lambda: "stop now" if cancel_requested.is_set() else "")
+
+        def trigger_cancel():
+            assert tool_started.wait(1.0)
+            cancel_requested.set()
+
+        threading.Thread(target=trigger_cancel, daemon=True).start()
+        result, action = executor.execute("slow_tool", {})
+
+        assert action is None
+        assert "[取消] slow_tool 已因停止请求中断" in str(result)
+
+        release_abandoned.set()
+        deadline = time.monotonic() + 2.0
+        late_events = []
+        while time.monotonic() < deadline:
+            late_events = [
+                event for event in events
+                if event[0][1] == "tool.execute.late_completed_after_cancel"
+            ]
+            if late_events:
+                break
+            time.sleep(0.01)
+
+        assert late_events, "被放弃的工具物理完成后应留下迟到对账 scene 事件"
+        assert late_events[0][1]["outcome"] == "succeeded"
+        assert late_events[0][1]["fields"]["lateOutcome"] == "succeeded"
+        assert late_events[0][1]["fields"]["cancelReason"] == "stop now"
+
     def test_execute_passes_cancel_checker_to_tools_that_accept_it(self, executor):
         captured = {}
 
