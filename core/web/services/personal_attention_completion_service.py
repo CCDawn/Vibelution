@@ -303,9 +303,12 @@ def collect_session_completed_attention(
         session_id = str(row.get("sessionId") or "").strip()
         if not session_id or session_id in automated_session_ids:
             continue
+        # id 的时间戳段必须来自行内稳定字段：缺 updatedAt 的行拿不到稳定
+        # 完成时刻（退到 observed 会让 15s 脉冲内每次轮询都生成新 id，账本
+        # 压不住，同一完成弹多次），直接跳过。
         stamp = _parse_iso_timestamp(row.get("updatedAt"))
         if stamp is None:
-            stamp = observed
+            continue
         agent_name = str(row.get("agentDisplayName") or "").strip()
         title = str(row.get("title") or "").strip() or "会话"
         rows.append(

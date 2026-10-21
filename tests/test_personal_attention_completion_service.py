@@ -321,6 +321,26 @@ def test_session_completed_attention_new_turn_gets_new_id(monkeypatch):
     assert first[0]["id"] != second[0]["id"]
 
 
+def test_session_completed_attention_skips_rows_without_stable_updated_at(monkeypatch):
+    monkeypatch.setattr(
+        pet_activity_service,
+        "get_pet_activity",
+        lambda: {
+            "sessions": [
+                # 缺 updatedAt：id 时间戳段没有稳定来源，15s 脉冲内逐轮都会
+                # 生成新 id，账本压不住 → 直接跳过，不产通知。
+                _pet_row("session-nostamp", ""),
+                _pet_row("session-stamped", _iso(NOW - 5)),
+            ]
+        },
+    )
+    monkeypatch.setattr(session_service, "list_sessions", lambda: [])
+
+    rows = completion.collect_session_completed_attention(now=NOW)
+    assert len(rows) == 1
+    assert rows[0]["id"].startswith("session-completed:session-stamped:")
+
+
 def test_session_completed_attention_caps_and_degrades(monkeypatch):
     monkeypatch.setattr(
         pet_activity_service,

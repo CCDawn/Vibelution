@@ -1,5 +1,5 @@
 import "./personalAssistant/personal-assistant.tailwind.css";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PanelRightClose } from "lucide-react";
 import { controlDesktopAssistant } from "../api/desktopPet";
@@ -30,14 +30,25 @@ export function PersonalAssistantRoute() {
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [overviewCollapsed, setOverviewCollapsed] = useState(false);
   // 人工关注通知深链：`?panel=dispatches` 直达派遣回执面板（宽布局落到
-  // 右栏派遣 tab，窄布局直接弹派遣对话框），只消费一次初始 searchParams。
+  // 右栏派遣 tab，窄布局直接弹派遣对话框）。初始 state 兜底首次挂载；
+  // SPA 内二次导航（已在本页时通知卡 navigate 改 searchParams）组件不
+  // 重挂载，由下方 effect 响应变化补切 tab。依赖只放 query 串：参数不
+  // 变不重跑，本页也不会自行写 panel 参数，无轮询抖动。
   const [searchParams] = useSearchParams();
-  const deepLinkPanel = searchParams.get("panel") === "dispatches";
-  const [rightTab, setRightTab] = useState(() => (deepLinkPanel ? "dispatches" : "overview"));
+  const dispatchesDeepLink = searchParams.get("panel") === "dispatches";
+  const searchParamsString = searchParams.toString();
+  const [rightTab, setRightTab] = useState(() => (dispatchesDeepLink ? "dispatches" : "overview"));
   const [computerOpen, setComputerOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [affairsOpen, setAffairsOpen] = useState(false);
-  const [dispatchesOpen, setDispatchesOpen] = useState(deepLinkPanel);
+  const [dispatchesOpen, setDispatchesOpen] = useState(dispatchesDeepLink);
+  useEffect(() => {
+    if (new URLSearchParams(searchParamsString).get("panel") !== "dispatches") {
+      return;
+    }
+    setRightTab("dispatches");
+    setDispatchesOpen(true);
+  }, [searchParamsString]);
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const assistantAgentId = state.assistant?.agentId ?? "";
   const [desktopPending, setDesktopPending] = useState(false);
