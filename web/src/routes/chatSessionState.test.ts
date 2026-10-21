@@ -909,6 +909,23 @@ describe("chatSessionState", () => {
     });
   });
 
+  it("projects pinnedAtMs so summary folds converge the cross-window pin state", () => {
+    expect(sessionSummaryFromDetail(makeDetail({ pinnedAtMs: 1690000000000 })).pinnedAtMs).toBe(1690000000000);
+    // An explicitly unpinned detail must clear a previously pinned row on fold.
+    const sessions = mergeSessionDetailIntoSummaries(
+      [makeSummary({ id: "session-live", pinnedAtMs: 1690000000000 })],
+      makeDetail({ pinnedAtMs: null }),
+    );
+    expect(sessions[0]?.pinnedAtMs).toBeNull();
+    // A detail without the field must not erase a known pin stamp.
+    const preserved = mergeSessionDetailIntoSummaries(
+      [makeSummary({ id: "session-live", pinnedAtMs: 1690000000000 })],
+      makeDetail(),
+    );
+    expect(preserved[0]?.pinnedAtMs).toBe(1690000000000);
+    expect("pinnedAtMs" in sessionSummaryFromDetail(makeDetail())).toBe(false);
+  });
+
   it("preserves direct-session mismatch facts when deriving a sidebar summary", () => {
     expect(
       sessionSummaryFromDetail(

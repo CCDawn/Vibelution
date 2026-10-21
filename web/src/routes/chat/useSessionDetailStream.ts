@@ -37,10 +37,12 @@ import {
 } from "../chatStreamProjectionGate";
 import { mergeSessionDetailMessageWindowWithOutcome } from "../chatSessionState";
 import {
+  isPermanentSessionStreamFailureStatus,
   SESSION_STREAM_ERROR_REFRESH_MIN_INTERVAL_MS,
   SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
   SESSION_STREAM_ROUTE_SWITCH_GRACE_MS,
   type SessionStreamDecisionSnapshot,
+  type SessionStreamTerminalFailure,
 } from "./chatSessionStreamConnect";
 import {
   createSessionEventStream as createDefaultSessionEventStream,
@@ -101,6 +103,9 @@ function sessionTurnItemsForDetail(detail: SessionDetail, turnId: string): Sessi
 /** Why a guarded stream was hard-closed by its owner (telemetry evidence). */
 export type SessionStreamCloseReason = "grace_timeout" | "manual_reconnect" | "append_gap";
 
+/** Fallback sink when the caller passes no terminal-failure ref (direct hook tests). */
+const fallbackTerminalFailureRef: MutableRefObject<SessionStreamTerminalFailure | null> = { current: null };
+
 export type UseSessionDetailStreamOptions = {
   activeSessionId: string | null | undefined;
   sessionStreamShouldConnect: boolean;
@@ -119,6 +124,14 @@ export type UseSessionDetailStreamOptions = {
    */
   lastStreamActivityAppliedAtRef: MutableRefObject<Record<string, number>>;
   sessionStreamDecisionSnapshotRef: MutableRefObject<SessionStreamDecisionSnapshot>;
+  /**
+   * Shared render-time read side for terminal stream failures (the workbench
+   * owns the ref; the shouldConnect chain runs earlier in render than this
+   * hook's return value, so state alone cannot feed it without a TDZ).
+   * Optional: without a consumer ref the hook still tracks the fact in its own
+   * state and a module fallback keeps the write site uniform.
+   */
+  sessionStreamTerminalFailureRef?: MutableRefObject<SessionStreamTerminalFailure | null>;
   desktopConversationNotifierRef: MutableRefObject<DesktopConversationNotifier>;
   createSessionEventStream?: (sessionId: string) => SessionEventStream;
   /** Live title for desktop notifications (detail title or summary title). */
@@ -142,6 +155,7 @@ export function useSessionDetailStream({
   lastAssistantDeltaAppliedAtRef,
   lastStreamActivityAppliedAtRef,
   sessionStreamDecisionSnapshotRef,
+  sessionStreamTerminalFailureRef,
   desktopConversationNotifierRef,
   createSessionEventStream = createDefaultSessionEventStream,
   sessionTitleForNotifications,
@@ -149,10 +163,21 @@ export function useSessionDetailStream({
 }: UseSessionDetailStreamOptions): {
   sessionStreamConnected: boolean;
   streamDisconnectedSinceMs: number | null;
+  /**
+   * Permanent transport failure (404/410/401/403) observed for the active
+   * session's stream. The shouldConnect chain consumes it to stop the
+   * reconnect loop; the tombstone rendering owns the unavailable surface.
+   */
+  sessionStreamTerminalFailure: SessionStreamTerminalFailure | null;
   /** Manual "reconnect now" affordance for the active-turn disconnect advisory. */
   reconnectSessionStream: () => void;
 } {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
+  // Permanent transport failure (404/410/401/403) for the stream effect's
+  // session. Unlike the transient reconnect loop this never clears by itself:
+  // only the next stream effect (session switch / revisit) resets it.
+  const [sessionStreamTerminalFailure, setSessionStreamTerminalFailure] = useState<SessionStreamTerminalFailure | null>(null);
+  const terminalFailureSink = sessionStreamTerminalFailureRef ?? fallbackTerminalFailureRef;
   // Sticky start of the current reconnect loop: set on the first transport
   // error, cleared by the next successful open or a fresh stream effect. The
   // active-turn status note reads it to show "disconnected · Ns"; it is not
@@ -160,6 +185,7 @@ export function useSessionDetailStream({
   const [streamDisconnectedSinceMs, setStreamDisconnectedSinceMs] = useState<number | null>(null);
   const [streamReconnectTick, setStreamReconnectTick] = useState(0);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
+  const sessionStreamTerminalLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamErrorRefreshAtRef = useRef<Record<string, number>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
@@ -211,6 +237,11 @@ export function useSessionDetailStream({
     // A new stream effect owns the advisory clock; stale disconnect timing
     // from a previous session must not leak into the next one.
     setStreamDisconnectedSinceMs(null);
+    setSessionStreamTerminalFailure(null);
+    // Deliberately NOT resetting sessionStreamTerminalFailureRef here: a grace
+    // close after a terminal failure re-runs this effect for the same session,
+    // and clearing the fact would loop reconnect→404→terminal every 4s. The
+    // workbench's render-time sessionId-mismatch check owns the reset.
     if (!shouldConnect) {
       const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
       setSessionStreamConnected(false);
@@ -886,6 +917,7 @@ export function useSessionDetailStream({
       if (!disposed) {
         markStreamConnected();
         sessionStreamErrorLoggedRef.current[streamSessionId] = false;
+        sessionStreamTerminalLoggedRef.current[streamSessionId] = false;
         // A stream (re)open re-baselines the continuity gate: the first frame
         // after the server resumes applies even when the ledger jumped during
         // the outage, and any pending watermark recovery episode retires.
@@ -905,6 +937,39 @@ export function useSessionDetailStream({
 
     stream.onerror = () => {
       if (!disposed) {
+        // A permanent HTTP failure (session gone / unauthorized) ended the
+        // stream for good: report the terminal fact once and let the
+        // shouldConnect chain (via the workbench) stop reconnecting and the
+        // existing tombstone rendering own the unavailable surface. This is
+        // not a transient drop: the "disconnected · Ns" advisory stays off.
+        const terminalFailure = stream.terminalFailure;
+        if (terminalFailure && isPermanentSessionStreamFailureStatus(terminalFailure.status)) {
+          setSessionStreamConnected(false);
+          // The ref is the render-time fact the shouldConnect chain reads; the
+          // state flip only guarantees this handler causes a re-render.
+          terminalFailureSink.current = {
+            sessionId: streamSessionId,
+            status: terminalFailure.status,
+          };
+          setSessionStreamTerminalFailure(terminalFailureSink.current);
+          if (!sessionStreamTerminalLoggedRef.current[streamSessionId]) {
+            sessionStreamTerminalLoggedRef.current[streamSessionId] = true;
+            // One canonical readback so the tombstone / eviction paths engage
+            // without waiting for the next poll beat.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+            postBrowserTelemetry({
+              phase: "session_stream",
+              eventCode: "browser.session_stream.terminal_failure",
+              message: "Session detail stream entered a permanent failure state; reconnects stopped.",
+              level: "warning",
+              fields: {
+                sessionId: streamSessionId,
+                status: terminalFailure.status,
+              },
+            });
+          }
+          return;
+        }
         setSessionStreamConnected(false);
         // onerror fires on every failed reconnect attempt; keep the first
         // timestamp so the duration counter measures the whole outage.
@@ -1218,5 +1283,5 @@ export function useSessionDetailStream({
     forceCloseStreamRef.current("manual_reconnect");
   }, [activeSessionId, queryClient]);
 
-  return { sessionStreamConnected, streamDisconnectedSinceMs, reconnectSessionStream };
+  return { sessionStreamConnected, streamDisconnectedSinceMs, sessionStreamTerminalFailure, reconnectSessionStream };
 }

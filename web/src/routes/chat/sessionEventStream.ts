@@ -1,10 +1,22 @@
-import { isFetchAbortError } from "../../api/chat";
+import { isFetchAbortError, isFetchJsonHttpError } from "../../api/chat";
 import { consumeGuardedEventStream } from "./guardedEventStream";
+import { isPermanentSessionStreamFailureStatus } from "./chatSessionStreamConnect";
 
 const SESSION_STREAM_RECONNECT_MS = 3_000;
 
+/**
+ * A permanent transport failure (404/410/401/403): the stream stops for good
+ * instead of looping the reconnect timer. The session-detail consumer folds
+ * this into the shouldConnect chain and the existing tombstone rendering.
+ */
+export type SessionEventStreamTerminalFailure = {
+  status: number;
+};
+
 export type SessionEventStream = {
   readonly readyState: number;
+  /** Non-null once a permanent HTTP failure ended this stream; never resets. */
+  readonly terminalFailure: SessionEventStreamTerminalFailure | null;
   onopen: ((event: Event) => void) | null;
   onerror: ((event: Event) => void) | null;
   addEventListener(type: string, callback: EventListener): void;
@@ -18,6 +30,7 @@ export function sessionEventsUrl(sessionId: string): string {
 
 class FetchSessionEventStream implements SessionEventStream {
   readyState = 0;
+  terminalFailure: SessionEventStreamTerminalFailure | null = null;
   onopen: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
 
@@ -84,12 +97,35 @@ class FetchSessionEventStream implements SessionEventStream {
       });
       if (!this.closed && !controller.signal.aborted) this.scheduleReconnect();
     } catch (error) {
-      if (!this.closed && !controller.signal.aborted && !isFetchAbortError(error)) {
-        this.scheduleReconnect();
+      if (this.closed || controller.signal.aborted || isFetchAbortError(error)) {
+        return;
       }
+      // A permanent HTTP failure (session gone / unauthorized) can never be
+      // fixed by reconnecting: enter the terminal state instead of looping the
+      // 3s retry. 5xx and network errors keep the existing reconnect policy.
+      if (isFetchJsonHttpError(error) && isPermanentSessionStreamFailureStatus(error.status)) {
+        this.enterTerminalFailure(error.status);
+        return;
+      }
+      this.scheduleReconnect();
     } finally {
       if (this.controller === controller) this.controller = null;
     }
+  }
+
+  /**
+   * Close the stream for good and report the failure once. readyState settles
+   * at CLOSED (2) so the warm registry drops the entry instead of parking a
+   * dead stream, and a later remount re-tries exactly once through a fresh
+   * stream (never through this instance).
+   */
+  private enterTerminalFailure(status: number): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.terminalFailure = { status };
+    this.readyState = 2;
+    this.controller = null;
+    this.onerror?.(new Event("error"));
   }
 
   private scheduleReconnect(): void {

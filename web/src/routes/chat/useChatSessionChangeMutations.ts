@@ -29,6 +29,8 @@ import {
   renameSessionDetail,
   renameSessionInSummaries,
 } from "../chatSessionState";
+import { broadcastSessionIndexChange } from "../chatSessionIndexSync";
+import { getPageInstanceId } from "../../app/pageInstance";
 import {
   pinSessionCreatePreserve,
   takeSessionCreatePreserve,
@@ -247,6 +249,13 @@ export function useChatSessionChangeMutations({
         return;
       }
       markSessionDeleteTombstone(variables.sessionId, { confirmed: true });
+      // Other windows must drop the row from their rails; their index poll is
+      // off while a stream owns live queries, so announce the deletion.
+      broadcastSessionIndexChange({
+        sessionId: variables.sessionId,
+        changeType: "delete",
+        sourceId: getPageInstanceId(),
+      });
       clearSessionTransientUiState(variables.sessionId);
       const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
       const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
@@ -411,6 +420,11 @@ export function useChatSessionChangeMutations({
       const deletedSessionIds = requestedIds.filter((id) => confirmedIds.has(id));
       const undeletedIds = requestedIds.filter((id) => !confirmedIds.has(id));
       deletedSessionIds.forEach((sessionId) => markSessionDeleteTombstone(sessionId, { confirmed: true }));
+      deletedSessionIds.forEach((sessionId) => broadcastSessionIndexChange({
+        sessionId,
+        changeType: "delete",
+        sourceId: getPageInstanceId(),
+      }));
       undeletedIds.forEach(clearSessionDeleteTombstone);
       for (const summary of context?.releasedCreatePreserves ?? []) {
         if (undeletedIds.includes(summary.id)) pinSessionCreatePreserve(summary);

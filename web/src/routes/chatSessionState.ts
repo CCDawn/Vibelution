@@ -980,6 +980,13 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   if (detail.hiddenFromIndex !== undefined) {
     summary.hiddenFromIndex = detail.hiddenFromIndex;
   }
+  // Pin stamp convergence: detail snapshots (GET/SSE/select handoff) carry the
+  // authoritative pinned_at_ms; without it a summary folded from a stream detail
+  // permanently shows a stale pin state, and `null` (explicitly unpinned) must
+  // still overwrite a previously pinned row.
+  if (detail.pinnedAtMs !== undefined) {
+    summary.pinnedAtMs = detail.pinnedAtMs;
+  }
   return summary;
 }
 
