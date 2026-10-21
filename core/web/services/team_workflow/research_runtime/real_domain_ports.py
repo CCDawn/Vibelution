@@ -2562,6 +2562,72 @@ def _persist_source_collection_run_id(
     store.submit(mutate, force_flush=True).result(timeout=30)
 
 
+_AGENT_TASK_TURN_ID_RESOLVE_TIMEOUT_S = 25.0
+_AGENT_TASK_TURN_ID_RESOLVE_POLL_S = 1.0
+
+
+def _resolve_started_agent_turn_id(
+    session_id: str,
+    task_id: str,
+    *,
+    timeout_s: float = _AGENT_TASK_TURN_ID_RESOLVE_TIMEOUT_S,
+    poll_s: float = _AGENT_TASK_TURN_ID_RESOLVE_POLL_S,
+) -> str:
+    """Boundedly resolve the real turn id for an asynchronously admitted turn.
+
+    A busy session can accept a task dispatch before the canonical turn exists,
+    so the started payload carries sessionId/taskId with an empty turnId. The
+    turn's journaled user message is the running-time authority: admission
+    stamps ``metadata.turnId`` on it, keyed by the stage/project task id, and
+    that message exists as soon as the turn is admitted (queued or running).
+    Returns "" when the deadline passes without a resolvable turn id.
+    """
+
+    from core.web.services import session_service
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_task_id = str(task_id or "").strip()
+    if not normalized_session_id or not normalized_task_id:
+        return ""
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    wait_s = max(0.05, float(poll_s))
+    while True:
+        try:
+            messages = session_service._session_ledger_visible_messages(
+                normalized_session_id
+            )
+        except Exception:  # noqa: BLE001 - a reader hiccup must not skip the poll window
+            messages = []
+        for message in reversed(list(messages or [])):
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role") or "").strip().lower() != "user":
+                continue
+            metadata = (
+                message.get("metadata")
+                if isinstance(message.get("metadata"), dict)
+                else {}
+            )
+            if (
+                str(metadata.get("taskId") or "").strip() != normalized_task_id
+                and str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+                != normalized_task_id
+            ):
+                continue
+            turn_id = str(
+                metadata.get("turnId")
+                or metadata.get("turn_id")
+                or message.get("turnId")
+                or message.get("turn_id")
+                or ""
+            ).strip()
+            if turn_id:
+                return turn_id
+        if time.monotonic() >= deadline:
+            return ""
+        time.sleep(wait_s)
+
+
 def _agent_handle_from_started(started: dict[str, Any]) -> AgentTaskHandle:
     task = started.get("task") if isinstance(started.get("task"), dict) else {}
     task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
@@ -2573,7 +2639,23 @@ def _agent_handle_from_started(started: dict[str, Any]) -> AgentTaskHandle:
     session_attempt = int(
         started.get("sessionAttempt") or task.get("sessionAttempt") or 1
     )
-    if not session_id or not task_id or not turn_id:
+    if not session_id or not task_id:
+        raise RuntimeError("agent task anchor is incomplete")
+    if not turn_id:
+        # A busy session admits the dispatch asynchronously: the acceptance
+        # payload can carry sessionId/taskId with an empty turnId while the
+        # real turn is queued/starting. Resolve the real turn id with a
+        # bounded poll so the anchor (and the later terminal wait) binds to
+        # the turn that actually runs instead of failing the attempt while
+        # the orphaned turn still executes. Timeout keeps the original
+        # failure semantics; a missing sessionId/taskId stays a hard error.
+        turn_id = _resolve_started_agent_turn_id(
+            session_id,
+            task_id,
+            timeout_s=_AGENT_TASK_TURN_ID_RESOLVE_TIMEOUT_S,
+            poll_s=_AGENT_TASK_TURN_ID_RESOLVE_POLL_S,
+        )
+    if not turn_id:
         raise RuntimeError("agent task anchor is incomplete")
     return AgentTaskHandle(
         session_id=session_id,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSessionDetail } from "../../api/chat";
 import { fetchPetActivity } from "../../api/pet";
@@ -19,11 +19,32 @@ export function useAssistantActivity({ enabled, assistant, reading, showCompleti
   const query = useQuery({ queryKey: queryKeys.petActivity(), queryFn: fetchPetActivity, enabled,
     refetchInterval: q => petActivityRefetchInterval(q.state.data), refetchIntervalInBackground: false, retry: false });
   const sessionId = assistant?.directSessionId ?? "";
+  const ownActivity = query.data?.sessions.find(row => row.sessionId === sessionId && row.agentId === assistant?.agentId);
+  const repliesActive = reading || !query.data || query.isError
+    || Boolean(ownActivity);
   const computer = useQuery({ queryKey: queryKeys.personalAssistantComputer(), queryFn: ({ signal }) => fetchPersonalAssistantComputer({ signal }),
-    enabled: enabled && Boolean(assistant), refetchInterval: 1000, refetchIntervalInBackground: false, retry: false });
+    enabled: enabled && Boolean(assistant),
+    refetchInterval: q => reading || !q.state.data || q.state.data.grantId ? 1000 : 15_000,
+    refetchIntervalInBackground: false, retry: false });
   const replies = useQuery({ queryKey: queryKeys.personalAssistantReplies(assistant?.agentId ?? "", sessionId),
     queryFn: ({ signal }) => fetchSessionDetail(sessionId, { signal, transcriptScope: "window", messageLimit: 12, includeSecondary: false }),
-    enabled: enabled && Boolean(assistant), refetchInterval: 3000, refetchIntervalInBackground: false, retry: false });
+    enabled: enabled && Boolean(assistant),
+    refetchInterval: q => repliesActive || q.state.status === "error" ? 3000 : 30_000,
+    refetchIntervalInBackground: false, retry: false });
+  // Activity is only a refresh hint. Native Session remains the message authority;
+  // the bounded fallback also catches replies absent from the activity projection.
+  const activityHint = JSON.stringify([ownActivity?.updatedAt, ownActivity?.tone, ownActivity?.phase]);
+  const identity = `${assistant?.agentId ?? ""}:${sessionId}`;
+  const previousHint = useRef({ identity, hint: activityHint });
+  const { refetch: refreshReplies } = replies;
+  useEffect(() => {
+    const previous = previousHint.current;
+    previousHint.current = { identity, hint: activityHint };
+    if (enabled && assistant && !reading && ownActivity?.tone !== "running"
+      && previous.identity === identity && previous.hint !== activityHint) {
+      void refreshReplies();
+    }
+  }, [enabled, assistant, identity, activityHint, reading, ownActivity?.tone, refreshReplies]);
   const store = useMemo(() => assistantReplyStore(`${assistant?.agentId ?? ""}:${sessionId}`), [assistant?.agentId, sessionId]);
   const replyState = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [clock, setClock] = useState(0);
