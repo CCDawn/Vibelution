@@ -17,6 +17,7 @@ Agent 单轮编排的现有 SSOT。新逻辑优先扩这里的模块，不要在
 | `round_state.py` | 单轮局部状态；卡住信号读 `runtime_telemetry()` |
 | `response_processor.py` | LLM 响应协议处理 |
 | `context_engine.py` | 长生命周期上下文与 Prompt segment 组装 |
+| `context_input_metering.py` | 复用协议消息投影计入工具参数和按协议回传的 reasoning 字段；仅生成有界计数视图，不改模型消息 |
 | `agent_modes.py` | `AgentMode` / `ModePolicy` |
 | `runtime_goal.py` | 运行目标包 |
 
