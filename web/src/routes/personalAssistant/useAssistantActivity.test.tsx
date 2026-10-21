@@ -122,6 +122,13 @@ it("reduces collapsed idle reads while keeping active, unread and fallback refre
     expect(Number(container.textContent)).toBe(unreadBeforeFallback + 1);
     expect(client.getQueryData<SessionDetail>(replyKey)?.messages).toHaveLength(2);
 
+    vi.mocked(fetchSessionDetail).mockRejectedValueOnce(new Error("temporarily unavailable"));
+    await act(async () => { await client.refetchQueries({ queryKey: replyKey, exact: true }); });
+    const failedReads = vi.mocked(fetchSessionDetail).mock.calls.length;
+    await advance(3);
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(failedReads + 1);
+    expect(client.getQueryState(replyKey)?.status).toBe("success");
+
     const counts = [fetchPetActivity, fetchPersonalAssistantComputer, fetchSessionDetail].map(fn => vi.mocked(fn).mock.calls.length);
     enabled = false;
     await render();
