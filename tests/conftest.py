@@ -280,6 +280,24 @@ def _reset_agent_directory_caches(agent_directory_service):
 # ============================================================================
 
 @pytest.fixture(autouse=True)
+def reset_polling_memo_caches():
+    """Keep TTL-memoized polling projections from leaking across tests."""
+    from core.web.services import (
+        agent_plugin_service,
+        personal_assistant_service,
+        personal_attention_service,
+    )
+
+    personal_attention_service._reset_human_attention_cache_for_tests()
+    agent_plugin_service._reset_companion_activity_rows_cache_for_tests()
+    personal_assistant_service._reset_platform_overview_cache_for_tests()
+    yield
+    personal_attention_service._reset_human_attention_cache_for_tests()
+    agent_plugin_service._reset_companion_activity_rows_cache_for_tests()
+    personal_assistant_service._reset_platform_overview_cache_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def reset_singletons(request):
     """
     每个测试前后重置所有模块级单例变量，防止测试间状态泄漏。

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import time
@@ -39,6 +40,22 @@ _SESSION_ACTIVITY_FIELDS = (
 _COMPANION_ACTIVITY_STAMP_CACHE: dict[str, dict[str, Any]] = {}
 _COMPANION_ACTIVITY_STAMP_CACHE_LOCK = threading.Lock()
 _COMPANION_ACTIVITY_STAMP_CACHE_MAX_ENTRIES = 256
+
+# The lobby polls this projection every 5s while visible, and each read still
+# pays one directory-store page query plus per-companion journal stats. A 10s
+# memo shared by the activity and companion endpoints halves that work while
+# keeping a new activity stamp visible within two polls.
+_COMPANION_ACTIVITY_ROWS_CACHE_TTL_SECONDS = 10.0
+_COMPANION_ACTIVITY_ROWS_CACHE_MAX_ENTRIES = 8
+_COMPANION_ACTIVITY_ROWS_CACHE: dict[tuple[tuple[str, str], ...], dict[str, Any]] = {}
+_COMPANION_ACTIVITY_ROWS_CACHE_LOCK = threading.Lock()
+
+
+def _reset_companion_activity_rows_cache_for_tests() -> None:
+    """Drop the memoized companion activity rows (test isolation only)."""
+
+    with _COMPANION_ACTIVITY_ROWS_CACHE_LOCK:
+        _COMPANION_ACTIVITY_ROWS_CACHE.clear()
 
 
 def _reset_companion_activity_stamp_cache_for_tests() -> None:
@@ -291,6 +308,40 @@ def _enabled_companion_directory_rows() -> list[dict[str, Any]]:
 
 
 def _companion_activity_rows(
+    companion_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project Session activity for the enabled companions, memoized per binding set."""
+
+    cache_key = tuple(
+        sorted(
+            (
+                str(row.get("agentId") or "").strip(),
+                str(row.get("directSessionId") or "").strip(),
+            )
+            for row in companion_rows
+            if isinstance(row, dict)
+        )
+    )
+    now = time.monotonic()
+    with _COMPANION_ACTIVITY_ROWS_CACHE_LOCK:
+        cached = _COMPANION_ACTIVITY_ROWS_CACHE.get(cache_key)
+        if cached is not None and now < float(cached["expires_at"]):
+            return copy.deepcopy(cached["rows"])
+        rows = _project_companion_activity_rows(companion_rows)
+        _COMPANION_ACTIVITY_ROWS_CACHE[cache_key] = {
+            "expires_at": now + _COMPANION_ACTIVITY_ROWS_CACHE_TTL_SECONDS,
+            "rows": copy.deepcopy(rows),
+        }
+        while len(_COMPANION_ACTIVITY_ROWS_CACHE) > _COMPANION_ACTIVITY_ROWS_CACHE_MAX_ENTRIES:
+            oldest_key = min(
+                _COMPANION_ACTIVITY_ROWS_CACHE,
+                key=lambda key: float(_COMPANION_ACTIVITY_ROWS_CACHE[key]["expires_at"]),
+            )
+            _COMPANION_ACTIVITY_ROWS_CACHE.pop(oldest_key, None)
+        return rows
+
+
+def _project_companion_activity_rows(
     companion_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     session_activity_by_id = _native_session_activity_by_id(companion_rows)

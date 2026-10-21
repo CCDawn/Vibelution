@@ -98,6 +98,7 @@ def query_session_summaries(
     before = parse_directory_cursor_entry(cursor)
     started_at_head = before is None
     runtime_statuses = _session_runtime_status_snapshot()
+    agent_inbox_pending_count_cache: dict[str, int] = {}
     _, experiment_bindings = _chat_state_directory_overlay()
     if normalized_query:
         return _query_session_summaries_with_body_search(
@@ -114,6 +115,7 @@ def query_session_summaries(
             agent_by_id=agent_by_id,
             experiment_bindings=experiment_bindings,
             runtime_statuses=runtime_statuses,
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
             cursor=cursor,
         )
     if normalized_sort != "updatedAt_desc":
@@ -133,6 +135,7 @@ def query_session_summaries(
                 agent_by_id=agent_by_id,
                 experiment_binding=experiment_bindings.get(str(row.get("sessionId") or "").strip()),
                 runtime_statuses=runtime_statuses,
+                agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
             )
             for row in page["rows"]
         ]
@@ -148,6 +151,7 @@ def query_session_summaries(
             query=normalized_query,
             matching_agent_ids=matching_agent_ids,
             runtime_statuses=runtime_statuses,
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
         )
         summaries.sort(
             key=s._session_query_sort_key(normalized_sort),
@@ -189,6 +193,7 @@ def query_session_summaries(
                 agent_by_id=agent_by_id,
                 experiment_binding=experiment_bindings.get(str(row.get("sessionId") or "").strip()),
                 runtime_statuses=runtime_statuses,
+                agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
             )
             if not include_hidden and not s._session_agent_visible_in_indexes(summary):
                 continue
@@ -215,6 +220,7 @@ def query_session_summaries(
             query=normalized_query,
             matching_agent_ids=matching_agent_ids,
             runtime_statuses=runtime_statuses,
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
         )
     return {
         "items": _with_terminal_states(items, store=store),
@@ -238,6 +244,7 @@ def _query_session_summaries_with_body_search(
     agent_by_id: Mapping[str, Mapping[str, Any]],
     experiment_bindings: Mapping[str, Mapping[str, Any]],
     runtime_statuses: Mapping[str, str] | None,
+    agent_inbox_pending_count_cache: dict[str, int],
     cursor: str,
 ) -> dict[str, Any]:
     """Search path that also matches session journal bodies and returns snippets.
@@ -333,6 +340,7 @@ def _query_session_summaries_with_body_search(
             ),
             runtime_statuses=runtime_statuses,
             search_snippets=body_matches.get(str(row.get("sessionId") or "").strip()),
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
         )
         for row in matched_rows
     ]
@@ -348,6 +356,7 @@ def _query_session_summaries_with_body_search(
         query=query,
         matching_agent_ids=matching_agent_ids,
         runtime_statuses=runtime_statuses,
+        agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
     )
     # Stable two-pass sort: requested order first, then pinned-first tiers.
     summaries.sort(
@@ -394,12 +403,14 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
             break
     _, experiment_bindings = _chat_state_directory_overlay()
     runtime_statuses = _session_runtime_status_snapshot()
+    agent_inbox_pending_count_cache: dict[str, int] = {}
     summaries = [
         _summary_from_directory_row(
             row,
             agent_by_id=agent_by_id,
             experiment_binding=experiment_bindings.get(str(row.get("sessionId") or "").strip()),
             runtime_statuses=runtime_statuses,
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
         )
         for row in rows
     ]
@@ -412,6 +423,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         agent_by_id=agent_by_id,
         include_hidden=include_hidden,
         runtime_statuses=runtime_statuses,
+        agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
     )
     summaries.sort(
         key=lambda item: (
@@ -448,11 +460,13 @@ def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
     agent_by_id = _service()._agent_lookup_for_conversations()
     rows = store.repository.list_child_sessions(root_session_id)
     runtime_statuses = _session_runtime_status_snapshot()
+    agent_inbox_pending_count_cache: dict[str, int] = {}
     items = [
         _summary_from_directory_row(
             row,
             agent_by_id=agent_by_id,
             runtime_statuses=runtime_statuses,
+            agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
         )
         for row in rows
     ]
@@ -804,6 +818,7 @@ def _merge_agent_directory_stub_summaries(
     query: str = "",
     matching_agent_ids: tuple[str, ...] = (),
     runtime_statuses: Mapping[str, str] | None = None,
+    agent_inbox_pending_count_cache: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Surface Agent direct bindings that exist in agents.json but not yet in Store."""
 
@@ -868,6 +883,7 @@ def _merge_agent_directory_stub_summaries(
                 },
                 agent_by_id=agent_by_id,
                 runtime_statuses=runtime_statuses,
+                agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
             )
         )
         existing.add(session_id)
@@ -920,6 +936,7 @@ def _summary_from_directory_row(
     experiment_binding: Mapping[str, Any] | None = None,
     runtime_statuses: Mapping[str, str] | None = None,
     search_snippets: Sequence[str] | None = None,
+    agent_inbox_pending_count_cache: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     session_id = str(row.get("sessionId") or "").strip()
@@ -958,6 +975,19 @@ def _summary_from_directory_row(
         agent_lookup_checked=True,
         persisted_status_code="",
     )
+    # The count is per Agent, but a page projects many sessions per Agent and
+    # each read stats that Agent's inbox paths. Share one lookup per request.
+    agent_inbox_pending_count = 0
+    if isinstance(agent, dict):
+        if (
+            agent_inbox_pending_count_cache is not None
+            and agent_id in agent_inbox_pending_count_cache
+        ):
+            agent_inbox_pending_count = agent_inbox_pending_count_cache[agent_id]
+        else:
+            agent_inbox_pending_count = s._agent_inbox_pending_count_for_summary(agent)
+            if agent_inbox_pending_count_cache is not None and agent_id:
+                agent_inbox_pending_count_cache[agent_id] = agent_inbox_pending_count
     summary: dict[str, Any] = {
         "id": session_id,
         "title": display_title or raw_title,
@@ -972,9 +1002,7 @@ def _summary_from_directory_row(
         "agentPromptSnapshot": {},
         "lastPromptAssembly": {},
         "experimentBinding": dict(experiment_binding) if isinstance(experiment_binding, Mapping) else None,
-        "agentInboxPendingCount": s._agent_inbox_pending_count_for_summary(agent)
-        if isinstance(agent, dict)
-        else 0,
+        "agentInboxPendingCount": agent_inbox_pending_count,
         "agentMissingId": "",
         "agentDirectSessionMismatch": False,
         "agentPrimaryDirectSessionId": str((agent or {}).get("directSessionId") or "").strip(),

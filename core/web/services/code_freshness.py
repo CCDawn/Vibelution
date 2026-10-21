@@ -57,9 +57,10 @@ GIT_TIMEOUT_SECONDS = 10
 POLL_GIT_GLOBAL_ARGS = ["--no-optional-locks"]
 # Fast-path TTL for the combined verdict.  The UI polls every 120s while this
 # only bounds staleness of inputs the HEAD/fingerprint observation cannot see
-# (frontend provenance files), so 45s (matching git_status_service's snapshot
-# TTL) keeps the hot path at zero git processes between unrelated changes.
-FRESHNESS_FAST_PATH_TTL_SECONDS = 45.0
+# (frontend provenance files); a full resolution costs seconds, so a TTL below
+# the poll interval made every poll a miss.  300s keeps the hot path at zero
+# git processes between unrelated changes and at most one poll behind.
+FRESHNESS_FAST_PATH_TTL_SECONDS = 300.0
 # Dirty-tree recheck throttle.  ``status --untracked-files=all`` walks the whole
 # tree and dominates the request cost, but the restart banner only needs a
 # eventually-consistent dirty flag, so it is refreshed at most every 5 minutes

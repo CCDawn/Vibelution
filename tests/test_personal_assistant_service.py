@@ -607,7 +607,42 @@ def test_platform_overview_keeps_total_counts_when_summaries_are_bounded(
         row["id"] for row in remaining["sessions"]
     )
     sessions[-1]["title"] = "另一个公开状态"
+    # Revision tracks the next projection; the poll memo bounds how long a
+    # change can stay invisible.
+    service._reset_platform_overview_cache_for_tests()
     assert service.get_platform_overview(offset=100)["pagination"]["revision"] != overview["pagination"]["revision"]
+
+
+def test_platform_overview_reuses_projection_until_the_poll_ttl_expires(
+    personal_env, monkeypatch
+):
+    scans = []
+
+    def collect(name):
+        scans.append(name)
+        return []
+
+    monkeypatch.setattr(directory, "list_agents", lambda **_kwargs: collect("agents"))
+    monkeypatch.setattr(session_service, "list_sessions", lambda: collect("sessions"))
+    monkeypatch.setattr(
+        pet_activity_service,
+        "get_pet_activity",
+        lambda: {
+            "generatedAt": "test",
+            "sessions": [],
+        },
+    )
+
+    first = service.get_platform_overview()
+    second = service.get_platform_overview()
+    assert scans == ["agents", "sessions"]
+    assert second == first
+    assert second is not first
+
+    with service._PLATFORM_OVERVIEW_CACHE_LOCK:
+        service._PLATFORM_OVERVIEW_CACHE["expires_at"] = 0.0
+    service.get_platform_overview()
+    assert scans == ["agents", "sessions", "agents", "sessions"]
 
 
 def test_created_assistant_can_execute_personal_memory_tools(personal_env):
