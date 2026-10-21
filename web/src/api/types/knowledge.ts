@@ -537,6 +537,25 @@ export type KnowledgeRatingSuggestionReviewResponse = {
   item: KnowledgeItem | null;
 };
 
+export type KnowledgeSourceInboxBulkReviewResponse = {
+  schemaVersion: number;
+  ownerType: KnowledgeSourceOwnerType;
+  ownerId: string;
+  decision: string;
+  reviewed: KnowledgeSourceInboxReviewResponse[];
+  skipped: Array<{
+    inboxSourceId: string;
+    reason: string;
+    detail?: string;
+  }>;
+  summary: {
+    requestedCount: number;
+    reviewedCount: number;
+    skippedCount: number;
+  };
+  updatedAt: string;
+};
+
 export type KnowledgeRatingSuggestionBulkReviewResponse = {
   schemaVersion: number;
   teamId: string;

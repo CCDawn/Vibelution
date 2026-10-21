@@ -1033,10 +1033,33 @@ export type SessionToolApprovalRequest = {
   configHash: string;
   permissionPreset: string;
   availableDecisions: Array<
-    "accept" | "acceptForSession" | "acceptAlways" | "decline" | "cancel" | string
+    | "accept"
+    | "acceptForSession"
+    | "acceptForSessionTool"
+    | "acceptWithActionWindow"
+    | "acceptAlways"
+    | "decline"
+    | "cancel"
+    | string
   >;
+  /** Assistant manage action-window projection; present on manage-tool requests only. */
+  assistantActionWindow?: {
+    eligible: boolean;
+    remainingSeconds: number;
+    durationSeconds: number;
+    activeWindows: Array<{ action: string; remainingSeconds: number }>;
+  };
   createdAt: string;
-  status: "pending" | "accepted" | "accepted_for_session" | "declined" | "cancelled" | "expired" | string;
+  status:
+    | "pending"
+    | "accepted"
+    | "accepted_for_session"
+    | "accepted_for_session_tool"
+    | "accepted_with_action_window"
+    | "declined"
+    | "cancelled"
+    | "expired"
+    | string;
   decision: string | null;
   resolvedAt: string | null;
 };

@@ -3,6 +3,7 @@ import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import type {
   FileContent,
   SessionRuntimeNotice,
+  SessionToolApprovalRequest,
 } from "../../api/types";
 import { VStateSurface } from "../../components/vui";
 import {
@@ -85,8 +86,11 @@ export type ChatSessionWorkspaceToolApproval = {
   actionPreview?: string;
   sessionGrantScope?: Record<string, unknown>;
   toolName?: string;
+  assistantActionWindow?: SessionToolApprovalRequest["assistantActionWindow"];
   onApprove: () => void;
   onApproveForSession?: () => void;
+  onApproveForSessionTool?: () => void;
+  onApproveWithActionWindow?: () => void;
   onReject: () => void;
 };
 
@@ -160,9 +164,12 @@ export function ChatSessionWorkspacePanel({
             actionPreview={toolApproval.actionPreview}
             sessionGrantScope={toolApproval.sessionGrantScope}
             toolName={toolApproval.toolName}
+            assistantActionWindow={toolApproval.assistantActionWindow}
             variant="banner"
             onApprove={toolApproval.onApprove}
             onApproveForSession={toolApproval.onApproveForSession}
+            onApproveForSessionTool={toolApproval.onApproveForSessionTool}
+            onApproveWithActionWindow={toolApproval.onApproveWithActionWindow}
             onReject={toolApproval.onReject}
           />
         </div>

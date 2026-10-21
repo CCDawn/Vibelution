@@ -2,8 +2,10 @@ import { useEffect, useId } from "react";
 import { ShieldAlert } from "lucide-react";
 
 import { VButton } from "../../components/vui";
+import type { SessionToolApprovalRequest } from "../../api/types";
 import styles from "./ChatToolApprovalDialog.styles";
 import {
+  assistantActionWindowSummary,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
   toolApprovalCodexTitle,
@@ -27,10 +29,16 @@ type ChatToolApprovalDialogProps = {
   actionPreview?: string;
   sessionGrantScope?: Record<string, unknown>;
   toolName?: string;
+  /** b3: assistant manage action-window projection (remaining delegation time). */
+  assistantActionWindow?: SessionToolApprovalRequest["assistantActionWindow"];
   /** banner: composer-adjacent bar; inline: under tool activity in transcript. */
   variant?: "banner" | "inline";
   onApprove: () => void;
   onApproveForSession?: () => void;
+  /** b1: coarser opt-in tier — this tool for the rest of the session. */
+  onApproveForSessionTool?: () => void;
+  /** b3: approve once and open the low-risk manage action window. */
+  onApproveWithActionWindow?: () => void;
   onReject: () => void;
 };
 
@@ -55,9 +63,12 @@ export function ChatToolApprovalDialog({
   actionPreview,
   sessionGrantScope,
   toolName,
+  assistantActionWindow,
   variant = "banner",
   onApprove,
   onApproveForSession,
+  onApproveForSessionTool,
+  onApproveWithActionWindow,
   onReject,
 }: ChatToolApprovalDialogProps) {
   const dialogId = useId();
@@ -67,7 +78,8 @@ export function ChatToolApprovalDialog({
   const toolListId = `${dialogId}-tools`;
   const previewId = `${dialogId}-preview`;
   const grantId = `${dialogId}-grant`;
-  const descriptionIds = `${riskId} ${scopeId} ${toolListId} ${previewId} ${grantId}`;
+  const windowId = `${dialogId}-window`;
+  const descriptionIds = `${riskId} ${scopeId} ${toolListId} ${previewId} ${grantId} ${windowId}`;
   const buttons = toolApprovalCodexButtonLabels(lang);
   const primaryToolName = toolName || toolLabels[0]?.id || "";
   const displayName = toolLabels.find((item) => item.id === primaryToolName)?.label || toolApprovalDisplayName(primaryToolName, lang);
@@ -78,6 +90,7 @@ export function ChatToolApprovalDialog({
   const scopeText = String(scopeLabel || "").trim();
   const visibleLabels = toolLabels.slice(0, 4);
   const extraCount = Math.max(0, toolLabels.length - visibleLabels.length);
+  const actionWindowText = assistantActionWindowSummary(assistantActionWindow, lang).trim();
 
   useEffect(() => {
     if (pending) {
@@ -143,6 +156,13 @@ export function ChatToolApprovalDialog({
           ) : (
             <span id={grantId} className="sr-only" />
           )}
+          {actionWindowText ? (
+            <p id={windowId} className={styles.grantDescription} data-chat-approval-action-window>
+              {actionWindowText}
+            </p>
+          ) : (
+            <span id={windowId} className="sr-only" />
+          )}
           {/* Keep labels for a11y without visual chip clutter. */}
           <div id={toolListId} className={styles.toolList} title={rawTitle} role="list">
             {visibleLabels.length
@@ -183,6 +203,30 @@ export function ChatToolApprovalDialog({
               title={lang === "zh" ? "本会话始终允许同类调用（A）" : "Always allow for this session (A)"}
             >
               <span>{buttons.always}</span>
+            </VButton>
+          ) : null}
+          {onApproveForSessionTool ? (
+            <VButton
+              type="button"
+              className={styles.alwaysButton}
+              onClick={onApproveForSessionTool}
+              isDisabled={pending}
+              data-chat-approval-accept-tool-session="true"
+              title={lang === "zh" ? "本会话内此工具不再询问" : "Stop asking for this tool this session"}
+            >
+              <span>{buttons.toolSession}</span>
+            </VButton>
+          ) : null}
+          {onApproveWithActionWindow ? (
+            <VButton
+              type="button"
+              className={styles.alwaysButton}
+              onClick={onApproveWithActionWindow}
+              isDisabled={pending}
+              data-chat-approval-accept-action-window="true"
+              title={lang === "zh" ? "批准本次并授权未来 4 小时内同类低风险操作直办" : "Approve once and allow this low-risk action directly for 4 hours"}
+            >
+              <span>{buttons.actionWindow}</span>
             </VButton>
           ) : null}
           <VButton
