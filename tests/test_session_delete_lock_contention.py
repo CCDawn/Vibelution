@@ -11,6 +11,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from core.ui.chat_state import save_chat_state
 from core.web.services import (
     agent_bulk_delete_service,
@@ -164,3 +166,80 @@ def test_delete_does_not_hold_lock_during_journal_helpers(tmp_path, monkeypatch)
     assert max(delete_holds) < 400, (
         f"delete lock hold {delete_holds} must stay off journal replay; sibling detail {detail_ms:.0f}ms"
     )
+
+
+def test_delete_waits_out_submit_admission_window_then_refuses_busy(tmp_path, monkeypatch):
+    """G4 (chat-fix2 R4): delete must not slip past a submit admission window.
+
+    Submit holds the per-session admission lock from its busy check through
+    running registration and the initial journal markers. A delete issued
+    inside that window must park on the same lock and then refuse as busy
+    instead of removing the row the admitted turn is about to register into.
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_two_sessions(tmp_path)
+
+    session_id = "session-delete"
+    admit_lock = session_service._session_submit_admit_lock(session_id)
+    admit_lock.acquire()
+    delete_started = threading.Event()
+    result_box: dict[str, object] = {}
+
+    def run_delete():
+        delete_started.set()
+        try:
+            result_box["result"] = session_service._delete_chat_session_state(session_id)
+        except BaseException as exc:  # noqa: BLE001 - forwarded to assertions below
+            result_box["error"] = exc
+
+    deleter = threading.Thread(target=run_delete, name="session-delete-admit-race")
+    deleter.start()
+    assert delete_started.wait(timeout=5)
+    time.sleep(0.1)  # let the delete park on the admission lock; outcome is order-independent
+    # The submit window closes with the turn registered as running.
+    session_service._set_session_running(session_id, True, turn_id="turn-delete-race")
+    admit_lock.release()
+    deleter.join(timeout=10)
+    assert deleter.is_alive() is False
+    try:
+        assert isinstance(result_box.get("error"), session_service.SessionBusyError)
+        assert "result" not in result_box
+
+        # The refused delete must leave the row in place with no tombstone, so
+        # the admitted turn never writes into an intentionally deleted session.
+        assert (
+            session_service.load_session_chat_state(session_service.PROJECT_ROOT, session_id)
+            is not None
+        )
+        assert not session_service._is_session_workspace_intentionally_deleted(session_id)
+    finally:
+        session_service._set_session_running(session_id, False)
+
+
+def test_delete_completion_leaves_tombstone_that_blocks_admitted_resubmit(tmp_path, monkeypatch):
+    """G4 (chat-fix2 R4): a submit unblocked after delete must refuse, not resurrect.
+
+    Delete keeps the admission lock until the tombstone is written, so an
+    admission parked behind it re-reads state after the lock, finds the
+    tombstone (materialize refuses tombstoned sessions) and fails instead of
+    resurrecting the deleted session from the Agent directory.
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_two_sessions(tmp_path)
+
+    session_id = "session-delete"
+    result = session_service._delete_chat_session_state(session_id)
+    assert result.get("nextActiveSessionId") == "session-keep"
+    assert session_service._is_session_workspace_intentionally_deleted(session_id)
+
+    # Simulate the submit side re-reading under the admission lock, the way
+    # submit_session_message does between admit acquire and running flag.
+    admit_lock = session_service._session_submit_admit_lock(session_id)
+    with admit_lock:
+        assert session_service.load_session_chat_state(session_service.PROJECT_ROOT, session_id) is None
+        assert not session_service._ensure_agent_directory_conversation_materialized(
+            session_id,
+            source="test_deleted_admission_recheck",
+        )
+        with pytest.raises(session_service.SessionNotFoundError):
+            session_service._ensure_session_mutable(session_id)
