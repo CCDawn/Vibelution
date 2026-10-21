@@ -17,11 +17,13 @@ import styles from "./HumanAttentionNoticeStack.styles";
 const DISMISS_AFTER_MS = 12_000;
 const MAX_STACKED_CARDS = 3;
 
-/** 完成类是好消息（severity info）：信息卡 + 一个“查看结果”跳转，无决策按钮。 */
+/** 完成类是好消息（severity info）：信息卡 + 一个“查看结果”跳转，无决策按钮。
+ *  assistant_digest 是 PA 巡检的定时信息摘要，同为 info 语气，共用此渲染路径。 */
 const COMPLETION_KINDS: ReadonlySet<HumanAttentionKind> = new Set([
   "dispatch_receipt",
   "run_completed",
   "session_completed",
+  "assistant_digest",
 ]);
 
 function isCompletionKind(kind: string): boolean {
@@ -42,6 +44,7 @@ const COPY = {
       dispatch_receipt: "派遣回执",
       run_completed: "运行完成",
       session_completed: "会话完成",
+      assistant_digest: "派遣摘要",
     },
     confirmPrefix: "确认",
     cancel: "取消",
@@ -61,6 +64,7 @@ const COPY = {
       dispatch_receipt: "Dispatch receipt",
       run_completed: "Run finished",
       session_completed: "Session done",
+      assistant_digest: "Dispatch digest",
     },
     confirmPrefix: "Confirm ",
     cancel: "Cancel",

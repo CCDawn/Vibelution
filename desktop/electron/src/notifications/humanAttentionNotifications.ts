@@ -5,7 +5,8 @@ export type HumanAttentionKind =
   | "human_gate"
   | "dispatch_receipt"
   | "run_completed"
-  | "session_completed";
+  | "session_completed"
+  | "assistant_digest";
 /** info 只用于完成类事件（好消息），不占用停靠/异常的 critical/high 语义。 */
 export type HumanAttentionSeverity = "critical" | "high" | "medium" | "info";
 
@@ -109,7 +110,8 @@ const KINDS: ReadonlySet<string> = new Set([
   "human_gate",
   "dispatch_receipt",
   "run_completed",
-  "session_completed"
+  "session_completed",
+  "assistant_digest"
 ]);
 const SEVERITIES: ReadonlySet<string> = new Set(["critical", "high", "medium", "info"]);
 const DEFAULT_DEDUP_WINDOW_MS = 60_000;

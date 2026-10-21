@@ -306,11 +306,12 @@ describe("human attention notification service", () => {
 });
 
 describe("human attention kind whitelist parity with the web layer", () => {
-  it("accepts exactly the web whitelist, including affair_reminder and human_gate", async () => {
+  it("accepts exactly the web whitelist, including affair_reminder, human_gate and assistant_digest", async () => {
     const webKinds = [...new Set(webKindWhitelist())].sort();
     expect(webKinds).toEqual([
       "affair_reminder",
       "anomaly",
+      "assistant_digest",
       "dispatch_receipt",
       "human_gate",
       "knowledge_review",
