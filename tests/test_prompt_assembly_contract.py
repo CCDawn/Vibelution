@@ -160,3 +160,46 @@ def test_prompt_manager_exposes_last_sanitized_assembly_manifest() -> None:
     assert "private manager body" not in repr(manifest)
     assert "sk-private" not in repr(manifest)
     _assert_manifest_has_no_prompt_body(manifest)
+
+
+def test_prompt_manager_manifest_covers_intent_alignment_without_leaking_packet_body() -> None:
+    manager = PromptManager()
+    manager.set_intent_alignment_packet(
+        {
+            "schemaVersion": 1,
+            "status": "clarifying",
+            "confirmedRequirements": [
+                {"point": "只改前端展示层", "settledAt": "第 2 轮", "evidence": "后端别动"}
+            ],
+            "openQuestions": [
+                {
+                    "id": "q2",
+                    "question": "表格数据超过一屏时要分页还是虚拟滚动？",
+                    "impactFork": "不问则布局与数据层实现直接分叉",
+                    "options": ["分页", "虚拟滚动"],
+                    "askedAt": None,
+                }
+            ],
+            "clarifyHistory": [],
+            "gate": {
+                "action": "ask",
+                "confidence": 0.7,
+                "decidedBy": "rules",
+                "reason": "命中缺失量纲信号，交由本轮自判",
+            },
+            "budget": {"questionsAskedThisSession": 1, "maxQuestionsPerTurn": 3},
+        }
+    )
+
+    manager.build(include=["INTENT_ALIGNMENT"])
+    manifest = manager.get_last_assembly_manifest()
+
+    segment = next(
+        (item for item in manifest["segments"] if item["key"] == "INTENT_ALIGNMENT"),
+        None,
+    )
+    assert segment is not None
+    assert segment["decision"] != "blocked"
+    assert "表格数据超过一屏" not in repr(manifest)
+    assert "后端别动" not in repr(manifest)
+    _assert_manifest_has_no_prompt_body(manifest)

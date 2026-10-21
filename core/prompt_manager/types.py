@@ -99,3 +99,4 @@ class BuildContext:
     state_memory: str = ""
     prompt_mode: str = "orient"
     runtime_goal_packet: Any = None
+    intent_alignment_packet: Any = None
