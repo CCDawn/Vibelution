@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -166,6 +167,192 @@ def test_first_frame_reads_work_before_unrelated_imports_finish(monkeypatch):
                     await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(exercise())
+
+
+def test_chat_operations_work_with_real_router_while_remaining_imports_are_blocked(monkeypatch):
+    from core.web import route_bootstrap
+    from core.web.control import CONTROL_TOKEN_HEADER, WebControlGuardMiddleware, get_control_token
+    from core.web.routes import sessions
+    from core.web.services.agent_directory import bootstrap
+
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    app.add_middleware(WebControlGuardMiddleware)
+    app.add_middleware(WaitForWebRoutesMiddleware, timeout_seconds=2)
+    calls = []
+    initialized = []
+
+    def detail(session_id, **kwargs):
+        assert initialized == [True]
+        calls.append(("detail", session_id))
+        return {"id": session_id, "messages": []}
+
+    def create(**kwargs):
+        assert initialized == [True]
+        calls.append(("create", kwargs))
+        return {"id": "chat-ready"}
+
+    def submit(session_id, content, **kwargs):
+        assert initialized == [True]
+        calls.append(("send", session_id, content, kwargs))
+        return {"accepted": True, "sessionId": session_id, "turnId": "turn-ready"}
+
+    def initial(session_id, mode):
+        assert initialized == [True]
+        calls.append(("events", session_id, mode))
+        return "light", None, {"sessionId": session_id}
+
+    async def events(session_id, **kwargs):
+        assert kwargs["initial_state"] == {"sessionId": session_id}
+        yield 'event: session_state\ndata: {"sessionId":"chat-ready"}\n\n'
+
+    monkeypatch.setattr(sessions, "get_session_detail", detail)
+    monkeypatch.setattr(sessions, "create_chat_session", create)
+    monkeypatch.setattr(sessions, "select_chat_session", detail)
+    monkeypatch.setattr(sessions, "submit_session_message_lightweight", submit)
+    monkeypatch.setattr(sessions, "resolve_session_stream_initial_payload", initial)
+    monkeypatch.setattr(sessions, "stream_session_events_async", events)
+    monkeypatch.setattr(sessions, "request_stop_session_turn", detail)
+    monkeypatch.setattr(sessions, "delete_chat_session", lambda *a, **k: {"deleted": True})
+    monkeypatch.setattr(sessions, "list_tool_approval_requests", lambda *a, **k: [])
+    monkeypatch.setattr(sessions, "resolve_tool_approval_request", lambda *a, **k: {"requestId": "approval-ready", "status": "resolved"})
+    monkeypatch.setattr(sessions, "_record_session_create_request_timing", lambda *a, **k: None)
+    monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", lambda: initialized.append(True))
+    monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *a, **k: None)
+
+    async def exercise():
+        app.state.web_routes_ready_event = asyncio.Event()
+        app.state.web_startup_routes_ready_event = asyncio.Event()
+        deferred = asyncio.Event()
+        release = asyncio.Event()
+        waiting = asyncio.Event()
+        wait_count = 0
+        original_wait = route_bootstrap.wait_for_web_routes
+        pending = []
+
+        async def observe_wait(*args, **kwargs):
+            nonlocal wait_count
+            if not kwargs.get("startup_only"):
+                wait_count += 1
+                if wait_count == 5:
+                    waiting.set()
+            return await original_wait(*args, **kwargs)
+
+        async def run_sync(name, callback, *args, **kwargs):
+            if name == "web-route-import":
+                if kwargs.get("startup_only"):
+                    return [sessions]
+                deferred.set()
+                await release.wait()
+                return []
+            if name == "builtin-agent-bootstrap":
+                return callback(*args, **kwargs)
+            return None
+
+        monkeypatch.setattr("core.web.middleware.wait_for_routes.wait_for_web_routes", observe_wait)
+        warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, run_sync=run_sync))
+        try:
+            await asyncio.wait_for(deferred.wait(), 1)
+            assert app.state.web_startup_routes_registered
+            assert not app.state.web_routes_registered
+            headers = {CONTROL_TOKEN_HEADER: get_control_token(), "Prefer": "respond-async"}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
+                assert (await client.get("/api/sessions/chat-ready", headers=headers)).json()["id"] == "chat-ready"
+                created = await client.post("/api/sessions", headers=headers, json={"title": "Ready"})
+                assert created.status_code == 201
+                assert created.json()["id"] == "chat-ready"
+                assert (await client.post("/api/sessions/chat-ready/select", headers=headers)).status_code == 200
+                sent = await client.post("/api/sessions/chat-ready/messages", headers=headers, json={"content": "hello"})
+                assert sent.status_code == 202
+                assert sent.json()["accepted"] is True
+                async with client.stream("GET", "/api/sessions/chat-ready/events", headers=headers) as response:
+                    assert response.headers["content-type"].startswith("text/event-stream")
+                    payload = await response.aread()
+                    assert b"event: session_state" in payload
+                    assert b'"sessionId":"chat-ready"' in payload
+                assert (await client.post("/api/sessions/chat-ready/stop", headers=headers, json={"turnId": "turn-ready"})).status_code == 202
+                assert (await client.get("/api/sessions/chat-ready/tool-approvals", headers=headers)).json() == []
+                decision = await client.post("/api/sessions/chat-ready/tool-approvals/approval-ready/decision", headers=headers, json={"decision": "accept"})
+                assert decision.json()["status"] == "resolved"
+
+                call_count = len(calls)
+                for method, path, body in (
+                    ("GET", "/api/sessions/chat-ready", None),
+                    ("POST", "/api/sessions", {}),
+                    ("POST", "/api/sessions/chat-ready/messages", {"content": "blocked"}),
+                    ("GET", "/api/sessions/chat-ready/events", None),
+                ):
+                    assert (await client.request(method, path, json=body)).status_code == 403
+                    assert (await client.request(method, path, headers={**headers, "Origin": "https://untrusted.invalid"}, json=body)).status_code == 403
+                assert len(calls) == call_count
+
+                pending = [asyncio.create_task(client.request(method, path, headers=headers)) for method, path in (
+                    ("GET", "/api/config/public"),
+                    ("GET", "/api/sessions/chat-ready/unknown"),
+                    ("POST", "/api/sessions/chat-ready/events"),
+                    ("DELETE", "/api/sessions/chat-ready"),
+                    ("POST", "/api/sessions/bootstrap"),
+                )]
+                await asyncio.wait_for(waiting.wait(), 1)
+                assert not any(task.done() for task in pending)
+                assert not app.state.web_routes_registered
+                release.set()
+                await warming
+                # Once all imports finish, ordinary routing/validation takes over.
+                assert all(response.status_code != 503 for response in await asyncio.gather(*pending))
+        finally:
+            release.set()
+            if not warming.done():
+                warming.cancel()
+            await asyncio.gather(warming, *pending, return_exceptions=True)
+            for name in ("financial_team_coordinator_task", "financial_job_scheduler_task", "financial_backtest_worker_task"):
+                task = getattr(app.state, name, None)
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+    with ThreadPoolExecutor(max_workers=1) as stream_executor:
+        monkeypatch.setattr(sessions, "_SESSION_STREAM_EXECUTOR", stream_executor)
+        asyncio.run(exercise())
+    assert any(call[0] == "create" for call in calls)
+    assert any(call[0] == "send" and call[2] == "hello" for call in calls)
+    assert any(call[0] == "events" for call in calls)
+
+
+def test_startup_operations_match_only_reviewed_methods_and_complete_route_shapes():
+    from core.web.route_bootstrap import is_startup_route_path
+    from core.web.routes import sessions
+
+    for path in (
+        "/api/config/bootstrap", "/api/launcher/current-instance", "/api/runtime/summary",
+        "/api/sessions/bootstrap", "/api/sessions/query", "/api/sessions/active",
+    ):
+        assert is_startup_route_path(path, method="GET")
+        assert is_startup_route_path(path, method="HEAD")
+        assert not is_startup_route_path(path, method="POST")
+    for path, method in (
+        ("/sessions", "POST"), ("/sessions/{session_id}", "GET"),
+        ("/sessions/{session_id}/select", "POST"), ("/sessions/{session_id}/messages", "POST"),
+        ("/sessions/{session_id}/events", "GET"), ("/sessions/{session_id}/stop", "POST"),
+        ("/sessions/{session_id}/guidance", "POST"), ("/sessions/{session_id}/tool-approvals", "GET"),
+        ("/sessions/{session_id}/tool-approvals/{request_id}/decision", "POST"),
+        ("/sessions/{session_id}/llm-options", "GET"), ("/sessions/{session_id}/model-parameters", "PATCH"),
+        ("/sessions/{session_id}/budget-parameters", "GET"), ("/sessions/{session_id}/budget-parameters", "PATCH"),
+    ):
+        assert any(route.path == path and method in route.methods for route in sessions.router.routes)
+        actual = "/api" + path.replace("{session_id}", "chat-ready").replace("{request_id}", "approval-ready")
+        assert is_startup_route_path(actual + "?limit=20", method=method)
+    for method, path in (
+        ("GET", "/api/sessions/chat-ready/export-html"),
+        ("POST", "/api/sessions/chat-ready/archive"),
+        ("GET", "/api/sessions/chat-ready/unknown"),
+        ("POST", "/api/sessions/chat-ready/events"),
+        ("DELETE", "/api/sessions/chat-ready"),
+        ("POST", "/api/sessions/bootstrap"),
+        ("GET", "/api/sessions/chat-ready/tool-approvals/a/decision/extra"),
+        ("GET", "/api/sessions//events"),
+    ):
+        assert not is_startup_route_path(path, method=method)
 
 
 def test_partial_registration_can_be_retried_without_duplicate_routes(monkeypatch):

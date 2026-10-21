@@ -23,6 +23,7 @@ const failedTelemetryBodies: string[] = [];
 const pendingTelemetry: PendingTelemetry[] = [];
 let drainingTelemetry = false;
 let immediateTelemetryInFlight = 0;
+let telemetryStartupPending = false;
 
 type BrowserPerformanceWithMemory = Performance & {
   memory?: {
@@ -182,7 +183,7 @@ async function flushFailedTelemetryBodies(control: ControlToken): Promise<void> 
   // Only the queue drain calls this, so retries share its single in-flight slot.
   while (failedTelemetryBodies.length > 0) {
     // An in-flight retry cannot be preempted; yield before the next one for new errors.
-    if (pendingTelemetry.some((pending) => pending.priority === 2)) {
+    if (telemetryStartupPending || pendingTelemetry.some((pending) => pending.priority === 2)) {
       return;
     }
     const pending = failedTelemetryBodies[0];
@@ -208,13 +209,24 @@ async function flushFailedTelemetryBodies(control: ControlToken): Promise<void> 
   }
 }
 
-function enqueueTelemetry(body: string, level: BrowserTelemetryEventInput["level"]): void {
-  pendingTelemetry.push({ body, priority: level === "error" ? 2 : level === "warning" ? 1 : 0 });
+function boundPendingTelemetry(): void {
   if (pendingTelemetry.length > MAX_PENDING_TELEMETRY_BODIES) {
     const lowestPriority = Math.min(...pendingTelemetry.map((pending) => pending.priority));
     pendingTelemetry.splice(pendingTelemetry.findIndex((pending) => pending.priority === lowestPriority), 1);
   }
+}
+
+function enqueueTelemetry(body: string, level: BrowserTelemetryEventInput["level"]): void {
+  pendingTelemetry.push({ body, priority: level === "error" ? 2 : level === "warning" ? 1 : 0 });
+  boundPendingTelemetry();
   void drainTelemetry();
+}
+
+export function setBrowserTelemetryStartupPending(pending: boolean): void {
+  telemetryStartupPending = pending;
+  if (!pending) {
+    void drainTelemetry();
+  }
 }
 
 async function drainTelemetry(): Promise<void> {
@@ -225,10 +237,21 @@ async function drainTelemetry(): Promise<void> {
   try {
     while (pendingTelemetry.length > 0) {
       const highestPriority = Math.max(...pendingTelemetry.map((pending) => pending.priority));
+      if (telemetryStartupPending && highestPriority < 2) {
+        return;
+      }
       const index = pendingTelemetry.findIndex((pending) => pending.priority === highestPriority);
-      const [{ body }] = pendingTelemetry.splice(index, 1);
+      const [pending] = pendingTelemetry.splice(index, 1);
+      const { body } = pending;
       try {
         const control = await getControlToken();
+        if (telemetryStartupPending && pending.priority < 2) {
+          // Token acquisition may have yielded to a startup hold. Restore FIFO order
+          // and the queue bound before selecting any newly arrived error.
+          pendingTelemetry.unshift(pending);
+          boundPendingTelemetry();
+          continue;
+        }
         const response = await postTelemetryBody(control, body);
         if (response.status === 403) {
           clearControlToken();
@@ -258,6 +281,7 @@ export function resetBrowserTelemetryDeliveryBufferForTests(): void {
   pendingTelemetry.length = 0;
   drainingTelemetry = false;
   immediateTelemetryInFlight = 0;
+  telemetryStartupPending = false;
 }
 
 export function postBrowserTelemetry(

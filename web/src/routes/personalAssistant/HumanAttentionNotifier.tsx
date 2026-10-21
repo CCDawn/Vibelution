@@ -21,7 +21,7 @@ import {
  * "opened" broadcast navigates the workbench to the entry target. Renders
  * nothing; the assistant window and the system tray own the visible layer.
  */
-export function HumanAttentionNotifier() {
+export function HumanAttentionNotifier({ startupReady = true }: { startupReady?: boolean }) {
   const navigate = useNavigate();
   const bridge = useMemo(() => humanAttentionBridge(), []);
   const ledger = useMemo(
@@ -35,6 +35,7 @@ export function HumanAttentionNotifier() {
   const attention = useQuery({
     queryKey: queryKeys.personalAssistantHumanAttention(),
     queryFn: ({ signal }) => fetchPersonalAssistantHumanAttention({ signal }),
+    enabled: startupReady,
     refetchInterval: 5000,
     // 双通道通知的主场景就是工作台最小化/助理窗关闭：此时窗口 hidden 会暂停
     // 默认后台轮询，人类关注事项将永远无法升级为系统 toast，因此显式保持轮询

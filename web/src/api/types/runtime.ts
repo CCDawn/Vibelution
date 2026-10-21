@@ -784,6 +784,8 @@ export type RuntimeSummary = {
 
 export type BackendHealth = {
   status: string;
+  /** Existing health contract: feature requests can wait without occupying HTTP connections. */
+  routesReady?: boolean;
 };
 
 export type RuntimeControlResponse = {

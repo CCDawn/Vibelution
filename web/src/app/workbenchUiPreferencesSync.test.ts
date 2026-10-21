@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getWorkbenchUiPreferences, saveWorkbenchUiPreferences, type WorkbenchUiPreferences } from "../api/workbenchUiPreferences";
 import { readPaneLayout, writePaneLayout } from "../components/layout/paneLayoutPersistence";
-import { flushWorkbenchUiPreferencesToServer, resetWorkbenchUiPreferencesSyncForTests, startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
+import { flushWorkbenchUiPreferencesToServer, hydrateWorkbenchUiPreferencesSync, resetWorkbenchUiPreferencesSyncForTests, startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
 
 vi.mock("../api/workbenchUiPreferences", () => ({ getWorkbenchUiPreferences: vi.fn(), saveWorkbenchUiPreferences: vi.fn() }));
 
@@ -31,6 +31,30 @@ afterEach(() => { stop?.(); stop = undefined; resetWorkbenchUiPreferencesSyncFor
 async function start() { stop = startWorkbenchUiPreferencesSync(); await settle(); }
 
 describe("workbench pane preference synchronization", () => {
+  it("observes startup edits locally without network work until hydration is released", async () => {
+    writePaneLayout("finance", widths(280));
+    stop = startWorkbenchUiPreferencesSync({ deferHydration: true });
+    writePaneLayout("finance", widths(304));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getWorkbenchUiPreferences).not.toHaveBeenCalled();
+    expect(saveWorkbenchUiPreferences).not.toHaveBeenCalled();
+    expect(localStorage.getItem(pendingKey)).toContain("finance");
+    hydrateWorkbenchUiPreferencesSync();
+    hydrateWorkbenchUiPreferencesSync();
+    await settle();
+    expect(getWorkbenchUiPreferences).toHaveBeenCalledTimes(1);
+    expect(readPaneLayout("finance")).toEqual(widths(304));
+    expect(saveWorkbenchUiPreferences).toHaveBeenCalledExactlyOnceWith({ paneLayout: { layoutId: "finance", widths: widths(304) } });
+  });
+
+  it("does not hydrate an observer that was disposed before startup completed", async () => {
+    stop = startWorkbenchUiPreferencesSync({ deferHydration: true });
+    stop();
+    hydrateWorkbenchUiPreferencesSync();
+    await settle();
+    expect(getWorkbenchUiPreferences).not.toHaveBeenCalled();
+  });
+
   it("keeps an unsynced local resize when the page reloads before the debounce fires", async () => {
     // Generation ids may contain the same digits as a width; they are not a
     // duplicate width snapshot. Keep the observed collision deterministic.
