@@ -333,6 +333,56 @@ def _load_scoped_evidence(
     )
 
 
+def load_workflow_bound_evidence_cards(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+) -> list[dict[str, Any]]:
+    """Read the claim-evidence cards explicitly bound to one workflow run.
+
+    The scoped evidence loader above answers "which cards belong to this
+    authority run", but a formal run may legitimately receive cards that name
+    the formal run itself as their ``workflowRunId`` while their
+    ``sourceCollectionRunId`` points at a side-flow collection round the run's
+    frozen scope never cites (production 005: relation-graph counter-evidence
+    cards materialized over a chain collection run).  Those cards are the
+    run's own evidence authority — workflowRunId binding is what makes them
+    belong to this run — yet ``_records_pass_strict_scope`` (shared with other
+    consumers, semantics unchanged) rejects every one of them, so packaging
+    never saw them.
+
+    This reader returns exactly the cards whose ``workflowRunId`` equals the
+    formal run: same team store, non-empty claim-evidence identity,
+    deduplicated by id (append-only store: one id, one content), sorted by
+    that id.  It is fail-open to an empty list — an unreadable store means no
+    supplement, never a packaging failure — and it never leaks another run's
+    cards because the workflow binding is the only inclusion criterion.
+    """
+
+    normalized_team = str(team_id or "").strip()
+    normalized_workflow = str(workflow_run_id or "").strip()
+    if not normalized_team or not normalized_workflow:
+        return []
+    from core.infrastructure.path_containment import PROJECT_ROOT
+    from core.research.evidence import ClaimEvidenceStore
+
+    try:
+        records = ClaimEvidenceStore(PROJECT_ROOT).list(normalized_team)
+    except Exception:
+        return []
+    cards: dict[str, dict[str, Any]] = {}
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        card_id = str(item.get("claimEvidenceId") or "").strip()
+        if not card_id or card_id in cards:
+            continue
+        if str(item.get("workflowRunId") or "").strip() != normalized_workflow:
+            continue
+        cards[card_id] = item
+    return [cards[key] for key in sorted(cards)]
+
+
 def load_relation_evidence_context(
     *,
     team_id: str,

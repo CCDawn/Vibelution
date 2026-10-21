@@ -13,6 +13,7 @@ Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -57,6 +58,16 @@ _DRAIN_LOCK = threading.Lock()
 _DRAINING_SESSIONS: set[str] = set()
 _STARTING_RETRY_LOCK = threading.Lock()
 _PENDING_STARTING_RETRIES: dict[str, tuple[str, threading.Timer]] = {}
+
+# Self-continuation guard: a drain that finishes one unit while rows remain
+# may schedule the next drain itself (turn settlement only covers units that
+# opened a model turn). The rolling per-session window bounds any pathological
+# repeat — e.g. a row that keeps bouncing off a busy race — after which the
+# next drain waits for a natural trigger (enqueue, edit, settle, stale retry).
+_DRAIN_CONTINUATION_LOCK = threading.Lock()
+_DRAIN_SELF_CONTINUATIONS: dict[str, tuple[float, int]] = {}
+MAX_DRAIN_SELF_CONTINUATIONS_PER_WINDOW = 16
+DRAIN_SELF_CONTINUATION_WINDOW_SECONDS = 60.0
 
 
 def _service():
@@ -1205,6 +1216,59 @@ def _journal_control_notice_row(session_id: str, row: dict[str, Any]) -> None:
     )
 
 
+def _drain_self_continuation_allowed(session_id: str) -> bool:
+    """Consume one slot of the session's rolling self-continuation window."""
+
+    now = time.monotonic()
+    with _DRAIN_CONTINUATION_LOCK:
+        window_start, count = _DRAIN_SELF_CONTINUATIONS.get(session_id, (now, 0))
+        if now - window_start >= DRAIN_SELF_CONTINUATION_WINDOW_SECONDS:
+            window_start, count = now, 0
+        count += 1
+        _DRAIN_SELF_CONTINUATIONS[session_id] = (window_start, count)
+        return count <= MAX_DRAIN_SELF_CONTINUATIONS_PER_WINDOW
+
+
+def _session_has_queued_drainable_rows(session_id: str) -> bool:
+    """True when at least one ``queued`` row is still waiting to drain."""
+
+    s = _service()
+    try:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+    except Exception:  # noqa: BLE001 - unreadable state must not turn a drain into a crash
+        return False
+    if not isinstance(conversation, dict):
+        return False
+    return any(row.get("status") == "queued" for row in session_queued_turn_rows(conversation))
+
+
+def _schedule_session_queued_turn_drain_continuation(session_id: str) -> None:
+    """Continue the drain when this unit ended without a settle-driven wake.
+
+    Turn settlement stays the primary driver for units that started a model
+    turn. This covers the ones it cannot see: control notices (journal-only),
+    and busy bounce-backs whose raced turn already settled. A still-running
+    session is skipped on purpose — its own settle hook owns the next drain,
+    so self-continuing there would only spin against the running claim. The
+    rolling-window cap is the backstop for any remaining repetition.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    try:
+        if s._is_session_running(normalized_session_id):
+            return
+        if not _session_has_queued_drainable_rows(normalized_session_id):
+            return
+    except Exception:  # noqa: BLE001 - continuation is best effort
+        return
+    if not _drain_self_continuation_allowed(normalized_session_id):
+        return
+    s._schedule_session_queued_turn_drain(normalized_session_id)
+
+
 def drain_session_queued_turns(session_id: str) -> bool:
     """Start the next queued turn once the session is idle.
 
@@ -1220,6 +1284,7 @@ def drain_session_queued_turns(session_id: str) -> bool:
         if normalized_session_id in _DRAINING_SESSIONS:
             return False
         _DRAINING_SESSIONS.add(normalized_session_id)
+    processed_unit = False
     try:
         # Keep the claim valid until submit/settlement, including cross-process TTL recovery.
         with s._session_submit_admit_lock(normalized_session_id):
@@ -1246,6 +1311,7 @@ def drain_session_queued_turns(session_id: str) -> bool:
                         error=None,
                         keep_queued=False,
                     )
+                processed_unit = True
                 return True
             queued_turn_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "").strip()]
             batch_kinds: list[str] = []
@@ -1346,6 +1412,19 @@ def drain_session_queued_turns(session_id: str) -> bool:
                     message_source=message_source,
                     **submit_kwargs,
                 )
+            except s.SessionLeaseConflictError as exc:
+                # A lease conflict outlives turn settlement (the holder is
+                # another run), so bouncing the row back would retry forever
+                # with the cause invisible. Fail it into "blocked" with the
+                # localized reason, matching the direct path's preflight
+                # rejection; editing the row makes it drainable again.
+                for queued_turn_id in queued_turn_ids:
+                    _settle_claimed_queued_turn(
+                        normalized_session_id,
+                        queued_turn_id,
+                        error=exc,
+                        keep_queued=False,
+                    )
             except s.SessionBusyError:
                 # Another turn won the race: keep the item queued for the next settle.
                 for queued_turn_id in queued_turn_ids:
@@ -1371,10 +1450,15 @@ def drain_session_queued_turns(session_id: str) -> bool:
                         error=None,
                         keep_queued=False,
                     )
+            processed_unit = True
             return True
     finally:
         with _DRAIN_LOCK:
             _DRAINING_SESSIONS.discard(normalized_session_id)
+        if processed_unit:
+            # Only after leaving the single-flight set: an earlier schedule
+            # would be dropped by it and the queue would stall.
+            _schedule_session_queued_turn_drain_continuation(normalized_session_id)
 
 
 def schedule_session_queued_turn_drain(session_id: str) -> None:

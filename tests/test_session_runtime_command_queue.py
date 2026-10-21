@@ -7,6 +7,7 @@ turn.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -750,3 +751,127 @@ def test_control_notice_rejects_edit_and_send_now_but_can_be_withdrawn(sessions,
 
     remaining = queued_turns.remove_session_queued_turn(PARENT_ID, control["id"])
     assert remaining == []
+
+
+def _enqueue_user_row(sessions, content: str, submission_id: str):
+    return queued_turns.enqueue_session_queued_turn(
+        PARENT_ID,
+        content=content,
+        attachments=[],
+        references=[],
+        mental_model_enabled=None,
+        runtime_status_enabled=None,
+        turn_mode="",
+        write_intent=False,
+        client_submission_id=submission_id,
+    )
+
+
+def test_control_notice_drain_schedules_continuation_for_remaining_rows(sessions, monkeypatch):
+    submitted = _drain_submitter(monkeypatch)
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+    queued_turns.enqueue_session_control_notice(
+        PARENT_ID,
+        content="用户在忙时直接启动了后台任务 X",
+        source_id="control:continuation",
+        branch_generation=0,
+    )
+    _enqueue_user_row(sessions, "排在控制记录后的用户消息", "after-control")
+    assert len(scheduled) == 2  # one per enqueue
+
+    # A journal-only control unit never settles a turn, so only a
+    # self-continuation can reach the queued user row behind it.
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    assert submitted == []
+    assert len(scheduled) == 3
+    assert scheduled[-1] == PARENT_ID
+    assert [row["kind"] for row in _rows(sessions)] == ["user"]
+
+
+def test_busy_bounce_while_running_does_not_self_continue(sessions, monkeypatch):
+    running = {"value": False}
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: running["value"])
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+    _enqueue_user_row(sessions, "busy 竞态的排队消息", "busy-bounce")
+    scheduled.clear()
+
+    def _submit(session_id, content, **kwargs):
+        running["value"] = True  # a raced turn starts during the submit
+        raise session_service.SessionBusyError("Another turn started")
+
+    monkeypatch.setattr(session_service, "submit_session_message", _submit)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    remaining = _rows(sessions)
+    assert [row["status"] for row in remaining] == ["queued"]
+    # The running session's own settle hook owns the next drain; scheduling
+    # against it would only spin.
+    assert scheduled == []
+
+
+def test_transient_busy_bounce_self_continues_when_idle(sessions, monkeypatch):
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+    _enqueue_user_row(sessions, "瞬态拒绝后仍待发送", "transient-busy")
+    scheduled.clear()
+
+    def _transient_busy(*args, **kwargs):
+        # A race that already resolved before the continuation check (e.g. an
+        # admission-lock timeout): the session is idle, the row stays queued.
+        raise session_service.SessionBusyError("Session admission is busy")
+
+    monkeypatch.setattr(session_service, "submit_session_message", _transient_busy)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    assert [row["status"] for row in _rows(sessions)] == ["queued"]
+    assert scheduled == [PARENT_ID]
+
+
+def test_self_continuation_is_capped_per_window(sessions, monkeypatch):
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+    _enqueue_user_row(sessions, "护栏拦截的排队消息", "capped-continuation")
+    scheduled.clear()
+    queued_turns._DRAIN_SELF_CONTINUATIONS.clear()
+    queued_turns._DRAIN_SELF_CONTINUATIONS[PARENT_ID] = (
+        time.monotonic(),
+        queued_turns.MAX_DRAIN_SELF_CONTINUATIONS_PER_WINDOW,
+    )
+
+    def _transient_busy(*args, **kwargs):
+        raise session_service.SessionBusyError("Session admission is busy")
+
+    monkeypatch.setattr(session_service, "submit_session_message", _transient_busy)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    # Window exhausted: the drain waits for a natural trigger instead of
+    # rescheduling itself.
+    assert scheduled == []
+    assert [row["status"] for row in _rows(sessions)] == ["queued"]
+
+    # An expired window restores the allowance.
+    queued_turns._DRAIN_SELF_CONTINUATIONS[PARENT_ID] = (
+        time.monotonic() - queued_turns.DRAIN_SELF_CONTINUATION_WINDOW_SECONDS - 1.0,
+        queued_turns.MAX_DRAIN_SELF_CONTINUATIONS_PER_WINDOW,
+    )
+    assert queued_turns._drain_self_continuation_allowed(PARENT_ID) is True
+
+
+def test_lease_conflict_blocks_row_with_visible_error(sessions, monkeypatch):
+    scheduled: list[str] = []
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", scheduled.append)
+    _enqueue_user_row(sessions, "租约冲突的排队消息", "lease-conflict")
+    scheduled.clear()
+    # Route mapping compatibility: handlers of the plain busy error keep working.
+    assert issubclass(session_service.SessionLeaseConflictError, session_service.SessionBusyError)
+
+    def _lease_conflict(*args, **kwargs):
+        raise session_service.SessionLeaseConflictError("资源被后台任务占用，请稍后重试")
+
+    monkeypatch.setattr(session_service, "submit_session_message", _lease_conflict)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    rows = _rows(sessions)
+    assert [row["status"] for row in rows] == ["blocked"]
+    assert "资源被后台任务占用" in rows[0]["lastError"]
+    # Nothing drainable remains, so no continuation is scheduled and the row
+    # stops bouncing invisibly; editing it retries.
+    assert scheduled == []

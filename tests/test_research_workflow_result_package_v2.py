@@ -3383,3 +3383,228 @@ def test_build_v2_verify_doi_metadata_flips_paywalled_receipt(monkeypatch) -> No
         if item["sourceUrl"] == "https://doi.org/10.1103/PhysRevLett.88.237901"
     )
     assert disabled_check["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Workflow-bound evidence cards (production 005): the third packaging layer.
+
+
+def _workflow_bound_counter_card(**overrides: Any) -> dict[str, Any]:
+    """Production 005 counter-evidence card shape (relation-graph bridge)."""
+    card = {
+        "schemaVersion": 1,
+        "claimEvidenceId": "ce-3c9bd28248608ec4aaaa",
+        "claimId": "claim-counter-1",
+        "candidateId": "dprec-20261020104507-aaaa",
+        "sourceId": "dprec-20261020104507-aaaa",
+        "locator": {"kind": "evidence_ref", "anchor": "dprec-20261020104507-aaaa"},
+        "quote": "该结论受设备与负载边界限制。",
+        "evidenceKind": "counter_evidence",
+        "reasoningRole": "inference",
+        "supportLevel": "contradicts",
+        "reviewStatus": "pending",
+        "sourceCollectionRunId": "dprun-20261020104506966426-72158dab",
+        "workflowRunId": "run-fbc374b1caf6",
+    }
+    card.update(overrides)
+    return card
+
+
+def test_evidence_payload_keeps_zero_diff_without_workflow_bound_cards(
+    monkeypatch,
+) -> None:
+    """No run-bound card: every layer returns exactly what it did before."""
+    first_layer = {
+        "teamId": "research-team",
+        "sourceCollectionRunId": "source-sci-096",
+        "evidenceCards": [_claim_evidence_card()],
+        "cardCount": 1,
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_workflow_bound_evidence_cards",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(first_layer),
+    )
+    payload = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload={},
+    )
+    assert payload == first_layer
+    assert "workflowBoundCards" not in payload
+
+    def missing_evidence(kind, **_kwargs):
+        raise result_package_v2.ResultPackageV2Error(
+            f"canonical artifact is missing: {kind}"
+        )
+
+    monkeypatch.setattr(result_package_v2, "_artifact_payload", missing_evidence)
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="^canonical artifact is missing: evidence_card_batch$",
+    ):
+        result_package_v2._evidence_card_payload(
+            team_id="research-team",
+            workflow_run_id="run-sci-096",
+            authority_run_id="source-sci-096",
+            dimension_payload={"dimensionReviews": [{"evidence_refs": ["E1"]}]},
+        )
+
+
+def test_workflow_bound_cards_merge_under_the_base_layer_first_seen_wins(
+    monkeypatch,
+) -> None:
+    """Base-layer cards keep precedence; run-bound cards only fill gaps."""
+    base_card = _claim_evidence_card(quote="Base-layer anchor wins.")
+    wf_duplicate = _workflow_bound_counter_card(claimEvidenceId="ce-anchor")
+    wf_new = _workflow_bound_counter_card(claimEvidenceId="ce-3c9bd28248608ec4aaaa")
+    first_layer = {
+        "teamId": "research-team",
+        "sourceCollectionRunId": "source-sci-096",
+        "evidenceCards": [base_card],
+        "cardCount": 1,
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_workflow_bound_evidence_cards",
+        lambda **_kwargs: [wf_duplicate, wf_new],
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(first_layer),
+    )
+
+    payload = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload={},
+    )
+
+    assert [card["claimEvidenceId"] for card in payload["evidenceCards"]] == [
+        "ce-anchor",
+        "ce-3c9bd28248608ec4aaaa",
+    ]
+    # The base layer's content wins for the duplicated identity.
+    assert payload["evidenceCards"][0]["quote"] == "Base-layer anchor wins."
+    assert payload["evidenceCards"][0]["evidenceKind"] == "primary_result"
+    assert payload["cardCount"] == 2
+    assert payload["workflowBoundCards"] is True
+
+
+def test_workflow_bound_cards_form_the_payload_alone_when_base_layers_empty(
+    monkeypatch,
+) -> None:
+    """workflowRunId binding is the run's own evidence authority."""
+
+    def missing_evidence(kind, **_kwargs):
+        raise result_package_v2.ResultPackageV2Error(
+            f"canonical artifact is missing: {kind}"
+        )
+
+    wf_card = _workflow_bound_counter_card(
+        title="Device-load boundary study",
+        sourceUrl="https://example.org/boundary",
+        sourceType="paper",
+        retrievedAt="2026-10-20T10:45:06Z",
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_workflow_bound_evidence_cards",
+        lambda **_kwargs: [wf_card],
+    )
+    monkeypatch.setattr(result_package_v2, "_artifact_payload", missing_evidence)
+
+    payload = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload={"dimensionReviews": [{"evidence_refs": ["E1"]}]},
+    )
+
+    assert payload["workflowBoundCards"] is True
+    assert payload["workflowRunId"] == "run-sci-096"
+    assert [card["claimEvidenceId"] for card in payload["evidenceCards"]] == [
+        "ce-3c9bd28248608ec4aaaa"
+    ]
+    assert payload["cardCount"] == 1
+    # A complete card passes the fill-missing projection through unchanged.
+    assert payload["evidenceCards"][0]["supportLevel"] == "contradicts"
+
+
+def test_workflow_bound_card_reader_filters_by_run_and_dedupes(
+    tmp_path, monkeypatch
+) -> None:
+    """The registry reader returns only this run's cards, never another run's."""
+    from core.infrastructure import path_containment
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_workflow_bound_evidence_cards,
+    )
+
+    monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
+
+    def _card_payload(**overrides):
+        payload = {
+            "claimId": "claim-counter-1",
+            "candidateId": "dprec-20261020104507-aaaa",
+            "sourceId": "dprec-20261020104507-aaaa",
+            "sourceRevision": "sha256:" + "a" * 64,
+            "locator": {
+                "kind": "evidence_ref",
+                "anchor": "dprec-20261020104507-aaaa",
+            },
+            "quote": "该结论受设备与负载边界限制。",
+            "evidenceKind": "counter_evidence",
+            "reasoningRole": "inference",
+            "supportLevel": "contradicts",
+            "extractionMethod": "model",
+            "extractorAgentId": "agent-relation-mapper",
+            "modelRef": "provider/model-x",
+            "sourceCollectionRunId": "dprun-20261020104506966426-72158dab",
+        }
+        payload.update(overrides)
+        return payload
+
+    store = ClaimEvidenceStore(tmp_path)
+    mine = store.register(
+        "research-team", _card_payload(workflowRunId="run-fbc374b1caf6")
+    )
+    mine_twin = store.register(
+        "research-team",
+        _card_payload(
+            workflowRunId="run-fbc374b1caf6",
+            quote="该结论受设备与负载边界限制。二",
+            claimId="claim-counter-2",
+        ),
+    )
+    store.register(
+        "research-team", _card_payload(workflowRunId="run-other-team-run")
+    )
+
+    cards = load_workflow_bound_evidence_cards(
+        team_id="research-team", workflow_run_id="run-fbc374b1caf6"
+    )
+    assert [card["claimEvidenceId"] for card in cards] == sorted(
+        [mine["claimEvidenceId"], mine_twin["claimEvidenceId"]]
+    )
+    assert all(card["workflowRunId"] == "run-fbc374b1caf6" for card in cards)
+    assert (
+        load_workflow_bound_evidence_cards(
+            team_id="research-team", workflow_run_id="run-missing"
+        )
+        == []
+    )
+    assert (
+        load_workflow_bound_evidence_cards(
+            team_id="", workflow_run_id="run-fbc374b1caf6"
+        )
+        == []
+    )

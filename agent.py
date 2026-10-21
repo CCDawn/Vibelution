@@ -63,6 +63,7 @@ from core.orchestration.turn_status_bar import (
     upsert_turn_status_bar_message,
 )
 from core.orchestration.verify_on_stop import reset_verify_on_stop_turn, take_verify_finish
+from core.orchestration.context_input_metering import estimate_context_input_tokens
 from core.runtime_status_flags import is_runtime_status_inject_enabled
 from core.infrastructure.cli_utils import create_config_from_args, parse_args, should_launch_workbench
 from core.infrastructure.boot_pipeline import (
@@ -1126,6 +1127,16 @@ class AgentRuntime:
             * self._automatic_context_compression_threshold()
         )
 
+    def _estimate_context_input_tokens(self, messages: list, threshold: int | None = None) -> int:
+        client = getattr(self, "_base_llm", None) or getattr(self, "llm_with_tools", None)
+        route = getattr(client, "protocol_route", None)
+        preserve_reasoning = getattr(getattr(route, "compat", None), "reasoning_roundtrip", False) is True
+        return estimate_context_input_tokens(
+            messages, threshold=threshold, preserve_reasoning_content=preserve_reasoning,
+            exact_estimator=estimate_messages_tokens,
+            threshold_estimator=estimate_messages_tokens_for_threshold,
+        )
+
     def _should_automatically_compress(self, current_tokens: int) -> bool:
         return max(0, int(current_tokens)) > self._automatic_context_compression_threshold_tokens()
 
@@ -1198,7 +1209,7 @@ class AgentRuntime:
                 messages,
                 anchor=anchor,
                 fallback_tokens=fallback_tokens,
-                incremental_estimate=lambda slice_messages: estimate_messages_tokens_for_threshold(
+                incremental_estimate=lambda slice_messages: self._estimate_context_input_tokens(
                     slice_messages,
                     trigger_tokens,
                 ),
@@ -2084,7 +2095,7 @@ class AgentRuntime:
             compression_strategy=getattr(self, "_compression_strategy", None),
             prompt_manager=getattr(self, "prompt_manager", None),
             turn_runtime_fn=_turn_runtime_from_env,
-            estimate_tokens_fn=estimate_messages_tokens,
+            estimate_tokens_fn=self._estimate_context_input_tokens,
             get_ui_fn=get_ui,
             get_state_manager_fn=get_state_manager,
             scene_recorder_fn=_record_agent_scene_event,
@@ -3367,7 +3378,7 @@ class AgentRuntime:
             )
         try:
             threshold_estimate_started = time.perf_counter()
-            threshold_estimate_tokens = estimate_messages_tokens_for_threshold(
+            threshold_estimate_tokens = self._estimate_context_input_tokens(
                 messages,
                 self._automatic_context_compression_threshold_tokens(),
             )
@@ -3500,7 +3511,7 @@ class AgentRuntime:
                 # Single estimate for UI + compress gate. Far under the compress
                 # threshold uses a conservative char upper bound (no full precise walk).
                 compress_threshold_tokens = self._automatic_context_compression_threshold_tokens()
-                current_tokens = estimate_messages_tokens_for_threshold(
+                current_tokens = self._estimate_context_input_tokens(
                     messages,
                     compress_threshold_tokens,
                 )
@@ -3547,7 +3558,7 @@ class AgentRuntime:
                             # 只在投影分支内消费 state：gate_tokens 低于触发线时
                             # micro_compact_state 保持 None，不得对其求值。
                             if micro_compact_state.get("applied"):
-                                current_tokens = estimate_messages_tokens_for_threshold(
+                                current_tokens = self._estimate_context_input_tokens(
                                     messages,
                                     compress_threshold_tokens,
                                 )
@@ -3574,7 +3585,7 @@ class AgentRuntime:
                         trigger_source=compression_trigger_source,
                     )
                     # Re-estimate only after messages actually changed.
-                    after_tokens = estimate_messages_tokens(messages)
+                    after_tokens = self._estimate_context_input_tokens(messages)
                     try:
                         ui.note_context_window(after_tokens, context_limit)
                     except Exception:
@@ -3590,7 +3601,7 @@ class AgentRuntime:
                     # The send gate and telemetry must measure the compressed
                     # payload, including the notice appended above. The old
                     # estimate can exceed the limit even when compression fits.
-                    current_tokens = estimate_messages_tokens(messages)
+                    current_tokens = self._estimate_context_input_tokens(messages)
                 self._raise_if_turn_stop_requested()
                 self._record_turn_send_timing_anchor(
                     "compressionGateMs",

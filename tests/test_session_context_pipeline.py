@@ -1784,6 +1784,95 @@ def test_session_detail_include_secondary_false_skips_side_lists(tmp_path, monke
     assert detail["pendingToolGovernanceRequests"] == []
 
 
+def test_session_detail_stamps_ledger_before_message_read(monkeypatch):
+    """The detail's ledgerSeq is the SSE id cursor and edit-staleness base, so
+    it must be snapshotted before the message assembly reads content: journal
+    events appended after the snapshot replay on reconnect, while an
+    end-of-assembly stamp would mark them seen without delivering them."""
+
+    from core.web.services.session import projection as session_projection
+
+    conversation = {
+        "id": "session-light",
+        "conversation_id": "session-light",
+        "title": "light",
+        "status": "ready",
+        "messages": [],
+        "last_turn_status": "ready",
+        "agent_id": "agent-light",
+    }
+    summary = {
+        "id": "session-light",
+        "title": "light",
+        "status": "ready",
+        "taskSummary": "",
+        "lastActive": "",
+        "updatedAt": "",
+        "currentPhase": "ready",
+        "agentId": "agent-light",
+    }
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("secondary hydrate should be skipped")
+
+    ledger = {"calls": 0}
+    message_read_at = {"ledger": None}
+
+    def ledger_sequence(_session_id):
+        # The journal watermark advances on every read, like live appends.
+        ledger["calls"] += 1
+        return ledger["calls"] * 10
+
+    def read_messages(*_args, **_kwargs):
+        message_read_at["ledger"] = ledger["calls"] * 10
+        return []
+
+    monkeypatch.setattr(session_service, "_recent_chat_next_state_signal_summaries", boom)
+    monkeypatch.setattr(session_service, "list_group_context_events_for_agent", boom)
+    monkeypatch.setattr(session_service, "list_agent_inbox_messages_for_agent", boom)
+    monkeypatch.setattr(session_service, "_pending_tool_governance_requests_for_session", boom)
+    monkeypatch.setattr(session_service, "_session_agent_is_available", lambda _summary: True)
+    monkeypatch.setattr(
+        session_service,
+        "_session_detail_agent_snapshot",
+        lambda *_args, **_kwargs: {"toolPolicy": {}, "memoryPolicy": {}},
+    )
+    monkeypatch.setattr(session_service, "_get_session_turn_control", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_normalize_session_active_task", lambda value: value if isinstance(value, dict) else None)
+    monkeypatch.setattr(session_service, "_is_task_tool_backed_active_task", lambda _task: False)
+    monkeypatch.setattr(session_service, "_session_detail_window_requested", lambda **_kwargs: False)
+    monkeypatch.setattr(session_service, "_messages_with_live_output", read_messages)
+    monkeypatch.setattr(session_service, "_normalize_messages", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "_build_session_context_usage", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_session_last_llm_usage", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_build_session_cache_usage", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_current_session_live_context_composition", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_normalize_session_context_composition", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_current_session_live_llm_payload_trace", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_normalize_session_llm_payload_trace", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_session_last_cache_composition", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", ledger_sequence)
+    monkeypatch.setattr(session_service, "_active_task_to_api", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_visible_session_runtime_notices", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "_normalize_session_runtime_notices", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "normalize_active_skill_contract", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_normalize_child_handoff_context", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_session_turn_error_to_api", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_current_session_turn_id", lambda *_a, **_k: "")
+
+    detail = session_projection._build_session_detail_from_summary(
+        conversation,
+        summary,
+        hydrate_agent=True,
+        include_secondary=False,
+    )
+
+    assert detail["ledgerSeq"] == 10
+    assert message_read_at["ledger"] is not None
+    assert detail["ledgerSeq"] <= message_read_at["ledger"]
+
+
 def test_terminal_reason_for_turn_maps_canonical_stops():
     assert session_service._terminal_reason_for_turn("completed") == "success"
     assert session_service._terminal_reason_for_turn("failed_runtime") == "failed_runtime"

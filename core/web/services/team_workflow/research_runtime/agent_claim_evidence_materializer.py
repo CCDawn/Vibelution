@@ -1339,6 +1339,267 @@ def _chain_agent_model_ref(agent_id: str) -> str:
     return _text(dialogue.get("modelId")) if isinstance(dialogue, dict) else ""
 
 
+# Dispositions the relation-graph contract treats as genuine counter-evidence.
+# Any other value (e.g. ``limit_scope``) narrows rather than negates a claim,
+# so it must never register as ``contradicts``.
+_COUNTER_EVIDENCE_DISPOSITIONS = frozenset(
+    {"challenges_ontology", "alternative_interpretation"}
+)
+
+
+def _candidate_graph_counter_evidence_source(
+    team_id: str,
+    collection_run_id: str,
+) -> dict[str, Any]:
+    """Read one collection run's authoritative candidate-graph bridge input.
+
+    Follows the same read shape as the readback registry's scoped relation
+    graph (``candidate_type="candidate_graph"``, latest record by
+    updatedAt/createdAt/candidateId), but keeps the raw fields the card
+    bridge needs and that the registry projection drops: the graph agent
+    (``graph.summary.createdByAgent``), the graph's own
+    ``sourceCollectionRunId``, and ``generatedFromCandidateIds`` for
+    evidenceRef → candidate resolution.  Fail-open to an empty dict: a run
+    without a candidate graph simply has no counter-evidence to bridge.
+    """
+
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    normalized_team = _text(team_id)
+    normalized_run = _text(collection_run_id)
+    if not normalized_team or not normalized_run:
+        return {}
+    try:
+        payload = list_candidate_store(
+            normalized_team,
+            candidate_type="candidate_graph",
+            limit=500,
+            run_id=normalized_run,
+        )
+    except Exception:  # noqa: BLE001 - bridge input is never a handoff failure
+        return {}
+    graphs = [
+        item
+        for item in list(payload.get("candidates") or [])
+        if isinstance(item, dict) and _text(item.get("candidateId"))
+    ]
+    if not graphs:
+        return {}
+    latest = max(
+        graphs,
+        key=lambda item: (
+            _text(item.get("updatedAt")),
+            _text(item.get("createdAt")),
+            _text(item.get("candidateId")),
+        ),
+    )
+    metadata = (
+        latest.get("metadata") if isinstance(latest.get("metadata"), dict) else {}
+    )
+    graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {}
+    summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+    agent_process = [
+        item
+        for item in list(metadata.get("agentProcess") or [])
+        if isinstance(item, dict) and _text(item.get("agentId"))
+    ]
+    return {
+        "counterEvidenceRefs": [
+            item
+            for item in list(graph.get("counterEvidenceRefs") or [])
+            if isinstance(item, dict)
+        ],
+        "graphAgentId": _first_non_empty_text(
+            summary.get("createdByAgent"),
+            agent_process[0].get("agentId") if agent_process else "",
+        ),
+        "graphSourceCollectionRunId": _first_non_empty_text(
+            summary.get("sourceCollectionRunId"), normalized_run
+        ),
+        "generatedFromCandidateIds": _normalized_hypothesis_candidate_ids(
+            metadata.get("generatedFromCandidateIds")
+        ),
+    }
+
+
+def _counter_evidence_candidate_id(
+    *,
+    evidence_ref: str,
+    generated_from_candidate_ids: list[str],
+    candidate_index: dict[str, Mapping[str, Any]] | None,
+) -> str:
+    """Resolve one counter-evidence evidenceRef to a real candidate id.
+
+    Two authorities, cheapest first: the graph's own
+    ``generatedFromCandidateIds`` (the nodes the graph was built over), then
+    the run-owner candidate store index.  An unresolvable ref returns "" —
+    the card contract requires a candidate dimension, so the caller skips
+    the ref instead of minting a fabricated one.
+    """
+
+    normalized_ref = _text(evidence_ref)
+    if not normalized_ref:
+        return ""
+    if normalized_ref in set(generated_from_candidate_ids):
+        return normalized_ref
+    if candidate_index is not None and normalized_ref in candidate_index:
+        return normalized_ref
+    return ""
+
+
+def _materialize_candidate_graph_counter_evidence(
+    *,
+    project_root: str | Path,
+    team_id: str,
+    question_scope: Mapping[str, Any],
+    collection_run_id: str,
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
+    """Bridge one run's candidate-graph counterEvidenceRefs into cards.
+
+    The candidate relation graph is the designed counter-evidence authority
+    (each ref carries the challenged claim, its disposition and the evidence
+    ref it stands on), but until this bridge nothing materialized those refs
+    as claim-evidence cards, so packaging could never see them and stage-one
+    deliveries failed with an empty ``counterevidence_refs`` list.  The
+    bridge runs after the collection bridge's existing phases, over the same
+    run's authoritative candidate graph:
+
+    - only genuine counter-evidence dispositions register
+      (``challenges_ontology`` / ``alternative_interpretation`` →
+      ``supportLevel="contradicts"``); unknown dispositions are skipped as
+      observable annotations, never a crash;
+    - claim identity comes from the question-scoped ledger via
+      :func:`_propose_ledger_claim` (content-hash identity, so a replayed
+      ref reuses its row), and the store's content-hash ``claimEvidenceId``
+      keeps a replay zero-write;
+    - ``candidateId`` is resolved from the graph's own generated ids or the
+      candidate store; an unresolvable ref is skipped rather than minted.
+    """
+
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    source = _candidate_graph_counter_evidence_source(team_id, collection_run_id)
+    refs = list(source.get("counterEvidenceRefs") or [])
+    if not refs:
+        return {"status": "skipped", "reason": "no_counter_evidence_refs"}
+    graph_agent_id = _text(source.get("graphAgentId"))
+    graph_source_run_id = _text(source.get("graphSourceCollectionRunId"))
+    generated_from_ids = list(source.get("generatedFromCandidateIds") or [])
+    # The candidate-store fallback index is read once, lazily: only a ref the
+    # generated ids do not cover pays for the read.
+    candidate_index: dict[str, Mapping[str, Any]] | None = None
+    candidate_index_loaded = False
+
+    def _load_candidate_index() -> dict[str, Mapping[str, Any]] | None:
+        nonlocal candidate_index, candidate_index_loaded
+        if not candidate_index_loaded:
+            candidate_index_loaded = True
+            try:
+                response = list_candidate_store(_text(team_id), limit=500)
+                index: dict[str, Mapping[str, Any]] = {}
+                for item in list(response.get("candidates") or []):
+                    if (
+                        isinstance(item, Mapping)
+                        and _text(item.get("candidateId"))
+                        and _text(item.get("candidateType")) != "candidate_graph"
+                    ):
+                        index.setdefault(_text(item.get("candidateId")), item)
+                candidate_index = index
+            except Exception:  # noqa: BLE001 - enrichment must never fail the write
+                candidate_index = None
+        return candidate_index
+
+    model_ref = _chain_agent_model_ref(graph_agent_id) if graph_agent_id else ""
+    store = ClaimEvidenceStore(project_root)
+    seen_refs: set[tuple[str, str]] = set()
+    registered = 0
+    unknown_disposition_skipped: list[dict[str, str]] = []
+    unresolved_candidate_skipped: list[dict[str, str]] = []
+    for ref in refs:
+        claim_text = _text(ref.get("claim"))
+        evidence_ref = _text(
+            ref.get("evidenceRef") or ref.get("evidence_ref") or ref.get("refId")
+        )
+        disposition = _text(ref.get("disposition")).lower()
+        if not claim_text or not evidence_ref:
+            continue
+        ref_key = (evidence_ref, claim_text)
+        if ref_key in seen_refs:
+            continue
+        seen_refs.add(ref_key)
+        if disposition not in _COUNTER_EVIDENCE_DISPOSITIONS:
+            if disposition:
+                unknown_disposition_skipped.append(
+                    {"evidenceRef": evidence_ref, "disposition": disposition}
+                )
+            continue
+        candidate_id = _counter_evidence_candidate_id(
+            evidence_ref=evidence_ref,
+            generated_from_candidate_ids=generated_from_ids,
+            candidate_index=_load_candidate_index(),
+        )
+        if not candidate_id:
+            unresolved_candidate_skipped.append(
+                {"evidenceRef": evidence_ref, "reason": "candidate_unresolved"}
+            )
+            continue
+        locator = {"kind": "evidence_ref", "anchor": evidence_ref}
+        # Deterministic source revision over the only facts the ref carries;
+        # identical replays hash identically, keeping the card id stable.
+        source_revision = "sha256:" + _sha256(
+            {
+                "sourceRef": evidence_ref,
+                "locator": locator,
+                "quote": claim_text,
+                "relation": "challenges",
+                "disposition": disposition,
+                "graphSourceCollectionRunId": graph_source_run_id,
+            }
+        )
+        proposed = _propose_ledger_claim(
+            team_id=_text(team_id),
+            question_scope=question_scope,
+            claim_text=claim_text,
+        )
+        payload: dict[str, Any] = {
+            "claimId": proposed["claimId"],
+            "candidateId": candidate_id,
+            "sourceId": evidence_ref,
+            "sourceRevision": source_revision,
+            "locator": locator,
+            "quote": claim_text,
+            "evidenceKind": "counter_evidence",
+            "reasoningRole": "inference",
+            "supportLevel": "contradicts",
+            "extractionMethod": "model" if model_ref else "manual",
+            "extractorAgentId": graph_agent_id or "source_collection",
+            "modelRef": model_ref,
+            "sourceCollectionRunId": graph_source_run_id,
+        }
+        if _text(workflow_run_id):
+            payload["workflowRunId"] = _text(workflow_run_id)
+        store.register(_text(team_id), payload)
+        registered += 1
+    result: dict[str, Any] = {
+        "status": "materialized" if registered else "skipped",
+        "counterEvidenceRefCount": len(refs),
+        "counterEvidenceCount": registered,
+    }
+    if not registered:
+        result["reason"] = "no_registerable_counter_evidence"
+    if unknown_disposition_skipped:
+        result["unknownDispositionSkipped"] = unknown_disposition_skipped
+    if unresolved_candidate_skipped:
+        result["unresolvedCandidateSkipped"] = unresolved_candidate_skipped
+    return result
+
+
 def _chain_hypothesis_candidate_statements(
     team_id: str,
     question_scope: Mapping[str, Any],
@@ -1377,6 +1638,7 @@ def materialize_chain_collection_evidence(
     question_scope: Mapping[str, Any],
     collection_run_id: str,
     hypothesis_candidate_ids: object = None,
+    workflow_run_id: str = "",
 ) -> dict[str, Any]:
     """Bridge one chain-level collection run into the claim ledger (idempotent).
 
@@ -1587,6 +1849,31 @@ def materialize_chain_collection_evidence(
                 },
             )
             evidence_count += 1
+    # Phase 3 — candidate-graph counter-evidence dimension: the relation
+    # graph's counterEvidenceRefs are the designed counter-evidence authority,
+    # and this bridge is what materializes them as canonical cards (bound to
+    # the formal run when the caller names one).  The bridge is deliberately
+    # fail-open — a run without a graph, without registerable refs, or with
+    # unknown dispositions only annotates the result — because a
+    # counter-evidence gap must stay visible, never block the handoff.
+    counter_evidence: dict[str, Any] = {}
+    try:
+        counter_evidence = _materialize_candidate_graph_counter_evidence(
+            project_root=project_root,
+            team_id=normalized_team,
+            question_scope=question_scope,
+            collection_run_id=normalized_run,
+            workflow_run_id=workflow_run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - bridge failure never blocks handoff
+        logger.warning(
+            "candidate-graph counter-evidence bridge failed for collection run "
+            "%s: %s: %s",
+            normalized_run,
+            type(exc).__name__,
+            str(exc)[:300],
+        )
+        counter_evidence = {"status": "failed", "error": str(exc)[:300]}
     return {
         "status": "materialized",
         "collectionRunId": normalized_run,
@@ -1595,6 +1882,7 @@ def materialize_chain_collection_evidence(
         "candidateClaimCount": len(candidate_claim_ids),
         "evidenceCount": evidence_count,
         "evidenceRefsAttached": ref_attachments,
+        "counterEvidence": counter_evidence,
         **({"metadataOnlySkipped": metadata_only_skipped} if metadata_only_skipped else {}),
         **({"offtopicSkipped": offtopic_skipped} if offtopic_skipped else {}),
     }
