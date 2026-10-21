@@ -239,6 +239,7 @@ describe("chatStreamApplyController", () => {
     expect(decision.shouldInvalidateSession).toBe(false);
     expect(decision.shouldLogApplied).toBe(true);
     expect(decision.telemetry.appliedCount).toBe(50);
+    expect(decision.nextCommittedLayer?.clientDeltaTiming).toEqual({ turnId: "turn-1", ledgerSeq: 1, appliedAtMs: 152 });
   });
 
   it("keeps draining after a stale-only batch without notifying it as applied", () => {
