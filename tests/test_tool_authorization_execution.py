@@ -834,3 +834,120 @@ def test_runtime_llm_identity_memo_reuses_config_fallback_per_snapshot(monkeypat
     assert calls["get_profile"] == 4
 
     tool_authorization_service.clear_llm_identity_memo()
+
+
+def _override_runtime(
+    *,
+    session_id="session-override",
+    agent_id="agent-override",
+    revision=5,
+    config_hash="hash-override",
+):
+    runtime = {
+        "agentId": agent_id,
+        "turnId": "turn-override",
+        "sessionId": session_id,
+        "agent": {"agentId": agent_id},
+        "agentConfigSnapshot": {
+            "agentId": agent_id,
+            "configRevision": revision,
+            "configHash": config_hash,
+        },
+        "permissionPreset": "request_approval",
+        "llmModel": "override-model",
+        "llmProvider": "override-provider",
+        "toolPolicy": {"policyId": "tool-agent-override", "maxCallsPerTurn": 32},
+    }
+    return runtime
+
+
+def test_session_override_memo_reuses_resolution_per_snapshot_identity(monkeypatch):
+    """TTFT 批七：session override 查询按快照身份 memo，同身份只走一次 store 读。"""
+
+    from core.orchestration import session_budget_resolve
+
+    tool_authorization_service.clear_session_override_memo()
+    calls = {"resolve": 0}
+
+    def fake_resolve(session_id):
+        calls["resolve"] += 1
+        return session_budget_resolve.SessionBudgetParameters(maxCallsPerTurn=48)
+
+    monkeypatch.setattr(session_budget_resolve, "get_session_budget_parameters", fake_resolve)
+
+    runtime = _override_runtime()
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 48
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 48
+    assert calls["resolve"] == 1
+
+    # 快照身份推进（override 写路径以 Agent configRevision CAS 守护）→ 重新解析。
+    bumped = _override_runtime(revision=6, config_hash="hash-override-2")
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(bumped)) == 48
+    assert calls["resolve"] == 2
+
+    # agent 变化（session 重绑）→ 新键，重新解析。
+    rebound = _override_runtime(agent_id="agent-override-2")
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(rebound)) == 48
+    assert calls["resolve"] == 3
+
+    # 无可信快照身份（revision<1 或缺 hash）→ 不 memo，逐次解析。
+    untrusted = _override_runtime(revision=0, config_hash="")
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(untrusted)) == 48
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(untrusted)) == 48
+    assert calls["resolve"] == 5
+
+    # 清空后同键重新解析。
+    tool_authorization_service.clear_session_override_memo()
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 48
+    assert calls["resolve"] == 6
+
+    tool_authorization_service.clear_session_override_memo()
+
+
+def test_session_override_memo_keeps_unset_result_negative(monkeypatch):
+    """无 override 的会话（最常见的每轮 I/O 来源）同样命中 memo，返回值不变。"""
+
+    from core.orchestration import session_budget_resolve
+
+    tool_authorization_service.clear_session_override_memo()
+    calls = {"resolve": 0}
+
+    def fake_resolve(session_id):
+        calls["resolve"] += 1
+        return None
+
+    monkeypatch.setattr(session_budget_resolve, "get_session_budget_parameters", fake_resolve)
+
+    runtime = _override_runtime(session_id="session-unset")
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 0
+    assert tool_authorization_service._session_override_max_calls_per_turn(dict(runtime)) == 0
+    assert calls["resolve"] == 1
+
+    tool_authorization_service.clear_session_override_memo()
+
+
+def test_install_execution_authorization_records_sub_anchor_timing():
+    """TTFT 批七：install 内部细分锚点写入线程局部，供绑定层并入 timing 事件。"""
+
+    runtime = _override_runtime()
+    tool_authorization_service.clear_execution_authorization()
+    context = tool_authorization_service.install_execution_authorization(
+        SimpleNamespace(
+            decision=SimpleNamespace(
+                agent_id=runtime["agentId"],
+                turn_id=runtime["turnId"],
+                decision_fingerprint="decision-timing",
+                executable_tools=("grep_search_tool",),
+            )
+        ),
+        runtime=dict(runtime),
+    )
+    assert context.max_calls_per_turn == 32
+
+    timing = tool_authorization_service.last_install_execution_timing()
+    assert timing is not None
+    assert set(timing) == {"identityMs", "maxCallsMs", "installCoreMs"}
+    for value in timing.values():
+        assert isinstance(value, int) and value >= 0
+
+    tool_authorization_service.clear_execution_authorization()

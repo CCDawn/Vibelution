@@ -112,6 +112,8 @@ def test_streaming_bridge_uses_event_sink_and_generator_return(monkeypatch):
         cache_partition = ""
         prompt_purpose = "test"
         surface = "test"
+        session_id = ""
+        agent_id = ""
 
         def with_cache_partition(self, _partition):
             return self

@@ -5373,8 +5373,6 @@ app.whenReady()
     if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen) {
       electronStartupStage = "workbench_window_ready";
       await startOrFocusWorkbenchFromProductEntryOnShell();
-    } else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot) {
-      await windowProvider.openLauncher();
     }
     if (deferWorkbenchOpen) {
       pendingOpenWorkbenchRequest = false;
