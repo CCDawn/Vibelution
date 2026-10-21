@@ -1179,7 +1179,6 @@ def session_agent_lifecycle_transaction():
 
 
 # Re-apply lifecycle serialization after decorator definition (packs export bare bodies).
-archive_agent_sessions = session_agent_lifecycle_serialized(archive_agent_sessions)
 stage_agent_session_purge = session_agent_lifecycle_serialized(stage_agent_session_purge)
 restore_staged_agent_session_purge = session_agent_lifecycle_serialized(restore_staged_agent_session_purge)
 retry_pending_agent_session_purge_cleanup = session_agent_lifecycle_serialized(
