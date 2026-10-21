@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+// @ts-expect-error Build entrypoints are plain JavaScript, outside the source TS project.
+import { createIsolatedBuilderConfig, resolveInstalledElectronDistribution } from "../scripts/buildDesktopPackage.js";
 
 const buildScriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
 const verifyScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_package.ps1", import.meta.url));
@@ -13,6 +17,48 @@ const packageBuilderPath = fileURLToPath(new URL("../scripts/buildDesktopPackage
 const packageOwnerPath = fileURLToPath(new URL("../scripts/runDesktopPackage.js", import.meta.url));
 const provenanceWriterPath = fileURLToPath(new URL("../src/scripts/writePackageProvenance.ts", import.meta.url));
 const frontendBundlePath = fileURLToPath(new URL("../src/packaging/frontendBundle.ts", import.meta.url));
+
+describe("installed Electron package runtime", () => {
+  function fixture(run: (root: string, dist: string) => void) {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-electron-dist-"));
+    const installed = join(root, "node_modules", "electron");
+    const dist = join(installed, "dist");
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(join(installed, "package.json"), JSON.stringify({ version: "42.5.0" }));
+    writeFileSync(join(dist, "version"), "42.5.0\n");
+    writeFileSync(join(dist, "electron.exe"), "fixture");
+    try { run(root, dist); } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+
+  it("packages the matching installed runtime without changing its source directory", () => {
+    fixture((root, dist) => {
+      const baseConfig = { files: ["dist/**/*"] };
+      const config = createIsolatedBuilderConfig({
+        baseConfig, electronRoot: root, appRoot: join(root, "app"),
+        outputRoot: join(root, "out"), frontendRoot: join(root, "web"),
+        electronDistribution: resolveInstalledElectronDistribution(root, "staging", "win32"),
+      });
+      expect(config.electronDist).toBe(dist);
+      expect(config.electronVersion).toBe("42.5.0");
+      expect(baseConfig).toEqual({ files: ["dist/**/*"] });
+      expect(existsSync(join(dist, "electron.exe"))).toBe(true);
+    });
+  });
+
+  it("rejects a mismatched or incomplete installed distribution", () => {
+    fixture((root, dist) => {
+      writeFileSync(join(dist, "version"), "41.0.0");
+      expect(() => resolveInstalledElectronDistribution(root, "dir", "win32")).toThrow(/version/);
+      writeFileSync(join(dist, "version"), "42.5.0");
+      rmSync(join(dist, "electron.exe"));
+      expect(() => resolveInstalledElectronDistribution(root, "dir", "win32")).toThrow(/incomplete/);
+    });
+  });
+
+  it("does not reuse the host runtime for a Linux ARM64 cross-build", () => {
+    expect(resolveInstalledElectronDistribution("missing-host-installation", "linux-arm64", "win32")).toEqual({});
+  });
+});
 
 describe("desktop package script", () => {
   it("does not mask npm or node failures before writing the launch profile", () => {

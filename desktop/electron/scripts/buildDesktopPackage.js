@@ -30,6 +30,7 @@ export function parseDesktopPackageArgs(argv) {
 
 export function createIsolatedBuilderConfig(input) {
   const config = structuredClone(input.baseConfig);
+  Object.assign(config, input.electronDistribution ?? {});
   config.directories = {
     ...config.directories,
     app: resolve(input.appRoot),
@@ -40,6 +41,23 @@ export function createIsolatedBuilderConfig(input) {
     config.win.icon = resolve(input.electronRoot, config.win.icon);
   }
   return config;
+}
+
+export function resolveInstalledElectronDistribution(packageRoot, mode, platform = process.platform) {
+  // A cross-build must download its target runtime, not copy the host runtime.
+  if (mode === "linux-arm64") return {};
+  const installed = join(packageRoot, "node_modules", "electron");
+  const metadata = readJsonFile(join(installed, "package.json"));
+  const electronDist = join(installed, "dist");
+  const version = readFileSync(join(electronDist, "version"), "utf8").trim();
+  const executable = platform === "win32" ? "electron.exe"
+    : platform === "darwin" ? "Electron.app/Contents/MacOS/Electron" : "electron";
+  if (!version || version !== metadata.version || !existsSync(join(electronDist, executable))) {
+    throw new Error("Installed Electron distribution is incomplete or its version does not match its package.");
+  }
+  // electron-builder supports an unpacked distribution. Copying it avoids a
+  // second download/extraction and Windows EPERM on win-unpacked.tmp rename.
+  return { electronDist, electronVersion: version };
 }
 
 export function runDesktopPackageBuild(input = {}) {
@@ -97,6 +115,7 @@ export function runDesktopPackageBuild(input = {}) {
 
     const builderConfig = createIsolatedBuilderConfig({
       baseConfig: input.baseConfig ?? readJsonFile(join(packageRoot, "electron-builder.json")),
+      electronDistribution: resolveInstalledElectronDistribution(packageRoot, mode),
       electronRoot: packageRoot,
       appRoot,
       outputRoot,
