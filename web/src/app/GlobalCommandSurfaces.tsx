@@ -15,7 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { fetchPublicConfig } from "../api/config";
+import { fetchConfigBootstrap } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import { VCommandPalette } from "../components/vui/product/workbench-shell/VCommandPalette";
 import { VSessionSearchDialog } from "../components/vui/product/workbench-shell/VSessionSearchDialog";
@@ -50,7 +50,7 @@ export function GlobalCommandSurfaces() {
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: fetchPublicConfig,
+    queryFn: fetchConfigBootstrap,
   });
   const chatEnabled = isWorkbenchDomainEnabled(configQuery.data, "chat");
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");

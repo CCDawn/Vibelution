@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchPublicConfig } from "../api/config";
+import { fetchConfigBootstrap } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import { shellDictionary, type Language, type ShellTranslationKey } from "./shellDictionary";
 
@@ -68,7 +68,7 @@ export function useShellI18n(options: ShellI18nOptions = {}) {
   const configEnabled = options.configEnabled ?? true;
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchPublicConfig(),
+    queryFn: () => fetchConfigBootstrap(),
     enabled: configEnabled,
   });
 

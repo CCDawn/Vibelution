@@ -36,6 +36,7 @@ from core.web.routes.config_apply_shell_models import (
     ConfigOpenEnvironmentResponse,
 )
 from core.web.routes.config_workspace_models import (
+    ConfigBootstrapResponse,
     ConfigWorkspaceResponse,
     PublicConfigSummaryResponse,
 )
@@ -48,6 +49,7 @@ from core.web.services.config_service import (
     draft_delete_model,
     discover_config_models,
     draft_update_model,
+    get_config_bootstrap,
     get_config_summary,
     get_config_workspace,
     open_system_environment_settings,
@@ -332,6 +334,11 @@ def _raise_migration_http_error(exc: Exception) -> None:
         status_code=422,
         detail={"code": "migration_request_rejected", "errorType": error_type},
     ) from exc
+
+
+@router.get("/config/bootstrap", response_model=ConfigBootstrapResponse)
+def config_bootstrap() -> dict:
+    return get_config_bootstrap()
 
 
 @router.get(

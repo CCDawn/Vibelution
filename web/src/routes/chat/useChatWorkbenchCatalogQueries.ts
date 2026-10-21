@@ -15,7 +15,7 @@ import {
   listChatRoomPurposes,
   queryConversations,
 } from "../../api/chat";
-import { fetchPublicConfig } from "../../api/config";
+import { fetchConfigBootstrap } from "../../api/config";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
 import { fetchRuntimeSummary } from "../../api/runtime";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
@@ -115,7 +115,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const configSummaryQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: ({ signal }) => fetchPublicConfig({ signal }),
+    queryFn: ({ signal }) => fetchConfigBootstrap({ signal }),
     staleTime: 30_000,
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");

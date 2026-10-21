@@ -211,6 +211,12 @@ def get_launcher_freshness() -> dict[str, Any]:
     return _freshness()
 
 
+def get_launcher_current_instance_identity() -> dict[str, Any]:
+    from core.infrastructure.branch_workspace import current_branch_instance_identity
+
+    return current_branch_instance_identity(PROJECT_ROOT)
+
+
 def list_launcher_branch_instances(*, include_cleanup_metadata: bool = False) -> dict[str, Any]:
     """Return Git-governed branch instances for the Launcher first screen.
 

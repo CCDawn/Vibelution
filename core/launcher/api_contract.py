@@ -180,6 +180,14 @@ class LauncherFreshnessResponse(LauncherJsonResponse):
     startedAt: str = ""
 
 
+class LauncherCurrentInstanceIdentityResponse(LauncherJsonResponse):
+    schemaVersion: int = 1
+    currentId: str
+    currentShortName: str
+    currentWorkbenchTitle: str
+    currentLauncherTitle: str
+
+
 class LauncherBranchInstanceListResponse(LauncherJsonResponse):
     schemaVersion: int = 1
     integrationRoot: str = ""
