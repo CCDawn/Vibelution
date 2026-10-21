@@ -20,6 +20,7 @@ import { resolveChatUserDisplayName } from "../chatCompactPanel";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   ChatComposerPlusMenu,
+  type ChatComposerKnowledgeReferenceState,
   type ChatComposerSessionReferenceOption,
 } from "./ChatComposerPlusMenu";
 import type { ChatComposerBudgetControl } from "./ChatComposerBudgetPopover";
@@ -159,6 +160,7 @@ export type ChatConversationSurfaceModelInput = {
   composerContextRing: ComposerContextRingModel | null;
   composerFocusRequest: { sessionId: string; signal: string };
   composerKnowledgeReferenceOptions: ChatComposerSessionReferenceOption[];
+  knowledgeReferenceState?: ChatComposerKnowledgeReferenceState;
   composerSessionReferenceOptions: ChatComposerSessionReferenceOption[];
   currentTaskSummary: string;
   detail: SessionDetail | null | undefined;
@@ -249,6 +251,7 @@ export function useChatConversationSurfaceModel({
   composerContextRing,
   composerFocusRequest,
   composerKnowledgeReferenceOptions,
+  knowledgeReferenceState,
   composerSessionReferenceOptions,
   currentTaskSummary,
   detail,
@@ -363,6 +366,7 @@ export function useChatConversationSurfaceModel({
           sessionReferences={composerSessionReferenceOptions}
           onAddSessionReference={handleAddComposerReference}
           knowledgeReferenceOptions={composerKnowledgeReferenceOptions}
+          knowledgeReferenceState={knowledgeReferenceState}
           onAddKnowledgeReference={handleAddComposerReference}
           labels={{
             composerAttachFiles: t("composerAttachFiles"),
@@ -520,6 +524,7 @@ export function useChatConversationSurfaceModel({
       composerContextRing,
       composerFocusRequest,
       composerKnowledgeReferenceOptions,
+      knowledgeReferenceState,
       composerSessionReferenceOptions,
       currentTaskSummary,
       detail,
