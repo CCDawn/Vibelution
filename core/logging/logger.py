@@ -577,12 +577,43 @@ class ConversationLogger:
     @staticmethod
     def _summarize_text_payload(*, field_name: str, text: str) -> Dict[str, Any]:
         """Return a stable prompt-free summary suitable for durable logs."""
-        raw = str(text or "")
+        return ConversationLogger._summarize_text_segments_payload(
+            field_name=field_name,
+            segments=(text,),
+        )
+
+    @staticmethod
+    def _summarize_text_segments_payload(
+        *,
+        field_name: str,
+        segments,  # Iterable[str]
+        separator: str = "\n\n",
+    ) -> Dict[str, Any]:
+        """Prompt-free summary over ``separator.join(segments)`` without materializing it.
+
+        Length and sha256 are computed chunk-wise (64 KiC slices, UTF-8 is
+        per-character so chunked encoding equals whole-string encoding), so a
+        huge message content never needs one full joined-string copy nor one
+        full encoded-bytes blob on the send path. The journal keeps only the
+        bounded summary; content text never enters durable logs.
+        """
+
+        hasher = hashlib.sha256()
+        total_chars = 0
+        chunk_size = 65536
+        first = True
+        for segment in segments:
+            raw = str(segment or "")
+            if not first:
+                hasher.update(separator.encode("utf-8"))
+                total_chars += len(separator)
+            first = False
+            for offset in range(0, len(raw), chunk_size):
+                hasher.update(raw[offset:offset + chunk_size].encode("utf-8", errors="ignore"))
+            total_chars += len(raw)
         return {
-            f"{field_name}_length": len(raw),
-            f"{field_name}_sha256": hashlib.sha256(
-                raw.encode("utf-8", errors="ignore")
-            ).hexdigest(),
+            f"{field_name}_length": total_chars,
+            f"{field_name}_sha256": hasher.hexdigest(),
             f"{field_name}_inlined": False,
             f"{field_name}_omitted": True,
         }
@@ -704,21 +735,28 @@ class ConversationLogger:
                             image_count += 1
                             continue
                         parts.append(str(block.get("text") or ""))
-                    text = "\n\n".join(part for part in parts if part)
+                    summary = self._summarize_text_segments_payload(
+                        field_name="content",
+                        segments=(part for part in parts if part),
+                    )
                 else:
-                    text = str(content_raw)
+                    summary = self._summarize_text_segments_payload(
+                        field_name="content",
+                        segments=(
+                            content_raw if isinstance(content_raw, str) else str(content_raw),
+                        ),
+                    )
             else:
                 msg_type = getattr(msg, "type", "unknown")
                 content_raw = getattr(msg, "content", "")
-                text = str(content_raw) if not isinstance(content_raw, str) else content_raw
+                text = content_raw if isinstance(content_raw, str) else str(content_raw)
+                summary = self._summarize_text_segments_payload(
+                    field_name="content",
+                    segments=(text,),
+                )
 
             payload = {"type": msg_type}
-            payload.update(
-                self._summarize_text_payload(
-                    field_name="content",
-                    text=text,
-                )
-            )
+            payload.update(summary)
             payload["image_count"] = image_count
             msg_summaries.append(payload)
 
