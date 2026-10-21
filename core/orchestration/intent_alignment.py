@@ -22,7 +22,10 @@
 owner 表登记归 T9（docs/plans/2026-10-18-intent-alignment-module.md §8.2）。
 T2 在 store 段之后追加「判定段」（§4.1-§4.3 / §5.2 / §3.9）：规则预筛信号、
 IntentAlignmentReply 回执解析与落账、IntentAlignmentPacket 组装，纯函数为主；
-仍不含工具 handler（T4）与 markdown 渲染（章节读 ctx packet，不读本 store）。
+T4 在判定段之后追加「agent 工具 handler 段」（§3.5.2）：intent_alignment_card /
+intent_alignment_merge 的确定性 handler（store 转调 + packet 刷新），供
+tools/Key_Tools.py 的同名 @tool 注册面调用；markdown 渲染不存在（章节读
+ctx packet，不读本 store）。
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -60,6 +64,11 @@ __all__ = [
     "parse_intent_alignment_reply",
     "apply_reply",
     "assemble_packet",
+    # ── T4 agent 工具 handler 段 ──
+    "CARD_TOOL_NAME",
+    "MERGE_TOOL_NAME",
+    "intent_alignment_card_handler",
+    "intent_alignment_merge_handler",
 ]
 
 
@@ -1572,4 +1581,530 @@ def assemble_packet(snapshot: Any, gate: Any) -> Optional[dict[str, Any]]:
             "questionsAskedThisSession": len(ledger),
             "maxQuestionsPerTurn": MAX_QUESTIONS_PER_TURN,
         },
+    }
+
+
+# ── agent 工具 handler（§3.5.2，T4） ─────────────────────────────────────
+#
+# 两个 handler 是 store 写路径的 agent 面（确定性：语义判断全部由主 agent 在
+# 入参中给出，handler 只落账与刷新投影）。注册面与 todo_write 同族：
+# tools/Key_Tools.py 的同名 @tool wrapper → tool_executor 从 create_key_tools
+# 自动推导执行映射；工具调用参数与结果由 turn 机制统一 journal 成 tool_call
+# turnItem（handler 不自行写 journal——落账机制唯一，禁止第二套执行机制）。
+# 写后 packet 刷新经 PromptManager.set_intent_alignment_packet（§4.4 时点 2）；
+# packet 只是投影，刷新失败不回滚 store 写入（fail-open，§8.2 D2）。
+
+CARD_TOOL_NAME = "intent_alignment_card"
+MERGE_TOOL_NAME = "intent_alignment_merge"
+
+_MAX_CARD_QUESTIONS = 5
+_MAX_CARD_OPTIONS = 6
+_CARD_PAYLOAD_CHAR_LIMIT = 8 * 1024
+_SHORT_QUOTE_LIMIT = 80
+
+_INPUT_MODES = frozenset({"single_choice", "multi_choice", "free_text", "choice_or_text"})
+_CHOICE_MODES = frozenset({"single_choice", "multi_choice", "choice_or_text"})
+
+
+def _tool_error(code: str, message: str) -> dict[str, Any]:
+    """结构化错误返回（agent 可读、可据此先补 merge 再重试），不抛异常打断 turn。"""
+    return {"status": "error", "code": code, "message": message}
+
+
+def _tool_error_from_exc(exc: Exception, fallback_code: str) -> dict[str, Any]:
+    if isinstance(exc, IntentAlignmentVersionConflictError):
+        return _tool_error("VERSION_CONFLICT", str(exc))
+    if isinstance(exc, IntentAlignmentInvalidTransitionError):
+        return _tool_error("INVALID_TRANSITION", str(exc))
+    if isinstance(exc, IntentAlignmentArtifactNotFoundError):
+        return _tool_error("NO_ARTIFACT", str(exc))
+    return _tool_error(fallback_code, str(exc))
+
+
+def _runtime_session_context() -> tuple[str, dict[str, str]]:
+    """从当前 agent runtime 上下文解析 (sessionId, turn_ref)（plan_tools 同源）。
+
+    上下文缺失（测试直调 / 非会话执行环境）返回空串，由调用方决定拒绝方式。
+    """
+    from core.web.services.agent_directory_service import current_agent_runtime
+
+    runtime = current_agent_runtime() or {}
+    session_id = str(runtime.get("sessionId") or "").strip()
+    turn_ref = {
+        "sessionId": session_id,
+        "turnId": str(runtime.get("turnId") or "").strip(),
+        "messageId": "",
+    }
+    return session_id, turn_ref
+
+
+def _normalize_card_question(index: int, raw: Any) -> tuple[dict[str, Any], str]:
+    """规范化单题（§3.5.2 入参 → 台账写入 + §5.2 payload 双形态）；返回 (题, 错误)。"""
+    if not isinstance(raw, Mapping):
+        return {}, f"questions 第 {index} 项不是对象"
+    question = str(raw.get("question") or raw.get("prompt") or "").strip()
+    if not question:
+        return {}, f"questions 第 {index} 项缺少 question"
+    input_mode = str(raw.get("input_mode") or raw.get("inputMode") or "").strip()
+    if input_mode not in _INPUT_MODES:
+        return {}, (
+            f"questions 第 {index} 项 input_mode 无效：{input_mode or '空'}。"
+            "可用：single_choice / multi_choice / free_text / choice_or_text"
+        )
+    options: list[dict[str, Any]] = []
+    if input_mode in _CHOICE_MODES:
+        raw_options = raw.get("options")
+        if not isinstance(raw_options, (list, tuple)) or not raw_options:
+            return {}, f"questions 第 {index} 项为选择题，必须提供 options"
+        if len(raw_options) > _MAX_CARD_OPTIONS:
+            return {}, f"questions 第 {index} 项选项数超过 {_MAX_CARD_OPTIONS}"
+        seen_option_ids: set[str] = set()
+        for option_index, option in enumerate(raw_options, 1):
+            if not isinstance(option, Mapping):
+                return {}, f"questions 第 {index} 项第 {option_index} 个选项不是对象"
+            option_id = str(option.get("option_id") or option.get("optionId") or "").strip()
+            label = str(option.get("label") or "").strip()
+            if not option_id or not label:
+                return {}, f"questions 第 {index} 项第 {option_index} 个选项缺少 option_id/label"
+            if option_id in seen_option_ids:
+                return {}, f"questions 第 {index} 项选项 option_id 重复：{option_id}"
+            seen_option_ids.add(option_id)
+            entry: dict[str, Any] = {"optionId": option_id, "label": label}
+            hint = str(option.get("hint") or "").strip()
+            if hint:
+                entry["hint"] = hint
+            options.append(entry)
+    required_raw = raw.get("required", True)
+    required = bool(required_raw) if isinstance(required_raw, bool) else True
+    normalized: dict[str, Any] = {
+        "question_id": str(raw.get("question_id") or raw.get("questionId") or "").strip(),
+        "question": question,
+        "why_it_matters": str(raw.get("why_it_matters") or raw.get("whyItMatters") or "").strip(),
+        "applies_to": str(raw.get("applies_to") or raw.get("appliesTo") or "").strip(),
+        "input_mode": input_mode,
+        "options": options,
+        "required": required,
+        "placeholder": str(raw.get("placeholder") or "").strip(),
+    }
+    return normalized, ""
+
+
+def _normalize_card_artifacts(raw: Any) -> tuple[list[dict[str, Any]], str]:
+    """规范化 artifacts 只读引用（§5.2 artifacts 形态）；返回 (列表, 错误)。"""
+    if raw is None:
+        return [], ""
+    if not isinstance(raw, (list, tuple)):
+        return [], "artifacts 需要是列表"
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(raw, 1):
+        if not isinstance(item, Mapping):
+            return [], f"artifacts 第 {index} 项不是对象"
+        artifact_id = str(item.get("artifact_id") or item.get("artifactId") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if not artifact_id or not title:
+            return [], f"artifacts 第 {index} 项缺少 artifact_id/title"
+        try:
+            version = int(item.get("version"))
+        except (TypeError, ValueError):
+            return [], f"artifacts 第 {index} 项 version 必须是整数"
+        result.append({"artifactId": artifact_id, "version": version, "title": title})
+    return result, ""
+
+
+def _known_card_ids(store: "IntentAlignmentStore", session_id: str, up_to_version: int) -> set[str]:
+    """收集台账已出现过的 cardId（各版本 confirmation.cardId + askedInCard），供唯一性检查。"""
+    known: set[str] = set()
+    for number in range(1, int(up_to_version) + 1):
+        snapshot = store.get_version(session_id, number)
+        if not snapshot:
+            continue
+        card_id = str((snapshot.get("confirmation") or {}).get("cardId") or "")
+        if card_id:
+            known.add(card_id)
+        for question in snapshot.get("openQuestions") or []:
+            card_ref = str((question or {}).get("askedInCard") or "")
+            if card_ref:
+                known.add(card_ref)
+    return known
+
+
+def _generate_card_id(store: "IntentAlignmentStore", session_id: str, revision: int) -> str:
+    """发卡时生成同会话唯一 cardId（§3.9：handler 生成；ia_ 前缀 + 随机 hex）。"""
+    known = _known_card_ids(store, session_id, revision)
+    for _ in range(16):
+        candidate = f"ia_{uuid.uuid4().hex[:10]}"
+        if candidate not in known:
+            return candidate
+    # 16 次连撞（概率 ~0）时退化为完整 hex，仍保持同会话唯一。
+    return f"ia_{uuid.uuid4().hex}"
+
+
+def _card_payload_size_estimate(questions: list[dict[str, Any]]) -> int:
+    """payload 尺寸预估（写台账前守 8KB 建议上限；questionId 用占位估长）。"""
+    payload = _build_card_payload(
+        card_id="ia_estimate",
+        revision=0,
+        intent_summary="",
+        questions=questions,
+        question_ids=[entry["question_id"] or "q0" for entry in questions],
+        artifacts=None,
+    )
+    return len(json.dumps(payload, ensure_ascii=False))
+
+
+def _build_card_payload(
+    *,
+    card_id: str,
+    revision: int,
+    intent_summary: str,
+    questions: list[dict[str, Any]],
+    question_ids: list[str],
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """组装 IntentAlignmentCardPayload（§5.2 schema）。"""
+    payload_questions: list[dict[str, Any]] = []
+    for entry, question_id in zip(questions, question_ids):
+        item: dict[str, Any] = {
+            "questionId": question_id,
+            "prompt": entry["question"],
+            "inputMode": entry["input_mode"],
+        }
+        if entry["options"]:
+            item["options"] = entry["options"]
+        if entry["input_mode"] == "choice_or_text":
+            item["allowCustomAnswer"] = True
+        if not entry["required"]:
+            item["required"] = False
+        if entry["placeholder"]:
+            item["placeholder"] = entry["placeholder"]
+        payload_questions.append(item)
+    payload: dict[str, Any] = {
+        "schemaVersion": 1,
+        "kind": _CARD_KIND,
+        "cardId": card_id,
+        "revision": int(revision),
+        "intentSummary": intent_summary,
+    }
+    if artifacts:
+        payload["artifacts"] = artifacts
+    payload["questions"] = payload_questions
+    payload["status"] = "open"
+    return payload
+
+
+def _resolve_prompt_manager(prompt_manager: Any) -> Any:
+    if prompt_manager is not None:
+        return prompt_manager
+    from core.prompt_manager.prompt_manager import get_prompt_manager
+
+    return get_prompt_manager()
+
+
+def _refresh_intent_packet(
+    store: "IntentAlignmentStore",
+    session_id: str,
+    prompt_manager: Any,
+    *,
+    options_by_question_id: Optional[Mapping[str, list[str]]] = None,
+    evidence_by_question_id: Optional[Mapping[str, str]] = None,
+) -> None:
+    """写后刷新 PromptManager 内 packet（§4.4 时点 2）。
+
+    store 快照 → assemble_packet（gate 段缺省保守中性）→ 回填 T2 契约委托给
+    handler 的两个空位（openQuestions[].options ← 发卡 questions 入参；
+    confirmedRequirements[].evidence ← 归并答案原文短引用）→ set 注入。
+    packet 只是投影：无工件不注入；刷新异常静默直通（fail-open，权威在 store）。
+    """
+    try:
+        snapshot = store.get_current(session_id)
+        if snapshot is None:
+            return
+        packet = assemble_packet(snapshot, None)
+        if packet is None:
+            return
+        if options_by_question_id:
+            for item in packet.get("openQuestions") or []:
+                labels = options_by_question_id.get(str(item.get("id") or ""))
+                if labels:
+                    item["options"] = list(labels)
+        if evidence_by_question_id:
+            evidence_map: dict[str, str] = {}
+            for change in snapshot.get("changes") or []:
+                if not isinstance(change, Mapping):
+                    continue
+                quote = evidence_by_question_id.get(str(change.get("questionId") or ""))
+                if not quote:
+                    continue
+                folded = change.get("to")
+                if isinstance(folded, (list, tuple)):
+                    points = [_point_text(item) for item in folded]
+                else:
+                    points = [_point_text(folded)]
+                for point in points:
+                    if point:
+                        evidence_map.setdefault(point, quote[:_SHORT_QUOTE_LIMIT])
+            for item in packet.get("confirmedRequirements") or []:
+                quote = evidence_map.get(str(item.get("point") or ""))
+                if quote and not str(item.get("evidence") or ""):
+                    item["evidence"] = quote
+        _resolve_prompt_manager(prompt_manager).set_intent_alignment_packet(packet)
+    except Exception:
+        # 投影刷新绝不阻断权威写入（§8.2 D2 fail-open；packet 层无语义归并）。
+        return
+
+
+def intent_alignment_card_handler(
+    session_id: str,
+    *,
+    intent_summary: str,
+    questions: Any,
+    artifacts: Any = None,
+    turn_ref: Optional[Mapping[str, Any]] = None,
+    store: Optional["IntentAlignmentStore"] = None,
+    prompt_manager: Any = None,
+) -> dict[str, Any]:
+    """intent_alignment_card 确定性 handler（§3.5.2）。
+
+    前置：工件已有四要素初稿（agent 先 merge 再发卡）；不满足返回结构化错误
+    （status=error + code），不落卡、不动台账、不 journal。
+    步骤：cardId 生成（§3.9）→ record_question_asked ×N（question_id 有值沿用、
+    缺省台账分配；记 asked_in_card）→ request_confirmation（draft →
+    pending_confirmation，绑定 cardId 与发卡 turn）→ 组装 §5.2 payload（含台账
+    分配的最终 questionId）随工具结果返回（turn 机制把它与调用参数一起落成
+    tool_call turnItem）→ 刷新 packet 并回填 options。
+    """
+    summary = str(intent_summary or "").strip()
+    if not summary:
+        return _tool_error("INVALID_QUESTIONS", "intent_summary 不能为空（卡片头部一句话）")
+    if not isinstance(questions, (list, tuple)) or not questions:
+        return _tool_error("INVALID_QUESTIONS", "questions 需要是非空列表（一次问完，不拆多轮）")
+    if len(questions) > _MAX_CARD_QUESTIONS:
+        return _tool_error(
+            "INVALID_QUESTIONS", f"questions 一次最多 {_MAX_CARD_QUESTIONS} 个，请挑最影响走向的"
+        )
+    normalized_questions: list[dict[str, Any]] = []
+    for index, raw in enumerate(questions, 1):
+        entry, error = _normalize_card_question(index, raw)
+        if error:
+            return _tool_error("INVALID_QUESTIONS", error)
+        normalized_questions.append(entry)
+    normalized_artifacts, error = _normalize_card_artifacts(artifacts)
+    if error:
+        return _tool_error("INVALID_QUESTIONS", error)
+    if _card_payload_size_estimate(normalized_questions) > _CARD_PAYLOAD_CHAR_LIMIT:
+        return _tool_error(
+            "CARD_TOO_LARGE",
+            f"卡片 payload 超过 {_CARD_PAYLOAD_CHAR_LIMIT} 字符建议上限，请压缩问题/选项文本",
+        )
+
+    store = store or get_intent_alignment_store()
+    try:
+        snapshot = store.get_current(session_id)
+        if snapshot is None:
+            return _tool_error(
+                "NO_ARTIFACT",
+                "当前会话还没有意图对齐工件：先用 intent_alignment_merge 落四要素初稿再发卡",
+            )
+        try:
+            _require_four_elements(snapshot)
+        except ValueError as exc:
+            return _tool_error(
+                "NO_FOUR_ELEMENTS", f"{exc}；先用 intent_alignment_merge 补齐初稿再发卡"
+            )
+        if str(snapshot.get("status") or "") != _STATUS_DRAFT:
+            return _tool_error(
+                "INVALID_TRANSITION",
+                f"当前版本 {snapshot.get('version')} 状态为 {snapshot.get('status')}，"
+                "发卡只允许 draft；如需改问先用 intent_alignment_merge 归并出新 draft 再发新卡",
+            )
+        revision = int(snapshot["version"])
+        card_id = _generate_card_id(store, session_id, revision)
+        asked_ids: list[str] = []
+        for entry in normalized_questions:
+            asked_ids.append(
+                store.record_question_asked(
+                    session_id,
+                    question=entry["question"],
+                    why_it_matters=entry["why_it_matters"],
+                    applies_to=entry["applies_to"],
+                    turn_ref=turn_ref,
+                    question_id=entry["question_id"],
+                    asked_in_card=card_id,
+                )
+            )
+        store.request_confirmation(session_id, card_id=card_id, turn_ref=turn_ref or {})
+    except (IntentAlignmentError, ValueError) as exc:
+        return _tool_error_from_exc(exc, "CARD_FAILED")
+
+    payload = _build_card_payload(
+        card_id=card_id,
+        revision=revision,
+        intent_summary=summary,
+        questions=normalized_questions,
+        question_ids=asked_ids,
+        artifacts=normalized_artifacts,
+    )
+    _refresh_intent_packet(
+        store,
+        session_id,
+        prompt_manager,
+        options_by_question_id={
+            str(entry.get("questionId") or ""): [
+                str(option.get("label") or "") for option in (entry.get("options") or [])
+            ]
+            for entry in payload["questions"]
+        },
+    )
+    return {
+        "status": "ok",
+        "cardId": card_id,
+        "revision": revision,
+        "questionIds": asked_ids,
+        "artifactStatus": _STATUS_PENDING_CONFIRMATION,
+        "payload": payload,
+        "message": "已发卡并登记台账，工件转入 pending_confirmation；请以正文文本提出同样的问题（正文是用户可见的提问本体）。",
+    }
+
+
+def _overlay_structured(
+    store: "IntentAlignmentStore", session_id: str, structured: Mapping[str, Any]
+) -> dict[str, Any]:
+    """把 merge 的 partial structured 叠加到当前版本内容上（未提供字段保持原值）。
+
+    record_structured 是全量重写语义（五个内容字段必填）；agent 的 merge 入参
+    允许只带部分字段——直接透传会把未提供字段清空。 assumptions 按 id 叠加：
+    已有 id 覆盖对应条目，新条目显式分配下一个序号（避免 record_structured 的
+    start_index=1 重排与既有 id 冲突）。
+    """
+    current = store.get_current(session_id)
+    goal = current.get("goal") if current else None
+    merged_goal = structured.get("goal")
+    if merged_goal is None:
+        goal_value: Any = (goal or {}).get("text") if isinstance(goal, Mapping) else goal
+    else:
+        goal_value = merged_goal
+
+    def merged_list(field: str) -> Any:
+        provided = structured.get(field)
+        if provided is not None:
+            return provided
+        return list(current.get(field) or []) if current else []
+
+    assumptions_current = list((current or {}).get("assumptions") or [])
+    next_index = 1
+    for item in assumptions_current:
+        suffix = re.fullmatch(r"a(\d+)", str(item.get("id") or "")) if isinstance(item, Mapping) else None
+        if suffix:
+            next_index = max(next_index, int(suffix.group(1)) + 1)
+    if "assumptions" not in structured:
+        # 未提及 assumptions：原样保留（record_structured 全量重写语义下防误清空）。
+        merged_assumptions: list[Any] = assumptions_current
+    else:
+        # 显式提供的 assumptions 即本轮全量声明：按 id 覆盖对应条目，新条目
+        # 显式分配下一个序号（避免 record_structured 的 start_index=1 重排冲突）。
+        merged_assumptions = []
+        for item in structured.get("assumptions") or []:
+            if isinstance(item, Mapping) and not item.get("id"):
+                item = {**item, "id": f"a{next_index}"}
+                next_index += 1
+            merged_assumptions.append(item)
+    return {
+        "goal": goal_value,
+        "boundaries": merged_list("boundaries"),
+        "constraints": merged_list("constraints"),
+        "acceptance": merged_list("acceptance"),
+        "assumptions": merged_assumptions,
+    }
+
+
+def intent_alignment_merge_handler(
+    session_id: str,
+    *,
+    answers: Any = None,
+    structured: Any = None,
+    confirmation: Any = None,
+    turn_ref: Optional[Mapping[str, Any]] = None,
+    store: Optional["IntentAlignmentStore"] = None,
+    prompt_manager: Any = None,
+) -> dict[str, Any]:
+    """intent_alignment_merge 确定性 handler（§3.5.2）。
+
+    answers / structured / confirmation 三段转调 store：record_answer（逐题，
+    merge 指令透传）/ record_structured（partial 叠加当前版本，首次写入经
+    open_or_load 创建 v1(draft)，origin.mode="chat"）/ submit_confirmation_decision。
+    写后刷新 packet 并回填 evidence；返回 {artifactId, version, artifactStatus}。
+    """
+    if answers is None and structured is None and confirmation is None:
+        return _tool_error("EMPTY_MERGE", "至少提供 answers / structured / confirmation 之一")
+
+    store = store or get_intent_alignment_store()
+    try:
+        if structured is not None:
+            if not isinstance(structured, Mapping):
+                return _tool_error("INVALID_STRUCTURED", "structured 需要是对象")
+            overlay = _overlay_structured(store, session_id, structured)
+            if store.get_current(session_id) is None:
+                store.open_or_load(
+                    session_id,
+                    origin={"mode": "chat", "roomId": "", "sourceTextDigest": ""},
+                )
+            latest = store.record_structured(
+                session_id,
+                goal=overlay["goal"],
+                boundaries=overlay["boundaries"],
+                constraints=overlay["constraints"],
+                acceptance=overlay["acceptance"],
+                assumptions=overlay["assumptions"],
+            )
+        else:
+            latest = None
+
+        answered_ids: list[str] = []
+        evidence_by_question_id: dict[str, str] = {}
+        for index, entry in enumerate(answers or [], 1):
+            if not isinstance(entry, Mapping):
+                return _tool_error("INVALID_ANSWERS", f"answers 第 {index} 项不是对象")
+            question_id = str(entry.get("question_id") or entry.get("questionId") or "").strip()
+            answer_text = str(entry.get("answer_text") or entry.get("answerText") or "").strip()
+            if not question_id:
+                return _tool_error("INVALID_ANSWERS", f"answers 第 {index} 项缺少 question_id")
+            if not answer_text:
+                return _tool_error(
+                    "INVALID_ANSWERS", f"answers 第 {index} 项（{question_id}）缺少 answer_text；跳过的问题不必提交"
+                )
+            merge_updates = entry.get("merge")
+            version_snapshot = store.record_answer(
+                session_id,
+                question_id,
+                answer_text=answer_text,
+                turn_ref=turn_ref or {},
+                merge=[dict(item) for item in merge_updates] if isinstance(merge_updates, (list, tuple)) else None,
+            )
+            answered_ids.append(question_id)
+            evidence_by_question_id[question_id] = answer_text
+            if version_snapshot is not None:
+                latest = version_snapshot
+
+        if confirmation is not None:
+            if not isinstance(confirmation, Mapping):
+                return _tool_error("INVALID_CONFIRMATION", "confirmation 需要是对象")
+            decision = str(confirmation.get("decision") or "").strip()
+            note = str(confirmation.get("note") or "").strip()
+            latest = store.submit_confirmation_decision(
+                session_id, decision=decision, turn_ref=turn_ref or {}, note=note
+            )
+    except (IntentAlignmentError, ValueError) as exc:
+        return _tool_error_from_exc(exc, "MERGE_FAILED")
+
+    _refresh_intent_packet(
+        store, session_id, prompt_manager, evidence_by_question_id=evidence_by_question_id
+    )
+    latest = latest or store.get_current(session_id) or {}
+    return {
+        "status": "ok",
+        "artifactId": session_id,
+        "version": int(latest.get("version") or 0),
+        "artifactStatus": str(latest.get("status") or ""),
+        "answeredQuestionIds": answered_ids,
+        "message": "归并已落账；收到用户回答后先归并再继续推进。",
     }

@@ -531,6 +531,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": [],
         "permissionTier": LOW_PERMISSION_TIER,
     },
+    "intent_alignment_card": {
+        "category": "task_runtime",
+        "capabilityTags": ["intent_alignment", "clarification_card", "turn_progress"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "intent_alignment_merge": {
+        "category": "task_runtime",
+        "capabilityTags": ["intent_alignment", "clarification_merge", "state_write"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
     "task_start_tool": {
         "category": "task_runtime",
         "capabilityTags": ["background_task", "command"],

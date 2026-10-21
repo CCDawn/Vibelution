@@ -332,6 +332,19 @@ Args:
 """
 
 
+def _intent_alignment_session_context() -> tuple[str, Dict[str, str]]:
+    """解析当前 agent runtime 的 (sessionId, turn_ref)，供意图对齐工具 handler 用。"""
+    from core.web.services.agent_directory_service import current_agent_runtime
+
+    runtime = current_agent_runtime() or {}
+    session_id = str(runtime.get("sessionId") or "").strip()
+    return session_id, {
+        "sessionId": session_id,
+        "turnId": str(runtime.get("turnId") or "").strip(),
+        "messageId": "",
+    }
+
+
 def _build_key_tools() -> List[BaseTool]:
     """
     将项目工具包装为 LangChain Tool。
@@ -1709,6 +1722,102 @@ def _build_key_tools() -> List[BaseTool]:
             JSON 格式的确认回显（清单不落盘，进度卡片直接从本轮工具调用派生）。
         """
         return _todo_write_impl(todos=todos)
+
+    @tool
+    def intent_alignment_card(
+        intent_summary: str,
+        questions: List[Dict],
+        artifacts: Optional[List[Dict]] = None,
+    ) -> str:
+        """
+        【意图对齐发卡】把待澄清问题发成确认卡：登记问题台账、把需求工件转入待确认，并让用户侧渲染问题卡。
+
+        使用纪律（务必遵守）：
+        1. 发卡前先调用 intent_alignment_merge 落当前最佳理解的四要素初稿
+           （推断内容进 assumptions 并标注来源）；工件没有齐备四要素时本工具会拒绝。
+        2. questions 一次成组（最多 5 个）、每个问题都要附 why_it_matters（不问则实现怎么分叉）；
+           不得把提问拆成连续多轮问卷；已在澄清历史中回答过的问题不要重问。
+        3. 正文要以文本提出同样的问题（正文是用户可见的提问本体，卡片只是加速回执）。
+        4. question_id 仅在重问同一问题时携带原台账 id；新问题留空由台账分配。
+
+        Args:
+            intent_summary: 一句话：当前理解的意图（卡片头部）。
+            questions: 问题列表，每项包含：
+                - question: 问题文本
+                - why_it_matters: 一句话说明该答案为什么影响实现走向
+                - applies_to: 影响的需求字段（goal / boundaries / constraints / acceptance / assumptions）
+                - input_mode: single_choice | multi_choice | free_text | choice_or_text
+                - options: 选择题必填，[{option_id, label, hint?}]，最多 6 个
+                - question_id: 可选，重问沿用已有台账 id
+                - required: 可选，默认 true；false 时用户可整题跳过
+                - placeholder: 可选，自由输入水印文案
+            artifacts: 可选关联工件只读引用 [{artifact_id, version, title}]。
+
+        Returns:
+            JSON 格式的发卡结果，包含 cardId、revision 与完整 IntentAlignmentCardPayload。
+        """
+        session_id, turn_ref = _intent_alignment_session_context()
+        if not session_id:
+            return json.dumps(
+                {"status": "error", "code": "NO_SESSION_CONTEXT", "message": "当前执行上下文没有会话，无法发卡。"},
+                ensure_ascii=False,
+            )
+        from core.orchestration.intent_alignment import intent_alignment_card_handler
+
+        result = intent_alignment_card_handler(
+            session_id,
+            intent_summary=intent_summary,
+            questions=questions,
+            artifacts=artifacts,
+            turn_ref=turn_ref,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    @tool
+    def intent_alignment_merge(
+        answers: Optional[List[Dict]] = None,
+        structured: Optional[Dict] = None,
+        confirmation: Optional[Dict] = None,
+    ) -> str:
+        """
+        【意图对齐归并】把用户回答与结构化更新归并进需求工件：答案落台账、按 merge 指令折算四要素、确认裁决落状态机。
+
+        使用纪律（务必遵守）：
+        1. 收到用户回答（打字或卡片回执）后先调用本工具归并，再继续推进；答案的语义
+           判断（答案是什么、折算到哪个字段）由你给出，本工具只落账。
+        2. answers 每项要给 question_id 与 answer_text（用户原话）；要把答案折算进
+           四要素/assumptions 时附 merge 指令 [{field, to, reason?}]，field 支持
+           goal / goal.text / boundaries / boundaries[+] / constraints / constraints[+] /
+           acceptance / acceptance[+] / assumptions / assumptions[+] / assumptions.<id>.status。
+        3. structured 允许只提供部分字段（未提供字段保持原值）；首次写入即创建 v1 草稿。
+        4. 全部对齐且用户明确确认时，随归并用 confirmation 落 approved 判定；
+           revision_requested / rejected 也走同一入参。
+
+        Args:
+            answers: 可选，逐题答案 [{question_id, answer_text, merge?: [{field, to, reason?}]}]。
+            structured: 可选，四要素/assumptions 的结构化更新
+                {goal?, boundaries?, constraints?, acceptance?, assumptions?}。
+            confirmation: 可选，确认裁决 {decision: approved | revision_requested | rejected, note?}。
+
+        Returns:
+            JSON 格式的归并结果，包含 artifactId、version 与工件当前状态。
+        """
+        session_id, turn_ref = _intent_alignment_session_context()
+        if not session_id:
+            return json.dumps(
+                {"status": "error", "code": "NO_SESSION_CONTEXT", "message": "当前执行上下文没有会话，无法归并。"},
+                ensure_ascii=False,
+            )
+        from core.orchestration.intent_alignment import intent_alignment_merge_handler
+
+        result = intent_alignment_merge_handler(
+            session_id,
+            answers=answers,
+            structured=structured,
+            confirmation=confirmation,
+            turn_ref=turn_ref,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
 
     @tool
     def create_child_session_tool(
@@ -3777,6 +3886,8 @@ def _build_key_tools() -> List[BaseTool]:
         enter_plan_mode_tool,
         exit_plan_mode_tool,
         todo_write,
+        intent_alignment_card,
+        intent_alignment_merge,
         create_child_session_tool,
         list_child_sessions_tool,
         agent_create_tool,
