@@ -5104,13 +5104,194 @@ def _create_stage_one_question_run(
     return result
 
 
+def _question_has_program_output_record(
+    team_id: str, question_id: str, run_id: str
+) -> bool:
+    """True when the question's immutable index already binds this run.
+
+    Challenge Program registrations are immutable per (questionId, runId):
+    re-registering a sealed package whose binding differs is a permanent
+    contract violation, so a deterministic reseal must never run for a run
+    whose program output record already exists.  The index store is the same
+    authority the registration step reads; an unreadable store counts as
+    "no record" only in the sense that the reseal then stays best-effort —
+    the registration gate itself remains fail-closed.
+    """
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    store = challenge_question_runs._read_json(
+        challenge_question_runs._store_path(team_id)
+    )
+    records = store.get("records")
+    if not isinstance(records, list):
+        return False
+    normalized_question = str(question_id or "").strip().upper()
+    normalized_run = str(run_id or "").strip()
+    return any(
+        isinstance(item, dict)
+        and str(item.get("questionId") or "").strip().upper() == normalized_question
+        and str(item.get("runId") or "").strip() == normalized_run
+        for item in records
+    )
+
+
+def _reseal_terminal_program_package(
+    team_id: str,
+    *,
+    run: Any,
+    idempotency_key: str,
+) -> dict[str, Any] | None:
+    """Deterministically reseal a terminal stage-one result package.
+
+    A terminal run can never re-enter the ``result_package`` system action
+    (the node attempt is no longer dispatchable), so a delivery that failed
+    on a stale sealed package used to be unrecoverable: the retry only
+    re-ran delivery over the old artifact.  This reseal rebuilds the package
+    through exactly the record materialization and builder sequence the
+    production system action uses — the ledger run projection
+    (``catalog_dict_from_run`` + input snapshot + terminal reason) that
+    ``RealDomainPorts.execute_system_action`` feeds the same builders, with
+    the same DOI-registry fallback — and appends a fresh immutable
+    ``research_result_package`` artifact, so the delivery step below reads
+    the resealed authority.
+
+    Strictly best-effort and gated like production: only a ``succeeded``
+    stage-one run whose projection is proposal-only and that has no existing
+    program output record qualifies (the Challenge Program registration is
+    immutable per question+run), and any rebuild failure is logged and
+    reported — the caller keeps delivering the existing sealed package, so a
+    reseal gap can never make the retry unavailable.
+    """
+
+    try:
+        from core.research.workflow.stage_one_definition import (
+            is_stage_one_workflow_version,
+        )
+
+        from .result_package_v2 import (
+            build_challenge_result_package_v2,
+            build_proposal_result_package_base,
+            is_proposal_only_challenge_run,
+        )
+        from .run_catalog import catalog_dict_from_run
+        from .store import WorkflowRunStore
+        from .workflow_artifact_store import put_workflow_artifact
+
+        run_id = str(getattr(run, "run_id", "") or "").strip()
+        if not run_id or str(getattr(run, "status", "") or "") != "succeeded":
+            return None
+        if not is_stage_one_workflow_version(
+            str(getattr(run, "workflow_version_id", "") or "")
+        ):
+            return None
+        try:
+            snapshot = json.loads(
+                str(getattr(run, "input_snapshot_json", "") or "{}")
+            )
+        except (TypeError, ValueError):
+            snapshot = {}
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        # The exact projection the production system action feeds the package
+        # builders (``execute_system_action`` → ``workflowRunProjection``).
+        # ``inheritedArtifactRefs`` stays empty here: the live action carried
+        # its node attempt's input refs, which a terminal run no longer has —
+        # package content is read from the workflow-artifact authorities, so
+        # only the traceability audit count differs, never the evidence.
+        candidate = {
+            **catalog_dict_from_run(run),
+            "inputSnapshot": dict(snapshot),
+            "terminalReason": str(
+                getattr(run, "terminal_reason", None) or ""
+            ).strip()
+            or "stage_one_proposal_completed",
+            "inheritedArtifactRefs": [],
+        }
+        if not is_proposal_only_challenge_run(candidate):
+            return None
+        question_id = str(
+            snapshot.get("questionId")
+            or getattr(run, "question_id", "")
+            or ""
+        ).strip().upper()
+        if not question_id:
+            return None
+        if _question_has_program_output_record(team_id, question_id, run_id):
+            return None
+        source_collection_run_id = (
+            str(snapshot.get("sourceCollectionRunId") or "").strip() or run_id
+        )
+        base = build_proposal_result_package_base(candidate)
+        package = build_challenge_result_package_v2(
+            generic_package=base,
+            record=candidate,
+            team_id=team_id,
+            workflow_run_id=run_id,
+            source_collection_run_id=source_collection_run_id,
+            verify_doi_metadata=True,
+        )
+        artifact_identity = f"{run_id}:reseal:{idempotency_key}"
+        artifact = put_workflow_artifact(
+            team_id,
+            kind="research_result_package",
+            workflow_run_id=run_id,
+            source_collection_run_id=source_collection_run_id,
+            payload={
+                "teamId": team_id,
+                "workflowRunId": run_id,
+                "sourceCollectionRunId": source_collection_run_id,
+                "package": package,
+            },
+            artifact_identity=artifact_identity,
+        )
+        # Same run projection the build_package path commits after its
+        # artifact write — only where that projection exists.  A ledger-era
+        # formal run has no ``WorkflowRunStore`` record (the ledger RunRecord
+        # carries no package projection), so the reseal info rides on the
+        # delivery event and the resealed artifact stays the authority.
+        run_store = WorkflowRunStore()
+        if run_store.get_run(run_id) is not None:
+            run_store.update_run(
+                run_id,
+                {
+                    "resultPackage": package,
+                    "resultPackageRef": str(
+                        artifact.get("recordId") or artifact_identity
+                    ),
+                },
+            )
+        return {
+            "artifactIdentity": str(artifact.get("recordId") or artifact_identity),
+            "packageId": str(package.get("packageId") or ""),
+            "contentHash": str(package.get("contentHash") or ""),
+        }
+    except Exception as exc:  # noqa: BLE001 - reseal must never block the retry
+        logger.warning(
+            "deterministic result-package reseal skipped for run %s: %s: %s",
+            str(getattr(run, "run_id", "") or ""),
+            type(exc).__name__,
+            str(exc)[:300],
+        )
+        return None
+
+
 def _retry_program_delivery(
     team_id: str,
     *,
     run_id: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    """Re-run delivery and append a fresh authoritative terminal event."""
+    """Re-run delivery and append a fresh authoritative terminal event.
+
+    Before the delivery chain runs, a terminal proposal-only run gets one
+    best-effort deterministic reseal of its result package: the previous
+    delivery may have failed on a sealed package that predates the evidence
+    the packaging gate now reads (workflow-bound counter-evidence cards), and
+    a retry that only re-reads the stale artifact would fail identically
+    forever.  The reseal appends a fresh immutable package artifact so the
+    delivery below reads the rebuilt authority.
+    """
 
     from .delivery_orchestration import (
         build_delivery_event,
@@ -5138,6 +5319,11 @@ def _retry_program_delivery(
             "runId": run.run_id,
             "eventId": str(getattr(existing, "event_id", "") or ""),
         }
+    reseal = _reseal_terminal_program_package(
+        team_id,
+        run=run,
+        idempotency_key=idempotency_key,
+    )
     now_ms = int(time.time() * 1000)
     try:
         outcome = run_delivery_orchestration(
@@ -5172,6 +5358,7 @@ def _retry_program_delivery(
             "programCandidateHandoff": dict(
                 outcome.get("programCandidateHandoff") or {}
             ),
+            **({"reseal": reseal} if reseal else {}),
         }
 
     return runtime.store.submit(mutate, force_flush=True).result(timeout=30)
