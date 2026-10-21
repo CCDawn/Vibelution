@@ -199,37 +199,41 @@ function stopSync(): void {
  * Hydrate shell + pane layouts from project-local preferences, then mirror
  * paneLayouts to the server. Chat widths are not written back to shell.chatPanelWidths.
  */
-export function startWorkbenchUiPreferencesSync(): () => void {
+export function hydrateWorkbenchUiPreferencesSync(): void {
+  if (!subscribers.size || hydratePromise) return;
+  const epoch = syncEpoch;
+  hydratePromise = getWorkbenchUiPreferences()
+    .then((prefs) => {
+      if (epoch !== syncEpoch) return;
+      applyingServer = true;
+      try { applyServerPreferences(prefs); } finally { applyingServer = false; }
+      readyToSave = true;
+      if (Object.keys(readPendingLayouts()).length) {
+        void flushWorkbenchUiPreferencesToServer();
+      }
+    })
+    .catch(() => {
+      if (epoch !== syncEpoch) return;
+      // Keep localStorage-only until backend is reachable; still allow later saves.
+      readyToSave = true;
+    });
+}
+
+export function startWorkbenchUiPreferencesSync(options: { deferHydration?: boolean } = {}): () => void {
   if (typeof window === "undefined") {
     return () => undefined;
   }
   const subscriber = Symbol("workbench-ui-sync");
-  subscribers.add(subscriber);
-
-  if (!hydratePromise) {
-    const epoch = syncEpoch;
+  if (!subscribers.size) {
     observedLayouts = readAllPaneLayouts();
-    hydratePromise = getWorkbenchUiPreferences()
-      .then((prefs) => {
-        if (epoch !== syncEpoch) return;
-        applyingServer = true;
-        try { applyServerPreferences(prefs); } finally { applyingServer = false; }
-        readyToSave = true;
-        if (Object.keys(readPendingLayouts()).length) {
-          void flushWorkbenchUiPreferencesToServer();
-        }
-      })
-      .catch(() => {
-        if (epoch !== syncEpoch) return;
-        // Keep localStorage-only until backend is reachable; still allow later saves.
-        readyToSave = true;
-      });
   }
+  subscribers.add(subscriber);
 
   setPaneLayoutPersistHook(observeLocalChanges);
 
   // Cross-tab: other tabs writing localStorage. The shared hook stays until the last cleanup.
   window.addEventListener("storage", onStorage);
+  if (!options.deferHydration) hydrateWorkbenchUiPreferencesSync();
 
   return () => {
     if (!subscribers.delete(subscriber)) return;

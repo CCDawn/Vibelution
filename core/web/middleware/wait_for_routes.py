@@ -30,7 +30,7 @@ class WaitForWebRoutesMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         ready = await wait_for_web_routes(
             app, timeout_seconds=self._timeout_seconds,
-            startup_only=request.method in {"GET", "HEAD"} and is_startup_route_path(path),
+            startup_only=is_startup_route_path(path, method=request.method),
         )
         if not ready:
             return routes_not_ready_response(app)

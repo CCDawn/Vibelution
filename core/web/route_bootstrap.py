@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.routing import compile_path
 
 from .router_registry import import_web_route_modules, register_web_routers_from_modules
 from .static_spa import web_index_response, web_spa_fallback_response
@@ -26,14 +27,42 @@ EARLY_READY_PATHS = frozenset(
 )
 
 
-def is_startup_route_path(path: str) -> bool:
-    """Only first-frame reads bypass unrelated feature initialization."""
+# These handlers and their services are imported by the startup routers. The
+# built-in Agent catalog is initialized before startup readiness is published.
+# Keep methods and complete route shapes explicit: an entire /sessions prefix
+# would also admit feature routers (archive/export) that have not mounted yet.
+_STARTUP_ROUTE_OPERATIONS = (
+    (frozenset({"GET", "HEAD"}), "/api/config/bootstrap"),
+    (frozenset({"GET", "HEAD"}), "/api/launcher/current-instance"),
+    (frozenset({"GET", "HEAD"}), "/api/runtime/summary"),
+    (frozenset({"GET", "HEAD"}), "/api/sessions/bootstrap"),
+    (frozenset({"GET", "HEAD"}), "/api/sessions/query"),
+    (frozenset({"GET", "HEAD"}), "/api/sessions/active"),
+    (frozenset({"POST"}), "/api/sessions"),
+    (frozenset({"GET"}), "/api/sessions/{session_id}"),
+    (frozenset({"POST"}), "/api/sessions/{session_id}/select"),
+    (frozenset({"POST"}), "/api/sessions/{session_id}/messages"),
+    (frozenset({"GET"}), "/api/sessions/{session_id}/events"),
+    (frozenset({"POST"}), "/api/sessions/{session_id}/stop"),
+    (frozenset({"POST"}), "/api/sessions/{session_id}/guidance"),
+    (frozenset({"GET"}), "/api/sessions/{session_id}/tool-approvals"),
+    (frozenset({"POST"}), "/api/sessions/{session_id}/tool-approvals/{request_id}/decision"),
+    (frozenset({"GET"}), "/api/sessions/{session_id}/llm-options"),
+    (frozenset({"PATCH"}), "/api/sessions/{session_id}/model-parameters"),
+    (frozenset({"GET", "PATCH"}), "/api/sessions/{session_id}/budget-parameters"),
+)
+_STARTUP_ROUTE_MATCHERS = tuple(
+    (methods, compile_path(path)[0]) for methods, path in _STARTUP_ROUTE_OPERATIONS
+)
+
+
+def is_startup_route_path(path: str, *, method: str = "GET") -> bool:
+    """Match only reviewed startup operations, without changing control guards."""
     normalized = str(path or "").split("?", 1)[0]
-    return normalized in {
-        "/api/config/bootstrap", "/api/launcher/current-instance",
-        "/api/runtime/summary", "/api/sessions/bootstrap",
-        "/api/sessions/query", "/api/sessions/active",
-    }
+    return any(
+        method in methods and pattern.fullmatch(normalized) is not None
+        for methods, pattern in _STARTUP_ROUTE_MATCHERS
+    )
 
 
 _REGISTER_LOCK = threading.Lock()

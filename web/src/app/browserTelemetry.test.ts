@@ -7,6 +7,7 @@ import {
   peekBrowserTelemetryDeliveryBufferForTests,
   postBrowserTelemetry,
   resetBrowserTelemetryDeliveryBufferForTests,
+  setBrowserTelemetryStartupPending,
   shouldCaptureConsoleTelemetry,
 } from "./browserTelemetry";
 import { resetPageInstanceIdForTests } from "./pageInstance";
@@ -31,6 +32,171 @@ describe("browser telemetry", () => {
     resetControlTokenForTests();
     resetPageInstanceIdForTests();
     resetBrowserTelemetryDeliveryBufferForTests();
+  });
+
+  it("holds ordinary startup telemetry and releases it in priority and FIFO order", async () => {
+    vi.stubGlobal("window", {});
+    seedControlTokenForTests();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    setBrowserTelemetryStartupPending(true);
+    postTestEvent("info.1");
+    postTestEvent("warning.1", "warning");
+    postTestEvent("info.2");
+    postTestEvent("warning.2", "warning");
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    postTestEvent("error", "error");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    setBrowserTelemetryStartupPending(false);
+    setBrowserTelemetryStartupPending(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)).eventCode)).toEqual([
+      "error", "warning.1", "warning.2", "info.1", "info.2",
+    ]);
+  });
+
+  it("keeps the two immediate exit slots available during startup", async () => {
+    vi.stubGlobal("window", {});
+    seedControlTokenForTests();
+    const exits = [deferredResponse(), deferredResponse()];
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => exits[0].promise)
+      .mockImplementationOnce(() => exits[1].promise)
+      .mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    setBrowserTelemetryStartupPending(true);
+    postTestEvent("held");
+    postExitTestEvent("pagehide.1");
+    postExitTestEvent("pagehide.2");
+    postExitTestEvent("queued-exit");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    for (const exit of exits) { exit.resolve({ ok: true, status: 202 }); }
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    setBrowserTelemetryStartupPending(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)).eventCode)).toEqual([
+      "pagehide.1", "pagehide.2", "held", "queued-exit",
+    ]);
+  });
+
+  it("stops ordinary draining after an in-flight request and survives repeated hold and release", async () => {
+    vi.stubGlobal("window", {});
+    seedControlTokenForTests();
+    const first = deferredResponse();
+    const error = deferredResponse();
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => error.promise)
+      .mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    postTestEvent("in-flight");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    setBrowserTelemetryStartupPending(true);
+    postTestEvent("held");
+    postTestEvent("error", "error");
+    first.resolve({ ok: true, status: 202 });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    setBrowserTelemetryStartupPending(false);
+    setBrowserTelemetryStartupPending(true);
+    error.resolve({ ok: true, status: 202 });
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    setBrowserTelemetryStartupPending(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)).eventCode)).toEqual([
+      "in-flight", "error", "held",
+    ]);
+  });
+
+  it("rechecks startup hold after waiting for a control token", async () => {
+    vi.stubGlobal("window", {});
+    let resolveToken!: (response: unknown) => void;
+    const token = new Promise((resolve) => { resolveToken = resolve; });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => token)
+      .mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    postTestEvent("waiting-for-token");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    setBrowserTelemetryStartupPending(true);
+    resolveToken({ ok: true, json: async () => ({ header: "X-Control", controlToken: "token" }) });
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    setBrowserTelemetryStartupPending(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).eventCode).toBe("waiting-for-token");
+  });
+
+  it("does not replay failed ordinary telemetry after a startup error succeeds", async () => {
+    vi.stubGlobal("window", {});
+    seedControlTokenForTests();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    postTestEvent("failed");
+    await vi.waitFor(() => expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1));
+    setBrowserTelemetryStartupPending(true);
+    postTestEvent("held");
+    postTestEvent("error", "error");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1);
+    setBrowserTelemetryStartupPending(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)).eventCode)).toEqual([
+      "failed", "error", "held", "failed",
+    ]);
+  });
+
+  it("stops failure replays after the current retry when startup becomes pending", async () => {
+    vi.stubGlobal("window", {});
+    seedControlTokenForTests();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const retry = deferredResponse();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: true, status: 202 })
+      .mockImplementationOnce(() => retry.promise)
+      .mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    postTestEvent("failed.1");
+    postTestEvent("failed.2");
+    await vi.waitFor(() => expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(2));
+    postTestEvent("success");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    setBrowserTelemetryStartupPending(true);
+    postTestEvent("held");
+    retry.resolve({ ok: true, status: 202 });
+    await vi.waitFor(() => expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    setBrowserTelemetryStartupPending(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(0);
+  });
+
+  it("resets startup hold and discards held events between tests", async () => {
+    vi.stubGlobal("window", {});
+    seedControlTokenForTests();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+    setBrowserTelemetryStartupPending(true);
+    postTestEvent("discarded");
+    resetBrowserTelemetryDeliveryBufferForTests();
+    postTestEvent("after-reset");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    setBrowserTelemetryStartupPending(false);
+    for (let index = 0; index < 20; index += 1) { await Promise.resolve(); }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).eventCode).toBe("after-reset");
   });
 
   it("keeps only one telemetry request in flight during a burst", async () => {

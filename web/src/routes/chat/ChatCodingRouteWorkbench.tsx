@@ -38,6 +38,7 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
+import { useReportWorkbenchStartupReady } from "../../app/workbenchStartupReady";
 import { useChatSessionWarmup } from "./useChatSessionWarmup";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import {
@@ -1122,6 +1123,11 @@ export function ChatCodingRouteWorkbench() {
     chatRouteStartupReadyLoggedRef,
     sessionStreamDecisionSnapshotRef,
   });
+
+  useReportWorkbenchStartupReady(
+    chatStartupDataReady,
+    [activeSessionBootstrapQuery, sessionsQuery, sessionDetailQuery, activeGroupRoomQuery, projectAgentBusQuery],
+  );
 
   const {
     submitTurnMutation,

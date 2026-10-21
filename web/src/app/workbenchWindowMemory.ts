@@ -176,7 +176,7 @@ async function persistObservedWindow(
   }
 }
 
-function schedulePersist(): void {
+function schedulePersist(canPersist: () => boolean): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -188,6 +188,9 @@ function schedulePersist(): void {
     const mode = observeWorkbenchWindowMode();
     const size = observeWorkbenchWindowSize();
     const position = observeWorkbenchWindowPosition();
+    if (!canPersist()) {
+      return;
+    }
     void persistObservedWindow(mode, size, position);
   }, SAVE_DEBOUNCE_MS);
 }
@@ -197,33 +200,43 @@ function schedulePersist(): void {
  * window_mode (+ window_size / window_position when windowed).
  * Returns a disposer.
  */
-export function startWorkbenchWindowMemory(): () => void {
+export function startWorkbenchWindowMemory(
+  options: { canPersist?: () => boolean } = {},
+): () => void {
   if (typeof window === "undefined" || started) {
     return () => undefined;
   }
   started = true;
 
-  // Seed from first observation without waiting for user input.
-  schedulePersist();
+  // The window geometry already reflects the Launcher config at startup.
+  // Treat it as the baseline so mounting the observer does not write it back.
+  if (lastSavedMode === null) {
+    lastSavedMode = observeWorkbenchWindowMode();
+    lastSavedSize = observeWorkbenchWindowSize();
+    lastSavedPosition = observeWorkbenchWindowPosition();
+  }
 
-  const onResize = () => schedulePersist();
+  const canPersist = options.canPersist ?? (() => true);
+  const schedule = () => schedulePersist(canPersist);
+
+  const onResize = () => schedule();
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "F11") {
       // Chromium toggles after the key event; observe shortly after.
-      window.setTimeout(schedulePersist, 50);
-      window.setTimeout(schedulePersist, 250);
+      window.setTimeout(schedule, 50);
+      window.setTimeout(schedule, 250);
     }
   };
   const onVisibility = () => {
     if (document.visibilityState === "visible") {
-      schedulePersist();
+      schedule();
     }
   };
 
   window.addEventListener("resize", onResize);
   window.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
-  positionPollTimer = window.setInterval(schedulePersist, POSITION_POLL_MS);
+  positionPollTimer = window.setInterval(schedule, POSITION_POLL_MS);
 
   return () => {
     started = false;
