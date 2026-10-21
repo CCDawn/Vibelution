@@ -56,6 +56,7 @@
 | 模式 | `core/orchestration/` | |
 | LLM | `core/llm/` | `PROTOCOL.md` |
 | Prompt | `core/prompt_manager/` · `core/core_prompt/` | 不扩权 |
+| 意图对齐 | `core/orchestration/intent_alignment.py`（工件 store/判定/工具 handler）；章节 `core/prompt_manager/sections.py::make_intent_alignment_section` | 被动数据服务；章节只读 ctx packet |
 | Tools | `tools/*_tools.py` | 授权文档 |
 | Turn SSOT | `core/chat/turn_journal.py` | UI 主包 turnItems |
 | Gym | `core/gym/` · `core/evaluation/` | ADR0001 |
