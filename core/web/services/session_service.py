@@ -1517,6 +1517,18 @@ class SessionBusyError(RuntimeError):
     """Raised when a session already has an active running turn."""
 
 
+class SessionLeaseConflictError(SessionBusyError):
+    """Raised when a turn's resource leases are held by another active run.
+
+    Unlike a plain busy race this conflict does not clear when the current
+    turn settles: the lease holder is a different run (e.g. an evolution run
+    whose leases were inferred from its content). Carrying it as a subclass
+    keeps every ``SessionBusyError`` handler (HTTP 409 mapping included)
+    working, while the queue drain can tell a persistent conflict apart from
+    a transient race and stop bouncing the row invisibly.
+    """
+
+
 class SessionModelParametersConflictError(RuntimeError):
     """Raised when the session Agent/model/revision changed during an edit."""
 

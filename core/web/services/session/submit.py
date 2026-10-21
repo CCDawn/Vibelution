@@ -1282,7 +1282,14 @@ def _settle_session_submit_admission_failure(
         # the failure persist only needs the current turn identity.
         lambda: s._persist_session_turn_failure(session_id, {"turn_id": turn_id}, exc),
     )
-    _settlement_step("clear_running", lambda: s._set_session_running(session_id, False))
+    # Clearing with the accepted turn's identity lets _set_session_running run
+    # its turn-scoped settle hook: a failure here is a terminal settle for this
+    # turn, so a queued follow-up must be released instead of stranded until
+    # some unrelated trigger fires.
+    _settlement_step(
+        "clear_running",
+        lambda: s._set_session_running(session_id, False, turn_id=turn_id),
+    )
     _settlement_step("clear_turn_control", lambda: s._clear_session_turn_control(session_id))
     _settlement_step("publish_snapshot", lambda: s._publish_session_detail_snapshot(session_id))
 
@@ -1627,7 +1634,21 @@ def submit_session_message(
                 s.text_for(lang, zh="请输入本轮消息、添加图片或引用会话后再发送。", en="Enter a message, attach an image, or reference a session before sending.")
             )
 
-        if s._is_session_running(conversation_id) or foreign_work_running:
+        # An idle session can still hold stranded queued rows (e.g. enqueued
+        # by a concurrent submit that lost the acceptance window). A direct
+        # send must not jump the queue ahead of them: route it into the queue
+        # so drain preserves submission order. Rows that never drain
+        # ("paused"/"blocked") do not block a direct send.
+        queued_rows_stranded = (
+            queue_if_busy
+            and not s._is_session_running(conversation_id)
+            and not foreign_work_running
+            and any(
+                row.get("status") == "queued"
+                for row in s._session_queued_turn_rows(conversation)
+            )
+        )
+        if s._is_session_running(conversation_id) or foreign_work_running or queued_rows_stranded:
             if queue_if_busy:
                 queued_payload = _enqueue_busy_session_turn(
                     s,
@@ -1678,7 +1699,10 @@ def submit_session_message(
                 lang=lang,
             )
             s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
-            raise s.SessionBusyError(localized_reason)
+            # Subclass, not plain SessionBusyError: this conflict survives turn
+            # settlement (the lease holder is another run), so the queue drain
+            # must treat it as a persistent rejection instead of a busy race.
+            raise s.SessionLeaseConflictError(localized_reason)
 
         if prepared_agent is None:
             s._ensure_conversation_agent_metadata(conversation)
@@ -2178,9 +2202,11 @@ def submit_session_message(
         )
         # Persist while this turn is still current: both clearing the turn
         # control and flagging the session not-running drop the active-turn
-        # identity the runtime-state commit gate requires.
+        # identity the runtime-state commit gate requires. The turn_id keeps
+        # the clear turn-scoped so the settle hook releases the next queued
+        # turn instead of leaving it stranded behind this failed schedule.
         s._persist_session_turn_failure(conversation_id, context, exc)
-        s._set_session_running(conversation_id, False)
+        s._set_session_running(conversation_id, False, turn_id=turn_control.turn_id)
         s._clear_session_turn_control(conversation_id)
         s._publish_session_detail_snapshot(conversation_id)
         raise
@@ -2556,7 +2582,7 @@ def _resubmit_session_user_message(
             if not lease_decision.allowed:
                 localized_reason = s._localize_lease_conflict(lease_decision.reason, lang=lang)
                 if _safe_retry_expected is not None:
-                    raise s.SessionBusyError(localized_reason)
+                    raise s.SessionLeaseConflictError(localized_reason)
                 s._persist_session_preflight_rejection(
                     conversation,
                     message=message,
@@ -2569,7 +2595,7 @@ def _resubmit_session_user_message(
                     lang=lang,
                 )
                 s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
-                raise s.SessionBusyError(localized_reason)
+                raise s.SessionLeaseConflictError(localized_reason)
 
             if not s._is_session_running(conversation_id) and session_has_active_work_run(s, conversation_id):
                 raise _session_still_running_error(s, lang)

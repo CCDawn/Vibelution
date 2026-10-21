@@ -12471,3 +12471,184 @@ def test_queued_turn_blocked_cannot_pause(tmp_path, monkeypatch):
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
     session_service._clear_session_live_output("session-live")
+
+
+def _settle_running_turn(tmp_path, active_turn_id: str) -> None:
+    """Complete the active mocked worker durably, then release its runtime slot."""
+
+    append_conversation_event(tmp_path, "session-live", active_turn_id, "turn_completed", status="completed")
+    session_service._persist_chat_turn_work_run(session_id="session-live", turn_id=active_turn_id, status="completed")
+    session_service._set_session_running("session-live", False, turn_id=active_turn_id)
+    session_service._clear_session_turn_control("session-live")
+
+
+@pytest.mark.parametrize("fail_stage", ["worker_schedule", "admission_window"])
+def test_failed_turn_settlement_releases_following_queued_rows(tmp_path, monkeypatch, fail_stage):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix=f"queue-fail-release-{fail_stage}")
+    scheduled_contexts: list[dict] = []
+    fail_next = {"value": False}
+
+    def _schedule(context):
+        if fail_next["value"]:
+            fail_next["value"] = False
+            raise RuntimeError("provider unavailable")
+        scheduled_contexts.append(dict(context))
+
+    def _fail_scheduled_event(context):
+        if fail_next["value"]:
+            fail_next["value"] = False
+            raise RuntimeError("scene log unavailable")
+
+    monkeypatch.setattr(session_service, "_schedule_session_turn", _schedule)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+
+    first = client.post("/api/sessions/session-live/messages", json={"content": "第一轮"})
+    assert first.status_code == 202
+    active_turn_id = str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+    assert active_turn_id
+
+    if fail_stage == "admission_window":
+        # The acceptance window runs after the admit lock is released: a
+        # concurrent queue_if_busy submit lands exactly inside this failure
+        # window, so the settlement must release the queue itself.
+        monkeypatch.setattr(session_service, "_record_session_turn_scheduled_event", _fail_scheduled_event)
+
+    queued_a = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "排队 A", "queueIfBusy": True},
+    )
+    queued_b = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "排队 B", "queueIfBusy": True},
+    )
+    assert queued_a.status_code == queued_b.status_code == 202
+    assert len(scheduled_contexts) == 1
+    fail_next["value"] = True
+
+    # Turn 1 settles; the drain submits 排队 A whose start fails. The failure
+    # settlement carries the accepted turn's identity, so the queue keeps
+    # going and 排队 B runs instead of stranding behind the failed row.
+    _settle_running_turn(tmp_path, active_turn_id)
+
+    # 排队 A fails visibly into "blocked"; 排队 B was released by the failure
+    # settlement and is running now.
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [(row["content"], row["status"]) for row in rows] == [("排队 A", "blocked")]
+    assert len(scheduled_contexts) == 2
+    assert scheduled_contexts[1]["user_message"] == "排队 B"
+    assert str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def _seed_stranded_queued_row(tmp_path, *, row_id: str, content: str, status: str) -> None:
+    state = load_chat_state(tmp_path)
+    conversations = [row for row in state["conversations"] if row["conversation_id"] == "session-live"]
+    assert conversations
+    timestamp = "2026-05-18T12:05:00"
+    conversations[0]["queued_turns"] = [
+        {
+            "id": row_id,
+            "kind": "user",
+            "clientSubmissionId": f"{row_id}-submission",
+            "content": content,
+            "attachments": [],
+            "references": [],
+            "mentalModelEnabled": False,
+            "runtimeStatusEnabled": False,
+            "turnMode": "",
+            "writeIntent": False,
+            "status": status,
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        }
+    ]
+    save_chat_state(tmp_path, state)
+
+
+def test_direct_send_queues_behind_stranded_queued_rows(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queue-stranded")
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    # No drain may run in the background: the stranded row must stay put.
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, *args, **kwargs: None))
+    _seed_stranded_queued_row(tmp_path, row_id="queued-stranded", content="滞留消息", status="queued")
+
+    direct = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "新消息", "queueIfBusy": True},
+    )
+    assert direct.status_code == 202
+    payload = direct.json()
+    assert payload["status"] == "queued"
+    assert payload["queuePosition"] == 2
+    # The direct send did not start a turn: the stranded row still leads.
+    assert scheduled_contexts == []
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [row["content"] for row in rows] == ["滞留消息", "新消息"]
+
+    session_service._set_session_running("session-live", False)
+
+
+def test_direct_send_ignores_rows_that_never_drain(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queue-paused-direct")
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, *args, **kwargs: None))
+    _seed_stranded_queued_row(tmp_path, row_id="queued-paused", content="已暂停", status="paused")
+
+    direct = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "新消息", "queueIfBusy": True},
+    )
+    assert direct.status_code == 202
+    # A paused row never drains, so it must not hold a direct send hostage.
+    assert len(scheduled_contexts) == 1
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [row["status"] for row in rows] == ["paused"]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_delete_starting_queued_turn_maps_busy_to_409(tmp_path, monkeypatch):
+    _seed_queued_turn_session(tmp_path, monkeypatch, prefix="queue-delete-busy")
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, session_id: fn(session_id)),
+    )
+    first = client.post("/api/sessions/session-live/messages", json={"content": "第一轮"})
+    assert first.status_code == 202
+    active_turn_id = str(session_service._SESSION_ACTIVE_TURN_IDS.get("session-live") or "")
+    assert active_turn_id
+    queued = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "排队", "queueIfBusy": True},
+    )
+    assert queued.status_code == 202
+    queued_turn_id = queued.json()["queuedTurnId"]
+
+    # A row inside its claim->submit window cannot tell the client "gone";
+    # withdraw must answer 409 like send-now does.
+    state = load_chat_state(tmp_path)
+    conversations = [row for row in state["conversations"] if row["conversation_id"] == "session-live"]
+    conversations[0]["queued_turns"][0]["status"] = "starting"
+    save_chat_state(tmp_path, state)
+
+    response = client.delete(f"/api/sessions/session-live/queued-turns/{queued_turn_id}")
+    assert response.status_code == 409
+    rows = session_service.get_session_detail("session-live")["queuedTurns"]
+    assert [row["id"] for row in rows] == [queued_turn_id]
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
