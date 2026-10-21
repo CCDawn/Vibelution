@@ -20,6 +20,8 @@ export type ActiveTurnLayerState = {
   processStage?: string;
   turnItems: SessionTurnItem[];
   ledgerSeq: number;
+  /** Ephemeral performance-clock anchor for this exact locally committed frame. */
+  clientDeltaTiming?: { turnId: string; ledgerSeq: number; appliedAtMs: number };
 };
 
 export type OptimisticActiveTurnLayerInput = {
@@ -95,6 +97,7 @@ export function bindActiveTurnLayerToTurnId(
   if (!layer || !normalizedTurnId || layer.turnId === normalizedTurnId) return layer;
   return {
     ...layer,
+    clientDeltaTiming: undefined,
     id: activeTurnMessageId(layer.sessionId, normalizedTurnId),
     turnId: normalizedTurnId,
   };
@@ -189,6 +192,7 @@ export function activeTurnLayerToConversationMessage(
       renderKey: layer.renderKey || activeTurnRenderKey(layer.sessionId),
       clientSubmissionId: layer.clientSubmissionId,
       ledgerSeq: layer.ledgerSeq,
+      assistantDeltaTiming: layer.clientDeltaTiming,
       processStage: layer.processStage,
       activeStatusSource: layer.ledgerSeq > 0 ? "assistant_delta" : "optimistic_submit",
     },
@@ -471,5 +475,5 @@ export function reconcileActiveTurnLayerItemsWithMessages(
   // Fully reconciled but not yet settled turns keep their (now empty) overlay
   // shell so stage/status UI survives until the canonical transcript settles
   // the turn through the whole-layer path.
-  return { ...layer, turnItems: remainingItems };
+  return { ...layer, turnItems: remainingItems, clientDeltaTiming: undefined };
 }

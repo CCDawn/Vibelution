@@ -274,6 +274,12 @@ export function planAppliedAssistantDeltaDrain(
       + (shouldCommitRender ? heldCount : appliedPayloadCount + heldCount),
   };
   const applyFinishedAtMs = input.applyFinishedAtMs ?? input.nowMs?.() ?? input.applyStartedAtMs;
+  if (shouldCommitRender && pendingLayer) {
+    pendingLayer = {
+      ...pendingLayer,
+      clientDeltaTiming: { turnId: pendingLayer.turnId, ledgerSeq: pendingLayer.ledgerSeq, appliedAtMs: applyFinishedAtMs },
+    };
+  }
   const shouldLogApplied = input.reason === "final"
     || (shouldCommitRender
       ? nextStats.applied === 1 || nextStats.applied % 50 === 0
