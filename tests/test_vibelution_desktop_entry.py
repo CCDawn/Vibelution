@@ -64,6 +64,24 @@ def test_desktop_entry_imports_safely_on_non_windows(monkeypatch):
     assert result["appUserModelId"] == "Vibelution.Launcher"
 
 
+def test_append_log_rotates_the_bridge_log_before_it_exceeds_the_limit(tmp_path, monkeypatch):
+    log_path = tmp_path / "desktop-entry-python.log"
+    log_path.write_text("x" * 256, encoding="utf-8")
+    monkeypatch.setattr(desktop_entry, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(desktop_entry, "PYTHON_BRIDGE_LOG_PATH", log_path)
+    monkeypatch.setattr(desktop_entry, "PYTHON_BRIDGE_LOG_MAX_BYTES", 128)
+    monkeypatch.setattr(desktop_entry, "PYTHON_BRIDGE_LOG_BACKUP_COUNT", 2)
+
+    desktop_entry._append_log("desktop_entry_python.test", level="info", value=1)
+
+    assert (tmp_path / "desktop-entry-python.log.1").read_text(encoding="utf-8") == "x" * 256
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["event"] == "desktop_entry_python.test"
+    assert payload["fields"] == {"value": 1}
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows shell identity contract is Windows-only")
 def test_desktop_entry_windows_identity_runtime_contract():
     entry = _load_desktop_entry_py()
