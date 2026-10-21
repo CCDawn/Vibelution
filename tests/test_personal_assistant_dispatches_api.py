@@ -1,6 +1,7 @@
 """Dispatch-tracking read model: inbox scan, receipt pairing, and API shape."""
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -160,6 +161,126 @@ def test_dispatches_receipt_matching_prefers_explicit_id_and_requires_unique_fal
         "receipt-wrong-source",
         "receipt-ambiguous-fallback",
     }
+
+
+def test_dispatches_thread_fallback_uses_authoritative_candidates_beyond_display_window(seeded):
+    dispatch_1 = _dispatch_row("dispatch-1", created_at="2026-10-20T10:00:00+00:00")
+    dispatch_2 = _dispatch_row("dispatch-2", created_at="2026-10-20T10:01:00+00:00")
+    dispatch_1["threadId"] = dispatch_2["threadId"] = "shared-thread"
+    _write_inbox(seeded, TARGET_ID, [dispatch_1, dispatch_2])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-ambiguous-window", thread_id="shared-thread"),
+    ])
+
+    payload = dispatches_service.list_personal_assistant_dispatches(limit=1)
+
+    assert [dispatch["messageId"] for dispatch in payload["dispatches"]] == ["dispatch-2"]
+    assert payload["dispatches"][0]["receipts"] == []
+    assert [receipt["messageId"] for receipt in payload["unmatchedReceipts"]] == [
+        "receipt-ambiguous-window",
+    ]
+
+
+def test_dispatches_thread_fallback_keeps_unique_candidate_outside_window_unmatched(seeded):
+    older_target_dispatch = _dispatch_row("dispatch-target", created_at="2026-10-20T10:00:00+00:00")
+    newer_other_dispatch = _dispatch_row("dispatch-other", created_at="2026-10-20T10:01:00+00:00")
+    older_target_dispatch["threadId"] = newer_other_dispatch["threadId"] = "same-thread"
+    newer_other_dispatch["targetAgentId"] = OTHER_ID
+    _write_inbox(seeded, TARGET_ID, [older_target_dispatch])
+    _write_inbox(seeded, OTHER_ID, [newer_other_dispatch])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-window-excluded", thread_id="same-thread"),
+    ])
+
+    payload = dispatches_service.list_personal_assistant_dispatches(limit=1)
+
+    assert [dispatch["messageId"] for dispatch in payload["dispatches"]] == ["dispatch-other"]
+    assert payload["dispatches"][0]["receipts"] == []
+    assert [receipt["messageId"] for receipt in payload["unmatchedReceipts"]] == [
+        "receipt-window-excluded",
+    ]
+
+
+def test_dispatches_thread_fallback_rejects_non_authoritative_target_inbox_row(seeded):
+    foreign_inbox_dispatch = _dispatch_row("dispatch-foreign-inbox")
+    foreign_inbox_dispatch["threadId"] = "orphan-thread"
+    _write_inbox(seeded, TARGET_ID, [])
+    _write_inbox(seeded, OTHER_ID, [foreign_inbox_dispatch])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-non-authoritative", thread_id="orphan-thread"),
+    ])
+
+    payload = dispatches_service.list_personal_assistant_dispatches(limit=10)
+
+    assert payload["dispatches"][0]["receipts"] == []
+    assert [receipt["messageId"] for receipt in payload["unmatchedReceipts"]] == [
+        "receipt-non-authoritative",
+    ]
+
+
+def test_dispatches_thread_fallback_deduplicates_ids_but_rejects_duplicate_visible_rows(seeded):
+    first_duplicate = _dispatch_row("dispatch-duplicate", created_at="2026-10-20T10:00:00+00:00")
+    second_duplicate = _dispatch_row("dispatch-duplicate", created_at="2026-10-20T10:01:00+00:00")
+    first_duplicate["threadId"] = second_duplicate["threadId"] = "duplicate-thread"
+    _write_inbox(seeded, TARGET_ID, [first_duplicate, second_duplicate])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-duplicate-id", thread_id="duplicate-thread"),
+    ])
+
+    one_visible = dispatches_service.list_personal_assistant_dispatches(limit=1)
+    assert [receipt["messageId"] for receipt in one_visible["dispatches"][0]["receipts"]] == [
+        "receipt-duplicate-id",
+    ]
+
+    both_visible = dispatches_service.list_personal_assistant_dispatches(limit=2)
+    assert all(dispatch["receipts"] == [] for dispatch in both_visible["dispatches"])
+    assert [receipt["messageId"] for receipt in both_visible["unmatchedReceipts"]] == [
+        "receipt-duplicate-id",
+    ]
+
+
+@pytest.mark.parametrize("failure", ["io", "malformed"])
+def test_dispatches_thread_fallback_does_not_infer_uniqueness_from_partial_scan(seeded, monkeypatch, failure):
+    dispatch = _dispatch_row("dispatch-partial")
+    _write_inbox(seeded, TARGET_ID, [dispatch])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        _receipt_row("receipt-partial", thread_id=dispatch["threadId"]),
+    ])
+    original_open = Path.open
+
+    class InterruptedRead:
+        def __init__(self, stream):
+            self.stream = stream
+            self.first = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.first:
+                self.first = False
+                return next(self.stream)
+            if failure == "io":
+                raise OSError("inbox read interrupted")
+            return "{malformed"
+
+    def interrupted_open(path, mode="r", *args, **kwargs):
+        stream = original_open(path, mode, *args, **kwargs)
+        if mode == "r" and path.name == dispatches_service.INBOX_FILENAME and path.parent.parent.name == TARGET_ID:
+            return InterruptedRead(stream)
+        return stream
+
+    monkeypatch.setattr(Path, "open", interrupted_open)
+    payload = dispatches_service.list_personal_assistant_dispatches(limit=10)
+
+    assert payload["dispatches"][0]["receipts"] == []
+    assert [receipt["messageId"] for receipt in payload["unmatchedReceipts"]] == ["receipt-partial"]
 
 
 def test_dispatches_limit_keeps_newest_window(seeded):

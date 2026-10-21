@@ -10,6 +10,7 @@ authoritative inbox JSONL the kernel already writes.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -63,8 +64,9 @@ def _scan_inbox_reverse(
     *,
     predicate: Any,
     cap: int,
+    strict: bool = False,
 ) -> list[dict[str, Any]]:
-    """Newest-first inbox scan that stops once ``cap`` rows match.
+    """Bounded matching scan; strict uniqueness reads need no ordering.
 
     A global top-``cap`` result can take at most ``cap`` rows from any single
     file, and if it takes k rows from a file they are that file's newest k
@@ -77,21 +79,30 @@ def _scan_inbox_reverse(
     if not path.exists():
         return matches
     try:
-        for line in directory._iter_text_lines_reverse(path):
-            if not line.strip():
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict) or not predicate(payload):
-                continue
-            matches.append(payload)
-            if len(matches) >= cap:
-                break
+        # The shared reverse iterator tolerates I/O failures. A uniqueness
+        # proof must instead reach EOF or a second distinct candidate.
+        with (path.open("r", encoding="utf-8") if strict else nullcontext(directory._iter_text_lines_reverse(path))) as lines:
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    if strict:
+                        raise
+                    continue
+                if strict and not isinstance(payload, dict):
+                    raise ValueError("Inbox record is not an object")
+                if not isinstance(payload, dict) or not predicate(payload):
+                    continue
+                matches.append(payload)
+                if len(matches) >= cap:
+                    break
     except OSError as exc:
+        if strict:
+            raise
         _debug_logger.warning(
-            "Failed to scan agent inbox for dispatches. path=%s error=%s", path, exc
+            f"Failed to scan agent inbox for dispatches. path={path} error={type(exc).__name__}"
         )
     return matches  # newest-first order from the reverse iterator
 
@@ -140,19 +151,27 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
             and _text(payload, "kind") != _REPLY_KIND
         )
 
+    agent_rows = _agent_rows()
+    agent_rows_by_id = {_text(row, "agentId"): row for row in agent_rows}
     dispatch_rows: list[dict[str, Any]] = []
-    for agent_row in _agent_rows():
+    dispatch_inbox_agent_by_row_id: dict[int, str] = {}
+    for agent_row in agent_rows:
         if _text(agent_row, "agentId") == assistant_agent_id:
             # The assistant's own inbox holds inbound rows only for receipts.
             continue
 
         try:
-            dispatch_rows.extend(_scan_inbox_reverse(_inbox_path(agent_row), predicate=_is_dispatch, cap=window))
+            inbox_agent_id = _text(agent_row, "agentId")
+            inbox_dispatches = _scan_inbox_reverse(
+                _inbox_path(agent_row), predicate=_is_dispatch, cap=window
+            )
+            dispatch_rows.extend(inbox_dispatches)
+            dispatch_inbox_agent_by_row_id.update(
+                {id(row): inbox_agent_id for row in inbox_dispatches}
+            )
         except Exception as exc:
             _debug_logger.warning(
-                "Dispatch inbox scan failed. agentId=%s error=%s",
-                _text(agent_row, "agentId"),
-                exc,
+                f"Dispatch inbox scan failed. agentId={_text(agent_row, 'agentId')} error={type(exc).__name__}"
             )
     dispatch_rows.sort(
         key=lambda row: (_text(row, "createdAt"), _text(row, "messageId") or _text(row, "eventId"))
@@ -166,6 +185,51 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
         _inbox_path(agent), predicate=lambda _payload: True, cap=receipt_window
     )
 
+    thread_match_cache: dict[tuple[str, str], str | None] = {}
+
+    def _unique_thread_dispatch_id(thread_id: str, target_agent_id: str) -> str | None:
+        cache_key = (thread_id, target_agent_id)
+        if cache_key in thread_match_cache:
+            return thread_match_cache[cache_key]
+
+        target_agent_row = agent_rows_by_id.get(target_agent_id)
+        if target_agent_row is None or target_agent_id == assistant_agent_id:
+            thread_match_cache[cache_key] = None
+            return None
+
+        seen_message_ids: set[str] = set()
+
+        def _is_thread_dispatch(payload: dict[str, Any]) -> bool:
+            if (
+                not _is_dispatch(payload)
+                or _text(payload, "targetAgentId") != target_agent_id
+                or _text(payload, "threadId") != thread_id
+            ):
+                return False
+            message_id = _text(payload, "messageId") or _text(payload, "eventId")
+            if not message_id or message_id in seen_message_ids:
+                return False
+            seen_message_ids.add(message_id)
+            return True
+
+        try:
+            candidates = _scan_inbox_reverse(
+                _inbox_path(target_agent_row), predicate=_is_thread_dispatch, cap=2, strict=True
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"Thread dispatch matching scan failed. agentId={target_agent_id} error={type(exc).__name__}"
+            )
+            candidates = []
+
+        candidate_ids = {
+            _text(candidate, "messageId") or _text(candidate, "eventId")
+            for candidate in candidates
+        }
+        unique_id = next(iter(candidate_ids)) if len(candidate_ids) == 1 else None
+        thread_match_cache[cache_key] = unique_id
+        return unique_id
+
     dispatches: list[dict[str, Any]] = []
     unmatched_receipts: list[dict[str, Any]] = []
     receipts_by_message_id: dict[str, list[dict[str, Any]]] = {}
@@ -176,23 +240,33 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
         thread_id = _text(row, "threadId")
         target_dispatch = None
         if reply_to:
-            for dispatch_row in dispatch_rows:
-                if (
-                    reply_to == (_text(dispatch_row, "messageId") or _text(dispatch_row, "eventId"))
-                    and source_agent_id
-                    and source_agent_id == _text(dispatch_row, "targetAgentId")
-                ):
-                    target_dispatch = dispatch_row
-                    break
-        elif thread_id and source_agent_id:
-            thread_candidates = [
+            explicit_rows = [
                 dispatch_row
                 for dispatch_row in dispatch_rows
-                if thread_id == _text(dispatch_row, "threadId")
-                and source_agent_id == _text(dispatch_row, "targetAgentId")
+                if reply_to == (_text(dispatch_row, "messageId") or _text(dispatch_row, "eventId"))
             ]
-            if len(thread_candidates) == 1:
-                target_dispatch = thread_candidates[0]
+            if (
+                len(explicit_rows) == 1
+                and source_agent_id
+                and source_agent_id == _text(explicit_rows[0], "targetAgentId")
+            ):
+                target_dispatch = explicit_rows[0]
+        elif thread_id and source_agent_id:
+            unique_dispatch_id = _unique_thread_dispatch_id(thread_id, source_agent_id)
+            visible_rows = [
+                dispatch_row
+                for dispatch_row in dispatch_rows
+                if unique_dispatch_id
+                and unique_dispatch_id
+                == (_text(dispatch_row, "messageId") or _text(dispatch_row, "eventId"))
+            ]
+            if (
+                len(visible_rows) == 1
+                and thread_id == _text(visible_rows[0], "threadId")
+                and source_agent_id == _text(visible_rows[0], "targetAgentId")
+                and dispatch_inbox_agent_by_row_id.get(id(visible_rows[0])) == source_agent_id
+            ):
+                target_dispatch = visible_rows[0]
         if target_dispatch is not None:
             receipts_by_message_id.setdefault(
                 _text(target_dispatch, "messageId") or _text(target_dispatch, "eventId"), []
