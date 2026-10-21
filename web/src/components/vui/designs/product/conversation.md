@@ -402,6 +402,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 | --- | --- | --- |
 | budget | `ChatComposerBudgetControl \| null` | 提供 `sessionId/revision/每回合工具调用额度/存取状态/onSave`；群聊与陪伴面不传 |
 | capabilityDisabled | 会话级禁用 | 与能力开关同一门：无 activeSession 时禁用预算入口 |
+| knowledgeReferenceState | 可选的 `loading/error/onRequest` | 知识引用按需加载；打开知识引用选择器或输入 `@` 后读取，加载及失败时不显示空列表结论，失败可重试；未传时沿用静态候选行为 |
 
 ### 边界
 - 斜杠指令仍由输入框内联建议负责，不进入加号菜单。

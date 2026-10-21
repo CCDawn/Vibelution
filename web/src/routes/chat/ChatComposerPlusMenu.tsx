@@ -29,6 +29,12 @@ export type ChatComposerSessionReferenceOption = {
   reference: SessionReferenceAttachment;
 };
 
+export type ChatComposerKnowledgeReferenceState = {
+  loading: boolean;
+  error: boolean;
+  onRequest: () => void;
+};
+
 /** A scoped workspace can supply its existing directory without enabling global queries. */
 export type ChatComposerScopedSessionReferences = {
   options: ChatComposerSessionReferenceOption[];
@@ -61,6 +67,7 @@ export type ChatComposerPlusMenuProps = {
   sessionReferences: ChatComposerSessionReferenceOption[];
   onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
   knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
+  knowledgeReferenceState?: ChatComposerKnowledgeReferenceState;
   onAddKnowledgeReference?: (reference: SessionReferenceAttachment) => void;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
@@ -113,6 +120,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     sessionReferences: defaultSessionReferences,
     onAddSessionReference,
     knowledgeReferenceOptions,
+    knowledgeReferenceState,
     onAddKnowledgeReference,
     mentalModelEnabled,
     runtimeStatusEnabled,
@@ -417,9 +425,10 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 id: "reference-knowledge",
                 label: t("composerReferenceKnowledgeFiles"),
                 icon: <BookOpen size={16} />,
-                disabled: !onAddKnowledgeReference || (knowledgeReferenceOptions ?? []).length === 0,
+                disabled: !onAddKnowledgeReference || (!knowledgeReferenceState && (knowledgeReferenceOptions ?? []).length === 0),
                 disabledReason: knowledgeUnavailableReason,
                 onSelect: () => {
+                  knowledgeReferenceState?.onRequest();
                   setKnowledgeQuery("");
                   setKnowledgeDialogOpen(true);
                 },
@@ -613,7 +622,9 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 {option.meta ? <small className={styles.referenceMeta}>{option.meta}</small> : null}
               </VButton>
             ))}
-            {filteredKnowledgeReferences.length === 0 ? (
+            {knowledgeReferenceState?.loading && !knowledgeReferenceState.error ? <p className={styles.referenceEmpty} role="status">{lang === "zh" ? "正在加载知识与文件…" : "Loading knowledge and files…"}</p> : null}
+            {knowledgeReferenceState?.error ? <div role="alert"><p>{lang === "zh" ? "知识与文件加载失败" : "Could not load knowledge and files"}</p><VButton variant="secondary" onPress={knowledgeReferenceState.onRequest}>{lang === "zh" ? "重试" : "Retry"}</VButton></div> : null}
+            {filteredKnowledgeReferences.length === 0 && !knowledgeReferenceState?.loading && !knowledgeReferenceState?.error ? (
               <p className={styles.referenceEmpty}>
                 {t("composerReferenceKnowledgeEmpty")}
               </p>
