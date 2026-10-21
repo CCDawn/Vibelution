@@ -129,6 +129,39 @@ def test_dispatches_pair_receipts_and_flag_unmatched(seeded):
     assert [r["messageId"] for r in payload["unmatchedReceipts"]] == ["receipt-foreign"]
 
 
+def test_dispatches_receipt_matching_prefers_explicit_id_and_requires_unique_fallback(seeded):
+    dispatch_1 = _dispatch_row("dispatch-1", created_at="2026-10-20T10:00:00+00:00")
+    dispatch_2 = _dispatch_row("dispatch-2", created_at="2026-10-20T10:01:00+00:00")
+    dispatch_1["threadId"] = dispatch_2["threadId"] = "shared-thread"
+    unique_dispatch = _dispatch_row("dispatch-unique", created_at="2026-10-20T10:02:00+00:00")
+    unique_dispatch["threadId"] = "unique-thread"
+    _write_inbox(seeded, TARGET_ID, [dispatch_1, dispatch_2, unique_dispatch])
+    _write_inbox(seeded, ASSISTANT_ID, [
+        # Explicit IDs must win over an earlier same-thread dispatch.
+        _receipt_row("receipt-r2", reply_to="dispatch-2", thread_id="shared-thread"),
+        # An explicit but unknown ID must not fall back to the matching thread.
+        _receipt_row("receipt-unknown-explicit", reply_to="missing-dispatch", thread_id="shared-thread"),
+        # An explicit match must still come from the dispatch target.
+        _receipt_row("receipt-wrong-source", reply_to="dispatch-1", thread_id="shared-thread", source_agent=OTHER_ID),
+        # Without an explicit ID, a single thread+source candidate remains valid.
+        _receipt_row("receipt-unique-fallback", thread_id="unique-thread"),
+        # Ambiguous thread+source candidates must not be guessed.
+        _receipt_row("receipt-ambiguous-fallback", thread_id="shared-thread"),
+    ])
+
+    payload = dispatches_service.list_personal_assistant_dispatches(limit=10)
+    by_id = {dispatch["messageId"]: dispatch for dispatch in payload["dispatches"]}
+
+    assert [receipt["messageId"] for receipt in by_id["dispatch-2"]["receipts"]] == ["receipt-r2"]
+    assert [receipt["messageId"] for receipt in by_id["dispatch-1"]["receipts"]] == []
+    assert [receipt["messageId"] for receipt in by_id["dispatch-unique"]["receipts"]] == ["receipt-unique-fallback"]
+    assert {receipt["messageId"] for receipt in payload["unmatchedReceipts"]} == {
+        "receipt-unknown-explicit",
+        "receipt-wrong-source",
+        "receipt-ambiguous-fallback",
+    }
+
+
 def test_dispatches_limit_keeps_newest_window(seeded):
     rows = [
         _dispatch_row(f"dispatch-{index:02d}", created_at=f"2026-10-20T10:{index:02d}:00+00:00")

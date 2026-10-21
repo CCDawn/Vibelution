@@ -566,6 +566,7 @@ def _enqueue_direct_session_submit_kernel_trace(
     turn_id_value = str(turn_id or "").strip()
     message_value = str(message or "")
     source_value = str(source or "").strip()
+    project_root = Path(s.PROJECT_ROOT).resolve()
 
     def _run() -> dict[str, Any]:
         return _create_direct_session_submit_kernel_trace(
@@ -574,6 +575,7 @@ def _enqueue_direct_session_submit_kernel_trace(
             turn_id=turn_id_value,
             message=message_value,
             source=source_value,
+            project_root=project_root,
         )
 
     executor = getattr(s, "_SESSION_CYCLE_PROJECTION_EXECUTOR", None)
@@ -613,6 +615,7 @@ def _create_direct_session_submit_kernel_trace(
     turn_id: str,
     message: str,
     source: str,
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_source = str(source or "").strip() or "raw"
@@ -670,9 +673,9 @@ def _create_direct_session_submit_kernel_trace(
     try:
         from core.agent_kernel import service as agent_kernel_service
 
-        if getattr(agent_kernel_service, "s.PROJECT_ROOT", s.PROJECT_ROOT) != Path(__file__).resolve().parents[3]:
-            agent_kernel_service.PROJECT_ROOT = Path(__file__).resolve().parents[3]
-        result = agent_kernel_service.handle_kernel_event(event_payload)
+        root = Path(project_root if project_root is not None else s.PROJECT_ROOT).resolve()
+        with agent_kernel_service.scoped_project_root(root):
+            result = agent_kernel_service.handle_kernel_event(event_payload)
     except Exception as exc:
         trace = {
             "source": "agent_kernel",
