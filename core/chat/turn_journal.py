@@ -3163,7 +3163,12 @@ def _write_sequence_watermark(path: Path, sequence: int) -> None:
         return
     target = _sequence_watermark_path(path)
     _ensure_journal_parent(target)
-    tmp_path = target.with_name(f"{target.name}.{uuid4().hex}.tmp")
+    # Windows MAX_PATH: a journal directory can already sit close to 260
+    # characters, and a 32-hex temp suffix pushed this write over the limit,
+    # so the watermark silently never landed. Keep the suffix short and fall
+    # back to a direct write: the value is a monotone integer, so the worst
+    # case is one lost update that the next write re-establishes.
+    tmp_path = target.with_name(f"{target.name}.{uuid4().hex[:8]}.tmp")
     try:
         with tmp_path.open("x", encoding="utf-8") as handle:
             handle.write(f"{normalized}\n")
@@ -3174,6 +3179,16 @@ def _write_sequence_watermark(path: Path, sequence: int) -> None:
     except OSError:
         try:
             tmp_path.unlink()
+        except OSError:
+            pass
+        # Even the shortened temp name can lose to a path-length limit on a
+        # deeply nested workspace; write the target directly so the sequence
+        # watermark is never dropped silently.
+        try:
+            with target.open("w", encoding="utf-8") as handle:
+                handle.write(f"{normalized}\n")
+                handle.flush()
+                os.fsync(handle.fileno())
         except OSError:
             pass
 
