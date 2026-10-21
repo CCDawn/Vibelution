@@ -204,3 +204,127 @@ def test_session_context_composition_records_lifecycle_and_cache_metadata(monkey
     assert manifest["cache"]["cacheableSegmentCount"] == 1
     assert manifest["cache"]["volatileSegmentCount"] >= 2
     assert manifest["cache"]["promptCachePartitionHash"]
+
+
+def test_context_composition_history_stats_cache_hit_matches_full_recompute(monkeypatch):
+    from core.web.services.session import projection as session_projection
+
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda conversation: {"limit": 8192, "source": "test", "modelId": "model-a", "agentId": "agent-a"},
+    )
+    # recordedAt 是唯一非确定性字段；冻结后命中输出可与全量重算逐字段相等。
+    monkeypatch.setattr(session_service, "_now_timestamp", lambda: "2026-06-12T12:00:00Z")
+    session_projection._CONTEXT_COMPOSITION_HISTORY_STATS_CACHE.clear()
+    chars_calls = []
+    real_message_list_chars = session_service._message_list_chars
+
+    def counting_message_list_chars(messages):
+        chars_calls.append(len(messages))
+        return real_message_list_chars(messages)
+
+    monkeypatch.setattr(session_service, "_message_list_chars", counting_message_list_chars)
+    history = [
+        {"role": "user", "content": "old question " + "x" * 400},
+        {"role": "assistant", "content": "prior reply " + "y" * 300},
+    ]
+    kwargs = {
+        "conversation": {"id": "session-stats-cache", "agentId": "agent-a"},
+        "turn_id": "turn-1",
+        "user_message": "current request",
+        "history_messages": history,
+        "active_task": None,
+        "prompt_cache_partition": "",
+    }
+
+    first = session_service._build_last_context_composition(**kwargs)
+    assert len(chars_calls) == 1
+    second = session_service._build_last_context_composition(**kwargs)
+    assert len(chars_calls) == 1  # 同一列表对象：命中 memo，不再全量重扫
+    assert second == first  # 缓存命中输出与全量重算逐字段相等
+    history_segment = next(item for item in second["segments"] if item["key"] == "history")
+    assert history_segment["chars"] == real_message_list_chars(history)
+    assert history_segment["contentPreview"] == session_service._message_list_content_preview(history)
+
+
+def test_context_composition_history_stats_cache_invalidates_on_new_history(monkeypatch):
+    from core.web.services.session import projection as session_projection
+
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda conversation: {"limit": 8192, "source": "test", "modelId": "model-a", "agentId": "agent-a"},
+    )
+    session_projection._CONTEXT_COMPOSITION_HISTORY_STATS_CACHE.clear()
+    history = [{"role": "user", "content": "old question " + "x" * 400}]
+    kwargs = {
+        "conversation": {"id": "session-stats-invalidate", "agentId": "agent-a"},
+        "turn_id": "turn-1",
+        "user_message": "current request",
+        "history_messages": history,
+        "active_task": None,
+        "prompt_cache_partition": "",
+    }
+
+    def history_chars_of(composition):
+        return next(item for item in composition["segments"] if item["key"] == "history")["chars"]
+
+    first = session_service._build_last_context_composition(**kwargs)
+    assert history_chars_of(first) == session_service._message_list_chars(history)
+
+    # 签名自然失效：新列表（增长）重算，不复用旧值。
+    grown_history = history + [{"role": "user", "content": "follow-up turn message"}]
+    grown = session_service._build_last_context_composition(**{**kwargs, "history_messages": grown_history})
+    assert history_chars_of(grown) == session_service._message_list_chars(grown_history)
+    assert history_chars_of(grown) > history_chars_of(first)
+
+    # 不同内容、不同对象：不得拿到 stale chars（身份键不命中）。
+    other_content = [{"role": "user", "content": "z" * (len(history[0]["content"]) + 5)}]
+    other = session_service._build_last_context_composition(
+        **{**kwargs, "history_messages": other_content}
+    )
+    assert history_chars_of(other) == session_service._message_list_chars(other_content)
+    assert history_chars_of(other) != history_chars_of(first)
+    other_preview = next(
+        item for item in other["segments"] if item["key"] == "history"
+    )["contentPreview"]
+    first_preview = next(
+        item for item in first["segments"] if item["key"] == "history"
+    )["contentPreview"]
+    assert other_preview != first_preview
+
+
+def test_cached_history_composition_stats_identity_hit_and_eviction(monkeypatch):
+    from core.web.services.session import projection as session_projection
+
+    session_projection._CONTEXT_COMPOSITION_HISTORY_STATS_CACHE.clear()
+    history = [{"role": "user", "content": "a" * 123}, {"role": "assistant", "content": "b" * 45}]
+    chars, preview = session_service._cached_history_composition_stats("session-helper", history)
+    assert chars == session_service._message_list_chars(history)
+    assert preview == session_service._message_list_content_preview(history)
+
+    # 同一对象再次调用：返回同一对统计，不再触发全量扫描。
+    real_message_list_chars = session_service._message_list_chars
+    chars_calls = []
+    monkeypatch.setattr(
+        session_service,
+        "_message_list_chars",
+        lambda messages: (chars_calls.append(len(messages)), real_message_list_chars(messages))[1],
+    )
+    chars_again, preview_again = session_service._cached_history_composition_stats("session-helper", history)
+    assert chars_calls == []
+    assert (chars_again, preview_again) == (chars, preview)
+
+    # 会话数超上限：FIFO 逐出，逐出后重算仍正确。
+    monkeypatch.setattr(session_projection, "_CONTEXT_COMPOSITION_HISTORY_STATS_CACHE_MAX_SESSIONS", 1)
+    other_history = [{"role": "user", "content": "c" * 7}]
+    other_chars, _ = session_service._cached_history_composition_stats("session-helper-b", other_history)
+    assert other_chars == session_service._message_list_chars(other_history)
+    assert len(session_projection._CONTEXT_COMPOSITION_HISTORY_STATS_CACHE) == 1
+    evicted_chars, evicted_preview = session_service._cached_history_composition_stats(
+        "session-helper", history
+    )
+    assert evicted_chars == chars
+    assert evicted_preview == preview
+    session_projection._CONTEXT_COMPOSITION_HISTORY_STATS_CACHE.clear()

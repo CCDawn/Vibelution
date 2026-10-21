@@ -2376,6 +2376,21 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
         "toolRegistryCacheHit",
         "turnAuthorizationMs",
         "turnAuthorizationCacheHit",
+        # TTFT 批六锚点：A8 段（research budget 段、guidance 上下文、skill
+        # contract 刷新，位于 historyAssemblyMs 与 totalSeedMs 之间）与 B 段
+        # （镜像附件、context composition、turn_context journal 写、历史图片
+        # 重建、研究历史脱敏）。A8 与 B 前两键写入 prepare_timings 后仍在本轮
+        # turn_context journal 的 prepareTimings 快照点之前，随快照透出；
+        # turnContextJournalMs/seedImagesMs/redactHistoryMs 三键在快照之后
+        # 测得，由 worker 的 prepare_tail_timings 观测事件透出。
+        "researchBudgetMs",
+        "guidanceContextMs",
+        "skillContractMs",
+        "imageAttachmentsMs",
+        "contextCompositionMs",
+        "turnContextJournalMs",
+        "seedImagesMs",
+        "redactHistoryMs",
     )
     fields = {
         key: timings[key]
