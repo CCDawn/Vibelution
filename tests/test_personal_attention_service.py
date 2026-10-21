@@ -93,6 +93,7 @@ _HUMAN_ATTENTION_COLLECTORS = (
     "collect_anomaly_attention",
     "_collect_human_gate_attention",
     "_collect_affair_reminder_attention",
+    "_collect_completion_attention",
 )
 
 
@@ -123,7 +124,7 @@ def test_human_attention_feed_and_overview_share_all_four_sources(monkeypatch):
     monkeypatch.setattr(attention, "collect_stage_task_attention", lambda: ([], []))
     rows = []
     for name, kind in zip(_HUMAN_ATTENTION_COLLECTORS, (
-        "knowledge_review", "anomaly", "human_gate", "affair_reminder"
+        "knowledge_review", "anomaly", "human_gate", "affair_reminder", "dispatch_receipt"
     )):
         row = {"id": name, "kind": kind, "title": name}
         rows.append(row)
