@@ -184,4 +184,23 @@ describe("AgentMessage timeline rows", () => {
       "assistant-turn:turn-timeline:process:item:operation:tool-1",
     );
   });
+
+  it("keeps rows unique when two segments share one projected message anchor", () => {
+    const rows = buildAgentMessageTimelineRowIdentities([
+      assistantMessage("segment-a", {
+        turnId: "turn-shared",
+        metadata: { projectedMessageIds: ["projected-message-9"] },
+      }),
+      assistantMessage("segment-b", {
+        turnId: "turn-shared",
+        metadata: { projectedMessageIds: ["projected-message-9"] },
+      }),
+    ]);
+
+    expect(rows.map((row) => row.rowKey)).toEqual([
+      "assistant-turn:turn-shared:message:projected-message-9:segment-a",
+      "assistant-turn:turn-shared:message:projected-message-9:segment-b",
+    ]);
+    expect(new Set(rows.map((row) => row.rowKey)).size).toBe(2);
+  });
 });

@@ -134,4 +134,47 @@ describe("conversation display message projection", () => {
 
     expect(projected.map((item) => item.id)).toEqual(["assistant-partial"]);
   });
+
+  it("folds assistant rows of one turn on item identity instead of painting the turn twice", async () => {
+    const turnItem = (
+      itemId: string,
+      sequence: number,
+      text: string,
+    ): ConversationMessage["turnItems"][number] => ({
+      version: 3,
+      id: `item-${itemId}`,
+      itemId,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "agent_message",
+      phase: "final_answer",
+      text,
+      status: "completed",
+      revision: 1,
+      sequence,
+      terminal: false,
+    });
+
+    const projected = await projectConversationDisplayMessages([
+      message({
+        id: "assistant-segment-a",
+        role: "assistant",
+        turnId: "turn-1",
+        content: "first half",
+        metadata: { turnId: "turn-1", messageIndex: 2 },
+        turnItems: [turnItem("answer", 1, "first half")],
+      }),
+      message({
+        id: "assistant-segment-b",
+        role: "assistant",
+        turnId: "turn-1",
+        content: "second half",
+        metadata: { turnId: "turn-1", messageIndex: 3 },
+        turnItems: [turnItem("summary", 2, "second half")],
+      }),
+    ]);
+
+    expect(projected.map((item) => item.id)).toEqual(["assistant-segment-a"]);
+    expect(projected[0].turnItems.map((item) => item.sequence)).toEqual([1, 2]);
+  });
 });

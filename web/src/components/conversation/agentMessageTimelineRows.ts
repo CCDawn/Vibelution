@@ -119,12 +119,25 @@ export function buildAgentMessageTimelineRowIdentities(
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
+  const anchors = messages.map(projectedMessageAnchor);
+  const anchorCounts = new Map<string, number>();
+  for (const anchor of anchors) {
+    anchorCounts.set(anchor, (anchorCounts.get(anchor) ?? 0) + 1);
+  }
+
   return messages.map((message, index) => {
     const baseKey = baseKeys[index];
-    const rowKey = (counts.get(baseKey) ?? 0) > 1
-      ? `${baseKey}:message:${projectedMessageAnchor(message)}`
-      : baseKey;
-    return timelineRowIdentity(message, rowKey);
+    if ((counts.get(baseKey) ?? 0) <= 1) {
+      return timelineRowIdentity(message, baseKey);
+    }
+    // A shared projection anchor (several segments folded onto one projected
+    // message id) is a scroll anchor, not an identity. Fall back to the row's
+    // own message id so two real rows never collide on the same React key.
+    const anchor = anchors[index];
+    const discriminator = (anchorCounts.get(anchor) ?? 0) > 1
+      ? `${anchor}:${message.id}`
+      : anchor;
+    return timelineRowIdentity(message, `${baseKey}:message:${discriminator}`);
   });
 }
 
