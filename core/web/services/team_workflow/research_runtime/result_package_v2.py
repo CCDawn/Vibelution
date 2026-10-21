@@ -1005,6 +1005,111 @@ def _aggregated_evidence_card_payload(
     }
 
 
+def _workflow_bound_evidence_cards(
+    *, team_id: str, workflow_run_id: str
+) -> list[dict[str, Any]]:
+    """Read the claim-evidence cards explicitly bound to this workflow run."""
+
+    from .artifact_readback_registry import load_workflow_bound_evidence_cards
+
+    return load_workflow_bound_evidence_cards(
+        team_id=team_id, workflow_run_id=workflow_run_id
+    )
+
+
+def _merge_workflow_bound_cards(
+    base_payload: dict[str, Any],
+    wf_cards: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Merge workflow-bound cards into an existing payload, existing-first.
+
+    The base layer (frozen authority run or review-cited aggregation) keeps
+    precedence: its cards are copied unchanged and a workflow-bound card only
+    fills a claim-evidence identity the base does not already carry.  A merge
+    that adds nothing returns the base payload untouched, so a payload whose
+    cards already cover the run-bound identities keeps byte-identical
+    behavior.  The ``workflowBoundCards`` marker rides only on payloads that
+    actually gained a card: it tells ``_evidence``'s identity-resolution to
+    consult the same cross-run candidate authorities the aggregation layer
+    uses, because a run-bound card may cite a source collected on a side-flow
+    run the frozen scope never names.
+    """
+
+    cards = _list_of_mappings(
+        base_payload.get("evidenceCards") or base_payload.get("cards")
+    )
+    seen_card_ids = {
+        card_id
+        for card_id in (
+            _text(_pick(card, "claimEvidenceId", "evidenceId", "evidence_id"))
+            for card in cards
+        )
+        if card_id
+    }
+    merged_cards = list(cards)
+    added = False
+    for card in wf_cards:
+        card_id = _text(_pick(card, "claimEvidenceId", "evidenceId", "evidence_id"))
+        if not card_id or card_id in seen_card_ids:
+            continue
+        seen_card_ids.add(card_id)
+        merged_cards.append(deepcopy(dict(card)))
+        added = True
+    if not added:
+        return base_payload
+    merged = dict(base_payload)
+    merged["evidenceCards"] = merged_cards
+    merged["cardCount"] = len(merged_cards)
+    merged["workflowBoundCards"] = True
+    return merged
+
+
+def _workflow_bound_only_payload(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    authority_run_id: str,
+    wf_cards: list[dict[str, Any]],
+    dimension_payload: Mapping[str, Any],
+    research_project_id: str = "",
+) -> dict[str, Any]:
+    """Build a payload from workflow-bound cards alone.
+
+    WorkflowRunId binding is the run's own evidence authority, so a run whose
+    frozen scope and review citations both yield no cards is still packagable
+    when cards name the run itself.  The lean projection reuses the exact
+    fill-missing authority chain of the aggregation layer (project store
+    first, cited runs' scoped batches fallback) so these cards meet the same
+    ``_evidence_item`` requirements.
+    """
+
+    cards = [deepcopy(dict(card)) for card in wf_cards]
+    lean_projection = any(
+        not _text(card.get("candidateId") or card.get("recordId"))
+        or not _text(card.get("title"))
+        for card in cards
+    )
+    if lean_projection:
+        if research_project_id:
+            record_index = _project_candidate_record_index(
+                team_id=team_id, research_project_id=research_project_id
+            )
+        else:
+            record_index = _source_candidate_record_index(
+                team_id=team_id,
+                cited_run_ids=_cited_evidence_run_ids(dimension_payload),
+            )
+        cards = [_project_lean_evidence_card(card, record_index) for card in cards]
+    return {
+        "teamId": team_id,
+        "sourceCollectionRunId": authority_run_id,
+        "workflowRunId": workflow_run_id,
+        "evidenceCards": cards,
+        "cardCount": len(cards),
+        "workflowBoundCards": True,
+    }
+
+
 def _evidence_card_payload(
     *,
     team_id: str,
@@ -1029,7 +1134,19 @@ def _evidence_card_payload(
     candidate store when the frozen scope names the project (through the
     memoized single-read loader, shared with the id authority below), and
     falls back to the cited runs' scoped batches otherwise.
+
+    The third layer never replaces the first two: cards explicitly bound to
+    this workflow run (``workflowRunId`` = the formal run, e.g. relation-graph
+    counter-evidence materialized over a side-flow collection round the
+    frozen scope never cites) are merged under the whichever base layer the
+    run resolves to — existing identities win, workflow-bound cards only fill
+    gaps — and form a legitimate payload alone only when both base layers
+    come back empty.  With no run-bound card every branch is untouched.
     """
+
+    wf_cards = _workflow_bound_evidence_cards(
+        team_id=team_id, workflow_run_id=workflow_run_id
+    )
 
     missing_error: ResultPackageV2Error | None = None
     try:
@@ -1047,7 +1164,11 @@ def _evidence_card_payload(
         if _list_of_mappings(payload.get("evidence")) or _list_of_mappings(
             payload.get("evidenceCards") or payload.get("cards")
         ):
-            return payload
+            return (
+                _merge_workflow_bound_cards(payload, wf_cards)
+                if wf_cards
+                else payload
+            )
     aggregated = _aggregated_evidence_card_payload(
         team_id=team_id,
         cited_run_ids=_cited_evidence_run_ids(dimension_payload),
@@ -1055,7 +1176,20 @@ def _evidence_card_payload(
         project_candidates=project_candidates,
     )
     if aggregated is not None:
-        return aggregated
+        return (
+            _merge_workflow_bound_cards(aggregated, wf_cards)
+            if wf_cards
+            else aggregated
+        )
+    if wf_cards:
+        return _workflow_bound_only_payload(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            authority_run_id=authority_run_id,
+            wf_cards=wf_cards,
+            dimension_payload=dimension_payload,
+            research_project_id=research_project_id,
+        )
     if missing_error is not None:
         raise missing_error
     return payload
@@ -2380,7 +2514,14 @@ def build_challenge_result_package_v2(
         authority_run_id=authority,
     )
     authority_sections = [dimension_payload, hypothesis_set, research_payload]
-    aggregated_cards = bool(evidence_cards.get("aggregatedFromDimensionReviews"))
+    # Workflow-bound merged cards cite sources the frozen scope may never
+    # name, so they resolve identities through the same cross-run candidate
+    # authorities as the aggregated path; without such a card the flag stays
+    # exactly as before and the single-run path keeps its fail-closed shape.
+    aggregated_cards = bool(
+        evidence_cards.get("aggregatedFromDimensionReviews")
+        or evidence_cards.get("workflowBoundCards")
+    )
     evidence = _evidence(
         evidence_cards,
         candidates,
