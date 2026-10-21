@@ -664,3 +664,191 @@ def test_session_initial_state_stamps_ledger_before_content_read(monkeypatch) ->
     assert state["ledgerSeq"] == 10
     assert service.ledger_seq_at_content_read is not None
     assert state["ledgerSeq"] <= service.ledger_seq_at_content_read
+
+
+def _journal_event(sequence: int, *, event_type="assistant_item_committed", payload=None, turn_id="turn-1"):
+    return SimpleNamespace(
+        sequence=sequence,
+        event_id=f"evt-{sequence:06d}",
+        turn_id=turn_id,
+        event_type=event_type,
+        status="completed",
+        timestamp=f"2026-01-01T00:00:{sequence % 60:02d}",
+        payload=payload if payload is not None else {"n": sequence},
+    )
+
+
+class _WindowJournalService(_FakeSessionService):
+    """Snapshot watermark 1 with one journal event at seq 2 above it.
+
+    Mirrors the route shape: the initial payload is resolved BEFORE the
+    subscriber registration (the handler resolves in the executor, the
+    generator registers on first iteration), so the seq-2 event published in
+    that window is neither in the snapshot nor in the subscriber queue.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.registered: list = []
+        self.unregistered: list = []
+
+    def get_session_stream_initial_state(self, session_id: str) -> dict:
+        return {"type": "session_initial", "sessionId": session_id, "ledgerSeq": 1}
+
+    def _session_ledger_sequence(self, _session_id: str) -> int:
+        return 2
+
+    def _load_session_conversation_events_cached(self, _session_id: str) -> list:
+        return [_journal_event(2)]
+
+    def _register_session_stream_subscriber(self, _session_id: str, subscriber) -> None:
+        self.registered.append(subscriber)
+
+    def _unregister_session_stream_subscriber(self, _session_id: str, subscriber) -> None:
+        self.unregistered.append(subscriber)
+
+
+def _decode_stream_frames(frames: list[str]) -> list[dict]:
+    return [json.loads(frame.split("data: ", 1)[1]) for frame in frames]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_first_connect_replays_resolve_register_window_exactly_once(monkeypatch, asynchronous):
+    service = _WindowJournalService()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    initial_state = {"type": "session_initial", "sessionId": "session-window", "ledgerSeq": 1}
+
+    async def run_async() -> list[dict]:
+        stream = publish.stream_session_events_async(
+            "session-window",
+            initial="light",
+            initial_state=initial_state,
+            last_event_id=0,
+        )
+        frames = [await anext(stream) for _ in range(3)]
+        await stream.aclose()
+        return _decode_stream_frames(frames)
+
+    def run_sync() -> list[dict]:
+        stream = publish.stream_session_events(
+            "session-window",
+            initial="light",
+            initial_state=initial_state,
+            last_event_id=0,
+        )
+        frames = [next(stream) for _ in range(3)]
+        stream.close()
+        return _decode_stream_frames(frames)
+
+    payloads = asyncio.run(run_async()) if asynchronous else run_sync()
+
+    # Frame 1 stays the initial snapshot resolved before registration.
+    assert payloads[0]["type"] == "session_initial"
+    assert payloads[0]["ledgerSeq"] == 1
+    # The window event (journal seq 2, above the snapshot watermark) is
+    # replayed by the first-connect prelude exactly once.
+    journal_frames = [payload for payload in payloads if payload.get("type") == "session_journal_event"]
+    assert [payload["seq"] for payload in journal_frames] == [2]
+    marker = payloads[2]
+    assert marker == {
+        "type": "stream_resume",
+        "sessionId": "session-window",
+        "resume": "replayed",
+        "fromSeq": 1,
+        "toSeq": 2,
+        "replayedCount": 1,
+    }
+    assert len(service.registered) == 1
+    assert service.unregistered == service.registered
+
+
+class _NoneModeDelimiterService(_FakeSessionService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.registered: list = []
+        self.unregistered: list = []
+
+    def _session_ledger_sequence(self, _session_id: str) -> int:
+        return 5
+
+    def _register_session_stream_subscriber(self, _session_id: str, subscriber) -> None:
+        self.registered.append(subscriber)
+        subscriber.put_nowait({"type": "session_probe", "sessionId": "session-none"})
+
+    def _unregister_session_stream_subscriber(self, _session_id: str, subscriber) -> None:
+        self.unregistered.append(subscriber)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_first_connect_none_mode_emits_handover_delimiter(monkeypatch, asynchronous):
+    """initial="none" first connects still get the stream_resume delimiter.
+
+    The marker anchors the handover at the registration-time journal
+    watermark (live frames carry ledgerSeq >= toSeq) and seeds the SSE id
+    cursor, instead of leaving the client without any handover frame.
+    """
+
+    service = _NoneModeDelimiterService()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+
+    async def run_async() -> list[dict]:
+        stream = publish.stream_session_events_async("session-none", initial="none", last_event_id=0)
+        frames = [await anext(stream) for _ in range(2)]
+        await stream.aclose()
+        return _decode_stream_frames(frames)
+
+    def run_sync() -> list[dict]:
+        stream = publish.stream_session_events("session-none", initial="none", last_event_id=0)
+        frames = [next(stream) for _ in range(2)]
+        stream.close()
+        return _decode_stream_frames(frames)
+
+    payloads = asyncio.run(run_async()) if asynchronous else run_sync()
+
+    assert payloads[0] == {
+        "type": "stream_resume",
+        "sessionId": "session-none",
+        "resume": "replayed",
+        "fromSeq": 5,
+        "toSeq": 5,
+        "replayedCount": 0,
+    }
+    assert payloads[1] == {"type": "session_probe", "sessionId": "session-none"}
+    assert len(service.registered) == 1
+    assert service.unregistered == service.registered
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_session_not_found_bootstrap_never_registers_subscriber(monkeypatch, asynchronous):
+    """A 404-shaped stream bootstrap must not leave a subscriber behind."""
+
+    service = _FakeSessionService()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    registered: list = []
+
+    def register(_session_id: str, subscriber) -> None:
+        registered.append(subscriber)
+
+    def missing_state(_session_id: str) -> dict:
+        raise LookupError("session not found")
+
+    monkeypatch.setattr(service, "_register_session_stream_subscriber", register)
+    monkeypatch.setattr(service, "get_session_stream_initial_state", missing_state)
+
+    async def run_async() -> None:
+        stream = publish.stream_session_events_async("session-missing", initial="light")
+        with pytest.raises(LookupError):
+            await anext(stream)
+
+    def run_sync() -> None:
+        stream = publish.stream_session_events("session-missing", initial="light")
+        with pytest.raises(LookupError):
+            next(stream)
+
+    if asynchronous:
+        asyncio.run(run_async())
+    else:
+        run_sync()
+
+    assert registered == []
+    assert _event_codes(service) == []

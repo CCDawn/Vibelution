@@ -862,6 +862,24 @@ def test_session_events_runs_only_initial_projection_on_dedicated_executor(monke
     assert not thread_names[1].startswith("session-stream")
 
 
+def test_session_events_route_missing_session_returns_404_without_subscriber(monkeypatch):
+    def missing_payload(_session_id: str, _initial: str):
+        raise session_routes.SessionNotFoundError("Session not found.")
+
+    monkeypatch.setattr(session_routes, "resolve_session_stream_initial_payload", missing_payload)
+
+    async def call_route():
+        with pytest.raises(session_routes.HTTPException) as exc_info:
+            await session_routes.session_events("session-active", "light")
+        return exc_info.value
+
+    error = asyncio.run(call_route())
+
+    assert error.status_code == 404
+    with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        assert not session_service._SESSION_STREAM_SUBSCRIBERS.get("session-active")
+
+
 def test_session_detail_exists(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
