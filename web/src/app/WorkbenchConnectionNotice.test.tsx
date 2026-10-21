@@ -57,7 +57,7 @@ describe("workbench connection recovery", () => {
     expect(shellSource).toContain("(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen");
     expect(shellSource).toContain("onRecover={() => { void beginRestart(); }}");
     expect(shellSource).toContain("const routeContent = useMemo(() => <Outlet />, []);");
-    expect(shellSource).toContain('<CompanionDesktopAttention /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}>{routeContent}</VWorkbenchFrame>');
+    expect(shellSource).toContain('<CompanionDesktopAttention startupReady={shellOptionalReady} /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}><WorkbenchStartupReadyContext.Provider value={reportRouteStartupReady}>{routeContent}</WorkbenchStartupReadyContext.Provider></VWorkbenchFrame>');
     expect(shellSource).not.toContain("unavailable ? null : <Outlet");
     expect(shellSource.indexOf("<div className={styles.mainArea}>" )).toBeLessThan(shellSource.indexOf("<WorkbenchConnectionNotice"));
     expect(shellSource).toContain("className={styles.contentFrame}");

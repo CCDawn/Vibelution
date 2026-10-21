@@ -1,14 +1,14 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-10-13",
-  "scannedFileCount": 1664,
+  "updatedAt": "2026-10-21",
+  "scannedFileCount": 1799,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
   ],
   "categories": {
     "builtinFontSize": {
-      "total": 272,
+      "total": 214,
       "files": {
         "routes/agentConfigForm.styles.ts": 4,
         "routes/AgentConfigPolicyPanePanel.styles.ts": 1,
@@ -21,14 +21,12 @@
         "routes/AgentSelectedDetailContentPanel.styles.ts": 3,
         "routes/AgentTaskProfilePanel.styles.ts": 3,
         "routes/chat/TeamDirectoryManagementOverlay.styles.ts": 1,
-        "routes/finance/FinanceAIBacktest.styles.ts": 2,
         "routes/finance/FinanceAnalystTeam.styles.ts": 22,
         "routes/finance/FinanceDashboard.styles.ts": 9,
         "routes/finance/FinanceEvaluation.styles.ts": 4,
         "routes/finance/FinanceKnowledgeCenter.styles.ts": 9,
         "routes/finance/FinanceManualPositions.styles.ts": 4,
         "routes/finance/FinanceMarketExplorer.styles.ts": 19,
-        "routes/finance/FinancePaperTrading.styles.ts": 7,
         "routes/finance/FinancePortfolioResearch.styles.ts": 4,
         "routes/finance/FinanceRebalance.styles.ts": 10,
         "routes/finance/FinanceReportExport.styles.ts": 1,
@@ -38,7 +36,6 @@
         "routes/finance/FinanceResearchConfig.styles.ts": 3,
         "routes/finance/FinanceResearchHistory.styles.ts": 3,
         "routes/finance/FinanceResearchJobs.styles.ts": 12,
-        "routes/finance/FinanceResearchOverview.styles.ts": 8,
         "routes/finance/FinanceResearchProcess.styles.ts": 5,
         "routes/finance/FinanceResearchProfiles.styles.ts": 3,
         "routes/finance/FinanceResearchReport.styles.ts": 9,
@@ -47,19 +44,16 @@
         "routes/finance/FinanceStockOverview.styles.ts": 12,
         "routes/finance/FinanceTaskCenter.styles.ts": 5,
         "routes/finance/FinanceWalkForward.styles.ts": 1,
-        "routes/finance/FinanceWatchlistTable.styles.ts": 1,
         "routes/finance/FinanceWorkspaceInspector.styles.ts": 3,
         "routes/finance/FinanceWorkspaceSidebar.styles.ts": 7,
-        "routes/FinanceRoute.styles.ts": 24,
         "routes/LauncherBranchInstancesPanel.styles.ts": 1,
         "routes/LauncherRoute.styles.ts": 1,
         "routes/LauncherToolsRoute.styles.ts": 1,
-        "routes/MemoryAgentMemoryPanel.styles.ts": 17,
-        "routes/teams/TeamHomeSurface.styles.ts": 16
+        "routes/MemoryAgentMemoryPanel.styles.ts": 17
       }
     },
     "arbitraryTextSize": {
-      "total": 59,
+      "total": 45,
       "files": {
         "app/AppShell.styles.ts": 1,
         "components/conversation/ConversationFileReferenceChips.styles.ts": 1,
@@ -73,15 +67,11 @@
         "routes/chat/ChatSessionBrowser.styles.ts": 6,
         "routes/finance/FinanceAnalystTeam.styles.ts": 1,
         "routes/finance/FinanceEvaluation.styles.ts": 1,
-        "routes/finance/FinancePaperTrading.styles.ts": 9,
         "routes/finance/FinancePortfolioResearch.styles.ts": 8,
         "routes/finance/FinanceRebalance.styles.ts": 7,
         "routes/finance/FinanceReportLibrary.styles.ts": 1,
-        "routes/finance/FinanceResearchOverview.styles.ts": 1,
         "routes/finance/FinanceResearchProcess.styles.ts": 1,
-        "routes/finance/FinanceWatchlistTable.styles.ts": 3,
         "routes/finance/FinanceWorkspaceSidebar.styles.ts": 5,
-        "routes/teams/TeamHomeSurface.styles.ts": 1,
         "routes/UsageRoute.styles.ts": 6
       }
     },
