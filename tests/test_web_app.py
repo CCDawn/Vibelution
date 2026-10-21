@@ -7711,11 +7711,6 @@ def test_session_turn_passes_draining_guidance_provider_to_continuation_loop(tmp
     )
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: object())
     guidance_text = "运行中不要改 Windows 启动路径"
-    monkeypatch.setattr(
-        session_service,
-        "_recent_session_steer_guidance_texts",
-        lambda _session_id, turn_id="", limit=3: [guidance_text],
-    )
     captured: dict[str, object] = {}
 
     def fake_run_session_continuation_loop(agent, **kwargs):
@@ -7729,11 +7724,48 @@ def test_session_turn_passes_draining_guidance_provider_to_continuation_loop(tmp
 
     monkeypatch.setattr(session_worker, "_run_session_continuation_loop", fake_run_session_continuation_loop)
 
+    # C3 回归：同一轮内两次提交完全相同的引导文本是两次独立干预，都必须
+    # 到达模型；去重键是 journal 提交身份（event id）而非文本内容。
+    from core.chat.turn_journal import TurnJournalEvent
+
+    steer_events_by_turn: dict[str, list[TurnJournalEvent]] = {}
+
+    def fake_loader(_session_id):
+        wanted_turn = str(getattr(captured.get("turn_control"), "turn_id", "") or "").strip()
+        bucket = steer_events_by_turn.get(wanted_turn)
+        if bucket is None:
+            rows = [
+                {
+                    "turnId": wanted_turn,
+                    "eventType": session_service.EVENT_USER_MESSAGE,
+                    "payload": {"content": guidance_text, "metadata": {"kind": "user_guidance"}},
+                },
+                {
+                    "turnId": wanted_turn,
+                    "eventType": session_service.EVENT_USER_MESSAGE,
+                    "payload": {"content": guidance_text, "metadata": {"kind": "user_guidance"}},
+                },
+            ]
+            bucket = [
+                TurnJournalEvent.from_dict({**row, "sequence": index})
+                for index, row in enumerate(rows, 1)
+            ]
+            steer_events_by_turn[wanted_turn] = bucket
+        return bucket
+
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        fake_loader,
+    )
+
     session_service.submit_session_message("session-live", "开始长任务")
 
     provider = captured["guidance_provider"]
     assert callable(provider)
-    assert provider() == [guidance_text]
+    live_turn = str(getattr(captured.get("turn_control"), "turn_id", "") or "").strip()
+    assert len({event.event_id for event in steer_events_by_turn[live_turn]}) == 2
+    assert provider() == [guidance_text, guidance_text]
     assert provider() == []
 
 
