@@ -9,6 +9,7 @@ from starlette.types import ASGIApp
 
 from core.web.route_bootstrap import (
     is_early_ready_path,
+    is_startup_route_path,
     routes_not_ready_response,
     wait_for_web_routes,
 )
@@ -27,7 +28,10 @@ class WaitForWebRoutesMiddleware(BaseHTTPMiddleware):
         app = request.app
         if bool(getattr(app.state, "web_shell_ready", False)) and path != "/api" and not path.startswith("/api/"):
             return await call_next(request)
-        ready = await wait_for_web_routes(app, timeout_seconds=self._timeout_seconds)
+        ready = await wait_for_web_routes(
+            app, timeout_seconds=self._timeout_seconds,
+            startup_only=request.method in {"GET", "HEAD"} and is_startup_route_path(path),
+        )
         if not ready:
             return routes_not_ready_response(app)
         return await call_next(request)

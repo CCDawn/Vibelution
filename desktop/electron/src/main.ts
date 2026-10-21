@@ -2096,10 +2096,23 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
   }
   let status: DesktopShellStatus;
   try {
+    // A usable shell need not wait for frontend source scans or packaged
+    // frontend hashes. Full advisory freshness stays with the existing watch
+    // and status paths; only a launch blocker enters automatic replacement.
+    const readiness = await inspectCurrentDesktopShellLaunchReadiness();
+    if (!readiness.launchBlocking) {
+      return false;
+    }
+    // Readiness deliberately omits refresh cooldown state. Keep the complete
+    // status check before the guarded update can prepare or stop anything.
     status = await inspectCurrentDesktopShell();
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `检查桌面壳版本失败，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
+    return false;
+  }
+  if (!status.launchBlocking) {
+    // The blocking condition may have cleared while the full probe ran.
     return false;
   }
   if (status.refreshBlocked) {
