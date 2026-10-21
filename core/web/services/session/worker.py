@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.web.services.session.runtime_glue import _is_steer_guidance_kind
 from core.infrastructure.tool_execution_scope import (
     ToolExecutionScope,
     tool_execution_scope,
@@ -1304,27 +1305,60 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             turn_id=turn_id,
         )
 
-    consumed_guidance_texts: list[str] = []
+    consumed_guidance_keys: set[str] = set()
 
     def guidance_provider() -> list[str]:
         """Drain new operator steer guidance for the running turn.
 
         Polled by the agent at iteration boundaries so a mid-turn steer reaches
         the next model request of the same turn (Codex-style steer).
+
+        Consumption dedup keys on journal submission identity (event id, with
+        sequence/text fallbacks for degenerate rows), never on text content:
+        two identical guidance submissions in one turn are two distinct
+        interventions and both must reach the model.
         """
         guidance_turn_id = str(getattr(turn_control, "turn_id", "") or turn_id).strip()
         if not guidance_turn_id:
             return []
         try:
-            texts = s._recent_session_steer_guidance_texts(
-                session_id,
-                turn_id=guidance_turn_id,
-                limit=8,
-            )
+            events = s._load_session_conversation_events_cached(session_id)
         except Exception:
             return []
-        pending = [text for text in texts if text not in consumed_guidance_texts]
-        consumed_guidance_texts.extend(pending)
+        steer_events: list[Any] = []
+        for event in events or []:
+            if str(getattr(event, "event_type", "") or "") != s.EVENT_USER_MESSAGE:
+                continue
+            if str(getattr(event, "turn_id", "") or "").strip() != guidance_turn_id:
+                continue
+            payload = dict(getattr(event, "payload", None) or {})
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            if not _is_steer_guidance_kind(metadata.get("kind")):
+                continue
+            steer_events.append(event)
+        pending: list[str] = []
+        # Keep the historical per-drain cap: only the latest 8 steer events of
+        # this turn are eligible, matching the previous source-window limit.
+        for event in steer_events[-8:]:
+            payload = dict(getattr(event, "payload", None) or {})
+            content = str(payload.get("content") or "").strip()
+            if not content:
+                continue
+            event_id = str(getattr(event, "event_id", "") or "").strip()
+            sequence = getattr(event, "sequence", "")
+            if event_id:
+                key = event_id
+            elif sequence:
+                key = f"seq:{sequence}"
+            else:
+                # Last resort for degenerate rows: key on text, but only here —
+                # an ``or``-chain would make f"seq:{''}" truthy and both drop
+                # the text fallback and collide distinct degenerate rows.
+                key = f"text:{content}"
+            if key in consumed_guidance_keys:
+                continue
+            consumed_guidance_keys.add(key)
+            pending.append(content)
         return pending
 
     # The LLM adapter receives a bound ``current_stop_reason`` method, so the
