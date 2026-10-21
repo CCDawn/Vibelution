@@ -491,6 +491,11 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         # Presentation-only checklist snapshot; journaled with the turn and
         # derived client-side by the conversation checklist card.
         "todo_write",
+        # Intent alignment agent surface (journaled tool calls, same family as
+        # todo_write): card issuance and deterministic merge into the artifact
+        # store. Handlers live in core/orchestration/intent_alignment.py.
+        "intent_alignment_card",
+        "intent_alignment_merge",
         "read_file_tool",
     ]
 )

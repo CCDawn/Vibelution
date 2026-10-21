@@ -50,6 +50,8 @@
         "github_project_library_search_tool",
         "github_project_library_clone_tool",
         "todo_write",
+        "intent_alignment_card",
+        "intent_alignment_merge",
         "read_file_tool"
       ],
       "expected_preferred_tools": [
