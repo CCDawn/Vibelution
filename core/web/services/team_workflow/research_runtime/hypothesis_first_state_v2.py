@@ -99,7 +99,7 @@ _COLLECTION_SOURCE_EVENT_TAIL = 240
 _QUESTION_SNAPSHOT_CACHE_LOCK = threading.RLock()
 _QUESTION_SNAPSHOT_CACHE: dict[
     tuple[str, str],
-    tuple[tuple[tuple[str, int, int], ...], dict[str, Any]],
+    tuple[tuple[tuple[str, int, int], ...], str],
 ] = {}
 _CHAT_ROOM_ROUND_STOPPED_STATUSES = {
     "cancelled",
@@ -329,8 +329,14 @@ def _cached_question_reset_snapshot(team_id: str, question_id: str) -> dict[str,
     before = _question_snapshot_signature(team_id)
     with _QUESTION_SNAPSHOT_CACHE_LOCK:
         cached = _QUESTION_SNAPSHOT_CACHE.get(key)
-        if cached is not None and cached[0] == before:
-            return deepcopy(cached[1])
+        encoded = cached[1] if cached is not None and cached[0] == before else None
+    if encoded is not None:
+        # The six durable sources contain JSON values. Decode outside the
+        # lock to retain nested copy isolation without Python's deepcopy walk.
+        snapshot = json.loads(encoded)
+        snapshot["targetMeetingIds"] = set(snapshot["targetMeetingIds"])
+        snapshot["targetRoundIds"] = set(snapshot["targetRoundIds"])
+        return snapshot
 
     # Avoid caching a cross-file observation while an append/atomic rewrite is
     # in flight. One retry is sufficient; a continuously changing workload
@@ -343,8 +349,17 @@ def _cached_question_reset_snapshot(team_id: str, question_id: str) -> dict[str,
         after = _question_snapshot_signature(team_id)
     snapshot = _compact_question_snapshot(raw_snapshot, question_id)
     if before == after:
+        encoded = json.dumps(
+            {
+                **snapshot,
+                "targetMeetingIds": sorted(snapshot["targetMeetingIds"]),
+                "targetRoundIds": sorted(snapshot["targetRoundIds"]),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         with _QUESTION_SNAPSHOT_CACHE_LOCK:
-            _QUESTION_SNAPSHOT_CACHE[key] = (after, deepcopy(snapshot))
+            _QUESTION_SNAPSHOT_CACHE[key] = (after, encoded)
     return snapshot
 
 
@@ -3041,18 +3056,20 @@ def project_state_from_records(
         program_output or {},
         room_round_snapshots,
     )
-    source_cursor = {
-        "chain": _canonical_hash(chain, length=24),
-        "selection": _canonical_hash(selections, length=24),
-        "meeting": _canonical_hash(meetings, length=24),
-        "digest": _canonical_hash(list(digest_records), length=24),
-        "decision": _canonical_hash(list(decision_records), length=24),
-        "hypothesisRound": _canonical_hash(rounds, length=24),
-        "formalRun": _canonical_hash(list(formal_runs), length=24),
-        "formalSnapshot": _canonical_hash(dict(formal_snapshots or {}), length=24),
-        "programOutput": _canonical_hash(dict(program_output or {}), length=24),
-        "chatRoomRound": _canonical_hash(room_round_snapshots, length=24),
-    }
+    source_cursor = None
+    if include_source_cursor:
+        source_cursor = {
+            "chain": _canonical_hash(chain, length=24),
+            "selection": _canonical_hash(selections, length=24),
+            "meeting": _canonical_hash(meetings, length=24),
+            "digest": _canonical_hash(list(digest_records), length=24),
+            "decision": _canonical_hash(list(decision_records), length=24),
+            "hypothesisRound": _canonical_hash(rounds, length=24),
+            "formalRun": _canonical_hash(list(formal_runs), length=24),
+            "formalSnapshot": _canonical_hash(dict(formal_snapshots or {}), length=24),
+            "programOutput": _canonical_hash(dict(program_output or {}), length=24),
+            "chatRoomRound": _canonical_hash(room_round_snapshots, length=24),
+        }
 
     candidates = sorted(
         (

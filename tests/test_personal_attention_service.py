@@ -96,6 +96,29 @@ _HUMAN_ATTENTION_COLLECTORS = (
 )
 
 
+def test_anomaly_scan_reuses_claim_sources_only_within_each_request(monkeypatch):
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
+
+    reads = 0
+
+    def evidence(_store, _team_id):
+        nonlocal reads
+        reads += 1
+        return [{"revision": reads}]
+
+    def collect():
+        first = chain._claim_evidence_records("team-1")
+        assert chain._claim_evidence_records("team-1") == first
+        return first
+
+    monkeypatch.setattr(ClaimEvidenceStore, "list", evidence)
+    monkeypatch.setattr(attention, "_collect_state_v2_anomaly_entries", collect)
+    assert attention._state_v2_anomaly_entries() == [{"revision": 1}]
+    assert attention._state_v2_anomaly_entries() == [{"revision": 2}]
+    assert chain._claim_evidence_records("team-1") == [{"revision": 3}]
+
+
 def test_human_attention_feed_and_overview_share_all_four_sources(monkeypatch):
     monkeypatch.setattr(attention, "collect_stage_task_attention", lambda: ([], []))
     rows = []

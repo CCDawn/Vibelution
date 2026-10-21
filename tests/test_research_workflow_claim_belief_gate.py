@@ -50,6 +50,73 @@ _SCOPE_IDENTITY = {
 }
 
 
+def test_claim_gate_read_scope_shares_team_sources_and_restores_fresh_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services.team_workflow import claim_ledger
+
+    reads = {"evidence": 0, "claims": 0}
+    revision = 1
+
+    def evidence(_store, team_id):
+        reads["evidence"] += 1
+        return [{"teamId": team_id, "revision": revision}]
+
+    def claims(team_id):
+        reads["claims"] += 1
+        return {"claims": [
+            {"question": question, "teamId": team_id, "revision": revision}
+            for question in ("SCI-001", "SCI-002")
+        ]}
+
+    monkeypatch.setattr(ClaimEvidenceStore, "list", evidence)
+    monkeypatch.setattr(claim_ledger, "list_claims", claims)
+
+    def read(team_id, question="SCI-001"):
+        return (
+            chain._claim_evidence_records(team_id),
+            chain._question_claim_rows_for_gate(team_id, question),
+        )
+
+    with chain.claim_belief_gate_read_scope():
+        first = read("team-1")
+        revision = 2
+        assert read("team-1", "SCI-002")[1][0]["revision"] == 1
+        assert reads == {"evidence": 1, "claims": 1}
+        assert read("team-2")[0][0] == {"teamId": "team-2", "revision": 2}
+        with chain.claim_belief_gate_read_scope():
+            assert read("team-1")[0][0]["revision"] == 2
+        assert read("team-1") == first
+    assert reads == {"evidence": 3, "claims": 3}
+    assert read("team-1")[0][0]["revision"] == 2
+    assert reads == {"evidence": 4, "claims": 4}
+
+
+def test_claim_gate_read_scope_does_not_cache_failures_or_leak_after_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.evidence import ClaimEvidenceStore
+
+    reads = 0
+
+    def evidence(_store, _team_id):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            raise OSError("unreadable evidence")
+        return [{"revision": reads}]
+
+    monkeypatch.setattr(ClaimEvidenceStore, "list", evidence)
+    with pytest.raises(RuntimeError, match="projection failed"):
+        with chain.claim_belief_gate_read_scope():
+            with pytest.raises(OSError, match="unreadable evidence"):
+                chain._claim_evidence_records("team-1")
+            assert chain._claim_evidence_records("team-1") == [{"revision": 2}]
+            raise RuntimeError("projection failed")
+    assert chain._claim_evidence_records("team-1") == [{"revision": 3}]
+
+
 def _scope_hash() -> str:
     return scope_hash_for(
         program=_SCOPE_IDENTITY["program"],
