@@ -1000,6 +1000,13 @@ def _load_turn_events_with_prefix_reuse(path: Path) -> list[TurnJournalEvent]:
     has only grown since the last read the already-parsed prefix objects can be
     reused and only the new tail needs parsing.  Anything other than pure
     growth (shrink, same size with a new mtime) falls back to a full re-read.
+
+    Growth alone does not prove append-only: another process may have run
+    ``rewrite_turn_events`` (edit-resubmit truncation) and re-extended the file
+    past our cached size.  Every rewrite force-touches the sequence watermark
+    file, so the watermark's (mtime, size) signature acts as the rewrite epoch:
+    a changed signature invalidates the cached prefix the same way
+    :func:`_latest_sequence` keys its cache on the watermark signature.
     """
 
     try:
@@ -1011,14 +1018,20 @@ def _load_turn_events_with_prefix_reuse(path: Path) -> list[TurnJournalEvent]:
                 return []
             size = int(stat.st_size)
             mtime_ns = int(stat.st_mtime_ns)
+            watermark_signature = _sequence_file_signature(_sequence_watermark_path(path))
             key = str(path)
             cached = _TURN_EVENTS_PREFIX_CACHE.get(key)
             if cached is not None:
                 cached_size = int(cached["size"])
                 cached_mtime_ns = int(cached["mtime_ns"])
-                if size == cached_size and mtime_ns == cached_mtime_ns:
+                watermark_changed = tuple(cached["watermark_signature"]) != watermark_signature
+                if size == cached_size and mtime_ns == cached_mtime_ns and not watermark_changed:
                     return list(cached["events"])
-                if size < cached_size or (size == cached_size and mtime_ns != cached_mtime_ns):
+                if (
+                    size < cached_size
+                    or (size == cached_size and mtime_ns != cached_mtime_ns)
+                    or watermark_changed
+                ):
                     cached = None
             resume_offset = int(cached["size"]) if cached is not None else 0
             prefix: list[TurnJournalEvent] = list(cached["events"]) if cached is not None else []
@@ -1028,6 +1041,7 @@ def _load_turn_events_with_prefix_reuse(path: Path) -> list[TurnJournalEvent]:
                 _remember_turn_events_prefix(key, {
                     "size": parsed_offset,
                     "mtime_ns": mtime_ns,
+                    "watermark_signature": watermark_signature,
                     "events": tuple(events),
                 })
             else:
@@ -1225,13 +1239,14 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                 except OSError:
                     return
                 _forget_sequence(path)
-                # The rewrite shrank the file: a stale events-prefix cache
-                # would replay the pre-rewrite prefix once later appends push
-                # the size past the cached one (the load path cannot tell
-                # "append-only growth" from "rewrite-then-extend").
+                # The rewrite shrank (or removed) the file. In-process readers
+                # drop their events-prefix cache here, but another process's
+                # cache survives: force-touch the watermark so its mtime acts
+                # as a rewrite epoch that invalidates those caches once later
+                # appends push the size past the cached prefix.
                 _forget_turn_events_prefix(str(path))
                 # Dropping the file must not reissue cursors clients already saw.
-                _write_sequence_watermark(path, previous_sequence)
+                _write_sequence_watermark(path, previous_sequence, force_touch=True)
                 return
             retained_sequence = max((event.sequence for event in event_list), default=0)
             tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
@@ -1250,10 +1265,11 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
                 os.replace(tmp_path, path)
                 _fsync_directory(path.parent)
                 _forget_sequence(path)
-                # Same staleness hazard as the unlink branch above: the file
-                # shrank, so the events-prefix cache must go.
+                # Same staleness hazard as the unlink branch above: in-process
+                # readers forget here, and the forced watermark touch below is
+                # what tells other processes their events-prefix cache is stale.
                 _forget_turn_events_prefix(str(path))
-                _write_sequence_watermark(path, max(previous_sequence, retained_sequence))
+                _write_sequence_watermark(path, max(previous_sequence, retained_sequence), force_touch=True)
             except OSError:
                 try:
                     tmp_path.unlink()
@@ -3148,7 +3164,7 @@ def _read_sequence_watermark(path: Path) -> int:
         return 0
 
 
-def _write_sequence_watermark(path: Path, sequence: int) -> None:
+def _write_sequence_watermark(path: Path, sequence: int, *, force_touch: bool = False) -> None:
     """Persist the highest issued sequence so a rewrite never reissues cursors.
 
     Sequence values are logical cursors clients and SSE payloads already
@@ -3156,10 +3172,18 @@ def _write_sequence_watermark(path: Path, sequence: int) -> None:
     sequence, but the next append must stay above every published value; this
     watermark is what keeps ``ledgerSeq`` monotonic across edit-resubmit
     truncation and group-room transcript cleanup.
+
+    Rewrite callers pass ``force_touch=True`` so the file is rewritten even
+    when the value would not increase. The watermark's (mtime, size) signature
+    doubles as the cross-process rewrite epoch for journal caches: a silent
+    no-op would leave another process's events-prefix cache believing the
+    file is still append-only after a rewrite trimmed and re-extended it.
     """
 
     normalized = max(0, int(sequence or 0))
-    if normalized <= 0 or _read_sequence_watermark(path) >= normalized:
+    if normalized <= 0:
+        return
+    if not force_touch and _read_sequence_watermark(path) >= normalized:
         return
     target = _sequence_watermark_path(path)
     _ensure_journal_parent(target)

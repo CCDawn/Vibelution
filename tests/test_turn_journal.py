@@ -387,6 +387,145 @@ def test_empty_rewrite_keeps_sequence_watermark(tmp_path):
     assert next_event.sequence == 4
 
 
+def _append_large_message(project_root: Path, session_id: str, turn_id: str, marker: str) -> TurnJournalEvent:
+    # Large enough that the rewritten journal ends up bigger than any prefix
+    # cached before the rewrite, so the stale read path takes the "file grew"
+    # branch instead of the shrink branch.
+    return append_turn_event(
+        project_root,
+        session_id,
+        turn_id,
+        EVENT_USER_MESSAGE,
+        payload={"content": f"{marker}-{'x' * 8192}"},
+    )
+
+
+def test_rewrite_in_another_process_does_not_resurrect_dropped_events(tmp_path):
+    """A reader's cached prefix must not survive a foreign rewrite-and-extend.
+
+    Simulates two processes against one journal: the local read caches the
+    prefix, a foreign process rewrites the file (trimming events) and
+    re-extends it past the cached size, and the local reader then replays.
+    ``rewrite_turn_events`` only forgets the rewriting process's own cache, so
+    the pre-rewrite entry is restored here to reproduce what the other
+    process's memory still holds.
+    """
+    session_id = "session-cross-process-rewrite"
+    events = [
+        append_turn_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+        for index in range(5)
+    ]
+    path = turn_journal_path(tmp_path, session_id)
+
+    first_read = load_turn_events(tmp_path, session_id)
+    assert [event.sequence for event in first_read] == [1, 2, 3, 4, 5]
+    stale_cache_entry = dict(turn_journal._TURN_EVENTS_PREFIX_CACHE[str(path)])
+
+    rewrite_turn_events(tmp_path, session_id, events[:2])
+    assert turn_journal._sequence_watermark_path(path).exists()
+    appended = _append_large_message(tmp_path, session_id, "turn-2", "post-rewrite")
+    assert appended.sequence == 6
+    # The rewritten-and-extended file must be bigger than the stale cached
+    # prefix, otherwise the load path would discard the cache for shrinking
+    # anyway and the test would not exercise the growth branch.
+    assert path.stat().st_size > int(stale_cache_entry["size"])
+    turn_journal._TURN_EVENTS_PREFIX_CACHE[str(path)] = stale_cache_entry
+
+    reloaded = load_turn_events(tmp_path, session_id)
+
+    assert [event.sequence for event in reloaded] == [1, 2, 6]
+    assert all("message-2" not in str(event.payload) for event in reloaded)
+
+
+def test_rewrite_watermark_force_touch_invalidates_prefix_cache_without_value_increase(tmp_path):
+    """A rewrite must move the watermark epoch even at an equal value.
+
+    The first rewrite creates the watermark (0 -> N), so its write alone moves
+    the epoch. This covers the harder case: a later rewrite whose watermark
+    value does not increase. Without ``force_touch`` the watermark file mtime
+    would stay put and the foreign reader below would keep trusting its stale
+    prefix once the file is re-extended past the cached size.
+    """
+    session_id = "session-rewrite-epoch"
+    events = [
+        append_turn_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+        for index in range(4)
+    ]
+    path = turn_journal_path(tmp_path, session_id)
+    watermark_path = turn_journal._sequence_watermark_path(path)
+
+    assert load_turn_events(tmp_path, session_id)
+    rewrite_turn_events(tmp_path, session_id, events[:2])
+    assert watermark_path.exists()
+
+    # Foreign reader re-reads after the first rewrite: its cache is now keyed
+    # on the live watermark signature.
+    second_read = load_turn_events(tmp_path, session_id)
+    assert [event.sequence for event in second_read] == [1, 2]
+    stale_cache_entry = dict(turn_journal._TURN_EVENTS_PREFIX_CACHE[str(path)])
+    assert tuple(stale_cache_entry["watermark_signature"]) == turn_journal._sequence_file_signature(watermark_path)
+
+    # Second rewrite keeps one fewer event; the watermark value stays 4, so
+    # only a forced touch moves the epoch.
+    rewrite_turn_events(tmp_path, session_id, events[:1])
+    appended = _append_large_message(tmp_path, session_id, "turn-2", "post-second-rewrite")
+    assert appended.sequence == 5
+    assert turn_journal._read_sequence_watermark(path) == 4
+    assert path.stat().st_size > int(stale_cache_entry["size"])
+    turn_journal._TURN_EVENTS_PREFIX_CACHE[str(path)] = stale_cache_entry
+
+    reloaded = load_turn_events(tmp_path, session_id)
+
+    assert [event.sequence for event in reloaded] == [1, 5]
+    assert all("message-1" not in str(event.payload) for event in reloaded)
+
+
+def test_pure_append_still_reuses_cached_prefix_event_objects(tmp_path):
+    """Without a rewrite, prefix reuse must stay on the fast path.
+
+    The cached prefix objects are returned by identity, so this fails if the
+    watermark-epoch check starts invalidating on plain appends (which never
+    touch the watermark file).
+    """
+    session_id = "session-append-reuse"
+    for index in range(3):
+        append_turn_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+
+    first = load_turn_events(tmp_path, session_id)
+    assert [event.sequence for event in first] == [1, 2, 3]
+
+    append_turn_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        payload={"content": "message-3"},
+    )
+    second = load_turn_events(tmp_path, session_id)
+
+    assert [event.sequence for event in second] == [1, 2, 3, 4]
+    assert second[:3] == list(first)
+    assert all(second[index] is first[index] for index in range(3))
+
+
 def test_loading_missing_journal_has_no_filesystem_side_effect(tmp_path):
     path = turn_journal_path(tmp_path, "session-missing")
 
