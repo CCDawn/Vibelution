@@ -3317,6 +3317,117 @@ def test_fetch_doi_metadata_all_failures_collapse_to_none(monkeypatch) -> None:
     assert dmv.fetch_doi_metadata("not-a-doi") is None
 
 
+def test_fetch_doi_metadata_datacite_prefix_falls_back_despite_raise_flag(
+    monkeypatch,
+) -> None:
+    # arXiv/DataCite case: Crossref structurally does not know the DOI
+    # (404) while doi.org content negotiation resolves it.
+    import urllib.error
+
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    seen_urls: list[str] = []
+
+    def _fake_open_registry_url(url, *, headers, allowed_redirect_hosts, timeout):
+        seen_urls.append(url)
+        if "api.crossref.org" in url:
+            raise urllib.error.HTTPError(url, 404, "not found", hdrs=None, fp=None)
+        assert headers["Accept"] == dmv._CSL_JSON_ACCEPT
+        return _FakeResponse(json.dumps({"DOI": "10.48550/arXiv.1212.4292"}).encode())
+
+    monkeypatch.setattr(dmv, "_open_registry_url", _fake_open_registry_url)
+
+    metadata = dmv.fetch_doi_metadata(
+        "10.48550/arXiv.1212.4292", raise_definitive_rejections=True
+    )
+
+    assert metadata == {"DOI": "10.48550/arXiv.1212.4292"}
+    assert seen_urls == [
+        "https://api.crossref.org/works/10.48550/arXiv.1212.4292",
+        "https://doi.org/10.48550/arXiv.1212.4292",
+    ]
+
+
+def test_fetch_doi_metadata_both_registries_reject_raises_from_doi_org(
+    monkeypatch,
+) -> None:
+    import urllib.error
+
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    seen_urls: list[str] = []
+
+    def _fake_open_registry_url(url, *, headers, allowed_redirect_hosts, timeout):
+        seen_urls.append(url)
+        raise urllib.error.HTTPError(url, 404, "not found", hdrs=None, fp=None)
+
+    monkeypatch.setattr(dmv, "_open_registry_url", _fake_open_registry_url)
+
+    with pytest.raises(dmv.DefinitiveDoiRejection) as excinfo:
+        dmv.fetch_doi_metadata("10.1103/gone", raise_definitive_rejections=True)
+
+    assert excinfo.value.status_code == 404
+    # The doi.org attempt ran after the Crossref 404; its verdict is terminal.
+    assert seen_urls[-1] == "https://doi.org/10.1103/gone"
+
+
+def test_fetch_doi_metadata_doi_org_transient_failure_collapses_to_none(
+    monkeypatch,
+) -> None:
+    import urllib.error
+
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    def _fake_open_registry_url(url, *, headers, allowed_redirect_hosts, timeout):
+        if "api.crossref.org" in url:
+            raise urllib.error.HTTPError(url, 404, "not found", hdrs=None, fp=None)
+        raise TimeoutError("doi.org unreachable")
+
+    monkeypatch.setattr(dmv, "_open_registry_url", _fake_open_registry_url)
+
+    # A transient second-registry failure is retryable: collapse to None
+    # instead of re-raising the Crossref rejection.
+    assert (
+        dmv.fetch_doi_metadata("10.1103/gone", raise_definitive_rejections=True) is None
+    )
+
+
+def test_fetch_doi_metadata_crossref_success_skips_doi_org(monkeypatch) -> None:
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    seen_urls: list[str] = []
+
+    def _fake_open_registry_url(url, *, headers, allowed_redirect_hosts, timeout):
+        seen_urls.append(url)
+        assert "api.crossref.org" in url
+        return _FakeResponse(
+            json.dumps({"status": "ok", "message": {"DOI": "10.1103/ok"}}).encode()
+        )
+
+    monkeypatch.setattr(dmv, "_open_registry_url", _fake_open_registry_url)
+
+    for raise_flag in (False, True):
+        seen_urls.clear()
+        metadata = dmv.fetch_doi_metadata(
+            "10.1103/ok", raise_definitive_rejections=raise_flag
+        )
+        assert metadata == {"DOI": "10.1103/ok"}
+        assert seen_urls == ["https://api.crossref.org/works/10.1103/ok"]
+
+
+def test_fetch_doi_metadata_default_path_keeps_none_collapse(monkeypatch) -> None:
+    import urllib.error
+
+    from core.web.services.team_workflow import doi_metadata_verification as dmv
+
+    def _fake_open_registry_url(url, *, headers, allowed_redirect_hosts, timeout):
+        raise urllib.error.HTTPError(url, 404, "not found", hdrs=None, fp=None)
+
+    monkeypatch.setattr(dmv, "_open_registry_url", _fake_open_registry_url)
+
+    assert dmv.fetch_doi_metadata("10.1103/gone") is None
+
+
 def test_build_v2_verify_doi_metadata_flips_paywalled_receipt(monkeypatch) -> None:
     from core.web.services.team_workflow import doi_metadata_verification
 
