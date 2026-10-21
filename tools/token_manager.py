@@ -24,7 +24,7 @@ import os
 import time
 from typing import Optional, List, Dict, Any, Tuple, Callable
 from dataclasses import dataclass, field
-from collections import deque
+from collections import deque, OrderedDict
 from datetime import datetime
 from enum import IntEnum
 
@@ -545,40 +545,92 @@ def rough_upper_bound_messages_tokens(messages: list) -> int:
     return int(total)
 
 
-# 单槽缓存：典型 agent iteration 会连续多次询问同一个 messages 的 token 数
-# （UI 显示 / 压缩触发 / 压缩后回显 / 错误诊断），但消息列表整轮里通常不变。
-# 缓存指纹覆盖 append/pop/messages[0] 重写/_compress_messages 返回新列表这几条
-# 实际突变路径；极端的"中段就地替换"会被漏掉，但本仓库内无此模式。
-_estimate_cache_fingerprint: tuple = ()
-_estimate_cache_value: int = 0
+# 内容签名键控的小 LRU：典型 agent iteration 会连续多次询问同一 messages 的
+# token 数（UI 显示 / 压缩触发 / 微压缩 gate / 错误诊断），且 compression、
+# micro-compact 会整表重建消息列表（id(messages) 变化但消息对象共享），旧的
+# 单槽按列表 id 键控的缓存在重建后立即 miss。新键控按每条消息的
+# (id(message), id(content), len(content)) 生成内容签名，重建列表只要共享
+# 消息对象即命中；条目同时钉住首尾消息对象（与 core.chat.context_assembler
+# 的 _IdentityListMemo 同一惯例），排除 id 复用碰撞。条目同时缓存 rough 上
+# 界与 precise 估值，热轮里 rough 与 precise 共享一次扫描结果（见
+# _scan_messages_tokens），重复查询完全免扫描。签名/命中为 O(N) 的 id+len
+# 组装，远低于 per-character 的 precise 扫描。单进程内多线程并发与旧实现
+# 一样不加锁；dict.get 原子返回完整条目，不会出现旧实现两个全局变量之间的
+# 撕裂读。
+_ESTIMATE_CACHE_MAX_ENTRIES = 8
+_PRECISE_UNSET = object()  # rough-only 条目的 precise 占位（precise 可合法为 0）
+_estimate_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
 
-def _messages_token_fingerprint(messages: list) -> tuple:
-    if not messages:
-        return (id(messages), 0)
-    first_content = _message_content(messages[0])
-    last_content = _message_content(messages[-1])
-    return (
-        id(messages),
-        len(messages),
-        id(messages[0]),
-        id(first_content),
-        len(first_content) if isinstance(first_content, (str, list)) else 0,
-        id(messages[-1]),
-        id(last_content),
-        len(last_content) if isinstance(last_content, (str, list)) else 0,
+
+def _messages_token_signature(messages: list) -> tuple:
+    """Cheap content signature of the message list (ids + lengths, no char scan)."""
+    parts = []
+    for message in messages:
+        content = _message_content(message)
+        parts.append((
+            id(message),
+            id(content),
+            len(content) if isinstance(content, (str, list)) else 0,
+        ))
+    return (len(messages), tuple(parts))
+
+
+def _estimate_cache_lookup(messages: list):
+    """Return (signature, entry|None); entry is (first, last, rough, precise)."""
+    signature = _messages_token_signature(messages)
+    entry = _estimate_cache.get(signature)
+    if entry is None:
+        return signature, None
+    first = messages[0] if messages else None
+    last = messages[-1] if messages else None
+    if entry[0] is not first or entry[1] is not last:
+        return signature, None
+    _estimate_cache.move_to_end(signature)
+    return signature, entry
+
+
+def _estimate_cache_store(signature: tuple, messages: list, rough: int, precise) -> None:
+    _estimate_cache[signature] = (
+        messages[0] if messages else None,
+        messages[-1] if messages else None,
+        int(rough),
+        precise,
     )
+    _estimate_cache.move_to_end(signature)
+    while len(_estimate_cache) > _ESTIMATE_CACHE_MAX_ENTRIES:
+        _estimate_cache.popitem(last=False)
+
+
+def _scan_messages_tokens(messages: list) -> tuple[int, int]:
+    """One pass over contents returning (precise_tokens, rough_upper_bound).
+
+    rough 与 precise 共享这次遍历：需要 precise 时 rough 免费得到，避免
+    同一列表在一次判定里被完整走两遍。
+    """
+    precise_total = 0
+    rough_total = 0
+    for message in messages:
+        content = _message_content(message)
+        precise_total += _estimate_message_content_tokens(content)
+        rough_total += _content_char_upper_bound(content) + 50  # matches precise structure floor
+    return precise_total, int(rough_total)
 
 
 def estimate_messages_tokens(messages: list) -> int:
-    """估算消息列表的总 Token（带单槽指纹缓存）。"""
-    global _estimate_cache_fingerprint, _estimate_cache_value
-    fingerprint = _messages_token_fingerprint(messages)
-    if fingerprint == _estimate_cache_fingerprint:
-        return _estimate_cache_value
-    value = _estimate_messages_tokens_uncached(messages)
-    _estimate_cache_fingerprint = fingerprint
-    _estimate_cache_value = value
-    return value
+    """估算消息列表的总 Token（内容签名键控的小 LRU 缓存）。"""
+    signature, entry = _estimate_cache_lookup(messages)
+    if entry is not None:
+        rough, precise = entry[2], entry[3]
+        if precise is not _PRECISE_UNSET:
+            return precise
+        # rough-only 条目（此前 far-under-threshold 只缓存了 rough），阈值
+        # 收紧后按需补齐 precise。
+        precise = _estimate_messages_tokens_uncached(messages)
+        _estimate_cache_store(signature, messages, rough, precise)
+        return precise
+    precise, rough = _scan_messages_tokens(messages)
+    _estimate_cache_store(signature, messages, rough, precise)
+    return precise
 
 
 def estimate_messages_tokens_for_threshold(messages: list, threshold: int) -> int:
@@ -586,13 +638,27 @@ def estimate_messages_tokens_for_threshold(messages: list, threshold: int) -> in
 
     When a conservative char upper bound is still <= threshold, skip the
     expensive per-character precise walk. Near/over the threshold, fall back to
-    the precise cached estimator so compress decisions stay correct.
+    the precise cached estimator so compress decisions stay correct. Rough 和
+    precise 都按内容签名缓存：同一列表重复判定不重扫。
     """
     limit = max(0, int(threshold or 0))
-    rough = rough_upper_bound_messages_tokens(messages)
+    signature, entry = _estimate_cache_lookup(messages)
+    if entry is not None:
+        rough, precise = entry[2], entry[3]
+    else:
+        rough = rough_upper_bound_messages_tokens(messages)
+        if rough <= limit:
+            _estimate_cache_store(signature, messages, rough, _PRECISE_UNSET)
+            return rough
+        precise, rough = _scan_messages_tokens(messages)
+        _estimate_cache_store(signature, messages, rough, precise)
+        return precise
     if rough <= limit:
         return rough
-    return estimate_messages_tokens(messages)
+    if precise is _PRECISE_UNSET:
+        precise = _estimate_messages_tokens_uncached(messages)
+        _estimate_cache_store(signature, messages, rough, precise)
+    return precise
 
 
 _TOOL_PAYLOAD_TEXT_KEYS = (
