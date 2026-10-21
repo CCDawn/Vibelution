@@ -24,6 +24,7 @@ import { listTeams } from "../../api/teams";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ConversationQueryResponse,
+  SessionQueryResponse,
   SessionSummary,
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
@@ -33,11 +34,12 @@ import {
   type ChatLiveQueryPolicy,
 } from "../chatLiveQueryPolicy";
 import type { ChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
-import { useSessionIndexQuery } from "../chatSessionIndexQuery";
+import { SESSION_INDEX_PAGE_SIZE, useSessionIndexQuery } from "../chatSessionIndexQuery";
 import { shouldEnableSessionIndexQuery } from "../chatSessionStartupGate";
 import { isVisibleDirectSession } from "../conversationIndexModel";
-import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
-import { filterOutTombstonedConversations } from "../sessionDeleteTombstone";
+import { isSessionCreatePreserved, mergePreservedCreatedSessions } from "../sessionCreatePreserve";
+import { filterOutTombstonedConversations, filterOutTombstonedSessions } from "../sessionDeleteTombstone";
+import { isTempSessionId } from "../sessionOptimisticIds";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 
 /**
@@ -144,11 +146,31 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
       );
       // Never hard-replace the session index page: create optimism / pins must
       // survive bootstrap refetch triggered by broad `["sessions"]` invalidation.
-      const previous = queryClient.getQueryData<{
-        pages: Array<{ items?: SessionSummary[] }>;
-        pageParams: unknown[];
-      }>(queryKeys.sessionQuery("", 50));
-      const previousItems = previous?.pages.flatMap((page) => page.items ?? []) ?? [];
+      // Bootstrap uses the server's updatedAt_desc order. Seed both equivalent
+      // default keys, never a searched or differently sorted session index.
+      const bootstrapSessionKeys = ["", "updatedAt_desc"].map((sort) =>
+        queryKeys.sessionQuery("", SESSION_INDEX_PAGE_SIZE, "", sort),
+      );
+      const isOptimisticOnly = (items: SessionSummary[]) => items.length > 0 && items.every((session) =>
+        isTempSessionId(session.id) || isSessionCreatePreserved(session.id),
+      );
+      // Bootstrap only fills a missing index (or an optimistic placeholder).
+      // An index response may have arrived during this request, and loaded
+      // pages/cursors belong to that query rather than this startup projection.
+      const bootstrapSessionCaches = bootstrapSessionKeys.map((key) => {
+        const data = queryClient.getQueryData<InfiniteData<SessionQueryResponse, string>>(key);
+        return {
+          key,
+          items: data?.pages.flatMap((page) => page.items ?? []) ?? [],
+          shouldSeed: !data || data.pages.length === 0 || (
+            data.pages.length === 1 && isOptimisticOnly(data.pages[0].items ?? [])
+          ),
+        };
+      });
+      const previousItems = bootstrapSessionCaches.flatMap((cache) => cache.items);
+      const currentSessions = filterOutTombstonedSessions(queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()));
+      // Decide before mergePreservedCreatedSessions clears server-acknowledged pins.
+      const preserveCurrentSessions = currentSessions !== undefined && !isOptimisticOnly(currentSessions);
       const mergedItems = mergePreservedCreatedSessions(payload.sessionPage?.items ?? [], {
         localItems: previousItems,
       });
@@ -156,12 +178,15 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
         ...payload.sessionPage,
         items: mergedItems,
       };
-      queryClient.setQueryData(
-        queryKeys.sessionQuery("", 50),
-        { pages: [mergedPage], pageParams: [""] },
-      );
+      for (const { key, shouldSeed } of bootstrapSessionCaches) {
+        if (shouldSeed) {
+          queryClient.setQueryData(key, { pages: [mergedPage], pageParams: [""] });
+        }
+      }
       queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (existing) =>
-        mergePreservedCreatedSessions(mergedItems, { localItems: existing ?? previousItems }),
+        mergePreservedCreatedSessions(preserveCurrentSessions ? currentSessions : mergedItems, {
+          localItems: existing ?? previousItems,
+        }),
       );
       return {
         ...payload,

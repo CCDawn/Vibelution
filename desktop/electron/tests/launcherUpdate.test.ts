@@ -3,6 +3,7 @@ import { runInNewContext } from "node:vm";
 import { ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
+import { decidePackagedDesktopShellRefresh } from "../src/process/desktopShellFreshness.js";
 import type { ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 
 function updateInputs(state: ActiveWorkStatus = { state: "idle", message: "" }) {
@@ -22,8 +23,9 @@ describe("guarded local Launcher update", () => {
     const sandbox = {
       app: { isPackaged: true, exit: vi.fn() },
       desktopCliArgs: {}, shellRefreshInFlight: false, shutdownApproved: false,
-      decidePackagedDesktopShellRefresh: () => "refresh",
-      inspectCurrentDesktopShell: vi.fn().mockResolvedValue({ stale: true }),
+      decidePackagedDesktopShellRefresh,
+      inspectCurrentDesktopShellLaunchReadiness: vi.fn().mockResolvedValue({ launchBlocking: true }),
+      inspectCurrentDesktopShell: vi.fn().mockResolvedValue({ stale: true, launchBlocking: true }),
       notifyDesktopTray: vi.fn(), executeLauncherUpdate,
       resolveLauncherUpdateActiveWork: vi.fn().mockResolvedValue({ state: "idle", message: "" }),
       ensureLatestLauncher: vi.fn().mockResolvedValue({}),
@@ -46,6 +48,45 @@ describe("guarded local Launcher update", () => {
     runInNewContext(code, sandbox);
     return sandbox;
   }
+
+  it("opens a launch-ready shell without waiting for full frontend freshness", async () => {
+    const input = automaticRefreshHarness();
+    input.inspectCurrentDesktopShellLaunchReadiness.mockResolvedValue({ launchBlocking: false });
+    // A full source scan that never settles must not hold up first launch.
+    input.inspectCurrentDesktopShell.mockImplementation(() => new Promise(() => {}));
+
+    expect(await input.refresh("start")).toBe(false);
+    expect(input.inspectCurrentDesktopShellLaunchReadiness).toHaveBeenCalledOnce();
+    expect(input.inspectCurrentDesktopShell).not.toHaveBeenCalled();
+    expect(input.ensureLatestLauncher).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+  });
+
+  it.each(["readiness", "full status"])("retains the current shell when %s inspection fails", async (probe) => {
+    const input = automaticRefreshHarness();
+    const inspect = probe === "readiness" ? input.inspectCurrentDesktopShellLaunchReadiness : input.inspectCurrentDesktopShell;
+    inspect.mockRejectedValue(new Error("inspection unavailable"));
+
+    expect(await input.refresh("start")).toBe(false);
+    expect(input.ensureLatestLauncher).not.toHaveBeenCalled();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    expect(input.notifyDesktopTray).toHaveBeenCalled();
+  });
+
+  it("keeps the shell when a launch blocker clears during the full status probe", async () => {
+    const input = automaticRefreshHarness();
+    input.inspectCurrentDesktopShell.mockResolvedValue({ stale: true, launchBlocking: false });
+
+    expect(await input.refresh("start")).toBe(false);
+    expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
+    expect(input.ensureLatestLauncher).not.toHaveBeenCalled();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+  });
 
   it.each(["active", "unknown"] as const)("keeps the automatic refresh idle when tasks are %s", async (state) => {
     const input = automaticRefreshHarness();
@@ -85,6 +126,10 @@ describe("guarded local Launcher update", () => {
   it("only schedules and exits automatic refresh after both non-interrupting stops", async () => {
     const input = automaticRefreshHarness();
     expect(await input.refresh("open")).toBe(true);
+    expect(input.inspectCurrentDesktopShellLaunchReadiness.mock.invocationCallOrder[0])
+      .toBeLessThan(input.inspectCurrentDesktopShell.mock.invocationCallOrder[0]);
+    expect(input.inspectCurrentDesktopShell.mock.invocationCallOrder[0])
+      .toBeLessThan(input.ensureLatestLauncher.mock.invocationCallOrder[0]);
     expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(false);
     expect(input.stopIsolatedInstancesForApprovedShutdown).toHaveBeenCalledWith(false);
     expect(input.stopIsolatedInstancesForApprovedShutdown.mock.invocationCallOrder[0])

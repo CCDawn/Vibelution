@@ -72,6 +72,15 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.pet",
 )
 
+# These owners can serve the first Workbench frame after the built-in Agent
+# catalog is initialized. Other feature routers remain behind full readiness.
+_STARTUP_ROUTE_MODULE_NAMES = frozenset({
+    "core.web.routes.runtime",
+    "core.web.routes.launcher",
+    "core.web.routes.sessions",
+    "core.web.routes.config",
+})
+
 
 def _import_route_module(module_name: str) -> Any:
     return importlib.import_module(module_name)
@@ -81,12 +90,15 @@ def import_web_route_modules(
     *,
     max_workers: int = 1,
     on_module_imported: Callable[[str, float], None] | None = None,
+    startup_only: bool | None = None,
 ) -> list[Any]:
     """Import route modules in stable order (serial; max_workers kept for API compatibility)."""
 
     del max_workers  # concurrent import is unsafe with circular service packages
     modules: list[Any] = []
     for name in _ROUTE_MODULE_NAMES:
+        if startup_only is not None and (name in _STARTUP_ROUTE_MODULE_NAMES) != startup_only:
+            continue
         started = time.perf_counter()
         module = _import_route_module(name)
         duration_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
@@ -98,8 +110,15 @@ def import_web_route_modules(
 
 
 def register_web_routers_from_modules(app: FastAPI, modules: list[Any]) -> None:
+    registered = getattr(app.state, "web_registered_router_ids", None)
+    if registered is None:
+        registered = app.state.web_registered_router_ids = set()
     for module in modules:
+        router_id = id(module.router)
+        if router_id in registered:
+            continue
         app.include_router(module.router, prefix="/api")
+        registered.add(router_id)
 
 
 def register_web_routers(app: FastAPI) -> None:

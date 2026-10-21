@@ -25,6 +25,17 @@ EARLY_READY_PATHS = frozenset(
     }
 )
 
+
+def is_startup_route_path(path: str) -> bool:
+    """Only first-frame reads bypass unrelated feature initialization."""
+    normalized = str(path or "").split("?", 1)[0]
+    return normalized in {
+        "/api/config/bootstrap", "/api/launcher/current-instance",
+        "/api/runtime/summary", "/api/sessions/bootstrap",
+        "/api/sessions/query", "/api/sessions/active",
+    }
+
+
 _REGISTER_LOCK = threading.Lock()
 _DEFAULT_ROUTE_WAIT_TIMEOUT_SECONDS = 120.0
 
@@ -112,6 +123,14 @@ def _mark_routes_ready(app: FastAPI, *, error: str = "") -> None:
     event = getattr(app.state, "web_routes_ready_event", None)
     if event is not None and not event.is_set():
         event.set()
+    _mark_startup_routes_ready(app)
+
+
+def _mark_startup_routes_ready(app: FastAPI) -> None:
+    app.state.web_startup_routes_registered = True
+    event = getattr(app.state, "web_startup_routes_ready_event", None)
+    if event is not None:
+        event.set()
 
 
 def _new_module_timing_sink() -> tuple[list[dict[str, Any]], Any]:
@@ -135,11 +154,12 @@ def _log_routes_bootstrap_summary(payload: dict[str, Any]) -> None:
         top = sorted(entries, key=lambda entry: entry[1], reverse=True)[:5]
         slowest = "; slowest: " + ", ".join(f"{name} {duration_ms:.1f}ms" for name, duration_ms in top)
     logger.info(
-        "web routes mounted: %s modules, import %.1fms, mount %.1fms%s",
+        "web routes mounted: %s modules, import %.1fms, mount %.1fms%s; first-frame %.1fms",
         payload.get("routeModuleCount", 0),
         float(payload.get("importMs", 0.0) or 0.0),
         float(payload.get("mountMs", 0.0) or 0.0),
         slowest,
+        float(payload.get("startupReadyMs", payload.get("totalMs", 0.0)) or 0.0),
     )
 
 
@@ -338,15 +358,17 @@ async def warm_web_routes_in_background(
     module_imports, on_module_imported = _new_module_timing_sink()
     try:
         if run_sync is None:
-            modules = await asyncio.to_thread(
+            startup_modules = await asyncio.to_thread(
                 import_web_route_modules,
                 on_module_imported=on_module_imported,
+                startup_only=True,
             )
         else:
-            modules = await run_sync(
+            startup_modules = await run_sync(
                 "web-route-import",
                 import_web_route_modules,
                 on_module_imported=on_module_imported,
+                startup_only=True,
             )
         import_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
         # include_router must stay on the main thread / event loop.
@@ -356,6 +378,28 @@ async def warm_web_routes_in_background(
             await asyncio.to_thread(initialize_builtin_agent_catalog)
         else:
             await run_sync("builtin-agent-bootstrap", initialize_builtin_agent_catalog)
+        mount_ms = 0.0
+        with _REGISTER_LOCK:
+            if not bool(getattr(app.state, "web_routes_registered", False)):
+                mount_started = time.perf_counter()
+                if startup_modules:
+                    register_web_routers_from_modules(app, startup_modules)
+                    register_spa_routes(app, web_dist=web_dist)
+                mount_ms = max(0.0, (time.perf_counter() - mount_started) * 1000.0)
+                _mark_startup_routes_ready(app)
+        startup_ready_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
+        remaining_started = time.perf_counter()
+        if run_sync is None:
+            modules = await asyncio.to_thread(
+                import_web_route_modules, startup_only=False,
+                on_module_imported=on_module_imported,
+            )
+        else:
+            modules = await run_sync(
+                "web-route-import", import_web_route_modules, startup_only=False,
+                on_module_imported=on_module_imported,
+            )
+        import_ms += max(0.0, (time.perf_counter() - remaining_started) * 1000.0)
         with _REGISTER_LOCK:
             if bool(getattr(app.state, "web_routes_registered", False)):
                 _start_financial_team_coordinator(app, run_sync=run_sync)
@@ -369,16 +413,17 @@ async def warm_web_routes_in_background(
             mount_started = time.perf_counter()
             register_web_routers_from_modules(app, modules)
             register_spa_routes(app, web_dist=web_dist)
-            mount_ms = max(0.0, (time.perf_counter() - mount_started) * 1000.0)
+            mount_ms += max(0.0, (time.perf_counter() - mount_started) * 1000.0)
             payload = {
                 "registered": True,
                 "alreadyReady": False,
                 "error": "",
-                "routeModuleCount": len(modules),
+                "routeModuleCount": len(startup_modules) + len(modules),
                 "importMs": round(import_ms, 1),
                 "mountMs": round(mount_ms, 1),
                 "totalMs": round(max(0.0, (time.perf_counter() - started) * 1000.0), 1),
                 "moduleImports": module_imports,
+                "startupReadyMs": round(startup_ready_ms, 1),
             }
             app.state.web_routes_bootstrap = payload
             _log_routes_bootstrap_summary(payload)
@@ -393,6 +438,9 @@ async def warm_web_routes_in_background(
         event = getattr(app.state, "web_routes_ready_event", None)
         if event is not None and not event.is_set():
             event.set()
+        event = getattr(app.state, "web_startup_routes_ready_event", None)
+        if event is not None:
+            event.set()
         raise
 
 
@@ -400,23 +448,34 @@ async def wait_for_web_routes(
     app: FastAPI,
     *,
     timeout_seconds: float = _DEFAULT_ROUTE_WAIT_TIMEOUT_SECONDS,
+    startup_only: bool = False,
 ) -> bool:
     """Wait until routes are mounted. Returns False on timeout."""
 
-    if bool(getattr(app.state, "web_routes_registered", False)):
+    def ready() -> bool:
+        return bool(getattr(app.state, "web_routes_registered", False)) or (
+            startup_only and bool(getattr(app.state, "web_startup_routes_registered", False))
+        )
+
+    if ready():
         return True
 
     event: asyncio.Event | None = getattr(app.state, "web_routes_ready_event", None)
+    if startup_only:
+        event = getattr(app.state, "web_startup_routes_ready_event", None) or event
     if event is None:
         # No lifespan warm task — register inline (TestClient / bare ASGI).
         ensure_web_routes_registered(app)
         return True
 
     if event.is_set():
-        if bool(getattr(app.state, "web_routes_registered", False)):
+        if ready():
             return True
         # Event set after failure — try synchronous recovery once.
-        ensure_web_routes_registered(app)
+        try:
+            ensure_web_routes_registered(app)
+        except Exception:
+            return False
         return bool(getattr(app.state, "web_routes_registered", False))
 
     try:
@@ -424,7 +483,7 @@ async def wait_for_web_routes(
     except TimeoutError:
         return False
 
-    if bool(getattr(app.state, "web_routes_registered", False)):
+    if ready():
         return True
     # Background warm failed; last-chance sync register for diagnostics.
     try:

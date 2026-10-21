@@ -529,6 +529,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             logger.warning("Static workbench shell is unavailable during startup", exc_info=True)
         # Enable async waiters for non-health requests while routes mount in background.
         app.state.web_routes_ready_event = asyncio.Event()
+        app.state.web_startup_routes_ready_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
         startup_routes_task = startup_jobs.start_async(

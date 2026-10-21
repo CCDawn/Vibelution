@@ -5,6 +5,28 @@ import { describe, expect, it } from "vitest";
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
 describe("Electron main startup sequence", () => {
+  it("uses launch readiness before opening windows and leaves full freshness on the resident watcher", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const startup = source.slice(source.indexOf("app.whenReady()"));
+    const refreshIndex = startup.indexOf("await refreshPackagedDesktopShellIfStale(");
+    const bootstrapIndex = startup.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths)");
+    const watcherIndex = startup.indexOf("startPeriodicShellFreshnessWatch()");
+    const refresh = source.slice(
+      source.indexOf("async function refreshPackagedDesktopShellIfStale("),
+      source.indexOf("async function runSmokeAndQuit(")
+    );
+    const watcher = source.slice(
+      source.indexOf("function startPeriodicShellFreshnessWatch("),
+      source.indexOf("async function runTrayBranchInstance(")
+    );
+
+    expect(refreshIndex).toBeGreaterThan(-1);
+    expect(bootstrapIndex).toBeGreaterThan(refreshIndex);
+    expect(watcherIndex).toBeGreaterThan(bootstrapIndex);
+    expect(refresh).toContain("await inspectCurrentDesktopShellLaunchReadiness()");
+    expect(watcher).toContain("await inspectCurrentDesktopShell()");
+  });
+
   it("does not register whenReady reap on a secondary product instance", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const gateIndex = source.indexOf("const runPrimaryWhenReady = shouldRunDesktopWhenReadyHandlers(");
