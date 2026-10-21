@@ -7,6 +7,7 @@ that message use the latest 分析日期, 分析截至, or 研究日期 in the t
 from __future__ import annotations
 
 import re
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from datetime import date, datetime
@@ -137,8 +138,40 @@ def screen_snapshot_usable(data_date: object, cutoff: date) -> bool:
     return cutoff >= datetime.now(ZoneInfo("Asia/Shanghai")).date()
 
 
+_REDACT_PROMPT_MEMO_MAX_ENTRIES = 128
+_REDACT_PROMPT_MEMO_MAX_TOTAL_CHARS = 8_000_000
+_REDACT_PROMPT_MEMO_LOCK = threading.Lock()
+# id(content) -> (content, redacted, len(content)). The entry holds a strong
+# reference to the exact string it was computed from, so an id match can only
+# ever be that same object (a live object's address cannot be reused) and a
+# hit is sound without re-hashing the contents. Deterministic output, so a hit
+# returns exactly what a full recompute would.
+_REDACT_PROMPT_MEMO: dict[int, tuple[str, object, int]] = {}
+
+
 def redact_research_prompt(text: object) -> object:
-    if not isinstance(text, str) or "行情快照" not in text:
+    if not isinstance(text, str):
+        return text
+    memo_identity = id(text)
+    with _REDACT_PROMPT_MEMO_LOCK:
+        entry = _REDACT_PROMPT_MEMO.get(memo_identity)
+        if entry is not None and entry[0] is text:
+            return entry[1]
+    result = _redact_research_prompt_uncached(text)
+    with _REDACT_PROMPT_MEMO_LOCK:
+        _REDACT_PROMPT_MEMO[memo_identity] = (text, result, len(text))
+        total_chars = sum(item[2] for item in _REDACT_PROMPT_MEMO.values())
+        while _REDACT_PROMPT_MEMO and (
+            len(_REDACT_PROMPT_MEMO) > _REDACT_PROMPT_MEMO_MAX_ENTRIES
+            or total_chars > _REDACT_PROMPT_MEMO_MAX_TOTAL_CHARS
+        ):
+            removed = _REDACT_PROMPT_MEMO.pop(next(iter(_REDACT_PROMPT_MEMO)))
+            total_chars -= removed[2]
+    return result
+
+
+def _redact_research_prompt_uncached(text: str) -> object:
+    if "行情快照" not in text:
         return text
     analysis = analysis_date_in_text(text)
     if analysis is None:

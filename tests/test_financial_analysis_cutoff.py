@@ -78,6 +78,58 @@ def test_follow_up_history_keeps_the_analysis_date_and_hides_the_late_quote():
         assert active_cutoff() == date(2024, 12, 31)
 
 
+def test_redact_prompt_memo_hit_matches_full_recompute_and_stays_content_scoped():
+    from core.web.services.financial_research import as_of as as_of_module
+
+    as_of_module._REDACT_PROMPT_MEMO.clear()
+    late_text = f"{REQUEST}\n{QUOTE}"
+    first = redact_research_prompt(late_text)
+    assert isinstance(first, str) and "1258.62" not in first
+    # 同一字符串对象重复调用：命中 memo，输出与全量重算逐字符一致。
+    assert redact_research_prompt(late_text) == as_of_module._redact_research_prompt_uncached(late_text)
+    # 等值但不同对象的内容：独立重算，结果一致，不串身份。
+    rebuilt = (late_text + " ")[:-1]
+    assert rebuilt is not late_text
+    assert redact_research_prompt(rebuilt) == first
+    # 无标记内容：原样返回，不进入改写路径。
+    plain = "普通提问，不含行情快照标记。"
+    assert redact_research_prompt(plain) is plain
+    as_of_module._REDACT_PROMPT_MEMO.clear()
+
+
+def test_redact_history_repeated_calls_return_equal_outputs():
+    from core.web.services.financial_research import as_of as as_of_module
+
+    as_of_module._REDACT_PROMPT_MEMO.clear()
+    history = [
+        {"role": "user", "content": f"{REQUEST}\n{QUOTE}"},
+        {"role": "assistant", "content": "先看年报。"},
+    ]
+    first = redact_research_history(history)
+    second = redact_research_history(history)
+    assert first == second
+    assert "1258.62" not in first[0]["content"]
+    assert "1258.62" not in second[0]["content"]
+    as_of_module._REDACT_PROMPT_MEMO.clear()
+
+
+def test_redact_prompt_memo_eviction_keeps_results_correct(monkeypatch):
+    from core.web.services.financial_research import as_of as as_of_module
+
+    as_of_module._REDACT_PROMPT_MEMO.clear()
+    monkeypatch.setattr(as_of_module, "_REDACT_PROMPT_MEMO_MAX_ENTRIES", 1)
+    first_text = f"{REQUEST}\n{QUOTE}"
+    second_text = f"{REQUEST}\n分析日期 2025-06-30。\n{QUOTE}"
+    first = redact_research_prompt(first_text)
+    second = redact_research_prompt(second_text)
+    assert "1258.62" not in first
+    assert "1258.62" not in second
+    # 上限 1 时第二条会逐出第一条；被逐出内容再次调用走重算，仍正确。
+    assert len(as_of_module._REDACT_PROMPT_MEMO) == 1
+    assert redact_research_prompt(first_text) == first
+    as_of_module._REDACT_PROMPT_MEMO.clear()
+
+
 def test_news_search_drops_items_after_the_analysis_date(monkeypatch):
     def collect(query, providers, max_results):
         assert "2024-12-31" in query
