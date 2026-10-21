@@ -305,6 +305,29 @@ def _active_work_allowed_for_hot_restart(item: dict[str, str], requester: dict[s
     return bool(requester_session_id and item_session_id == requester_session_id)
 
 
+# Wake-failure classification (hot restart): the routine wake failure is a
+# transient admission conflict (session busy / resource-lease 409) or a
+# timeout, which a bounded backoff can clear. Everything else — validation,
+# missing session, journal guards, unexpected errors — is treated as permanent
+# and goes straight to the full rollback without burning retries on it.
+_HOT_RESTART_WAKE_MAX_ATTEMPTS = 3
+_HOT_RESTART_WAKE_RETRY_DELAY_SECONDS: tuple[float, ...] = (0.5, 1.5)
+_HOT_RESTART_WAKE_TRANSIENT_ERROR_TYPES = frozenset({"SessionBusyError"})
+_HOT_RESTART_WAKE_TRANSIENT_MESSAGE_MARKERS = ("timeout", "timed out", "time out")
+
+
+def _classify_hot_restart_wake_failure(error_type: str, message: str) -> str:
+    """Classify a wake submit failure as ``transient`` or ``permanent``."""
+
+    normalized_error_type = str(error_type or "").strip()
+    if normalized_error_type in _HOT_RESTART_WAKE_TRANSIENT_ERROR_TYPES:
+        return "transient"
+    lowered = str(message or "").lower()
+    if any(marker in lowered for marker in _HOT_RESTART_WAKE_TRANSIENT_MESSAGE_MARKERS):
+        return "transient"
+    return "permanent"
+
+
 def _filter_active_work_for_lifecycle_command(
     active_work_runs: list[dict[str, str]],
     *,
@@ -5151,6 +5174,25 @@ class RuntimeManagerDaemon:
         if not session_id:
             delivery["reason"] = "missing_session_id"
             return delivery
+        # Read the interrupted turn's persisted intent BEFORE stopping it: the
+        # stop settles the journal turn, and after that the write-intent lease
+        # record and model-selection metadata are no longer recoverable from
+        # the open-turn view. Unreadable metadata degrades to the defaults.
+        resume_intent: dict[str, Any] = {"writeIntent": False, "modelSelection": None, "turnId": ""}
+        try:
+            from core.web.services.session import startup_recovery as session_startup_recovery
+
+            resume_intent = session_startup_recovery.session_resume_intent_snapshot(session_id)
+        except Exception as exc:
+            _append_event(
+                "workbench.hot_restart.resume_intent_unavailable",
+                {
+                    "commandId": command_id,
+                    "sessionId": session_id,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
         try:
             from core.web.services import session_service
 
@@ -5172,7 +5214,8 @@ class RuntimeManagerDaemon:
                 session_id,
                 message,
                 turn_mode="hot_restart_resume",
-                write_intent=False,
+                write_intent=bool(resume_intent.get("writeIntent")),
+                model_selection=resume_intent.get("modelSelection"),
                 message_metadata={
                     "kind": "hot_restart_resume",
                     "commandId": command_id,
@@ -5182,26 +5225,108 @@ class RuntimeManagerDaemon:
                 include_started_turn_id=True,
             )
         except Exception as exc:
+            error_type = type(exc).__name__
+            failure_class = _classify_hot_restart_wake_failure(error_type, str(exc))
             delivery["wakeStatus"] = "failed"
-            delivery["reason"] = f"{type(exc).__name__}: {exc}"
+            delivery["errorType"] = error_type
+            delivery["failureClass"] = failure_class
+            delivery["reason"] = f"{error_type}: {exc}"
             _append_event(
                 "workbench.hot_restart.session_wake_failed",
                 {
                     "commandId": command_id,
                     "sessionId": session_id,
-                    "errorType": type(exc).__name__,
+                    "errorType": error_type,
+                    "failureClass": failure_class,
                     "message": str(exc),
                 },
             )
             return delivery
         delivery["wakeStatus"] = "delivered"
         delivery["turnId"] = str((detail or {}).get("startedTurnId") or "")
+        delivery["resumeTurnId"] = str(resume_intent.get("turnId") or "")
+        delivery["resumeWriteIntent"] = bool(resume_intent.get("writeIntent"))
+        delivery["resumeModelSelected"] = bool(resume_intent.get("modelSelection"))
         _append_event(
             "workbench.hot_restart.session_wake_delivered",
             {
                 "commandId": command_id,
                 "sessionId": session_id,
                 "turnId": delivery["turnId"],
+                "resumeTurnId": delivery["resumeTurnId"],
+                "resumeWriteIntent": delivery["resumeWriteIntent"],
+                "resumeModelSelected": delivery["resumeModelSelected"],
+            },
+        )
+        return delivery
+
+    def _wake_hot_restart_session_with_retry(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        command_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Wake the requester session with classified, bounded retries.
+
+        Transient failures (session busy / lease conflict / timeout) retry with
+        backoff instead of triggering a full rollback — the routine wake
+        failure is exactly such a conflict. Permanent failures and an exhausted
+        retry budget return the failed delivery untouched so the caller decides
+        on rollback with the classified reason in hand.
+        """
+
+        max_attempts = max(1, int(_HOT_RESTART_WAKE_MAX_ATTEMPTS))
+        delivery: dict[str, Any] = {}
+        for attempt in range(1, max_attempts + 1):
+            delivery = self._wake_hot_restart_session(
+                session_id=session_id,
+                message=message,
+                command_id=command_id,
+                metadata=metadata,
+            )
+            if delivery.get("wakeStatus") == "delivered":
+                if attempt > 1:
+                    _append_event(
+                        "workbench.hot_restart.session_wake_retry_succeeded",
+                        {
+                            "commandId": command_id,
+                            "sessionId": session_id,
+                            "attempt": attempt,
+                            "maxAttempts": max_attempts,
+                        },
+                    )
+                return delivery
+            failure_class = str(delivery.get("failureClass") or "permanent")
+            if failure_class != "transient":
+                return delivery
+            if attempt >= max_attempts:
+                break
+            delays = _HOT_RESTART_WAKE_RETRY_DELAY_SECONDS or (0.0,)
+            delay = delays[min(attempt - 1, len(delays) - 1)]
+            _append_event(
+                "workbench.hot_restart.session_wake_retry_scheduled",
+                {
+                    "commandId": command_id,
+                    "sessionId": session_id,
+                    "attempt": attempt,
+                    "maxAttempts": max_attempts,
+                    "failureClass": failure_class,
+                    "delaySeconds": delay,
+                    "reason": str(delivery.get("reason") or ""),
+                },
+            )
+            if delay > 0:
+                time.sleep(delay)
+        _append_event(
+            "workbench.hot_restart.session_wake_retry_exhausted",
+            {
+                "commandId": command_id,
+                "sessionId": session_id,
+                "maxAttempts": max_attempts,
+                "failureClass": str(delivery.get("failureClass") or "permanent"),
+                "reason": str(delivery.get("reason") or ""),
             },
         )
         return delivery
@@ -5271,7 +5396,7 @@ class RuntimeManagerDaemon:
                     "workbench.hot_restart.stable_backup_failed",
                     {"commandId": command_id, "errorType": type(exc).__name__, "message": str(exc)},
                 )
-            delivery = self._wake_hot_restart_session(
+            delivery = self._wake_hot_restart_session_with_retry(
                 session_id=session_id,
                 command_id=command_id,
                 message=str(
@@ -5401,7 +5526,7 @@ class RuntimeManagerDaemon:
             recovery_result = {"ok": True, "message": "Workbench restarted after rollback.", **recovery_data}
         except Exception as exc:
             recovery_result = {"ok": False, "message": str(exc), "errorType": type(exc).__name__}
-        delivery = self._wake_hot_restart_session(
+        delivery = self._wake_hot_restart_session_with_retry(
             session_id=session_id,
             command_id=command_id,
             message=(

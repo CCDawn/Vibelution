@@ -7,8 +7,11 @@ This sweep runs once after the workbench lifespan is ready and:
 
 - resumes an interrupted turn by resubmitting its original user prompt with
   ``turn_mode="hot_restart_resume"`` (the daemon hot-restart wake precedent:
-  the kind keeps the message out of the real user-message channel), guarded by
-  the operator ``session_recovery`` switch and a per-turn retry budget;
+  the kind keeps the message out of the real user-message channel), restoring
+  the interrupted turn's persisted write intent and per-turn model selection
+  from the journal so the recovery turn is authorized and modeled like the
+  original, guarded by the operator ``session_recovery`` switch and a
+  per-turn retry budget;
 - appends one ``session_recovery_resumed`` status line to the conversation
   when a resume is accepted (the journal projection derives ``turnItems`` from
   the content, so the row survives the timeline visibility filter);
@@ -33,6 +36,7 @@ from typing import Any, Callable
 
 from core.chat.turn_journal import (
     EVENT_SESSION_RECOVERY_RESUMED,
+    EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     latest_open_turn_id,
 )
@@ -54,6 +58,12 @@ RECOVERY_STATE_KEY = "session_recovery"
 _RECOVERY_BUSY_WORK_RUN_STATUSES = {"queued", "running", "stopping", "paused"}
 
 _TURN_LABEL_MAX_CHARS = 60
+
+# Chat-turn leases that prove the interrupted turn ran with write intent. The
+# submit path derives them from ``writeIntent``/content markers and persists
+# the acquired leases on the journal ``turn_started`` payload, so a write
+# lease is the durable journal fact of the original turn's authorization.
+_WRITE_INTENT_CHAT_LEASES = frozenset({"worktree_write", "memory_write"})
 
 # Re-entrancy guards: the sweep itself must be single-flight per process, and
 # each (session, interrupted turn) pair is claimed before resubmitting so a
@@ -182,6 +192,81 @@ def _interrupted_turn_attachment_ids(events: list[Any], turn_id: str) -> list[st
                 artifact_ids.append(artifact_id)
         return artifact_ids
     return []
+
+
+def interrupted_turn_resume_intent(events: list[Any], *, turn_id: str) -> dict[str, Any]:
+    """The interrupted turn's persisted write intent and model override.
+
+    ``modelSelection`` rides the user-message metadata (submit persists the
+    per-turn override there, including ``reasoningEffort`` when pinned). Write
+    intent has no direct metadata field: an explicit ``metadata.writeIntent``
+    wins when present, otherwise the write leases acquired on the journal
+    ``turn_started`` payload are the durable fact of what the original turn
+    was authorized to do. Anything unreadable degrades to the pre-existing
+    defaults (``writeIntent=False`` / no override) instead of guessing.
+    """
+
+    normalized_turn_id = str(turn_id or "").strip()
+    explicit_write_intent: bool | None = None
+    model_selection: dict[str, Any] | None = None
+    started_leases: list[str] = []
+    for event in reversed(list(events or [])):
+        if str(getattr(event, "turn_id", "") or "").strip() != normalized_turn_id:
+            continue
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        if event_type != EVENT_USER_MESSAGE:
+            continue
+        payload = getattr(event, "payload", None)
+        metadata = payload.get("metadata") if isinstance(payload, dict) else None
+        if isinstance(metadata, dict):
+            raw_write_intent = metadata.get("writeIntent")
+            if isinstance(raw_write_intent, bool):
+                explicit_write_intent = raw_write_intent
+            raw_selection = metadata.get("modelSelection")
+            if (
+                isinstance(raw_selection, dict)
+                and str(raw_selection.get("modelId") or raw_selection.get("modelRef") or "").strip()
+            ):
+                model_selection = dict(raw_selection)
+        break
+    for event in list(events or []):
+        if str(getattr(event, "turn_id", "") or "").strip() != normalized_turn_id:
+            continue
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_TURN_STARTED:
+            continue
+        payload = getattr(event, "payload", None)
+        leases = payload.get("leases") if isinstance(payload, dict) else None
+        started_leases = [str(item or "").strip() for item in list(leases or [])]
+    if explicit_write_intent is not None:
+        write_intent = explicit_write_intent
+    else:
+        write_intent = any(lease in _WRITE_INTENT_CHAT_LEASES for lease in started_leases)
+    return {"writeIntent": write_intent, "modelSelection": model_selection}
+
+
+def session_resume_intent_snapshot(session_id: str) -> dict[str, Any]:
+    """Resume intent of the session's open (interrupted) turn, daemon-safe.
+
+    Used by the hot-restart wake, which must read the interrupted turn before
+    stopping it (the stop settles the journal turn and the snapshot would be
+    gone). Read failures and missing open turns degrade to the pre-existing
+    defaults so the wake never blocks on recovery metadata.
+    """
+
+    defaults: dict[str, Any] = {"writeIntent": False, "modelSelection": None, "turnId": ""}
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return defaults
+    try:
+        s = _service()
+        events = s._load_session_conversation_events_cached(normalized_session_id)
+        open_turn_id = latest_open_turn_id(events)
+        if not open_turn_id:
+            return defaults
+        intent = interrupted_turn_resume_intent(events, turn_id=open_turn_id)
+        return {**intent, "turnId": open_turn_id}
+    except Exception:  # noqa: BLE001 - intent metadata must never block the wake
+        return defaults
 
 
 def _recovery_turn_label(prompt: str) -> str:
@@ -319,6 +404,10 @@ def _resume_interrupted_turn(
         # interrupted presentation stays and the user can resend manually.
         summary["noInterruptedTurnCount"] += 1
         return
+    # Restore the interrupted turn's authorization and per-turn model override
+    # so the recovery turn runs like the original (same write leases, same
+    # model, same reasoning effort) instead of silently downgrading both.
+    resume_intent = interrupted_turn_resume_intent(events, turn_id=open_turn_id)
 
     max_retries = max(0, int(session_recovery_max_auto_retries()))
     previous_state = (
@@ -363,7 +452,8 @@ def _resume_interrupted_turn(
             session_id,
             prompt,
             turn_mode="hot_restart_resume",
-            write_intent=False,
+            write_intent=bool(resume_intent.get("writeIntent")),
+            model_selection=resume_intent.get("modelSelection"),
             client_submission_id=f"resume:{open_turn_id}",
             attachment_ids=attachment_ids or None,
             message_metadata={

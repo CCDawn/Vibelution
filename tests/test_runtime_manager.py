@@ -8635,6 +8635,233 @@ def test_hot_restart_blocks_other_active_work(monkeypatch):
     assert events[0][0] == "workbench.hot_restart.blocked_active_work"
 
 
+def _hot_restart_args(session_id: str = "session-a", run_id: str = "turn-live") -> dict:
+    return {
+        "reason": "code_update",
+        "hotRestart": {"sessionId": session_id, "runId": run_id},
+    }
+
+
+def _stub_hot_restart_env(monkeypatch, runtime_daemon, events):
+    state = {
+        "command": {"activeCommandId": "cmd-hot", "activeType": "hot_restart_workbench"},
+        "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+    }
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "latest_stable_backup", lambda: {"backupId": "stable-1", "archivePath": "snapshot.zip"})
+    monkeypatch.setattr(daemon, "create_stable_backup", lambda **_kwargs: {"backupId": "stable-2"})
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda command_id, args: {"residualCleanup": {}, "requestedNoBrowser": False, "effectiveNoBrowser": False},
+    )
+
+
+def test_hot_restart_wake_transient_failure_retries_without_rollback(monkeypatch):
+    """A transient wake conflict (busy/lease 409) retries with backoff and never rolls back."""
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    wake_calls: list[dict] = []
+
+    def fake_wake(**kwargs):
+        wake_calls.append(kwargs)
+        if len(wake_calls) == 1:
+            return {
+                "wakeStatus": "failed",
+                "errorType": "SessionBusyError",
+                "failureClass": "transient",
+                "reason": "SessionBusyError: resource lease conflict",
+            }
+        return {"wakeStatus": "delivered", "turnId": "turn-resume"}
+
+    _stub_hot_restart_env(monkeypatch, runtime_daemon, events)
+    monkeypatch.setattr(
+        daemon,
+        "restore_stable_backup",
+        lambda backup: pytest.fail("transient wake failure must not roll back"),
+    )
+    monkeypatch.setattr(daemon, "create_failure_package", lambda **_kwargs: {"packageId": "pkg-x"})
+    monkeypatch.setattr(runtime_daemon, "_wake_hot_restart_session", fake_wake)
+    monkeypatch.setattr(daemon, "_HOT_RESTART_WAKE_RETRY_DELAY_SECONDS", (0.0, 0.0))
+
+    result = runtime_daemon._handle_hot_restart_workbench(
+        command_id="cmd-hot",
+        args=_hot_restart_args(),
+    )
+
+    assert result["ok"] is True
+    assert result["hotRestart"]["status"] == "completed"
+    assert len(wake_calls) == 2
+    event_types = [name for name, _payload in events]
+    assert "workbench.hot_restart.session_wake_retry_scheduled" in event_types
+    assert "workbench.hot_restart.rollback_restored" not in event_types
+    retry_succeeded = [
+        payload for name, payload in events if name == "workbench.hot_restart.session_wake_retry_succeeded"
+    ]
+    assert retry_succeeded and retry_succeeded[0]["attempt"] == 2
+
+
+def test_hot_restart_wake_permanent_failure_rolls_back_without_retry(monkeypatch):
+    """A permanent wake failure skips retries and goes straight to the full rollback."""
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    wake_calls: list[dict] = []
+    restore_calls: list[dict] = []
+
+    def fake_wake(**_kwargs):
+        wake_calls.append(_kwargs)
+        return {
+            "wakeStatus": "failed",
+            "errorType": "SessionValidationError",
+            "failureClass": "permanent",
+            "reason": "SessionValidationError: bad resume payload",
+        }
+
+    def fake_restore(backup):
+        restore_calls.append(backup)
+        return {"backupId": "restored-1"}
+
+    _stub_hot_restart_env(monkeypatch, runtime_daemon, events)
+    monkeypatch.setattr(daemon, "restore_stable_backup", fake_restore)
+    monkeypatch.setattr(daemon, "create_failure_package", lambda **_kwargs: {"packageId": "pkg-y"})
+    monkeypatch.setattr(runtime_daemon, "_wake_hot_restart_session", fake_wake)
+    monkeypatch.setattr(daemon, "_HOT_RESTART_WAKE_RETRY_DELAY_SECONDS", (0.0, 0.0))
+
+    result = runtime_daemon._handle_hot_restart_workbench(
+        command_id="cmd-hot",
+        args=_hot_restart_args(),
+    )
+
+    assert result["ok"] is False
+    assert result["hotRestart"]["status"] == "rolled_back"
+    # One wake attempt (no retries for a permanent failure) plus the rollback
+    # path's own notification wake with the failure package.
+    assert len(wake_calls) == 2
+    assert wake_calls[1]["metadata"]["hotRestartStatus"] == "rolled_back"
+    assert len(restore_calls) == 1
+    event_types = [name for name, _payload in events]
+    assert "workbench.hot_restart.session_wake_retry_scheduled" not in event_types
+    assert "workbench.hot_restart.rollback_restored" in event_types
+
+
+def test_hot_restart_wake_transient_exhaustion_rolls_back(monkeypatch):
+    """Retries exhausted on a still-conflicting transient failure finally roll back."""
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    wake_calls: list[dict] = []
+    restore_calls: list[dict] = []
+
+    def fake_wake(**_kwargs):
+        wake_calls.append(_kwargs)
+        return {
+            "wakeStatus": "failed",
+            "errorType": "SessionBusyError",
+            "failureClass": "transient",
+            "reason": "SessionBusyError: resource lease conflict",
+        }
+
+    def fake_restore(backup):
+        restore_calls.append(backup)
+        return {"backupId": "restored-1"}
+
+    _stub_hot_restart_env(monkeypatch, runtime_daemon, events)
+    monkeypatch.setattr(daemon, "restore_stable_backup", fake_restore)
+    monkeypatch.setattr(daemon, "create_failure_package", lambda **_kwargs: {"packageId": "pkg-z"})
+    monkeypatch.setattr(runtime_daemon, "_wake_hot_restart_session", fake_wake)
+    monkeypatch.setattr(daemon, "_HOT_RESTART_WAKE_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(daemon, "_HOT_RESTART_WAKE_RETRY_DELAY_SECONDS", (0.0, 0.0))
+
+    result = runtime_daemon._handle_hot_restart_workbench(
+        command_id="cmd-hot",
+        args=_hot_restart_args(),
+    )
+
+    assert result["ok"] is False
+    assert result["hotRestart"]["status"] == "rolled_back"
+    # The primary wake burns the full budget (2) and the rollback path's own
+    # wake is classified with the same budget (2 more) before reporting.
+    assert len(wake_calls) == 4
+    assert wake_calls[0]["metadata"]["hotRestartStatus"] == "completed"
+    assert wake_calls[2]["metadata"]["hotRestartStatus"] == "rolled_back"
+    assert len(restore_calls) == 1
+    event_types = [name for name, _payload in events]
+    assert "workbench.hot_restart.session_wake_retry_exhausted" in event_types
+    assert "workbench.hot_restart.rollback_restored" in event_types
+
+
+def test_hot_restart_wake_restores_interrupted_turn_intent(tmp_path, monkeypatch):
+    """The wake reads the interrupted turn's journal intent and submits with it."""
+
+    from core.chat.turn_journal import EVENT_TURN_STARTED, EVENT_USER_MESSAGE, append_turn_event
+    from core.web.services import session_service
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", Path(tmp_path))
+    monkeypatch.setattr(session_service, "_is_session_running", lambda session_id: False)
+    submit_calls: list[dict] = []
+
+    def fake_submit(session_id, content, **kwargs):
+        submit_calls.append({"session_id": session_id, "content": content, **kwargs})
+        return {"startedTurnId": "turn-wake"}
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit)
+
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-open",
+        EVENT_TURN_STARTED,
+        status="running",
+        payload={"leases": ["worktree_write", "memory_write"]},
+        source="submit",
+    )
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-open",
+        EVENT_USER_MESSAGE,
+        payload={
+            "content": "帮我实现导出功能",
+            "metadata": {
+                "modelSelection": {
+                    "modelId": "glm-5",
+                    "modelRef": "glm-5",
+                    "providerId": "zhipu",
+                    "reasoningEffort": "high",
+                }
+            },
+        },
+        source="submit",
+    )
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    delivery = runtime_daemon._wake_hot_restart_session(
+        session_id="session-a",
+        message="热重启已完成，请继续。",
+        command_id="cmd-wake",
+    )
+
+    assert delivery["wakeStatus"] == "delivered"
+    assert delivery["resumeTurnId"] == "turn-open"
+    assert delivery["resumeWriteIntent"] is True
+    assert delivery["resumeModelSelected"] is True
+    call = submit_calls[0]
+    assert call["write_intent"] is True
+    assert call["model_selection"]["modelId"] == "glm-5"
+    assert call["model_selection"]["reasoningEffort"] == "high"
+    delivered = [payload for name, payload in events if name == "workbench.hot_restart.session_wake_delivered"]
+    assert delivered and delivered[0]["resumeWriteIntent"] is True
+
+
 def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     saved_states: list[dict] = []
