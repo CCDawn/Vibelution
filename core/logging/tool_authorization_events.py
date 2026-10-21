@@ -130,6 +130,45 @@ def record_authorization_failure(*, runtime: dict[str, Any], error: Exception, d
     )
 
 
+def record_authorization_timing(
+    *,
+    agent_id: str = "",
+    turn_id: str = "",
+    duration_ms: float = 0.0,
+    cache_hit: bool = False,
+    bind_ms: float = 0.0,
+    registry_ms: float = 0.0,
+    resolve_ms: float = 0.0,
+    install_ms: float = 0.0,
+    record_ms: float = 0.0,
+) -> None:
+    """Per-turn latency sub-anchors for the turn-authorization path (TTFT batch 6).
+
+    ``tool.authorization.decision`` 在命中去重轮会被跳过，而命中轮正是本批
+    要归因的 turnAuthorizationMs 缺口所在，因此细分锚点走这条独立的轻量
+    事件、每回合照常写出，不参与 decision 的场景去重。各子锚点与
+    ``durationMs`` 同源于一次 ``resolve_turn_authorization``，均为毫秒整数。
+    """
+
+    _record(
+        "tool.authorization.timing",
+        message="Turn authorization latency sub-anchors recorded.",
+        outcome="resolved",
+        level="info",
+        fields={
+            "agentId": str(agent_id or "").strip(),
+            "turnId": str(turn_id or "").strip(),
+            "durationMs": max(0, int(duration_ms or 0)),
+            "cacheHit": bool(cache_hit),
+            "bindMs": max(0, int(bind_ms or 0)),
+            "registryMs": max(0, int(registry_ms or 0)),
+            "resolveMs": max(0, int(resolve_ms or 0)),
+            "installMs": max(0, int(install_ms or 0)),
+            "recordMs": max(0, int(record_ms or 0)),
+        },
+    )
+
+
 def _record(event_code: str, *, message: str, outcome: str, level: str, fields: dict[str, Any]) -> None:
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event

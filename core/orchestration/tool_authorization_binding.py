@@ -54,9 +54,25 @@ _RECORDED_DECISION_KEYS: Dict[str, str] = {}
 _RECORDED_DECISION_KEYS_MAX = 64
 
 
-def _record_turn_authorization_timing(duration_ms: float, *, cache_hit: bool) -> None:
+def _record_turn_authorization_timing(
+    duration_ms: float,
+    *,
+    cache_hit: bool,
+    bind_ms: float = 0.0,
+    registry_ms: float = 0.0,
+    resolve_ms: float = 0.0,
+    install_ms: float = 0.0,
+    record_ms: float = 0.0,
+) -> None:
     _TURN_AUTHORIZATION_TIMING.durationMs = max(0, int(duration_ms))
     _TURN_AUTHORIZATION_TIMING.cacheHit = bool(cache_hit)
+    # TTFT 批六子锚点：与 durationMs 同源于一次 resolve_turn_authorization，
+    # 供命中路径 144-570ms 缺口做段级归因。
+    _TURN_AUTHORIZATION_TIMING.bindMs = max(0, int(bind_ms))
+    _TURN_AUTHORIZATION_TIMING.registryMs = max(0, int(registry_ms))
+    _TURN_AUTHORIZATION_TIMING.resolveMs = max(0, int(resolve_ms))
+    _TURN_AUTHORIZATION_TIMING.installMs = max(0, int(install_ms))
+    _TURN_AUTHORIZATION_TIMING.recordMs = max(0, int(record_ms))
     _TURN_AUTHORIZATION_TIMING.recordedAtMonotonic = time.monotonic()
 
 
@@ -70,6 +86,12 @@ def last_turn_authorization_timing() -> Dict[str, Any] | None:
         "turnAuthorizationMs": int(duration_ms),
         "turnAuthorizationCacheHit": bool(getattr(_TURN_AUTHORIZATION_TIMING, "cacheHit", False)),
         "recordedAtMonotonic": float(getattr(_TURN_AUTHORIZATION_TIMING, "recordedAtMonotonic", 0.0) or 0.0),
+        # 子锚点（毫秒整数）；journal 白名单暂不消费，scene timing 事件使用。
+        "bindMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "bindMs", 0) or 0)),
+        "registryMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "registryMs", 0) or 0)),
+        "resolveMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "resolveMs", 0) or 0)),
+        "installMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "installMs", 0) or 0)),
+        "recordMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "recordMs", 0) or 0)),
     }
 
 
@@ -78,7 +100,16 @@ def clear_turn_authorization_telemetry_state() -> None:
 
     with _RECORDED_DECISION_KEYS_LOCK:
         _RECORDED_DECISION_KEYS.clear()
-    for attribute in ("durationMs", "cacheHit", "recordedAtMonotonic"):
+    for attribute in (
+        "durationMs",
+        "cacheHit",
+        "recordedAtMonotonic",
+        "bindMs",
+        "registryMs",
+        "resolveMs",
+        "installMs",
+        "recordMs",
+    ):
         try:
             delattr(_TURN_AUTHORIZATION_TIMING, attribute)
         except AttributeError:
@@ -305,22 +336,43 @@ def resolve_turn_authorization(
 
     started = time.perf_counter()
     runtime: Dict[str, Any] = {}
+    bind_ms = registry_ms = resolve_ms = install_ms = record_ms = 0.0
     try:
         from core.authorization.tool_authorization_service import (
             install_execution_authorization,
             resolve_enforced_authorization,
         )
-        from core.logging.tool_authorization_events import record_authorization_decision
+        from core.logging.tool_authorization_events import (
+            record_authorization_decision,
+            record_authorization_timing,
+        )
         from core.web.services.agent_directory_service import current_agent_runtime
 
+        # bindMs：current/turn runtime 获取 + 身份绑定。
+        phase_started = time.perf_counter()
         runtime_getter = current_runtime_fn or current_agent_runtime
         runtime = bind_authorization_runtime(
             current_runtime=_coerce_mapping(runtime_getter()),
             turn_runtime=_coerce_mapping((turn_runtime_fn or _turn_runtime_from_env)()),
             agent_binding=runtime_agent_binding,
         )
+        bind_ms = (time.perf_counter() - phase_started) * 1000
+
+        # resolveMs：整段 resolve 减去 service 报告的注册表加载段（registryMs），
+        # 剩余即决策段（cache key + 评估/命中重水化）。
+        phase_started = time.perf_counter()
         report = resolve_enforced_authorization(runtime=runtime)
-        install_execution_authorization(report)
+        resolve_total_ms = (time.perf_counter() - phase_started) * 1000
+        registry_ms = float(max(0, int(getattr(report, "registry_ms", 0) or 0)))
+        resolve_ms = max(0.0, resolve_total_ms - registry_ms)
+
+        # installMs：执行上下文安装（预算解析 + 身份闸门），复用 bind 的 runtime。
+        phase_started = time.perf_counter()
+        install_execution_authorization(report, runtime=runtime)
+        install_ms = (time.perf_counter() - phase_started) * 1000
+
+        # recordMs：场景事件去重判定 + 决策事件写出。
+        phase_started = time.perf_counter()
         # Scene-event dedupe：决策来自 turn 无关模板缓存且与上一次已记录
         # 签名一致时跳过重复写事件；变化后的首个回合恢复记录。
         decision = getattr(report, "decision", None)
@@ -331,9 +383,31 @@ def resolve_turn_authorization(
         else:
             record_authorization_decision(report)
             _mark_decision_recorded(agent_id, decision_cache_key)
+        record_ms = (time.perf_counter() - phase_started) * 1000
+
+        total_ms = (time.perf_counter() - started) * 1000
+        cache_hit = bool(getattr(report, "decision_cache_hit", False))
+        # 子锚点走独立轻量 timing 事件、每回合写出：decision 事件在命中去重
+        # 轮被跳过，而命中轮正是本批要归因的 turnAuthorizationMs 缺口所在。
+        record_authorization_timing(
+            agent_id=agent_id,
+            turn_id=str(getattr(decision, "turn_id", "") or ""),
+            duration_ms=total_ms,
+            cache_hit=cache_hit,
+            bind_ms=bind_ms,
+            registry_ms=registry_ms,
+            resolve_ms=resolve_ms,
+            install_ms=install_ms,
+            record_ms=record_ms,
+        )
         _record_turn_authorization_timing(
-            (time.perf_counter() - started) * 1000,
-            cache_hit=bool(getattr(report, "decision_cache_hit", False)),
+            total_ms,
+            cache_hit=cache_hit,
+            bind_ms=bind_ms,
+            registry_ms=registry_ms,
+            resolve_ms=resolve_ms,
+            install_ms=install_ms,
+            record_ms=record_ms,
         )
         return report
     except Exception as exc:
@@ -349,7 +423,15 @@ def resolve_turn_authorization(
             )
         except Exception:
             pass
-        _record_turn_authorization_timing((time.perf_counter() - started) * 1000, cache_hit=False)
+        _record_turn_authorization_timing(
+            (time.perf_counter() - started) * 1000,
+            cache_hit=False,
+            bind_ms=bind_ms,
+            registry_ms=registry_ms,
+            resolve_ms=resolve_ms,
+            install_ms=install_ms,
+            record_ms=record_ms,
+        )
         return None
 
 
