@@ -1497,12 +1497,13 @@ class TestToolExecutorTimeout:
 
         cancel_requested = threading.Event()
         tool_started = threading.Event()
+        release_abandoned = threading.Event()
 
         def slow_tool():
             tool_started.set()
-            while not cancel_requested.is_set():
-                time.sleep(0.01)
-            time.sleep(0.05)
+            # 持有到 execute 已按运行中取消返回后才释放，
+            # 钉死时序：execute 返回前 future 绝不完成，避免落入完成后取消分支。
+            release_abandoned.wait(2.0)
             return "late result"
 
         executor.register_tool("slow_tool", slow_tool, timeout=5)
@@ -1518,6 +1519,7 @@ class TestToolExecutorTimeout:
         assert action is None
         assert "[取消] slow_tool 已因停止请求中断" in str(result)
 
+        release_abandoned.set()
         deadline = time.monotonic() + 2.0
         late_events = []
         while time.monotonic() < deadline:
