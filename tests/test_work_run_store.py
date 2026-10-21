@@ -721,3 +721,131 @@ def test_work_run_store_active_prune_failure_still_filters_reads(tmp_path, monke
     assert store.load_active_snapshot(kind)["runId"] == "run_live"
     assert [item["runId"] for item in store.load_active_snapshots(kind)] == ["run_live"]
     assert store.load_active_snapshot_for_run(kind, "run_zombie") is None
+
+
+def test_work_run_store_index_rmw_holds_cross_process_lock(tmp_path, monkeypatch):
+    """A store instance must hold the index sidecar across its whole RMW cycle.
+
+    Another "process" (a thread holding ``index.json.lock`` directly) must block
+    the cycle before its first index read: the atomic write alone is already
+    serialized by ``atomic_write_json``, so the regression this guards is a
+    cycle that loads a stale index outside the lock and later clobbers a
+    concurrent writer's update.
+    """
+
+    from core.infrastructure.file_lock import cross_process_file_lock
+
+    root = tmp_path / "work_runs"
+    kind = "source_collection_run"
+    store = WorkRunStore(root=root)
+    index_path = store.index_path(kind)
+    first_index_read = threading.Event()
+
+    original_load_json = work_run_store._load_json
+
+    def load_json_flag_first_index_read(path):
+        payload = original_load_json(path)
+        if path == index_path:
+            first_index_read.set()
+        return payload
+
+    monkeypatch.setattr(work_run_store, "_load_json", load_json_flag_first_index_read)
+
+    held = threading.Event()
+    release = threading.Event()
+
+    def other_process() -> None:
+        with cross_process_file_lock(index_path):
+            held.set()
+            release.wait(timeout=10)
+
+    other_thread = threading.Thread(target=other_process, name="other-process")
+    other_thread.start()
+    try:
+        assert held.wait(timeout=10)
+
+        finished = threading.Event()
+
+        def this_process() -> None:
+            try:
+                store.persist_snapshot(kind, _running_snapshot("run_a"), active_run_id="run_a")
+            finally:
+                finished.set()
+
+        writer_thread = threading.Thread(target=this_process, name="this-process")
+        writer_thread.start()
+        try:
+            # The whole cycle — including its index read — waits for the other
+            # process; reading the index before taking the lock fails here.
+            assert not first_index_read.wait(timeout=0.5), (
+                "index RMW read the index while another process held the index lock"
+            )
+        finally:
+            release.set()
+        assert finished.wait(timeout=10)
+        assert not writer_thread.is_alive()
+    finally:
+        release.set()
+        other_thread.join(timeout=10)
+
+    index = store.load_run_index(kind)
+    assert index["activeRunIds"] == ["run_a"]
+    assert index["latestRunId"] == "run_a"
+
+
+def test_work_run_store_two_process_instances_keep_every_active_id(tmp_path, monkeypatch):
+    """Two store instances sharing only files must not drop active-run ids.
+
+    ``_STORE_LOCK`` is module-level: a second real process does not share it,
+    so the test replaces it with a no-op to make the two instances behave like
+    two processes. Only the per-kind ``index.json.lock`` sidecar may serialize
+    their read-modify-write cycles; with it, every marked run id survives.
+    """
+
+    class _NoProcessLock:
+        def __enter__(self) -> "_NoProcessLock":
+            return self
+
+        def __exit__(self, *exc_info: object) -> bool:
+            return False
+
+    monkeypatch.setattr(work_run_store, "_STORE_LOCK", _NoProcessLock())
+
+    root = tmp_path / "work_runs"
+    kind = "source_collection_run"
+    store_a = WorkRunStore(root=root)
+    store_b = WorkRunStore(root=root)
+    rounds = 30
+    expected_ids = {f"run_a_{index}" for index in range(rounds)} | {
+        f"run_b_{index}" for index in range(rounds)
+    }
+    errors: list[Exception] = []
+    start = threading.Barrier(2)
+
+    def churn(store: WorkRunStore, prefix: str) -> None:
+        try:
+            start.wait(timeout=10)
+            for index in range(rounds):
+                run_id = f"{prefix}_{index}"
+                store.persist_snapshot(kind, _running_snapshot(run_id), active_run_id=run_id)
+        except Exception as exc:  # pragma: no cover - surfaced via assertion
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=churn, args=(store_a, "run_a"), name="proc-a"),
+        threading.Thread(target=churn, args=(store_b, "run_b"), name="proc-b"),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+
+    assert errors == []
+    # A hang here means the RMW cycles deadlocked instead of serializing.
+    assert not any(thread.is_alive() for thread in threads)
+    # Nothing removes another run's mark, so the serialized cycles must have
+    # accumulated every id; without the cross-process lock a stale writer
+    # drops whole batches of them.
+    assert set(store_a.load_active_run_ids(kind)) == expected_ids
+    for run_id in sorted(expected_ids):
+        assert store_a.load_snapshot(kind, run_id)["runId"] == run_id
