@@ -662,6 +662,15 @@ def test_provider_reference_conflict_409_projects_redacted_detail(monkeypatch) -
 
 
 @pytest.fixture(autouse=True)
+def isolate_http_tests_from_terminal_ui(monkeypatch):
+    from importlib import import_module
+
+    # These routes exercise HTTP/config behavior, not the interactive terminal.
+    # Log forwarding must not construct a shared CLI singleton mid-request.
+    monkeypatch.setattr(import_module("core.logging.logger"), "_get_ui", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
@@ -767,14 +776,21 @@ def bootstrap_config(monkeypatch):
 
 
 def test_config_bootstrap_skips_diagnostics_editor_and_tool_construction(monkeypatch, bootstrap_config):
-    from tools import Key_Tools
+    import sys
+    from types import ModuleType
+    import tools
 
     def unexpected(*_args, **_kwargs):
         pytest.fail("bootstrap must not run diagnostics, editor setup, or construct tools")
 
     monkeypatch.setattr(config_service, "inspect_public_config", unexpected)
     monkeypatch.setattr(config_service, "build_editor_sections", unexpected)
-    monkeypatch.setattr(Key_Tools, "create_llm_facing_tools", unexpected)
+    # Keep the regression guard cold: importing the real toolbox here would
+    # initialize unrelated CLI/UI singletons inside this HTTP test process.
+    toolbox = ModuleType("tools.Key_Tools")
+    toolbox.create_llm_facing_tools = unexpected
+    monkeypatch.setitem(sys.modules, "tools.Key_Tools", toolbox)
+    monkeypatch.setattr(tools, "Key_Tools", toolbox, raising=False)
 
     response = client.get("/api/config/bootstrap")
 
