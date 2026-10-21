@@ -249,8 +249,10 @@ intent_alignment_card(
 ) -> {cardId, revision}
     # handler（确定性）：
     #   1. 生成 cardId（§3.9）；revision = 发卡时工件版本号；
-    #   2. 组装 IntentAlignmentCardPayload，以 tool_call turnItem 落 journal
-    #      （toolName="intent_alignment_card"，input=payload JSON 串，todo_write 同构）；
+    #   2. 组装 IntentAlignmentCardPayload：模型原始入参（intent_summary/questions/
+    #      artifacts）经 tool_call turnItem.input 落 journal（toolName=
+    #      "intent_alignment_card"，todo_write 同构）；完整 payload（含 handler 生成的
+    #      cardId/revision/台账分配的最终 questionId）随工具 result 侧入 journal；
     #   3. 转调 store.record_question_asked ×N + store.request_confirmation(card_id)；
     #   4. 刷新 PromptManager 内 packet（供同 turn 后续 continuation 轮次可见）。
 
@@ -267,6 +269,8 @@ intent_alignment_merge(
     # 写后同样刷新 packet。语义判断（答案是什么、折算到哪、用户是否确认）全部由
     # 主 agent 在入参中给出——handler 只落账。
 ```
+
+> 实现修订（T4）：工具执行机制下 turnItem.input 只承载模型原始入参（intent_summary/questions/artifacts）；handler 组装的完整 §5.2 payload（含 cardId/revision/最终 questionId）随工具结果（result 侧）入 journal，前端从 input+output 拼装或直接读 result.payload。
 
 约束：`intent_alignment_card` 的前置条件是工件已有四要素初稿（agent 先 merge 再发卡）；不满足时 handler 返回错误，agent 可先补 merge。正文文本与卡片问题必须一致（P0 前端折叠卡片为工具行，正文是用户可见的提问本体）。
 
@@ -541,8 +545,10 @@ status=clarifying 时的渲染形态（示例文本，非实现代码）：
 TS 类型草案（前端侧，`web/src/api/types/chat.ts` 追加；`schemaVersion` 对齐 challenge meeting 惯例 `chat.ts:1478`）：
 
 ```ts
-/** 意图对齐确认卡 payload。普通会话随 intent_alignment_card 工具调用的
- *  turnItem.input（JSON 字符串）传输；群聊随 messagePayload 传输。 */
+/** 意图对齐确认卡 payload。普通会话：模型入参经 intent_alignment_card 工具调用的
+ *  turnItem.input，handler 组装的完整 payload（含 cardId/revision/最终 questionIds）
+ *  经工具 result 侧；前端从 input+output 拼装或直接读 result.payload。
+ *  群聊随 messagePayload 传输。 */
 export type IntentAlignmentCardPayload = {
   schemaVersion: 1;
   kind: "intent_alignment_card";
@@ -636,7 +642,7 @@ JSON 示例（卡片，随 tool-call input 传输）：
 
 约束：
 
-- payload 尺寸上限建议 8 KB（与 tool-call input 的 journal 落盘成本对齐；问题数 ≤5、选项数 ≤6 由 `intent_alignment_card` 产出端约束，前端只做防御性截断渲染）。
+- payload 尺寸上限建议 8 KB（与 tool-call input 的 journal 落盘成本对齐；问题数 ≤5、选项数 ≤6 由 `intent_alignment_card` 产出端约束，前端只做防御性截断渲染）。questions 数量的工具面硬上限为 5（超限 handler 直接拒绝，防滥用防线）；协议纪律仍为一次成组 ≤3（`maxQuestionsPerTurn`），硬上限只是兜底而非目标。
 - `inputMode: "choice_or_text"` 是 `single_choice + allowCustomAnswer` 的语法糖，前端实现统一为「单选 + 其他（输入框）」。
 - 卡片不可变：journal append-only；需要改问时发新卡（新 cardId、当时的 revision），旧卡由前端按 §5.4 派生标记。
 
