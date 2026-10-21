@@ -87,7 +87,9 @@ def test_full_detail_keeps_directory_sync_and_repair(monkeypatch: pytest.MonkeyP
     session_service.get_session_detail("session-poll", include_secondary=True)
 
     assert len(calls["sync"]) == 1
-    assert len(calls["loads"]) == 2
+    # 1 initial load + 1 reload after reconcile + 1 repaired reload feeding the
+    # directory sync (fb6bdb9ea syncs the directory row from the re-read row).
+    assert len(calls["loads"]) == 3
     assert calls["target"][0][1]["repair"] is True
 
 

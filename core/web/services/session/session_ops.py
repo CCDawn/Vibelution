@@ -663,31 +663,60 @@ def _load_conversation_detail_target(
         return None
     agent_by_id = agent_by_id if agent_by_id is not None else s._agent_lookup_for_conversations()
     hidden_team_member_agent_ids = s._agent_directory_stub_hidden_team_member_ids()
+    if not repair:
+        for raw in conversations:
+            if not isinstance(raw, dict):
+                continue
+            raw_session_id = str(raw.get("conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
+            if raw_session_id != normalized_session_id:
+                continue
+            return s._normalize_conversation(
+                raw,
+                agent_by_id=agent_by_id,
+                hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+                ensure_workspace=False,
+                lightweight=lightweight,
+            )
+        return None
+    # Repair decisions are writes, and the caller's snapshot may be arbitrarily
+    # stale because detail polls read without the mutation lock. Writing back a
+    # whole repaired stale row used to clobber a concurrent worker commit (lost
+    # terminal status, lost runtime notices). Hold the facade mutation lock,
+    # re-read the freshest row inside it, and only then repair and save — the
+    # same read-merge-save discipline as _commit_session_turn_runtime_state.
+    # The expensive detail assembly below stays outside the lock so the lock
+    # window covers only the bounded read-repair-save segment.
+    raw_target: dict[str, Any] | None = None
     changed = False
-    if repair:
-        changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
-    for raw in conversations:
-        if not isinstance(raw, dict):
-            continue
-        raw_session_id = str(raw.get("conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
-        if raw_session_id != normalized_session_id:
-            continue
-        if repair:
+    with s._CHAT_STATE_LOCK:
+        fresh = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if fresh is not None:
+            payload = {"conversations": [fresh]}
+            conversations = payload["conversations"]
+        changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id)
+        for raw in conversations:
+            if not isinstance(raw, dict):
+                continue
+            raw_session_id = str(raw.get("conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
+            if raw_session_id != normalized_session_id:
+                continue
             changed = s._repair_stale_running_conversation(raw) or changed
             changed = s._ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
             changed = s._ensure_conversation_workspace_metadata(raw) or changed
-        conversation = s._normalize_conversation(
-            raw,
-            agent_by_id=agent_by_id,
-            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
-            ensure_workspace=repair,
-            lightweight=lightweight,
-        )
-        if changed:
+            raw_target = raw
+            break
+        if raw_target is not None and changed:
             payload["updated_at"] = s._now_timestamp()
-            s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, raw)
-        return conversation
-    return None
+            s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, raw_target)
+    if raw_target is None:
+        return None
+    return s._normalize_conversation(
+        raw_target,
+        agent_by_id=agent_by_id,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        ensure_workspace=True,
+        lightweight=lightweight,
+    )
 
 
 def _make_chat_message(
