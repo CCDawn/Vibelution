@@ -258,7 +258,16 @@ def test_resolve_turn_authorization_emits_subanchor_timing_event_every_turn(monk
         assert fields["turnId"] == "turn-timing"
         assert fields["cacheHit"] is True
         assert isinstance(fields["durationMs"], int) and fields["durationMs"] >= 0
-        for anchor in ("bindMs", "registryMs", "resolveMs", "installMs", "recordMs"):
+        for anchor in (
+            "bindMs",
+            "registryMs",
+            "resolveMs",
+            "installMs",
+            "recordMs",
+            "identityMs",
+            "maxCallsMs",
+            "installCoreMs",
+        ):
             assert isinstance(fields[anchor], int) and fields[anchor] >= 0
     # registryMs 透传 service 报告的注册表加载段。
     assert timing_events[0]["fields"]["registryMs"] == 5
@@ -267,8 +276,95 @@ def test_resolve_turn_authorization_emits_subanchor_timing_event_every_turn(monk
     assert thread_timing is not None
     assert thread_timing["turnAuthorizationCacheHit"] is True
     assert thread_timing["registryMs"] == 5
-    for anchor in ("bindMs", "resolveMs", "installMs", "recordMs"):
+    for anchor in (
+        "bindMs",
+        "resolveMs",
+        "installMs",
+        "recordMs",
+        "identityMs",
+        "maxCallsMs",
+        "installCoreMs",
+    ):
         assert isinstance(thread_timing[anchor], int) and thread_timing[anchor] >= 0
 
     binding.clear_turn_authorization_telemetry_state()
+    clear_turn_decision_template_cache()
+
+
+def test_resolve_turn_authorization_timing_event_carries_real_install_subanchors(monkeypatch):
+    """TTFT 批七：真实 install 执行后，timing 事件携带 install 内部细分锚点。"""
+
+    from core.logging import tool_authorization_events as events
+    from core.orchestration import session_budget_resolve
+    from core.orchestration import tool_authorization_binding as binding
+
+    binding.clear_turn_authorization_telemetry_state()
+    service.clear_execution_authorization()
+    service.clear_session_override_memo()
+    clear_turn_decision_template_cache()
+
+    override_calls = {"count": 0}
+
+    def fake_session_override(session_id):
+        override_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(session_budget_resolve, "get_session_budget_parameters", fake_session_override)
+
+    def fake_resolve(*, runtime):
+        return SimpleNamespace(
+            decision=SimpleNamespace(
+                agent_id="agent-install-timing",
+                turn_id="turn-install-timing",
+                decision_fingerprint="fingerprint-install-timing",
+                executable_tools=("grep_search_tool",),
+            ),
+            decision_cache_key="key-install-timing",
+            decision_cache_hit=True,
+            registry_ms=0,
+        )
+
+    record_calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(service, "resolve_enforced_authorization", fake_resolve)
+    monkeypatch.setattr(events, "record_authorization_decision", lambda report: None)
+    monkeypatch.setattr(events, "_record", lambda event_code, **kwargs: record_calls.append((event_code, kwargs)))
+
+    kwargs = dict(
+        runtime_agent_binding={"agentId": "agent-install-timing"},
+        turn_runtime_fn=lambda: {"agentId": "agent-install-timing", "turnId": "turn-install-timing"},
+        current_runtime_fn=lambda: {
+            "agentId": "agent-install-timing",
+            "turnId": "turn-install-timing",
+            "sessionId": "session-install-timing",
+            "agent": {"agentId": "agent-install-timing"},
+            "agentConfigSnapshot": {
+                "agentId": "agent-install-timing",
+                "configRevision": 4,
+                "configHash": "hash-install-timing",
+            },
+            "permissionPreset": "request_approval",
+            "llmModel": "install-timing-model",
+            "llmProvider": "install-timing-provider",
+            "toolPolicy": {"policyId": "tool-agent-install-timing", "maxCallsPerTurn": 32},
+        },
+    )
+    binding.resolve_turn_authorization(**kwargs)
+
+    timing_events = [kwargs_ for event_code, kwargs_ in record_calls if event_code == "tool.authorization.timing"]
+    assert len(timing_events) == 1
+    fields = timing_events[0]["fields"]
+    # 真实 install 走过 identity/maxCalls/core 三段，线程局部非空并进入事件。
+    assert fields["installMs"] >= 0
+    for anchor in ("identityMs", "maxCallsMs", "installCoreMs"):
+        assert isinstance(fields[anchor], int) and fields[anchor] >= 0
+        assert fields[anchor] <= max(1, fields["installMs"] + 1)
+
+    # memo 生效：同快照身份第二回合的 session override 查询不再触碰 store。
+    binding.resolve_turn_authorization(**kwargs)
+    assert override_calls["count"] == 1
+    assert len([1 for event_code, _ in record_calls if event_code == "tool.authorization.timing"]) == 2
+
+    binding.clear_turn_authorization_telemetry_state()
+    service.clear_session_override_memo()
+    service.clear_execution_authorization()
     clear_turn_decision_template_cache()
