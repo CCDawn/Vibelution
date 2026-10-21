@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 from core.infrastructure import developer_sandbox
 from core.infrastructure.atomic_io import atomic_write_json
+from core.infrastructure.file_lock import cross_process_file_lock
 
 from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR
 
@@ -23,9 +24,13 @@ RECENT_RUN_IDS_LIMIT = 100
 ACTIVE_RUN_IDS_LIMIT = 64
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
-# Index updates are read-modify-write across processes of store instances; a
-# module-level reentrant lock keeps concurrent persist/delete RMW cycles from
-# clobbering each other's active-run-id set within one process.
+# Index updates are read-modify-write cycles spanning load→mutate→atomic write.
+# Locking is two-level: ``_STORE_LOCK`` keeps threads of one process from
+# clobbering each other, and the per-kind ``index.json.lock`` sidecar
+# (see :meth:`WorkRunStore._index_lock`) serializes the whole RMW cycle across
+# store instances in different processes — the module lock is invisible to
+# another process, so without the sidecar a daemon/backend race can drop an
+# active-run-id add or remove.
 _STORE_LOCK = threading.RLock()
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _ACTIVE_WORK_BLOCKING_STATUSES = {
@@ -445,6 +450,25 @@ class WorkRunStore:
     def ensure_kind_dirs(self, run_kind: str) -> None:
         self.runs_dir(run_kind).mkdir(parents=True, exist_ok=True)
 
+    def _index_lock(self, run_kind: str):
+        """Cross-process lock guarding one kind's index read-modify-write cycle.
+
+        ``save_run_index``/``persist_snapshot``/``delete_snapshot``/
+        ``load_active_run_ids`` each span load→mutate→atomic write, and the
+        ``atomic_write_json`` file lock only serializes the physical replace —
+        not the cycle — so two store instances in different processes (daemon
+        and backend) could interleave and drop each other's active-run-id
+        updates. Holding the ``index.json.lock`` sidecar next to the index for
+        the whole cycle closes that window. The lock is reentrant per thread,
+        so the nested ``save_run_index`` call inside ``persist_snapshot`` does
+        not self-deadlock; it is only ever acquired while already holding
+        ``_STORE_LOCK`` and no other cross-process lock, so the ordering is
+        acyclic. Lockless ``load_run_index`` reads stay allowed and may see a
+        briefly stale index — every RMW cycle re-reads inside the lock.
+        """
+
+        return cross_process_file_lock(self.index_path(run_kind))
+
     def load_run_index(self, run_kind: str) -> dict[str, Any]:
         payload = _load_json(self.index_path(run_kind))
         if not payload:
@@ -463,7 +487,7 @@ class WorkRunStore:
         active_run_ids: Iterable[str] | None = None,
         emit_event: bool = True,
     ) -> dict[str, Any]:
-        with _STORE_LOCK:
+        with _STORE_LOCK, self._index_lock(run_kind):
             payload = self.load_run_index(run_kind)
             next_latest_run_id = str(latest_run_id or "").strip()
             next_recent_run_ids = _bounded_recent_run_ids(
@@ -548,7 +572,7 @@ class WorkRunStore:
         effective_active_run_id = requested_active_run_id
         if requested_active_run_id == run_id and not _snapshot_blocks_active_index(snapshot):
             effective_active_run_id = ""
-        with _STORE_LOCK:
+        with _STORE_LOCK, self._index_lock(run_kind):
             previous_payload = self.load_snapshot(run_kind, run_id)
             previous_signature = (
                 _snapshot_lifecycle_signature(previous_payload, active_run_id=effective_active_run_id)
@@ -661,7 +685,10 @@ class WorkRunStore:
         except ValueError:
             return None
         now = str(timestamp or "").strip() or _now_iso()
-        with _STORE_LOCK:
+        # The snapshot patch is itself a cross-process RMW; the per-kind index
+        # lock keeps it from reverting a concurrent persist_snapshot's fuller
+        # write (last stale touch would otherwise clobber the new snapshot).
+        with _STORE_LOCK, self._index_lock(run_kind):
             path = self.runs_dir(run_kind) / f"{normalized}.json"
             payload = _load_json(path)
             if not payload:
@@ -688,7 +715,7 @@ class WorkRunStore:
         which makes the prune safe; latest/history entries stay untouched.
         """
 
-        with _STORE_LOCK:
+        with _STORE_LOCK, self._index_lock(run_kind):
             active_run_ids = _bounded_active_run_ids(_index_active_run_ids(self.load_run_index(run_kind)))
             if not active_run_ids:
                 return []
@@ -890,7 +917,7 @@ class WorkRunStore:
         normalized = normalize_run_id(run_id)
         runs_dir = self.runs_dir(run_kind)
         target = runs_dir / f"{normalized}.json"
-        with _STORE_LOCK:
+        with _STORE_LOCK, self._index_lock(run_kind):
             index = self.load_run_index(run_kind)
             active_run_ids = _bounded_active_run_ids(_index_active_run_ids(index))
             latest_run_id = str(index.get("latestRunId") or "").strip()
