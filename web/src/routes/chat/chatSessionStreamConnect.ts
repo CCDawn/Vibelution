@@ -71,6 +71,24 @@ export function resolveSessionStreamRouteSwitchGraceActive(options: {
   );
 }
 
+/**
+ * Transport status codes that can never recover by reconnecting: the session
+ * is gone (404/410) or the request is not authorized (401/403). The guarded
+ * session stream must enter a terminal failure on these instead of looping the
+ * 3s reconnect forever; 5xx and network errors keep the reconnect policy.
+ */
+export const SESSION_STREAM_PERMANENT_FAILURE_STATUSES: readonly number[] = [401, 403, 404, 410];
+
+export function isPermanentSessionStreamFailureStatus(status: number): boolean {
+  return SESSION_STREAM_PERMANENT_FAILURE_STATUSES.includes(status);
+}
+
+/** Terminal stream failure observed for a session (transport-layer fact). */
+export type SessionStreamTerminalFailure = {
+  sessionId: string;
+  status: number;
+};
+
 export function resolveSessionStreamShouldConnect(options: {
   activeSessionId: string | null | undefined;
   routeTargetMatches: boolean;
@@ -81,7 +99,19 @@ export function resolveSessionStreamShouldConnect(options: {
    * drops live deltas and forces a cold reconnect on focus.
    */
   directSessionBackgroundSyncActive?: boolean;
+  /** Terminal stream failure (404/410/401/403) for this session: never reconnect. */
+  terminalFailure?: SessionStreamTerminalFailure | null;
 }): boolean {
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  const terminalFailure = options.terminalFailure;
+  if (
+    activeSessionId
+    && terminalFailure
+    && String(terminalFailure.sessionId || "").trim() === activeSessionId
+    && isPermanentSessionStreamFailureStatus(terminalFailure.status)
+  ) {
+    return false;
+  }
   return Boolean(
     options.activeSessionId
     && options.routeTargetMatches

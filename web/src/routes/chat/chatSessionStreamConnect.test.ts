@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPermanentSessionStreamFailureStatus,
   nextSessionStreamGraceWindow,
   resolveSessionStreamRouteSettling,
   resolveSessionStreamRouteSwitchGraceActive,
@@ -86,6 +87,54 @@ describe("chatSessionStreamConnect", () => {
       chatPollingVisible: false,
       routeSwitchGraceActive: false,
     })).toBe(false);
+  });
+
+  it("classifies 404/410/401/403 as permanent stream failures and 5xx as transient", () => {
+    for (const status of [401, 403, 404, 410]) {
+      expect(isPermanentSessionStreamFailureStatus(status)).toBe(true);
+    }
+    for (const status of [200, 400, 409, 429, 500, 502, 503, 0]) {
+      expect(isPermanentSessionStreamFailureStatus(status)).toBe(false);
+    }
+  });
+
+  it("stops connecting on a terminal stream failure for the active session only", () => {
+    const base = {
+      routeTargetMatches: true,
+      chatPollingVisible: true,
+      routeSwitchGraceActive: false,
+      directSessionBackgroundSyncActive: false,
+    };
+    // Permanent failure for this session wins over every connect signal.
+    expect(resolveSessionStreamShouldConnect({
+      ...base,
+      activeSessionId: "s1",
+      terminalFailure: { sessionId: "s1", status: 404 },
+    })).toBe(false);
+    expect(resolveSessionStreamShouldConnect({
+      ...base,
+      activeSessionId: "s1",
+      chatPollingVisible: false,
+      routeSwitchGraceActive: true,
+      terminalFailure: { sessionId: "s1", status: 410 },
+    })).toBe(false);
+    // A foreign session's terminal fact must not block this session.
+    expect(resolveSessionStreamShouldConnect({
+      ...base,
+      activeSessionId: "s1",
+      terminalFailure: { sessionId: "s2", status: 404 },
+    })).toBe(true);
+    // Transient statuses keep the normal reconnect policy.
+    expect(resolveSessionStreamShouldConnect({
+      ...base,
+      activeSessionId: "s1",
+      terminalFailure: { sessionId: "s1", status: 503 },
+    })).toBe(true);
+    expect(resolveSessionStreamShouldConnect({
+      ...base,
+      activeSessionId: "s1",
+      terminalFailure: null,
+    })).toBe(true);
   });
 
   it("keeps the stream open for a hidden window that still syncs a busy turn", () => {

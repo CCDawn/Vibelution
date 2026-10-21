@@ -16,6 +16,8 @@ import {
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { mergeSessionDetailIntoSummaries } from "../chatSessionState";
+import { broadcastSessionIndexChange } from "../chatSessionIndexSync";
+import { getPageInstanceId } from "../../app/pageInstance";
 import { describeChatRouteError as describeError } from "./chatCodingRouteViewModel";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { TranslationKey } from "../../i18n/dictionaryTypes";
@@ -99,6 +101,13 @@ export function useChatSessionMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      // Archive state is another stream-invisible metadata flip: announce it to
+      // the other windows so their index/archive listings refetch.
+      broadcastSessionIndexChange({
+        sessionId: variables.sessionId,
+        changeType: variables.archive ? "archive" : "unarchive",
+        sourceId: getPageInstanceId(),
+      });
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { sessionId: variables.sessionId });
@@ -157,6 +166,13 @@ export function useChatSessionMutations({
       context?.telemetry?.succeeded({ sessionId: variables.sessionId });
       // Authoritative pinned_at_ms and ordering come from the next refetch.
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      // Other windows keep their index poll off while a stream owns live
+      // queries; announce the metadata flip so their rail converges too.
+      broadcastSessionIndexChange({
+        sessionId: variables.sessionId,
+        changeType: variables.pinned ? "pin" : "unpin",
+        sourceId: getPageInstanceId(),
+      });
     },
     onError: (error, variables, context) => {
       restoreSessionIndexCacheSnapshots(queryClient, context?.indexSnapshots);

@@ -217,8 +217,10 @@ import {
   resolveSessionStreamRouteTargetMatches,
   resolveSessionStreamShouldConnect,
   type SessionStreamDecisionSnapshot,
+  type SessionStreamTerminalFailure,
 } from "./chatSessionStreamConnect";
 import { useSessionDetailStream } from "./useSessionDetailStream";
+import { useSessionIndexCrossWindowSync } from "../chatSessionIndexSync";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useGroupRoomTimeline } from "./useGroupRoomTimeline";
 import { useChatSessionSelection } from "./useChatSessionSelection";
@@ -555,6 +557,11 @@ export function ChatCodingRouteWorkbench() {
     routeSwitchGraceActive: false,
     routeSwitchGraceMsRemaining: 0,
   });
+  // Terminal stream failure fact (404/410/401/403), written synchronously by
+  // the session stream hook and read by the shouldConnect chain below — the
+  // same ref-handoff pattern as sessionStreamDecisionSnapshotRef, because the
+  // chain runs earlier in render than the stream hook returns.
+  const sessionStreamTerminalFailureRef = useRef<SessionStreamTerminalFailure | null>(null);
 
   const chatRouteMountStartedAtRef = useRef(Date.now());
   const chatRouteShellMountedLoggedRef = useRef(false);
@@ -757,12 +764,25 @@ export function ChatCodingRouteWorkbench() {
     graceSessionId: sessionStreamGraceSessionRef.current,
     graceUntilMs: sessionStreamGraceUntilRef.current,
   });
+  // A terminal stream failure belongs to exactly one session: switching away
+  // must give the next session a fresh connect attempt. Render-time reset so
+  // the shouldConnect chain below never sees a foreign session's terminal fact
+  // (same render-phase ref discipline as the grace-window refs above).
+  if (
+    sessionStreamTerminalFailureRef.current
+    && sessionStreamTerminalFailureRef.current.sessionId !== String(activeSessionId || "")
+  ) {
+    sessionStreamTerminalFailureRef.current = null;
+  }
   const sessionStreamShouldConnect = resolveSessionStreamShouldConnect({
     activeSessionId,
     routeTargetMatches: sessionStreamRouteTargetMatches && !isTempSessionId(activeSessionId),
     chatPollingVisible,
     routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
     directSessionBackgroundSyncActive,
+    // A permanent stream failure (404/410/401/403) stops the reconnect loop
+    // for this session; index/detail polling and the tombstone surface take over.
+    terminalFailure: sessionStreamTerminalFailureRef.current,
   });
   sessionStreamDecisionSnapshotRef.current = {
     sessionId: activeSessionId || "",
@@ -848,7 +868,11 @@ export function ChatCodingRouteWorkbench() {
     || activeSessionId
     || ""
   );
-  const { sessionStreamConnected, streamDisconnectedSinceMs, reconnectSessionStream } = useSessionDetailStream({
+  const {
+    sessionStreamConnected,
+    streamDisconnectedSinceMs,
+    reconnectSessionStream,
+  } = useSessionDetailStream({
     activeSessionId,
     sessionStreamShouldConnect,
     queryClient,
@@ -858,10 +882,15 @@ export function ChatCodingRouteWorkbench() {
     lastAssistantDeltaAppliedAtRef,
     lastStreamActivityAppliedAtRef,
     sessionStreamDecisionSnapshotRef,
+    sessionStreamTerminalFailureRef,
     desktopConversationNotifierRef,
     sessionTitleForNotifications,
     viewedSessionId: activeSessionId || "",
   });
+  // Pin/unpin/archive/delete in one window must reach the rails of every other
+  // window: a stream-owning window keeps its index poll off, so metadata flips
+  // arrive through the storage-event channel as index invalidations.
+  useSessionIndexCrossWindowSync(queryClient);
   // Transport visibility for the active-turn status note. `streamConnected`
   // stays tri-state: only a real reconnect loop reports false; route-settling
   // teardowns keep it undefined so the note never flashes a false drop.

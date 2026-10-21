@@ -122,4 +122,58 @@ describe("session event stream", () => {
       vi.useRealTimers();
     }
   });
+
+  it("enters a terminal failure on 404 and never schedules a reconnect", async () => {
+    seedControlTokenForTests("session-stream-token");
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "session not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const stream = createSessionEventStream("session-1");
+      const errorStatuses: Array<number | null> = [];
+      stream.onerror = () => errorStatuses.push(stream.terminalFailure?.status ?? null);
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(stream.terminalFailure).toEqual({ status: 404 });
+      expect(errorStatuses).toEqual([404]);
+      expect(stream.readyState).toBe(2);
+      // Far beyond the 3s reconnect window: no further attempt, no timer left.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(stream.terminalFailure).toEqual({ status: 404 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the 3s reconnect policy for transient 5xx failures", async () => {
+    seedControlTokenForTests("session-stream-token");
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "boom" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const stream = createSessionEventStream("session-1");
+      stream.onerror = () => undefined;
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(stream.terminalFailure).toBeNull();
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(stream.terminalFailure).toBeNull();
+      expect(stream.readyState).not.toBe(2);
+      stream.close();
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
