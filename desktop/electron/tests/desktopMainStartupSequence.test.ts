@@ -54,7 +54,9 @@ describe("Electron main startup sequence", () => {
       "startOrFocusWorkbenchFromProductEntryOnShell()"
     );
     expect(source).toContain("if (deferWorkbenchOpen)");
-    expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
+    expect(source).toContain(
+      "else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot && !deferWorkbenchOpen)"
+    );
   });
 });
 

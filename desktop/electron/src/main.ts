@@ -5373,7 +5373,8 @@ app.whenReady()
     if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen) {
       electronStartupStage = "workbench_window_ready";
       await startOrFocusWorkbenchFromProductEntryOnShell();
-    } else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot) {
+    } else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot && !deferWorkbenchOpen) {
+      // A deferred lifecycle owns presentation; opening Launcher here would steal focus.
       await windowProvider.openLauncher();
     }
     if (deferWorkbenchOpen) {
