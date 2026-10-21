@@ -75,13 +75,14 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain('orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })');
   });
 
-  it("opens the Launcher window on a bare first launch and resolves the workbench URL without python", () => {
+  it("does not open the Launcher as a first-launch fallback and resolves the workbench URL without python", () => {
     const source = readFileSync(mainSourcePath, "utf8");
+    const startupIndex = source.indexOf("if (pendingOpenWorkbenchRequest &&");
+    const deferIndex = source.indexOf("if (deferWorkbenchOpen)", startupIndex);
 
-    expect(source).toContain("await windowProvider.openLauncher()");
-    expect(source).toContain(
-      "else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot && !deferWorkbenchOpen)"
-    );
+    expect(startupIndex).toBeGreaterThan(0);
+    expect(deferIndex).toBeGreaterThan(startupIndex);
+    expect(source.slice(startupIndex, deferIndex)).not.toContain("openLauncher");
     expect(source).toContain("bootstrapMainOwnedLauncher(paths)");
     expect(source).toContain("resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined)");
     expect(source).not.toContain("bootstrapPythonLauncherService(");
