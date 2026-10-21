@@ -588,3 +588,79 @@ def test_subscriber_replacement_does_not_receive_an_old_hydration(monkeypatch):
     finally:
         release.set()
         thread.join(3)
+
+
+def test_assistant_delta_publish_holds_per_subscriber_publish_lock(monkeypatch) -> None:
+    """Delta coalesce+put must sit inside the same per-subscriber critical
+    section as the detail path: an interleaved publisher could otherwise drain
+    and refill the queue between coalesce and put and strand or reorder frames."""
+
+    service = _AssistantDeltaSeqService()
+    subscriber = queue.Queue()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    publish._register_session_stream_subscriber("session-live", subscriber)
+    observed: list[tuple[str, bool]] = []
+    publish_lock = publish._session_stream_publish_lock(subscriber)
+    real_coalesce = service._coalesce_session_assistant_delta_queue
+    real_put = service._put_session_stream_event
+
+    def spy_coalesce(sub, event):
+        observed.append(("coalesce", publish_lock.locked()))
+        return real_coalesce(sub, event)
+
+    def spy_put(sub, event, **kwargs):
+        observed.append(("put", publish_lock.locked()))
+        return real_put(sub, event, **kwargs)
+
+    monkeypatch.setattr(service, "_coalesce_session_assistant_delta_queue", spy_coalesce)
+    monkeypatch.setattr(service, "_put_session_stream_event", spy_put)
+    try:
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("a"))
+    finally:
+        publish._unregister_session_stream_subscriber("session-live", subscriber)
+
+    assert observed == [("coalesce", True), ("put", True)]
+    assert not publish_lock.locked()
+    assert subscriber.get_nowait()["turnItems"]
+
+
+def test_session_initial_state_stamps_ledger_before_content_read(monkeypatch) -> None:
+    """The initial frame's ledgerSeq doubles as the SSE id cursor; journal
+    events appended between the content read and the stamp would be marked seen
+    without ever being delivered, so the stamp must precede the reads."""
+
+    class Service:
+        _RUNNING_SESSIONS_LOCK = threading.Lock()
+        _SESSION_ACTIVE_TURN_IDS: dict = {}
+        _RUNNING_SESSION_IDS: set = set()
+
+        def __init__(self) -> None:
+            self.ledger_calls = 0
+            self.ledger_seq_at_content_read: int | None = None
+
+        def _session_ledger_sequence(self, _session_id: str) -> int:
+            # The journal watermark advances on every read, like live appends.
+            self.ledger_calls += 1
+            return self.ledger_calls * 10
+
+        def _agent_lookup_for_conversations(self) -> dict:
+            return {}
+
+        def _load_conversation_detail_target(self, _session_id: str, **_kwargs) -> dict:
+            return {"id": "session-live"}
+
+        def _build_session_summary(self, _target, *, hydrate_agent: bool) -> dict:
+            return {"currentPhase": "ready"}
+
+        def _session_stream_initial_latest_message_payload(self, _session_id: str) -> dict:
+            self.ledger_seq_at_content_read = self.ledger_calls * 10
+            return {"role": "assistant", "text": "hello"}
+
+    service = Service()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+
+    state = publish.get_session_stream_initial_state("session-live")
+
+    assert state["ledgerSeq"] == 10
+    assert service.ledger_seq_at_content_read is not None
+    assert state["ledgerSeq"] <= service.ledger_seq_at_content_read

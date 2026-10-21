@@ -11,8 +11,13 @@ body, removing the O(total length) resends that made long turns quadratic on
 the wire. Extension is verified against a digest of the sent text (the server
 never keeps the body), and the full item snapshot stays the authority: any
 rewrite, shrink, first send, terminal frame, or canonical-shape anomaly falls
-back to the full row. Consumers validate every append against their cached
-length before splicing and fall back to a snapshot on mismatch.
+back to the full row. An append is additionally only cut when the row's
+non-text fields are unchanged since the last delivered frame: a same-row
+status flip or an embedded-revision ``id`` change cannot travel inside an
+append fragment (the client splices text onto its cached row and keeps the
+cached metadata), so those frames resend the full row. Consumers validate
+every append against their cached length before splicing and fall back to a
+snapshot on mismatch.
 
 Frames published through the incremental projector carry a
 :class:`~core.web.services.session.stream_projection_delta.AssistantDeltaFrameWitness`
@@ -50,6 +55,34 @@ def _text_cursor(text: str) -> tuple[int, bytes]:
     return len(text), hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest()
 
 
+def _non_text_fingerprint(item: dict[str, Any]) -> bytes:
+    """Recompute-path digest over the row minus its ``text`` body.
+
+    Mirrors the projector's non-text half (``stream_projection_delta``) so a
+    growing row's metadata stability can be proven without keeping the body.
+    """
+
+    payload = {key: value for key, value in item.items() if key != "text"}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.blake2b(encoded, digest_size=16).digest()
+
+
+def _witness_non_text_changed(previous: Any, current: Any) -> bool:
+    """Whether the non-text half of two projector fingerprints differs.
+
+    Projector fingerprints for text rows are ``text_digest + non_text_digest``
+    (two 16-byte halves). When either side is not that shape (legacy 16-byte
+    full-row fingerprints, missing history), conservatively report a change so
+    the row falls back to a full snapshot instead of a text-only append.
+    """
+
+    if not isinstance(previous, (bytes, bytearray)) or not isinstance(current, (bytes, bytearray)):
+        return True
+    if len(previous) != 32 or len(current) != 32:
+        return True
+    return bytes(previous[16:]) != bytes(current[16:])
+
+
 def _without_witness(event: dict[str, Any]) -> dict[str, Any]:
     if WITNESS_FIELD not in event:
         return event
@@ -60,6 +93,11 @@ class SessionStreamItemDelta:
     def __init__(self) -> None:
         self._turn: tuple[str, str] | None = None
         self._fingerprints: dict[tuple[str, str], bytes] = {}
+        # identity -> non-text fingerprint of the row as last delivered on
+        # THIS connection. An append fragment splices text onto the client's
+        # cached row and keeps the cached metadata, so it may only be cut when
+        # this fingerprint is unchanged since the last delivery.
+        self._non_text_fingerprints: dict[tuple[str, str], bytes] = {}
         # identity -> (length, digest) of the text last delivered on THIS
         # connection (via a full row or via cumulative appends). Appends are
         # cut at this cursor and only when the new text hash-verifies as a
@@ -85,6 +123,7 @@ class SessionStreamItemDelta:
         fingerprints: dict[tuple[str, str], bytes] = {}
         changed: list[dict[str, Any]] = []
         appends: list[dict[str, Any]] = []
+        non_text_fingerprints: dict[tuple[str, str], bytes] = {}
         text_cursors: dict[tuple[str, str], tuple[int, bytes]] = {}
         for item in items:
             if (
@@ -108,9 +147,19 @@ class SessionStreamItemDelta:
             text = _item_text(item) if item.get("type") in TEXT_APPEND_ITEM_TYPES else None
             if text is not None:
                 text_cursors[identity] = _text_cursor(text)
+                non_text_fingerprints[identity] = _non_text_fingerprint(item)
             if self._fingerprints.get(identity) == fingerprint:
                 continue
             append_entry = self._append_entry_for(item, identity, text)
+            if (
+                append_entry is not None
+                and self._non_text_fingerprints.get(identity) != non_text_fingerprints[identity]
+            ):
+                # The text grew append-only, but another field on the same row
+                # (status flip, embedded-revision id, ...) changed since the
+                # last delivered frame. An append would splice text onto the
+                # client's row while keeping its stale metadata: full row.
+                append_entry = None
             if append_entry is not None:
                 appends.append(append_entry)
             else:
@@ -122,6 +171,7 @@ class SessionStreamItemDelta:
         )
         self._turn = turn
         self._fingerprints = fingerprints
+        self._non_text_fingerprints = non_text_fingerprints
         self._text_cursors = text_cursors
         if full:
             # Terminal / turn-switch / item-set-shrink frames stay verbatim full
@@ -142,6 +192,7 @@ class SessionStreamItemDelta:
         fingerprints: dict[tuple[str, str], bytes] = {}
         changed: list[dict[str, Any]] = []
         appends: list[dict[str, Any]] = []
+        non_text_fingerprints: dict[tuple[str, str], bytes] = {}
         text_cursors: dict[tuple[str, str], tuple[int, bytes]] = {}
         for item in items:
             if (
@@ -168,9 +219,21 @@ class SessionStreamItemDelta:
             cursor = witness.text_cursors.get(identity)
             if cursor is not None:
                 text_cursors[identity] = cursor
+                # The cursor marks a projector-tracked text row, whose 32-byte
+                # fingerprint is text digest ++ non-text digest: keep the
+                # non-text half current for a later legacy recompute frame.
+                if isinstance(fingerprint, (bytes, bytearray)) and len(fingerprint) == 32:
+                    non_text_fingerprints[identity] = bytes(fingerprint[16:])
             if self._fingerprints.get(identity) == fingerprint:
                 continue
             append_entry = self._witness_append_entry(item, identity, witness)
+            if append_entry is not None and _witness_non_text_changed(
+                self._fingerprints.get(identity), fingerprint
+            ):
+                # The two 32-byte fingerprint halves split text from metadata;
+                # a changed non-text half means the client's cached row carries
+                # stale fields an append cannot update: full row instead.
+                append_entry = None
             if append_entry is not None:
                 appends.append(append_entry)
             else:
@@ -182,6 +245,7 @@ class SessionStreamItemDelta:
         )
         self._turn = turn
         self._fingerprints = fingerprints
+        self._non_text_fingerprints = non_text_fingerprints
         self._text_cursors = text_cursors
         stripped = _without_witness(event)
         if full:
@@ -195,6 +259,7 @@ class SessionStreamItemDelta:
     def _reset(self) -> None:
         self._turn = None
         self._fingerprints.clear()
+        self._non_text_fingerprints.clear()
         self._text_cursors.clear()
 
     def _append_entry_for(

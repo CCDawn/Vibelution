@@ -647,6 +647,16 @@ def _build_session_detail_from_summary(
     include_secondary: bool = True,
 ) -> dict[str, Any]:
     s = _service()
+    # ``ledgerSeq`` on this detail doubles as the SSE ``id:`` cursor and the
+    # edit-resubmit staleness base, so it may only claim coverage of content
+    # the frame actually contains. Detail assembly is multi-step (message
+    # window, live output hydration, metrics, agent snapshot), so this is the
+    # read-before-snapshot watermark: every read below the snapshot either
+    # belongs to the frame with a sequence at or above it (safe: a reconnect
+    # replays it redundantly) or completed before the snapshot (covered). The
+    # previous end-of-assembly stamp claimed the opposite band and let
+    # reconnects skip journal events the frame never delivered.
+    ledger_sequence = s._session_ledger_sequence(conversation["id"])
     turn_control = s._get_session_turn_control(conversation["id"])
     turn_snapshot = turn_control.snapshot() if turn_control is not None else {
         "stopRequested": False,
@@ -738,7 +748,7 @@ def _build_session_detail_from_summary(
         ).strip(),
         "terminalReason": summary.get("terminalReason")
         or s._terminal_reason_from_conversation(conversation),
-        "ledgerSeq": s._session_ledger_sequence(conversation["id"]),
+        "ledgerSeq": ledger_sequence,
         "activeTask": s._active_task_to_api(active_task),
         "defaultFileContext": default_file_context,
         "previewTabs": preview_tabs,
