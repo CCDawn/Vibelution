@@ -44,6 +44,11 @@ Vibelution Agent 的系统提示词装配模块。
 
 **能力门是单一权威**：运行目标包的能力由 `provider_adapters.runtime_goal_capabilities()` 投影为能力名（`code_context` / `git_workflow`），与协议能力合并进 `PromptAssemblyContext.capabilities`；章节是否放行只在 resolver 裁决，manifest 记录 `decision` 与 `decisionReason`。渲染前不再有第二处目标过滤。
 
+## 动态章节注册：INTENT_ALIGNMENT
+
+- `INTENT_ALIGNMENT`（`sections.py::make_intent_alignment_section`）是意图对齐状态动态章节：packet 由 host 经 `PromptManager.set_intent_alignment_packet()` 注入 BuildContext，compute 只读 packet、不 import store；packet 为空或已对齐且无未决问题时返回 None（空态零 token）。
+- 注册走 protected floor + preferred section order（`prompt_manager.py` 的 `_PROTECTED_FLOOR_SECTIONS` / `_PREFERRED_SECTION_ORDER`），不进 `_FALLBACK_DEFAULT_SECTIONS` 与 config `prompt.default_components`——被 include/exclude 裁剪后仍回补；`TASK_CHECKLIST` 只进 preferred order、无 floor 回补，这是两者的注册差异。
+
 ## 未启用机制（保留，但生产不生效）
 
 - **workspace 动态文件**：`IDENTITY.md` / `USER.md` / `DYNAMIC.md` 章节仅在 `PromptManager(enable_workspace=True)` 时注册；生产恒为 `False`（唯一启用点在测试）。保留为潜在能力，勿按“活跃机制”理解。
