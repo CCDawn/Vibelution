@@ -163,6 +163,23 @@ def _recover_interrupted_session_turns_on_startup(
     return recover_interrupted_session_turns_on_startup(should_stop=should_stop)
 
 
+def _recover_stale_subagent_addresses_on_startup(
+    *, should_stop: Callable[[], bool] | None = None
+) -> object:
+    """Fail subagent address records orphaned by a parent crash.
+
+    The spawned child deliberately outlives the parent process group, so a
+    crash leaves its address record stuck ``running`` forever (resumes queue
+    eternally). Best-effort sweep, never blocks startup.
+    """
+
+    from core.orchestration.subagent_address import (
+        recover_stale_subagent_addresses_on_startup,
+    )
+
+    return recover_stale_subagent_addresses_on_startup(should_stop=should_stop)
+
+
 def _validate_challenge_fence_config_on_startup() -> int | None:
     """Validate the operator per-call fence pin once at backend boot.
 
@@ -620,6 +637,13 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_session_recovery_task = startup_jobs.start_thread(
         "startup-session-recovery",
         _recover_interrupted_session_turns_on_startup,
+        stop_keyword="should_stop",
+    )
+    # Subagent address orphan sweep (crash-left running records). Same
+    # best-effort recovery family; see core/orchestration/subagent_address.py.
+    startup_jobs.start_thread(
+        "startup-subagent-address-recovery",
+        _recover_stale_subagent_addresses_on_startup,
         stop_keyword="should_stop",
     )
     startup_research_task_recovery = _start_research_task_recovery_job(
