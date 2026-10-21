@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
@@ -249,11 +250,21 @@ def prepare_agent_turn(
         # input keeps the existing same-turn context and its provenance.
         has_history_seed = bool(history_items) or isinstance(_maybe_json(chat_history), list)
         if callable(restore_chat_history) and has_history_seed:
+            # History seeding (ProviderMessageChain build + per-message
+            # restore) is a TTFT dark zone: measure it here and let the agent
+            # surface it as the seedHistoryMs anchor once the turn's telemetry
+            # opens inside run_single_turn.
+            seed_history_started_at = time.perf_counter()
             restore_chat_history(history_items)
             ledger_fp = _coerce_text(chat_history_ledger_fingerprint).strip()
             seed_ledger_fp = getattr(agent, "seed_chat_history_ledger_fingerprint", None)
             if callable(seed_ledger_fp):
                 seed_ledger_fp(ledger_fp)
+            stash_seed_timing = getattr(agent, "stash_seed_history_timing_ms", None)
+            if callable(stash_seed_timing):
+                stash_seed_timing(
+                    max(0, int((time.perf_counter() - seed_history_started_at) * 1000))
+                )
 
     host_seeded_runtime_context = False
     static_context_text = _coerce_text(static_runtime_context).strip()
