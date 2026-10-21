@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
+from core.web.services.session.stream_projection_delta import (
+    WITNESS_FIELD,
+    AssistantDeltaFrameWitness,
+)
 from core.web.services.session.stream_transport_delta import SessionStreamItemDelta
 
 
@@ -167,3 +172,99 @@ def test_long_turn_append_payload_stays_bounded_and_reconstructs_items():
             received[value["itemId"]] = value
         assert list(received.values()) == event["turnItems"]
     assert compact_bytes < full_bytes * 0.1
+
+
+def _text_digest(text: str) -> bytes:
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest()
+
+
+def _witness_fingerprint(value: dict) -> bytes:
+    """Mirror the projector's split fingerprint: text digest + non-text digest."""
+
+    payload = {key: val for key, val in value.items() if key != "text"}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return _text_digest(value["text"]) + hashlib.blake2b(encoded, digest_size=16).digest()
+
+
+def witness_frame(row: dict, *prior_rows: dict) -> dict:
+    """Build the witness snapshot the publish-side projector would freeze."""
+
+    identity = ("item", row["itemId"])
+    event = frame(row)
+    event[WITNESS_FIELD] = AssistantDeltaFrameWitness(
+        fingerprints={identity: _witness_fingerprint(row)},
+        text_cursors={identity: (len(row["text"]), _text_digest(row["text"]))},
+        prefix_history={
+            identity: {len(prior["text"]): _text_digest(prior["text"]) for prior in (row, *prior_rows)}
+        },
+    )
+    return event
+
+
+def test_same_row_status_flip_travels_as_full_row_not_append():
+    delta = SessionStreamItemDelta()
+    delta.compact(frame(item(text="hello")))
+    # The text grows AND the row's status flips on the same frame (running ->
+    # completed at the same identity): an append would splice text onto the
+    # client's cached row while keeping its stale status.
+    grown = delta.compact(frame(item(text="hello world", status="completed")))
+    assert grown["turnItems"] == [item(text="hello world", status="completed")]
+    assert "turnItemAppends" not in grown
+    # Pure text growth afterwards appends again from the refreshed baseline.
+    pure = delta.compact(frame(item(text="hello world!", status="completed")))
+    assert pure["turnItems"] == []
+    assert pure["turnItemAppends"][0]["appendedText"] == "!"
+
+
+def test_same_row_revision_id_change_travels_as_full_row_not_append():
+    delta = SessionStreamItemDelta()
+    delta.compact(frame(item(text="hello", id="answer:1")))
+    # Row ids embed the revision (``f"{itemId}:{revision}"``), so a revision
+    # bump rewrites ``id`` on the same identity while the text grows.
+    bumped = delta.compact(frame(item(text="hello world", id="answer:2", revision=2)))
+    assert bumped["turnItems"] == [item(text="hello world", id="answer:2", revision=2)]
+    assert "turnItemAppends" not in bumped
+
+
+def test_witness_pure_text_growth_still_appends():
+    delta = SessionStreamItemDelta()
+    first = witness_frame(item(text="hello"))
+    assert delta.compact(first) == frame(item(text="hello"))
+    second = witness_frame(item(text="hello world"), item(text="hello"))
+    compact = delta.compact(second)
+    assert compact["turnItems"] == []
+    assert compact["turnItemAppends"] == [
+        {
+            "kind": "append",
+            "itemId": "answer",
+            "itemType": "agent_message",
+            "baseLength": 5,
+            "appendedLength": 6,
+            "appendedText": " world",
+        }
+    ]
+
+
+def test_witness_same_row_status_flip_travels_as_full_row_not_append():
+    delta = SessionStreamItemDelta()
+    delta.compact(witness_frame(item(text="hello", status="running")))
+    second = witness_frame(item(text="hello world", status="completed"), item(text="hello", status="running"))
+    compact = delta.compact(second)
+    assert compact["turnItems"] == [item(text="hello world", status="completed")]
+    assert "turnItemAppends" not in compact
+
+
+def test_legacy_frame_after_witness_frames_compares_against_last_delivered_metadata():
+    delta = SessionStreamItemDelta()
+    delta.compact(witness_frame(item(text="hello", status="running")))
+    # The witness frame flips the delivered row to completed (full row, since
+    # the non-text half changed); a later legacy frame whose metadata reverts
+    # to running must compare against that last DELIVERED completed row and
+    # resend full, not append onto it.
+    flipped = delta.compact(
+        witness_frame(item(text="hello world", status="completed"), item(text="hello", status="running"))
+    )
+    assert flipped["turnItems"] == [item(text="hello world", status="completed")]
+    reverted = delta.compact(frame(item(text="hello world!", status="running")))
+    assert reverted["turnItems"] == [item(text="hello world!", status="running")]
+    assert "turnItemAppends" not in reverted

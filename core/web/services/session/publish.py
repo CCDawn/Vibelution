@@ -403,6 +403,13 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
     if not normalized_session_id:
         return None
 
+    # The frame's ``ledgerSeq`` doubles as the SSE ``id:`` cursor, so it may
+    # only claim coverage of content the frame actually contains. Snapshot the
+    # journal watermark BEFORE reading any content (target, summary, latest
+    # message): journal events appended after the snapshot get sequences above
+    # it and are replayed on Last-Event-ID resume, while stamping after the
+    # reads would mark those events seen without ever delivering them.
+    ledger_sequence = s._session_ledger_sequence(normalized_session_id)
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in s._RUNNING_SESSION_IDS
@@ -420,7 +427,7 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
     return {
         "type": "session_initial",
         "sessionId": normalized_session_id,
-        "ledgerSeq": s._session_ledger_sequence(normalized_session_id),
+        "ledgerSeq": ledger_sequence,
         "summary": summary,
         "latestMessage": latest_message_payload,
         "activeTurnId": active_turn_id,
@@ -822,15 +829,20 @@ def _publish_session_assistant_delta(
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
-        queued_event, coalesced_count = s._coalesce_session_assistant_delta_queue(subscriber, event)
-        dropped_count += coalesced_count
-        delivered, dropped = s._put_session_stream_event(
-            subscriber,
-            queued_event,
-            recover_assistant_delta_on_drop=True,
-            assistant_delta_recovery_event=recovery_event,
-        )
-        dropped_count += dropped
+        # Coalescing and enqueue must be one publisher-side critical section:
+        # an interleaved publisher that drains and refills the queue between
+        # this publisher's coalesce and put can strand or reorder frames
+        # (same contract as the session_detail publish path above).
+        with _session_stream_publish_lock(subscriber):
+            queued_event, coalesced_count = s._coalesce_session_assistant_delta_queue(subscriber, event)
+            dropped_count += coalesced_count
+            delivered, dropped = s._put_session_stream_event(
+                subscriber,
+                queued_event,
+                recover_assistant_delta_on_drop=True,
+                assistant_delta_recovery_event=recovery_event,
+            )
+            dropped_count += dropped
         if delivered:
             delivered_count += 1
     turn_items = event.get("turnItems") or []
