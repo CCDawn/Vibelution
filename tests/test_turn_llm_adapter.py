@@ -845,6 +845,77 @@ def test_adapter_single_hop_caps_the_fallback_chain():
     assert terminal[0]["routeFallback"] == {"from": "primary", "to": "backup_qwen"}
 
 
+def test_adapter_initial_fallback_profile_seeds_first_attempt_directly():
+    """C4 回归：粘性 fallback 从 initial_fallback_profile_id 起始直发。
+
+    同会话上一个 send 已切换到 fallback 后，下一个 send 起始即 fallback，
+    不再烧主路由重试预算；本 send 未发生切换，route_fallback 保持空，
+    由 Agent runtime 依据粘性状态自行维护。
+    """
+    profile_requests = []
+    llm_calls = []
+    backup = _route_llm("backup_qwen", identity=("dashscope", "backup_qwen"))
+
+    def get_llm_for_mode(**kwargs):
+        profile_requests.append(kwargs.get("profile_id"))
+        return backup
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        return TurnOutcome.final_answer(identity=_identity(), text="fallback-ok")
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        initial_fallback_profile_id="backup_qwen",
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            invoke_outcome=invoke_outcome,
+        ),
+    )
+    assert profile_requests == ["backup_qwen"]
+    assert llm_calls == ["backup_qwen"]
+    assert result.payload is not None
+    assert result.route_fallback == {}
+
+
+def test_adapter_sticky_fallback_failure_does_not_hop_again():
+    """C4 回归：粘性 fallback 路由自身失败时保持单跳，不再二次切换。"""
+    profile_requests = []
+    events = []
+    backup = _route_llm("backup_qwen", identity=("dashscope", "backup_qwen"), fallback="primary")
+
+    def get_llm_for_mode(**kwargs):
+        profile_requests.append(kwargs.get("profile_id"))
+        return backup
+
+    def invoke_outcome(*_args, **_kwargs):
+        raise LLMError(
+            "server_error", "backup down", retryable=True, details={"attempt": 5, "max_attempts": 5}
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        initial_fallback_profile_id="backup_qwen",
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                stop_current_turn=True,
+                user_message="backup down",
+            ),
+            record_scene_event=lambda _module, event, **kwargs: events.append(
+                (event, kwargs.get("fields") or {})
+            ),
+        ),
+    )
+    assert profile_requests == ["backup_qwen"]
+    assert result.payload is None
+    assert not any(event == "llm_route_fallback_switched" for event, _fields in events)
+
+
 def test_sanitize_llm_turn_messages_unwraps_history_envelope():
     cleaned = sanitize_llm_turn_messages(
         b'{"messages": [{"role": "system", "content": "stable"}]}'
