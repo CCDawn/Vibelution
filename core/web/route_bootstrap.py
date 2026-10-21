@@ -46,7 +46,15 @@ def _web_dist() -> Path:
 
 
 def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:
-    """Mount SPA index + catch-all after API routers so /api/* is not swallowed."""
+    """Publish the pinned shell, keeping its catch-all behind later API routes."""
+
+    shell_routes = getattr(app.state, "web_shell_routes", ())
+    if shell_routes:
+        # The shell is available before imports finish. Reuse those exact routes
+        # after API registration, otherwise the early catch-all swallows /api/*.
+        app.router.routes[:] = [route for route in app.router.routes if route not in shell_routes]
+        app.router.routes.extend(shell_routes)
+        return
 
     pinned_dist = str(getattr(app.state, "serving_frontend_dist", "") or "").strip()
     # A process-created app may be instantiated before a build exists (and
@@ -69,6 +77,8 @@ def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:
     if not dist.is_dir():
         raise RuntimeError(f"Serving frontend directory is unavailable: {dist}")
 
+    first_shell_route = len(app.router.routes)
+
     @app.get("/", include_in_schema=False)
     def index(request: Request):
         from .control import ensure_control_source
@@ -82,6 +92,18 @@ def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:
 
         ensure_control_source(request)
         return web_spa_fallback_response(full_path, dist)
+
+    app.state.web_shell_routes = tuple(app.router.routes[first_shell_route:])
+    from core.launcher.frontend_build import validate_staging_release
+
+    try:
+        validate_staging_release(dist)
+    except (OSError, RuntimeError) as exc:
+        app.state.web_shell_ready = False
+        app.state.web_shell_error = str(exc)
+    else:
+        app.state.web_shell_ready = True
+        app.state.web_shell_error = ""
 
 
 def _mark_routes_ready(app: FastAPI, *, error: str = "") -> None:

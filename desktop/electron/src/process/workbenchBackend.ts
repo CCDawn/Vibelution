@@ -2119,6 +2119,7 @@ export async function executeMainLineWorkbench(
     await waitForBackendHealthy({
       port: resolved.port,
       host,
+      readiness: "shell",
       signal: input.signal,
       childError: () => {
         const spawnError = spawned.spawnError();

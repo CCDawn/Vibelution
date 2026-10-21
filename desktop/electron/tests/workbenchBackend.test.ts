@@ -176,6 +176,19 @@ describe("workbenchBackendHealth", () => {
     ).resolves.toBe(false);
   });
 
+  it("can wait for verified shell readiness while functional routes keep warming", async () => {
+    const base = {
+      port: 8000,
+      connect: async () => true,
+      fetchHealth: async () => ({ status: 200, json: async () => ({ status: "ok", shellReady: true, routesReady: false }) })
+    };
+    await expect(probeBackendHealthy(base)).resolves.toBe(false);
+    await expect(probeBackendHealthy({ ...base, readiness: "shell" })).resolves.toBe(true);
+    await expect(probeBackendHealthy({ ...base, readiness: "shell", fetchHealth: async () => ({
+      status: 200, json: async () => ({ status: "ok", shellReady: false, routesReady: true })
+    }) })).resolves.toBe(false);
+  });
+
   it("treats a 200 response without a health payload as not ready", async () => {
     await expect(
       probeBackendHealthy({

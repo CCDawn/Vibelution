@@ -3634,7 +3634,7 @@ async function orchestrateLauncherLifecycle(
       }
     }
     const servingVersion = frontendCheckedForReuse && !frontendReleaseChanged && !packagedShellBlocksReuse
-      ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot })
+      ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot, readiness: "shell" })
       : { ok: false, reason: "release_or_shell_changed" };
     if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
       console.warn(`main-line backend reuse rejected: ${servingVersion.reason}`);
@@ -4150,6 +4150,7 @@ async function openWorkbenchAfterLifecycleReady(
   // unreplaced serving process (2026-09-11 freshness-gate incident).
   const servingVerification = await verifyRestartedServingVersion({
     workspaceRoot: paths.workspaceRoot,
+    readiness: "shell",
     previousBackendIdentity: previousBackendIdentity ?? null
   });
   if (!servingVerification.ok) {
@@ -4157,7 +4158,13 @@ async function openWorkbenchAfterLifecycleReady(
     console.error(detail);
     throw new Error(detail);
   }
-  const url = await refreshLiveWorkbenchUrl(paths);
+  const verifiedPort = servingVerification.inspection?.port ?? 0;
+  if (!Number.isInteger(verifiedPort) || verifiedPort <= 0 || verifiedPort > 65535) {
+    throw new Error("Workbench serving verification did not return a valid port");
+  }
+  // This port was just proved by the health + identity + version handshake.
+  // A second Python bridge only rereads the same persisted URL.
+  const url = rememberLiveWorkbenchUrl(workbenchLoopbackUrl(verifiedPort));
   if (!launcherLifecycleSupervisor.isCurrent(lease) || !launcherLifecycleSupervisor.claimReady(lease)) {
     return;
   }

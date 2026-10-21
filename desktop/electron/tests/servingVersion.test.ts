@@ -37,6 +37,30 @@ function input(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("shell serving verification", () => {
+  it("waits for the asynchronous code fingerprint before accepting the backend", async () => {
+    let finish!: (value: { head: string; dirtyTreeDigest: string }) => void;
+    const currentCode = vi.fn(() => new Promise<{ head: string; dirtyTreeDigest: string }>((resolve) => { finish = resolve; }));
+    let settled = false;
+    const pending = inspectWorkbenchServingVersion(input({ currentCode })).then((result) => { settled = true; return result; });
+    await vi.waitFor(() => expect(currentCode).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    finish({ head: "head-current", dirtyTreeDigest: "dirty-current" });
+    expect((await pending).ok).toBe(true);
+  });
+  it("keeps identity and version validation before routes finish warming", async () => {
+    const fetchHealth = async () => ({ status: 200, json: async () => healthPayload({ shellReady: true, routesReady: false }) });
+    expect((await inspectWorkbenchServingVersion(input({ fetchHealth }))).reason).toBe("health_not_ready");
+    expect((await inspectWorkbenchServingVersion(input({ fetchHealth, readiness: "shell" }))).ok).toBe(true);
+    expect((await inspectWorkbenchServingVersion(input({
+      fetchHealth, readiness: "shell", currentCode: () => ({ head: "other", dirtyTreeDigest: "dirty-current" })
+    }))).reason).toBe("backend_code_mismatch");
+    expect((await inspectWorkbenchServingVersion(input({
+      fetchHealth, readiness: "shell", readState: () => ({ backendPid: 4321, backendCreateTime: 999, backendExecutable: "python.exe" })
+    }))).reason).toBe("serving_backend_identity_mismatch");
+  });
+});
+
 describe("workbench serving-version handshake", () => {
   it("accepts the verified interpreter child of a Windows venv launcher", async () => {
     const runIdentityBridge = vi.fn(async () => JSON.stringify({ matches: true }));

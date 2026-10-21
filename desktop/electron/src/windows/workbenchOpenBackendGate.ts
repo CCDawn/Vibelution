@@ -23,8 +23,8 @@ import {
  * forever.
  *
  * A live PID or TCP listener is only a reachability hint. Reuse also requires
- * a ready health response from this workspace; release and process identity
- * validation remain at the lifecycle startup boundary.
+ * a verified static shell from this workspace. Functional API requests keep
+ * their separate routes-ready wait; identity/version checks stay at startup.
  */
 
 export const WORKBENCH_OPEN_START_WAIT_TIMEOUT_MS = 30_000;
@@ -90,6 +90,7 @@ export async function ensureWorkbenchBackendReady(
       port,
       host,
       fetchHealth,
+      readiness: "shell",
       timeoutMs: wait.timeoutMs
     }));
   const remainingMs = Math.max(0, expiresAt - Date.now());
@@ -108,7 +109,7 @@ function workspaceHealthFetch(workspaceRoot: string): (url: string) => Promise<W
       return { status: 503 };
     }
     const payload = await response.json();
-    if (!workbenchHealthPayloadReady(payload)
+    if (!workbenchHealthPayloadReady(payload, "shell")
       || !sameProjectRoot(String((payload as Record<string, unknown>).workspaceRoot || ""), workspaceRoot)) {
       return { status: 503 };
     }

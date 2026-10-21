@@ -14,6 +14,20 @@ function baseInput(overrides: Partial<Parameters<typeof ensureWorkbenchBackendRe
 }
 
 describe("ensureWorkbenchBackendReady", () => {
+  it("reuses a same-workspace static shell while API routes are warming", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      status: "ok", shellReady: true, routesReady: false, workspaceRoot: WORKSPACE_ROOT
+    }))));
+    try {
+      const startLifecycle = vi.fn(async () => undefined);
+      await expect(ensureWorkbenchBackendReady(baseInput({
+        isBackendReachable: async () => true, isBackendHealthy: undefined, startLifecycle
+      }))).resolves.toEqual({ started: false });
+      expect(startLifecycle).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it("opens with zero extra actions when the backend is already healthy", async () => {
     const isBackendReachable = vi.fn(async () => true);
     const startLifecycle = vi.fn(async () => ({ accepted: true }));

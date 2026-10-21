@@ -97,13 +97,14 @@ _HUMAN_ATTENTION_COLLECTORS = (
 
 
 def test_human_attention_feed_and_overview_share_all_four_sources(monkeypatch):
+    monkeypatch.setattr(attention, "collect_stage_task_attention", lambda: ([], []))
     rows = []
     for name, kind in zip(_HUMAN_ATTENTION_COLLECTORS, (
         "knowledge_review", "anomaly", "human_gate", "affair_reminder"
     )):
         row = {"id": name, "kind": kind, "title": name}
         rows.append(row)
-        monkeypatch.setattr(attention, name, lambda row=row: [row])
+        monkeypatch.setattr(attention, name, lambda row=row, **_kwargs: [row])
     assert attention.collect_human_attention() == rows
     payload = {"attention": [{"id": "approval-1", "kind": "approval"}]}
     assert attention.attach_attention_to_overview(payload)["humanAttention"] == rows
@@ -111,20 +112,53 @@ def test_human_attention_feed_and_overview_share_all_four_sources(monkeypatch):
 
 
 def test_human_attention_feed_isolates_each_failed_source_and_keeps_empty_overview_shape(monkeypatch):
-    def fail():
+    monkeypatch.setattr(attention, "collect_stage_task_attention", lambda: ([], []))
+    def fail(**_kwargs):
         raise RuntimeError("Source unavailable")
 
     for broken in _HUMAN_ATTENTION_COLLECTORS:
         with monkeypatch.context() as patch:
             for name in _HUMAN_ATTENTION_COLLECTORS:
-                patch.setattr(attention, name, fail if name == broken else lambda name=name: [{"id": name}])
+                patch.setattr(attention, name, fail if name == broken else lambda name=name, **_kwargs: [{"id": name}])
             assert attention.collect_human_attention() == [
                 {"id": name} for name in _HUMAN_ATTENTION_COLLECTORS if name != broken
             ]
     for name in _HUMAN_ATTENTION_COLLECTORS:
-        monkeypatch.setattr(attention, name, lambda: [])
+        monkeypatch.setattr(attention, name, lambda **_kwargs: [])
     assert attention.collect_human_attention() == []
     assert attention.attach_attention_to_overview({"attention": []}) == {"attention": []}
+
+
+def test_human_attention_reads_shared_stage_files_once_per_request(monkeypatch):
+    calls = []
+    review = {"id": "review", "kind": "knowledge_review", "severity": "high"}
+    anomaly = {"id": "stage-anomaly", "kind": "anomaly", "severity": "high"}
+    inbox = {"id": "inbox-anomaly", "kind": "anomaly", "severity": "critical"}
+
+    def stages():
+        calls.append("stage-scan")
+        return [review], [anomaly]
+
+    monkeypatch.setattr(attention, "collect_stage_task_attention", stages)
+    monkeypatch.setattr(attention, "_state_v2_anomaly_entries", lambda: [inbox, anomaly])
+    monkeypatch.setattr(attention, "_collect_human_gate_attention", lambda: [])
+    monkeypatch.setattr(attention, "_collect_affair_reminder_attention", lambda: [])
+    assert attention.collect_human_attention() == [review, inbox, anomaly]
+    assert calls == ["stage-scan"]
+
+
+def test_failed_shared_stage_scan_keeps_other_notification_sources(monkeypatch):
+    def stages():
+        raise OSError("stage source unavailable")
+
+    inbox = {"id": "inbox", "kind": "anomaly", "severity": "critical"}
+    gate = {"id": "gate", "actions": [{"decision": "accept"}], "meta": {"runId": "run"}}
+    reminder = {"id": "reminder"}
+    monkeypatch.setattr(attention, "collect_stage_task_attention", stages)
+    monkeypatch.setattr(attention, "_state_v2_anomaly_entries", lambda: [inbox])
+    monkeypatch.setattr(attention, "_collect_human_gate_attention", lambda: [gate])
+    monkeypatch.setattr(attention, "_collect_affair_reminder_attention", lambda: [reminder])
+    assert attention.collect_human_attention() == [inbox, gate, reminder]
 
 
 
@@ -1000,8 +1034,8 @@ def test_affair_reminder_attention_caps_and_degrades_safely(monkeypatch):
 
 
 def test_overview_attaches_affair_reminders_without_touching_session_attention(monkeypatch):
-    monkeypatch.setattr(attention, "collect_knowledge_review_attention", lambda: [])
-    monkeypatch.setattr(attention, "collect_anomaly_attention", lambda: [])
+    monkeypatch.setattr(attention, "collect_knowledge_review_attention", lambda **_kwargs: [])
+    monkeypatch.setattr(attention, "collect_anomaly_attention", lambda **_kwargs: [])
     reminder = {
         "id": "affair-reminder:affair-1:20261019",
         "kind": "affair_reminder",

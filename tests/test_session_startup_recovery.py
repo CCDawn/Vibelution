@@ -18,6 +18,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -41,6 +42,16 @@ SESSION_ID = "session-a"
 ORIGINAL_TURN_ID = "turn-1"
 RESUMED_TURN_ID = "turn-resume-1"
 ORIGINAL_PROMPT = "帮我重构导出脚本"
+
+
+def test_companion_scope_uses_summary_without_losing_identity():
+    def list_agents(*, include_archived, detail):
+        assert include_archived is True
+        assert detail == "summary"
+        return [{"directSessionId": "companion-session", "metadata": {"virtualHumanCompanion": True}}]
+
+    service = SimpleNamespace(agent_directory_service=SimpleNamespace(list_agents=list_agents))
+    assert startup_recovery._companion_session_ids(service) == {"companion-session"}
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +91,7 @@ def recovery_env(tmp_path, monkeypatch, work_run_store):
     monkeypatch.setattr(
         session_service.agent_directory_service,
         "list_agents",
-        lambda include_archived=False: [],
+        lambda include_archived=False, detail="full": [],
     )
     monkeypatch.setattr(
         startup_recovery, "is_session_recovery_enabled", lambda *args, **kwargs: True
@@ -489,7 +500,7 @@ def test_companion_session_is_skipped(
     monkeypatch.setattr(
         session_service.agent_directory_service,
         "list_agents",
-        lambda include_archived=False: [
+        lambda include_archived=False, detail="full": [
             {
                 "agentId": "agent-companion",
                 "directSessionId": SESSION_ID,
@@ -512,7 +523,7 @@ def test_companion_session_is_skipped(
 def test_companion_scoping_unavailable_fails_closed(
     recovery_env, tmp_path, submit_calls, monkeypatch
 ) -> None:
-    def broken_list_agents(include_archived=False):
+    def broken_list_agents(include_archived=False, detail="full"):
         raise RuntimeError("directory unavailable")
 
     monkeypatch.setattr(

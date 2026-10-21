@@ -104,7 +104,9 @@ def _companion_session_ids(s: Any) -> set[str] | None:
     """
 
     try:
-        agents = s.agent_directory_service.list_agents(include_archived=True)
+        # Both Companion identity fields survive summary projection; full
+        # hydration also repairs unrelated Agent assets and loads policies.
+        agents = s.agent_directory_service.list_agents(include_archived=True, detail="summary")
     except Exception as exc:  # noqa: BLE001 - directory outage must not guess
         logger.warning(
             "Session startup recovery skipped: companion scoping unavailable (%s).",

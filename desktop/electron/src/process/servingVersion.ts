@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,8 +8,9 @@ import {
   readLauncherStateFile,
   sameProjectRoot
 } from "./workbenchBackend.js";
-import { workbenchHealthUrl } from "./workbenchBackendHealth.js";
+import { workbenchHealthPayloadReady, workbenchHealthUrl, type WorkbenchReadiness } from "./workbenchBackendHealth.js";
 import { runPythonJsonBridge, PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS, type PythonProcessIdentity } from "./pythonJsonBridge.js";
+import { readOnlyGitText } from "./gitProcess.js";
 
 export const WORKBENCH_API_CONTRACT_VERSION = "v1";
 
@@ -27,12 +27,13 @@ export type ServingVersionInspection = {
 
 type ServingVersionInput = {
   workspaceRoot: string;
+  readiness?: WorkbenchReadiness;
   port?: number;
   expectedBuildKey?: string;
   expectedRelease?: string;
   fetchHealth?: (url: string) => Promise<{ status: number; json?: () => Promise<unknown> }>;
   readActive?: (workspaceRoot: string) => { buildKey: string; release: string };
-  currentCode?: (workspaceRoot: string) => { head: string; dirtyTreeDigest: string };
+  currentCode?: (workspaceRoot: string) => { head: string; dirtyTreeDigest: string } | Promise<{ head: string; dirtyTreeDigest: string }>;
   readState?: (workspaceRoot: string) => Record<string, unknown>;
   runIdentityBridge?: typeof runPythonJsonBridge;
 };
@@ -105,23 +106,16 @@ function activeFrontendRelease(workspaceRoot: string): { buildKey: string; relea
   }
 }
 
-function currentBackendCode(workspaceRoot: string): { head: string; dirtyTreeDigest: string } {
-  const git = (args: string[]): string => {
-    try {
-      return execFileSync("git", args, {
-        cwd: workspaceRoot,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-        timeout: 10_000
-      }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    } catch {
-      return "";
-    }
-  };
-  const status = git(["status", "--porcelain=v1", "--untracked-files=all"]).replace(/\n+$/g, "");
+async function currentBackendCode(workspaceRoot: string): Promise<{ head: string; dirtyTreeDigest: string }> {
+  const [rawStatus, rawHead] = await Promise.all([
+    readOnlyGitText(workspaceRoot, ["status", "--porcelain=v1", "--untracked-files=all"]),
+    readOnlyGitText(workspaceRoot, ["rev-parse", "HEAD"])
+  ]);
+  // A failed status probe must not be hashed as an empty (clean) worktree.
+  if (rawStatus === null || rawHead === null) return { head: "", dirtyTreeDigest: "" };
+  const status = rawStatus.replace(/\n+$/g, "");
   return {
-    head: git(["rev-parse", "HEAD"]).trim(),
+    head: rawHead.trim(),
     dirtyTreeDigest: createHash("sha256").update(status, "utf8").digest("hex")
   };
 }
@@ -186,7 +180,7 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
   } catch {
     return { ok: false, reason: "health_invalid_json", port };
   }
-  if (!isRecord(raw) || raw.status !== "ok" || raw.routesReady !== true) {
+  if (!isRecord(raw) || !workbenchHealthPayloadReady(raw, input.readiness)) {
     return { ok: false, reason: "health_not_ready", port };
   }
   const serving = servingHealthPayload(raw);
@@ -269,7 +263,7 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
       health: raw
     };
   }
-  const current = (input.currentCode || currentBackendCode)(input.workspaceRoot);
+  const current = await (input.currentCode || currentBackendCode)(input.workspaceRoot);
   if (!current.head || !current.dirtyTreeDigest || serving.code.head !== current.head || serving.code.dirtyTreeDigest !== current.dirtyTreeDigest) {
     return {
       ok: false,
@@ -345,6 +339,7 @@ function sameProcessIdentity(
  */
 export async function verifyRestartedServingVersion(input: {
   workspaceRoot: string;
+  readiness?: WorkbenchReadiness;
   previousBackendIdentity?: ServingProcessIdentity | null;
   inspect?: typeof inspectWorkbenchServingVersion;
   attempts?: number;
@@ -366,7 +361,7 @@ export async function verifyRestartedServingVersion(input: {
     if (attempt > 0) {
       await delay(delayMs);
     }
-    const inspection = await inspect({ workspaceRoot: input.workspaceRoot });
+    const inspection = await inspect({ workspaceRoot: input.workspaceRoot, readiness: input.readiness });
     if (!inspection.ok) {
       last = { ok: false, reason: inspection.reason, inspection };
       if (!TRANSIENT_VERIFICATION_REASONS.has(inspection.reason)) {

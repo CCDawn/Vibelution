@@ -2,11 +2,74 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
+import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 
 from core.web.route_bootstrap import register_spa_routes
+from core.web.middleware.wait_for_routes import WaitForWebRoutesMiddleware
+
+
+def test_shell_and_assets_are_served_while_api_waits_for_bootstrap(tmp_path, monkeypatch):
+    from core.web import route_bootstrap
+    from core.web.router_registry import register_web_routers_from_modules
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text('<script src="/assets/app.js"></script>', encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("window.shellLoaded = true", encoding="utf-8")
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    app.state.web_routes_error = ""
+    app.add_middleware(WaitForWebRoutesMiddleware, timeout_seconds=1)
+    register_spa_routes(app, web_dist=dist)
+    shell_routes = app.state.web_shell_routes
+    assert app.state.web_shell_ready is True
+
+    async def exercise():
+        app.state.web_routes_ready_event = asyncio.Event()
+        waiting = asyncio.Event()
+        original_wait = route_bootstrap.wait_for_web_routes
+
+        async def observe_wait(*args, **kwargs):
+            waiting.set()
+            return await original_wait(*args, **kwargs)
+
+        monkeypatch.setattr("core.web.middleware.wait_for_routes.wait_for_web_routes", observe_wait)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
+            assert (await client.get("/chat")).status_code == 200
+            assert (await client.get("/assets/app.js")).text == "window.shellLoaded = true"
+            assert (await client.get("/assets/missing.js")).status_code == 404
+            assert "no-store" in (await client.get("/")).headers["cache-control"]
+            pending = asyncio.create_task(client.get("/api/probe"))
+            await asyncio.wait_for(waiting.wait(), 1)
+            assert not pending.done()
+            api = APIRouter()
+
+            @api.get("/probe")
+            def probe():
+                return {"ready": True}
+
+            register_web_routers_from_modules(app, [SimpleNamespace(router=api)])
+            register_spa_routes(app)
+            assert app.state.web_shell_routes is shell_routes
+            assert sum(route in shell_routes for route in app.routes) == 2
+            route_bootstrap._mark_routes_ready(app)
+            response = await asyncio.wait_for(pending, 1)
+            assert response.status_code == 200
+            assert response.json() == {"ready": True}
+
+    asyncio.run(exercise())
+
+
+def test_shell_readiness_rejects_missing_referenced_assets(tmp_path):
+    (tmp_path / "index.html").write_text('<script src="/assets/missing.js"></script>', encoding="utf-8")
+    app = FastAPI()
+    register_spa_routes(app, web_dist=tmp_path)
+    assert app.state.web_shell_ready is False
+    assert "missing asset" in app.state.web_shell_error
 
 
 @pytest.mark.parametrize("background", [False, True])
