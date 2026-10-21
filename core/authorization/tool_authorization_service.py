@@ -185,6 +185,9 @@ class AuthorizationReport:
     decision_cache_key: str = ""
     # 本决策是否来自模板缓存命中（False = 全量评估）。
     decision_cache_hit: bool = False
+    # TTFT 批六：本次解析内注册表加载段（peek/get）耗时（毫秒）。绑定层用它
+    # 把整段 resolve 拆成 registryMs 与决策段（cache key + 评估/命中重水化）。
+    registry_ms: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +312,43 @@ def clear_turn_decision_template_cache() -> None:
         _TURN_DECISION_TEMPLATES.clear()
 
 
+# ---------------------------------------------------------------------------
+# LLM identity fallback memo (TTFT batch 6)
+#
+# ``_runtime_llm_identity`` 在 runtime/快照带不出 model/provider 时回退到
+# ``config.get_config().llm.get_profile(role="primary")``；该回退每次 install
+# 都会走一遍 config 解析，是命中路径的已知嫌疑开销。memo 以 runtime 快照身份
+# （configRevision + configHash，与执行面 agent_config_mismatch 闸门同一信任
+# 口径）加上显式输入字段为键：同键必同内容，全局 config 变化必然推进
+# revision/hash，因此不引入额外失效通道。无可信快照身份（revision<1 或缺
+# hash）时不 memo，保持逐次解析；容量有界防漂移。
+# ---------------------------------------------------------------------------
+_LLM_IDENTITY_MEMO_MAX = 64
+_LLM_IDENTITY_MEMO_LOCK = Lock()
+_LLM_IDENTITY_MEMO: "OrderedDict[tuple[str, str, str, int, str], tuple[str, str, str]]" = OrderedDict()
+
+
+def _llm_identity_memo_key(
+    *,
+    model: str,
+    provider: str,
+    profile_id: str,
+    config_snapshot: Mapping[str, Any],
+) -> tuple[str, str, str, int, str] | None:
+    revision = _safe_int(config_snapshot.get("configRevision"), 0)
+    config_hash = _coerce_text(config_snapshot.get("configHash")).strip()
+    if revision < 1 or not config_hash:
+        return None
+    return (model, provider, profile_id, revision, config_hash)
+
+
+def clear_llm_identity_memo() -> None:
+    """Drop all cached LLM identity fallbacks (tests and explicit invalidation)."""
+
+    with _LLM_IDENTITY_MEMO_LOCK:
+        _LLM_IDENTITY_MEMO.clear()
+
+
 def _resolve_authorization(
     *,
     runtime: Mapping[str, Any],
@@ -319,7 +359,9 @@ def _resolve_authorization(
     """Resolve one canonical decision without any legacy visibility input."""
 
     started = perf_counter()
+    registry_started = perf_counter()
     loaded = registry_payload if registry_payload is not None else _load_registry_payload(registry_loader)
+    registry_ms = (perf_counter() - registry_started) * 1000
     payload = _as_mapping(loaded)
     descriptors = _descriptors_from_registry(payload)
     registered_names = tuple(descriptor.name for descriptor in descriptors)
@@ -400,6 +442,7 @@ def _resolve_authorization(
         duration_ms=max(0, int((perf_counter() - started) * 1000)),
         decision_cache_key=turn_cache_key,
         decision_cache_hit=cached_template is not None,
+        registry_ms=max(0, int(registry_ms)),
     )
 
 
@@ -449,6 +492,18 @@ def _runtime_llm_identity(runtime: Mapping[str, Any]) -> tuple[str, str, str]:
             model = model or _coerce_text(primary.get("model") or primary.get("modelId")).strip()
             provider = provider or _coerce_text(primary.get("provider") or primary.get("providerId")).strip()
     if not model or not provider:
+        memo_key = _llm_identity_memo_key(
+            model=model,
+            provider=provider,
+            profile_id=profile_id,
+            config_snapshot=config_snapshot,
+        )
+        if memo_key is not None:
+            with _LLM_IDENTITY_MEMO_LOCK:
+                cached = _LLM_IDENTITY_MEMO.get(memo_key)
+                if cached is not None:
+                    _LLM_IDENTITY_MEMO.move_to_end(memo_key)
+                    return cached
         try:
             from config.settings import get_config
 
@@ -465,6 +520,12 @@ def _runtime_llm_identity(runtime: Mapping[str, Any]) -> tuple[str, str, str]:
                 ).strip()
         except Exception:
             pass
+        if memo_key is not None:
+            with _LLM_IDENTITY_MEMO_LOCK:
+                _LLM_IDENTITY_MEMO[memo_key] = (model, provider, profile_id)
+                _LLM_IDENTITY_MEMO.move_to_end(memo_key)
+                while len(_LLM_IDENTITY_MEMO) > _LLM_IDENTITY_MEMO_MAX:
+                    _LLM_IDENTITY_MEMO.popitem(last=False)
     return model, provider, profile_id
 
 
@@ -513,12 +574,26 @@ def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
         return 0
 
 
-def install_execution_authorization(report: AuthorizationReport) -> ToolExecutionAuthorizationContext:
+def install_execution_authorization(
+    report: AuthorizationReport,
+    runtime: Mapping[str, Any] | None = None,
+) -> ToolExecutionAuthorizationContext:
+    """Install one turn-scoped execution context.
+
+    ``runtime`` 由绑定层传入 bind 阶段已取到的 runtime 投影，消掉本函数原本
+    的第二次 ``current_agent_runtime()`` getter；缺省 None 时保持旧行为
+    （自行从 current_agent_runtime 读取），供独立调用方使用。
+    """
+
     from core.orchestration.tool_budget_profiles import resolve_max_calls_per_turn
-    from core.web.services.agent_directory_service import current_agent_runtime
 
     decision = report.decision
-    runtime = _as_mapping(current_agent_runtime())
+    if runtime is None:
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        runtime = _as_mapping(current_agent_runtime())
+    else:
+        runtime = _as_mapping(runtime)
     policy = runtime.get("toolPolicy")
     if policy is None:
         policy = runtime.get("tool_policy")

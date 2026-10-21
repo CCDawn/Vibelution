@@ -698,3 +698,139 @@ def test_undeclared_write_scope_policy_keeps_write_tool_executable(monkeypatch):
         tool_call_id="call-planner",
     )
     assert execution.allowed is True
+
+
+def _dedupe_runtime_fixture():
+    """Runtime carrying explicit llm identity so the config fallback never fires."""
+
+    return {
+        "agentId": "agent-dedupe",
+        "turnId": "turn-dedupe",
+        "agent": {"agentId": "agent-dedupe"},
+        "agentConfigSnapshot": {
+            "agentId": "agent-dedupe",
+            "configRevision": 11,
+            "configHash": "config-hash-dedupe",
+        },
+        "permissionPreset": "request_approval",
+        "llmModel": "dedupe-model",
+        "llmProvider": "dedupe-provider",
+        "toolPolicy": {
+            "policyId": "tool-agent-dedupe",
+            "allowedTools": ["grep_search_tool"],
+            "preferredTools": [],
+        },
+    }
+
+
+def _context_fields(context):
+    from dataclasses import fields
+
+    return {
+        item.name: getattr(context, item.name)
+        for item in fields(context)
+        if item.name != "call_count_lock"
+    }
+
+
+def test_install_execution_authorization_with_bound_runtime_is_equivalent(monkeypatch):
+    """TTFT 批六消重：传入 bind 阶段 runtime 与旧 getter 路径逐字段等价，且不再取 getter。"""
+
+    from core.authorization.tool_authorization_service import resolve_enforced_authorization
+    from core.orchestration.tool_authorization_binding import bind_authorization_runtime
+
+    runtime_fixture = _dedupe_runtime_fixture()
+    getter_calls = {"count": 0}
+
+    def fake_getter():
+        getter_calls["count"] += 1
+        return dict(runtime_fixture)
+
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", fake_getter)
+    report = resolve_enforced_authorization(
+        runtime=dict(runtime_fixture),
+        registry_payload={
+            "registryVersion": 1,
+            "registryFingerprint": "registry-dedupe",
+            "descriptors": [
+                {
+                    "name": "grep_search_tool",
+                    "enabled": True,
+                    "capabilities": ["read"],
+                    "risk": "read",
+                    "approval": "never",
+                    "aliases": [],
+                }
+            ],
+            "tools": [
+                {"name": "grep_search_tool", "enabled": True, "runtimeActive": True, "llmVisible": True}
+            ],
+        },
+        generated_at="2026-10-21T00:00:00Z",
+    )
+
+    # 旧路径：自行取 current_agent_runtime。
+    context_legacy = tool_authorization_service.install_execution_authorization(report)
+    assert getter_calls["count"] == 1
+
+    # 新路径：绑定层传入 bind 阶段已取到的 runtime，getter 不再被触碰。
+    bound_runtime = bind_authorization_runtime(
+        current_runtime=dict(runtime_fixture),
+        turn_runtime={"agentId": "agent-dedupe", "turnId": "turn-dedupe"},
+        agent_binding=None,
+    )
+    context_bound = tool_authorization_service.install_execution_authorization(report, runtime=bound_runtime)
+    assert getter_calls["count"] == 1
+
+    assert _context_fields(context_bound) == _context_fields(context_legacy)
+    assert context_bound.model == "dedupe-model"
+    assert context_bound.provider == "dedupe-provider"
+    assert context_bound.max_calls_per_turn == context_legacy.max_calls_per_turn
+    assert context_bound.budget_profile == context_legacy.budget_profile
+
+
+def test_runtime_llm_identity_memo_reuses_config_fallback_per_snapshot(monkeypatch):
+    """TTFT 批六消重：config get_profile 回退按快照身份 memo，同身份只解析一次。"""
+
+    from config import settings as config_settings
+
+    tool_authorization_service.clear_llm_identity_memo()
+    calls = {"get_profile": 0}
+
+    class _FakeProvider:
+        provider_id = "memo-provider"
+
+    class _FakeProfile:
+        model = "memo-model"
+        profile_id = "memo-profile"
+        provider = _FakeProvider()
+
+    class _FakeLLM:
+        def get_profile(self, role="primary"):
+            calls["get_profile"] += 1
+            return _FakeProfile()
+
+    class _FakeConfig:
+        llm = _FakeLLM()
+
+    monkeypatch.setattr(config_settings, "get_config", lambda: _FakeConfig())
+
+    snapshot = {"agentConfigSnapshot": {"configRevision": 7, "configHash": "hash-memo"}}
+    first = tool_authorization_service._runtime_llm_identity(dict(snapshot))
+    second = tool_authorization_service._runtime_llm_identity(dict(snapshot))
+    assert first == ("memo-model", "memo-provider", "memo-profile")
+    assert second == first
+    assert calls["get_profile"] == 1
+
+    # 快照身份推进 → 旧 memo 不复用，重新解析。
+    bumped = {"agentConfigSnapshot": {"configRevision": 8, "configHash": "hash-memo-2"}}
+    assert tool_authorization_service._runtime_llm_identity(dict(bumped)) == first
+    assert calls["get_profile"] == 2
+
+    # 无可信快照身份（revision<1）→ 不 memo，逐次解析。
+    untrusted = {"agentConfigSnapshot": {"configRevision": 0, "configHash": ""}}
+    assert tool_authorization_service._runtime_llm_identity(dict(untrusted)) == first
+    assert tool_authorization_service._runtime_llm_identity(dict(untrusted)) == first
+    assert calls["get_profile"] == 4
+
+    tool_authorization_service.clear_llm_identity_memo()

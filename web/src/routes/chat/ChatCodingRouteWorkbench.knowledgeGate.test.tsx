@@ -17,7 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useComposerKnowledgeReferenceQueries } from "./ChatCodingRouteWorkbench";
+import { useComposerKnowledgeReferenceQueries } from "./useComposerKnowledgeReferenceQueries";
 
 // happy-dom needs an explicit act environment; without it act() only warns.
 // Repo pattern: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -39,19 +39,19 @@ let queryClient: QueryClient;
 let overviewItemCount = 0;
 let hostDataSnapshots: Array<{ bases: unknown; items: unknown }> = [];
 
-function Host({ agentId }: { agentId: string }) {
+function Host({ agentId, draft = "" }: { agentId: string; draft?: string }) {
   // Consuming `.data` registers the tracked props that let the observer
   // re-render the host when the overview lands (and the gate flips).
-  const { agentKnowledgeBasesQuery, agentKnowledgeItemsQuery } =
-    useComposerKnowledgeReferenceQueries(agentId);
+  const { agentKnowledgeBasesQuery, agentKnowledgeItemsQuery, knowledgeReferenceState } =
+    useComposerKnowledgeReferenceQueries(agentId, draft);
   hostDataSnapshots.push({
     bases: agentKnowledgeBasesQuery.data,
     items: agentKnowledgeItemsQuery.data,
   });
-  return null;
+  return <button onClick={knowledgeReferenceState.onRequest} data-loading={knowledgeReferenceState.loading} data-error={knowledgeReferenceState.error}>Load</button>;
 }
 
-function mount(agentId: string) {
+function mount(agentId: string, requested = true, draft = "") {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -60,10 +60,11 @@ function mount(agentId: string) {
       React.createElement(
         QueryClientProvider,
         { client: queryClient },
-        React.createElement(Host, { agentId }),
+        React.createElement(Host, { agentId, draft }),
       ),
     );
   });
+  if (requested) act(() => container.querySelector("button")!.click());
 }
 
 async function flush() {
@@ -90,7 +91,7 @@ beforeEach(() => {
     if (path.includes("/api/knowledge/search")) {
       return Promise.resolve({ results: [] });
     }
-    if (path.includes("/api/agents/agent-1/knowledge-bases")) {
+    if (path.includes("/knowledge-bases")) {
       return Promise.resolve({ knowledgeBases: [] });
     }
     throw new Error(`unexpected knowledge fetch: ${path}`);
@@ -112,6 +113,43 @@ afterEach(() => {
 });
 
 describe("composer knowledge-reference query gate", () => {
+  it("makes no knowledge requests on mount until the picker is requested", async () => {
+    overviewItemCount = 3;
+    mount("agent-1", false);
+    await flush();
+    expect(requestedPaths()).toEqual([]);
+    act(() => container.querySelector("button")!.click());
+    await vi.waitFor(() => expect(requestedPaths().some(path => path.includes("/search"))).toBe(true));
+    expect(requestedPaths()).toHaveLength(3);
+    act(() => container.querySelector("button")!.click());
+    await flush();
+    expect(requestedPaths()).toHaveLength(3);
+  });
+
+  it("loads candidates for @ input without opening the picker", async () => {
+    overviewItemCount = 1;
+    mount("agent-1", false, "请查看 @文档");
+    await vi.waitFor(() => expect(requestedPaths().some(path => path.includes("/search"))).toBe(true));
+  });
+
+  it("does not carry picker demand to a different agent", async () => {
+    mount("agent-1");
+    await vi.waitFor(() => expect(requestedPaths()).toHaveLength(2));
+    act(() => root!.render(<QueryClientProvider client={queryClient}><Host agentId="agent-2" /></QueryClientProvider>));
+    await flush();
+    expect(requestedPaths()).toHaveLength(2);
+    act(() => container.querySelector("button")!.click());
+    await vi.waitFor(() => expect(requestedPaths()).toHaveLength(4));
+    expect(requestedPaths().slice(2).every(path => path.includes("agent-2"))).toBe(true);
+  });
+
+  it("exposes a failed lookup and retries it on request", async () => {
+    fetchJsonMock.mockRejectedValueOnce(new Error("offline"));
+    mount("agent-1");
+    await vi.waitFor(() => expect(container.querySelector("button")?.dataset.error).toBe("true"));
+    act(() => container.querySelector("button")!.click());
+    await vi.waitFor(() => expect(container.querySelector("button")?.dataset.error).toBe("false"));
+  });
   it("skips the empty-query search when the overview proves the agent owns no knowledge items", async () => {
     overviewItemCount = 0;
     mount("agent-1");

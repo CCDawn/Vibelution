@@ -171,9 +171,11 @@ def test_resolve_turn_authorization_dedupes_identical_scene_events_and_keeps_ins
 
     recorded: list[Any] = []
     installed: list[Any] = []
+    timing_events: list[dict[str, Any]] = []
     monkeypatch.setattr(service, "resolve_enforced_authorization", fake_resolve)
-    monkeypatch.setattr(service, "install_execution_authorization", lambda report: installed.append(report))
+    monkeypatch.setattr(service, "install_execution_authorization", lambda report, **_kwargs: installed.append(report))
     monkeypatch.setattr(events, "record_authorization_decision", lambda report: recorded.append(report))
+    monkeypatch.setattr(events, "record_authorization_timing", lambda **fields: timing_events.append(fields))
 
     turn_runtime = {"agentId": "agent-dedupe", "turnId": "turn-1", "runId": "run-1", "mode": "chat"}
     kwargs = dict(
@@ -208,5 +210,65 @@ def test_resolve_turn_authorization_dedupes_identical_scene_events_and_keeps_ins
     # 再次同签名：跳过。
     binding.resolve_turn_authorization(**kwargs)
     assert len(recorded) == 2
+    binding.clear_turn_authorization_telemetry_state()
+    clear_turn_decision_template_cache()
+
+
+def test_resolve_turn_authorization_emits_subanchor_timing_event_every_turn(monkeypatch):
+    """TTFT 批六：子锚点 timing 事件每回合写出，且命中去重轮不缺席。"""
+
+    from core.logging import tool_authorization_events as events
+    from core.orchestration import tool_authorization_binding as binding
+
+    binding.clear_turn_authorization_telemetry_state()
+    clear_turn_decision_template_cache()
+
+    def fake_resolve(*, runtime):
+        return SimpleNamespace(
+            decision=SimpleNamespace(agent_id="agent-timing", turn_id="turn-timing"),
+            decision_cache_key="key-timing",
+            decision_cache_hit=True,
+            registry_ms=5,
+        )
+
+    recorded: list[Any] = []
+    record_calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(service, "resolve_enforced_authorization", fake_resolve)
+    monkeypatch.setattr(service, "install_execution_authorization", lambda report, **_kwargs: None)
+    monkeypatch.setattr(events, "record_authorization_decision", lambda report: recorded.append(report))
+    monkeypatch.setattr(events, "_record", lambda event_code, **kwargs: record_calls.append((event_code, kwargs)))
+
+    kwargs = dict(
+        runtime_agent_binding={"agentId": "agent-timing"},
+        turn_runtime_fn=lambda: {"agentId": "agent-timing", "turnId": "turn-timing"},
+        current_runtime_fn=lambda: {"agentId": "agent-timing"},
+    )
+    binding.resolve_turn_authorization(**kwargs)
+    binding.resolve_turn_authorization(**kwargs)
+
+    # decision 事件去重为 1 条，timing 事件每回合各写一条。
+    assert len(recorded) == 1
+    timing_events = [kwargs_ for event_code, kwargs_ in record_calls if event_code == "tool.authorization.timing"]
+    assert len(timing_events) == 2
+    for event in timing_events:
+        assert event["outcome"] == "resolved"
+        assert event["level"] == "info"
+        fields = event["fields"]
+        assert fields["agentId"] == "agent-timing"
+        assert fields["turnId"] == "turn-timing"
+        assert fields["cacheHit"] is True
+        assert isinstance(fields["durationMs"], int) and fields["durationMs"] >= 0
+        for anchor in ("bindMs", "registryMs", "resolveMs", "installMs", "recordMs"):
+            assert isinstance(fields[anchor], int) and fields[anchor] >= 0
+    # registryMs 透传 service 报告的注册表加载段。
+    assert timing_events[0]["fields"]["registryMs"] == 5
+
+    thread_timing = binding.last_turn_authorization_timing()
+    assert thread_timing is not None
+    assert thread_timing["turnAuthorizationCacheHit"] is True
+    assert thread_timing["registryMs"] == 5
+    for anchor in ("bindMs", "resolveMs", "installMs", "recordMs"):
+        assert isinstance(thread_timing[anchor], int) and thread_timing[anchor] >= 0
+
     binding.clear_turn_authorization_telemetry_state()
     clear_turn_decision_template_cache()
