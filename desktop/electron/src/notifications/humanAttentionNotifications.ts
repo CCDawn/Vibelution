@@ -1,5 +1,13 @@
-export type HumanAttentionKind = "knowledge_review" | "anomaly" | "affair_reminder" | "human_gate";
-export type HumanAttentionSeverity = "critical" | "high" | "medium";
+export type HumanAttentionKind =
+  | "knowledge_review"
+  | "anomaly"
+  | "affair_reminder"
+  | "human_gate"
+  | "dispatch_receipt"
+  | "run_completed"
+  | "session_completed";
+/** info 只用于完成类事件（好消息），不占用停靠/异常的 critical/high 语义。 */
+export type HumanAttentionSeverity = "critical" | "high" | "medium" | "info";
 
 /** Server-labeled approve affordance forwarded to the assistant window card. */
 export type DesktopHumanAttentionAction = {
@@ -98,9 +106,12 @@ const KINDS: ReadonlySet<string> = new Set([
   "knowledge_review",
   "anomaly",
   "affair_reminder",
-  "human_gate"
+  "human_gate",
+  "dispatch_receipt",
+  "run_completed",
+  "session_completed"
 ]);
-const SEVERITIES: ReadonlySet<string> = new Set(["critical", "high", "medium"]);
+const SEVERITIES: ReadonlySet<string> = new Set(["critical", "high", "medium", "info"]);
 const DEFAULT_DEDUP_WINDOW_MS = 60_000;
 const MAX_TRACKED_IDS = 500;
 const MAX_ID_LENGTH = 128;
@@ -214,7 +225,7 @@ function validateHumanAttentionPayload(
   if (typeof raw.severity !== "string" || !SEVERITIES.has(raw.severity)) {
     return {
       ok: false,
-      error: "Human attention notification severity must be one of critical, high, medium."
+      error: "Human attention notification severity must be one of critical, high, medium, info."
     };
   }
   const title = normalizeText(raw.title, MAX_TITLE_LENGTH);

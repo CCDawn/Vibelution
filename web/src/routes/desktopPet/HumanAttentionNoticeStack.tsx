@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, X } from "lucide-react";
+import { CheckCircle2, CircleAlert, X } from "lucide-react";
 import { VIconButton, VNativeButton } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import {
   humanAttentionBridge,
   humanAttentionTargetFor,
+  isHumanAttentionKind,
   subscribeHumanAttentionEvents,
+  type HumanAttentionKind,
   type HumanAttentionNotificationPayload,
 } from "../personalAssistant/humanAttentionNotifications";
 import { humanGateScopeFor, submitHumanGateDecision } from "../personalAssistant/humanGateDecision";
@@ -15,13 +17,32 @@ import styles from "./HumanAttentionNoticeStack.styles";
 const DISMISS_AFTER_MS = 12_000;
 const MAX_STACKED_CARDS = 3;
 
+/** 完成类是好消息（severity info）：信息卡 + 一个“查看结果”跳转，无决策按钮。 */
+const COMPLETION_KINDS: ReadonlySet<HumanAttentionKind> = new Set([
+  "dispatch_receipt",
+  "run_completed",
+  "session_completed",
+]);
+
+function isCompletionKind(kind: string): boolean {
+  return isHumanAttentionKind(kind) && COMPLETION_KINDS.has(kind);
+}
+
 const COPY = {
   zh: {
     region: "人工注意通知",
     close: "关闭通知",
     open: "查看该事项",
     fallbackTitle: "需要你的关注",
-    kinds: { knowledge_review: "知识复核", anomaly: "研究异常", affair_reminder: "事务提醒", human_gate: "人工审批" },
+    kinds: {
+      knowledge_review: "知识复核",
+      anomaly: "研究异常",
+      affair_reminder: "事务提醒",
+      human_gate: "人工审批",
+      dispatch_receipt: "派遣回执",
+      run_completed: "运行完成",
+      session_completed: "会话完成",
+    },
     confirmPrefix: "确认",
     cancel: "取消",
     submitting: "提交中…",
@@ -32,7 +53,15 @@ const COPY = {
     close: "Dismiss notification",
     open: "Open the related item",
     fallbackTitle: "Needs your attention",
-    kinds: { knowledge_review: "Knowledge review", anomaly: "Anomaly", affair_reminder: "Affair", human_gate: "Human gate" },
+    kinds: {
+      knowledge_review: "Knowledge review",
+      anomaly: "Anomaly",
+      affair_reminder: "Affair",
+      human_gate: "Human gate",
+      dispatch_receipt: "Dispatch receipt",
+      run_completed: "Run finished",
+      session_completed: "Session done",
+    },
     confirmPrefix: "Confirm ",
     cancel: "Cancel",
     submitting: "Submitting…",
@@ -227,7 +256,9 @@ export function HumanAttentionNoticeStack({ onBeforeNavigate }: {
               aria-label={`${copy.open}: ${card.payload.title}`}
               onClick={() => openCard(card)}
             >
-              <CircleAlert size={14} aria-hidden="true" className={styles.cardIcon} />
+              {isCompletionKind(card.payload.kind)
+                ? <CheckCircle2 size={14} aria-hidden="true" className={styles.cardIcon} />
+                : <CircleAlert size={14} aria-hidden="true" className={styles.cardIcon} />}
               <span className={styles.cardCopy}>
                 <strong className={styles.cardTitle} title={card.payload.title}>
                   {card.payload.title || copy.fallbackTitle}

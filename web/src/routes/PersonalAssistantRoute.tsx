@@ -1,5 +1,6 @@
 import "./personalAssistant/personal-assistant.tailwind.css";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PanelRightClose } from "lucide-react";
 import { controlDesktopAssistant } from "../api/desktopPet";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -28,11 +29,15 @@ export function PersonalAssistantRoute() {
   const narrow = useAssistantNarrowLayout();
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [overviewCollapsed, setOverviewCollapsed] = useState(false);
-  const [rightTab, setRightTab] = useState("overview");
+  // 人工关注通知深链：`?panel=dispatches` 直达派遣回执面板（宽布局落到
+  // 右栏派遣 tab，窄布局直接弹派遣对话框），只消费一次初始 searchParams。
+  const [searchParams] = useSearchParams();
+  const deepLinkPanel = searchParams.get("panel") === "dispatches";
+  const [rightTab, setRightTab] = useState(() => (deepLinkPanel ? "dispatches" : "overview"));
   const [computerOpen, setComputerOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [affairsOpen, setAffairsOpen] = useState(false);
-  const [dispatchesOpen, setDispatchesOpen] = useState(false);
+  const [dispatchesOpen, setDispatchesOpen] = useState(deepLinkPanel);
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const assistantAgentId = state.assistant?.agentId ?? "";
   const [desktopPending, setDesktopPending] = useState(false);

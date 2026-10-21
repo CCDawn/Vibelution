@@ -36,6 +36,16 @@ overview ``attention`` 条目。只做轮询聚合（overview GET 已有轮询�
 
   决策仍走 ``resolve_human_task`` 单一命令权威，本源不写任何状态。
 
+- ``completion`` —— 完成类事件（派遣回执到达 / 科研 run ``succeeded`` /
+
+  用户可见会话一轮完成）。行由 ``personal_attention_completion_service``
+
+  产出，带新鲜度窗口、聚合与每次采集上限三层防刷屏；severity 固定
+
+  ``info``，不占用停靠/异常的 critical/high 语义，也没有 ``actions``
+
+  （纯信息卡，点击即跳转结果页）。
+
 
 同一条任务既停靠复核又带升级时只按 ``anomaly`` 报一次，避免一条停靠弹
 
@@ -910,6 +920,18 @@ def _collect_affair_reminder_attention() -> list[dict[str, str]]:
     return collect_affair_reminder_attention()
 
 
+def _collect_completion_attention() -> list[dict[str, str]]:
+    """完成类事件（派遣回执/run 完成/会话完成）；lazy import 保持可选接线。
+
+    防刷屏与新鲜度窗口的裁决都在采集模块内部
+    （``personal_attention_completion_service`` 模块 docstring），这里只做
+    单一失败边界的转发。
+    """
+    from .personal_attention_completion_service import collect_completion_attention
+
+    return collect_completion_attention()
+
+
 def _collect_human_attention_uncached() -> list[dict[str, Any]]:
     started = time.perf_counter()
     # Both lanes project the same files. Share one request-local scan, keeping
@@ -926,6 +948,7 @@ def _collect_human_attention_uncached() -> list[dict[str, Any]]:
         ("anomaly", lambda: collect_anomaly_attention(stage_entries=stage_anomaly)),
         ("humanGate", _collect_human_gate_attention),
         ("reminder", _collect_affair_reminder_attention),
+        ("completion", _collect_completion_attention),
     ):
         source_started = time.perf_counter()
         try:
