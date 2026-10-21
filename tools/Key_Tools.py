@@ -2386,7 +2386,8 @@ def _build_key_tools() -> List[BaseTool]:
 
         Args:
             task: 兼容旧接口的任务描述（自然语言）
-            timeout: 超时时间（秒），默认 120
+            timeout: 超时时间（秒），默认 120；上限 150 秒（执行器预算），
+                传入更大的值会被自动收窄到 150
             task_type: inspect | diagnose | verify | summarize
             goal: 当前唯一目标
             scope: 任务范围，可传路径、目录、日志文件或 JSON 字符串
@@ -2508,6 +2509,7 @@ def _build_key_tools() -> List[BaseTool]:
         to: str,
         message: str,
         summary: str = "",
+        _cancel_checker=None,
     ) -> str:
         """
         按子代理编号继续同一场会话。
@@ -2523,7 +2525,12 @@ def _build_key_tools() -> List[BaseTool]:
         Returns:
             JSON。delivery=queued 表示还在跑并已排队；否则是这一场的执行结果。
         """
-        return _continue_subagent_impl(to=to, message=message, summary=summary)
+        return _continue_subagent_impl(
+            to=to,
+            message=message,
+            summary=summary,
+            _cancel_checker=_cancel_checker,
+        )
 
     @tool
     def append_personal_memory_tool(

@@ -102,13 +102,22 @@ def _attach_abandoned_future_reconciliation(
     tool_name: str,
     tool_args: dict,
     cancel_reason: str,
+    late_context: str = "cancel",
 ) -> None:
     """被放弃的工具 future 仍可能物理完成：完成时留下迟到对账记录，避免静默丢失。
 
     `future.cancel()` 对已启动的线程无效；调用方放弃该 future 后，其真实结果
     （或异常）仍会在物理线程中出现。这里在 done 回调里补一条 scene 事件，
-    与 quiescence 等待预算耗尽时的 `abandoned_wait` 记录对账。
+    与 quiescence 等待预算耗尽时的 `abandoned_wait` 记录对账。取消路径与
+    超时路径共用；``late_context`` 只区分事件码与文案，不改记录语义。
     """
+
+    if late_context == "timeout":
+        late_event_code = "tool.execute.late_completed_after_timeout"
+        late_prefix = "在外层超时后"
+    else:
+        late_event_code = "tool.execute.late_completed_after_cancel"
+        late_prefix = "在取消后"
 
     def _record_late_completion(done_future: Any) -> None:
         try:
@@ -130,12 +139,12 @@ def _attach_abandoned_future_reconciliation(
                 fields["error"] = late_error
             _record_tool_scene_event(
                 "execute",
-                "tool.execute.late_completed_after_cancel",
+                late_event_code,
                 tool_name=tool_name,
                 message=(
-                    f"{tool_name} 在取消后仍物理完成，结果已丢弃并留痕"
+                    f"{tool_name} {late_prefix}仍物理完成，结果已丢弃并留痕"
                     if late_outcome == "succeeded"
-                    else f"{tool_name} 在取消后仍物理结束（失败），异常已留痕"
+                    else f"{tool_name} {late_prefix}仍物理结束（失败），异常已留痕"
                 ),
                 level="warning",
                 outcome=late_outcome,
@@ -152,6 +161,35 @@ def _attach_abandoned_future_reconciliation(
     except Exception as exc:
         _debug_logger.warning(
             f"[工具场景] 注册迟到完成对账回调失败: {type(exc).__name__}: {exc}"
+        )
+
+
+def _terminate_active_spawn_processes_on_timeout(
+    tool_name: str, cancel_checker: Optional[Callable[[], str]]
+) -> None:
+    """外层超时后物理终止仍在其 spawn 线程里等待的子代理进程树。
+
+    `future.cancel()` 对已启动线程无效；spawn_agent_tool 的子进程句柄登记在
+    agent_tools 的活跃注册表里，这里按本次调用的 cancel checker 归属过滤终止，
+    防止父轮已报超时而子进程继续烧 LLM、父轮重派形成双跑。任何失败只留日志，
+    不改变超时返回语义。
+    """
+
+    try:
+        from tools.agent_tools import terminate_active_subagent_processes
+
+        terminated = terminate_active_subagent_processes(
+            "executor_timeout",
+            owner=cancel_checker if callable(cancel_checker) else None,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[工具执行] spawn 子进程超时终止 hook 失败: {type(exc).__name__}: {exc}"
+        )
+        return
+    if terminated:
+        _debug_logger.warning(
+            f"[工具执行] {tool_name} 外层超时，已终止 {terminated} 个子代理进程树"
         )
 
 
@@ -712,7 +750,10 @@ class ToolExecutor:
 
     def _register_default_tools(self):
         """注册默认工具映射：只注册 canonical agent 工具名和内部委派入口。"""
-        from tools.agent_tools import spawn_agent as spawn_agent_tool
+        from tools.agent_tools import (
+            SPAWN_AGENT_EXECUTOR_BUDGET_SECONDS,
+            spawn_agent as spawn_agent_tool,
+        )
 
         # ── 从 Key_Tools 自动推导工具映射 ──────────────────────────────
         from tools.Key_Tools import create_key_tools
@@ -739,7 +780,13 @@ class ToolExecutor:
             "run_test_for_tool": 120,
             "code_symbol_tool": 30,
             "python_lint_tool": 60,
-            "spawn_agent_tool": 150,
+            # 与 agent_tools.clamp_spawn_timeout 共用同一预算常量：工具入口
+            # 把模型请求的 timeout clamp 到该值以内，外层预算不再被无界拉伸。
+            "spawn_agent_tool": SPAWN_AGENT_EXECUTOR_BUDGET_SECONDS,
+            # 按子代理编号续聊在工具内部同步跑一场完整子代理（受同一 150s
+            # clamp 约束），不能沿用轻量消息工具的 30s 默认预算，否则合法
+            # 续聊会被外层超时误杀。
+            "send_message_tool": SPAWN_AGENT_EXECUTOR_BUDGET_SECONDS,
             "image2_generate_tool": IMAGE2_TOOL_TIMEOUT_SECONDS,
             "computer_use_session_tool": 180,
             "computer_use_task_tool": 180,
@@ -1280,7 +1327,19 @@ class ToolExecutor:
             tool_stop_event.set()
             if future is not None:
                 future.cancel()
+                # future.cancel() 对已启动线程同样无效：超时放弃的 future 仍可能
+                # 物理完成，补迟到对账（与取消路径同一语义，仅事件码区分）。
+                _attach_abandoned_future_reconciliation(
+                    future,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    cancel_reason=f"executor_timeout_{timeout}s",
+                    late_context="timeout",
+                )
             executor.shutdown(wait=False, cancel_futures=True)
+            # spawn 类工具的子进程对 future.cancel() 也不可见：按本次调用的
+            # cancel checker 归属终止其进程树，避免父轮超时后子进程继续烧 LLM。
+            _terminate_active_spawn_processes_on_timeout(tool_name, cancel_checker)
             error_msg = f"[超时] {tool_name} 执行超时 ({timeout}秒)"
             publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
@@ -1428,8 +1487,10 @@ class ToolExecutor:
         if requested_int <= 0:
             return timeout
 
-        # 给外层线程执行器留一点缓冲，避免子进程还在收尾时外层先误杀。
-        return max(timeout, requested_int + 15)
+        # 预算不随模型请求无界拉伸：spawn_agent_tool 入口已把 timeout clamp 到
+        # 预算内，外层至多在预算上多留 15 秒缓冲，让工具自身的超时分支（终止
+        # 子进程并结算地址记录）总是先于外层超时落地。
+        return min(max(timeout, requested_int + 15), timeout + 15)
 
     @classmethod
     def _check_readonly_subagent_block(cls, tool_name: str) -> Optional[str]:
