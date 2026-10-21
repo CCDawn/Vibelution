@@ -5,6 +5,7 @@ import {
   cancelRuntimeLifecycleCommand,
   forceStopLauncherBundle,
   getLauncherBranchInstances,
+  getCurrentInstanceIdentity,
   getLauncherCleanupMergeStatus,
   requestBranchInstanceCleanup,
   requestBranchInstanceLifecycle,
@@ -46,6 +47,19 @@ function stubLauncherIpcBridge(invoke: (payload: unknown) => Promise<LauncherIpc
 }
 
 describe("launcher api helpers", () => {
+  it("reads only the current checkout identity for a workbench title", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000", href: "http://127.0.0.1:8000/chat" } });
+    const identity = { schemaVersion: 1, currentId: "main", currentShortName: "main", currentWorkbenchTitle: "Vibelution 工作台 · main", currentLauncherTitle: "Vibelution 启动管理" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => identity });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    expect(await getCurrentInstanceIdentity({ signal: controller.signal })).toEqual(identity);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/current-instance");
+    expect(fetchMock.mock.calls[1][1].signal).toBe(controller.signal);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("branch-instances"))).toBe(false);
+  });
   it("reads Launcher freshness and opens its window through narrow workbench capabilities", async () => {
     vi.stubGlobal("window", {});
     const freshness = { current: false, label: "stale", shellStale: true };

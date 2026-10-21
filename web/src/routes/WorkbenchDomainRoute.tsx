@@ -2,7 +2,7 @@ import { PropsWithChildren } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
 
-import { fetchPublicConfig } from "../api/config";
+import { fetchConfigBootstrap } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import { isWorkbenchDomainEnabled, resolveWorkbenchHomePath, WorkbenchDomain } from "../app/workbenchContract";
 
@@ -13,7 +13,7 @@ type WorkbenchDomainRouteProps = PropsWithChildren<{
 export function WorkbenchDomainRoute({ domain, children }: WorkbenchDomainRouteProps) {
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchPublicConfig(),
+    queryFn: () => fetchConfigBootstrap(),
   });
 
   if (configQuery.data && !isWorkbenchDomainEnabled(configQuery.data, domain)) {

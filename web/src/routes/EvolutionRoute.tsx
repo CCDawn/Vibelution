@@ -5,7 +5,7 @@ import { PanelLeftClose } from "lucide-react";
 import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { fetchPublicConfig } from "../api/config";
+import { fetchConfigBootstrap } from "../api/config";
 import {
   fetchEvolutionProposalDetail,
   fetchEvolutionWorkbench,
@@ -345,7 +345,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchPublicConfig(),
+    queryFn: () => fetchConfigBootstrap(),
     staleTime: 30_000,
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,

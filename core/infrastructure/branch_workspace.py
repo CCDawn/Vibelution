@@ -21,6 +21,9 @@ from vibelution_storage import resolve_project_runtime_home
 from core.infrastructure.instance_display_name import (
     assign_instance_display_names,
     current_instance_display,
+    instance_short_name_base,
+    launcher_window_title,
+    workbench_window_title,
 )
 
 BRANCH_POOL_NAME = ".worktrees"
@@ -225,7 +228,21 @@ def migrate_legacy_branch_workspaces(
     }
 
 
-def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
+def current_branch_instance_identity(checkout: Path | str) -> dict[str, Any]:
+    """Read title identity without scanning checkout dirtiness or runtime status."""
+    layout = resolve_branch_workspace(checkout)
+    if layout.role == "main":
+        return {
+            "schemaVersion": 1,
+            "currentId": "main",
+            "currentShortName": "main",
+            "currentWorkbenchTitle": workbench_window_title("main"),
+            "currentLauncherTitle": launcher_window_title("main"),
+        }
+    return list_branch_instances(checkout, identity_only=True)
+
+
+def list_branch_instances(checkout: Path | str, *, identity_only: bool = False) -> dict[str, Any]:
     """List Git-governed branch instances for the Launcher first screen."""
 
     layout = resolve_branch_workspace(checkout)
@@ -242,7 +259,7 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
             continue
         seen_paths.add(_norm(path))
         unique_worktrees.append((entry, path))
-    dirty_by_path = _worktree_dirty_map([path for _, path in unique_worktrees])
+    dirty_by_path = {} if identity_only else _worktree_dirty_map([path for _, path in unique_worktrees])
 
     for entry, path in unique_worktrees:
         role, slug = _classify_checkout(
@@ -265,7 +282,7 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
         # unrelated branches into one registry key.
         instance_id = _instance_id(kind, slug=slug or _norm(path), branch=branch)
         dirty = dirty_by_path.get(_norm(path), False)
-        observation = _runtime_observation(path)
+        observation = {} if identity_only else _runtime_observation(path)
         item = _instance_payload(
             instance_id=instance_id,
             kind=kind,
@@ -329,20 +346,33 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
         )
         seen_ids.add(instance_id)
 
+    if identity_only:
+        # Only colliding names need alive ordering to preserve the full list's
+        # suffix assignment (e.g. detached checkouts with the same leaf name).
+        bases = [instance_short_name_base(kind=item["kind"], branch=item["branch"],
+                                         path_name=Path(item["path"]).name if item["path"] else "")
+                 for item in items]
+        if len(set(bases)) != len(bases):
+            # Alive ordering can also change generated-suffix collisions with
+            # another base (foo-2), so preserve it for this exceptional case.
+            for item in items:
+                if item["checkedOut"]:
+                    item["alive"] = bool(_runtime_observation(Path(item["path"])).get("alive"))
     items.sort(key=_instance_sort_key)
     assign_instance_display_names(items)
     current_id = next((item["id"] for item in items if item["current"]), "main")
     current_display = current_instance_display(items)
-    return {
+    identity = {
         "schemaVersion": 1,
-        "integrationRoot": str(layout.integration_root),
-        "branchPool": str(layout.branch_pool),
         "currentId": current_id,
         "currentShortName": current_display["shortName"],
         "currentWorkbenchTitle": current_display["workbenchTitle"],
         "currentLauncherTitle": current_display["launcherTitle"],
-        "items": items,
     }
+    if identity_only:
+        return identity
+    return {**identity, "integrationRoot": str(layout.integration_root),
+            "branchPool": str(layout.branch_pool), "items": items}
 
 
 def _legacy_sibling_roots(integration_root: Path) -> tuple[Path, ...]:

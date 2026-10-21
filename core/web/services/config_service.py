@@ -2440,7 +2440,7 @@ def _config_result_cache_signature() -> tuple[Any, ...]:
 
 
 def _invalidate_config_result_cache() -> None:
-    """Drop cached workspace/summary payloads after any config-file write."""
+    """Drop cached bootstrap/workspace/summary payloads after config writes."""
     _CONFIG_RESULT_CACHE.clear()
 
 
@@ -2561,19 +2561,14 @@ def _save_model_catalog_state_and_invalidate(state: dict[str, Any]) -> None:
     _invalidate_config_result_cache()
 
 
-def _build_config_summary() -> dict[str, Any]:
-    """Build the condensed config summary payload for shell-wide consumers."""
+def _config_bootstrap_fields(public_config: dict[str, Any]) -> dict[str, Any]:
+    """Build shell fields without running diagnostics or editor/tool setup."""
 
-    public_config = _with_config_workspace_defaults(load_public_config())
-    diagnostics = inspect_public_config(public_config)
-    diagnosis = diagnostics.get("diagnosis", {})
     contract = get_workbench_contract(public_config)
     llm_cfg = public_config.get("llm", {})
     model_library = llm_cfg.get("model_library", {})
     lang = _resolve_workspace_language(public_config)
 
-    blocking = diagnosis.get("blocking_issues") or []
-    warnings = diagnosis.get("warnings") or []
     theme_background_path = _theme_background_path(public_config)
 
     return {
@@ -2591,8 +2586,41 @@ def _build_config_summary() -> dict[str, Any]:
         "themeBackgroundImagePath": theme_background_path,
         "themeBackgroundImageUrl": theme_background_image_url(theme_background_path),
         "themeBackgroundReadability": _theme_background_readability(public_config),
-        "blockingCount": len(blocking),
-        "warningCount": len(warnings),
+    }
+
+
+def _build_config_bootstrap() -> dict[str, Any]:
+    public_config = _with_config_workspace_defaults(load_public_config())
+    return _config_bootstrap_fields(public_config)
+
+
+def _compute_config_bootstrap_payload(pre_signature: tuple[Any, ...]) -> tuple[dict[str, Any], tuple[Any, ...]]:
+    payload = _build_config_bootstrap()
+    post_signature = _config_result_cache_signature()
+    if post_signature != pre_signature:
+        payload = _build_config_bootstrap()
+        post_signature = _config_result_cache_signature()
+    return payload, post_signature
+
+
+def get_config_bootstrap() -> dict[str, Any]:
+    """Return cached shell initialization fields without config diagnostics."""
+
+    return _config_result_cache_single_flight("bootstrap", _compute_config_bootstrap_payload)
+
+
+def _build_config_summary() -> dict[str, Any]:
+    """Build the complete summary, including diagnostics and editor sections."""
+
+    public_config = _with_config_workspace_defaults(load_public_config())
+    diagnostics = inspect_public_config(public_config)
+    diagnosis = diagnostics.get("diagnosis", {})
+    bootstrap = _config_bootstrap_fields(public_config)
+    lang = bootstrap["language"]
+    return {
+        **bootstrap,
+        "blockingCount": len(diagnosis.get("blocking_issues") or []),
+        "warningCount": len(diagnosis.get("warnings") or []),
         "sections": _config_sections(lang, build_editor_sections(public_config, lang)),
     }
 

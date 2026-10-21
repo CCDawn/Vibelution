@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from core.launcher.api_contract import (
     LauncherAcceptedCommandResponse,
     LauncherBranchInstanceListResponse,
+    LauncherCurrentInstanceIdentityResponse,
     LauncherCleanupPlanResponse,
     LauncherDesktopActionResponse,
     LauncherDesktopSessionResponse,
@@ -61,10 +62,35 @@ def test_active_work_projection_requires_control_token_and_valid_projection():
     assert unauthorized.status_code == 403
     assert client.get("/api/launcher/status?projection=invalid").status_code == 422
 
+
+def test_current_instance_identity_does_not_read_launcher_inventory(monkeypatch, tmp_path):
+    from core.infrastructure import branch_workspace
+
+    def no_inventory(*args, **kwargs):
+        raise AssertionError("title read must not fetch inventory or runtime status")
+
+    payload = {
+        "schemaVersion": 1, "currentId": "worktree:one",
+        "currentShortName": "branch+codex/one",
+        "currentWorkbenchTitle": "Vibelution 测试工作台 · codex/one",
+        "currentLauncherTitle": "Vibelution 启动管理",
+    }
+    monkeypatch.setattr(launcher_routes.launcher_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher_routes.launcher_service, "list_launcher_branch_instances", no_inventory)
+    monkeypatch.setattr(launcher_routes.launcher_service, "_current_project_bundle_for_branch_list", no_inventory)
+    calls = []
+    monkeypatch.setattr(branch_workspace, "current_branch_instance_identity", lambda root: calls.append(root) or payload)
+    response = client.get("/api/launcher/current-instance")
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert calls == [tmp_path]
+    assert TestClient(create_app()).get("/api/launcher/current-instance").status_code == 403
+
 JSON_ROUTE_FUNCTIONS = {
     "launcher_status",
     "launcher_freshness",
     "launcher_branch_instances",
+    "launcher_current_instance",
     "launcher_branch_instances_cleanup",
     "launcher_workbench_window_setting",
     "launcher_startup_settings",
@@ -158,6 +184,9 @@ def test_launcher_response_models_publish_known_schema_fields() -> None:
             "integrationRoot",
             "currentId",
             "items",
+        },
+        LauncherCurrentInstanceIdentityResponse: {
+            "currentId", "currentShortName", "currentWorkbenchTitle", "currentLauncherTitle",
         },
         WorkbenchWindowModeSettingResponse: {
             "mode",

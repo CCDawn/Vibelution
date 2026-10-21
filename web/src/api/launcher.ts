@@ -375,6 +375,20 @@ export type LauncherBranchInstanceCleanupResponse = {
   skipped: LauncherBranchInstanceCleanupIssue[];
 };
 
+export type LauncherCurrentInstanceIdentity = {
+  schemaVersion: number;
+  currentId: string;
+  currentShortName: string;
+  currentWorkbenchTitle: string;
+  currentLauncherTitle: string;
+};
+
+export function getCurrentInstanceIdentity(options?: { signal?: AbortSignal }) {
+  return fetchJson<LauncherCurrentInstanceIdentity>("/api/launcher/current-instance", {
+    signal: options?.signal,
+  });
+}
+
 export type LauncherBranchInstances = {
   schemaVersion: number;
   integrationRoot: string;

@@ -11,7 +11,7 @@ import { useShellStore } from "../store/shellStore";
 import { EvolutionRoute } from "./EvolutionRoute";
 
 const apiMocks = vi.hoisted(() => ({
-  fetchPublicConfig: vi.fn(),
+  fetchConfigBootstrap: vi.fn(),
   fetchEvolutionWorkspaceSnapshot: vi.fn(),
   fetchEvolutionWorkbench: vi.fn(),
   fetchSelfEvolutionWorkspaceSnapshot: vi.fn(),
@@ -42,7 +42,7 @@ const mutationMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("../api/config", () => ({ fetchPublicConfig: apiMocks.fetchPublicConfig }));
+vi.mock("../api/config", () => ({ fetchConfigBootstrap: apiMocks.fetchConfigBootstrap }));
 vi.mock("../api/evolution", () => ({
   EVOLUTION_WORKBENCH_POLL_INTERVAL_MS: 60_000,
   fetchEvolutionWorkspaceSnapshot: apiMocks.fetchEvolutionWorkspaceSnapshot,
@@ -473,7 +473,7 @@ describe("EvolutionRoute unified workspace run selection", () => {
     sessionStorage.clear();
     useShellStore.setState({ evolutionTrack: "supervised", evolutionView: "live" });
     currentSnapshot = initialWorkspaceSnapshot();
-    apiMocks.fetchPublicConfig.mockReset().mockResolvedValue({
+    apiMocks.fetchConfigBootstrap.mockReset().mockResolvedValue({
       language: "zh",
       intakeMode: "standard",
       modeAvailability: { supervised_evolution: true, self_evolution: true },
