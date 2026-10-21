@@ -141,6 +141,9 @@ def record_authorization_timing(
     resolve_ms: float = 0.0,
     install_ms: float = 0.0,
     record_ms: float = 0.0,
+    identity_ms: float = 0.0,
+    max_calls_ms: float = 0.0,
+    install_core_ms: float = 0.0,
 ) -> None:
     """Per-turn latency sub-anchors for the turn-authorization path (TTFT batch 6).
 
@@ -148,6 +151,11 @@ def record_authorization_timing(
     要归因的 turnAuthorizationMs 缺口所在，因此细分锚点走这条独立的轻量
     事件、每回合照常写出，不参与 decision 的场景去重。各子锚点与
     ``durationMs`` 同源于一次 ``resolve_turn_authorization``，均为毫秒整数。
+
+    批七在 installMs 内再拆三段（``identityMs``/``maxCallsMs``/
+    ``installCoreMs``，由 install 层线程局部上报，installMs ≥ 三者之和）：
+    身份解析（含 config 回退与 memo）、回合预算解析（含 session override
+    查询）、执行上下文构建与安装。
     """
 
     _record(
@@ -165,6 +173,9 @@ def record_authorization_timing(
             "resolveMs": max(0, int(resolve_ms or 0)),
             "installMs": max(0, int(install_ms or 0)),
             "recordMs": max(0, int(record_ms or 0)),
+            "identityMs": max(0, int(identity_ms or 0)),
+            "maxCallsMs": max(0, int(max_calls_ms or 0)),
+            "installCoreMs": max(0, int(install_core_ms or 0)),
         },
     )
 
