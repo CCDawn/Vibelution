@@ -871,6 +871,57 @@ def archive_agent_sessions(
     normalized_direct_session_id = str(direct_session_id or "").strip()
     if not normalized_agent_id:
         raise s.SessionValidationError("Agent id is required to archive sessions.")
+    # G4 (chat-fix2 R4): sealing must exclude the per-session submit admission
+    # window exactly like delete does. Session ids are snapshotted before the
+    # chat-state lock so admission locks are taken in the canonical order
+    # (admission lock before _CHAT_STATE_LOCK), and sorted acquisition keeps
+    # concurrent archives deadlock-free. A session that joins the Agent after
+    # the snapshot is refused as retryable busy instead of sealed without
+    # admission exclusion. Acquisition is bounded and raises SessionBusyError.
+    admit_locks: list[Any] = []
+    try:
+        pre_payload = s.load_chat_state(s.PROJECT_ROOT)
+        pre_conversations = (
+            pre_payload.get("conversations") if isinstance(pre_payload, dict) else None
+        )
+        admitted_session_ids = set(
+            s._agent_session_conversation_ids(
+                list(pre_conversations or []),
+                agent_id=normalized_agent_id,
+                direct_session_id=normalized_direct_session_id,
+            )
+        )
+        for locked_session_id in sorted(admitted_session_ids):
+            admit_lock = s._session_submit_admit_lock(locked_session_id)
+            admit_lock.acquire()
+            admit_locks.append(admit_lock)
+        # Serialization is applied inside the pack on purpose: the facade
+        # re-exports this composer directly, and wrapping it again on the
+        # facade would take _CHAT_STATE_LOCK before these admission locks and
+        # invert the canonical (admission -> chat-state) lock order.
+        return s.session_agent_lifecycle_serialized(_archive_agent_sessions_sealed)(
+            normalized_agent_id,
+            direct_session_id=normalized_direct_session_id,
+            include_restore_token=include_restore_token,
+            admitted_session_ids=admitted_session_ids,
+        )
+    finally:
+        for admit_lock in reversed(admit_locks):
+            admit_lock.release()
+
+
+def _archive_agent_sessions_sealed(
+    agent_id: str,
+    *,
+    direct_session_id: str = "",
+    include_restore_token: bool = False,
+    admitted_session_ids: set[str],
+) -> dict[str, Any]:
+    """Lifecycle-serialized archive body; the composer holds admission locks."""
+    s = _service()
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_direct_session_id = str(direct_session_id or "").strip()
     s._ensure_agent_direct_session_not_reassigned(
         normalized_agent_id,
         normalized_direct_session_id,
@@ -892,6 +943,18 @@ def archive_agent_sessions(
             direct_session_id=normalized_direct_session_id,
         )
         selected = set(session_ids)
+
+        # Snapshot coverage gate: refuse (retryable) instead of sealing a
+        # session whose submit admission window is not excluded here.
+        uncovered_session_ids = sorted(set(session_ids) - admitted_session_ids)
+        if uncovered_session_ids:
+            raise s.SessionBusyError(
+                s.text_for(
+                    s.get_web_language(),
+                    zh=f"会话 {uncovered_session_ids[0]} 在归档期间加入 Agent，请稍后重试归档。",
+                    en=f"Session {uncovered_session_ids[0]} joined the Agent during archive; retry shortly.",
+                )
+            )
         for raw in conversations:
             if not isinstance(raw, dict):
                 continue
@@ -3901,238 +3964,252 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
 
     next_active_id = ""
     replacement_snapshot: dict[str, Any] | None = None
-    with s._CHAT_STATE_LOCK:
-        payload = timed("load_state", lambda: s.load_chat_state(s.PROJECT_ROOT))
-        timed(
-            "materialize_session",
-            lambda: s._materialize_agent_directory_conversation_locked(payload, conversation_id, source="s.delete_chat_session"),
-        )
-        payload = timed("repair_state", lambda: s._repair_stale_running_conversations(payload))
-        resolve_started_at = s._perf_counter()
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
+    # G4 (chat-fix2 R4): submit holds this same per-session admission lock from
+    # its busy check through running registration and the initial journal
+    # markers, so the busy check below must run under it too; otherwise a turn
+    # admitted inside that window could register running into an already
+    # removed row and write into the deleted workspace. The lock is kept until
+    # the tombstone is written so an admission unblocked afterwards re-reads
+    # state, sees the tombstone (materialize refuses tombstoned sessions) and
+    # refuses. Lock order matches every admission user: admission lock first,
+    # then _CHAT_STATE_LOCK; acquisition is bounded and raises SessionBusyError.
+    admit_lock = s._session_submit_admit_lock(conversation_id)
+    admit_lock.acquire()
+    try:
+        with s._CHAT_STATE_LOCK:
+            payload = timed("load_state", lambda: s.load_chat_state(s.PROJECT_ROOT))
+            timed(
+                "materialize_session",
+                lambda: s._materialize_agent_directory_conversation_locked(payload, conversation_id, source="s.delete_chat_session"),
+            )
+            payload = timed("repair_state", lambda: s._repair_stale_running_conversations(payload))
+            resolve_started_at = s._perf_counter()
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                conversations = []
 
-        target_index = -1
-        target_conversation: dict[str, Any] | None = None
-        for index, item in enumerate(conversations):
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("conversation_id") or "").strip() == conversation_id:
-                target_index = index
-                target_conversation = item
-                break
-        if target_index < 0 or target_conversation is None:
-            # Idempotent delete: a session already marked intentionally deleted
-            # (tombstone present) is treated as deleted success, not a 404.
-            if s._is_session_workspace_intentionally_deleted(conversation_id):
-                s._record_session_delete_event(
-                    "already_deleted",
-                    session_id=conversation_id,
-                    outcome="already_deleted",
-                    fields={
-                        "phase": "deleted",
-                        "agentId": "",
-                        "messageCount": 0,
-                    },
-                )
-                return {
-                    "nextActiveSessionId": str(payload.get("active_conversation_id") or "").strip(),
-                    "replacementDirectSessionId": "",
-                }
-            raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-        # Deliberately no `_ensure_session_mutable` here: an archived (read-only)
-        # session must stay deletable — sealing is reversible only by delete or
-        # restore, so blocking delete wedged archived sessions forever. The busy
-        # guard below still refuses deletes of running/stopping turns.
-        s._ensure_conversation_workspace_metadata(target_conversation)
-        target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
-        target_agent = s.get_agent(target_agent_id, include_archived=False) if target_agent_id else None
-        target_agent_direct_session_id = str((target_agent or {}).get("directSessionId") or "").strip()
+            target_index = -1
+            target_conversation: dict[str, Any] | None = None
+            for index, item in enumerate(conversations):
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("conversation_id") or "").strip() == conversation_id:
+                    target_index = index
+                    target_conversation = item
+                    break
+            if target_index < 0 or target_conversation is None:
+                # Idempotent delete: a session already marked intentionally deleted
+                # (tombstone present) is treated as deleted success, not a 404.
+                if s._is_session_workspace_intentionally_deleted(conversation_id):
+                    s._record_session_delete_event(
+                        "already_deleted",
+                        session_id=conversation_id,
+                        outcome="already_deleted",
+                        fields={
+                            "phase": "deleted",
+                            "agentId": "",
+                            "messageCount": 0,
+                        },
+                    )
+                    return {
+                        "nextActiveSessionId": str(payload.get("active_conversation_id") or "").strip(),
+                        "replacementDirectSessionId": "",
+                    }
+                raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+            # Deliberately no `_ensure_session_mutable` here: an archived (read-only)
+            # session must stay deletable — sealing is reversible only by delete or
+            # restore, so blocking delete wedged archived sessions forever. The busy
+            # guard below still refuses deletes of running/stopping turns.
+            s._ensure_conversation_workspace_metadata(target_conversation)
+            target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
+            target_agent = s.get_agent(target_agent_id, include_archived=False) if target_agent_id else None
+            target_agent_direct_session_id = str((target_agent or {}).get("directSessionId") or "").strip()
 
-        # Keep this critical section off the journal replay path. The live
-        # delete stall was resolve_target scanning turn_journal.jsonl (and
-        # then normalizing every remaining conversation) while holding
-        # _CHAT_STATE_LOCK, which blocked sibling GET detail / select.
-        target_phase = _delete_session_control_phase(conversation_id, target_conversation)
-        raw_messages = target_conversation.get("messages")
-        target_message_count = len(raw_messages) if isinstance(raw_messages, list) else 0
-        timings["resolve_target"] = s._elapsed_ms(resolve_started_at)
-        s._record_session_delete_event(
-            "requested",
-            session_id=conversation_id,
-            outcome="requested",
-            fields={
-                "phase": target_phase,
-                "agentId": target_agent_id,
-                "messageCount": target_message_count,
-            },
-        )
-        if target_phase in {"running", "stopping"}:
+            # Keep this critical section off the journal replay path. The live
+            # delete stall was resolve_target scanning turn_journal.jsonl (and
+            # then normalizing every remaining conversation) while holding
+            # _CHAT_STATE_LOCK, which blocked sibling GET detail / select.
+            target_phase = _delete_session_control_phase(conversation_id, target_conversation)
+            raw_messages = target_conversation.get("messages")
+            target_message_count = len(raw_messages) if isinstance(raw_messages, list) else 0
+            timings["resolve_target"] = s._elapsed_ms(resolve_started_at)
             s._record_session_delete_event(
-                "blocked",
+                "requested",
                 session_id=conversation_id,
-                outcome="busy",
-                level="warning",
+                outcome="requested",
                 fields={
-                    "reason": "busy",
                     "phase": target_phase,
                     "agentId": target_agent_id,
+                    "messageCount": target_message_count,
                 },
             )
-            raise s.SessionBusyError(
-                s.text_for(
-                    lang,
-                    zh="当前会话仍在运行或停止中，请先等待这一轮收束后再删除。",
-                    en="This session is still running or stopping. Wait for the current turn to close before deleting it.",
+            if target_phase in {"running", "stopping"}:
+                s._record_session_delete_event(
+                    "blocked",
+                    session_id=conversation_id,
+                    outcome="busy",
+                    level="warning",
+                    fields={
+                        "reason": "busy",
+                        "phase": target_phase,
+                        "agentId": target_agent_id,
+                    },
                 )
-            )
+                raise s.SessionBusyError(
+                    s.text_for(
+                        lang,
+                        zh="当前会话仍在运行或停止中，请先等待这一轮收束后再删除。",
+                        en="This session is still running or stopping. Wait for the current turn to close before deleting it.",
+                    )
+                )
 
-        remaining = [
-            item
-            for index, item in enumerate(conversations)
-            if index != target_index and isinstance(item, dict)
-        ]
-        replacement_direct_session_id = ""
-        agent_unbound = False
-        if target_agent and target_agent_direct_session_id == conversation_id:
-            timed(
-                "unbind_agent",
-                lambda: s.update_agent_instance(
-                    target_agent_id,
-                    direct_session_id="",
-                ),
-            )
-            agent_unbound = True
-        else:
-            timings["unbind_agent"] = 0
-
-        current_active_id = str(payload.get("active_conversation_id") or "").strip()
-        next_active_id = _next_active_session_id_from_remaining(
-            remaining,
-            current_active_id=current_active_id,
-            deleted_session_id=conversation_id,
-        )
-        if not next_active_id:
-            now = s._now_timestamp()
-            next_active_id = s._new_conversation_id({conversation_id})
-            replacement_conversation = s._make_empty_conversation(
-                next_active_id,
-                title=s.text_for(lang, zh="新会话", en="New session"),
-                timestamp=now,
-            )
             remaining = [
-                replacement_conversation
+                item
+                for index, item in enumerate(conversations)
+                if index != target_index and isinstance(item, dict)
             ]
-            replacement_snapshot = dict(replacement_conversation)
+            replacement_direct_session_id = ""
+            agent_unbound = False
+            if target_agent and target_agent_direct_session_id == conversation_id:
+                timed(
+                    "unbind_agent",
+                    lambda: s.update_agent_instance(
+                        target_agent_id,
+                        direct_session_id="",
+                    ),
+                )
+                agent_unbound = True
+            else:
+                timings["unbind_agent"] = 0
 
-        now = s._now_timestamp()
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        payload["active_conversation_id"] = next_active_id
-        payload["updated_at"] = now
-        payload["conversations"] = remaining
-        try:
-            timed(
-                "save_state_and_archive",
-                lambda: s.save_chat_state(
-                    s.PROJECT_ROOT,
-                    payload,
-                    archive_session_id=conversation_id,
-                ),
+            current_active_id = str(payload.get("active_conversation_id") or "").strip()
+            next_active_id = _next_active_session_id_from_remaining(
+                remaining,
+                current_active_id=current_active_id,
+                deleted_session_id=conversation_id,
             )
-        except Exception as exc:
-            if agent_unbound:
-                try:
-                    timed(
-                        "rollback_agent_unbind",
-                        lambda: s.update_agent_instance(
-                            target_agent_id,
-                            direct_session_id=conversation_id,
-                        ),
-                    )
-                    s._record_session_delete_event(
-                        "agent_unbind_rolled_back",
-                        session_id=conversation_id,
-                        outcome="rolled_back",
-                        level="warning",
-                        fields={
-                            "agentId": target_agent_id,
-                            "reason": type(exc).__name__,
-                        },
-                    )
-                except Exception as rollback_exc:
-                    s._record_session_delete_event(
-                        "agent_unbind_rollback_failed",
-                        session_id=conversation_id,
-                        outcome="rollback_failed",
-                        level="error",
-                        fields={
-                            "agentId": target_agent_id,
-                            "reason": type(exc).__name__,
-                            "rollbackError": type(rollback_exc).__name__,
-                        },
-                    )
-            raise
+            if not next_active_id:
+                now = s._now_timestamp()
+                next_active_id = s._new_conversation_id({conversation_id})
+                replacement_conversation = s._make_empty_conversation(
+                    next_active_id,
+                    title=s.text_for(lang, zh="新会话", en="New session"),
+                    timestamp=now,
+                )
+                remaining = [
+                    replacement_conversation
+                ]
+                replacement_snapshot = dict(replacement_conversation)
 
-    from . import directory_bridge
+            now = s._now_timestamp()
+            payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
+            payload["active_conversation_id"] = next_active_id
+            payload["updated_at"] = now
+            payload["conversations"] = remaining
+            try:
+                timed(
+                    "save_state_and_archive",
+                    lambda: s.save_chat_state(
+                        s.PROJECT_ROOT,
+                        payload,
+                        archive_session_id=conversation_id,
+                    ),
+                )
+            except Exception as exc:
+                if agent_unbound:
+                    try:
+                        timed(
+                            "rollback_agent_unbind",
+                            lambda: s.update_agent_instance(
+                                target_agent_id,
+                                direct_session_id=conversation_id,
+                            ),
+                        )
+                        s._record_session_delete_event(
+                            "agent_unbind_rolled_back",
+                            session_id=conversation_id,
+                            outcome="rolled_back",
+                            level="warning",
+                            fields={
+                                "agentId": target_agent_id,
+                                "reason": type(exc).__name__,
+                            },
+                        )
+                    except Exception as rollback_exc:
+                        s._record_session_delete_event(
+                            "agent_unbind_rollback_failed",
+                            session_id=conversation_id,
+                            outcome="rollback_failed",
+                            level="error",
+                            fields={
+                                "agentId": target_agent_id,
+                                "reason": type(exc).__name__,
+                                "rollbackError": type(rollback_exc).__name__,
+                            },
+                        )
+                raise
 
-    timings["directory_archive_dispatch"] = 0
-    s._record_session_delete_event(
-        "directory_archived",
-        session_id=conversation_id,
-        outcome="archived",
-        fields={
-            "durationMs": timings.get("save_state_and_archive", 0),
-            "transactional": True,
-        },
-    )
-    if replacement_snapshot is not None:
-        directory_bridge.sync_conversation_record(replacement_snapshot)
-    s._invalidate_session_list_cache()
-    if target_agent and target_agent_direct_session_id == conversation_id:
+        from . import directory_bridge
+
+        timings["directory_archive_dispatch"] = 0
         s._record_session_delete_event(
-            "agent_unbound",
+            "directory_archived",
             session_id=conversation_id,
-            outcome="unbound",
+            outcome="archived",
             fields={
-                "agentId": target_agent_id,
-                "previousDirectSessionId": conversation_id,
+                "durationMs": timings.get("save_state_and_archive", 0),
+                "transactional": True,
             },
         )
-    cleanup_started_at = s._perf_counter()
-    s._set_session_running(conversation_id, False)
-    s._clear_session_turn_control(conversation_id)
-    s._clear_session_live_output(conversation_id)
-    removed_runtime_cache_entries = s._invalidate_session_agent_runtime_cache(conversation_id)
-    # Block workspace auto-recovery (llm-options / materialize) from resurrecting
-    # intentionally deleted sessions after clear/reset/delete.
-    tombstone_written = bool(
-        s._mark_session_workspace_intentionally_deleted(
-            conversation_id,
-            reason="chat_session_deleted",
-            agent_id=target_agent_id,
+        if replacement_snapshot is not None:
+            directory_bridge.sync_conversation_record(replacement_snapshot)
+        s._invalidate_session_list_cache()
+        if target_agent and target_agent_direct_session_id == conversation_id:
+            s._record_session_delete_event(
+                "agent_unbound",
+                session_id=conversation_id,
+                outcome="unbound",
+                fields={
+                    "agentId": target_agent_id,
+                    "previousDirectSessionId": conversation_id,
+                },
+            )
+        cleanup_started_at = s._perf_counter()
+        s._set_session_running(conversation_id, False)
+        s._clear_session_turn_control(conversation_id)
+        s._clear_session_live_output(conversation_id)
+        removed_runtime_cache_entries = s._invalidate_session_agent_runtime_cache(conversation_id)
+        # Block workspace auto-recovery (llm-options / materialize) from resurrecting
+        # intentionally deleted sessions after clear/reset/delete.
+        tombstone_written = bool(
+            s._mark_session_workspace_intentionally_deleted(
+                conversation_id,
+                reason="chat_session_deleted",
+                agent_id=target_agent_id,
+            )
         )
-    )
-    timings["runtime_cleanup"] = s._elapsed_ms(cleanup_started_at)
-    s._record_session_delete_event(
-        "deleted",
-        session_id=conversation_id,
-        outcome="deleted",
-        fields={
+        timings["runtime_cleanup"] = s._elapsed_ms(cleanup_started_at)
+        s._record_session_delete_event(
+            "deleted",
+            session_id=conversation_id,
+            outcome="deleted",
+            fields={
+                "nextActiveSessionId": next_active_id,
+                "agentId": target_agent_id,
+                "replacementDirectSessionId": replacement_direct_session_id,
+                "remainingCount": len(remaining),
+                "removedAgentRuntimeCacheEntries": removed_runtime_cache_entries,
+                "sessionDeletedTombstone": tombstone_written,
+                "durationMs": s._elapsed_ms(started_at),
+                "timingsMs": timings,
+            },
+        )
+        return {
             "nextActiveSessionId": next_active_id,
-            "agentId": target_agent_id,
             "replacementDirectSessionId": replacement_direct_session_id,
-            "remainingCount": len(remaining),
-            "removedAgentRuntimeCacheEntries": removed_runtime_cache_entries,
-            "sessionDeletedTombstone": tombstone_written,
-            "durationMs": s._elapsed_ms(started_at),
-            "timingsMs": timings,
-        },
-    )
-    return {
-        "nextActiveSessionId": next_active_id,
-        "replacementDirectSessionId": replacement_direct_session_id,
-    }
+        }
+    finally:
+        admit_lock.release()
 
 
 def _agent_session_conversation_ids(

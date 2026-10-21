@@ -20,6 +20,7 @@ from .turn_journal import (
     append_turn_event,
     fold_active_events,
     load_turn_events,
+    model_messages_from_events,
 )
 
 
@@ -108,13 +109,20 @@ def build_context_compression_checkpoint_payload(
     source_message_count: int = 0,
     tool_result_replacement_state: dict[str, Any] | None = None,
     covered_events: Iterable[TurnJournalEvent] | None = None,
+    include_sequence_range: bool = True,
     scope: Mapping[str, Any] | None = None,
     scope_hash: str = "",
     child_session_id: str = "",
     child_session_scope: Mapping[str, Any] | None = None,
     scope_binding_required: bool = False,
 ) -> dict[str, Any]:
-    """Return the durable payload for a compression checkpoint event."""
+    """Return the durable payload for a compression checkpoint event.
+
+    ``include_sequence_range=False`` keeps only the explicit
+    ``coveredEventIds``: a sparse covered set (kept-window events sit between
+    folded ones) must never publish a min/max sequence range, or the replay
+    would cover the un-summarized events inside the range as well.
+    """
 
     summary_text = str(summary or "").strip()
     covered = [event for event in list(covered_events or []) if isinstance(event, TurnJournalEvent)]
@@ -147,8 +155,12 @@ def build_context_compression_checkpoint_payload(
         "effectivenessRatio": max(0.0, float(effectiveness_ratio or 0.0)),
         "effective": bool(effective),
         "sourceMessageCount": max(0, int(source_message_count or 0)),
-        "coveredEventSeqStart": min(covered_sequences) if covered_sequences else 0,
-        "coveredEventSeqEnd": max(covered_sequences) if covered_sequences else 0,
+        "coveredEventSeqStart": (
+            min(covered_sequences) if covered_sequences and include_sequence_range else 0
+        ),
+        "coveredEventSeqEnd": (
+            max(covered_sequences) if covered_sequences and include_sequence_range else 0
+        ),
         "coveredEventIds": [event.event_id for event in covered if str(event.event_id or "").strip()],
         "coveredEventCount": len(covered),
         "toolResultReplacement": replacement_state,
@@ -182,6 +194,7 @@ def append_context_compression_checkpoint(
     effective: bool = True,
     source_message_count: int = 0,
     tool_result_replacement_state: dict[str, Any] | None = None,
+    summarized_messages: Iterable[Any] | None = None,
     source: str = "agent_context_compression",
     scope: Mapping[str, Any] | None = None,
     scope_hash: str = "",
@@ -189,7 +202,16 @@ def append_context_compression_checkpoint(
     child_session_scope: Mapping[str, Any] | None = None,
     scope_binding_required: bool = False,
 ) -> TurnJournalEvent | None:
-    """Append a compression checkpoint that covers only historical events."""
+    """Append a compression checkpoint that covers only historical events.
+
+    ``summarized_messages`` is the set of messages the summary actually folded
+    (the compression output's ``summarized_messages``). When provided, the
+    checkpoint covers exactly the historical events projecting to those
+    messages — kept-window and error-preserved events must stay uncovered, or
+    the next replay silently drops history that never entered the summary.
+    Callers that cannot prove the folded boundary keep the legacy blanket
+    coverage (every historical event).
+    """
 
     normalized_session_id = str(session_id or "").strip()
     summary_text = str(summary or "").strip()
@@ -218,7 +240,15 @@ def append_context_compression_checkpoint(
         for event in events
         if _is_coverable_by_checkpoint(event, current_turn_id=normalized_current_turn_id)
     ]
-    _assert_covered_events_scope(coverable, scope=scope, required=scope_binding_required)
+    if summarized_messages is None:
+        covered_events = coverable
+        include_sequence_range = True
+    else:
+        covered_events = _summarized_checkpoint_events(coverable, summarized_messages)
+        # A sparse folded set (kept-window events in between) must not publish
+        # a sequence range: replay treats the whole range as covered.
+        include_sequence_range = _sequences_contiguous(covered_events)
+    _assert_covered_events_scope(covered_events, scope=scope, required=scope_binding_required)
     payload = build_context_compression_checkpoint_payload(
         summary=summary_text,
         level=level,
@@ -232,7 +262,8 @@ def append_context_compression_checkpoint(
         effective=effective,
         source_message_count=source_message_count,
         tool_result_replacement_state=tool_result_replacement_state,
-        covered_events=coverable,
+        covered_events=covered_events,
+        include_sequence_range=include_sequence_range,
         scope=scope,
         scope_hash=scope_hash,
         child_session_id=normalized_child_session_id if has_scope else "",
@@ -480,6 +511,161 @@ def _is_coverable_by_checkpoint(event: TurnJournalEvent, *, current_turn_id: str
     if current_turn_id and event.turn_id == current_turn_id:
         return False
     return True
+
+
+def _summarized_checkpoint_events(
+    events: Iterable[TurnJournalEvent],
+    summarized_messages: Iterable[Any],
+) -> list[TurnJournalEvent]:
+    """Return the events whose projected model messages were folded into a summary.
+
+    The checkpoint's covered set must equal the summary's actual input domain.
+    Projecting the candidate events with the same model replay the seed uses
+    keeps the mapping anchored on ``metadata.eventId``; messages whose content
+    was rewritten downstream (redaction, tool-result replacement, truncation)
+    simply fail to match and stay uncovered — under-covering only costs a
+    duplicated replay, while over-covering loses history.
+    """
+
+    candidates = list(summarized_messages or [])
+    event_list = [event for event in list(events or []) if isinstance(event, TurnJournalEvent)]
+    if not candidates or not event_list:
+        return []
+    try:
+        projected = model_messages_from_events(event_list)
+    except Exception:
+        return []
+    event_by_id = {
+        str(event.event_id or "").strip(): event
+        for event in event_list
+        if str(event.event_id or "").strip()
+    }
+    # Consume-on-match keeps the alignment monotonic: two history messages
+    # with identical content cannot both claim one folded candidate, so a
+    # kept-window twin can never be marked covered through its folded twin.
+    unconsumed = list(range(len(candidates)))
+    matched_ids: set[str] = set()
+    for message in projected:
+        if not isinstance(message, Mapping):
+            continue
+        metadata = message.get("metadata")
+        event_id = (
+            str(metadata.get("eventId") or "").strip() if isinstance(metadata, Mapping) else ""
+        )
+        if not event_id or event_id not in event_by_id:
+            continue
+        for position in list(unconsumed):
+            if _projects_to_summary_input(message, candidates[position]):
+                unconsumed.remove(position)
+                matched_ids.add(event_id)
+                break
+    return [event for event in event_list if str(event.event_id or "").strip() in matched_ids]
+
+
+def _projects_to_summary_input(projected: Mapping[str, Any], candidate: Any) -> bool:
+    """Best-effort identity match between a projected event message and the
+    in-memory message compression folded."""
+
+    projected_role = str(projected.get("role") or "").strip().lower()
+    if projected_role != _candidate_message_role(candidate):
+        return False
+    if projected_role == "tool":
+        projected_call_id = str(projected.get("tool_call_id") or "").strip()
+        candidate_call_id = _candidate_tool_call_id(candidate)
+        if projected_call_id and candidate_call_id and projected_call_id != candidate_call_id:
+            return False
+    else:
+        projected_calls = _projected_tool_call_ids(projected)
+        candidate_calls = _candidate_tool_call_ids(candidate)
+        if projected_calls and candidate_calls:
+            if not set(projected_calls) & set(candidate_calls):
+                return False
+            # Tool-call ids are a strong identity anchor; content may have
+            # been legitimately rewritten downstream (redaction/replacement).
+            return True
+    return _content_overlaps(projected.get("content"), candidate)
+
+
+def _candidate_message_role(candidate: Any) -> str:
+    if isinstance(candidate, Mapping):
+        role = str(candidate.get("role") or "").strip().lower()
+    else:
+        role = str(getattr(candidate, "type", "") or getattr(candidate, "role", "") or "").strip().lower()
+    return {"human": "user", "ai": "assistant"}.get(role, role)
+
+
+def _projected_tool_call_ids(projected: Mapping[str, Any]) -> list[str]:
+    raw = projected.get("tool_calls") or projected.get("toolCalls") or []
+    ids: list[str] = []
+    for item in list(raw or []):
+        if isinstance(item, Mapping):
+            call_id = str(item.get("id") or "").strip()
+        else:
+            call_id = str(getattr(item, "id", "") or "").strip()
+        if call_id:
+            ids.append(call_id)
+    return ids
+
+
+def _candidate_tool_call_ids(candidate: Any) -> list[str]:
+    if isinstance(candidate, Mapping):
+        raw = candidate.get("tool_calls") or candidate.get("toolCalls") or []
+    else:
+        raw = getattr(candidate, "tool_calls", None) or []
+    ids: list[str] = []
+    for item in list(raw or []):
+        if isinstance(item, Mapping):
+            call_id = str(item.get("id") or "").strip()
+        else:
+            call_id = str(getattr(item, "id", "") or "").strip()
+        if call_id:
+            ids.append(call_id)
+    return ids
+
+
+def _candidate_tool_call_id(candidate: Any) -> str:
+    if isinstance(candidate, Mapping):
+        value = candidate.get("tool_call_id") or candidate.get("toolCallId")
+    else:
+        value = getattr(candidate, "tool_call_id", None)
+    return str(value or "").strip()
+
+
+def _candidate_content_text(candidate: Any) -> Any:
+    if isinstance(candidate, Mapping):
+        return candidate.get("content")
+    return getattr(candidate, "content", None)
+
+
+def _content_overlaps(projected_content: Any, candidate: Any) -> bool:
+    projected_text = _overlap_text(projected_content)
+    candidate_text = _overlap_text(_candidate_content_text(candidate))
+    if not projected_text or not candidate_text:
+        return False
+    return projected_text == candidate_text or projected_text in candidate_text or candidate_text in projected_text
+
+
+def _overlap_text(value: Any) -> str:
+    if isinstance(value, Mapping):
+        value = value.get("text") or value.get("content") or ""
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item or ""))
+        value = "".join(parts)
+    return " ".join(str(value or "").split())
+
+
+def _sequences_contiguous(events: Iterable[TurnJournalEvent]) -> bool:
+    sequences = sorted(
+        int(event.sequence or 0)
+        for event in list(events or [])
+        if int(event.sequence or 0) > 0
+    )
+    return all(next_seq - current_seq == 1 for current_seq, next_seq in zip(sequences, sequences[1:]))
 
 
 def _event_is_covered(

@@ -96,6 +96,65 @@ def _summarize_tool_args(tool_args: dict) -> dict[str, Any]:
     return summary
 
 
+def _attach_abandoned_future_reconciliation(
+    future: Any,
+    *,
+    tool_name: str,
+    tool_args: dict,
+    cancel_reason: str,
+) -> None:
+    """被放弃的工具 future 仍可能物理完成：完成时留下迟到对账记录，避免静默丢失。
+
+    `future.cancel()` 对已启动的线程无效；调用方放弃该 future 后，其真实结果
+    （或异常）仍会在物理线程中出现。这里在 done 回调里补一条 scene 事件，
+    与 quiescence 等待预算耗尽时的 `abandoned_wait` 记录对账。
+    """
+
+    def _record_late_completion(done_future: Any) -> None:
+        try:
+            if not done_future.done() or done_future.cancelled():
+                return
+            try:
+                done_future.result()
+                late_outcome = "succeeded"
+                late_error = ""
+            except Exception as exc:
+                late_outcome = "failed"
+                late_error = f"{type(exc).__name__}: {exc}"
+            fields: dict[str, Any] = {
+                **_summarize_tool_args(tool_args),
+                "cancelReason": cancel_reason,
+                "lateOutcome": late_outcome,
+            }
+            if late_error:
+                fields["error"] = late_error
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.late_completed_after_cancel",
+                tool_name=tool_name,
+                message=(
+                    f"{tool_name} 在取消后仍物理完成，结果已丢弃并留痕"
+                    if late_outcome == "succeeded"
+                    else f"{tool_name} 在取消后仍物理结束（失败），异常已留痕"
+                ),
+                level="warning",
+                outcome=late_outcome,
+                fields=fields,
+                lifecycle=True,
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具场景] 迟到完成对账记录失败: {type(exc).__name__}: {exc}"
+            )
+
+    try:
+        future.add_done_callback(_record_late_completion)
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[工具场景] 注册迟到完成对账回调失败: {type(exc).__name__}: {exc}"
+        )
+
+
 def _summarize_tool_result(result: Any) -> dict[str, Any]:
     if isinstance(result, str) and result.lstrip().startswith("{"):
         try:
@@ -1074,12 +1133,21 @@ class ToolExecutor:
             future = executor.submit(tool_context.run, func, **call_args)
             register_current_tool_future(future, tool_name=tool_name)
             deadline = time.monotonic() + max(float(timeout), 0.1)
+            stop_observed_after_completion = False
             while True:
                 cancel_reason = self._current_cancel_reason(cancel_checker)
                 if cancel_reason:
                     tool_stop_event.set()
                     future.cancel()
                     executor.shutdown(wait=False, cancel_futures=True)
+                    # future.cancel() 对已启动线程无效：被放弃的 future 仍可能物理完成，
+                    # 需要在 done 回调里留下迟到对账记录，避免静默丢失。
+                    _attach_abandoned_future_reconciliation(
+                        future,
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        cancel_reason=cancel_reason,
+                    )
                     error_msg = f"[取消] {tool_name} 已因停止请求中断：{cancel_reason}"
                     publish_tool_event(EventNames.TOOL_ERROR, {
                         "name": tool_name,
@@ -1095,7 +1163,8 @@ class ToolExecutor:
                             failure_class="cancelled",
                         ),
                     })
-                    self._record_runtime_signals(tool_name, tool_args, error_msg)
+                    # 取消不是失败：取消文案不进入 runtime signals，
+                    # 否则 cli_tool/pytest 验证链会把取消误判为测试失败。
                     _record_tool_scene_event(
                         "execute",
                         "tool.execute.cancelled",
@@ -1118,29 +1187,19 @@ class ToolExecutor:
                     result = future.result(timeout=min(0.05, remaining))
                     cancel_reason = self._current_cancel_reason(cancel_checker)
                     if cancel_reason:
-                        error_msg = f"[取消] {tool_name} 已因停止请求中断：{cancel_reason}"
-                        publish_tool_event(EventNames.TOOL_ERROR, {
-                            "name": tool_name,
-                            "error": error_msg,
-                            "result": error_msg,
-                            "args": tool_args,
-                            "durationMs": int((time.monotonic() - started_at) * 1000),
-                            "timeoutSeconds": timeout,
-                            **_tool_error_event_facts(
-                                tool_name,
-                                error_msg,
-                                semantic_status="cancelled",
-                                failure_class="cancelled",
-                            ),
-                        })
-                        self._record_runtime_signals(tool_name, tool_args, error_msg)
+                        # 结果已物理完成：保留真实结果并正常走成功链路，
+                        # 取消语义留给轮级状态表达，不伪造工具错误。
+                        stop_observed_after_completion = True
                         _record_tool_scene_event(
                             "execute",
-                            "tool.execute.cancelled",
+                            "tool.execute.completed_after_stop",
                             tool_name=tool_name,
-                            message=error_msg,
-                            level="warning",
-                            outcome="cancelled",
+                            message=(
+                                f"{tool_name} 已物理完成，停止请求在完成后才被观察到；"
+                                "保留真实结果，不记为取消错误"
+                            ),
+                            level="info",
+                            outcome="observed",
                             fields={
                                 **_summarize_tool_args(tool_args),
                                 "durationMs": int((time.monotonic() - started_at) * 1000),
@@ -1148,7 +1207,6 @@ class ToolExecutor:
                             },
                             lifecycle=True,
                         )
-                        return (error_msg, None)
                     break
                 except TimeoutError:
                     continue
@@ -1166,6 +1224,9 @@ class ToolExecutor:
             if semantic_outcome == "timeout":
                 result_facts["timedOut"] = True
                 result_facts["failureClass"] = result_facts.get("failureClass") or "timeout"
+            if stop_observed_after_completion:
+                # 停止请求在工具完成后才被观察到：真实结果有效，仅补一条事实注记。
+                result_facts["stopAfterCompletion"] = True
 
             event_payload = {
                 "name": tool_name,

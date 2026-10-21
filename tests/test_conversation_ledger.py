@@ -391,6 +391,178 @@ def test_conversation_ledger_checkpoint_replaces_covered_history_for_model(tmp_p
     assert "旧工具结果" not in contents
 
 
+def test_checkpoint_summarized_boundary_covers_only_folded_events(tmp_path):
+    """F2 回归②：covered 集合必须等于摘要实际折叠的事件集。
+
+    turn-old-1 的 user/assistant/tool 事件被折叠进摘要；turn-old-2 属于
+    kept 窗口——不得进 coveredEventIds，重放后必须仍对模型可见。
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from core.infrastructure.runtime_input import build_chat_user_message
+
+    session_id = "session-summarized-boundary"
+    append_conversation_event(
+        tmp_path, session_id, "turn-old-1", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "FOLDED-REQUEST 旧请求一"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-old-1", EVENT_ASSISTANT_MESSAGE,
+        status="completed", payload={"content": "FOLDED-ANSWER 旧回答一"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-old-1", EVENT_TOOL_RESULT,
+        status="done", tool_call_id="tool-folded",
+        payload={"toolCall": {"id": "tool-folded", "name": "cli_tool", "status": "done", "result": "FOLDED-TOOL-RESULT 旧工具结果"}},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-old-2", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "KEPT-REQUEST 旧请求二"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-old-2", EVENT_ASSISTANT_MESSAGE,
+        status="completed", payload={"content": "KEPT-ANSWER 旧回答二"},
+    )
+
+    projected = conversation_model_messages_from_events(
+        load_conversation_events(tmp_path, session_id)
+    )
+    summarized = []
+    for message in projected:
+        role = str(message.get("role") or "")
+        if role == "user":
+            summarized.append(build_chat_user_message(str(message.get("content") or "")))
+        elif role == "assistant":
+            summarized.append(AIMessage(content=str(message.get("content") or "")))
+        elif role == "tool":
+            summarized.append(
+                ToolMessage(
+                    content=str(message.get("content") or ""),
+                    tool_call_id=str(message.get("tool_call_id") or ""),
+                )
+            )
+    # kept 窗口消息显式留在折叠集之外
+    def _message_text(message) -> str:
+        content = (
+            message.get("content")
+            if isinstance(message, dict)
+            else getattr(message, "content", "")
+        )
+        return str(content or "")
+
+    summarized = [message for message in summarized if "KEPT" not in _message_text(message)]
+
+    event = append_context_compression_checkpoint(
+        tmp_path,
+        session_id,
+        turn_id="turn-current",
+        current_turn_id="turn-current",
+        summary="旧阶段已折叠：FOLDED 部分进摘要。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=9000,
+        after_tokens=3000,
+        iteration=5,
+        trigger_source="auto",
+        summarized_messages=summarized,
+    )
+    assert event is not None
+    payload = dict(event.payload or {})
+    events = load_conversation_events(tmp_path, session_id)
+    covered_ids = set(payload["coveredEventIds"])
+    folded_ids = {
+        event_.event_id
+        for event_ in events
+        if event_.turn_id == "turn-old-1"
+    }
+    kept_ids = {
+        event_.event_id
+        for event_ in events
+        if event_.turn_id == "turn-old-2"
+    }
+    assert folded_ids and kept_ids
+    assert folded_ids <= covered_ids
+    assert kept_ids.isdisjoint(covered_ids)
+    # 连续折叠块保留序列范围语义
+    assert payload["coveredEventSeqStart"] > 0
+    assert payload["coveredEventSeqEnd"] >= payload["coveredEventSeqStart"]
+
+    messages = conversation_model_messages_from_events(events)
+    contents = "\n".join(str(message.get("content") or "") for message in messages)
+    assert "旧阶段已折叠" in contents
+    assert "FOLDED-REQUEST" not in contents
+    assert "FOLDED-ANSWER" not in contents
+    assert "FOLDED-TOOL-RESULT" not in contents
+    # kept 窗口事件未被覆盖，重放仍可见
+    assert "KEPT-REQUEST" in contents
+    assert "KEPT-ANSWER" in contents
+
+
+def test_checkpoint_sparse_summarized_boundary_suppresses_sequence_range(tmp_path):
+    """稀疏折叠集（kept 事件夹在中间）只写 coveredEventIds，不发布序列范围。
+
+    否则 replay 会把范围内的 kept 事件一并当成已覆盖剔除。
+    """
+    from langchain_core.messages import AIMessage
+
+    session_id = "session-sparse-boundary"
+    append_conversation_event(
+        tmp_path, session_id, "turn-a", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "SPARSE-FOLD-ONE 旧请求一"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-a", EVENT_ASSISTANT_MESSAGE,
+        status="completed", payload={"content": "SPARSE-KEPT-ANSWER 保留回答"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "turn-b", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "SPARSE-FOLD-TWO 旧请求二"},
+    )
+
+    projected = conversation_model_messages_from_events(
+        load_conversation_events(tmp_path, session_id)
+    )
+    summarized = [
+        AIMessage(content=str(message.get("content") or ""))
+        if str(message.get("role")) == "assistant"
+        else {"role": "user", "content": str(message.get("content") or "")}
+        for message in projected
+        if "KEPT" not in str(message.get("content") or "")
+    ]
+
+    event = append_context_compression_checkpoint(
+        tmp_path,
+        session_id,
+        turn_id="turn-current",
+        current_turn_id="turn-current",
+        summary="稀疏折叠边界检查点。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=8000,
+        after_tokens=3000,
+        iteration=3,
+        trigger_source="auto",
+        summarized_messages=summarized,
+    )
+    assert event is not None
+    payload = dict(event.payload or {})
+    events = load_conversation_events(tmp_path, session_id)
+    covered_ids = list(payload["coveredEventIds"])
+    fold_one = next(event_ for event_ in events if "SPARSE-FOLD-ONE" in str(event_.payload.get("content") or ""))
+    fold_two = next(event_ for event_ in events if "SPARSE-FOLD-TWO" in str(event_.payload.get("content") or ""))
+    kept_answer = next(event_ for event_ in events if "SPARSE-KEPT-ANSWER" in str(event_.payload.get("content") or ""))
+    assert covered_ids == [fold_one.event_id, fold_two.event_id]
+    # 稀疏集合不发布 min/max 序列范围
+    assert payload["coveredEventSeqStart"] == 0
+    assert payload["coveredEventSeqEnd"] == 0
+
+    messages = conversation_model_messages_from_events(events)
+    contents = "\n".join(str(message.get("content") or "") for message in messages)
+    assert "SPARSE-KEPT-ANSWER" in contents
+    assert "SPARSE-FOLD-ONE" not in contents
+    assert "SPARSE-FOLD-TWO" not in contents
+
+
 def test_conversation_ledger_projects_compression_checkpoint_as_visible_marker(tmp_path):
     append_conversation_event(
         tmp_path,

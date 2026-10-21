@@ -689,3 +689,101 @@ def test_attachment_only_resume_counts_against_retry_budget(
 
     assert summary["retryLimitSkipCount"] == 1
     assert submit_calls == []
+
+
+def _seed_interrupted_turn_with_intent(
+    tmp_path,
+    *,
+    session_id: str = SESSION_ID,
+    turn_id: str = ORIGINAL_TURN_ID,
+    prompt: str = ORIGINAL_PROMPT,
+    started_leases: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Interrupted turn whose journal records authorization + model snapshot."""
+
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        payload={"leases": list(started_leases or [])},
+        source="submit",
+    )
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_USER_MESSAGE,
+        payload={"content": prompt, "metadata": dict(metadata or {})},
+        source="submit",
+    )
+
+
+_MODEL_SELECTION = {
+    "modelId": "glm-5",
+    "modelRef": "glm-5",
+    "providerId": "zhipu",
+    "reasoningEffort": "high",
+}
+
+
+def test_recovery_resumes_original_write_intent_and_model_selection(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """A persisted write-intent lease + modelSelection resume with their original values."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn_with_intent(
+        tmp_path,
+        started_leases=["worktree_write", "memory_write"],
+        metadata={"modelSelection": dict(_MODEL_SELECTION)},
+    )
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert summary["errorCount"] == 0
+    assert len(submit_calls) == 1
+    call = submit_calls[0]
+    assert call["write_intent"] is True
+    assert call["model_selection"] == _MODEL_SELECTION
+    assert call["model_selection"]["reasoningEffort"] == "high"
+
+
+def test_recovery_write_intent_defaults_without_journal_evidence(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """No authorization/model evidence in the journal keeps the status quo defaults."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn_with_intent(tmp_path, started_leases=["readonly_chat"])
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    call = submit_calls[0]
+    assert call["write_intent"] is False
+    assert call["model_selection"] is None
+
+
+def test_explicit_write_intent_metadata_wins_over_lease_derivation(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """An explicit persisted writeIntent beats the lease-derived inference."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn_with_intent(
+        tmp_path,
+        started_leases=["worktree_write", "memory_write"],
+        metadata={"writeIntent": False},
+    )
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert submit_calls[0]["write_intent"] is False

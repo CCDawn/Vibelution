@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -1169,3 +1170,54 @@ def test_archive_keeps_shared_room_for_non_last_member(tmp_path, monkeypatch):
     assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == [room["roomId"]]
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [item["agentId"] for item in detail["participants"]] == [peer["agentId"]]
+
+
+def test_archive_waits_out_submit_admission_window_then_refuses_busy(tmp_path, monkeypatch):
+    """G4 (chat-fix2 R4): archive must not seal inside a submit admission window.
+
+    Submit holds the per-session admission lock from its busy check through
+    running registration. An archive issued inside that window must park on
+    the same lock (taken before the lifecycle chat-state lock, canonical
+    order) and then refuse as busy instead of sealing a session whose turn is
+    still being admitted.
+    """
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    agent_id = direct["agentId"]
+    session_id = direct["id"]
+    admit_lock = session_service._session_submit_admit_lock(session_id)
+    admit_lock.acquire()
+    archive_started = threading.Event()
+    result_box: dict[str, object] = {}
+
+    def run_archive():
+        archive_started.set()
+        try:
+            result_box["result"] = session_service.archive_agent_sessions(
+                agent_id,
+                direct_session_id=session_id,
+            )
+        except BaseException as exc:  # noqa: BLE001 - forwarded to assertions below
+            result_box["error"] = exc
+
+    archiver = threading.Thread(target=run_archive, name="agent-archive-admit-race")
+    archiver.start()
+    assert archive_started.wait(timeout=5)
+    time.sleep(0.1)  # let the archive park on the admission lock; outcome is order-independent
+    # The submit window closes with the turn registered as running.
+    session_service._set_session_running(session_id, True, turn_id="turn-archive-race")
+    admit_lock.release()
+    archiver.join(timeout=15)
+    assert archiver.is_alive() is False
+    try:
+        assert isinstance(result_box.get("error"), session_service.SessionBusyError)
+        assert "result" not in result_box
+
+        # The refused archive must leave the direct session unsealed and open.
+        detail = session_service.get_session_detail(
+            session_id, message_limit=0, transcript_scope="none"
+        )
+        assert detail is not None
+        assert detail.get("readOnly") is not True
+        assert str((detail.get("archiveState") or {}).get("status") or "") != "archived"
+    finally:
+        session_service._set_session_running(session_id, False)
