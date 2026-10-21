@@ -2039,11 +2039,16 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 prompt_snapshot_segment = s._prompt_snapshot_context_segment(agent_prompt_snapshot_block, agent_prompt_snapshot)
                 if prompt_snapshot_segment:
                     runtime_context_segments.insert(0, prompt_snapshot_segment)
+                # TTFT 批六 A8 暗区锚点：historyAssemblyMs 与 totalSeedMs 之间
+                # 的三步（research budget 段会再读一次 chat state、guidance
+                # 上下文、skill contract 刷新）。仅观测，不改变行为。
+                stage_started_at = s._perf_counter()
                 research_thinking_budget_segment = build_research_thinking_budget_segment(
                     session_id,
                     project_root=s.PROJECT_ROOT,
                     load_chat_state=s.load_session_chat_state,
                 )
+                prepare_timings["researchBudgetMs"] = s._elapsed_ms(stage_started_at)
                 if research_thinking_budget_segment:
                     # Appended last so the hard budget line sits at the tail of
                     # the static system context (recency advantage).
@@ -2079,10 +2084,14 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     for part in (static_runtime_context_block, dynamic_runtime_context_block)
                     if str(part or "").strip()
                 ).strip()
+                stage_started_at = s._perf_counter()
                 guidance_context_block = s._recent_session_guidance_context_block(session_id)
+                prepare_timings["guidanceContextMs"] = s._elapsed_ms(stage_started_at)
                 skill_invocation = context.get("skill_invocation")
                 skill_runtime_context_block = s._skill_runtime_context_from_invocation(skill_invocation)
+                stage_started_at = s._perf_counter()
                 active_skill_contract = s.refresh_active_skill_contract_status(context.get("active_skill_contract"))
+                prepare_timings["skillContractMs"] = s._elapsed_ms(stage_started_at)
                 active_skill_context_block = (
                     ""
                     if skill_runtime_context_block
@@ -2250,7 +2259,11 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     return
 
                 user_message = str(context.get("user_message") or "").strip()
+                # TTFT 批六 B 段暗区锚点：totalSeedMs 之后、模型请求之前的
+                # 逐段观测。仅观测，不改变行为；缺锚（提前返回）时省略。
+                stage_started_at = s._perf_counter()
                 llm_attachments = s._build_llm_image_attachments(session_id, attachments)
+                prepare_timings["imageAttachmentsMs"] = s._elapsed_ms(stage_started_at)
                 if attachments:
                     s._record_session_turn_trace_event(
                         session_id,
@@ -2264,6 +2277,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         status="running",
                         summary="User image attachments prepared for this turn.",
                     )
+                stage_started_at = s._perf_counter()
                 context_composition = s._build_last_context_composition(
                     conversation={
                         "id": session_id,
@@ -2287,12 +2301,14 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     attachments=attachments,
                     prompt_cache_partition=prompt_cache_partition,
                 )
+                prepare_timings["contextCompositionMs"] = s._elapsed_ms(stage_started_at)
                 context_composition["contextAssembly"] = context_assembly.to_composition_patch()
                 context_cache = (
                     context_composition.get("cache")
                     if isinstance(context_composition.get("cache"), dict)
                     else {}
                 )
+                stage_started_at = s._perf_counter()
                 s._append_session_conversation_event(
                     session_id,
                     turn_id,
@@ -2319,6 +2335,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     },
                     source="session_context_assembler",
                 )
+                # journal 写的耗时只能在本 payload 之后测得（自引用进不了上面
+                # 的 prepareTimings 快照），由尾部 prepare_tail_timings 事件透出。
+                prepare_timings["turnContextJournalMs"] = s._elapsed_ms(stage_started_at)
                 s._record_session_turn_lifecycle_event(
                     session_id,
                     "context_composition_recorded",
@@ -2347,11 +2366,13 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 # can see prior-turn images. Runs after ledger windowing and
                 # compaction (images follow the text history lifecycle) and
                 # after every char/token telemetry snapshot above.
+                stage_started_at = s._perf_counter()
                 history_messages = s._seed_history_messages_with_image_attachments(
                     session_id,
                     history_messages,
                     agent_instance=agent_instance or historical_agent,
                 )
+                prepare_timings["seedImagesMs"] = s._elapsed_ms(stage_started_at)
                 # Context composition is already available through live output and the
                 # conversation journal.  A durable WorkRun rewrite here blocks the
                 # imminent model request and is immediately superseded by model_request.
@@ -2363,7 +2384,26 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     return
                 tool_scope = ToolExecutionScope(session_id=session_id, turn_id=turn_id)
                 model_prompt = redact_research_prompt(user_message)
+                stage_started_at = s._perf_counter()
                 model_history = redact_research_history(history_messages)
+                prepare_timings["redactHistoryMs"] = s._elapsed_ms(stage_started_at)
+                # 三个尾部锚点（turnContextJournal/seedImages/redactHistory）的
+                # 测量都发生在 turn_context journal 的 prepareTimings 快照之后，
+                # 那份 durable 载荷装不下它们；这里补一条轻量观测事件，让 B 段
+                # 尾部也有可归属的 per-turn 记录。缺锚（如 fence 提前返回）时
+                # 对应键省略，不造 0。
+                s._record_session_turn_lifecycle_event(
+                    session_id,
+                    "prepare_tail_timings",
+                    turn_id=turn_id,
+                    outcome="completed",
+                    fields={
+                        key: prepare_timings[key]
+                        for key in ("turnContextJournalMs", "seedImagesMs", "redactHistoryMs")
+                        if isinstance(prepare_timings.get(key), (int, float))
+                        and not isinstance(prepare_timings.get(key), bool)
+                    },
+                )
                 # TTFT 观测：把「受理/worker 开跑」锚点带给 LLM client，
                 # 首 chunk 时聚合成一条 llm.stream.ttft_breakdown 事件。
                 # 受理锚点缺失（continue 等旁路提交）时该段省略，不造 0。

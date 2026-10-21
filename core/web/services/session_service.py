@@ -1011,6 +1011,7 @@ from core.web.services.session.projection import (
     _build_computed_cache_segments,
     _enrich_session_cache_composition,
     _build_last_context_composition,
+    _cached_history_composition_stats,
     _normalize_session_context_composition,
     _normalize_session_llm_payload_trace,
     _normalize_session_runtime_notices,
