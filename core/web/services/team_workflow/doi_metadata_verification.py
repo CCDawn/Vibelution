@@ -309,19 +309,34 @@ def fetch_doi_metadata(
     endpoint is tried as the second registry.  Every failure mode — timeout,
     HTTP error, non-JSON body — collapses to None so callers keep the
     fail-closed receipt.  With ``raise_definitive_rejections=True`` a 4xx
-    registry rejection other than 408/429 instead raises
+    registry rejection other than 408/429 raises
     :class:`DefinitiveDoiRejection` so retry-aware callers (citation
-    recheck) can skip pointless retries; the default keeps the historical
-    None-collapse for package builders and existing tests.
+    recheck) can skip pointless retries.  A Crossref rejection only becomes
+    definitive once doi.org rejects too: DataCite prefixes (arXiv's
+    ``10.48550/arXiv.*``) are structurally absent from Crossref, so a
+    first-registry 404 still consults doi.org, and a transient doi.org
+    failure keeps the retryable None-collapse.  The default keeps the
+    historical None-collapse for package builders and existing tests.
     """
 
     normalized = normalize_doi(doi)
     if not normalized:
         return None
     timeout = max(0.5, float(timeout_seconds))
-    metadata = _crossref_metadata(
-        normalized, timeout, raise_definitive_rejections=raise_definitive_rejections
-    )
+    try:
+        metadata = _crossref_metadata(
+            normalized, timeout, raise_definitive_rejections=raise_definitive_rejections
+        )
+    except DefinitiveDoiRejection:
+        # A first-registry 404 is expected for DataCite prefixes (arXiv's
+        # `10.48550/arXiv.*` 404s on api.crossref.org while doi.org resolves
+        # them), so the fallback must run before any rejection is definitive:
+        # remember the rejection and still consult doi.org.  If doi.org
+        # rejects definitively its own exception propagates from the call
+        # below — the terminal registry's true verdict; if doi.org fails
+        # transiently it returns None and the fail-closed collapse stands
+        # (retryable), so the Crossref rejection is NOT re-raised.
+        metadata = None
     if metadata is not None:
         return metadata
     return _doi_org_metadata(
