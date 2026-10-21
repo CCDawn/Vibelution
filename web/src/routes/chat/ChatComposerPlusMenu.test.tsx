@@ -85,6 +85,54 @@ describe("ChatComposerPlusMenu contract", () => {
 });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+describe("lazy knowledge picker", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement;
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+  it("opens before candidates arrive, shows loading and retry, then selects a reference", async () => {
+    container = document.createElement("div"); document.body.append(container);
+    root = createRoot(container);
+    const onRequest = vi.fn();
+    const onAdd = vi.fn();
+    const reference = { referenceId: "file:one", kind: "file" as const, artifactId: "one", title: "验收文档", createdAt: "2026-10-21T00:00:00Z" };
+    const props: ChatComposerPlusMenuProps = {
+      lang: "zh", attachmentDisabled: false, sessionReferences: [], onAddKnowledgeReference: onAdd,
+      mentalModelEnabled: false, runtimeStatusEnabled: true, promptSuggestionEnabled: true,
+      capabilityDisabled: false, onMentalModelEnabledChange: vi.fn(),
+      onRuntimeStatusEnabledChange: vi.fn(), onPromptSuggestionEnabledChange: vi.fn(),
+    };
+    const render = async (loading: boolean, error: boolean, ready = false) => {
+      await act(async () => root!.render(<VuiProvider><ChatComposerPlusMenu {...props}
+        knowledgeReferenceState={{ loading, error, onRequest }}
+        knowledgeReferenceOptions={ready ? [{ id: "one", title: reference.title, reference }] : []} /></VuiProvider>));
+    };
+    await render(false, false);
+    expect(onRequest).not.toHaveBeenCalled();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    const action = [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')].find(button => button.textContent?.includes("引用知识/文件"));
+    expect(action?.disabled).toBe(false);
+    await act(async () => action!.click());
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    await render(true, false);
+    expect(document.querySelector('[role="status"]')?.textContent).toContain("正在加载知识与文件");
+    expect(document.body.textContent).not.toContain("没有匹配的知识");
+    await render(true, true);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("加载失败");
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    const retry = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "重试");
+    await act(async () => retry!.click());
+    expect(onRequest).toHaveBeenCalledTimes(2);
+    await render(false, false, true);
+    const item = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === reference.title);
+    await act(async () => item!.click());
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith(reference);
+  });
+});
+
 describe("composer budget entry interaction", () => {
   let root: Root | null = null;
   let container: HTMLDivElement;
