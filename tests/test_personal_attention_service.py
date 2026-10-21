@@ -143,11 +143,13 @@ def test_human_attention_feed_isolates_each_failed_source_and_keeps_empty_overvi
         with monkeypatch.context() as patch:
             for name in _HUMAN_ATTENTION_COLLECTORS:
                 patch.setattr(attention, name, fail if name == broken else lambda name=name, **_kwargs: [{"id": name}])
+            attention._reset_human_attention_cache_for_tests()
             assert attention.collect_human_attention() == [
                 {"id": name} for name in _HUMAN_ATTENTION_COLLECTORS if name != broken
             ]
     for name in _HUMAN_ATTENTION_COLLECTORS:
         monkeypatch.setattr(attention, name, lambda **_kwargs: [])
+    attention._reset_human_attention_cache_for_tests()
     assert attention.collect_human_attention() == []
     assert attention.attach_attention_to_overview({"attention": []}) == {"attention": []}
 
@@ -168,6 +170,55 @@ def test_human_attention_reads_shared_stage_files_once_per_request(monkeypatch):
     monkeypatch.setattr(attention, "_collect_affair_reminder_attention", lambda: [])
     assert attention.collect_human_attention() == [review, inbox, anomaly]
     assert calls == ["stage-scan"]
+
+
+def test_human_attention_reads_are_memoized_until_the_poll_ttl_expires(monkeypatch):
+    scans = []
+
+    def stages():
+        scans.append("stage")
+        return [], []
+
+    monkeypatch.setattr(attention, "collect_stage_task_attention", stages)
+    for name in _HUMAN_ATTENTION_COLLECTORS:
+        monkeypatch.setattr(attention, name, lambda **_kwargs: [])
+    first = attention.collect_human_attention()
+    second = attention.collect_human_attention()
+    assert scans == ["stage"]
+    assert second == first
+    assert second is not first
+    with attention._HUMAN_ATTENTION_CACHE_LOCK:
+        attention._HUMAN_ATTENTION_CACHE["expires_at"] = 0.0
+    attention.collect_human_attention()
+    assert scans == ["stage", "stage"]
+
+
+def test_human_attention_concurrent_polls_share_one_read(monkeypatch):
+    import threading
+
+    scans = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def stages():
+        scans.append("stage")
+        entered.set()
+        release.wait(timeout=5)
+        return [], []
+
+    monkeypatch.setattr(attention, "collect_stage_task_attention", stages)
+    for name in _HUMAN_ATTENTION_COLLECTORS:
+        monkeypatch.setattr(attention, name, lambda **_kwargs: [])
+    results = []
+    workers = [threading.Thread(target=lambda: results.append(attention.collect_human_attention())) for _ in range(2)]
+    workers[0].start()
+    assert entered.wait(timeout=5)
+    workers[1].start()
+    release.set()
+    for worker in workers:
+        worker.join(timeout=5)
+    assert len(results) == 2
+    assert scans == ["stage"]
 
 
 def test_failed_shared_stage_scan_keeps_other_notification_sources(monkeypatch):

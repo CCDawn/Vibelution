@@ -704,6 +704,34 @@ def test_session_list_reuses_agent_inbox_count_for_shared_agent(tmp_path, monkey
     assert inbox_count_calls.count(parent["agentId"]) == 1
 
 
+def test_directory_session_summary_shares_agent_inbox_count(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = session_service.create_chat_session(title="Directory Shared Agent")
+    agent_id = created["agentId"]
+    agent = session_service.get_agent(agent_id, include_archived=True)
+    row = {"sessionId": created["id"], "agentId": agent_id, "title": "Row", "status": "ready"}
+    inbox_count_calls = []
+    monkeypatch.setattr(
+        session_service,
+        "_agent_inbox_pending_count_for_summary",
+        lambda item: inbox_count_calls.append(str(item.get("agentId") or "")) or 2,
+    )
+    from core.web.services.session import directory_bridge
+
+    cache: dict[str, int] = {}
+    first = directory_bridge._summary_from_directory_row(
+        row, agent_by_id={agent_id: agent}, agent_inbox_pending_count_cache=cache,
+    )
+    second = directory_bridge._summary_from_directory_row(
+        {**row, "sessionId": "session-directory-sibling"},
+        agent_by_id={agent_id: agent},
+        agent_inbox_pending_count_cache=cache,
+    )
+    assert first["agentInboxPendingCount"] == 2
+    assert second["agentInboxPendingCount"] == 2
+    assert inbox_count_calls == [agent_id]
+
+
 def test_session_list_cache_returns_isolated_summary_snapshots(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Cached Parent")

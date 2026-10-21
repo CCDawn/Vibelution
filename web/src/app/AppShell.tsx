@@ -1267,7 +1267,9 @@ export function AppShell() {
     queryKey: queryKeys.gitStatus(),
     queryFn: ({ signal }) => fetchGitStatus({ limit: 500, signal }),
     enabled: shellDeferredPollReady,
-    refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
+    // The badge only reads counts/summary; a 5-minute cadence keeps it fresh
+    // enough while a cold git-status scan costs seconds. Mutations invalidate.
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 300_000),
     refetchIntervalInBackground: false,
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],

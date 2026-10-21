@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
 import threading
+import time
+from typing import Any
 
 from core.web.services import agent_directory_service as directory
 from core.web.services import pet_activity_service, session_service
@@ -501,15 +504,24 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
         }
 
 
-def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
-    """Public summaries only; no transcript, prompt, tool arguments or config."""
-    if (
-        type(offset) is not int
-        or offset < 0
-        or type(limit) is not int
-        or not 1 <= limit <= 100
-    ):
-        raise ValueError(_text("概览 offset 必须为非负整数，limit 必须为 1–100。", "Overview offset must be a non-negative integer and limit must be between 1 and 100."))
+# The workbench polls the overview every 5s, and each miss re-lists agents,
+# Session activity and the full revision hash.  A short memo (single-flight, so
+# concurrent pages share one build) keeps that cadence from paying the full
+# projection repeatedly while bounding how long a status change stays unseen.
+PLATFORM_OVERVIEW_CACHE_TTL_SECONDS = 10.0
+
+_PLATFORM_OVERVIEW_CACHE_LOCK = threading.Lock()
+_PLATFORM_OVERVIEW_CACHE: dict[str, Any] = {"expires_at": 0.0, "snapshot": None}
+
+
+def _reset_platform_overview_cache_for_tests() -> None:
+    """Drop the memoized overview snapshot (test isolation only)."""
+    with _PLATFORM_OVERVIEW_CACHE_LOCK:
+        _PLATFORM_OVERVIEW_CACHE["expires_at"] = 0.0
+        _PLATFORM_OVERVIEW_CACHE["snapshot"] = None
+
+
+def _build_platform_overview_snapshot() -> dict:
     agents = directory.list_agents(detail="summary")
     sessions = session_service.list_sessions()
     activity = pet_activity_service.get_pet_activity()
@@ -564,18 +576,43 @@ def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
     revision = hashlib.sha256(
         json.dumps(public, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    return {"generatedAt": activity["generatedAt"], "public": public, "revision": revision}
+
+
+def get_platform_overview(*, offset: int = 0, limit: int = 100) -> dict:
+    """Public summaries only; no transcript, prompt, tool arguments or config."""
+    if (
+        type(offset) is not int
+        or offset < 0
+        or type(limit) is not int
+        or not 1 <= limit <= 100
+    ):
+        raise ValueError(_text("概览 offset 必须为非负整数，limit 必须为 1–100。", "Overview offset must be a non-negative integer and limit must be between 1 and 100."))
+    with _PLATFORM_OVERVIEW_CACHE_LOCK:
+        snapshot = _PLATFORM_OVERVIEW_CACHE["snapshot"]
+        if snapshot is None or time.monotonic() >= float(_PLATFORM_OVERVIEW_CACHE["expires_at"]):
+            snapshot = _build_platform_overview_snapshot()
+            _PLATFORM_OVERVIEW_CACHE["snapshot"] = copy.deepcopy(snapshot)
+            _PLATFORM_OVERVIEW_CACHE["expires_at"] = (
+                time.monotonic() + PLATFORM_OVERVIEW_CACHE_TTL_SECONDS
+            )
+        else:
+            snapshot = copy.deepcopy(snapshot)
+    public = snapshot["public"]
     end = offset + limit
     return {
-        "generatedAt": activity["generatedAt"],
+        "generatedAt": snapshot["generatedAt"],
         "counts": public["counts"],
         "agents": public["agents"][offset:end],
         "sessions": public["sessions"][offset:end],
-        "attention": attention[offset:end],
+        "attention": public["attention"][offset:end],
         "pagination": {
             "offset": offset,
             "limit": limit,
-            "revision": revision,
-            "nextOffset": end if end < max(len(agents), len(sessions), len(attention)) else None,
+            "revision": snapshot["revision"],
+            "nextOffset": end
+            if end < max(len(public["agents"]), len(public["sessions"]), len(public["attention"]))
+            else None,
         },
     }
 

@@ -24,7 +24,11 @@ MAX_STATUS_LIMIT = 500
 # Utility menu polls ~6s; keep snapshot warm so runtime does not thrash git.exe
 # (each cold status can spawn many git processes and flash consoles on Windows).
 GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 45.0
-GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 120.0
+# Branch/upstream/worktree reads cost seconds and are already keyed by HEAD, so
+# an unchanged HEAD plus the commit-time cache clear means the only stale window
+# is an out-of-app push; 5 minutes keeps the Git page from paying that read
+# every two minutes.
+GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 300.0
 # Utility menu polls ~6s; only emit read-path scenes for slow, failed, or truncated results.
 GIT_READ_SLOW_THRESHOLD_MS = 2000.0
 GIT_READ_ERROR_MAX_CHARS = 240

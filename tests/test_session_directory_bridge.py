@@ -49,7 +49,10 @@ def test_directory_sync_preserves_canonical_last_turn_status(monkeypatch, termin
         return done
 
     monkeypatch.setattr(directory_bridge.directory_runtime, "get_open_directory_store", lambda: SimpleNamespace(
-        repository=SimpleNamespace(upsert_directory_session=upsert),
+        repository=SimpleNamespace(
+            upsert_directory_session=upsert,
+            get_session=lambda *_args, **_kwargs: None,
+        ),
     ))
     monkeypatch.setattr(directory_bridge, "_ensure_agent_revision", lambda *_: "revision-a")
     directory_bridge.sync_conversation_record({

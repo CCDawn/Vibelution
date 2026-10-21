@@ -66,6 +66,8 @@ decision 的按钮语义）与 ``meta``（teamId/runId/nodeId/taskId/decisions�
 from __future__ import annotations
 
 
+import copy
+
 import json
 
 import logging
@@ -107,6 +109,25 @@ MAX_KNOWLEDGE_REVIEW_ITEMS = 20
 MAX_ANOMALY_ITEMS = 20
 
 MAX_HUMAN_GATE_ITEMS = 20
+
+# The notification lane is polled every 5s by both the desktop notifier and the
+# assistant overview, and each uncached read replays stage files, state-v2
+# projections and the affair ledger. A short memo (single-flight, so concurrent
+# callers share one read) cuts that work in half while bounding how long a
+# newly arrived item can stay unseen.
+HUMAN_ATTENTION_CACHE_TTL_SECONDS = 10.0
+
+_HUMAN_ATTENTION_CACHE_LOCK = threading.Lock()
+
+_HUMAN_ATTENTION_CACHE: dict[str, Any] = {"expires_at": 0.0, "items": None}
+
+
+def _reset_human_attention_cache_for_tests() -> None:
+    """Drop the memoized lane (test isolation only)."""
+
+    with _HUMAN_ATTENTION_CACHE_LOCK:
+        _HUMAN_ATTENTION_CACHE["expires_at"] = 0.0
+        _HUMAN_ATTENTION_CACHE["items"] = None
 
 
 _LEDGER_HUMAN_TASK_ROW_LIMIT = 200
@@ -889,8 +910,7 @@ def _collect_affair_reminder_attention() -> list[dict[str, str]]:
     return collect_affair_reminder_attention()
 
 
-def collect_human_attention() -> list[dict[str, Any]]:
-    """Read the notification lane without constructing the Session overview."""
+def _collect_human_attention_uncached() -> list[dict[str, Any]]:
     started = time.perf_counter()
     # Both lanes project the same files. Share one request-local scan, keeping
     # the independent state-v2/gate/reminder failure boundaries intact.
@@ -921,6 +941,27 @@ def collect_human_attention() -> list[dict[str, Any]]:
             total_ms, stage_ms, source_ms, len(extension),
         )
     return extension
+
+
+def collect_human_attention() -> list[dict[str, Any]]:
+    """Read the notification lane without constructing the Session overview.
+
+    Memoized for ``HUMAN_ATTENTION_CACHE_TTL_SECONDS``; the collection runs
+    under the cache lock so overlapping polls wait for one read instead of
+    replaying every source. Callers receive their own copy of the rows.
+    """
+    with _HUMAN_ATTENTION_CACHE_LOCK:
+        if (
+            _HUMAN_ATTENTION_CACHE["items"] is not None
+            and time.monotonic() < float(_HUMAN_ATTENTION_CACHE["expires_at"])
+        ):
+            return copy.deepcopy(_HUMAN_ATTENTION_CACHE["items"])
+        items = _collect_human_attention_uncached()
+        _HUMAN_ATTENTION_CACHE["items"] = copy.deepcopy(items)
+        _HUMAN_ATTENTION_CACHE["expires_at"] = (
+            time.monotonic() + HUMAN_ATTENTION_CACHE_TTL_SECONDS
+        )
+        return items
 
 
 def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:

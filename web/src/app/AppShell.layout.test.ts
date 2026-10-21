@@ -276,7 +276,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("fetchGitStatus({ limit: 500, signal })");
     expect(shellSource).toContain("styles.settingsTriggerAlertDot");
     // Low-frequency, foreground-only shell poll (shares the Git status cache).
-    expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000)");
+    expect(shellSource).toMatch(/queryKey: queryKeys\.gitStatus\(\),[\s\S]*?refetchInterval: resolvePollingInterval\(shellPollingVisible, 300_000\)/);
   });
 
   it("opens notifications in the shared right rail and marks them seen after the list is shown", () => {
@@ -416,7 +416,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("useAppI18n");
     expect(shellSource).not.toContain("../i18n/dictionary");
     expect(shellSource).not.toContain("../i18n/useAppI18n");
-    expect(launcherShellSource).toContain("useShellI18n");
+    expect(launcherShellSource).toContain("useLauncherLanguage");
     expect(launcherShellSource).not.toContain("useAppI18n");
     expect(launcherShellSource).not.toContain("../i18n/dictionary");
     expect(launcherShellSource).not.toContain("../i18n/useAppI18n");

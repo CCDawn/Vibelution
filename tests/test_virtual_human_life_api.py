@@ -1380,6 +1380,40 @@ def test_companion_activity_batches_one_query_across_companions(monkeypatch) -> 
     assert calls == [{"limit": 100}]
 
 
+def test_companion_activity_rows_are_memoized_per_binding_set(monkeypatch) -> None:
+    from core.web.services import agent_plugin_service
+
+    agent_plugin_service._reset_companion_activity_rows_cache_for_tests()
+    scans: list[int] = []
+
+    def fake_project(rows):
+        scans.append(len(rows))
+        return [
+            {"sessionId": row["directSessionId"], "agentId": row["agentId"]}
+            for row in rows
+        ]
+
+    monkeypatch.setattr(
+        agent_plugin_service, "_project_companion_activity_rows", fake_project
+    )
+
+    companion_rows = [
+        {"agentId": "agent-nora", "directSessionId": "session-nora"},
+        {"agentId": "agent-ivy", "directSessionId": "session-ivy"},
+    ]
+    first = agent_plugin_service._companion_activity_rows(list(reversed(companion_rows)))
+    second = agent_plugin_service._companion_activity_rows(companion_rows)
+
+    assert scans == [2]
+    assert second == first
+    assert second is not first
+    assert second[0] is not first[0]
+
+    agent_plugin_service._reset_companion_activity_rows_cache_for_tests()
+    agent_plugin_service._companion_activity_rows(companion_rows)
+    assert scans == [2, 2]
+
+
 def test_companion_activity_falls_back_to_agent_scoped_query_on_page_miss(monkeypatch) -> None:
     from core.web.services.agent_plugin_service import (
         _native_session_activity_by_id,
