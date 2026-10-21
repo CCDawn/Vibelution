@@ -182,6 +182,52 @@ def _initial_session_stream_event(
     return None
 
 
+def _initial_session_stream_watermark(
+    initial_mode: str,
+    detail: dict[str, Any] | None,
+    state: dict[str, Any] | None,
+) -> int:
+    """Journal watermark the resolved initial snapshot claims to cover.
+
+    Both snapshot builders stamp the watermark BEFORE reading content, so
+    journal events at or below it are reflected by the frame's payload.
+    ``initial="none"`` has no server-side snapshot and returns 0.
+    """
+
+    if initial_mode == "full" and isinstance(detail, dict):
+        return _session_stream_nonnegative_int(detail.get("ledgerSeq"))
+    if initial_mode == "light" and isinstance(state, dict):
+        return _session_stream_nonnegative_int(state.get("ledgerSeq"))
+    return 0
+
+
+def _session_stream_first_connect_resume_from(
+    conversation_id: str,
+    initial_mode: str,
+    detail: dict[str, Any] | None,
+    state: dict[str, Any] | None,
+) -> int:
+    """Resume cursor for a first connect that arrives without Last-Event-ID.
+
+    The initial payload is resolved before this subscriber can be registered
+    (route executor resolves, the stream generator registers on first
+    iteration), so state changes inside that window are neither in the
+    snapshot nor in the queue. Anchor the resume prelude at the snapshot
+    watermark so it replays exactly that window and hands over with a
+    ``stream_resume`` marker. ``initial="none"`` has no snapshot, so anchor at
+    the registration-time journal watermark: the marker becomes the delimiter
+    frame the consumer can verify (live frames carry ``ledgerSeq >= toSeq``),
+    and the cursor seeded on the marker makes every later reconnect resumable.
+    """
+
+    watermark = _initial_session_stream_watermark(initial_mode, detail, state)
+    if watermark > 0:
+        return watermark
+    if initial_mode == "none":
+        return max(0, int(_service()._session_ledger_sequence(conversation_id) or 0))
+    return 0
+
+
 def _session_stream_resume_prelude(
     conversation_id: str,
     last_event_id: int,
@@ -253,7 +299,17 @@ def stream_session_events(
         if initial_event is not None:
             event_count += 1
             yield initial_event
-        for resume_frame in _session_stream_resume_prelude(conversation_id, last_event_id):
+        resume_from = last_event_id
+        if resume_from <= 0:
+            # First connect: anchor at the initial snapshot watermark so the
+            # resolve→register window is replayed instead of silently lost.
+            resume_from = _session_stream_first_connect_resume_from(
+                conversation_id,
+                initial_mode,
+                detail,
+                state,
+            )
+        for resume_frame in _session_stream_resume_prelude(conversation_id, resume_from):
             event_count += 1
             yield resume_frame
         item_delta = SessionStreamItemDelta()
@@ -345,7 +401,17 @@ async def stream_session_events_async(
         if initial_event is not None:
             event_count += 1
             yield initial_event
-        for resume_frame in _session_stream_resume_prelude(conversation_id, last_event_id):
+        resume_from = last_event_id
+        if resume_from <= 0:
+            # First connect: anchor at the initial snapshot watermark so the
+            # resolve→register window is replayed instead of silently lost.
+            resume_from = _session_stream_first_connect_resume_from(
+                conversation_id,
+                initial_mode,
+                detail,
+                state,
+            )
+        for resume_frame in _session_stream_resume_prelude(conversation_id, resume_from):
             event_count += 1
             yield resume_frame
         item_delta = SessionStreamItemDelta()
