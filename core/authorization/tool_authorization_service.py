@@ -6,7 +6,7 @@ from collections import Counter, OrderedDict
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Lock, local
 from time import perf_counter
 from typing import Any, Callable, Mapping, Sequence
 
@@ -548,11 +548,60 @@ def _deny_rules_from_decision(decision: Any) -> tuple[tuple[str, str, str], ...]
     return tuple(rules)
 
 
+# ---------------------------------------------------------------------------
+# Session budget override memo (TTFT batch 7)
+#
+# 批七 install 拆锚实测：``_session_override_max_calls_per_turn`` 每回合经
+# ``get_session_budget_parameters`` 做一次 session store 读 + agent registry
+# 读，是 installMs 64-220ms 的主要来源（读缓存在每轮 chat-state 写后被
+# epoch 失效，稳态回合近似每轮真实 I/O）。memo 以可信快照身份
+# （sessionId + agentId + configRevision + configHash）为键：会话预算
+# override 存放在绑定 Agent 的 registry metadata 下，写路径以该 Agent 的
+# ``configRevision`` compare-and-swap 守护（见 session_budget_resolve 模块
+# 注释），override 变化必然推进 revision；session 重绑会改变 runtime 投影的
+# agentId。因此同键必同内容，无需额外失效通道。无可信快照身份（revision<1
+# 或缺 hash）或缺 sessionId/agentId 时不 memo，保持逐次解析；容量有界防漂
+# 移。读失败的负例（0）同样按快照身份缓存：真实 override 变更必然推进
+# revision 产生新键，不会被打断可见性。
+#
+# 缓存值同时绑定解析函数的对象同一性（``is``）：生产进程中模块级解析函数
+# 恒定，命中不受影响；同键下解析函数被替换（测试 monkeypatch、热修复）时
+# 视为 miss 重新解析，杜绝「同键不同源」的串值命中。
+# ---------------------------------------------------------------------------
+_SESSION_OVERRIDE_MEMO_MAX = 64
+_SESSION_OVERRIDE_MEMO_LOCK = Lock()
+_SESSION_OVERRIDE_MEMO: "OrderedDict[tuple[str, str, int, str], tuple[Any, int]]" = OrderedDict()
+
+
+def _session_override_memo_key(
+    *,
+    session_id: str,
+    agent_id: str,
+    config_snapshot: Mapping[str, Any],
+) -> tuple[str, str, int, str] | None:
+    if not session_id or not agent_id:
+        return None
+    revision = _safe_int(config_snapshot.get("configRevision"), 0)
+    config_hash = _coerce_text(config_snapshot.get("configHash")).strip()
+    if revision < 1 or not config_hash:
+        return None
+    return (session_id, agent_id, revision, config_hash)
+
+
+def clear_session_override_memo() -> None:
+    """Drop all cached session budget overrides (tests and explicit invalidation)."""
+
+    with _SESSION_OVERRIDE_MEMO_LOCK:
+        _SESSION_OVERRIDE_MEMO.clear()
+
+
 def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
     """Session-configured maxCallsPerTurn override (session > family > base).
 
     Best-effort: unknown sessions, missing bindings, and read failures keep the
-    family/base resolution already computed by the caller.
+    family/base resolution already computed by the caller. Repeat lookups for
+    one stable (sessionId, agentId, configRevision, configHash) identity are
+    served from the bounded memo above.
     """
 
     session_id = _coerce_text(runtime.get("sessionId")).strip()
@@ -561,17 +610,68 @@ def _session_override_max_calls_per_turn(runtime: Mapping[str, Any]) -> int:
         session_id = _coerce_text(agent.get("directSessionId")).strip()
     if not session_id:
         return 0
+    agent_id = _coerce_text(runtime.get("agentId")).strip()
+    if not agent_id:
+        agent = _as_mapping(runtime.get("agent"))
+        agent_id = _coerce_text(agent.get("agentId")).strip()
+    memo_key = _session_override_memo_key(
+        session_id=session_id,
+        agent_id=agent_id,
+        config_snapshot=_as_mapping(runtime.get("agentConfigSnapshot")),
+    )
     try:
         from core.orchestration.session_budget_resolve import get_session_budget_parameters
-
+    except Exception:  # noqa: BLE001 - override lookup must never break install
+        return 0
+    if memo_key is not None:
+        with _SESSION_OVERRIDE_MEMO_LOCK:
+            cached = _SESSION_OVERRIDE_MEMO.get(memo_key)
+            if cached is not None and cached[0] is get_session_budget_parameters:
+                _SESSION_OVERRIDE_MEMO.move_to_end(memo_key)
+                return cached[1]
+    try:
         parameters = get_session_budget_parameters(session_id)
     except Exception:  # noqa: BLE001 - override lookup must never break install
         return 0
     value = parameters.maxCallsPerTurn if parameters is not None else None
     try:
-        return int(value) if value else 0
+        resolved = int(value) if value else 0
     except (TypeError, ValueError):
-        return 0
+        resolved = 0
+    if memo_key is not None:
+        with _SESSION_OVERRIDE_MEMO_LOCK:
+            _SESSION_OVERRIDE_MEMO[memo_key] = (get_session_budget_parameters, resolved)
+            _SESSION_OVERRIDE_MEMO.move_to_end(memo_key)
+            while len(_SESSION_OVERRIDE_MEMO) > _SESSION_OVERRIDE_MEMO_MAX:
+                _SESSION_OVERRIDE_MEMO.popitem(last=False)
+    return resolved
+
+
+# ---------------------------------------------------------------------------
+# Install sub-anchor timing (TTFT batch 7)
+#
+# 批六拆锚实测 installMs 64-220ms 是回合授权链路唯一大头，但 install 内部
+# 无段级归因。这里把 install 三段耗时写入线程局部，由绑定层在
+# ``install_execution_authorization`` 返回后读取并并入
+# ``tool.authorization.timing`` 事件（扩展字段，不另开事件通道）：
+# ``identityMs`` = LLM 身份解析（含 config 回退与 memo）；``maxCallsMs`` =
+# 回合预算解析（family/base + session override 查询）；``installCoreMs`` =
+# 执行上下文构建 + 身份闸门校验 + ContextVar 安装。仅计时，不参与任何决策。
+# ---------------------------------------------------------------------------
+_INSTALL_TIMING = local()
+
+
+def last_install_execution_timing() -> dict[str, int] | None:
+    """Return the current thread's most recent install sub-anchor timing."""
+
+    identity_ms = getattr(_INSTALL_TIMING, "identityMs", None)
+    if not isinstance(identity_ms, (int, float)):
+        return None
+    return {
+        "identityMs": max(0, int(identity_ms)),
+        "maxCallsMs": max(0, int(getattr(_INSTALL_TIMING, "maxCallsMs", 0) or 0)),
+        "installCoreMs": max(0, int(getattr(_INSTALL_TIMING, "installCoreMs", 0) or 0)),
+    }
 
 
 def install_execution_authorization(
@@ -599,7 +699,10 @@ def install_execution_authorization(
         policy = runtime.get("tool_policy")
     policy = policy if isinstance(policy, Mapping) else {}
     config_snapshot = _as_mapping(runtime.get("agentConfigSnapshot"))
+    phase_started = perf_counter()
     model, provider, profile_id = _runtime_llm_identity(runtime)
+    identity_ms = (perf_counter() - phase_started) * 1000
+    phase_started = perf_counter()
     max_calls_per_turn, budget_profile = resolve_max_calls_per_turn(
         policy,
         model=model,
@@ -611,6 +714,8 @@ def install_execution_authorization(
     session_max_calls = _session_override_max_calls_per_turn(runtime)
     if session_max_calls > 0:
         max_calls_per_turn = session_max_calls
+    max_calls_ms = (perf_counter() - phase_started) * 1000
+    phase_started = perf_counter()
     context = ToolExecutionAuthorizationContext(
         agent_id=_coerce_text(decision.agent_id).strip(),
         turn_id=_coerce_text(decision.turn_id).strip(),
@@ -639,6 +744,9 @@ def install_execution_authorization(
             "execution authorization requires Agent config identity"
         )
     _EXECUTION_AUTHORIZATION.set(context)
+    _INSTALL_TIMING.identityMs = max(0, identity_ms)
+    _INSTALL_TIMING.maxCallsMs = max(0, max_calls_ms)
+    _INSTALL_TIMING.installCoreMs = max(0, (perf_counter() - phase_started) * 1000)
     return context
 
 
