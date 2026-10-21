@@ -154,43 +154,44 @@ describe("conversationMessageOrder", () => {
     expect(ordered.map((item) => item.id)).toEqual(["user-optimistic", "assistant-active"]);
   });
 
-  it("renders mid-turn steer guidance after the streaming turn's live overlay", () => {
-    // Regression: the steer message is journaled with a real messageIndex while
-    // the in-flight answer is still an unsequenced live overlay, so journal
-    // order alone put the guidance above the answer it was steering.
-    const ordered = chronologicalConversationMessages([
-      message({
-        id: "session-1-message-44",
-        role: "assistant",
-        content: "上一轮回答",
-        metadata: { messageIndex: 44 },
-      }),
-      message({
-        id: "session-1-message-58",
-        role: "user",
-        content: "运行中引导：先做 B",
-        metadata: {
-          messageIndex: 58,
-          kind: "user_guidance",
-          source: "steer",
+  it.each(["session_live_overlay", "session_active_turn_layer"])(
+    "keeps received guidance before the growing %s so the live answer remains the tail",
+    (kind) => {
+      const ordered = chronologicalConversationMessages([
+        message({
+          id: "session-1-message-44",
+          role: "assistant",
+          content: "上一轮回答",
+          metadata: { messageIndex: 44 },
+        }),
+        message({
+          id: "session-1-message-58",
+          role: "user",
+          content: "运行中引导：先做 B",
+          metadata: {
+            messageIndex: 58,
+            kind: "user_guidance",
+            source: "steer",
+            turnId: "turn-running",
+          },
+        }),
+        message({
+          id: "session-live-overlay",
+          role: "assistant",
+          content: "流式输出中",
           turnId: "turn-running",
-        },
-      }),
-      message({
-        id: "session-live-overlay",
-        role: "assistant",
-        content: "流式输出中",
-        turnId: "turn-running",
-        metadata: { kind: "session_live_overlay", turnId: "turn-running" },
-      }),
-    ]);
+          // A folded live row may inherit an earlier segment's journal index.
+          metadata: { kind, turnId: "turn-running", messageIndex: 45 },
+        }),
+      ]);
 
-    expect(ordered.map((item) => item.id)).toEqual([
-      "session-1-message-44",
-      "session-live-overlay",
-      "session-1-message-58",
-    ]);
-  });
+      expect(ordered.map((item) => item.id)).toEqual([
+        "session-1-message-44",
+        "session-1-message-58",
+        "session-live-overlay",
+      ]);
+    },
+  );
 
   it("keeps steer guidance in journal order when it targets a different turn", () => {
     const ordered = chronologicalConversationMessages([
