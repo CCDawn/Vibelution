@@ -79,7 +79,9 @@ describe("Electron main public deep-link consumption", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("await windowProvider.openLauncher()");
-    expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
+    expect(source).toContain(
+      "else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot && !deferWorkbenchOpen)"
+    );
     expect(source).toContain("bootstrapMainOwnedLauncher(paths)");
     expect(source).toContain("resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined)");
     expect(source).not.toContain("bootstrapPythonLauncherService(");
