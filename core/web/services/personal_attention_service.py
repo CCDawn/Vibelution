@@ -932,6 +932,17 @@ def _collect_completion_attention() -> list[dict[str, str]]:
     return collect_completion_attention()
 
 
+def _collect_assistant_digest_attention() -> list[dict[str, str]]:
+    """定时派遣摘要卡（assistant_digest）；lazy import 保持可选接线。
+
+    行由 PA 心跳巡检（``personal_assistant_patrol_service``）生成并做指纹
+    去重/轮转节流，这里只转发当前行；巡检未启用或摘要过新鲜度窗口时为空。
+    """
+    from .personal_assistant_patrol_service import collect_assistant_digest_attention
+
+    return collect_assistant_digest_attention()
+
+
 def _collect_human_attention_uncached() -> list[dict[str, Any]]:
     started = time.perf_counter()
     # Both lanes project the same files. Share one request-local scan, keeping
@@ -949,6 +960,7 @@ def _collect_human_attention_uncached() -> list[dict[str, Any]]:
         ("humanGate", _collect_human_gate_attention),
         ("reminder", _collect_affair_reminder_attention),
         ("completion", _collect_completion_attention),
+        ("digest", _collect_assistant_digest_attention),
     ):
         source_started = time.perf_counter()
         try:

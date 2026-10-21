@@ -20,7 +20,8 @@ export type HumanAttentionKind =
   | "human_gate"
   | "dispatch_receipt"
   | "run_completed"
-  | "session_completed";
+  | "session_completed"
+  | "assistant_digest";
 /** info 只用于完成类事件（好消息），不占用停靠/异常的 critical/high 语义。 */
 export type HumanAttentionSeverity = "critical" | "high" | "medium" | "info";
 export type HumanAttentionDelivery = "assistant_window" | "system_notification" | "attention_fallback";
@@ -81,6 +82,7 @@ export const HUMAN_ATTENTION_KINDS = new Set<string>([
   "dispatch_receipt",
   "run_completed",
   "session_completed",
+  "assistant_digest",
 ]);
 const SEVERITIES = new Set<string>(["critical", "high", "medium", "info"]);
 const MAX_TITLE_LENGTH = 120;
@@ -106,6 +108,8 @@ export const HUMAN_ATTENTION_DEFAULT_TARGETS: Record<HumanAttentionKind, string>
   dispatch_receipt: "/personal-assistant?panel=dispatches",
   run_completed: "/teams?researchView=workflow",
   session_completed: "/chat",
+  // PA 心跳巡检的定时摘要卡：点击落回助理面板。
+  assistant_digest: "/personal-assistant",
 };
 
 export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string> = {
@@ -116,6 +120,7 @@ export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string>
   dispatch_receipt: "派遣回执已到达",
   run_completed: "研究运行已完成",
   session_completed: "会话已完成",
+  assistant_digest: "助理派遣摘要",
 };
 
 function normalizeText(value: unknown): string {

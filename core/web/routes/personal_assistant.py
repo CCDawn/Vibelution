@@ -236,6 +236,8 @@ class Attention(BaseModel):
 
         "session_completed",
 
+        "assistant_digest",
+
     ]
 
     title: str

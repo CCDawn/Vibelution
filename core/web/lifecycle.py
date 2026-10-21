@@ -248,6 +248,31 @@ def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
     return list(get_default_service(project_root).reconcile())
 
 
+def _start_pa_patrol_job(startup_jobs: StartupJobGroup):
+    """Schedule the personal-assistant dispatch patrol (chase + wake + digest).
+
+    Mirrors the external-agent reconcile loop shape: an async forever job whose
+    per-iteration sync body runs through ``startup_jobs.run_sync``. Skipped
+    under pytest so tests never chase or wake against the operator's live
+    stores; the ``VIBELUTION_PA_PATROL`` env switch is the runtime kill switch.
+    """
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        async def _skipped_pa_patrol() -> dict[str, bool]:
+            return {"started": False}
+
+        return startup_jobs.start_async("startup-pa-patrol", _skipped_pa_patrol())
+
+    from .services.personal_assistant_patrol_service import (
+        run_personal_assistant_patrol_forever,
+    )
+
+    return startup_jobs.start_async(
+        "startup-pa-patrol",
+        run_personal_assistant_patrol_forever(startup_jobs=startup_jobs),
+    )
+
+
 async def reconcile_external_agent_tasks_forever(
     *, interval_seconds: float = 5.0, startup_jobs: StartupJobGroup | None = None
 ) -> None:
@@ -656,6 +681,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-external-agent-reconcile",
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
+    startup_pa_patrol_task = _start_pa_patrol_job(startup_jobs)
     startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs)
     startup_generic_workflow_task = startup_jobs.start_async(
         "startup-generic-workflows",

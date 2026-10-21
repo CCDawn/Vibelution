@@ -153,16 +153,23 @@ describe("human attention target resolution", () => {
     expect(humanAttentionTargetFor({ kind: "human_gate" })).toBe("/teams?researchView=workflow");
     expect(HUMAN_ATTENTION_FALLBACK_TITLES.human_gate).toContain("审批");
   });
-  it("whitelists exactly the seven dual-channel kinds (mirrored by the Electron shell)", () => {
+  it("whitelists exactly the eight dual-channel kinds (mirrored by the Electron shell)", () => {
     expect([...HUMAN_ATTENTION_KINDS].sort()).toEqual([
       "affair_reminder",
       "anomaly",
+      "assistant_digest",
       "dispatch_receipt",
       "human_gate",
       "knowledge_review",
       "run_completed",
       "session_completed",
     ]);
+  });
+  it("accepts assistant_digest rows with the assistant-page default target", () => {
+    expect(isHumanAttentionKind("assistant_digest")).toBe(true);
+    expect(isHumanAttentionKind("assistant-digest")).toBe(false);
+    expect(humanAttentionTargetFor({ kind: "assistant_digest" })).toBe("/personal-assistant");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.assistant_digest).toContain("派遣");
   });
   it("maps the three completion kinds to real pages with info severity", () => {
     // 完成类事件（好消息）：targetUrl 必须落到真实页面，不许是空状态页。

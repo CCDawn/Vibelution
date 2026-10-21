@@ -3361,11 +3361,24 @@ def restore_direct_session_agent_deleted_tombstone(restore_token: dict[str, Any]
     return result
 
 
-def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
+def wake_agent_for_inbox_message(
+    message: dict[str, Any],
+    *,
+    ignore_delegation_wake_policy: bool = False,
+) -> dict[str, Any]:
     """Wake the collaboration target session so it can answer an inbox message.
 
     ADR 0002: prefer explicit ``message.targetSessionId`` (session landing) over
     rewriting to the Agent's current direct session.
+
+    ``ignore_delegation_wake_policy`` skips only the delegationPolicy wake gate
+    (every other gate — session ownership, busy, in-flight dedup — still runs).
+    Default ``False`` keeps the historical behavior byte-for-byte. The sole
+    sanctioned caller is the personal-assistant patrol
+    (``personal_assistant_patrol_service``): the assistant keeps
+    ``allowWakeMessages=False`` globally so receipt arrivals stay silent, and
+    the patrol is the single exception that must digest its own dispatch
+    receipts — throttled there by a 15-minute cooldown plus an hourly cap.
     """
     s = _service()
 
@@ -3445,12 +3458,13 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
             s._record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
         return delivery
     target_metadata = target_agent.get("metadata") if isinstance(target_agent.get("metadata"), dict) else {}
-    delegation_decision = s.evaluate_delegation_wake_policy(target_metadata.get("delegationPolicy"), agent_id=target_agent_id)
-    if not delegation_decision.allowed:
-        delivery["wakeStatus"] = "skipped_policy_blocked"
-        delivery["reason"] = delegation_decision.reason
-        s._record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
-        return delivery
+    if not ignore_delegation_wake_policy:
+        delegation_decision = s.evaluate_delegation_wake_policy(target_metadata.get("delegationPolicy"), agent_id=target_agent_id)
+        if not delegation_decision.allowed:
+            delivery["wakeStatus"] = "skipped_policy_blocked"
+            delivery["reason"] = delegation_decision.reason
+            s._record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+            return delivery
     if not target_session_id:
         delivery["wakeStatus"] = "skipped_no_direct_session"
         delivery["reason"] = "target_agent_has_no_direct_session"
