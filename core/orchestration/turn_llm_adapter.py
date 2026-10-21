@@ -369,6 +369,7 @@ def invoke_agent_llm_turn(
     messages: list,
     replay_state: Any = None,
     hooks: AgentLlmTurnHooks,
+    initial_fallback_profile_id: str = "",
 ) -> AgentLlmAttemptResult:
     """Run the Agent-side LLM route attempts.
 
@@ -387,7 +388,12 @@ def invoke_agent_llm_turn(
     later attempts exist through degraded retries and/or the operator-declared
     ``fallback`` profile after the primary exhausted its retryable transport
     budget on a recoverable gateway-level failure. The fallback target is
-    never switched again (single hop).
+    never switched again (single hop). ``initial_fallback_profile_id`` seeds
+    this send with the sticky fallback profile chosen by an earlier send of
+    the same agent-runtime session (the Agent consumes
+    ``AgentLlmAttemptResult.route_fallback`` and feeds it back here), so a
+    demoted primary does not burn its transport retry budget again on every
+    new send.
     """
     result = AgentLlmAttemptResult()
     ui = hooks.get_ui()
@@ -415,7 +421,11 @@ def invoke_agent_llm_turn(
 
     with ui.thinking("?? 思考中..."), hooks.llm_cancel_context(hooks.current_stop_reason):
         route_attempt = 1
-        pending_fallback_profile_id = ""
+        # Sticky fallback: the Agent runtime passes back the profile an earlier
+        # send of this session switched to, so this send starts there directly
+        # instead of burning the primary's retry budget again. An empty value
+        # keeps the pre-stickiness behaviour byte-for-byte.
+        pending_fallback_profile_id = _coerce_text(initial_fallback_profile_id).strip()
         switched_fallback: Dict[str, str] = {}
         invocation_context = None
         trace_fields: Dict[str, Any] = {}
@@ -825,11 +835,16 @@ def invoke_agent_llm_turn(
                         level="warning",
                         outcome="switched",
                     )
-                    # Persistence is owned by the Session Journal, not this
-                    # adapter: the scene-event binding layer mirrors the event
-                    # above into core.chat.llm_resilience_journal (durable,
-                    # restart-safe). The old in-memory route_fallback_registry
-                    # is gone; do not reintroduce a volatile second authority.
+                    # Cross-send stickiness is owned by the Agent runtime: it
+                    # reads ``result.route_fallback`` and feeds the effective
+                    # profile back via ``initial_fallback_profile_id`` on the
+                    # next send of the same session. The scene-event binding
+                    # layer mirrors the event above into
+                    # core.chat.llm_resilience_journal (durable, restart-safe)
+                    # for audit/observability only — journal replay is NOT
+                    # consumed as a route decision input this iteration, and
+                    # there is no volatile second authority beyond the
+                    # agent-runtime sticky value.
                     switched_fallback = {"from": failed_profile_id, "to": fallback_profile_id}
                     result.route_fallback = dict(switched_fallback)
                     pending_fallback_profile_id = fallback_profile_id
