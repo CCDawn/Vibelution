@@ -152,6 +152,21 @@ from tools.token_manager import (
 )
 # Provider context-limit recovery: one retry per turn, bounded per session.
 _MAX_PROVIDER_CONTEXT_COMPRESSION_RETRIES = 2
+# Send-path timing anchors surfaced on agent.llm_preflight.completed (TTFT
+# dark zone). Pre-loop anchors (seed/todo-restore/status-bar/threshold/llm-log)
+# are measured before the loop; reconcile/invoke-prep lag by one send and the
+# final send's values are flushed by agent.llm_send.final_timing at turn end.
+_TURN_SEND_TIMING_ANCHOR_KEYS = frozenset(
+    {
+        "seedHistoryMs",
+        "todoRestoreMs",
+        "turnStatusBarMs",
+        "thresholdEstimateMs",
+        "llmRequestLogMs",
+        "reconcileMs",
+        "invokePrepMs",
+    }
+)
 from tools.compression_strategy import (
     CompressionLevel,
     CompressionStrategy,
@@ -2554,6 +2569,19 @@ class AgentRuntime:
             self._turn_send_timing_anchors = anchors
         anchors[str(key or "").strip()] = max(0, int(value_ms))
 
+    def stash_seed_history_timing_ms(self, value_ms: int) -> None:
+        """Hold the host-side history-seed timing until this turn's telemetry opens.
+
+        ``prepare_agent_turn`` seeds chat history BEFORE ``run_single_turn``
+        opens the turn's timing anchors, so the measurement is parked here and
+        ingested at the per-turn anchor reset inside the orchestrated turn.
+        """
+
+        try:
+            self._pending_seed_history_ms = max(0, int(value_ms))
+        except (TypeError, ValueError):
+            self._pending_seed_history_ms = 0
+
     def _apply_chat_journal_replay(
         self,
         messages: list,
@@ -3189,6 +3217,16 @@ class AgentRuntime:
             extend_cacheable_prefix_fn=extend_system_message_cacheable_prefix,
         )
         messages = assembled_turn_messages.messages
+        # Per-turn send-path timing anchors open here (TTFT dark zone): stale
+        # anchors from a previous turn are dropped BEFORE any of this turn's
+        # pre-loop measurements, and a host-side history-seed timing stashed
+        # by prepare_agent_turn rides with the first preflight event.
+        self._turn_send_timing_anchors = {}
+        self._turn_send_timing_anchors_emitted = {}
+        pending_seed_history_ms = max(0, int(getattr(self, "_pending_seed_history_ms", 0) or 0))
+        self._pending_seed_history_ms = 0
+        if pending_seed_history_ms > 0:
+            self._record_turn_send_timing_anchor("seedHistoryMs", pending_seed_history_ms)
         if policy.mode == AgentMode.CHAT:
             ledger_identity = self._chat_ledger_identity()
             if ledger_identity is not None:
@@ -3226,7 +3264,12 @@ class AgentRuntime:
                     "cacheableSystemPrefixMerged": cacheable_prefix_merged,
                 },
             )
+        turn_status_bar_started = time.perf_counter()
         messages = self._apply_turn_status_bar(messages, iteration=0)
+        self._record_turn_send_timing_anchor(
+            "turnStatusBarMs",
+            max(0, int((time.perf_counter() - turn_status_bar_started) * 1000)),
+        )
         if assembled_turn_messages.dynamic_system_context_inserted:
             _record_agent_scene_event(
                 "prompt",
@@ -3251,11 +3294,17 @@ class AgentRuntime:
                 },
             )
         try:
+            threshold_estimate_started = time.perf_counter()
+            threshold_estimate_tokens = estimate_messages_tokens_for_threshold(
+                messages,
+                self._automatic_context_compression_threshold_tokens(),
+            )
+            self._record_turn_send_timing_anchor(
+                "thresholdEstimateMs",
+                max(0, int((time.perf_counter() - threshold_estimate_started) * 1000)),
+            )
             get_ui().note_context_window(
-                estimate_messages_tokens_for_threshold(
-                    messages,
-                    self._automatic_context_compression_threshold_tokens(),
-                ),
+                threshold_estimate_tokens,
                 context_limit,
             )
         except Exception:
@@ -3277,12 +3326,16 @@ class AgentRuntime:
             if hasattr(llm_config, "get_profile")
             else getattr(llm_config, "model_name", "unknown")
         )
+        llm_request_log_started = time.perf_counter()
         logger.log_llm_request(messages, model=model_name)
+        self._record_turn_send_timing_anchor(
+            "llmRequestLogMs",
+            max(0, int((time.perf_counter() - llm_request_log_started) * 1000)),
+        )
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
         self._context_compression_retry_used = False
         self._stream_recovery_retry_count = 0
-        self._turn_send_timing_anchors = {}
         try:
             from core.chat.stream_recovery import bind_committed_tool_results
 
@@ -3467,20 +3520,35 @@ class AgentRuntime:
                         "promptBuildReused": prompt_build_reused,
                         "contextEstimateMs": context_estimate_ms,
                         "delegationMs": delegation_ms,
-                        # Send-path timing anchors (TTFT dark zone): todo
-                        # restore is measured before the loop, reconcile and
-                        # invoke-prep anchors lag by one send because they are
-                        # measured after this event's emission.
+                        # Send-path timing anchors (TTFT dark zone): seed/
+                        # todo-restore/status-bar/threshold/llm-log are
+                        # measured before the loop; reconcile and invoke-prep
+                        # anchors lag by one send because they are measured
+                        # after this event's emission. The final send's values
+                        # are flushed by agent.llm_send.final_timing at turn end.
                         **{
                             anchor_key: anchor_value
                             for anchor_key, anchor_value in dict(
                                 getattr(self, "_turn_send_timing_anchors", {}) or {}
                             ).items()
-                            if anchor_key in {"todoRestoreMs", "reconcileMs", "invokePrepMs"}
+                            if anchor_key in _TURN_SEND_TIMING_ANCHOR_KEYS
                         },
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
                     },
                 )
+                # Snapshot which anchor values already rode a preflight event;
+                # agent.llm_send.final_timing only reports later measurements
+                # (reconcile/invoke-prep of the final send) at turn end.
+                self._turn_send_timing_anchors_emitted = {
+                    "iteration": iteration,
+                    **{
+                        anchor_key: anchor_value
+                        for anchor_key, anchor_value in dict(
+                            getattr(self, "_turn_send_timing_anchors", {}) or {}
+                        ).items()
+                        if anchor_key in _TURN_SEND_TIMING_ANCHOR_KEYS
+                    },
+                }
                 # Hard input-limit preflight: never invoke the model when the
                 # estimated input still exceeds the versioned hard limit
                 # (auditable context_budget_exhausted, fail-closed).
@@ -4005,6 +4073,30 @@ class AgentRuntime:
                 **round_state.current_status(),
             )
             logger.log_turn_end(current_turn, finalization.turn_stats)
+            # Final send anchors: reconcile/invoke-prep of the last send are
+            # measured after its preflight event, so they never ride one.
+            # Flush exactly the measurements the preflight events did not
+            # report (values recorded or changed after the last emission).
+            emitted_snapshot = dict(getattr(self, "_turn_send_timing_anchors_emitted", {}) or {})
+            final_pending_anchors = {
+                anchor_key: anchor_value
+                for anchor_key, anchor_value in dict(
+                    getattr(self, "_turn_send_timing_anchors", {}) or {}
+                ).items()
+                if anchor_key in _TURN_SEND_TIMING_ANCHOR_KEYS
+                and emitted_snapshot.get(anchor_key) != anchor_value
+            }
+            if final_pending_anchors:
+                _record_agent_scene_event(
+                    "llm",
+                    "agent.llm_send.final_timing",
+                    message="Final send timing anchors measured after the last preflight event.",
+                    fields={
+                        "iteration": max(0, int(emitted_snapshot.get("iteration", 0) or 0)),
+                        **final_pending_anchors,
+                    },
+                )
+            self._turn_send_timing_anchors_emitted = {}
             carryover_messages = [
                 message for message in messages
                 if not is_volatile_system_context_message(message)
