@@ -69,8 +69,8 @@ function turn(overrides: Partial<AssistantConversationTurn> = {}): AssistantConv
 }
 
 describe("conversationTurnWorkStatus", () => {
-  it("keeps the noise threshold at 5 seconds", () => {
-    expect(MIN_TURN_WORK_HEADER_DURATION_MS).toBe(5_000);
+  it("keeps no noise threshold so short turns still report real time", () => {
+    expect(MIN_TURN_WORK_HEADER_DURATION_MS).toBe(0);
   });
 
   it("derives the turn span from the message timestamp to timed item facts", () => {
@@ -199,21 +199,25 @@ describe("conversationTurnWorkStatus", () => {
     expect(summary?.toolDurationMs).toBe(9_000);
   });
 
-  it("drops sub-threshold turns and turns without any time facts", () => {
+  it("reports short turns and stays null only without any time facts", () => {
     const startMs = Date.parse("2026-09-16T10:00:00.000Z");
-    // 3s span: below the header threshold.
-    expect(resolveConversationTurnWorkSummary(turn({
+    // 3s span: a real measurement, reported instead of hidden behind a floor.
+    const shortSpan = resolveConversationTurnWorkSummary(turn({
       turnItems: [toolItem({
         metadata: {
           executionStartedAtEpochMs: startMs,
           durationMs: 3_000,
         },
       })],
-    }))).toBeNull();
-    // 3s of tools with no span anchors: still below threshold.
-    expect(resolveConversationTurnWorkSummary(turn({
+    }));
+    expect(shortSpan).not.toBeNull();
+    expect(shortSpan?.durationMs).toBeGreaterThanOrEqual(3_000);
+    // 3s of tools with no span anchors: the labeled tool sum still shows.
+    const shortTools = resolveConversationTurnWorkSummary(turn({
       turnItems: [toolItem({ metadata: { durationMs: 3_000 } })],
-    }))).toBeNull();
+    }));
+    expect(shortTools?.durationMs).toBe(3_000);
+    expect(shortTools?.basis).toBe("tool_durations");
     // Untimed shell: nothing to show.
     expect(resolveConversationTurnWorkSummary(turn({
       turnItems: [answerItem()],
