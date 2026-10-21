@@ -23,7 +23,11 @@ from core.chat.turn_journal import TERMINAL_EVENTS, TurnJournalPostTerminalWrite
 from . import conversation_references
 from . import document_attachments
 from . import journal_bridge
-from .admission_lock import SessionAdmissionLock, session_has_active_work_run
+from .admission_lock import (
+    SessionAdmissionLock,
+    session_active_work_run_owner_alive,
+    session_has_active_work_run,
+)
 from .retry import validate_safe_retry, with_retry_receipt
 from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
 from .admission import (
@@ -1435,10 +1439,21 @@ def submit_session_message(
                 release_admit_lock()
                 return replay
         foreign_work_running = (
-            normalized_message_source != "hot_restart_resume"
-            and not s._is_session_running(conversation_id)
+            not s._is_session_running(conversation_id)
             and session_has_active_work_run(s, conversation_id)
         )
+        if normalized_message_source == "hot_restart_resume" and foreign_work_running:
+            # The exemption exists to let hot-restart recovery proceed past a
+            # dead process's abandoned work-run residue (on-disk snapshots
+            # outlive their writer): an ownership snapshot whose writer is
+            # dead clears the busy flag again.  A snapshot that proves a live
+            # foreign writer is a concurrent recovery — e.g. the backend
+            # startup sweep already resumed this turn while the runtime
+            # manager wakes it — and keeps the normal busy semantics instead
+            # of forking a second parallel resume into the same journal
+            # (split-brain).  SessionBusyError is transient for the daemon
+            # wake retry.
+            foreign_work_running = session_active_work_run_owner_alive(s, conversation_id)
         if s._is_session_running(conversation_id) or foreign_work_running:
             if queue_if_busy:
                 raise _SessionTurnQueued(

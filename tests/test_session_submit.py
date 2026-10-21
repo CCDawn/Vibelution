@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
+import psutil
 import pytest
 
 from core.chat.conversation_ledger import (
@@ -1022,6 +1027,126 @@ def test_same_session_second_submit_stays_busy(tmp_path: Path, monkeypatch) -> N
             )
         message = str(exc_info.value)
         assert "仍在运行" in message or "still running" in message.lower()
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def _spawn_hidden_child(code: str):
+    """Spawn a real foreign process for ownership stamps (no console window)."""
+
+    hidden = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **hidden,
+    )
+
+
+def _seed_foreign_owner_work_run(
+    store,
+    *,
+    session_id: str,
+    turn_id: str,
+    owner_pid: int,
+    owner_create_time: float,
+) -> None:
+    """An active chat_turn snapshot stamped with a foreign writer identity."""
+
+    now = datetime.now(timezone.utc).isoformat()
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": turn_id,
+            "runKind": "chat_turn",
+            "status": "running",
+            "sessionId": session_id,
+            "startedAt": now,
+            "updatedAt": now,
+            "finishedAt": "",
+            "ownerPid": int(owner_pid),
+            "ownerCreateTime": float(owner_create_time),
+        },
+        active_run_id=turn_id,
+    )
+
+
+def _prepare_hot_restart_submit_env(tmp_path: Path, monkeypatch, session_id: str):
+    from core.runtime_manager.work_run_store import WorkRunStore
+
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT", raising=False)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    store = WorkRunStore(root=tmp_path / "work-runs")
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", store)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    return store
+
+
+def test_hot_restart_resume_rejects_live_foreign_work_run_snapshot(tmp_path: Path, monkeypatch) -> None:
+    """快照归属活进程（他进程仍在跑该轮）时，热重启恢复按 busy 拒绝。
+
+    豁免只该放行死进程残留：活 writer 的运行中快照说明已有并发恢复方，
+    再提交同一恢复轮会把两份写入 fork 进同一 journal（脑裂）。
+    """
+
+    session_id = "session-live"
+    store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
+    child = _spawn_hidden_child("import time; time.sleep(30)")
+    try:
+        _seed_foreign_owner_work_run(
+            store,
+            session_id=session_id,
+            turn_id="turn-live-owner",
+            owner_pid=child.pid,
+            owner_create_time=psutil.Process(child.pid).create_time(),
+        )
+        with pytest.raises(session_service.SessionBusyError):
+            submit.submit_session_message(
+                session_id,
+                "热重启恢复",
+                turn_mode="hot_restart_resume",
+                message_source="hot_restart_resume",
+                lightweight_response=True,
+            )
+    finally:
+        child.kill()
+        child.wait(timeout=15)
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_hot_restart_resume_exempt_past_dead_process_work_run_residue(tmp_path: Path, monkeypatch) -> None:
+    """死进程残留的运行中快照保持豁免：热重启恢复轮照常提交。
+
+    正常热重启（快照 writer 已死）是豁免存在的唯一场景，回归锁定其行为
+    与修复前一致。
+    """
+
+    session_id = "session-live"
+    store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
+    child = _spawn_hidden_child("pass")
+    child_create_time = psutil.Process(child.pid).create_time()
+    child.wait(timeout=15)
+    try:
+        _seed_foreign_owner_work_run(
+            store,
+            session_id=session_id,
+            turn_id="turn-dead-owner",
+            owner_pid=child.pid,
+            owner_create_time=child_create_time,
+        )
+        result = submit.submit_session_message(
+            session_id,
+            "热重启恢复",
+            turn_mode="hot_restart_resume",
+            message_source="hot_restart_resume",
+            lightweight_response=True,
+        )
+        assert result["accepted"] is True
     finally:
         _reset_seeded_session_runtime(session_id)
 
