@@ -63,12 +63,18 @@ def _retained_release_asset(full_path: str, web_dist: Path) -> Path | None:
     releases_dir = web_dist.parent
     if not releases_dir.is_dir():
         return None
+    releases_root = releases_dir.resolve()
     for release in releases_dir.iterdir():
         if not release.is_dir() or not release.name.startswith("release-"):
             continue
-        candidate = (release / normalized).resolve()
+        release_root = release.resolve()
         try:
-            candidate.relative_to(release.resolve())
+            release_root.relative_to(releases_root)
+        except ValueError:
+            continue
+        candidate = (release_root / normalized).resolve()
+        try:
+            candidate.relative_to(release_root)
         except ValueError:
             continue
         if candidate.is_file():
