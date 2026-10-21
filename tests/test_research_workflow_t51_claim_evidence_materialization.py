@@ -2871,3 +2871,305 @@ def test_envelope_never_overwrites_explicitly_provided_values(
         "title": "Operator supplied title",
         "sourceUrl": "https://example.org/explicit-source",
     }
+
+
+# ---------------------------------------------------------------------------
+# Candidate-graph counter-evidence bridge (production 005): the relation
+# graph's counterEvidenceRefs become canonical contradict cards.
+
+
+def _counter_evidence_graph_record(
+    *,
+    counter_refs: list[dict],
+    graph_run_id: str = "dprun-20261020104506966426-72158dab",
+) -> dict:
+    return {
+        "candidateId": "candidate-graph-prod005",
+        "candidateType": "candidate_graph",
+        "createdAt": "2026-10-20T10:45:06Z",
+        "updatedAt": "2026-10-20T10:45:06Z",
+        "metadata": {
+            # dprec-b deliberately missing: its candidateId must resolve
+            # through the candidate-store fallback index instead.
+            "generatedFromCandidateIds": ["dprec-20261020104507-aaaa"],
+            "graph": {
+                "nodes": [],
+                "edges": [],
+                "evidenceGaps": [],
+                "counterEvidenceRefs": counter_refs,
+                "summary": {
+                    "createdByAgent": "agent-relation-mapper",
+                    "sourceCollectionRunId": graph_run_id,
+                },
+            },
+        },
+    }
+
+
+def _seed_counter_evidence_graph(
+    monkeypatch: pytest.MonkeyPatch,
+    graph_record: dict,
+    candidate_ids: list[str],
+) -> None:
+    from core.web.services.team_workflow.source_collection import (
+        candidates as candidates_module,
+    )
+
+    def fake_list_candidate_store(team_id, **kwargs):
+        if kwargs.get("candidate_type") == "candidate_graph":
+            return {"schemaVersion": 1, "candidates": [graph_record]}
+        return {
+            "schemaVersion": 1,
+            "candidates": [
+                {
+                    "candidateId": candidate_id,
+                    "candidateType": "source_manifest",
+                    "title": f"Collected source {candidate_id}",
+                    "sourceUrl": f"https://example.org/{candidate_id}",
+                    # Anchorable summaries: the counter-evidence bridge runs
+                    # inside the materialized path, after the fact phase.
+                    "summary": (
+                        f"Collected abstract for {candidate_id} reports a "
+                        "bounded mechanism."
+                    ),
+                    "createdAt": "2026-10-20T10:45:06Z",
+                }
+                for candidate_id in candidate_ids
+            ],
+        }
+
+    monkeypatch.setattr(
+        candidates_module, "list_candidate_store", fake_list_candidate_store
+    )
+
+
+_COUNTER_REFS = [
+    {
+        "evidenceRef": "dprec-20261020104507-aaaa",
+        "claim": "该结论受设备与负载边界限制。",
+        "disposition": "challenges_ontology",
+    },
+    {
+        "evidenceRef": "dprec-20261020104507-bbbb",
+        "claim": "观测相关性存在未排除的替代解释。",
+        "disposition": "alternative_interpretation",
+    },
+    {
+        "evidenceRef": "dprec-20261020104507-aaaa",
+        "claim": "结论仅在受控负载范围内成立。",
+        "disposition": "limit_scope",
+    },
+    {
+        "evidenceRef": "dprec-20261020104507-unresolved",
+        "claim": "该引用无法解析到已收集候选。",
+        "disposition": "challenges_ontology",
+    },
+]
+
+
+def test_chain_collection_materializes_graph_counter_evidence_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both genuine dispositions land as contradict cards bound to the run.
+
+    Unknown dispositions (a scope limit is not a negation) and refs whose
+    candidate cannot be resolved are skipped as observable annotations, and
+    the bridge itself never fails the handoff.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        agent_claim_evidence_materializer as materializer_module,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_counter_evidence_graph(
+        monkeypatch,
+        _counter_evidence_graph_record(counter_refs=_COUNTER_REFS),
+        candidate_ids=["dprec-20261020104507-aaaa", "dprec-20261020104507-bbbb"],
+    )
+    monkeypatch.setattr(
+        materializer_module,
+        "_chain_agent_model_ref",
+        lambda _agent_id: "provider/model-x",
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-20261020104506966426-72158dab",
+        workflow_run_id="run-fbc374b1caf6",
+    )
+
+    counter = result["counterEvidence"]
+    assert counter["status"] == "materialized"
+    assert counter["counterEvidenceCount"] == 2
+    assert counter["unknownDispositionSkipped"] == [
+        {
+            "evidenceRef": "dprec-20261020104507-aaaa",
+            "disposition": "limit_scope",
+        }
+    ]
+    assert counter["unresolvedCandidateSkipped"] == [
+        {
+            "evidenceRef": "dprec-20261020104507-unresolved",
+            "reason": "candidate_unresolved",
+        }
+    ]
+
+    cards = [
+        item
+        for item in ClaimEvidenceStore(tmp_path).list(team_id)
+        if item["evidenceKind"] == "counter_evidence"
+    ]
+    assert len(cards) == 2
+    by_source = {item["sourceId"]: item for item in cards}
+    assert set(by_source) == {
+        "dprec-20261020104507-aaaa",
+        "dprec-20261020104507-bbbb",
+    }
+    for card in by_source.values():
+        assert card["supportLevel"] == "contradicts"
+        assert card["reasoningRole"] == "inference"
+        assert card["extractionMethod"] == "model"
+        assert card["modelRef"] == "provider/model-x"
+        assert card["extractorAgentId"] == "agent-relation-mapper"
+        assert card["workflowRunId"] == "run-fbc374b1caf6"
+        assert card["sourceCollectionRunId"] == (
+            "dprun-20261020104506966426-72158dab"
+        )
+        assert card["locator"] == {
+            "kind": "evidence_ref",
+            "anchor": card["sourceId"],
+        }
+    # Identity resolution: generated ids first, candidate-store fallback next.
+    assert by_source["dprec-20261020104507-aaaa"]["candidateId"] == (
+        "dprec-20261020104507-aaaa"
+    )
+    assert by_source["dprec-20261020104507-bbbb"]["candidateId"] == (
+        "dprec-20261020104507-bbbb"
+    )
+    # The claim rows live in the question-scoped ledger.
+    rows = {
+        item["claim"]: item for item in claim_ledger.list_claims(team_id)["claims"]
+    }
+    assert "该结论受设备与负载边界限制。" in rows
+    assert "观测相关性存在未排除的替代解释。" in rows
+
+
+def test_chain_collection_counter_evidence_replay_is_zero_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replayed bridge reuses every row and appends nothing."""
+    from core.web.services.team_workflow.research_runtime import (
+        agent_claim_evidence_materializer as materializer_module,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_counter_evidence_graph(
+        monkeypatch,
+        _counter_evidence_graph_record(counter_refs=_COUNTER_REFS[:2]),
+        candidate_ids=["dprec-20261020104507-aaaa", "dprec-20261020104507-bbbb"],
+    )
+    monkeypatch.setattr(
+        materializer_module,
+        "_chain_agent_model_ref",
+        lambda _agent_id: "provider/model-x",
+    )
+    kwargs = {
+        "project_root": tmp_path,
+        "team_id": team_id,
+        "question_scope": scope,
+        "collection_run_id": "dprun-20261020104506966426-72158dab",
+        "workflow_run_id": "run-fbc374b1caf6",
+    }
+
+    first = materialize_chain_collection_evidence(**kwargs)
+    store = ClaimEvidenceStore(tmp_path)
+    snapshot_after_first = [
+        dict(item) for item in store.list(team_id)
+    ]
+
+    replay = materialize_chain_collection_evidence(**kwargs)
+
+    assert first["counterEvidence"]["counterEvidenceCount"] == 2
+    assert replay["counterEvidence"]["counterEvidenceCount"] == 2
+    assert replay["counterEvidence"]["status"] == "materialized"
+    assert [dict(item) for item in store.list(team_id)] == snapshot_after_first
+
+
+def test_chain_collection_counter_evidence_bridge_is_fail_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No graph, and a broken graph reader, never break the handoff."""
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-run-a-1",
+                summary="The collected abstract states a bounded mechanism.",
+                url="https://example.org/paper-a",
+            ),
+        ],
+    )
+
+    no_graph = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-1",
+    )
+    assert no_graph["status"] == "materialized"
+    assert no_graph["counterEvidence"] == {
+        "status": "skipped",
+        "reason": "no_counter_evidence_refs",
+    }
+
+    from core.web.services.team_workflow.source_collection import (
+        candidates as candidates_module,
+    )
+
+    def broken_list_candidate_store(team_id, **kwargs):
+        if kwargs.get("candidate_type") == "candidate_graph":
+            raise RuntimeError("candidate store unavailable")
+        # The collection candidates stay readable — only the graph read breaks.
+        return {
+            "schemaVersion": 1,
+            "candidates": [
+                {
+                    "candidateId": "candidate-run-a-1",
+                    "candidateType": "source_manifest",
+                    "title": "Collected source candidate-run-a-1",
+                    "summary": (
+                        "The collected abstract states a bounded mechanism."
+                    ),
+                    "sourceUrl": "https://example.org/paper-a",
+                    "createdAt": "2026-10-20T10:45:06Z",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        candidates_module, "list_candidate_store", broken_list_candidate_store
+    )
+    broken_graph = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-1",
+    )
+    assert broken_graph["status"] == "materialized"
+    assert broken_graph["counterEvidence"] == {
+        "status": "skipped",
+        "reason": "no_counter_evidence_refs",
+    }
