@@ -63,6 +63,9 @@ def _record_turn_authorization_timing(
     resolve_ms: float = 0.0,
     install_ms: float = 0.0,
     record_ms: float = 0.0,
+    identity_ms: float = 0.0,
+    max_calls_ms: float = 0.0,
+    install_core_ms: float = 0.0,
 ) -> None:
     _TURN_AUTHORIZATION_TIMING.durationMs = max(0, int(duration_ms))
     _TURN_AUTHORIZATION_TIMING.cacheHit = bool(cache_hit)
@@ -73,6 +76,10 @@ def _record_turn_authorization_timing(
     _TURN_AUTHORIZATION_TIMING.resolveMs = max(0, int(resolve_ms))
     _TURN_AUTHORIZATION_TIMING.installMs = max(0, int(install_ms))
     _TURN_AUTHORIZATION_TIMING.recordMs = max(0, int(record_ms))
+    # TTFT 批七 install 内部细分：由 install 层线程局部上报，installMs ≥ 三者之和。
+    _TURN_AUTHORIZATION_TIMING.identityMs = max(0, int(identity_ms))
+    _TURN_AUTHORIZATION_TIMING.maxCallsMs = max(0, int(max_calls_ms))
+    _TURN_AUTHORIZATION_TIMING.installCoreMs = max(0, int(install_core_ms))
     _TURN_AUTHORIZATION_TIMING.recordedAtMonotonic = time.monotonic()
 
 
@@ -92,6 +99,9 @@ def last_turn_authorization_timing() -> Dict[str, Any] | None:
         "resolveMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "resolveMs", 0) or 0)),
         "installMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "installMs", 0) or 0)),
         "recordMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "recordMs", 0) or 0)),
+        "identityMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "identityMs", 0) or 0)),
+        "maxCallsMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "maxCallsMs", 0) or 0)),
+        "installCoreMs": max(0, int(getattr(_TURN_AUTHORIZATION_TIMING, "installCoreMs", 0) or 0)),
     }
 
 
@@ -109,6 +119,9 @@ def clear_turn_authorization_telemetry_state() -> None:
         "resolveMs",
         "installMs",
         "recordMs",
+        "identityMs",
+        "maxCallsMs",
+        "installCoreMs",
     ):
         try:
             delattr(_TURN_AUTHORIZATION_TIMING, attribute)
@@ -340,6 +353,7 @@ def resolve_turn_authorization(
     try:
         from core.authorization.tool_authorization_service import (
             install_execution_authorization,
+            last_install_execution_timing,
             resolve_enforced_authorization,
         )
         from core.logging.tool_authorization_events import (
@@ -387,6 +401,12 @@ def resolve_turn_authorization(
 
         total_ms = (time.perf_counter() - started) * 1000
         cache_hit = bool(getattr(report, "decision_cache_hit", False))
+        # 批七：install 内部细分（identity/maxCalls/core）由 install 层线程
+        # 局部上报；install 被 mock 或失败时读不到，按 0 兜底，事件字段恒在。
+        install_sub = last_install_execution_timing() or {}
+        identity_ms = float(install_sub.get("identityMs", 0) or 0)
+        max_calls_ms = float(install_sub.get("maxCallsMs", 0) or 0)
+        install_core_ms = float(install_sub.get("installCoreMs", 0) or 0)
         # 子锚点走独立轻量 timing 事件、每回合写出：decision 事件在命中去重
         # 轮被跳过，而命中轮正是本批要归因的 turnAuthorizationMs 缺口所在。
         record_authorization_timing(
@@ -399,6 +419,9 @@ def resolve_turn_authorization(
             resolve_ms=resolve_ms,
             install_ms=install_ms,
             record_ms=record_ms,
+            identity_ms=identity_ms,
+            max_calls_ms=max_calls_ms,
+            install_core_ms=install_core_ms,
         )
         _record_turn_authorization_timing(
             total_ms,
@@ -408,6 +431,9 @@ def resolve_turn_authorization(
             resolve_ms=resolve_ms,
             install_ms=install_ms,
             record_ms=record_ms,
+            identity_ms=identity_ms,
+            max_calls_ms=max_calls_ms,
+            install_core_ms=install_core_ms,
         )
         return report
     except Exception as exc:
