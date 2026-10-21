@@ -198,6 +198,7 @@ class PromptManager:
         "AGENTS",
         "PROTOCOL_ADAPTER",
         "RUNTIME_GOAL",
+        "INTENT_ALIGNMENT",
         "USER_PROFILE",
         "SPEC_DIGEST",
         "MEMORY",
@@ -232,6 +233,7 @@ class PromptManager:
         "AGENTS",
         "PROTOCOL_ADAPTER",
         "RUNTIME_GOAL",
+        "INTENT_ALIGNMENT",
         "USER_PROFILE",
         "TASK_CHECKLIST",
         "CODEBASE_MAP",
@@ -1001,6 +1003,15 @@ class PromptManager:
 
     def get_runtime_goal_packet(self) -> Any:
         return self._build_context.runtime_goal_packet
+
+    def set_intent_alignment_packet(self, packet: Any) -> None:
+        """设置意图对齐 packet，供 INTENT_ALIGNMENT 动态章节渲染。"""
+
+        self._build_context.intent_alignment_packet = packet
+        self._section_cache.invalidate("INTENT_ALIGNMENT")
+
+    def get_intent_alignment_packet(self) -> Any:
+        return self._build_context.intent_alignment_packet
 
     # ------------------------------------------------------------------------
     # 状态记忆

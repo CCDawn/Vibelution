@@ -1488,3 +1488,190 @@ class TestFallbackDefaults:
             "CONFIG_AWARENESS",
             "ENV_INFO",
         ]
+
+
+def _make_intent_alignment_packet(**overrides):
+    """构造 IntentAlignmentPacket 测试投影（dict 形态，设计 §4.2 schema）。"""
+    packet = {
+        "schemaVersion": 1,
+        "status": "clarifying",
+        "confirmedRequirements": [
+            {
+                "point": "只改前端展示层，不动接口契约",
+                "settledAt": "第 2 轮",
+                "evidence": "后端别动",
+            }
+        ],
+        "openQuestions": [
+            {
+                "id": "q2",
+                "question": "表格数据超过一屏时要分页还是虚拟滚动？",
+                "impactFork": "不问则布局与数据层实现直接分叉",
+                "options": ["分页", "虚拟滚动", "你定"],
+                "askedAt": None,
+            }
+        ],
+        "clarifyHistory": [
+            {
+                "questionId": "q1",
+                "question": "改哪部分？",
+                "answer": "只动展示层",
+                "settledAs": "改动范围仅 web/src/table",
+            }
+        ],
+        "gate": {
+            "action": "ask",
+            "confidence": 0.7,
+            "decidedBy": "rules",
+            "reason": "规则预筛命中缺失量纲信号，交由本轮自判",
+        },
+        "budget": {"questionsAskedThisSession": 1, "maxQuestionsPerTurn": 3},
+    }
+    packet.update(overrides)
+    return packet
+
+
+class TestIntentAlignmentSection:
+    """INTENT_ALIGNMENT 章节：注册、注入、渲染与注册集纪律（表 B1-B8）"""
+
+    def test_b1_registered_and_empty_state_renders_none(self):
+        pm = PromptManager()
+        section = pm._sections.get("INTENT_ALIGNMENT")
+        assert section is not None, "INTENT_ALIGNMENT 章节应已注册"
+        # 元信息照 §4.5.1：priority 19、动态、不进缓存前缀、可 exclude、无能力位。
+        assert section.priority == 19
+        assert section.cache_break is True
+        assert section.cache_prefix is False
+        assert section.required is False
+        assert section.capability_requirements == ()
+        # packet 未注入 → compute 返回 None（空态零 token）。
+        assert section.compute() is None
+
+        pm.set_intent_alignment_packet(_make_intent_alignment_packet())
+        content = section.compute()
+        assert content is not None
+        assert "## 意图对齐" in content
+        assert "待澄清问题" in content
+
+    def test_b1_aligned_packet_without_open_questions_renders_none(self):
+        pm = PromptManager()
+        pm.set_intent_alignment_packet({"status": "aligned", "openQuestions": []})
+        assert pm._sections.get("INTENT_ALIGNMENT").compute() is None
+
+    def test_b2_order_between_runtime_goal_and_task_checklist(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(
+            RuntimeGoalPacket(
+                goal="运行目标锚点A",
+                source="对话入口",
+                objective_type="user_request",
+                allow_auto_continue=False,
+                allow_file_writes=True,
+                allow_git_commit=False,
+                allow_evolution_transaction=False,
+                allow_subagents=False,
+                completion_standard="验证排序。",
+                forbidden_actions=(),
+            )
+        )
+        pm.set_intent_alignment_packet(_make_intent_alignment_packet())
+        with patch("core.orchestration.task_planner.get_task_manager") as mock_tm:
+            class FakeTaskManager:
+                def get_active_tasks(self):
+                    return "## 任务清单锚点"
+
+            mock_tm.return_value = FakeTaskManager()
+            result = to_string(
+                pm.build(
+                    include=[
+                        "RUNTIME_GOAL",
+                        "INTENT_ALIGNMENT",
+                        "USER_PROFILE",
+                        "TASK_CHECKLIST",
+                    ]
+                )
+            )
+
+        goal_pos = result.find("运行目标锚点A")
+        intent_pos = result.find("## 意图对齐")
+        task_pos = result.find("任务清单锚点")
+        assert goal_pos != -1 and intent_pos != -1 and task_pos != -1
+        assert goal_pos < intent_pos, "INTENT_ALIGNMENT 应位于 RUNTIME_GOAL 之后"
+        assert intent_pos < task_pos, "INTENT_ALIGNMENT 应位于 TASK_CHECKLIST 之前"
+
+    def test_b3_protected_floor_survives_and_exclude_wins(self):
+        pm = PromptManager()
+        pm.set_intent_alignment_packet(_make_intent_alignment_packet())
+        default_text = to_string(pm.build())
+        assert "## 意图对齐" in default_text
+        excluded_text = to_string(pm.build(exclude=["INTENT_ALIGNMENT"]))
+        assert "## 意图对齐" not in excluded_text
+
+    def test_b4_packet_refresh_between_builds(self):
+        pm = PromptManager()
+        pm.set_intent_alignment_packet(_make_intent_alignment_packet())
+        first = to_string(pm.build(include=["INTENT_ALIGNMENT"]))
+
+        settled_v2 = _make_intent_alignment_packet(
+            openQuestions=[],
+            clarifyHistory=[
+                {
+                    "questionId": "q1",
+                    "question": "改哪部分？",
+                    "answer": "只动展示层",
+                    "settledAs": "改动范围仅 web/src/table",
+                },
+                {
+                    "questionId": "q2",
+                    "question": "表格数据超过一屏时要分页还是虚拟滚动？",
+                    "answer": "虚拟滚动",
+                    "settledAs": "长列表用虚拟滚动",
+                },
+            ],
+        )
+        pm.set_intent_alignment_packet(settled_v2)
+        second = to_string(pm.build(include=["INTENT_ALIGNMENT"]))
+
+        assert "表格数据超过一屏时要分页还是虚拟滚动" in first
+        assert "长列表用虚拟滚动" not in first
+        assert "长列表用虚拟滚动" in second
+        second_open_region = second.split("待澄清问题", 1)[1].split("澄清历史", 1)[0]
+        assert "分页还是虚拟滚动" not in second_open_region
+
+    def test_b5_intent_alignment_lands_in_dynamic_parts(self):
+        pm = PromptManager()
+        pm.set_intent_alignment_packet(_make_intent_alignment_packet())
+        sp = pm.build(include=["INTENT_ALIGNMENT"])
+        static_parts, dynamic_parts = split_sys_prompt_prefix(sp)
+        assert not any("## 意图对齐" in part for part in static_parts)
+        assert any("## 意图对齐" in part for part in dynamic_parts)
+
+    def test_b6_registered_in_floor_but_not_fallback(self):
+        # 注册集第 7 条自查：注册前已 grep——既有 floor 断言均为子集式成员
+        # 断言（test_protected_floor_survives_include_override 等），无精确
+        # 集合断言需要同步；fallback 全量断言（TestFallbackDefaults）不受影响。
+        pm = PromptManager()
+        assert "INTENT_ALIGNMENT" in pm._PROTECTED_FLOOR_SECTIONS
+        assert "INTENT_ALIGNMENT" not in pm._FALLBACK_DEFAULT_SECTIONS
+
+    def test_b8_settled_question_not_reasked_in_open_region(self):
+        pm = PromptManager()
+        packet = _make_intent_alignment_packet(
+            openQuestions=[
+                {
+                    "id": "q3",
+                    "question": "需要支持导出 Excel 吗？",
+                    "impactFork": "决定是否引入导出依赖",
+                    "options": [],
+                    "askedAt": None,
+                }
+            ],
+        )
+        pm.set_intent_alignment_packet(packet)
+        content = pm._sections.get("INTENT_ALIGNMENT").compute()
+        assert content is not None
+        assert "禁止重复追问" in content
+        assert "改动范围仅 web/src/table" in content
+        open_region = content.split("待澄清问题", 1)[1].split("澄清历史", 1)[0]
+        assert "改哪部分" not in open_region
+        assert "需要支持导出 Excel 吗" in open_region

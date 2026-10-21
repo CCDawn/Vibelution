@@ -268,6 +268,139 @@ def make_task_checklist_section() -> SystemPromptSection:
     )
 
 
+def make_intent_alignment_section(ctx: BuildContext) -> SystemPromptSection:
+    """意图对齐 — 需求理解状态：已确认需求、待澄清问题与问答记忆。
+
+    compute 只从 BuildContext 读 intent_alignment_packet（不 import store、
+    不读文件）；packet 为 None 或 status=aligned 且无 openQuestions 时返回
+    None（空态零 token）。协议规则写进章节文本本身，让位
+    prompt_template_service 的散规则。
+    """
+
+    _PROTOCOL_RULES = (
+        "### 对齐协议",
+        "- 只在「歧义会改变实现走向」时提问；影响面仅是措辞、风格、等价路径选择时不问，直接选并说明。",
+        "- 提问必须一次成组（≤3 个）、每个问题附一句 impactFork（不问则实现怎么分叉）；不得把提问拆成连续多轮问卷。",
+        "- 决定提问时：先以 `intent_alignment_merge` 落当前最佳理解的四要素初稿（推断内容进 assumptions），再调用 `intent_alignment_card` 发卡，同时以正文文本提出同样的问题（正文是用户可见的提问本体）。",
+        "- 收到用户回答（无论打字还是卡片回执）后，先以 `intent_alignment_merge` 归并答案与结构化更新，再继续推进；全部对齐且用户确认时随归并落 approved 判定。",
+        "- 已在澄清历史中 settle 的问题禁止重问；用户答复先折算成已确认需求再进入规划。",
+        "- 意图清楚时直接推进规划与执行，不为常规步骤索要确认。",
+    )
+
+    def _packet_get(holder: Any, key: str, default: Any = None) -> Any:
+        if isinstance(holder, dict):
+            return holder.get(key, default)
+        return getattr(holder, key, default)
+
+    def _as_items(value: Any) -> list:
+        if isinstance(value, (list, tuple)):
+            return [item for item in value if item is not None]
+        return []
+
+    def _field(item: Any, key: str, default: str = "") -> str:
+        value = _packet_get(item, key, default)
+        return default if value is None else str(value).strip()
+
+    def _sub_list(item: Any, key: str) -> list:
+        value = _packet_get(item, key)
+        if not isinstance(value, (list, tuple)):
+            return []
+        return [str(v).strip() for v in value if str(v).strip()]
+
+    def _open_questions(packet: Any) -> list:
+        questions = []
+        for item in _as_items(_packet_get(packet, "openQuestions")):
+            if _field(item, "status") in ("answered", "withdrawn"):
+                continue
+            questions.append(item)
+        return questions
+
+    def compute() -> Optional[str]:
+        packet = getattr(ctx, "intent_alignment_packet", None)
+        if packet is None:
+            return None
+        status = _field(packet, "status")
+        open_questions = _open_questions(packet)
+        if status == "aligned" and not open_questions:
+            return None
+
+        budget = _packet_get(packet, "budget")
+        max_questions = _packet_get(budget, "maxQuestionsPerTurn", 3) if budget else 3
+        try:
+            max_questions = max(1, int(max_questions))
+        except (TypeError, ValueError):
+            max_questions = 3
+
+        lines = ["## 意图对齐"]
+        if status == "clarifying":
+            lines.append("- 状态: 存在会改变实现走向的未决分叉，先澄清再规划/执行。")
+        else:
+            lines.append(f"- 状态: {status}")
+
+        confirmed = _as_items(_packet_get(packet, "confirmedRequirements"))
+        if confirmed:
+            lines.append("- 已确认需求:")
+            for item in confirmed[:5]:
+                point = _field(item, "point")
+                if not point:
+                    continue
+                settled_at = _field(item, "settledAt")
+                evidence = _field(item, "evidence")
+                detail = f"（{settled_at}，用户:\"{evidence}\"）" if settled_at or evidence else ""
+                lines.append(f"  - {point}{detail}")
+
+        lines.append("- 待澄清问题（最多 3 个，一次问完，不拆成多轮问卷）:")
+        if open_questions:
+            for idx, item in enumerate(open_questions[:max_questions], start=1):
+                question = _field(item, "question")
+                if not question:
+                    continue
+                text = f"  {idx}. \"{question}\""
+                impact = _field(item, "impactFork")
+                if impact:
+                    text += f"——{impact}"
+                options = _sub_list(item, "options")
+                if options:
+                    text += "；建议: " + " / ".join(options[:3])
+                lines.append(text)
+        else:
+            lines.append("  - （当前没有未决问题）")
+
+        history = _as_items(_packet_get(packet, "clarifyHistory"))[-3:]
+        lines.append("- 澄清历史（已问已答，禁止重复追问）:")
+        if history:
+            for item in history:
+                settled = _field(item, "settledAs") or _field(item, "answer")
+                if not settled:
+                    continue
+                question = _field(item, "question")
+                text = f"  - 已确认: {settled}"
+                if question:
+                    text += f"（问\"{question}\"）"
+                lines.append(text)
+        else:
+            lines.append("  - （暂无）")
+
+        gate = _packet_get(packet, "gate")
+        if gate:
+            reason = _field(gate, "reason")
+            if reason:
+                confidence = _packet_get(gate, "confidence")
+                suffix = "" if confidence in (None, "") else f"（confidence {confidence}）"
+                lines.append(f"- 判定依据: {reason}{suffix}")
+
+        lines.extend(_PROTOCOL_RULES)
+        return "\n".join(lines)
+
+    return SystemPromptSection(
+        name="INTENT_ALIGNMENT",
+        compute=compute,
+        cache_break=True,
+        priority=19,
+        description="意图对齐状态：已确认需求、待澄清问题与问答记忆",
+    )
+
+
 def make_codebase_map_section(
     build_context: BuildContext | None = None,
 ) -> SystemPromptSection:
@@ -798,6 +931,7 @@ def create_default_sections(
     # ── 内置动态章节 ──
 
     sections.append(make_task_checklist_section())
+    sections.append(make_intent_alignment_section(build_context))
     sections.append(make_user_profile_section())
     sections.append(make_codebase_map_section(build_context))
     sections.append(make_git_memory_section())
