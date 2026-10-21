@@ -20,7 +20,7 @@ import type {
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
-import { fetchPublicConfig } from "../../api/config";
+import { fetchConfigBootstrap } from "../../api/config";
 import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
@@ -324,14 +324,14 @@ export const ConversationView = React.memo(function ConversationView({
   void onSafeGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   // Model labels for the turn-envelope switch dividers. Uses the lightweight
-  // /api/config/public summary (modelLabels id→label map) instead of the full
+  // configuration bootstrap summary (modelLabels id→label map) instead of the full
   // /api/config/workspace payload: this mount only needs labels, and the heavy
   // workspace endpoint landed in every boot volley. Shares the configPublic
   // cache key with the shell-wide summary consumers; absence of data degrades
   // to the raw model id.
   const configSummaryQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: ({ signal }) => fetchPublicConfig({ signal }),
+    queryFn: ({ signal }) => fetchConfigBootstrap({ signal }),
     staleTime: 30_000,
   });
   const modelLabelByModelId = useMemo(

@@ -140,6 +140,79 @@ def test_missing_or_non_git_checkout_raises(tmp_path):
         resolve_branch_workspace(plain)
 
 
+@pytest.mark.parametrize(
+    ("role", "slug", "branch", "short_name", "instance_id"),
+    [
+        ("main", "", "main", "main", "main"),
+        ("task", "test", "codex/test", "branch+codex/test", "worktree:test"),
+        ("retired", "old", "codex/old", "retired+codex/old", "retired:old"),
+        ("task", "test", "HEAD", "branch+checkout", "worktree:test"),
+    ],
+)
+def test_current_identity_skips_dirty_and_runtime_scans(
+    tmp_path, monkeypatch, role, slug, branch, short_name, instance_id,
+):
+    root = tmp_path / "checkout"
+    layout = workspace.BranchWorkspaceLayout(
+        checkout=root, worktree_root=root, integration_root=tmp_path,
+        git_common_dir=tmp_path / ".git", branch_pool=tmp_path / ".worktrees",
+        retired_pool=tmp_path / ".worktrees" / "_retired",
+        legacy_siblings=(), role=role, slug=slug,
+    )
+    monkeypatch.setattr(workspace, "resolve_branch_workspace", lambda checkout: layout)
+    calls = []
+
+    def no_inventory(*args, **kwargs):
+        raise AssertionError("window title must not scan dirty state or runtime")
+
+    entry = {"worktree": str(root), "branch": f"refs/heads/{branch}"}
+    if branch == "HEAD":
+        entry = {"worktree": str(root), "detached": "true"}
+    monkeypatch.setattr(workspace, "_registered_worktrees", lambda root: calls.append(root) or [entry])
+    monkeypatch.setattr(workspace, "_local_branch_refs", lambda root: [])
+    monkeypatch.setattr(workspace, "_unregistered_pool_dirs", lambda layout: [])
+    monkeypatch.setattr(workspace, "_classify_checkout", lambda *args, **kwargs: (role, slug))
+    for name in ("_worktree_dirty_map", "_runtime_observation"):
+        monkeypatch.setattr(workspace, name, no_inventory)
+    identity = workspace.current_branch_instance_identity(root)
+    assert identity["currentId"] == instance_id
+    assert identity["currentShortName"] == short_name
+    assert identity["currentWorkbenchTitle"] == workspace.workbench_window_title(short_name)
+    assert identity["currentLauncherTitle"] == "Vibelution 启动管理"
+    assert "items" not in identity
+    assert len(calls) == (0 if role == "main" else 1)
+
+
+def test_identity_preserves_detached_and_generated_suffix_collisions(tmp_path, monkeypatch):
+    paths = [tmp_path / "a" / "repo", tmp_path / "b" / "repo", tmp_path / "c" / "other"]
+    layout = workspace.BranchWorkspaceLayout(
+        checkout=paths[1], worktree_root=paths[1], integration_root=tmp_path,
+        git_common_dir=tmp_path / ".git", branch_pool=tmp_path / ".worktrees",
+        retired_pool=tmp_path / ".worktrees" / "_retired",
+        legacy_siblings=(), role="unknown", slug="",
+    )
+    monkeypatch.setattr(workspace, "resolve_branch_workspace", lambda checkout: layout)
+    monkeypatch.setattr(workspace, "_registered_worktrees", lambda root: [
+        {"worktree": str(paths[0]), "detached": "true"},
+        {"worktree": str(paths[1]), "detached": "true"},
+        {"worktree": str(paths[2]), "branch": "refs/heads/repo-2"},
+    ])
+    monkeypatch.setattr(workspace, "_classify_checkout", lambda *args, **kwargs: ("unknown", ""))
+    monkeypatch.setattr(workspace, "_local_branch_refs", lambda root: [])
+    monkeypatch.setattr(workspace, "_unregistered_pool_dirs", lambda layout: [])
+    monkeypatch.setattr(workspace, "_worktree_dirty_map", lambda paths: {})
+    monkeypatch.setattr(workspace, "_runtime_observation", lambda path: {"alive": path == paths[2]})
+    full = list_branch_instances(paths[1])
+    assert full["currentShortName"] == "branch+repo-3"
+
+    def no_dirty(*args):
+        raise AssertionError("even colliding titles must not scan dirtiness")
+
+    monkeypatch.setattr(workspace, "_worktree_dirty_map", no_dirty)
+    identity = workspace.current_branch_instance_identity(paths[1])
+    assert identity == {key: full[key] for key in identity}
+
+
 def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     project = _init_repo(tmp_path / "OtherApp")
     in_pool = project / ".worktrees" / "feat-task"

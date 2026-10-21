@@ -2,6 +2,8 @@ import base64
 import copy
 import json
 import struct
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import httpx
@@ -660,6 +662,15 @@ def test_provider_reference_conflict_409_projects_redacted_detail(monkeypatch) -
 
 
 @pytest.fixture(autouse=True)
+def isolate_http_tests_from_terminal_ui(monkeypatch):
+    from importlib import import_module
+
+    # These routes exercise HTTP/config behavior, not the interactive terminal.
+    # Log forwarding must not construct a shared CLI singleton mid-request.
+    monkeypatch.setattr(import_module("core.logging.logger"), "_get_ui", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
@@ -752,6 +763,134 @@ def test_config_summary_exposes_language():
     assert response.status_code == 200
     payload = response.json()
     assert payload["language"] in {"zh", "en"}
+
+
+@pytest.fixture
+def bootstrap_config(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("ui", {})["language"] = "en"
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    config_service._invalidate_config_result_cache()
+    yield public_config
+    config_service._invalidate_config_result_cache()
+
+
+def test_config_bootstrap_skips_diagnostics_editor_and_tool_construction(monkeypatch, bootstrap_config):
+    import sys
+    from types import ModuleType
+    import tools
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("bootstrap must not run diagnostics, editor setup, or construct tools")
+
+    monkeypatch.setattr(config_service, "inspect_public_config", unexpected)
+    monkeypatch.setattr(config_service, "build_editor_sections", unexpected)
+    # Keep the regression guard cold: importing the real toolbox here would
+    # initialize unrelated CLI/UI singletons inside this HTTP test process.
+    toolbox = ModuleType("tools.Key_Tools")
+    toolbox.create_llm_facing_tools = unexpected
+    monkeypatch.setitem(sys.modules, "tools.Key_Tools", toolbox)
+    monkeypatch.setattr(tools, "Key_Tools", toolbox, raising=False)
+
+    response = client.get("/api/config/bootstrap")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["language"] == "en"
+    assert not {"blockingCount", "warningCount", "sections"} & payload.keys()
+    assert payload["defaultRoute"] == config_service.get_workbench_contract(bootstrap_config)["defaultRoute"]
+
+
+def test_config_bootstrap_matches_full_summary_and_preserves_diagnostics(monkeypatch, bootstrap_config):
+    calls = []
+
+    def inspect(public_config):
+        calls.append("diagnostics")
+        return {"diagnosis": {"blocking_issues": ["a", "b"], "warnings": ["c"]}}
+
+    def editor(public_config, language):
+        calls.append("editor")
+        return []
+
+    monkeypatch.setattr(config_service, "inspect_public_config", inspect)
+    monkeypatch.setattr(config_service, "build_editor_sections", editor)
+    bootstrap = client.get("/api/config/bootstrap").json()
+    assert calls == []
+    summary = client.get("/api/config/public").json()
+
+    assert bootstrap == {key: summary[key] for key in bootstrap}
+    assert set(summary) - set(bootstrap) == {"blockingCount", "warningCount", "sections"}
+    assert summary["blockingCount"] == 2
+    assert summary["warningCount"] == 1
+    assert summary["sections"]
+    assert calls == ["diagnostics", "editor"]
+
+
+def test_config_bootstrap_http_schema_requires_typed_fields():
+    schema = client.app.openapi()
+    response = schema["paths"]["/api/config/bootstrap"]["get"]["responses"]["200"]
+    response_schema = response["content"]["application/json; charset=utf-8"]["schema"]
+    assert response_schema["$ref"].endswith("/ConfigBootstrapResponse")
+    model = schema["components"]["schemas"]["ConfigBootstrapResponse"]
+    assert set(model["required"]) == set(model["properties"])
+    assert model["additionalProperties"] is False
+    assert model["properties"]["modelLibraryCount"]["type"] == "integer"
+    assert model["properties"]["modeAvailability"]["additionalProperties"]["type"] == "boolean"
+    assert not {"blockingCount", "warningCount", "sections"} & model["properties"].keys()
+
+
+@pytest.mark.parametrize("writer", ["_save_public_config_and_invalidate", "_save_model_catalog_state_and_invalidate"])
+def test_config_bootstrap_write_invalidates_cached_fields(monkeypatch, bootstrap_config, writer):
+    first = config_service.get_config_bootstrap()
+    bootstrap_config["ui"]["language"] = "zh"
+    monkeypatch.setattr(config_service, "save_public_config", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "save_model_catalog_state", lambda *_args, **_kwargs: None)
+    assert config_service.get_config_bootstrap() == first
+
+    getattr(config_service, writer)({})
+    refreshed = config_service.get_config_bootstrap()
+    assert refreshed["language"] == "zh"
+    assert refreshed["hash"] != first["hash"]
+
+
+def test_config_bootstrap_cache_signature_ttl_and_copy_isolation(monkeypatch, bootstrap_config, tmp_path):
+    signature_file = tmp_path / "config.toml"
+    signature_file.write_text("one", encoding="utf-8")
+    monkeypatch.setattr(config_service, "CONFIG_PATH", signature_file)
+    first = config_service.get_config_bootstrap()
+    first["modelLabels"]["modified"] = "should not persist"
+    assert "modified" not in config_service.get_config_bootstrap()["modelLabels"]
+
+    bootstrap_config["ui"]["language"] = "zh"
+    signature_file.write_text("changed length", encoding="utf-8")
+    assert config_service.get_config_bootstrap()["language"] == "zh"
+    bootstrap_config["ui"]["language"] = "en"
+    entry = config_service._CONFIG_RESULT_CACHE["bootstrap"]
+    monkeypatch.setattr(config_service.time, "monotonic", lambda: entry.expires_at + 1)
+    assert config_service.get_config_bootstrap()["language"] == "en"
+
+
+def test_config_bootstrap_concurrent_misses_share_one_build(monkeypatch, bootstrap_config):
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+    original = config_service._build_config_bootstrap
+
+    def build():
+        calls.append(1)
+        started.set()
+        assert release.wait(5)
+        return original()
+
+    monkeypatch.setattr(config_service, "_build_config_bootstrap", build)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        leader = executor.submit(config_service.get_config_bootstrap)
+        assert started.wait(5)
+        waiters = [executor.submit(config_service.get_config_bootstrap) for _ in range(3)]
+        release.set()
+        payloads = [future.result(timeout=5) for future in [leader, *waiters]]
+    assert calls == [1]
+    assert all(payload == payloads[0] for payload in payloads)
 
 
 def test_config_summary_exposes_model_labels(monkeypatch):

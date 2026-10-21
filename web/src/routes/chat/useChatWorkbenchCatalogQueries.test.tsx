@@ -25,7 +25,7 @@ function pendingRead(name: string, signal?: AbortSignal): Promise<never> {
     signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
   });
 }
-vi.mock("../../api/config", () => ({ fetchPublicConfig: ({ signal }: { signal?: AbortSignal } = {}) => pendingRead("config", signal) }));
+vi.mock("../../api/config", () => ({ fetchConfigBootstrap: ({ signal }: { signal?: AbortSignal } = {}) => pendingRead("config", signal) }));
 vi.mock("../../api/chat", () => ({
   fetchChatWorkbenchBootstrap: () => {
     bootstrapControl.requestCount += 1;

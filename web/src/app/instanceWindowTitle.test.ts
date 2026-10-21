@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { currentInstanceWindowTitle, instanceWindowTitle } from "./instanceWindowTitle";
+import shellSource from "./AppShell?raw";
 
 describe("instance window titles", () => {
+  it("keeps the workbench title off the full Launcher inventory path", () => {
+    expect(shellSource).toContain("queryKeys.launcherCurrentInstance()");
+    expect(shellSource).toContain("getCurrentInstanceIdentity({ signal })");
+    expect(shellSource).not.toContain("getLocalBranchInstances");
+    expect(shellSource).not.toContain("queryKeys.launcherBranchInstances()");
+  });
   it("distinguishes workbench and Launcher roles", () => {
     expect(instanceWindowTitle("workbench", "main")).toBe("Vibelution 工作台 · main");
     expect(instanceWindowTitle("launcher", "main")).toBe("Vibelution 启动管理");

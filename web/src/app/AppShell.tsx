@@ -27,7 +27,7 @@ import {
   setFetchJsonFailureReporter,
   type FetchJsonFailureReport,
 } from "../api/client";
-import { fetchPublicConfig } from "../api/config";
+import { fetchConfigBootstrap } from "../api/config";
 import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
 import { listRuntimeTasksRevisionAware, type RuntimeTaskListPayload } from "../api/runtimeTasks";
@@ -41,7 +41,7 @@ import {
 import { loadPrimaryRouteChunk } from "./primaryRouteChunkLoader";
 import {
   cancelRuntimeLifecycleCommand,
-  getLocalBranchInstances,
+  getCurrentInstanceIdentity,
   getLauncherFreshness,
   hasLauncherFreshnessBridge,
   isLauncherControlPlaneNotReady,
@@ -53,7 +53,7 @@ import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
   CodeFreshness,
-  ConfigSummary,
+  ConfigBootstrap,
   RuntimeSummary,
 } from "../api/types";
 import {
@@ -683,11 +683,6 @@ type RouteLocationLike = {
   hash: string;
 };
 
-type ConfigSummaryWithThemeBackground = ConfigSummary & {
-  themeBackgroundImageUrl?: unknown;
-  themeBackgroundReadability?: unknown;
-};
-
 type WorkbenchShellStyle = CSSProperties & {
   "--workbench-theme-background-image"?: string;
 };
@@ -713,8 +708,8 @@ export function syncWorkbenchThemeRoot(theme: WorkbenchTheme): () => void {
   };
 }
 
-function configThemeBackgroundImageUrl(summary: ConfigSummary | undefined): string {
-  const value = (summary as ConfigSummaryWithThemeBackground | undefined)?.themeBackgroundImageUrl;
+function configThemeBackgroundImageUrl(summary: ConfigBootstrap | undefined): string {
+  const value = summary?.themeBackgroundImageUrl;
   const url = typeof value === "string" ? value.trim() : "";
   if (!url.startsWith("/api/config/theme-background-image/")) {
     return "";
@@ -723,13 +718,13 @@ function configThemeBackgroundImageUrl(summary: ConfigSummary | undefined): stri
 }
 
 function configThemeBackgroundReadability(
-  summary: ConfigSummary | undefined,
+  summary: ConfigBootstrap | undefined,
   hasBackgroundImage: boolean,
 ): ThemeBackgroundReadability {
   if (!hasBackgroundImage) {
     return "standard";
   }
-  const value = (summary as ConfigSummaryWithThemeBackground | undefined)?.themeBackgroundReadability;
+  const value = summary?.themeBackgroundReadability;
   if (value === "soft" || value === "standard" || value === "strong") {
     return value;
   }
@@ -1150,14 +1145,14 @@ export function AppShell() {
   const suppressNextReturnStackPushRef = useRef(false);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: ({ signal }) => fetchPublicConfig({ signal }),
+    queryFn: ({ signal }) => fetchConfigBootstrap({ signal }),
   });
-  const branchInstancesQuery = useQuery({
-    queryKey: queryKeys.launcherBranchInstances(),
-    queryFn: () => getLocalBranchInstances(),
+  const currentInstanceQuery = useQuery({
+    queryKey: queryKeys.launcherCurrentInstance(),
+    queryFn: ({ signal }) => getCurrentInstanceIdentity({ signal }),
     staleTime: 15_000,
   });
-  const workbenchWindowTitle = currentInstanceWindowTitle("workbench", branchInstancesQuery.data);
+  const workbenchWindowTitle = currentInstanceWindowTitle("workbench", currentInstanceQuery.data);
   const themeBackgroundImageUrl = configThemeBackgroundImageUrl(configQuery.data);
   const themeBackgroundReadability = configThemeBackgroundReadability(
     configQuery.data,

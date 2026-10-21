@@ -1,17 +1,30 @@
 // @vitest-environment happy-dom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { expect, it, vi } from "vitest";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeEach, expect, it, vi } from "vitest";
 import { queryKeys } from "../../api/queryKeys";
 import type { PersonalAssistant } from "../../api/types/personalAssistant";
 import type { ComputerState } from "../../api/types/personalAssistantComputer";
+import type { SessionDetail } from "../../api/types/chat";
+import type { PetActivity } from "../../api/types/petActivity";
+import { fetchSessionDetail } from "../../api/chat";
+import { fetchPetActivity } from "../../api/pet";
+import { fetchPersonalAssistantComputer } from "../../api/personalAssistantComputer";
 import { useAssistantActivity } from "./useAssistantActivity";
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
+vi.mock("../../api/chat", () => ({ fetchSessionDetail: vi.fn() }));
+vi.mock("../../api/pet", () => ({ fetchPetActivity: vi.fn() }));
 vi.mock("../../api/personalAssistantComputer", () => ({ fetchPersonalAssistantComputer: vi.fn(async () => ({
   available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
 })) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue({
+    available: false, status: "idle", message: "", grantId: null, window: null, pending: null,
+  });
+});
 
 it.each([
   ["working", "tooling", "正在操作已授权窗口"],
@@ -31,6 +44,100 @@ it.each([
     expect(container.querySelector("output")?.dataset.animation).toBe(animation);
     expect(container.textContent).toBe(label);
   } finally { await act(async () => root.unmount()); client.clear(); container.remove(); }
+});
+
+it("reduces collapsed idle reads while keeping active, unread and fallback refreshes", async () => {
+  vi.useFakeTimers();
+  focusManager.setFocused(true);
+  const assistant = { agentId: "poll-agent", directSessionId: "poll-session", displayName: "Assistant", status: "active", setupStatus: "ready", profile: "personal_assistant_v1", renderer: "whale" } satisfies PersonalAssistant;
+  const idle: PetActivity = { schemaVersion: 1, aggregateTone: "idle", animationState: "idle", activeCount: 0, attentionCount: 0, generatedAt: "", sessions: [] };
+  let activity = idle;
+  let detail = { id: assistant.directSessionId, agentId: assistant.agentId, sessionKind: "main", messages: [] } as unknown as SessionDetail;
+  const computerIdle: ComputerState = { available: false, status: "idle", message: "", grantId: null, window: null, pending: null };
+  vi.mocked(fetchPetActivity).mockReset().mockImplementation(async () => activity);
+  vi.mocked(fetchSessionDetail).mockReset().mockImplementation(async () => detail);
+  vi.mocked(fetchPersonalAssistantComputer).mockReset().mockResolvedValue(computerIdle);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnMount: false, gcTime: Infinity } } });
+  const replyKey = queryKeys.personalAssistantReplies(assistant.agentId, assistant.directSessionId);
+  client.setQueryData(queryKeys.petActivity(), idle);
+  client.setQueryData(replyKey, detail);
+  client.setQueryData(queryKeys.personalAssistantComputer(), computerIdle);
+  let reading = false;
+  let enabled = true;
+  function Probe() { const state = useAssistantActivity({ enabled, assistant, reading }); return <output>{state.unreadCount}</output>; }
+  const container = document.createElement("div"); document.body.appendChild(container); const root = createRoot(container);
+  const render = () => act(async () => root.render(<QueryClientProvider client={client}><Probe /></QueryClientProvider>));
+  const advance = async (seconds: number) => {
+    for (let i = 0; i < seconds; i++) await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5); });
+  };
+  try {
+    await render();
+    await advance(60);
+    // Same idle minute used to perform 20 + 60 + 20 requests.
+    expect(fetchPetActivity).toHaveBeenCalledTimes(20);
+    expect(fetchPersonalAssistantComputer).toHaveBeenCalledTimes(4);
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
+
+    activity = { ...idle, sessions: [{ sessionId: assistant.directSessionId, agentId: "another-agent", title: "", agentDisplayName: "", tone: "completed", phase: "completed", updatedAt: "unrelated" }] };
+    await advance(6);
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2); // another Agent cannot drive this mailbox
+
+    detail = { ...detail, messages: [{ role: "assistant", turnId: "poll-turn", status: "completed", turnItems: [{ type: "agent_message", phase: "final_answer", status: "completed", itemId: "poll-final", text: "Done" }] }] } as SessionDetail;
+    activity = { ...idle, sessions: [{ sessionId: assistant.directSessionId, agentId: assistant.agentId, title: "", agentDisplayName: "", tone: "completed", phase: "completed", updatedAt: "new-reply" }] };
+    await advance(3);
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(3);
+    expect(container.textContent).toBe("1");
+    await advance(6);
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(5); // recent completion keeps the original 3s cadence
+
+    const repliesBefore = vi.mocked(fetchSessionDetail).mock.calls.length;
+    const computerBefore = vi.mocked(fetchPersonalAssistantComputer).mock.calls.length;
+    reading = true;
+    await render();
+    await advance(6);
+    expect(vi.mocked(fetchSessionDetail).mock.calls.length - repliesBefore).toBe(2);
+    expect(vi.mocked(fetchPersonalAssistantComputer).mock.calls.length - computerBefore).toBe(6);
+
+    reading = false;
+    const granted: ComputerState = { ...computerIdle, grantId: "grant", status: "working" };
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(granted);
+    await act(async () => { client.setQueryData(queryKeys.personalAssistantComputer(), granted); });
+    activity = { ...activity, sessions: activity.sessions.map(row => ({ ...row, tone: "running", phase: "tooling" })) };
+    await render();
+    await advance(3); // observe activity on the regular lightweight poll
+    const activeReplies = vi.mocked(fetchSessionDetail).mock.calls.length;
+    const activeComputer = vi.mocked(fetchPersonalAssistantComputer).mock.calls.length;
+    await advance(6);
+    expect(vi.mocked(fetchSessionDetail).mock.calls.length - activeReplies).toBe(2);
+    expect(vi.mocked(fetchPersonalAssistantComputer).mock.calls.length - activeComputer).toBe(6);
+
+    // Even if activity omits a reply, the idle fallback still reads native messages.
+    activity = idle;
+    await advance(3);
+    const unreadBeforeFallback = Number(container.textContent);
+    detail = { ...detail, messages: [...detail.messages, { ...detail.messages[0], turnId: "fallback-turn" }] };
+    await advance(30);
+    expect(Number(container.textContent)).toBe(unreadBeforeFallback + 1);
+    expect(client.getQueryData<SessionDetail>(replyKey)?.messages).toHaveLength(2);
+
+    vi.mocked(fetchSessionDetail).mockRejectedValueOnce(new Error("temporarily unavailable"));
+    await act(async () => { await client.refetchQueries({ queryKey: replyKey, exact: true }); });
+    const failedReads = vi.mocked(fetchSessionDetail).mock.calls.length;
+    await advance(3);
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(failedReads + 1);
+    expect(client.getQueryState(replyKey)?.status).toBe("success");
+
+    const counts = [fetchPetActivity, fetchPersonalAssistantComputer, fetchSessionDetail].map(fn => vi.mocked(fn).mock.calls.length);
+    enabled = false;
+    await render();
+    await advance(60);
+    expect([fetchPetActivity, fetchPersonalAssistantComputer, fetchSessionDetail].map(fn => vi.mocked(fn).mock.calls.length)).toEqual(counts);
+  } finally {
+    await act(async () => root.unmount()); client.clear(); container.remove();
+    focusManager.setFocused(undefined); vi.useRealTimers();
+  }
 });
 
 it("expires staggered completion and new-message pulses while retaining unread state", async () => {

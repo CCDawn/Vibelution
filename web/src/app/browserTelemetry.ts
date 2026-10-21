@@ -13,11 +13,16 @@ const TELEMETRY_ENDPOINT = "/api/runtime/browser-telemetry";
 const TELEMETRY_DELIVERY_FAILURE_MESSAGE = "browser telemetry delivery failed";
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const MAX_FAILED_TELEMETRY_BODIES = 20;
+const MAX_PENDING_TELEMETRY_BODIES = 100;
+const MAX_IMMEDIATE_TELEMETRY_REQUESTS = 2;
 
 type ControlToken = { header: string; token: string };
+type PendingTelemetry = { body: string; priority: number };
 
 const failedTelemetryBodies: string[] = [];
-let flushingFailedTelemetry = false;
+const pendingTelemetry: PendingTelemetry[] = [];
+let drainingTelemetry = false;
+let immediateTelemetryInFlight = 0;
 
 type BrowserPerformanceWithMemory = Performance & {
   memory?: {
@@ -141,6 +146,24 @@ function rememberFailedTelemetryBody(body: string, error: unknown): void {
   }
 }
 
+async function postImmediateTelemetry(body: string): Promise<void> {
+  immediateTelemetryInFlight += 1;
+  try {
+    const control = await getControlToken();
+    const response = await postTelemetryBody(control, body);
+    if (response.status === 403) {
+      clearControlToken();
+    } else if (!response.ok) {
+      rememberFailedTelemetryBody(body, `HTTP ${response.status}`);
+    }
+    // Exit-critical delivery never takes the normal queue's retry slot.
+  } catch (error) {
+    rememberFailedTelemetryBody(body, error);
+  } finally {
+    immediateTelemetryInFlight -= 1;
+  }
+}
+
 function postTelemetryBody(control: ControlToken, body: string): Promise<Response> {
   return fetch(TELEMETRY_ENDPOINT, {
     method: "POST",
@@ -156,32 +179,73 @@ function postTelemetryBody(control: ControlToken, body: string): Promise<Respons
 }
 
 async function flushFailedTelemetryBodies(control: ControlToken): Promise<void> {
-  if (flushingFailedTelemetry || failedTelemetryBodies.length === 0) {
-    return;
-  }
-  flushingFailedTelemetry = true;
-  try {
-    while (failedTelemetryBodies.length > 0) {
-      const pending = failedTelemetryBodies[0];
-      let response: Response;
-      try {
-        response = await postTelemetryBody(control, pending);
-      } catch (error) {
-        warnTelemetryDeliveryFailure(error);
-        return;
-      }
-      if (response.status === 403) {
-        clearControlToken();
-        return;
-      }
-      if (!response.ok) {
-        warnTelemetryDeliveryFailure(`HTTP ${response.status}`);
-        return;
-      }
+  // Only the queue drain calls this, so retries share its single in-flight slot.
+  while (failedTelemetryBodies.length > 0) {
+    // An in-flight retry cannot be preempted; yield before the next one for new errors.
+    if (pendingTelemetry.some((pending) => pending.priority === 2)) {
+      return;
+    }
+    const pending = failedTelemetryBodies[0];
+    let response: Response;
+    try {
+      response = await postTelemetryBody(control, pending);
+    } catch (error) {
+      warnTelemetryDeliveryFailure(error);
+      return;
+    }
+    if (response.status === 403) {
+      clearControlToken();
+      return;
+    }
+    if (!response.ok) {
+      warnTelemetryDeliveryFailure(`HTTP ${response.status}`);
+      return;
+    }
+    // Immediate delivery failures may have evicted this body while the retry was in flight.
+    if (failedTelemetryBodies[0] === pending) {
       failedTelemetryBodies.shift();
     }
+  }
+}
+
+function enqueueTelemetry(body: string, level: BrowserTelemetryEventInput["level"]): void {
+  pendingTelemetry.push({ body, priority: level === "error" ? 2 : level === "warning" ? 1 : 0 });
+  if (pendingTelemetry.length > MAX_PENDING_TELEMETRY_BODIES) {
+    const lowestPriority = Math.min(...pendingTelemetry.map((pending) => pending.priority));
+    pendingTelemetry.splice(pendingTelemetry.findIndex((pending) => pending.priority === lowestPriority), 1);
+  }
+  void drainTelemetry();
+}
+
+async function drainTelemetry(): Promise<void> {
+  if (drainingTelemetry) {
+    return;
+  }
+  drainingTelemetry = true;
+  try {
+    while (pendingTelemetry.length > 0) {
+      const highestPriority = Math.max(...pendingTelemetry.map((pending) => pending.priority));
+      const index = pendingTelemetry.findIndex((pending) => pending.priority === highestPriority);
+      const [{ body }] = pendingTelemetry.splice(index, 1);
+      try {
+        const control = await getControlToken();
+        const response = await postTelemetryBody(control, body);
+        if (response.status === 403) {
+          clearControlToken();
+          continue;
+        }
+        if (!response.ok) {
+          rememberFailedTelemetryBody(body, `HTTP ${response.status}`);
+          continue;
+        }
+        // Failed bodies wait for a successful new event; never retry failures in a spin.
+        await flushFailedTelemetryBodies(control);
+      } catch (error) {
+        rememberFailedTelemetryBody(body, error);
+      }
+    }
   } finally {
-    flushingFailedTelemetry = false;
+    drainingTelemetry = false;
   }
 }
 
@@ -191,12 +255,14 @@ export function peekBrowserTelemetryDeliveryBufferForTests(): readonly string[] 
 
 export function resetBrowserTelemetryDeliveryBufferForTests(): void {
   failedTelemetryBodies.length = 0;
-  flushingFailedTelemetry = false;
+  pendingTelemetry.length = 0;
+  drainingTelemetry = false;
+  immediateTelemetryInFlight = 0;
 }
 
 export function postBrowserTelemetry(
   payload: BrowserTelemetryEventInput,
-  _options?: { preferBeacon?: boolean },
+  options?: { preferBeacon?: boolean },
 ) {
   if (typeof window === "undefined") {
     return;
@@ -214,22 +280,11 @@ export function postBrowserTelemetry(
       clientMonotonicMs,
     },
   });
-  void getControlToken()
-    .then(async (control) => {
-      const response = await postTelemetryBody(control, body);
-      if (response.status === 403) {
-        clearControlToken();
-        return;
-      }
-      if (!response.ok) {
-        rememberFailedTelemetryBody(body, `HTTP ${response.status}`);
-        return;
-      }
-      await flushFailedTelemetryBodies(control);
-    })
-    .catch((error: unknown) => {
-      rememberFailedTelemetryBody(body, error);
-    });
+  if (options?.preferBeacon && immediateTelemetryInFlight < MAX_IMMEDIATE_TELEMETRY_REQUESTS) {
+    void postImmediateTelemetry(body);
+  } else {
+    enqueueTelemetry(body, payload.level);
+  }
 }
 
 function finiteNumber(value: unknown): number {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { fetchPublicConfig, updateIntakeMode } from "../api/config";
+import { fetchConfigBootstrap, updateIntakeMode } from "../api/config";
 import { fetchEvolutionOverview } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import { EvolutionOverview } from "../api/types";
@@ -53,7 +53,7 @@ export function SupervisedWorkspaceControls({
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchPublicConfig(),
+    queryFn: () => fetchConfigBootstrap(),
     enabled: shouldFetchConfig,
   });
   const overviewQuery = useQuery({

@@ -8,7 +8,30 @@ stay absent instead of being filled with empty defaults.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
+
+
+class ConfigBootstrapResponse(BaseModel):
+    """Required shell initialization fields; diagnostics are fetched separately."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hash: str
+    language: Literal["zh", "en"]
+    runtimeProfile: str
+    defaultMode: str
+    defaultRoute: str
+    intakeMode: str
+    modeAvailability: dict[str, bool]
+    domainAvailability: dict[str, bool]
+    modelLibraryCount: int
+    modelLabels: dict[str, str]
+    modelImageInputSupport: dict[str, bool | None]
+    themeBackgroundImagePath: str
+    themeBackgroundImageUrl: str
+    themeBackgroundReadability: Literal["soft", "standard", "strong"]
 
 
 class PublicConfigSummaryResponse(BaseModel):
