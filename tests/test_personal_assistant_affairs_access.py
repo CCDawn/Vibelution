@@ -106,8 +106,8 @@ def test_authorized_calls_persist_affairs_and_feed_existing_reminders(personal_e
             selected = call(action="list", kind=kind)["affairs"]["items"]
             assert len(selected) == 1 and selected[0]["kind"] == kind
         call(action="set_due", item_id=ids[2], due_at="2026-10-20T09:00:00+08:00")
-        monkeypatch.setattr(attention, "collect_knowledge_review_attention", lambda: [])
-        monkeypatch.setattr(attention, "collect_anomaly_attention", lambda: [])
+        monkeypatch.setattr(attention, "collect_knowledge_review_attention", lambda **_kwargs: [])
+        monkeypatch.setattr(attention, "collect_anomaly_attention", lambda **_kwargs: [])
         first = attention.attach_attention_to_overview({"attention": []})
         assert {item["title"] for item in first["humanAttention"]} == {"事务提醒：todo", "事务提醒：schedule"}
         call(action="complete", item_id=ids[0])
