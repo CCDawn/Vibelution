@@ -86,6 +86,81 @@ def test_llm_request_persists_message_shape_without_prompt_content(tmp_path):
         assert "content_ref" not in message
 
 
+def test_llm_request_message_summary_hash_and_length_match_full_content(tmp_path):
+    """TTFT 批六：journal 只落摘要，且摘要必须与全文等价（含跨 64KiC 分块）。"""
+    logger = _fresh_logger(tmp_path)
+    huge_text = "H" * (64 * 1024 + 123)  # 跨分块边界的单条大消息
+    block_texts = ["alpha part", "beta part", "gamma part"]
+    dict_block_message = {
+        "role": "tool",
+        "content": [
+            {"type": "text", "text": block_texts[0]},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,xx"}},
+            {"type": "text", "text": block_texts[1]},
+            {"type": "text", "text": ""},
+            {"type": "text", "text": block_texts[2]},
+        ],
+    }
+
+    class FakeLangChainMessage:
+        type = "ai"
+        content = huge_text
+
+    logger.log_llm_request(
+        [
+            {"role": "user", "content": huge_text},
+            dict_block_message,
+            FakeLangChainMessage(),
+        ],
+        model="gpt-test",
+    )
+
+    session_file = tmp_path / "conversation_test_session.jsonl"
+    serialized = session_file.read_text(encoding="utf-8")
+    record = json.loads(serialized.splitlines()[-1])
+    summaries = record["messages"]
+
+    # 全文等价：length/sha256 与直接对全文计算的参考值一致。
+    assert summaries[0]["content_length"] == len(huge_text)
+    assert summaries[0]["content_sha256"] == hashlib.sha256(
+        huge_text.encode("utf-8", errors="ignore")
+    ).hexdigest()
+    joined = "\n\n".join(part for part in block_texts if part)
+    assert summaries[1]["content_length"] == len(joined)
+    assert summaries[1]["content_sha256"] == hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    assert summaries[1]["image_count"] == 1
+    assert summaries[2]["content_length"] == len(huge_text)
+    assert summaries[2]["content_sha256"] == hashlib.sha256(
+        huge_text.encode("utf-8", errors="ignore")
+    ).hexdigest()
+
+    # 全文不进 journal（截断语义：journal 只有摘要字段）。
+    assert huge_text not in serialized
+    for message in summaries:
+        assert message["content_omitted"] is True
+        assert message["content_inlined"] is False
+        assert "content" not in message
+        assert "content_preview" not in message
+
+
+def test_summarize_segments_payload_matches_whole_string_summary():
+    """分块摘要与整串摘要在任意切分下等价（含分隔符与空段语义）。"""
+    segments = ["first segment", "", "second segment", "third" * 10]
+    joined = "\n\n".join(part for part in ["first segment", "second segment", "third" * 10] if part)
+
+    via_segments = ConversationLogger._summarize_text_segments_payload(
+        field_name="content",
+        segments=(segment for segment in segments if segment),
+    )
+    via_whole = ConversationLogger._summarize_text_payload(field_name="content", text=joined)
+
+    assert via_segments == via_whole
+
+    # 空段列表等价于空串摘要。
+    empty = ConversationLogger._summarize_text_segments_payload(field_name="content", segments=())
+    assert empty == ConversationLogger._summarize_text_payload(field_name="content", text="")
+
+
 def test_transcript_system_prompt_persists_only_hash_summary(tmp_path):
     secret_prompt = "TRANSCRIPT-SECRET-" + ("C" * 1000)
     TranscriptLogger._instance = None

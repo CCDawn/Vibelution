@@ -200,20 +200,19 @@ class TestEstimateMessagesTokens:
         """测试空消息列表"""
         assert estimate_messages_tokens([]) == 0
 
-    def test_estimate_messages_tokens_uses_fingerprint_cache(self):
-        """同一 messages 连续调用应命中缓存（指纹相同），不重复遍历消息。"""
+    def test_estimate_messages_tokens_uses_signature_lru_cache(self):
+        """同一 messages 连续调用应命中缓存（内容签名相同），不重复遍历消息。"""
         from tools import token_manager
 
         calls = {"n": 0}
-        original = token_manager._estimate_messages_tokens_uncached
+        original = token_manager._scan_messages_tokens
 
         def counting(messages):
             calls["n"] += 1
             return original(messages)
 
-        token_manager._estimate_messages_tokens_uncached = counting
-        token_manager._estimate_cache_fingerprint = ()
-        token_manager._estimate_cache_value = 0
+        token_manager._scan_messages_tokens = counting
+        token_manager._estimate_cache.clear()
         try:
             messages = [FakeMessage("hello"), FakeMessage("world")]
             v1 = estimate_messages_tokens(messages)
@@ -222,19 +221,34 @@ class TestEstimateMessagesTokens:
             assert v1 == v2 == v3
             assert calls["n"] == 1, "同一 messages 连续调用必须命中缓存"
 
-            # append 后指纹应变化（len 变），缓存失效
+            # append 后签名应变化（len 变），缓存失效
             messages.append(FakeMessage("more"))
             v4 = estimate_messages_tokens(messages)
             assert calls["n"] == 2
             assert v4 > v1
 
-            # messages[0] 重写后指纹变化，缓存失效
+            # messages[0] 重写后签名变化，缓存失效
             messages[0] = FakeMessage("replaced with much longer content for sure" * 10)
             v5 = estimate_messages_tokens(messages)
             assert calls["n"] == 3
             assert v5 != v4
+
+            # 重建列表（新 list 对象、共享消息对象）应命中：整表重建不再 miss
+            rebuilt = list(messages)
+            v6 = estimate_messages_tokens(rebuilt)
+            assert calls["n"] == 3
+            assert v6 == v5
+
+            # LRU 有界：灌入超过容量后最旧条目被逐出
+            for index in range(token_manager._ESTIMATE_CACHE_MAX_ENTRIES + 2):
+                estimate_messages_tokens([FakeMessage(f"evict-{index}")])
+            assert calls["n"] == 3 + token_manager._ESTIMATE_CACHE_MAX_ENTRIES + 2
+            v7 = estimate_messages_tokens(rebuilt)
+            assert calls["n"] == 4 + token_manager._ESTIMATE_CACHE_MAX_ENTRIES + 2
+            assert v7 == v5
         finally:
-            token_manager._estimate_messages_tokens_uncached = original
+            token_manager._scan_messages_tokens = original
+            token_manager._estimate_cache.clear()
 
     def test_estimate_messages_tokens_for_threshold_skips_precise_when_far_under(self):
         from tools import token_manager
@@ -244,15 +258,14 @@ class TestEstimateMessagesTokens:
         )
 
         calls = {"n": 0}
-        original = token_manager._estimate_messages_tokens_uncached
+        original = token_manager._scan_messages_tokens
 
         def counting(messages):
             calls["n"] += 1
             return original(messages)
 
-        token_manager._estimate_messages_tokens_uncached = counting
-        token_manager._estimate_cache_fingerprint = ()
-        token_manager._estimate_cache_value = 0
+        token_manager._scan_messages_tokens = counting
+        token_manager._estimate_cache.clear()
         try:
             messages = [FakeMessage("short")]
             rough = rough_upper_bound_messages_tokens(messages)
@@ -261,13 +274,27 @@ class TestEstimateMessagesTokens:
             assert value == rough
             assert calls["n"] == 0, "far under threshold must not run precise estimator"
 
-            # At/over rough upper bound, fall back to precise path.
-            precise = estimate_messages_tokens_for_threshold(messages, threshold=rough - 1)
+            # 同一列表阈值收紧：rough-only 条目按需补齐 precise（走 uncached
+            # 精确路径，rough 复用缓存，不再重扫整表）。
+            refined = estimate_messages_tokens_for_threshold(messages, threshold=rough - 1)
+            assert 0 < refined <= rough
+            assert calls["n"] == 0
+
+            # 同一列表再次跨阈值判定：rough/precise 均已缓存，零扫描。
+            again = estimate_messages_tokens_for_threshold(messages, threshold=rough - 1)
+            assert again == refined
+            assert calls["n"] == 0
+
+            # 重建后的新列表（新消息对象）跨阈值：rough 与 precise 共享同一次
+            # 共享扫描（只算一次 _scan_messages_tokens 遍历）。
+            rebuilt = [FakeMessage("short")]
+            precise = estimate_messages_tokens_for_threshold(rebuilt, threshold=rough - 1)
             assert precise > 0
             assert calls["n"] == 1
-            assert precise <= rough
+            assert precise == refined
         finally:
-            token_manager._estimate_messages_tokens_uncached = original
+            token_manager._scan_messages_tokens = original
+            token_manager._estimate_cache.clear()
 
     def test_estimate_messages_with_none_content(self):
         """测试内容为 None 的消息"""

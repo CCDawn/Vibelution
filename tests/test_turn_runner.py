@@ -948,3 +948,41 @@ def test_empty_history_with_forged_or_expired_provenance_still_blocks_guidance(t
         messages = [build_chat_user_message("initial request"), build_chat_guidance_message("guidance")]
         assert runtime._reconcile_chat_conversation_before_llm(messages) == (messages, False)
         assert errors == ["ledger_history_mismatch"]
+
+
+def test_prepare_agent_turn_stashes_seed_history_timing_for_the_turn():
+    """TTFT 批六：seed_chat_history 段计时通过 stash 交给 agent 透出。"""
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history(self, history):
+            captured["history"] = history
+
+        def seed_chat_history_ledger_fingerprint(self, fingerprint):
+            captured["fingerprint"] = fingerprint
+
+        def stash_seed_history_timing_ms(self, value_ms):
+            captured["seedTimingMs"] = value_ms
+
+    prepare_agent_turn(
+        FakeAgent(),
+        chat_history=[{"role": "user", "content": "hello"}],
+        chat_history_ledger_fingerprint="fp-1",
+    )
+
+    assert captured["history"] == [{"role": "user", "content": "hello"}]
+    assert captured["fingerprint"] == "fp-1"
+    assert isinstance(captured["seedTimingMs"], int)
+    assert captured["seedTimingMs"] >= 0
+
+
+def test_prepare_agent_turn_without_history_seed_does_not_stash_timing():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def stash_seed_history_timing_ms(self, value_ms):
+            captured["seedTimingMs"] = value_ms
+
+    prepare_agent_turn(FakeAgent(), chat_history=None)
+
+    assert captured == {}
