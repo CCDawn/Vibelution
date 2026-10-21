@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionDetail } from "../../api/chat";
 import { fetchPersonalAssistant, fetchPersonalAssistantSettings } from "../../api/personalAssistant";
@@ -100,6 +100,8 @@ async function settle() {
   await act(async () => new Promise(resolve => setTimeout(resolve, 25)));
 }
 
+let router: ReturnType<typeof createMemoryRouter>;
+
 async function render(path: string, innerWidth: number) {
   Object.defineProperty(window, "innerWidth", { value: innerWidth, configurable: true });
   vi.spyOn(window, "matchMedia").mockImplementation(query => ({
@@ -108,11 +110,13 @@ async function render(path: string, innerWidth: number) {
     addEventListener: vi.fn(), removeEventListener: vi.fn(),
     addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(), onchange: null,
   } as MediaQueryList));
+  router = createMemoryRouter(
+    [{ path: "/personal-assistant", element: <PersonalAssistantRoute /> }],
+    { initialEntries: [path] },
+  );
   await act(async () => root.render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <PersonalAssistantRoute />
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   ));
   await settle();
@@ -138,5 +142,24 @@ describe("personal assistant dispatch deep link for completion notices", () => {
     const overviewTab = container.querySelector('[role="tab"][id$="overview"]');
     expect(overviewTab?.getAttribute("data-state")).toBe("active");
     expect(container.querySelector('[data-dispatches-panel="true"]')).toBeNull();
+  });
+
+  it("switches to the dispatches tab when the param arrives after mount (SPA re-navigation)", async () => {
+    // 通知卡点击走 react-router navigate：已在本页时组件不重挂载，
+    // useState 初始化器不重跑，必须由 effect 响应 searchParams 变化。
+    await render("/personal-assistant", 1200);
+    expect(container.querySelector('[role="tab"][id$="overview"]')?.getAttribute("data-state")).toBe("active");
+    await act(async () => router.navigate("/personal-assistant?panel=dispatches"));
+    await settle();
+    expect(container.querySelector('[role="tab"][id$="dispatches"]')?.getAttribute("data-state")).toBe("active");
+    expect(container.querySelector('[data-dispatches-panel="true"]')).not.toBeNull();
+  });
+
+  it("re-arming the same param in-place does not toggle the tab away", async () => {
+    await render("/personal-assistant?panel=dispatches", 1200);
+    await act(async () => router.navigate("/personal-assistant?panel=dispatches"));
+    await settle();
+    // 同参二次导航效果幂等：仍是派遣 tab，不回跳 overview。
+    expect(container.querySelector('[role="tab"][id$="dispatches"]')?.getAttribute("data-state")).toBe("active");
   });
 });
