@@ -1177,6 +1177,10 @@ def session_remove_queued_turn(session_id: str, queued_turn_id: str) -> dict:
         rows = remove_session_queued_turn(session_id, queued_turn_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        # Same contract as send-now: a row inside its claim->submit window is
+        # temporarily untouchable, not missing (404) or invalid (422).
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"queuedTurns": rows}
