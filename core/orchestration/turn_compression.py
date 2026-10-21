@@ -575,7 +575,7 @@ def compress_turn_messages(
             trigger_source=resolved_trigger_source,
             recorder=recorder,
         )
-    compressed, summary = token_compressor.compress(
+    compression_output = token_compressor.compress(
         messages_for_compression,
         max_chars=comp_config.summary_max_chars,
         reason=combined_reason,
@@ -584,14 +584,72 @@ def compress_turn_messages(
         use_llm_summary=use_llm,
         llm_summary_reporter=summary_reporter,
     )
+    compressed, summary = compression_output[0], compression_output[1]
+    # The exact set of messages the summary folded (None for compressors that
+    # predate the field): the ledger checkpoint needs it to cover only the
+    # events that really entered the summary.
+    summarized_messages = getattr(compression_output, "summarized_messages", None)
     replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
     if replacement_summary:
         summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
 
+    def fail_closed(
+        guard_reason: str,
+        retention_after: Mapping[str, Any],
+        after_tokens_value: int,
+    ) -> Tuple[List[Any], bool, bool, int, int]:
+        recorder(
+            "runtime",
+            "agent.context_budget_exhausted",
+            message="Context compression could not satisfy the retention contract or hard input limit; model call blocked.",
+            level="error",
+            outcome="blocked",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "iteration": iteration,
+                "guardReason": guard_reason,
+                "estimatedTokens": current_tokens,
+                "afterTokens": after_tokens_value,
+                "contextInputHardLimit": normalized_hard_limit,
+                "postCompressionTargetTokens": _coerce_nonnegative_int(post_compression_target_tokens),
+                "retentionBefore": {
+                    "unresolvedCallCount": before_pairing.get("unresolvedCallCount"),
+                    "orphanResultCount": before_pairing.get("orphanResultCount"),
+                },
+                "retentionAfter": {
+                    "unresolvedCallCount": retention_after.get("unresolvedCallCount"),
+                    "orphanResultCount": retention_after.get("orphanResultCount"),
+                },
+                "messageCount": len(messages),
+            },
+        )
+        return messages, True, False, compression_count_this_turn, last_compression_iteration
+
+    # Retention gate, check-first: judge the RAW compressed output before any
+    # repair. normalize_tool_call_pairing is an explicit post-gate repair step
+    # for damage that already existed in the input; running the gate on its
+    # output made the check structurally unreachable (normalization zeroes
+    # unresolved calls and drops orphan results by construction), so a
+    # compression cut that broke the tool chain was silently repaired instead
+    # of failing closed.
+    normalized_hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
+    raw_after_pairing = _tool_call_pairing_snapshot(compressed)
+    raw_retention_violation = _retention_violation_reason(before_pairing, raw_after_pairing)
+    if raw_retention_violation:
+        return fail_closed(
+            raw_retention_violation,
+            raw_after_pairing,
+            _coerce_nonnegative_int(estimator(compressed)),
+        )
+
     # Provider-chain normalization (codex parity): synthesize aborted results
-    # for unresolved calls and drop orphan tool results before the retention
-    # gate. A compression cut that retires one side of a pair must not block the
-    # turn; the repair stays auditable in the runtime scene.
+    # for unresolved calls and drop orphan tool results. It runs only after the
+    # retention gate above passed, as an explicit repair for damage that
+    # already existed in the input; a compression cut that newly breaks the
+    # pair contract was already rejected instead of being silently repaired.
+    # The repair stays auditable in the runtime scene.
     compressed, pairing_repair = normalize_tool_call_pairing(compressed)
     if pairing_repair["droppedOrphanResults"] or pairing_repair["synthesizedAbortedResults"]:
         recorder(
@@ -635,40 +693,15 @@ def compress_turn_messages(
     # Fail-closed budget/retention gate: a broken retention chain or a
     # post-compression size that still exceeds the hard input limit must stop
     # the turn before any model call (auditable context_budget_exhausted).
+    # The retention half re-checks the final payload defensively (the check
+    # above already judged the raw output; normalization only removes
+    # unresolved calls / orphan results), the hard-limit half is new here.
     after_pairing = _tool_call_pairing_snapshot(compressed)
     retention_violation = _retention_violation_reason(before_pairing, after_pairing)
-    normalized_hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
     over_hard_limit = normalized_hard_limit > 0 and after_tokens > normalized_hard_limit
     if retention_violation or over_hard_limit:
         guard_reason = retention_violation or "post_compression_over_hard_limit"
-        recorder(
-            "runtime",
-            "agent.context_budget_exhausted",
-            message="Context compression could not satisfy the retention contract or hard input limit; model call blocked.",
-            level="error",
-            outcome="blocked",
-            fields={
-                "agentId": agent_id,
-                "sessionId": session_id,
-                "turnId": turn_id,
-                "iteration": iteration,
-                "guardReason": guard_reason,
-                "estimatedTokens": current_tokens,
-                "afterTokens": after_tokens,
-                "contextInputHardLimit": normalized_hard_limit,
-                "postCompressionTargetTokens": _coerce_nonnegative_int(post_compression_target_tokens),
-                "retentionBefore": {
-                    "unresolvedCallCount": before_pairing.get("unresolvedCallCount"),
-                    "orphanResultCount": before_pairing.get("orphanResultCount"),
-                },
-                "retentionAfter": {
-                    "unresolvedCallCount": after_pairing.get("unresolvedCallCount"),
-                    "orphanResultCount": after_pairing.get("orphanResultCount"),
-                },
-                "messageCount": len(messages),
-            },
-        )
-        return messages, True, False, compression_count_this_turn, last_compression_iteration
+        return fail_closed(guard_reason, after_pairing, after_tokens)
     if normalized_hard_limit <= 0:
         # Zero-diagnosis guard: without a hard limit the budget gate cannot
         # fail closed, which used to be fully silent. The turn still proceeds
@@ -772,6 +805,12 @@ def compress_turn_messages(
                 )
 
                 if compression_effective:
+                    checkpoint_kwargs: Dict[str, Any] = {}
+                    if summarized_messages is not None:
+                        # Exact covered domain: only the events whose messages
+                        # really entered the summary. Kept-window / error-
+                        # preserved events must stay replayable.
+                        checkpoint_kwargs["summarized_messages"] = summarized_messages
                     event = append_context_compression_checkpoint(
                         Path(project_root),
                         session_id,
@@ -789,6 +828,7 @@ def compress_turn_messages(
                         effective=True,
                         source_message_count=len(messages),
                         tool_result_replacement_state=tool_result_replacement_state,
+                        **checkpoint_kwargs,
                     )
                 else:
                     event = append_context_compression_attempt(
