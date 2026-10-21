@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi import APIRouter, FastAPI
+from fastapi.testclient import TestClient
 
 from core.web.route_bootstrap import register_spa_routes
 from core.web.middleware.wait_for_routes import WaitForWebRoutesMiddleware
@@ -70,6 +71,35 @@ def test_shell_readiness_rejects_missing_referenced_assets(tmp_path):
     register_spa_routes(app, web_dist=tmp_path)
     assert app.state.web_shell_ready is False
     assert "missing asset" in app.state.web_shell_error
+
+
+def test_missing_hashed_asset_is_served_from_retained_release(tmp_path):
+    releases_dir = tmp_path / ".vibelution-builds"
+    retained = releases_dir / "release-retained"
+    current = releases_dir / "release-current"
+    (retained / "assets").mkdir(parents=True)
+    (current / "assets").mkdir(parents=True)
+    (retained / "index.html").write_text("retained shell", encoding="utf-8")
+    (current / "index.html").write_text("current shell", encoding="utf-8")
+    (retained / "assets" / "AgentContextSectionsView-CeXSITa3.js").write_text("retained chunk", encoding="utf-8")
+    (current / "assets" / "AgentContextSectionsView-C6H2VnC4.js").write_text("current chunk", encoding="utf-8")
+    (retained / "retained.txt").write_text("not an asset", encoding="utf-8")
+
+    app = FastAPI()
+    register_spa_routes(app, web_dist=current)
+    client = TestClient(app)
+
+    retained_response = client.get("/assets/AgentContextSectionsView-CeXSITa3.js")
+    current_response = client.get("/assets/AgentContextSectionsView-C6H2VnC4.js")
+    unknown_response = client.get("/assets/AgentContextSectionsView-UNKNOWN.js")
+    outside_assets_response = client.get("/retained.txt")
+
+    assert retained_response.status_code == 200
+    assert retained_response.text == "retained chunk"
+    assert current_response.status_code == 200
+    assert current_response.text == "current chunk"
+    assert unknown_response.status_code == 404
+    assert outside_assets_response.status_code == 404
 
 
 @pytest.mark.parametrize("background", [False, True])
