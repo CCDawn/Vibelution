@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.models import ActorKind
 from core.web.services.team_workflow.research_runtime.action_registry import ActionRegistry
@@ -1076,3 +1078,232 @@ def test_project_task_reconcile_lag_does_not_invent_live_execution(monkeypatch) 
         assert _turn_alive_progressing(exc) is False
     else:
         raise AssertionError("expected an explicit task reconciliation error")
+
+
+# ---------------------------------------------------------------------------
+# Bounded turn-id resolution at the agent task anchor boundary.
+#
+# A busy (or restarting) session can accept a source-collection / project
+# agent dispatch before the canonical turn exists: the started payload then
+# carries sessionId/taskId with an empty turnId while the real turn runs
+# asynchronously. The anchor must resolve that real turn id with a bounded
+# poll instead of failing the attempt while the orphaned turn still executes.
+# ---------------------------------------------------------------------------
+
+
+def _stage_task_journal_message(
+    *,
+    session_id: str,
+    task_id: str,
+    turn_id: str,
+) -> dict[str, object]:
+    return {
+        "role": "user",
+        "content": "stage task message",
+        "turnId": turn_id,
+        "metadata": {
+            "kind": "source_collection_stage_session_task",
+            "sessionId": session_id,
+            "sourceCollectionStageTaskId": task_id,
+            "taskId": task_id,
+            "turnId": turn_id,
+        },
+    }
+
+
+def _monkeypatch_journal_reader(monkeypatch, batches: list[list[dict[str, object]]]):
+    """Feed one batch per reader call, repeating the last batch afterwards."""
+    from core.web.services import session_service
+
+    calls = {"count": 0}
+
+    def _read(session_id: str) -> list[dict[str, object]]:
+        index = min(calls["count"], len(batches) - 1)
+        calls["count"] += 1
+        return list(batches[index])
+
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", _read)
+    return calls
+
+
+def test_missing_turn_id_resolves_from_session_journal(monkeypatch) -> None:
+    """Fresh dispatch accepted without turnId: the poll binds the real turn."""
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        _agent_handle_from_started,
+    )
+
+    calls = _monkeypatch_journal_reader(
+        monkeypatch,
+        batches=[
+            [],
+            [_stage_task_journal_message(
+                session_id="sess-1",
+                task_id="stagetask-1",
+                turn_id="turn-real-1",
+            )],
+        ],
+    )
+
+    handle = _agent_handle_from_started(
+        {
+            "accepted": True,
+            "sessionId": "sess-1",
+            "turnId": "",
+            "queued": True,
+            "taskId": "stagetask-1",
+            "task": {"taskId": "stagetask-1", "sessionId": "sess-1", "turn": {}},
+            "turn": {},
+        }
+    )
+
+    assert handle.session_id == "sess-1"
+    assert handle.task_id == "stagetask-1"
+    assert handle.turn_id == "turn-real-1"
+    assert calls["count"] >= 2, "resolver must poll until the turn is admitted"
+
+
+def test_reuse_payload_with_empty_turn_dict_resolves_turn_id(monkeypatch) -> None:
+    """Reuse path with a turnless task record resolves the journaled turn."""
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        _agent_handle_from_started,
+    )
+
+    _monkeypatch_journal_reader(
+        monkeypatch,
+        batches=[[
+            _stage_task_journal_message(
+                session_id="sess-reuse",
+                task_id="stagetask-reuse",
+                turn_id="turn-reuse-1",
+            ),
+        ]],
+    )
+
+    handle = _agent_handle_from_started(
+        {
+            "sessionId": "sess-reuse",
+            "taskId": "stagetask-reuse",
+            "created": False,
+            "alreadyPresent": True,
+            "task": {"taskId": "stagetask-reuse", "turn": {}},
+            "turn": {},
+        }
+    )
+
+    assert handle.session_id == "sess-reuse"
+    assert handle.task_id == "stagetask-reuse"
+    assert handle.turn_id == "turn-reuse-1"
+
+
+def test_missing_turn_id_resolution_timeout_keeps_original_failure(monkeypatch) -> None:
+    """A turn that never gets admitted still fails with the original error."""
+    from core.web.services.team_workflow.research_runtime import real_domain_ports
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        _agent_handle_from_started,
+    )
+
+    monkeypatch.setattr(
+        real_domain_ports,
+        "_AGENT_TASK_TURN_ID_RESOLVE_TIMEOUT_S",
+        0.2,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        real_domain_ports,
+        "_AGENT_TASK_TURN_ID_RESOLVE_POLL_S",
+        0.05,
+        raising=False,
+    )
+    calls = _monkeypatch_journal_reader(
+        monkeypatch,
+        batches=[[
+            {  # matching task id but no turn id yet, forever
+                "role": "user",
+                "metadata": {
+                    "kind": "source_collection_stage_session_task",
+                    "sourceCollectionStageTaskId": "stagetask-timeout",
+                    "taskId": "stagetask-timeout",
+                },
+            },
+        ]],
+    )
+
+    with pytest.raises(RuntimeError, match="agent task anchor is incomplete"):
+        _agent_handle_from_started(
+            {
+                "sessionId": "sess-timeout",
+                "taskId": "stagetask-timeout",
+                "task": {"taskId": "stagetask-timeout", "turn": {}},
+                "turn": {},
+            }
+        )
+
+    assert calls["count"] >= 2, "timeout must be bounded by polling, not an instant bail"
+
+
+def test_missing_session_or_task_id_fails_without_polling(monkeypatch) -> None:
+    """A truly broken start has no locator: fail fast, never poll."""
+    from core.web.services.team_workflow.research_runtime import real_domain_ports
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        _agent_handle_from_started,
+    )
+
+    def _forbidden_reader(_session_id: str):
+        raise AssertionError("missing sessionId/taskId must not enter the poll loop")
+
+    monkeypatch.setattr(
+        real_domain_ports,
+        "_resolve_started_agent_turn_id",
+        _forbidden_reader,
+    )
+
+    with pytest.raises(RuntimeError, match="agent task anchor is incomplete"):
+        _agent_handle_from_started({"taskId": "stagetask-x", "turn": {}})
+    with pytest.raises(RuntimeError, match="agent task anchor is incomplete"):
+        _agent_handle_from_started({"sessionId": "sess-x", "turn": {}})
+
+
+def test_turn_id_resolver_scopes_to_requested_task_and_prefers_latest(monkeypatch) -> None:
+    """The resolver matches only the requested task id and the latest match."""
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        _resolve_started_agent_turn_id,
+    )
+
+    _monkeypatch_journal_reader(
+        monkeypatch,
+        batches=[[
+            _stage_task_journal_message(
+                session_id="sess-2",
+                task_id="stagetask-other",
+                turn_id="turn-other",
+            ),
+            _stage_task_journal_message(
+                session_id="sess-2",
+                task_id="stagetask-2",
+                turn_id="turn-older",
+            ),
+            _stage_task_journal_message(
+                session_id="sess-2",
+                task_id="stagetask-2",
+                turn_id="turn-newer",
+            ),
+            {"role": "assistant", "metadata": {"taskId": "stagetask-2", "turnId": "turn-assistant"}},
+        ]],
+    )
+
+    resolved = _resolve_started_agent_turn_id(
+        "sess-2",
+        "stagetask-2",
+        timeout_s=0.1,
+        poll_s=0.05,
+    )
+    assert resolved == "turn-newer"
+
+    assert (
+        _resolve_started_agent_turn_id("sess-2", "stagetask-missing", timeout_s=0.1, poll_s=0.05)
+        == ""
+    )
+    assert (
+        _resolve_started_agent_turn_id("", "stagetask-2", timeout_s=0.1, poll_s=0.05)
+        == ""
+    )
