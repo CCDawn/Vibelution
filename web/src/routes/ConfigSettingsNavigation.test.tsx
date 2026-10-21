@@ -157,7 +157,7 @@ describe("ConfigSettingsNavigation", () => {
     expect(selection.page?.id).toBe("model-connection");
   });
 
-  it("renders direct category entries, a native mobile selector and one current page", () => {
+  it("renders direct category entries, a VUI mobile selector and one current page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
     const activeGroup = groups.find((group) => group.id === "tooling-diagnostics") ?? null;
     const sidebarMarkup = renderToStaticMarkup(
@@ -187,10 +187,9 @@ describe("ConfigSettingsNavigation", () => {
     expect(sidebarMarkup).toContain("个人助理");
     expect(sidebarMarkup).toContain("搜索设置");
     expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
-    expect(sidebarMarkup).toContain('data-vui="native-select"');
-    expect(sidebarMarkup).toContain('<optgroup label="工作台">');
-    expect(sidebarMarkup).toContain('<optgroup label="Agent">');
-    expect(sidebarMarkup).toContain('<optgroup label="系统">');
+    expect(sidebarMarkup).toContain('role="combobox"');
+    expect(sidebarMarkup).toContain('aria-label="设置分类"');
+    expect(sidebarMarkup).toContain('data-vui-select-trigger="true"');
     expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
     // Plain native titles keep pointer entry from remounting a navigation target.
     expect(componentSource).toContain("title={page.summary}");
@@ -270,15 +269,29 @@ describe("direct settings category interactions", () => {
     expect(onShowAll).toHaveBeenCalledOnce();
   });
 
-  it("navigates directly from the native mobile category selector", async () => {
+  it("navigates directly from the VUI mobile category selector and keeps category context", async () => {
     const { onNavigate } = await mountSidebar();
-    const select = container.querySelector("select")!;
-    expect(select.value).toBe("workbench-shortcuts");
+    const select = container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="设置分类"]')!;
+    expect(select.textContent).toContain("快捷键");
+    await act(async () => select.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(new Set(options.map((option) => option.getAttribute("title")).filter(Boolean))).toEqual(new Set(["工作台", "Agent", "系统"]));
+    const option = options.find((item) => item.textContent?.includes("安全保护"))!;
     await act(async () => {
-      select.value = "tooling-security";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      option.click();
     });
     expect(onNavigate).toHaveBeenCalledExactlyOnceWith("tooling-diagnostics", "tooling-security");
+  });
+
+  it("keeps the empty all-settings option actionable in the mobile selector", async () => {
+    const { onNavigate, onShowAll } = await mountSidebar();
+    const select = container.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="设置分类"]')!;
+    await act(async () => select.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((item) => item.textContent?.trim() === "全部设置")!;
+    await act(async () => option.click());
+    expect(onShowAll).toHaveBeenCalledOnce();
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("preserves field-level search navigation across the category split", async () => {

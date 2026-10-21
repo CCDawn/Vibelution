@@ -11,6 +11,7 @@ const owners = [
   "ratingSuggestionBulkReviewMutation",
   "sourceInboxCollectMutation",
   "sourceInboxReviewMutation",
+  "sourceInboxBulkReviewMutation",
   "centralSourceAttachMutation",
 ] as const;
 
