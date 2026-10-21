@@ -178,11 +178,12 @@ def test_human_attention_read_skips_session_overview_and_preserves_row_contract(
     monkeypatch.setattr(service, "get_platform_overview", forbidden)
     monkeypatch.setattr(session_service, "list_sessions", forbidden)
     monkeypatch.setattr(session_service, "current_session_turn_id", forbidden)
+    monkeypatch.setattr(attention, "collect_stage_task_attention", lambda: ([], []))
     for index, name in enumerate((
         "collect_knowledge_review_attention", "collect_anomaly_attention",
         "_collect_human_gate_attention", "_collect_affair_reminder_attention",
     )):
-        monkeypatch.setattr(attention, name, lambda index=index: rows[index:index + 1])
+        monkeypatch.setattr(attention, name, lambda index=index, **_kwargs: rows[index:index + 1])
     response = client.get("/api/personal-assistant/human-attention")
     assert response.status_code == 200, response.text
     assert response.json() == {"humanAttention": rows}
