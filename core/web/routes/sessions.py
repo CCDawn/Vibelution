@@ -374,7 +374,15 @@ class ChildSessionCreatePayload(BaseModel):
 class SessionToolApprovalDecisionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: Literal["accept", "acceptForSession", "acceptAlways", "decline", "cancel"]
+    decision: Literal[
+        "accept",
+        "acceptForSession",
+        "acceptForSessionTool",
+        "acceptAlways",
+        "acceptWithActionWindow",
+        "decline",
+        "cancel",
+    ]
 
 
 class SessionPromptSuggestionPayload(BaseModel):

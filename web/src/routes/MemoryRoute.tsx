@@ -408,6 +408,10 @@ type Copy = {
   reviewedAt: string;
   sourceReviewNote: string;
   noInboxSources: string;
+  bulkAcceptSources: string;
+  bulkRejectSources: string;
+  selectVisibleSources: string;
+  skippedSources: string;
   noCentralSources: string;
   useActiveKnowledgeOwner: string;
   refinementProposal: string;
@@ -1016,6 +1020,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewedAt: "审核时间",
     sourceReviewNote: "审核说明",
     noInboxSources: "无来源",
+    bulkAcceptSources: "批量通过",
+    bulkRejectSources: "批量驳回",
+    selectVisibleSources: "全选待复核",
+    skippedSources: "跳过",
     noCentralSources: "无中央来源",
     useActiveKnowledgeOwner: "使用当前知识库 owner",
     refinementProposal: "精炼提案",
@@ -1520,6 +1528,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewedAt: "Reviewed at",
     sourceReviewNote: "Review note",
     noInboxSources: "No sources",
+    bulkAcceptSources: "Bulk accept",
+    bulkRejectSources: "Bulk reject",
+    selectVisibleSources: "Select reviewable",
+    skippedSources: "Skipped",
     noCentralSources: "No central sources",
     useActiveKnowledgeOwner: "Use current KB owner",
     refinementProposal: "Refinement proposal",
@@ -2540,6 +2552,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const [ratingSuggestionStatus, setRatingSuggestionStatus] = useState<RatingSuggestionStatusFilter>("pending");
   const [ratingSuggestionPriority, setRatingSuggestionPriority] = useState<RatingSuggestionPriorityFilter>("all");
   const [selectedRatingSuggestionIds, setSelectedRatingSuggestionIds] = useState<string[]>([]);
+  const [selectedInboxSourceIds, setSelectedInboxSourceIds] = useState<string[]>([]);
   const [traceTargetId, setTraceTargetId] = useState("");
   const [selectedAgentMemoryItemId, setSelectedAgentMemoryItemId] = useState("");
   const [graphSearchText, setGraphSearchText] = useState("");
@@ -2617,6 +2630,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     ratingSuggestionBulkReviewMutation,
     sourceInboxCollectMutation,
     sourceInboxReviewMutation,
+    sourceInboxBulkReviewMutation,
     centralSourceAttachMutation,
   } = useMemoryKnowledgeMutations({
     copy,
@@ -3443,6 +3457,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const knowledgeBusy =
     sourceInboxCollectMutation.isPending
     || sourceInboxReviewMutation.isPending
+    || sourceInboxBulkReviewMutation.isPending
     || centralSourceAttachMutation.isPending
     || proposalMutation.isPending
     || reviewMutation.isPending
@@ -3529,6 +3544,35 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       return;
     }
     sourceInboxReviewMutation.mutate({ source, decision });
+  };
+  const toggleInboxSourceSelection = (inboxSourceId: string) => {
+    setSelectedInboxSourceIds((current) =>
+      current.includes(inboxSourceId) ? current.filter((value) => value !== inboxSourceId) : [...current, inboxSourceId],
+    );
+  };
+  const toggleVisibleInboxSources = () => {
+    const visibleIds = ownerInboxSources
+      .filter((source) => source.status === "pending" || source.status === "needs_more_context")
+      .map((source) => source.inboxSourceId);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedInboxSourceIds.includes(id));
+    setSelectedInboxSourceIds(allSelected
+      ? selectedInboxSourceIds.filter((id) => !visibleIds.includes(id))
+      : Array.from(new Set([...selectedInboxSourceIds, ...visibleIds])));
+  };
+  const bulkReviewOwnerSources = (decision: "accepted" | "rejected") => {
+    if (!activeSourceOwnerId || !activeKnowledgeActorAgentId) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
+      return;
+    }
+    const ids = ownerInboxSources
+      .filter((source) => selectedInboxSourceIds.includes(source.inboxSourceId))
+      .filter((source) => source.status === "pending" || source.status === "needs_more_context")
+      .map((source) => source.inboxSourceId);
+    if (!ids.length) {
+      return;
+    }
+    sourceInboxBulkReviewMutation.mutate({ inboxSourceIds: ids, decision });
+    setSelectedInboxSourceIds([]);
   };
   const attachCentralSource = (centralSourceId: string) => {
     if (!activeKnowledgeBase || !activeKnowledgeBaseForItems || !activeKnowledgeActorAgentId || !centralSourceId.trim()) {
@@ -4413,6 +4457,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             onDuplicateCentralSourceIdChange={setDuplicateCentralSourceId}
             onSubmitOwnerSource={submitOwnerSource}
             onReviewOwnerSource={reviewOwnerSource}
+            selectedInboxSourceIds={selectedInboxSourceIds}
+            onToggleInboxSourceSelection={toggleInboxSourceSelection}
+            onToggleVisibleInboxSources={toggleVisibleInboxSources}
+            onBulkReviewOwnerSource={bulkReviewOwnerSources}
             onAttachCentralSource={attachCentralSource}
             formatTimestamp={(value) => formatTimestamp(value, lang)}
           />

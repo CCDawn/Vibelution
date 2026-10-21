@@ -47,6 +47,7 @@ from core.web.services.team_knowledge_service import (
     list_team_knowledge_bases,
     list_agent_knowledge_bases,
     review_owner_inbox_source,
+    review_owner_inbox_sources_bulk,
     review_rating_suggestions_bulk,
     review_rating_suggestion,
     review_refinement_proposal,
@@ -177,6 +178,13 @@ class SourceInboxReviewPayload(BaseModel):
     knowledgeSummary: str = Field("", max_length=4000)
     knowledgeContent: str = Field("", max_length=40000)
     tags: list[str] = Field(default_factory=list, max_length=40)
+
+
+class SourceInboxBulkReviewPayload(BaseModel):
+    inboxSourceIds: list[str] = Field(default_factory=list, max_length=200)
+    decision: Literal["accepted", "rejected"]
+    reviewedByAgentId: str = Field("", max_length=160)
+    resolutionNote: str = Field("", max_length=2000)
 
 
 class SourceGovernanceUpdatePayload(BaseModel):
@@ -691,6 +699,33 @@ def knowledge_source_inbox_review(owner_type: str, owner_id: str, inbox_source_i
             knowledge_summary=payload.knowledgeSummary,
             knowledge_content=payload.knowledgeContent,
             tags=payload.tags,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/knowledge/sources/inbox/{owner_type}/{owner_id}/review-batch",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
+def knowledge_source_inbox_bulk_review(
+    owner_type: str,
+    owner_id: str,
+    payload: SourceInboxBulkReviewPayload,
+) -> dict:
+    try:
+        return review_owner_inbox_sources_bulk(
+            owner_type,
+            owner_id,
+            inbox_source_ids=payload.inboxSourceIds,
+            decision=payload.decision,
+            reviewed_by_agent_id=payload.reviewedByAgentId,
+            resolution_note=payload.resolutionNote,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
