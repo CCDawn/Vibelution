@@ -579,6 +579,7 @@ from core.web.services.team_workflow.challenge_question_runs import (
     read_citation_recheck_progress,
     review_challenge_question_output,
     reverify_citation_receipts,
+    verify_citation_receipt_manually,
 )
 from core.web.services.team_workflow.challenge_program import (
     build_competition_program_projection,

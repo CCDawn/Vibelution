@@ -238,6 +238,81 @@ def test_reverify_citations_progress_get_maps_missing_team_to_404(monkeypatch):
     assert response.status_code == 404
 
 
+def test_verify_citation_manual_post_passes_payload_through_and_returns_service_report(monkeypatch):
+    calls: list[tuple[str, str, str, dict]] = []
+    report = {
+        "status": "verified",
+        "record": {"recordId": "SCI-096:stage1-sci-096-v3", "citationValidation": "passed"},
+        "citation": {"status": "passed", "missingUrls": []},
+        "receipt": {
+            "sourceUrl": "https://dead-origin.example.org/news",
+            "reviewer": "Acceptance Authority",
+            "rationale": "Page confirmed manually before the origin went dark.",
+            "authorityDoi": "",
+            "verifiedAt": "2026-10-21T00:00:00Z",
+        },
+    }
+    payload = {
+        "sourceUrl": "https://dead-origin.example.org/news",
+        "reviewer": "Acceptance Authority",
+        "rationale": "Page confirmed manually before the origin went dark.",
+        "authorityDoi": "",
+    }
+
+    def fake_manual_verify(
+        team_id: str, question_id: str, run_id: str, body: dict
+    ) -> dict:
+        calls.append((team_id, question_id, run_id, body))
+        return report
+
+    monkeypatch.setattr(
+        team_workflows_experiment, "verify_citation_receipt_manually", fake_manual_verify
+    )
+
+    response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/verify-citation-manual",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert calls == [("research-team", "SCI-096", "stage1-sci-096-v3", payload)]
+    assert response.json() == report
+
+
+def test_verify_citation_manual_maps_errors_like_neighbors(monkeypatch):
+    def missing_team(team_id: str, question_id: str, run_id: str, body: dict) -> dict:
+        from core.web.services.team_service import TeamNotFoundError
+
+        raise TeamNotFoundError("team not found: research-team")
+
+    def missing_record(team_id: str, question_id: str, run_id: str, body: dict) -> dict:
+        raise ValueError("Challenge question run record was not found.")
+
+    payload = {
+        "sourceUrl": "https://dead-origin.example.org/news",
+        "reviewer": "Acceptance Authority",
+        "rationale": "Page confirmed manually before the origin went dark.",
+    }
+
+    monkeypatch.setattr(team_workflows_experiment, "verify_citation_receipt_manually", missing_team)
+    missing_team_response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/verify-citation-manual",
+        json=payload,
+    )
+    assert missing_team_response.status_code == 404
+
+    monkeypatch.setattr(team_workflows_experiment, "verify_citation_receipt_manually", missing_record)
+    value_error_response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program"
+        "/questions/SCI-096/runs/stage1-sci-096-v3/verify-citation-manual",
+        json=payload,
+    )
+    assert value_error_response.status_code == 422
+    assert "Challenge question run record was not found." in value_error_response.json()["detail"]
+
+
 def test_repair_registration_post_passes_ids_through_and_returns_service_report(monkeypatch):
     calls: list[tuple[str, str, str]] = []
     report = {
