@@ -7,6 +7,7 @@ import configTypesSource from "./types/config.ts?raw";
 import evolutionTypesSource from "./types/evolution.ts?raw";
 import knowledgeTypesSource from "./types/knowledge.ts?raw";
 import memoryTypesSource from "./types/memory.ts?raw";
+import personalAffairsTypesSource from "./types/personalAffairs.ts?raw";
 import runtimeTypesSource from "./types/runtime.ts?raw";
 import sharedTypesSource from "./types/shared.ts?raw";
 import teamsTypesSource from "./types/teams.ts?raw";
@@ -25,6 +26,7 @@ const expectedBarrel = [
   'export * from "./types/config";',
   'export * from "./types/hypothesisFirst";',
   'export * from "./types/virtualHumanLife";',
+  'export * from "./types/personalAffairs";',
   'export * from "./types/teamBundles";',
   'export * from "./types/financialMarket";',
   'export * from "./types/financialResearch";',
@@ -44,6 +46,7 @@ const domainSources = [
   evolutionTypesSource,
   knowledgeTypesSource,
   memoryTypesSource,
+  personalAffairsTypesSource,
   runtimeTypesSource,
   sharedTypesSource,
   teamsTypesSource,
