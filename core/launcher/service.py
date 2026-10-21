@@ -1203,9 +1203,11 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     store = WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
+    # Only active, indexed-recent, and grace-window snapshots can still block a
+    # lifecycle action; parsing the full history costs seconds once it grows.
     for kind in ("chat_turn", "chat_room_round", "source_collection_run"):
         active_run_id = str(store.load_run_index(kind).get("activeRunId") or "").strip()
-        for payload in store.list_snapshots(kind):
+        for payload in store.list_lifecycle_candidate_snapshots(kind):
             _append_active_work_run(
                 items,
                 seen,
@@ -1214,7 +1216,7 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
                 force_current=str(payload.get("runId") or "").strip() == active_run_id,
             )
 
-    for payload in store.list_snapshots("formal_run"):
+    for payload in store.list_lifecycle_candidate_snapshots("formal_run"):
         _append_active_work_run(
             items,
             seen,

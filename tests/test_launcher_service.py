@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -2127,6 +2128,51 @@ def test_launcher_active_work_guard_scans_parallel_chat_turn_snapshots(tmp_path,
     active = launcher_service.launcher_active_work_runs()
 
     assert {item["runId"] for item in active} == {"chat-turn-alpha", "chat-turn-beta"}
+
+
+def test_launcher_active_work_guard_skips_historical_snapshot_files(tmp_path, monkeypatch):
+    work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    store = WorkRunStore(root=work_runs_dir)
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-turn-live",
+            "runKind": "chat_turn",
+            "sessionId": "session-live",
+            "status": "running",
+        },
+        active_run_id="chat-turn-live",
+    )
+    unseen_history = store.runs_dir("chat_turn") / "chat-turn-history.json"
+    unseen_history.write_text(
+        json.dumps(
+            {
+                "runId": "chat-turn-history",
+                "runKind": "chat_turn",
+                "sessionId": "session-history",
+                "status": "running",
+            }
+        ),
+        encoding="utf-8",
+    )
+    # A stale-mtime, unindexed snapshot would have been parsed by the old full
+    # scan; the bounded candidate scan must leave it alone.
+    os.utime(unseen_history, (1, 1))
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+
+    loaded: list[str] = []
+    original_load_json = work_run_store._load_json
+
+    def capture_load(path):
+        loaded.append(Path(path).name)
+        return original_load_json(path)
+
+    monkeypatch.setattr(work_run_store, "_load_json", capture_load)
+
+    active = launcher_service.launcher_active_work_runs()
+
+    assert [item["runId"] for item in active] == ["chat-turn-live"]
+    assert "chat-turn-history.json" not in loaded
 
 
 def test_launcher_active_work_guard_includes_source_collection_snapshots(tmp_path, monkeypatch):
