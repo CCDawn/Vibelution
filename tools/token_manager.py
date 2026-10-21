@@ -207,9 +207,15 @@ class CompressionResult:
 
 @dataclass
 class CompressionOutput:
-    """压缩返回值；支持 `(messages, stats)` 解包，也支持直接读取统计字段。"""
+    """压缩返回值；支持 `(messages, stats)` 解包，也支持直接读取统计字段。
+
+    ``summarized_messages`` 是本次真正被折叠进摘要的消息集（保留区/错误保留
+    组除外）。压缩 checkpoint 用它把 covered 事件域约束在摘要实际折叠的
+    事件上，避免把 kept 窗口标成已覆盖导致重放丢历史。
+    """
     messages: List[Any]
     result: CompressionResult
+    summarized_messages: List[Any] = field(default_factory=list)
 
     def __iter__(self):
         yield self.messages
@@ -479,6 +485,37 @@ def _pair_preserving_groups(messages: list) -> list[list]:
 
 def _is_provider_user_message(message: Any) -> bool:
     return _message_role(message) == "user"
+
+
+# 历史摘要 notice 的载体标记：compress() 把上一代摘要写回为 runtime notice
+# （SystemMessage，正文以「历史摘要:」开头）。下一轮压缩必须能识别它，
+# 否则前代摘要既不进摘要输入也不被保留，压缩链在第二代断裂。
+HISTORY_SUMMARY_NOTICE_MARKER = "历史摘要:"
+
+
+def _is_history_summary_notice(message: Any) -> bool:
+    """判断一条消息是否是前代压缩写回的历史摘要载体。
+
+    等价判据：system 角色且正文携带历史摘要标记；外部任务输入永远不算
+    历史摘要（它们有独立的保留语义）。
+    """
+    if is_external_request_message(message):
+        return False
+    if _message_role(message) != "system":
+        return False
+    content = _message_content_text(message)
+    return HISTORY_SUMMARY_NOTICE_MARKER in content
+
+
+def _history_summary_notice_payload(message: Any) -> str:
+    """提取历史摘要 notice 携带的上一代摘要正文（去掉载体标记头）。"""
+    content = _message_content_text(message)
+    if not content:
+        return ""
+    marker_index = content.find(HISTORY_SUMMARY_NOTICE_MARKER)
+    if marker_index < 0:
+        return ""
+    return content[marker_index + len(HISTORY_SUMMARY_NOTICE_MARKER):].strip()
 
 
 def _estimate_message_content_tokens(content: Any) -> int:
@@ -1008,7 +1045,9 @@ class EnhancedTokenCompressor:
         # 分离消息类型
         system_msgs = [
             m for m in messages
-            if isinstance(m, SystemMessage) and not is_external_request_message(m)
+            if isinstance(m, SystemMessage)
+            and not is_external_request_message(m)
+            and not _is_history_summary_notice(m)
         ]
         external_request_indices = [
             index for index, message in enumerate(messages)
@@ -1036,10 +1075,18 @@ class EnhancedTokenCompressor:
         # Only the current external request is protected verbatim. Prior user
         # requests remain compactable and therefore enter the summary instead
         # of disappearing silently.
+        #
+        # 历史摘要 notice（上一代压缩写回的 SystemMessage）也必须进入可摘要
+        # 输入：压缩链的单调累积依赖「第 N 代摘要在第 N+1 次压缩时被折叠进
+        # 新摘要」。把它们排除会让前代上下文从模型视野消失（多代断裂）。
         other_msgs = [
             message
             for index, message in enumerate(messages)
-            if (not isinstance(message, SystemMessage) or is_external_request_message(message))
+            if (
+                not isinstance(message, SystemMessage)
+                or is_external_request_message(message)
+                or _is_history_summary_notice(message)
+            )
             and index != latest_request_index
         ]
         
@@ -1088,6 +1135,9 @@ class EnhancedTokenCompressor:
                 use_llm=use_llm_summary,
                 llm_summary_reporter=llm_summary_reporter,
             )
+            # 摘要链保真：上一代摘要正文显式并入新摘要（LLM 路径已在输入里
+            # 看得到 notice，规则路径完全忽略 system 消息，必须在这里兜底）。
+            summary = self._merge_prior_history_summary(old_msgs, summary, max_chars)
         if not old_msgs and not summary:
             return CompressionOutput(
                 messages,
@@ -1133,6 +1183,7 @@ class EnhancedTokenCompressor:
                 pairs_compressed=len(old_msgs),
                 compression_type=compression_type,
             ),
+            summarized_messages=list(old_msgs),
         )
     
     def _pair_messages(self, messages: List[Any]) -> List[List[Any]]:
@@ -1187,6 +1238,30 @@ class EnhancedTokenCompressor:
 - 总长度不超过 {max_chars} 字符
 - 使用中文输出"""
     
+    def _merge_prior_history_summary(self, old_msgs: List[Any], summary: str, max_chars: int) -> str:
+        """把上一代摘要正文并入新摘要，保证压缩链单调累积（输出单条、不叠多条）。
+
+        超预算时保留头部（上一代摘要是密度更高的既有压缩产物），新提取内容
+        尾部截断；LLM 已携带前代内容时去重跳过。
+        """
+        prior_notices = [
+            message for message in old_msgs if _is_history_summary_notice(message)
+        ]
+        if not prior_notices:
+            return summary
+        prior_text = _history_summary_notice_payload(prior_notices[-1])
+        if not prior_text:
+            return summary
+        new_text = str(summary or "").strip()
+        if not new_text:
+            return prior_text[:max_chars]
+        if prior_text in new_text:
+            return new_text
+        combined = f"{prior_text}\n{new_text}"
+        if len(combined) <= max_chars:
+            return combined
+        return combined[: max(0, max_chars - 3)] + "..."
+
     def _generate_summary(
         self,
         messages: List[Any],

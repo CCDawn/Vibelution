@@ -39,10 +39,14 @@ from tools.token_manager import (
     MessageMeta,
     MessagePriority,
     TokenBudget,
+    # 历史摘要链（F1）
+    _is_history_summary_notice,
 )
 from core.infrastructure.runtime_input import (
     build_chat_user_message,
     build_external_request_message,
+    build_runtime_notice_message,
+    EXTERNAL_REQUEST_HEADER,
 )
 
 
@@ -470,6 +474,124 @@ def test_compression_preserves_latest_provider_user_message_and_summarizes_older
     assert old_user_two not in compressed
     assert "OLD-ANCHOR" in result.summary
     assert result.tokens_after < result.tokens_before
+
+
+def test_history_summary_notice_detection():
+    """历史摘要 notice 等价判据：system 角色 + 「历史摘要:」标记。"""
+    from langchain_core.messages import SystemMessage
+
+    notice = build_runtime_notice_message("历史摘要:\n上一代摘要内容")
+    assert _is_history_summary_notice(notice)
+    # dict 形状的 seed 消息同样要能识别
+    assert _is_history_summary_notice(
+        {"role": "system", "content": "## 运行时提示\n历史摘要:\n上一代摘要内容"}
+    )
+    assert not _is_history_summary_notice(SystemMessage(content="stable system prompt"))
+    assert not _is_history_summary_notice({"role": "user", "content": "历史摘要: 不是系统消息"})
+    # 外部任务输入有独立保留语义，永远不算历史摘要
+    external = SystemMessage(
+        content=f"{EXTERNAL_REQUEST_HEADER}\n历史摘要: 外部请求不是摘要载体"
+    )
+    assert not _is_history_summary_notice(external)
+
+
+def test_recompression_folds_previous_summary_notice_into_new_summary():
+    """F1 回归①：二次压缩时一代摘要必须折叠进二代摘要，输出只保留一条合并摘要。
+
+    旧实现把摘要 notice（SystemMessage）排除出可摘要输入且不保留在输出里，
+    第 N 代摘要在第 N+1 次压缩时从模型视野消失。
+    """
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    compressor = EnhancedTokenCompressor(token_budget=4_000)
+    gen1_messages = [
+        SystemMessage(content="stable system"),
+        build_chat_user_message("GEN1-ANCHOR-TASK " + ("a" * 8_000)),
+        AIMessage(content="ack one"),
+        AIMessage(content="ack two"),
+        build_chat_user_message("GEN1-CURRENT"),
+    ]
+    compressed_gen1, result_gen1 = compressor.compress(
+        gen1_messages,
+        max_chars=600,
+        keep_count=1,
+        preserve_errors=True,
+        use_llm_summary=False,
+    )
+    assert "GEN1-ANCHOR-TASK" in result_gen1.summary
+    gen1_notices = [
+        message for message in compressed_gen1 if _is_history_summary_notice(message)
+    ]
+    assert len(gen1_notices) == 1
+
+    gen2_messages = [
+        *compressed_gen1,
+        AIMessage(content="ack three"),
+        AIMessage(content="ack four"),
+        build_chat_user_message("GEN2-CURRENT"),
+    ]
+    output_gen2 = compressor.compress(
+        gen2_messages,
+        max_chars=600,
+        keep_count=1,
+        preserve_errors=True,
+        use_llm_summary=False,
+    )
+    compressed_gen2, result_gen2 = output_gen2
+
+    # 一代摘要内容折叠进二代摘要（链单调累积）
+    assert "GEN1-ANCHOR-TASK" in result_gen2.summary
+    # 输出侧只有一条合并后的新摘要，不叠多条
+    gen2_notices = [
+        message for message in compressed_gen2 if _is_history_summary_notice(message)
+    ]
+    assert len(gen2_notices) == 1
+    assert "GEN1-ANCHOR-TASK" in str(getattr(gen2_notices[0], "content", ""))
+    # 原系统提示仍然保留在最前
+    assert isinstance(compressed_gen2[0], SystemMessage)
+    assert compressed_gen2[0].content == "stable system"
+    # 上一代 notice 对象确实进入了本次折叠集
+    assert gen1_notices[0] in output_gen2.summarized_messages
+
+
+def test_compression_output_carries_summarized_boundary():
+    """CompressionOutput 暴露实际折叠消息集，供 checkpoint 精确圈定 covered 事件。"""
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    old_user = build_chat_user_message("BOUNDARY-ANCHOR " + ("c" * 8_000))
+    current_user = build_chat_user_message("BOUNDARY-CURRENT")
+    messages = [
+        SystemMessage(content="stable system"),
+        old_user,
+        AIMessage(content="ack one"),
+        AIMessage(content="ack two"),
+        current_user,
+    ]
+    compressor = EnhancedTokenCompressor(token_budget=4_000)
+
+    output = compressor.compress(
+        messages,
+        max_chars=600,
+        keep_count=1,
+        preserve_errors=True,
+        use_llm_summary=False,
+    )
+    compressed, result = output
+
+    # 支持既有 (messages, stats) 解包
+    unpacked_messages, unpacked_result = compressor.compress(
+        messages, max_chars=600, keep_count=1, preserve_errors=True, use_llm_summary=False
+    )
+    assert unpacked_result.summary == result.summary
+    assert [str(getattr(message, "content", message)) for message in unpacked_messages] == [
+        str(getattr(message, "content", message)) for message in compressed
+    ]
+    assert old_user in output.summarized_messages
+    assert current_user not in output.summarized_messages
+    assert any(
+        getattr(message, "content", "") == "ack one"
+        for message in output.summarized_messages
+    )
 
 
 # ============================================================================

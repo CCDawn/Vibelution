@@ -41,6 +41,16 @@ class _FakeCompressor:
         return self.result, self.summary
 
 
+class _FakeOutputCompressor:
+    """compress() 直接返回 CompressionOutput（携带 summarized 边界）的假压缩器。"""
+
+    def __init__(self, output) -> None:
+        self.output = output
+
+    def compress(self, messages, **kwargs):
+        return self.output
+
+
 class _FakeStrategy:
     def __init__(self, level: CompressionLevel = CompressionLevel.STANDARD) -> None:
         self.level = level
@@ -253,6 +263,63 @@ def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path
     other_events = ledger.load_conversation_events(tmp_path, "s1")
     assert len(other_events) == 1
     assert "original history of s1" in str(ledger.conversation_model_messages_from_events(other_events))
+
+
+def test_checkpoint_receives_exact_summarized_boundary(monkeypatch, tmp_path):
+    """F2 接线：checkpoint 必须拿到压缩真正折叠的消息集；无法证明边界时保持旧行为。"""
+    from core.chat import conversation_ledger
+    from core.web.services import agent_directory_service
+    from tools.token_manager import CompressionOutput, CompressionResult
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "a1",
+            "sessionId": "workspace-session",
+            "turnId": "workspace-turn",
+        },
+    )
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        conversation_ledger,
+        "append_context_compression_checkpoint",
+        lambda root, session_id, **kw: captured.append(dict(kw)) or object(),
+    )
+
+    folded = AIMessage(content="folded-history-message")
+    boundary_output = CompressionOutput(
+        [AIMessage(content="x")],
+        CompressionResult(
+            summary="ok",
+            tokens_before=100,
+            tokens_after=10,
+            pairs_compressed=1,
+            compression_type="active",
+        ),
+        summarized_messages=[folded],
+    )
+    _run(
+        messages=[AIMessage(content="long-context-message")],
+        compressor=_FakeOutputCompressor(boundary_output),
+        config=_feature_config(),
+        project_root=str(tmp_path),
+        turn_runtime_fn=dict,
+    )
+    assert captured
+    assert captured[0]["summarized_messages"] == [folded]
+
+    # 旧式 (messages, stats) 压缩器证明不了边界：不传参，走既有 blanket 语义。
+    captured.clear()
+    _run(
+        messages=[AIMessage(content="long-context-message")],
+        compressor=_FakeCompressor([AIMessage(content="x")], summary="ok"),
+        config=_feature_config(),
+        project_root=str(tmp_path),
+        turn_runtime_fn=dict,
+    )
+    assert captured
+    assert "summarized_messages" not in captured[0]
 
 
 def test_disabled_feature_or_missing_compressor_skips_without_counting():
@@ -599,7 +666,12 @@ def test_normalize_tool_call_pairing_handles_provider_dict_messages():
     assert repaired["metadata"]["toolName"] == "shell"
 
 
-def test_compressor_unresolved_call_is_normalized_and_audited():
+def test_compressor_new_unresolved_call_fails_closed_before_normalize():
+    """压缩新引入的未决 tool call 必须触发门 fail-closed，而不是被静默修复。
+
+    保留门在 normalize 之前对原始压缩输出判定；normalize 只负责修复输入中
+    既有的链路损伤。新引入的断裂走 agent.context_budget_exhausted。
+    """
     original = [AIMessage(content="long-context-message")]
     broken = [AIMessage(content="", tool_calls=[{"name": "fetch_tool", "args": {}, "id": "call-new"}])]
     extras = {}
@@ -612,27 +684,29 @@ def test_compressor_unresolved_call_is_normalized_and_audited():
         iteration=6,
     )
 
-    assert result[1] is False
-    assert isinstance(result[0][-1], ToolMessage)
-    assert result[0][-1].tool_call_id == "call-new"
-    assert result[0][-1].content == ABORTED_TOOL_RESULT_CONTENT
-    normalized = [
-        item
-        for item in extras["events"]
-        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
-    ]
-    assert normalized
-    fields = normalized[0]["kwargs"]["fields"]
-    assert fields["synthesizedAbortedResults"] == 1
-    assert fields["droppedOrphanResults"] == 0
-    assert not [
+    assert result[0] == original
+    assert result[0] is not original
+    assert result[1] is True
+    blocked = [
         item
         for item in extras["events"]
         if item["args"][1] == "agent.context_budget_exhausted"
     ]
+    assert blocked
+    fields = blocked[0]["kwargs"]["fields"]
+    assert fields["guardReason"] == "retention_missing"
+    assert fields["retentionBefore"]["unresolvedCallCount"] == 0
+    assert fields["retentionAfter"]["unresolvedCallCount"] == 1
+    # 门失败时不做 normalize，也不写 checkpoint。
+    assert not [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
+    ]
 
 
-def test_compressor_orphan_result_is_dropped_before_the_gate():
+def test_compressor_new_orphan_result_fails_closed_before_normalize():
+    """压缩 retire 掉 call 侧却保留结果侧（新增孤儿结果）同样 fail-closed。"""
     original = [
         AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "c1"}]),
         ToolMessage(content="r1", tool_call_id="c1"),
@@ -651,15 +725,53 @@ def test_compressor_orphan_result_is_dropped_before_the_gate():
         iteration=6,
     )
 
+    assert result[0] == original
+    assert result[1] is True
+    blocked = [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_budget_exhausted"
+    ]
+    assert blocked
+    fields = blocked[0]["kwargs"]["fields"]
+    assert fields["guardReason"] == "retention_missing"
+    assert fields["retentionAfter"]["orphanResultCount"] == 1
+    assert not [
+        item
+        for item in extras["events"]
+        if item["args"][1] == "agent.context_compression.tool_chain_normalized"
+    ]
+
+
+def test_pre_existing_unresolved_call_is_still_normalized():
+    """输入中既有的链路损伤不由门拦截，normalize 仍是门通过后的显式修复步骤。"""
+    original = [
+        AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "pre-existing"}]),
+    ]
+    carried = [
+        AIMessage(content="kept note", tool_calls=[{"name": "t", "args": {}, "id": "pre-existing"}]),
+    ]
+    extras = {}
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(carried, summary="ok summary"),
+        config=_feature_config(),
+        extra=extras,
+        iteration=6,
+    )
+
     assert result[1] is False
-    assert all(getattr(item, "tool_call_id", None) != "c-gone" for item in result[0])
+    assert isinstance(result[0][-1], ToolMessage)
+    assert result[0][-1].tool_call_id == "pre-existing"
+    assert result[0][-1].content == ABORTED_TOOL_RESULT_CONTENT
     normalized = [
         item
         for item in extras["events"]
         if item["args"][1] == "agent.context_compression.tool_chain_normalized"
     ]
     assert normalized
-    assert normalized[0]["kwargs"]["fields"]["droppedOrphanResults"] == 1
+    assert normalized[0]["kwargs"]["fields"]["synthesizedAbortedResults"] == 1
     assert not [
         item
         for item in extras["events"]

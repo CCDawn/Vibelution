@@ -674,7 +674,7 @@ def test_unresolved_tool_call_is_normalized_before_the_retention_gate():
     assert normalized[0]["fields"].get("droppedOrphanResults") == 0
 
 
-def test_broken_chain_from_compressor_is_normalized_instead_of_failing_closed():
+def test_broken_chain_from_compressor_fails_closed_before_normalize():
     messages = _unresolved_pair_messages()
     (compressed, should_break, _applied, _count, _last_iter), events, _ui = _run_compress(
         messages=messages,
@@ -682,22 +682,25 @@ def test_broken_chain_from_compressor_is_normalized_instead_of_failing_closed():
         context_input_hard_limit=HARD_LIMIT,
         post_compression_target_tokens=POST_TARGET,
     )
-    # Codex parity: normalize before the gate, so a compressor that retires one
-    # side of a pair no longer blocks the turn; the repair is recorded.
-    assert should_break is False
-    after = turn_compression._tool_call_pairing_snapshot(compressed)
-    assert after["unresolvedCallIds"] == []
-    assert after["orphanResultCount"] == 0
-    assert not any(
-        event["action"] == "agent.context_budget_exhausted" for event in events
-    )
-    normalized = [
+    # Check-first retention gate: a compressor that introduces a *fresh*
+    # unresolved tool call breaks the retention contract and must fail closed
+    # instead of being silently repaired by normalization. Normalization stays
+    # available only for damage that already existed in the input (see
+    # test_unresolved_tool_call_is_normalized_before_the_retention_gate).
+    assert should_break is True
+    assert compressed == messages
+    exhausted = [
         event
         for event in events
-        if event["action"] == "agent.context_compression.tool_chain_normalized"
+        if event["action"] == "agent.context_budget_exhausted"
     ]
-    assert normalized, "pairing repair must stay auditable in the runtime scene"
-    assert normalized[0]["fields"].get("synthesizedAbortedResults") == 1
+    assert exhausted
+    assert exhausted[0]["fields"].get("guardReason") == "retention_missing"
+    assert exhausted[0]["fields"]["retentionAfter"]["unresolvedCallCount"] == 1
+    assert not any(
+        event["action"] == "agent.context_compression.tool_chain_normalized"
+        for event in events
+    )
 
 
 def test_compression_fails_closed_when_still_over_hard_limit():
