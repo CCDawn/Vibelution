@@ -152,10 +152,14 @@ from tools.token_manager import (
 )
 # Provider context-limit recovery: one retry per turn, bounded per session.
 _MAX_PROVIDER_CONTEXT_COMPRESSION_RETRIES = 2
-# Send-path timing anchors surfaced on agent.llm_preflight.completed (TTFT
-# dark zone). Pre-loop anchors (seed/todo-restore/status-bar/threshold/llm-log)
-# are measured before the loop; reconcile/invoke-prep lag by one send and the
-# final send's values are flushed by agent.llm_send.final_timing at turn end.
+# Send-path timing anchors (TTFT dark zone). C-preflight anchors (seed/
+# todo-restore/status-bar/threshold/llm-log + loop head/guidance/compression
+# gate) ride agent.llm_preflight.completed; route-side anchors (reconcile/
+# invoke-prep + E-segment invoke prep) lag by one send and ride the dedicated
+# agent.llm_send.route_timing tail event — runtime scene events cap fields at
+# MAX_TELEMETRY_FIELD_ITEMS (24), which the combined key set would overflow.
+# The final send's unreported values are flushed by agent.llm_send.final_timing
+# at turn end.
 _TURN_SEND_TIMING_ANCHOR_KEYS = frozenset(
     {
         "seedHistoryMs",
@@ -163,8 +167,50 @@ _TURN_SEND_TIMING_ANCHOR_KEYS = frozenset(
         "turnStatusBarMs",
         "thresholdEstimateMs",
         "llmRequestLogMs",
+        "iterationHeadMs",
+        "guidanceRebindMs",
+        "compressionGateMs",
+        "preflightTelemetryMs",
         "reconcileMs",
+        "ledgerLoadMs",
         "invokePrepMs",
+        "invokeSetupMs",
+        "llmRouteBindMs",
+        "invocationContextMs",
+        "routeCaptureMs",
+        "llmRouteAttemptEventMs",
+        "streamHandoffMs",
+    }
+)
+# Anchors measured before the send-gate telemetry block; they ride the same
+# send's agent.llm_preflight.completed event (≤24 fields with the base fields).
+_TURN_SEND_PREFLIGHT_ANCHOR_KEYS = frozenset(
+    {
+        "seedHistoryMs",
+        "todoRestoreMs",
+        "turnStatusBarMs",
+        "thresholdEstimateMs",
+        "llmRequestLogMs",
+        "iterationHeadMs",
+        "guidanceRebindMs",
+        "compressionGateMs",
+    }
+)
+# Anchors measured after the preflight event of the send they describe
+# (reconcile + invoke-side prep); they lag one send on
+# agent.llm_send.route_timing and flush via final_timing on the last send.
+_TURN_SEND_ROUTE_ANCHOR_KEYS = frozenset(
+    {
+        "reconcileMs",
+        "ledgerLoadMs",
+        "invokePrepMs",
+        "invokeSetupMs",
+        "llmRouteBindMs",
+        "invocationContextMs",
+        "routeCaptureMs",
+        "llmRouteAttemptEventMs",
+        "streamHandoffMs",
+        "preflightTelemetryMs",
     }
 )
 from tools.compression_strategy import (
@@ -1597,6 +1643,25 @@ class AgentRuntime:
         disable_tools: bool = False,
         profile_id: Optional[str] = None,
     ):
+        # TTFT 批七 E 段锚点：get_llm_for_mode（bind 缓存命中或重建绑定）。
+        route_bind_started_at = time.perf_counter()
+        try:
+            return self._resolve_llm_for_current_mode(
+                disable_tools=disable_tools,
+                profile_id=profile_id,
+            )
+        finally:
+            self._record_turn_send_timing_anchor(
+                "llmRouteBindMs",
+                max(0, int((time.perf_counter() - route_bind_started_at) * 1000)),
+            )
+
+    def _resolve_llm_for_current_mode(
+        self,
+        *,
+        disable_tools: bool = False,
+        profile_id: Optional[str] = None,
+    ):
         base_llm = getattr(self, "_base_llm", None) or self.llm_with_tools
         if profile_id and profile_id != getattr(base_llm, "profile_id", None):
             base_llm = self._get_or_create_agent_llm_client(
@@ -2491,7 +2556,14 @@ class AgentRuntime:
             # lock plus a re-parse when the file is unchanged.
             from core.chat.conversation_ledger import load_conversation_events_cached
 
+            # TTFT 批七 C 段锚点：把「二次 ledger 加载」从 reconcileMs 里拆出
+            # 单独归因（reconcileMs 保持整段含加载，两者做差即回放/指纹成本）。
+            ledger_load_started_at = time.perf_counter()
             events = load_conversation_events_cached(project_root, session_id)
+            self._record_turn_send_timing_anchor(
+                "ledgerLoadMs",
+                max(0, int((time.perf_counter() - ledger_load_started_at) * 1000)),
+            )
             seeded_ledger_fingerprint = str(
                 getattr(self, "_seeded_history_ledger_fingerprint", "") or ""
             ).strip()
@@ -3357,11 +3429,27 @@ class AgentRuntime:
             )
             responses_continuation_disabled = False
             for _ in range(round_state.max_iterations):
+                # TTFT 批七 C 段锚点：循环头（停止检查 + guidance rebind +
+                # 迭代推进）位于 totalPreflightMs 计时起点之前，此前完全无观测。
+                iteration_head_started_at = time.perf_counter()
                 self._raise_if_turn_stop_requested()
                 # Mid-turn steer: guidance submitted while this turn runs lands
                 # before the next model request instead of the next prompt build.
+                guidance_rebind_started_at = time.perf_counter()
                 messages = self._apply_turn_guidance_messages(messages)
+                guidance_rebind_ms = max(
+                    0, int((time.perf_counter() - guidance_rebind_started_at) * 1000)
+                )
+                self._record_turn_send_timing_anchor("guidanceRebindMs", guidance_rebind_ms)
                 iteration = round_state.next_iteration()
+                self._record_turn_send_timing_anchor(
+                    "iterationHeadMs",
+                    max(
+                        0,
+                        int((time.perf_counter() - iteration_head_started_at) * 1000)
+                        - guidance_rebind_ms,
+                    ),
+                )
                 pre_llm_started = time.perf_counter()
                 ui.update_status(
                     "THINKING",
@@ -3421,6 +3509,9 @@ class AgentRuntime:
                 except Exception:
                     pass
                 context_estimate_ms = max(0, int((time.perf_counter() - context_estimate_started) * 1000))
+                # TTFT 批七 C 段锚点：压缩闸区（delegation 检查 + 压缩判定 +
+                # 微压缩计量 + 按需压缩执行）在 totalPreflightMs 内但未单项透出。
+                compression_gate_started_at = time.perf_counter()
 
                 delegated = None
                 delegation_ms = 0
@@ -3501,6 +3592,14 @@ class AgentRuntime:
                     # estimate can exceed the limit even when compression fits.
                     current_tokens = estimate_messages_tokens(messages)
                 self._raise_if_turn_stop_requested()
+                self._record_turn_send_timing_anchor(
+                    "compressionGateMs",
+                    max(0, int((time.perf_counter() - compression_gate_started_at) * 1000)),
+                )
+                # TTFT 批七 C 段锚点：遥测写段（preflight 事件写 + emitted 快照
+                # + route timing 尾部事件写）整体计时，滞后一拍透出（最终 send
+                # 由 agent.llm_send.final_timing 补发）。
+                preflight_telemetry_started_at = time.perf_counter()
                 _record_agent_scene_event(
                     "llm",
                     "agent.llm_preflight.completed",
@@ -3520,18 +3619,19 @@ class AgentRuntime:
                         "promptBuildReused": prompt_build_reused,
                         "contextEstimateMs": context_estimate_ms,
                         "delegationMs": delegation_ms,
-                        # Send-path timing anchors (TTFT dark zone): seed/
-                        # todo-restore/status-bar/threshold/llm-log are
-                        # measured before the loop; reconcile and invoke-prep
-                        # anchors lag by one send because they are measured
-                        # after this event's emission. The final send's values
-                        # are flushed by agent.llm_send.final_timing at turn end.
+                        # Send-path timing anchors (TTFT dark zone): preflight
+                        # keys are measured before this event; route-side keys
+                        # (reconcile/invoke-prep/E-segment) lag by one send on
+                        # agent.llm_send.route_timing because the combined key
+                        # set would overflow the scene event field cap. The
+                        # final send's values are flushed by
+                        # agent.llm_send.final_timing at turn end.
                         **{
                             anchor_key: anchor_value
                             for anchor_key, anchor_value in dict(
                                 getattr(self, "_turn_send_timing_anchors", {}) or {}
                             ).items()
-                            if anchor_key in _TURN_SEND_TIMING_ANCHOR_KEYS
+                            if anchor_key in _TURN_SEND_PREFLIGHT_ANCHOR_KEYS
                         },
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
                     },
@@ -3549,6 +3649,30 @@ class AgentRuntime:
                         if anchor_key in _TURN_SEND_TIMING_ANCHOR_KEYS
                     },
                 }
+                # TTFT 批七：route 段锚点（reconcile/ledger 加载/invoke 前组装）
+                # 超出 runtime scene 事件 24 字段上限，不进 preflight；按
+                # prepare_tail_timings 先例用专用尾部事件滞后一拍透出。
+                route_anchor_fields = {
+                    anchor_key: anchor_value
+                    for anchor_key, anchor_value in dict(
+                        getattr(self, "_turn_send_timing_anchors", {}) or {}
+                    ).items()
+                    if anchor_key in _TURN_SEND_ROUTE_ANCHOR_KEYS
+                }
+                if route_anchor_fields:
+                    _record_agent_scene_event(
+                        "llm",
+                        "agent.llm_send.route_timing",
+                        message="Agent LLM send route-side timing anchors measured after the previous preflight event.",
+                        fields={
+                            "iteration": iteration,
+                            **route_anchor_fields,
+                        },
+                    )
+                self._record_turn_send_timing_anchor(
+                    "preflightTelemetryMs",
+                    max(0, int((time.perf_counter() - preflight_telemetry_started_at) * 1000)),
+                )
                 # Hard input-limit preflight: never invoke the model when the
                 # estimated input still exceeds the versioned hard limit
                 # (auditable context_budget_exhausted, fail-closed).
@@ -4192,6 +4316,27 @@ class AgentRuntime:
         prompt_purpose: str = "main_reply",
         route_attempt: int = 1,
     ) -> LLMInvocationContext:
+        # TTFT 批七 E 段锚点：invocation context 组装；同时记录结束时间戳供
+        # _invoke_llm 的 routeCaptureMs 间隙锚点对齐。
+        invocation_context_started_at = time.perf_counter()
+        try:
+            return self._assemble_llm_invocation_context(
+                prompt_purpose=prompt_purpose,
+                route_attempt=route_attempt,
+            )
+        finally:
+            self._record_turn_send_timing_anchor(
+                "invocationContextMs",
+                max(0, int((time.perf_counter() - invocation_context_started_at) * 1000)),
+            )
+            self._turn_invocation_context_ended_at = time.perf_counter()
+
+    def _assemble_llm_invocation_context(
+        self,
+        *,
+        prompt_purpose: str = "main_reply",
+        route_attempt: int = 1,
+    ) -> LLMInvocationContext:
         try:
             policy = self._get_mode_policy()
             mode_value = str(getattr(policy.mode, "value", policy.mode) or "").strip()
@@ -4384,6 +4529,7 @@ class AgentRuntime:
         # Removal: keep while tests call AgentRuntime._invoke_llm and patch agent.* helpers.
         # Reset before delegation so a stop/interrupt cannot leave diagnostics
         # from an earlier invocation attached to the active turn.
+        invoke_setup_started_at = time.perf_counter()
         self._last_llm_error_category = None
         self._last_llm_error_retryable = False
         self._last_llm_recovery_action = None
@@ -4391,6 +4537,11 @@ class AgentRuntime:
         self._last_llm_error_details = {}
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
+        # TTFT 批七 E 段：routeCaptureMs/streamHandoffMs 的间隙基准时间戳。
+        # 每次 invoke 入口清零，避免上一 send/attempt 或其他调用路径的陈旧
+        # 时间戳污染本 send 的间隙锚点。
+        self._turn_invocation_context_ended_at = 0.0
+        self._turn_route_attempt_event_ended_at = 0.0
 
         def _turn_llm_cancel_context(checker):
             # Session turns mark the checker to enable provider HTTP abort, so
@@ -4407,6 +4558,53 @@ class AgentRuntime:
                 ),
             )
 
+        def _timed_route_scene_event(*args, **kwargs):
+            # TTFT 批七 E 段锚点：llm_route_attempt_started 事件写时长
+            # （llmRouteAttemptEventMs），及其与 invocation context 组装结束
+            # 之间的 capture/trace 间隙（routeCaptureMs）。其余事件原样透传。
+            event_code = str(args[1]) if len(args) > 1 else str(kwargs.get("event_code", "") or "")
+            if event_code == "llm_route_attempt_started":
+                context_ended_at = float(
+                    getattr(self, "_turn_invocation_context_ended_at", 0.0) or 0.0
+                )
+                if context_ended_at > 0:
+                    self._record_turn_send_timing_anchor(
+                        "routeCaptureMs",
+                        max(0, int((time.perf_counter() - context_ended_at) * 1000)),
+                    )
+                    self._turn_invocation_context_ended_at = 0.0
+            route_event_write_started_at = time.perf_counter()
+            try:
+                return _record_agent_scene_event(*args, **kwargs)
+            finally:
+                if event_code == "llm_route_attempt_started":
+                    self._record_turn_send_timing_anchor(
+                        "llmRouteAttemptEventMs",
+                        max(0, int((time.perf_counter() - route_event_write_started_at) * 1000)),
+                    )
+                    self._turn_route_attempt_event_ended_at = time.perf_counter()
+
+        def _timed_stream_handoff(stream_outcome_fn):
+            # TTFT 批七 E 段锚点：route attempt 事件写结束 → 流式/非流式
+            # outcome 调用入口之间的适配层间隙（should_stream 等）。
+            def _wrapper(*args, **kwargs):
+                route_event_ended_at = float(
+                    getattr(self, "_turn_route_attempt_event_ended_at", 0.0) or 0.0
+                )
+                if route_event_ended_at > 0:
+                    self._record_turn_send_timing_anchor(
+                        "streamHandoffMs",
+                        max(0, int((time.perf_counter() - route_event_ended_at) * 1000)),
+                    )
+                    self._turn_route_attempt_event_ended_at = 0.0
+                return stream_outcome_fn(*args, **kwargs)
+
+            return _wrapper
+
+        self._record_turn_send_timing_anchor(
+            "invokeSetupMs",
+            max(0, int((time.perf_counter() - invoke_setup_started_at) * 1000)),
+        )
         result = invoke_agent_llm_turn(
             messages=messages,
             replay_state=replay_state,
@@ -4418,15 +4616,15 @@ class AgentRuntime:
                 get_llm_for_mode=self._get_llm_for_current_mode,
                 should_stream=self._should_stream_llm_for_turn,
                 build_invocation_context=self._build_llm_invocation_context,
-                invoke_outcome=invoke_llm_outcome,
-                run_streaming_outcome=run_streaming_llm_outcome,
+                invoke_outcome=_timed_stream_handoff(invoke_llm_outcome),
+                run_streaming_outcome=_timed_stream_handoff(run_streaming_llm_outcome),
                 canonicalize=build_answer_channel_guard(
                     canonicalize_legacy_xml_outcome,
                     record_event=_record_agent_scene_event,
                     resolve_route=self._resolve_answer_channel_leak_route,
                 ),
                 plan_recovery=plan_llm_recovery,
-                record_scene_event=_record_agent_scene_event,
+                record_scene_event=_timed_route_scene_event,
                 record_route_success=_record_llm_route_success,
                 request_compression=request_compression,
                 debug_logger=_debug_logger,
