@@ -572,6 +572,16 @@ def _team_question_inbox(team_id: str, question_id: str):
 
 def _state_v2_anomaly_entries() -> list[dict[str, str]]:
 
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_chain import (
+        claim_belief_gate_read_scope,
+    )
+
+    with claim_belief_gate_read_scope():
+        return _collect_state_v2_anomaly_entries()
+
+
+def _collect_state_v2_anomaly_entries() -> list[dict[str, str]]:
+
     """Critical/high anomaly-inbox items projected from state-v2 snapshots."""
 
 

@@ -7861,6 +7861,176 @@ def test_question_source_replay_cache_is_bound_to_durable_file_cursors(
     state_module.clear_hypothesis_first_state_v2_cache()
 
 
+def test_question_source_cache_preserves_json_values_and_nested_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = hf_state_v2_module
+    state.clear_hypothesis_first_state_v2_cache()
+    fields = (
+        "chainRecords", "selectionRecords", "meetingRecords", "digestRecords",
+        "decisionRecords", "hypothesisRoundRecords",
+    )
+    raw = {
+        field: [{
+            "questionId": "SCI-001",
+            "meetingRoundId": "meeting-1",
+            "roundId": "round-1",
+            "nested": {"text": "中文", "values": [None, True, False, 3, 2.5, {"items": []}]},
+        }]
+        for field in fields
+    }
+    raw.update(targetMeetingIds={"meeting-1"}, targetRoundIds={"round-1"})
+    expected = {"questionId": "SCI-001", **deepcopy(raw)}
+    monkeypatch.setattr(state, "_question_snapshot_signature", lambda _: ())
+    monkeypatch.setattr(
+        state.hypothesis_first_chain, "_question_reset_snapshot", lambda *_: deepcopy(raw),
+    )
+
+    for _ in range(3):
+        snapshot = state._cached_question_reset_snapshot("team-1", "SCI-001")
+        assert snapshot == expected
+        assert isinstance(snapshot["targetMeetingIds"], set)
+        assert isinstance(snapshot["targetRoundIds"], set)
+        for field in fields:
+            snapshot[field][0]["nested"]["values"][-1]["items"].append("changed")
+        snapshot["targetMeetingIds"].add("other-meeting")
+        snapshot["targetRoundIds"].clear()
+    state.clear_hypothesis_first_state_v2_cache()
+
+
+@pytest.mark.parametrize("source_index", range(6))
+def test_question_source_cache_invalidates_each_durable_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source_index: int,
+) -> None:
+    from core.web.services.team_workflow import (
+        hypothesis_rounds, hypothesis_selection, meeting_rounds,
+    )
+
+    state = hf_state_v2_module
+    state.clear_hypothesis_first_state_v2_cache()
+    owners = (
+        (state.hypothesis_first_chain, "_storage_path"),
+        (hypothesis_selection, "_storage_path"),
+        (meeting_rounds, "_rounds_path"),
+        (meeting_rounds, "_digests_path"),
+        (meeting_rounds, "_decisions_path"),
+        (hypothesis_rounds, "_storage_path"),
+    )
+    paths = [tmp_path / f"source-{index}.jsonl" for index in range(6)]
+    for (owner, attribute), path in zip(owners, paths):
+        path.write_text("", encoding="utf-8")
+        monkeypatch.setattr(owner, attribute, lambda _team, path=path: path)
+    reads = 0
+
+    def read_snapshot(*_args):
+        nonlocal reads
+        reads += 1
+        return {
+            "chainRecords": [{"questionId": "SCI-001", "generation": reads}],
+        }
+
+    monkeypatch.setattr(state.hypothesis_first_chain, "_question_reset_snapshot", read_snapshot)
+    first = state._cached_question_reset_snapshot("team-1", "SCI-001")
+    assert state._cached_question_reset_snapshot("team-1", "SCI-001") == first
+    assert reads == 1
+    paths[source_index].write_text('{"changed":true}\n', encoding="utf-8")
+    second = state._cached_question_reset_snapshot("team-1", "SCI-001")
+    assert reads == 2
+    assert second["chainRecords"][0]["generation"] == 2
+    state.clear_hypothesis_first_state_v2_cache()
+
+
+@pytest.mark.parametrize("stabilizes", [True, False])
+def test_question_source_cache_retries_changing_replay_without_caching_torn_read(
+    monkeypatch: pytest.MonkeyPatch, stabilizes: bool,
+) -> None:
+    state = hf_state_v2_module
+    state.clear_hypothesis_first_state_v2_cache()
+    signatures = [(("chain", index, index),) for index in range(3)]
+    final = signatures[1 if stabilizes else 2]
+    sequence = iter([signatures[0], signatures[1], final])
+    monkeypatch.setattr(state, "_question_snapshot_signature", lambda _: next(sequence, final))
+    reads = 0
+
+    def read_snapshot(*_args):
+        nonlocal reads
+        reads += 1
+        return {"chainRecords": [{"questionId": "SCI-001", "generation": reads}]}
+
+    monkeypatch.setattr(state.hypothesis_first_chain, "_question_reset_snapshot", read_snapshot)
+    first = state._cached_question_reset_snapshot("team-1", "SCI-001")
+    assert reads == 2
+    assert first["chainRecords"][0]["generation"] == 2
+    second = state._cached_question_reset_snapshot("team-1", "SCI-001")
+    assert reads == (2 if stabilizes else 3)
+    assert second["chainRecords"][0]["generation"] == reads
+    state.clear_hypothesis_first_state_v2_cache()
+
+
+def test_source_cursor_hashes_are_only_computed_for_diagnostic_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    canonical_hash = hf_state_v2_module._canonical_hash
+
+    def counted_hash(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return canonical_hash(*args, **kwargs)
+
+    monkeypatch.setattr(hf_state_v2_module, "_canonical_hash", counted_hash)
+    inputs = {
+        "team_id": "team-1", "question_id": "SCI-001", "reset_boundary": None,
+        "chain_records": [], "selection_records": [], "meeting_records": [],
+        "digest_records": [], "decision_records": [], "hypothesis_round_records": [],
+    }
+    ordinary = project_state_from_records(**inputs)
+    ordinary_hash_calls = calls
+    calls = 0
+    diagnostic = project_state_from_records(**inputs, include_source_cursor=True)
+    assert calls == ordinary_hash_calls + 10
+    assert len(diagnostic.pop("sourceCursor")) == 10
+    assert diagnostic == ordinary
+
+
+@pytest.mark.parametrize("failure_source", ["list_runs", "get_snapshot"])
+def test_warm_question_source_cache_still_reads_formal_authority(
+    monkeypatch: pytest.MonkeyPatch, failure_source: str,
+) -> None:
+    state = hf_state_v2_module
+    state.clear_hypothesis_first_state_v2_cache()
+    monkeypatch.setattr(state, "_question_snapshot_signature", lambda _: ())
+    monkeypatch.setattr(state.hypothesis_first_chain, "_question_reset_snapshot", lambda *_: {})
+    monkeypatch.setattr(state, "_latest_requirement_matrix", lambda *_: None)
+    monkeypatch.setattr(state, "_record_projection_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: None,
+    )
+    failed = False
+
+    class QueryService:
+        def list_runs(self, **_kwargs):
+            if failed and failure_source == "list_runs":
+                raise RuntimeError("ledger unavailable")
+            return {"runs": [{"runId": "run-1", "questionId": "SCI-001", "status": "succeeded"}]}
+
+        def get_snapshot(self, **_kwargs):
+            if failed and failure_source == "get_snapshot":
+                raise RuntimeError("ledger unavailable")
+            return {}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: QueryService(),
+    )
+    assert state._scope_records("team-1", "SCI-001")["formal_runs"][0]["runId"] == "run-1"
+    failed = True
+    with pytest.raises(state.HypothesisFirstStateSourceError):
+        state._scope_records("team-1", "SCI-001")
+    state.clear_hypothesis_first_state_v2_cache()
+
+
 def test_v2_route_uses_representation_version_for_etag(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshot = finalize_state_versions(_initial_snapshot(), reset_id="origin")
     monkeypatch.setattr(

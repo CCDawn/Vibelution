@@ -35,6 +35,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,9 @@ from .budget_stage_admission import (
 )
 
 logger = logging.getLogger(__name__)
+_CLAIM_BELIEF_READ_SOURCES: ContextVar[
+    dict[tuple[str, str], list[dict[str, Any]]] | None
+] = ContextVar("claim_belief_read_sources", default=None)
 
 SCHEMA_VERSION = 1
 # Review/dispatch round cap. The temporary acceptance-era reduction to 2 is
@@ -1990,28 +1994,60 @@ def _run_round_failure_recovery(
 CLAIM_BELIEF_GATE_BLOCKING_STATES = frozenset({"contradicted", "disputed"})
 
 
+@contextmanager
+def claim_belief_gate_read_scope():
+    """Share source reads within one notification scan, never across requests.
+
+    Command/readiness callers outside this explicit read-only scope retain
+    fresh authority reads. Nested scans own separate snapshots, and reset the
+    context even when a projection fails.
+    """
+    token = _CLAIM_BELIEF_READ_SOURCES.set({})
+    try:
+        yield
+    finally:
+        _CLAIM_BELIEF_READ_SOURCES.reset(token)
+
+
 def _claim_evidence_records(team_id: str) -> list[dict[str, Any]]:
     """Authoritative claim-evidence records for one team (evidence store)."""
     from core.research.evidence import ClaimEvidenceStore
 
-    return [
+    sources = _CLAIM_BELIEF_READ_SOURCES.get()
+    key = (team_id, "evidence")
+    if sources is not None and key in sources:
+        return sources[key]
+    records = [
         dict(record)
         for record in ClaimEvidenceStore(_project_root()).list(team_id)
         if isinstance(record, Mapping)
     ]
+    if sources is not None:
+        sources[key] = records
+    return records
 
 
 def _question_claim_rows_for_gate(team_id: str, question_id: str) -> list[dict[str, Any]]:
     """Latest-per-claim ledger rows scoped to one question (read-only)."""
     from core.web.services.team_workflow import claim_ledger as claim_ledger_service
 
-    listing = claim_ledger_service.list_claims(team_id)
+    sources = _CLAIM_BELIEF_READ_SOURCES.get()
+    key = (team_id, "claims")
+    rows = sources.get(key) if sources is not None else None
+    if rows is None:
+        listing = claim_ledger_service.list_claims(team_id)
+        rows = [
+            dict(item)
+            for item in list(listing.get("claims") or [])
+            if isinstance(item, Mapping)
+        ]
+        if sources is not None:
+            sources[key] = rows
     normalized_question = str(question_id or "").strip().upper()
     return [
         dict(item)
-        for item in list(listing.get("claims") or [])
-        if isinstance(item, Mapping)
-        and str(item.get("question") or "").strip().upper() == normalized_question
+        for item in rows
+        if str(item.get("question") or "").strip().upper() == normalized_question
     ]
 
 
