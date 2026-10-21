@@ -20,7 +20,11 @@ import type { AssistantConversationTurn, SessionTurnItem } from "../../api/types
  *   completed tool durations. The header then labels it 「工具耗时」 so the
  *   number is never presented as total turn time.
  */
-export const MIN_TURN_WORK_HEADER_DURATION_MS = 5_000;
+/**
+ * opencode 口径：一轮的耗时就是墙钟跨度（turn_started → turn_ended），不做噪声
+ * 门槛。短回合也有真实耗时，隐藏它只会让用户以为这一轮没有被计时。
+ */
+export const MIN_TURN_WORK_HEADER_DURATION_MS = 0;
 
 export type ConversationTurnWorkBasis = "turn_header" | "turn_span" | "tool_durations";
 
@@ -129,19 +133,16 @@ export function resolveConversationTurnWorkSummary(
   const headerActiveMs = header.turnActiveMs ?? null;
   const headerStartMs = parseEpochMs(header.turnStartedAt);
   const headerEndMs = parseEpochMs(header.turnEndedAt);
-  // Authoritative header: the backend measured this turn's worked time (or at
-  // least its real start/end instants). Never below the noise floor either —
-  // a sub-threshold header is still a header, but keep the threshold semantics.
-  if (headerActiveMs !== null && headerActiveMs > 0 && header.turnState !== "running") {
-    if (headerActiveMs >= MIN_TURN_WORK_HEADER_DURATION_MS) {
-      return {
-        durationMs: headerActiveMs,
-        basis: "turn_header",
-        toolCallCount,
-        toolDurationMs: hasToolDuration ? toolDurationSumMs : null,
-      };
-    }
-    return null;
+  // Authoritative header: the backend measured this turn's worked span
+  // (turn_started → turn_ended). A sub-second turn is still a real measurement,
+  // so it is reported instead of being hidden behind a noise floor.
+  if (headerActiveMs !== null && headerActiveMs >= 0 && header.turnState !== "running") {
+    return {
+      durationMs: headerActiveMs,
+      basis: "turn_header",
+      toolCallCount,
+      toolDurationMs: hasToolDuration ? toolDurationSumMs : null,
+    };
   }
   if (
     header.turnState
@@ -149,7 +150,6 @@ export function resolveConversationTurnWorkSummary(
     && headerStartMs !== null
     && headerEndMs !== null
     && headerEndMs >= headerStartMs
-    && headerEndMs - headerStartMs >= MIN_TURN_WORK_HEADER_DURATION_MS
   ) {
     return {
       durationMs: headerEndMs - headerStartMs,
@@ -160,7 +160,10 @@ export function resolveConversationTurnWorkSummary(
   }
 
   const endCandidates: number[] = [];
-  const startCandidates: number[] = [];
+  // opencode 口径：整轮跨度从用户提交那一刻起算，而不是从 assistant 首条消息
+  // 生成时起算。后端的 turn_started 在提交路径同步写入，就是那个时刻；
+  // message.timestamp 只在它缺失时兜底。
+  const startCandidates: number[] = headerStartMs !== null ? [headerStartMs] : [];
   const messageStartMs = parseEpochMs(message.timestamp);
   if (messageStartMs !== null) {
     startCandidates.push(messageStartMs);
@@ -189,7 +192,6 @@ export function resolveConversationTurnWorkSummary(
     startMs !== null
     && endMs !== null
     && endMs >= startMs
-    && endMs - startMs >= MIN_TURN_WORK_HEADER_DURATION_MS
   ) {
     return {
       durationMs: endMs - startMs,
@@ -200,7 +202,7 @@ export function resolveConversationTurnWorkSummary(
   }
   // No span derivable (no item timestamps at all): a real tool-duration sum is
   // still an honest, clearly-labeled lower bound.
-  if (hasToolDuration && toolDurationSumMs >= MIN_TURN_WORK_HEADER_DURATION_MS) {
+  if (hasToolDuration) {
     return {
       durationMs: toolDurationSumMs,
       basis: "tool_durations",
