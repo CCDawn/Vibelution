@@ -6138,6 +6138,482 @@ class TestLocalProviderBootstrap:
         assert "seedHistoryMs" not in final_fields
         assert "turnStatusBarMs" not in final_fields
 
+    def test_llm_preflight_completed_surfaces_batch7_ce_anchors(self, monkeypatch):
+        """TTFT 批七：C 段锚点（循环头/guidance rebind/压缩闸/遥测写/ledger
+        加载）随 preflight 或 final_timing 透出；route 段锚点不进 preflight。"""
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.name = "ce-anchor-tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(get_profile=lambda role="primary": SimpleNamespace(model="demo-model")),
+            agent=SimpleNamespace(max_iterations=1),
+            context_compression=SimpleNamespace(
+                enabled=True,
+                max_compressions_per_session=3,
+                levels=SimpleNamespace(standard=0.8),
+            ),
+        )
+        agent.prompt_manager = SimpleNamespace(
+            update_current_goal=lambda _goal: None,
+            set_runtime_goal_packet=lambda _packet: None,
+            clear_state_memory=lambda persist=True: None,
+            build=lambda **kwargs: "stable system prompt",
+        )
+        agent.git_memory = SimpleNamespace(
+            refresh_git_memory=lambda force=False: SimpleNamespace(
+                available=True,
+                head_rev="abc",
+                indexed_head_rev="abc",
+                dirty=False,
+                error=None,
+            )
+        )
+        agent._active_turn_messages = []
+        agent._active_turn_goal = None
+        agent._pending_lifecycle_action = None
+        agent._system_prompt_written = False
+        agent._cached_system_prompt = ""
+        agent._context_window_limit = 100000
+        agent._effective_max_token_limit = 100000
+        agent._pending_static_context_blocks = []
+        agent._pending_runtime_context_blocks = []
+        agent._last_turn_metadata = {}
+        agent._last_turn_failed = False
+        agent._single_turn_mode_active = False
+        agent._active_goal = None
+        agent._last_runtime_state_memory = ""
+        agent._last_runtime_state_memory_key = ""
+        agent._force_disable_tools_for_turn = True
+        agent._compression_min_iteration_gap = 0
+        agent._runtime_state_memory_dirty = False
+        agent._sync_runtime_state_memory = lambda force=False: None
+        agent._seed_runtime_agent_context_for_turn = lambda run_id=None: None
+        agent._refresh_retrospective_state_memory = lambda: None
+        agent._current_turn_stop_reason = lambda: None
+        agent._raise_if_turn_stop_requested = lambda: None
+        agent._chat_ledger_identity = lambda: None
+        agent._micro_compact_enabled = lambda: False
+        agent._micro_compact_trigger_tokens = lambda: 0
+        agent._get_mode_policy = lambda: ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._create_round_state = lambda: RoundStateController(max_iterations=1)
+        agent.is_mental_model_enabled_for_turn = lambda: False
+        agent._pending_seed_history_ms = 0
+
+        scene_events = []
+
+        class DummyUI:
+            def note_context_window(self, *_args, **_kwargs):
+                pass
+
+            def update_status(self, *_args, **_kwargs):
+                pass
+
+            def add_log(self, *_args, **_kwargs):
+                pass
+
+            def note_turn_start(self, *_args, **_kwargs):
+                pass
+
+            def note_turn_result(self, *_args, **_kwargs):
+                pass
+
+        class DummyLogger:
+            _turn_count = 1
+
+            def log_action(self, *_args, **_kwargs):
+                pass
+
+            def write_system_prompt(self, *_args, **_kwargs):
+                pass
+
+            def log_external_request(self, *_args, **_kwargs):
+                pass
+
+            def start_turn(self, *_args, **_kwargs):
+                pass
+
+            def log_llm_request(self, *_args, **_kwargs):
+                pass
+
+            def log_turn_end(self, *_args, **_kwargs):
+                pass
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module, "logger", DummyLogger())
+        monkeypatch.setattr(agent_module._debug_logger, "turn_end", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda messages: 100)
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens_for_threshold",
+            lambda messages, threshold=None: 100,
+        )
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: SimpleNamespace(
+            set_runtime_goal_packet=lambda _packet: None,
+            reset_runtime_constraints=lambda: None,
+            get_attention_snapshot=lambda: {},
+            get_active_evolution_txn=lambda: None,
+        ))
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: scene_events.append((args, kwargs)),
+        )
+
+        def fake_reconcile(messages):
+            agent._record_turn_send_timing_anchor("ledgerLoadMs", 3)
+            agent._record_turn_send_timing_anchor("reconcileMs", 7)
+            return messages, True
+
+        agent._reconcile_chat_conversation_before_llm = fake_reconcile
+
+        def fake_invoke(messages, replay_state=None):
+            for key, value in (
+                ("invokePrepMs", 11),
+                ("invokeSetupMs", 13),
+                ("llmRouteBindMs", 17),
+                ("invocationContextMs", 19),
+                ("routeCaptureMs", 23),
+                ("llmRouteAttemptEventMs", 29),
+                ("streamHandoffMs", 31),
+            ):
+                agent._record_turn_send_timing_anchor(key, value)
+            return None
+
+        agent._invoke_llm = fake_invoke
+
+        agent._run_orchestrated_turn(user_prompt="批七锚点透出")
+
+        preflight = next(
+            item for item in scene_events if item[0][1] == "agent.llm_preflight.completed"
+        )
+        fields = preflight[1]["fields"]
+        # C 段锚点随本 send 的 preflight 事件透出（测量先于事件写）。
+        for anchor_key in (
+            "iterationHeadMs",
+            "guidanceRebindMs",
+            "compressionGateMs",
+        ):
+            assert anchor_key in fields
+            assert fields[anchor_key] >= 0
+        # route 段锚点（reconcile/invoke/E 段）滞后一拍，不进本轮 preflight。
+        for anchor_key in (
+            "reconcileMs",
+            "ledgerLoadMs",
+            "invokePrepMs",
+            "invokeSetupMs",
+            "llmRouteBindMs",
+            "invocationContextMs",
+            "routeCaptureMs",
+            "llmRouteAttemptEventMs",
+            "streamHandoffMs",
+            "preflightTelemetryMs",
+        ):
+            assert anchor_key not in fields
+
+        # 单迭代轮：route 段锚点 + 遥测写锚点全部由 final_timing 收口补发。
+        final_timing = next(
+            item for item in scene_events if item[0][1] == "agent.llm_send.final_timing"
+        )
+        final_fields = final_timing[1]["fields"]
+        for anchor_key, value in (
+            ("reconcileMs", 7),
+            ("ledgerLoadMs", 3),
+            ("invokePrepMs", 11),
+            ("invokeSetupMs", 13),
+            ("llmRouteBindMs", 17),
+            ("invocationContextMs", 19),
+            ("routeCaptureMs", 23),
+            ("llmRouteAttemptEventMs", 29),
+            ("streamHandoffMs", 31),
+        ):
+            assert final_fields[anchor_key] == value
+        assert final_fields["preflightTelemetryMs"] >= 0
+        assert "seedHistoryMs" not in final_fields
+
+    def test_route_timing_tail_event_lags_one_send_then_final_timing_flushes(self, monkeypatch):
+        """TTFT 批七：多 send 轮里 route 段锚点经 agent.llm_send.route_timing
+        滞后一拍透出；最终 send 的值仍由 final_timing 补发。"""
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.name = "route-timing-tail-tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(get_profile=lambda role="primary": SimpleNamespace(model="demo-model")),
+            agent=SimpleNamespace(max_iterations=2),
+            context_compression=SimpleNamespace(
+                enabled=True,
+                max_compressions_per_session=3,
+                levels=SimpleNamespace(standard=0.8),
+            ),
+        )
+        agent.prompt_manager = SimpleNamespace(
+            update_current_goal=lambda _goal: None,
+            set_runtime_goal_packet=lambda _packet: None,
+            clear_state_memory=lambda persist=True: None,
+            build=lambda **kwargs: "stable system prompt",
+        )
+        agent.git_memory = SimpleNamespace(
+            refresh_git_memory=lambda force=False: SimpleNamespace(
+                available=True,
+                head_rev="abc",
+                indexed_head_rev="abc",
+                dirty=False,
+                error=None,
+            )
+        )
+        agent._active_turn_messages = []
+        agent._active_turn_goal = None
+        agent._pending_lifecycle_action = None
+        agent._system_prompt_written = False
+        agent._cached_system_prompt = ""
+        agent._context_window_limit = 100000
+        agent._effective_max_token_limit = 100000
+        agent._pending_static_context_blocks = []
+        agent._pending_runtime_context_blocks = []
+        agent._last_turn_metadata = {}
+        agent._last_turn_failed = False
+        agent._single_turn_mode_active = False
+        agent._active_goal = None
+        agent._last_runtime_state_memory = ""
+        agent._last_runtime_state_memory_key = ""
+        agent._force_disable_tools_for_turn = True
+        agent._compression_min_iteration_gap = 0
+        agent._runtime_state_memory_dirty = False
+        agent._sync_runtime_state_memory = lambda force=False: None
+        agent._seed_runtime_agent_context_for_turn = lambda run_id=None: None
+        agent._refresh_retrospective_state_memory = lambda: None
+        agent._current_turn_stop_reason = lambda: None
+        agent._raise_if_turn_stop_requested = lambda: None
+        agent._chat_ledger_identity = lambda: None
+        agent._micro_compact_enabled = lambda: False
+        agent._micro_compact_trigger_tokens = lambda: 0
+        agent._get_mode_policy = lambda: ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._create_round_state = lambda: RoundStateController(max_iterations=2)
+        agent.is_mental_model_enabled_for_turn = lambda: False
+        agent._pending_seed_history_ms = 0
+        agent._reconcile_chat_conversation_before_llm = lambda msgs: (msgs, True)
+        # 每次 send 失败后都恢复重试，制造第二个 send/preflight 迭代。
+        agent._recover_failed_model_stream = lambda: True
+
+        scene_events = []
+
+        class DummyUI:
+            def note_context_window(self, *_args, **_kwargs):
+                pass
+
+            def update_status(self, *_args, **_kwargs):
+                pass
+
+            def add_log(self, *_args, **_kwargs):
+                pass
+
+            def note_turn_start(self, *_args, **_kwargs):
+                pass
+
+            def note_turn_result(self, *_args, **_kwargs):
+                pass
+
+        class DummyLogger:
+            _turn_count = 1
+
+            def log_action(self, *_args, **_kwargs):
+                pass
+
+            def write_system_prompt(self, *_args, **_kwargs):
+                pass
+
+            def log_external_request(self, *_args, **_kwargs):
+                pass
+
+            def start_turn(self, *_args, **_kwargs):
+                pass
+
+            def log_llm_request(self, *_args, **_kwargs):
+                pass
+
+            def log_turn_end(self, *_args, **_kwargs):
+                pass
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module, "logger", DummyLogger())
+        monkeypatch.setattr(agent_module._debug_logger, "turn_end", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda messages: 100)
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens_for_threshold",
+            lambda messages, threshold=None: 100,
+        )
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: SimpleNamespace(
+            set_runtime_goal_packet=lambda _packet: None,
+            reset_runtime_constraints=lambda: None,
+            get_attention_snapshot=lambda: {},
+            get_active_evolution_txn=lambda: None,
+        ))
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: scene_events.append((args, kwargs)),
+        )
+
+        send_counter = {"count": 0}
+
+        def fake_invoke(messages, replay_state=None):
+            send_counter["count"] += 1
+            offset = 0 if send_counter["count"] == 1 else 100
+            for key, value in (
+                ("reconcileMs", 7 + offset),
+                ("ledgerLoadMs", 3 + offset),
+                ("invokePrepMs", 11 + offset),
+                ("invokeSetupMs", 13 + offset),
+                ("llmRouteBindMs", 17 + offset),
+                ("invocationContextMs", 19 + offset),
+                ("routeCaptureMs", 23 + offset),
+                ("llmRouteAttemptEventMs", 29 + offset),
+                ("streamHandoffMs", 31 + offset),
+            ):
+                agent._record_turn_send_timing_anchor(key, value)
+            return None
+
+        agent._invoke_llm = fake_invoke
+
+        agent._run_orchestrated_turn(user_prompt="route timing 尾部事件")
+
+        route_timing_events = [
+            item for item in scene_events if item[0][1] == "agent.llm_send.route_timing"
+        ]
+        assert route_timing_events, "第二次 send 的 preflight 后应补发上一 send 的 route 段锚点"
+        tail_fields = route_timing_events[0][1]["fields"]
+        # 尾部事件携带的是第一个 send 的值（滞后一拍）。
+        assert tail_fields["reconcileMs"] == 7
+        assert tail_fields["invokePrepMs"] == 11
+        assert tail_fields["llmRouteBindMs"] == 17
+        assert tail_fields["preflightTelemetryMs"] >= 0
+        # 已随尾部事件透出的第一个 send 值不再进 final_timing。
+        final_timing = next(
+            item for item in scene_events if item[0][1] == "agent.llm_send.final_timing"
+        )
+        final_fields = final_timing[1]["fields"]
+        assert final_fields["reconcileMs"] == 107
+        assert final_fields["invokePrepMs"] == 111
+
+    def test_invoke_llm_records_route_prep_anchors_via_hooks(self, monkeypatch):
+        """TTFT 批七：_invoke_llm 通过 hooks 包装记录 E 段锚点（invoke 组装、
+        路由绑定、事件写、间隙）。"""
+        captured = {}
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class DummyLLM:
+            pass
+
+        def fake_invoke_agent_llm_turn(*, messages, replay_state, hooks):
+            captured["hooks"] = hooks
+            captured["llm"] = hooks.get_llm_for_mode()
+            hooks.build_invocation_context(prompt_purpose="main_reply", route_attempt=1)
+            hooks.record_scene_event("llm_route", "llm_route_attempt_started", message="x", fields={})
+            outcome = hooks.run_streaming_outcome(
+                captured["llm"],
+                messages,
+                context="stub-context",
+                on_event=lambda _event: None,
+            )
+            assert outcome == "stream-stub"
+            return SimpleNamespace(
+                payload=None,
+                last_error_category=None,
+                last_error_retryable=False,
+                last_recovery_action=None,
+                last_error_message="",
+                last_error_details={},
+                last_failure_attempts=0,
+                last_failure_max_attempts=3,
+                route_fallback={},
+                degraded_actions=[],
+                invoke_prep_ms=5.0,
+            )
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(
+            agent_module, "invoke_agent_llm_turn", fake_invoke_agent_llm_turn
+        )
+        # 流式 outcome 函数替换为桩：只验证 handoff 包装记录锚点并透传调用。
+        monkeypatch.setattr(
+            agent_module, "run_streaming_llm_outcome", lambda *args, **kwargs: "stream-stub"
+        )
+
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.llm_with_tools = DummyLLM()
+        agent._record_turn_send_timing_anchor("invokePrepMs", 5)
+
+        agent._invoke_llm([build_chat_user_message("hi")])
+
+        hooks = captured["hooks"]
+        # 遥测事件原样透传给 scene recorder 包装（不改变事件语义）。
+        assert hooks.record_scene_event is not agent_module._record_agent_scene_event
+        anchors = dict(getattr(agent, "_turn_send_timing_anchors", {}) or {})
+        for anchor_key in (
+            "invokeSetupMs",
+            "llmRouteBindMs",
+            "invocationContextMs",
+            "routeCaptureMs",
+            "llmRouteAttemptEventMs",
+            "streamHandoffMs",
+        ):
+            assert anchor_key in anchors
+            assert anchors[anchor_key] >= 0
+        # 间隙基准时间戳消费后归零，不污染下一次 send。
+        assert float(getattr(agent, "_turn_invocation_context_ended_at", 0.0)) == 0.0
+        assert float(getattr(agent, "_turn_route_attempt_event_ended_at", 0.0)) == 0.0
+
+    def test_route_prep_method_wrappers_record_anchors(self):
+        """TTFT 批七：get_llm_for_mode / invocation context 组装方法级锚点。"""
+        agent = AgentRuntime.__new__(AgentRuntime)
+        agent.llm_with_tools = object()
+
+        resolved = agent._get_llm_for_current_mode()
+        assert resolved is agent.llm_with_tools
+        invocation_context = agent._build_llm_invocation_context()
+        assert invocation_context is not None
+
+        anchors = dict(getattr(agent, "_turn_send_timing_anchors", {}) or {})
+        assert "llmRouteBindMs" in anchors
+        assert anchors["llmRouteBindMs"] >= 0
+        assert "invocationContextMs" in anchors
+        assert anchors["invocationContextMs"] >= 0
+        assert float(getattr(agent, "_turn_invocation_context_ended_at", 0.0)) > 0
+
+
     def _provider_context_retry_agent(self, monkeypatch, *, max_retries, invoke, compress_calls, ui_logs):
         agent = AgentRuntime.__new__(AgentRuntime)
         agent.name = "provider-context-retry-tester"
