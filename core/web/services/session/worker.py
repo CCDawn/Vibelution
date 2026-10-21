@@ -1015,6 +1015,42 @@ def _attach_runtime_prompt_assembly_manifest(result: Any, runtime_agent: Any) ->
     return result
 
 
+def _inject_intent_alignment_packet(session_id: str, message_text: str, runtime_agent: Any) -> None:
+    """意图对齐 gate（设计 §4.4 时点 1）：turn 前确定性 packet 注入。
+
+    纯增量维护段：加载会话工件快照（无工件零开销直通）→ 规则预筛 → 组装
+    packet → 注入本 agent 的 PromptManager（getattr 链与 T4 handler 的
+    PromptManager 取法同构，不新造全局单例）。语义判定与产出全部归主 agent，
+    本 gate 零语义分支。任何异常 fail-open：只记一条 warning，直通原链路且
+    不注入 packet；不返回、不改 turn outcome（§6.2-4 红线）。
+    """
+    try:
+        from core.orchestration.intent_alignment import (
+            assemble_packet,
+            get_intent_alignment_store,
+            run_rule_prefilter,
+        )
+
+        snapshot = get_intent_alignment_store().get_current(session_id)
+        if snapshot is None:
+            return
+        packet = assemble_packet(snapshot, run_rule_prefilter(message_text))
+        if packet is None:
+            return
+        prompt_manager = getattr(runtime_agent, "prompt_manager", None)
+        set_packet = getattr(prompt_manager, "set_intent_alignment_packet", None)
+        if not callable(set_packet):
+            raise RuntimeError("runtime agent prompt_manager unavailable")
+        # P1: 确认卡回执的确定性落账在此接入——解析本 turn 用户消息携带的
+        # kind="intent_alignment" 回执 references → apply_reply(...)（标 answered
+        # 存原文、无结构化变更）→ 重跑本函数刷新 packet；语义归并仍归 agent。
+        set_packet(packet)
+    except Exception as exc:  # noqa: BLE001 - gate fail-open，直通原链路
+        logging.getLogger(__name__).warning(
+            "Intent alignment gate failed open (%s).", type(exc).__name__
+        )
+
+
 def _finish_session_turn_worker(
     session_id: str,
     turn_id: str,
@@ -2293,6 +2329,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     return
 
                 user_message = str(context.get("user_message") or "").strip()
+                # 意图对齐 gate（设计 §4.4 时点 1）：turn 前确定性 packet 注入。
+                # 纯增量维护段：fail-open、不短路 turn、不产出 assistant 内容、
+                # 不改 submit/admission/Journal 时序（§6.2-4）。
+                _inject_intent_alignment_packet(session_id, user_message, runtime_agent)
                 # TTFT 批六 B 段暗区锚点：totalSeedMs 之后、模型请求之前的
                 # 逐段观测。仅观测，不改变行为；缺锚（提前返回）时省略。
                 stage_started_at = s._perf_counter()
