@@ -4123,6 +4123,56 @@ def _enrich_session_cache_composition(
     return s._normalize_session_cache_composition(enriched)
 
 
+_CONTEXT_COMPOSITION_HISTORY_STATS_CACHE_MAX_SESSIONS = 64
+_CONTEXT_COMPOSITION_HISTORY_STATS_CACHE_LOCK = threading.Lock()
+_CONTEXT_COMPOSITION_HISTORY_STATS_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _cached_history_composition_stats(
+    session_id: str,
+    history_messages: list[dict[str, Any]],
+) -> tuple[int, str]:
+    """Session-scoped identity memo for the O(history) composition stats.
+
+    ``_message_list_chars`` and the history ``content_preview`` are pure
+    functions of the message list alone, but they rescan the full assembled
+    history on every prepared turn. The entry keeps a strong reference to the
+    exact list it was computed from, so an ``id`` match can only ever be that
+    same object (a live object's address cannot be reused) and the hit is
+    sound without hashing the contents — the in-memory analogue of the
+    ``load_conversation_events_cached`` disk-signature discipline. Every turn
+    assembles a fresh list, which misses naturally, so the write path needs no
+    explicit invalidation. The assembled list is treated as immutable after
+    assembly, matching that same discipline.
+    """
+
+    if not isinstance(history_messages, list):
+        s = _service()
+        return s._message_list_chars(history_messages), s._message_list_content_preview(history_messages)
+    s = _service()
+    cache_key = str(session_id or "").strip()
+    list_identity = id(history_messages)
+    with _CONTEXT_COMPOSITION_HISTORY_STATS_CACHE_LOCK:
+        entry = _CONTEXT_COMPOSITION_HISTORY_STATS_CACHE.get(cache_key)
+        if entry is not None and entry["listIdentity"] == list_identity:
+            return int(entry["chars"]), str(entry["preview"])
+    chars = s._message_list_chars(history_messages)
+    preview = s._message_list_content_preview(history_messages)
+    with _CONTEXT_COMPOSITION_HISTORY_STATS_CACHE_LOCK:
+        _CONTEXT_COMPOSITION_HISTORY_STATS_CACHE[cache_key] = {
+            "listIdentity": list_identity,
+            "messages": history_messages,
+            "chars": chars,
+            "preview": preview,
+        }
+        while (
+            len(_CONTEXT_COMPOSITION_HISTORY_STATS_CACHE)
+            > _CONTEXT_COMPOSITION_HISTORY_STATS_CACHE_MAX_SESSIONS
+        ):
+            _CONTEXT_COMPOSITION_HISTORY_STATS_CACHE.pop(next(iter(_CONTEXT_COMPOSITION_HISTORY_STATS_CACHE)))
+    return chars, preview
+
+
 def _build_last_context_composition(
     *,
     conversation: dict[str, Any],
@@ -4144,6 +4194,10 @@ def _build_last_context_composition(
     prompt_cache_partition: str = "",
 ) -> dict[str, Any]:
     s = _service()
+    history_chars, history_preview = s._cached_history_composition_stats(
+        str(conversation.get("id") or "") if isinstance(conversation, dict) else "",
+        history_messages,
+    )
     segments = [
         s._context_segment(
             "current_user",
@@ -4165,7 +4219,7 @@ def _build_last_context_composition(
         s._context_segment(
             "history",
             "history",
-            chars=s._message_list_chars(history_messages),
+            chars=history_chars,
             item_count=len(list(history_messages or [])),
             source="seed_chat_history",
             description="Filtered prior chat messages seeded into the agent.",
@@ -4369,7 +4423,7 @@ def _build_last_context_composition(
     )
     content_previews = {
         "current_user": s._compact_preview_text(user_message, max_lines=3, max_chars=240),
-        "history": s._message_list_content_preview(history_messages),
+        "history": history_preview,
         "active_task": s._active_task_content_preview(active_task),
         "agent_context": s._compact_preview_text(runtime_context_block, max_lines=3, max_chars=240),
         "dynamic_runtime_context": s._compact_preview_text(dynamic_runtime_context_block, max_lines=3, max_chars=240),

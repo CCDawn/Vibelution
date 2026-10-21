@@ -1181,6 +1181,52 @@ def test_session_turn_context_prepare_timings_extend_prepare_fields():
     ) == {"totalPrepareMs": 1}
 
 
+def test_session_turn_prepare_timing_log_fields_carry_ttft_batch6_stage_anchors():
+    _reset_acquire_stage_telemetry()
+    timings = {
+        "totalPrepareMs": 15100,
+        "researchBudgetMs": 410,
+        "guidanceContextMs": 35,
+        "skillContractMs": 22,
+        "imageAttachmentsMs": 12,
+        "contextCompositionMs": 640,
+        "turnContextJournalMs": 18,
+        "seedImagesMs": 9,
+        "redactHistoryMs": 7,
+        "syncedEnvNames": ["DO_NOT_LOG"],
+    }
+    fields = session_service._session_turn_prepare_timing_log_fields(timings)
+
+    for key in (
+        "researchBudgetMs",
+        "guidanceContextMs",
+        "skillContractMs",
+        "imageAttachmentsMs",
+        "contextCompositionMs",
+        "turnContextJournalMs",
+        "seedImagesMs",
+        "redactHistoryMs",
+    ):
+        assert fields[key] == timings[key]
+    assert "syncedEnvNames" not in fields
+
+    # durable journal 载荷同样携带批六锚点。
+    payload = session_service._session_turn_context_prepare_timings(
+        timings,
+        history_assembly_ms=2200,
+        executor_wait_ms=5,
+    )
+    assert payload["researchBudgetMs"] == 410
+    assert payload["contextCompositionMs"] == 640
+    assert payload["redactHistoryMs"] == 7
+    assert payload["historyAssemblyMs"] == 2200
+
+    # 缺锚省略：不含新键的 timings 不造 0。
+    sparse = session_service._session_turn_prepare_timing_log_fields({"totalPrepareMs": 10})
+    assert "researchBudgetMs" not in sparse
+    assert "redactHistoryMs" not in sparse
+
+
 def test_running_snapshot_throttle_skips_detail_hydration(monkeypatch):
     subscriber = queue.Queue()
     session_id = "session-throttled"
