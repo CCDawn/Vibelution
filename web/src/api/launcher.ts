@@ -14,6 +14,7 @@ import type {
   LauncherMaintenancePreviewResponse,
   LauncherMaintenanceSummary,
   LauncherControlResponse,
+  LauncherCurrentInstanceIdentity,
   LauncherFreshness,
   LauncherOperation,
   LauncherStartupSettings as BaseLauncherStartupSettings,
@@ -373,14 +374,6 @@ export type LauncherBranchInstanceCleanupResponse = {
   cleaned: LauncherBranchInstanceCleanupResult[];
   failed: LauncherBranchInstanceCleanupIssue[];
   skipped: LauncherBranchInstanceCleanupIssue[];
-};
-
-export type LauncherCurrentInstanceIdentity = {
-  schemaVersion: number;
-  currentId: string;
-  currentShortName: string;
-  currentWorkbenchTitle: string;
-  currentLauncherTitle: string;
 };
 
 export function getCurrentInstanceIdentity(options?: { signal?: AbortSignal }) {
