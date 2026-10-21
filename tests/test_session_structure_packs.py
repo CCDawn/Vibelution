@@ -70,7 +70,11 @@ def test_facade_reexports_agent_sessions_pack() -> None:
     # Lifecycle-serialized surfaces wrap pack bodies on the facade.
     assert getattr(facade.stage_agent_session_purge, "__wrapped__", None) is agent_sessions.stage_agent_session_purge
     assert getattr(facade.commit_staged_agent_session_purge, "__wrapped__", None) is agent_sessions.commit_staged_agent_session_purge
-    assert getattr(facade.archive_agent_sessions, "__wrapped__", None) is agent_sessions.archive_agent_sessions
+    # G4 (chat-fix2 R4): archive takes submit-admission locks BEFORE lifecycle
+    # serialization, so the pack composer applies serialization itself and the
+    # facade re-exports it directly; a facade-level wrap would take chat-state
+    # before the admission locks and invert the canonical lock order.
+    assert facade.archive_agent_sessions is agent_sessions.archive_agent_sessions
     assert facade.create_child_session is agent_sessions.create_child_session
     assert facade.wake_agent_for_inbox_message is agent_sessions.wake_agent_for_inbox_message
     assert facade.append_cli_agent_lifecycle_event is agent_sessions.append_cli_agent_lifecycle_event
