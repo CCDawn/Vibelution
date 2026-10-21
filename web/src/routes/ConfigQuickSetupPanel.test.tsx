@@ -38,7 +38,14 @@ describe("ConfigQuickSetupPanel single form", () => {
   function mount(input: ConfigQuickSetupPanelProps) { act(() => root.render(<ConfigQuickSetupPanel {...input} />)); }
   function input(suffix: string) { const element = host.querySelector<HTMLInputElement>(`input[id$='-${suffix}']`); if (!element) throw Error(`Missing ${suffix}`); return element; }
   function changeModel(value: string) { const control = input("model"); act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
-  function select(suffix: string, value: string) { const control = host.querySelector<HTMLSelectElement>(`select[id$='-${suffix}']`)!; act(() => { control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); }); }
+  function select(suffix: string, label: string) {
+    const control = host.querySelector<HTMLButtonElement>(`[role="combobox"][id$='-${suffix}']`)!;
+    act(() => control.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((item) => item.textContent?.trim() === label);
+    if (!option) throw Error(`Missing option ${label}`);
+    act(() => option.click());
+  }
   function button(label: string) { const match = [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label); if (!match) throw Error(`Missing button ${label}`); return match; }
   function submit() { act(() => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
 
@@ -79,7 +86,7 @@ describe("ConfigQuickSetupPanel single form", () => {
   });
   it("copies a discovered upstream ID into the model input while retaining the legacy modelRef callback", () => {
     const current = props(); current.state.discoveredModels = [{ availability: "observed", status: "observed", label: "Special", modelKey: "internal-key", modelRef: "provider/internal-key", upstreamId: "actual-upstream-id", capabilities: {} }];
-    mount(current); select("catalog", "provider/internal-key");
+    mount(current); select("catalog", "Special · actual-upstream-id");
     expect(input("model").value).toBe("actual-upstream-id");
     expect(current.onModelChange).toHaveBeenCalledWith("provider/internal-key"); submit();
     expect(current.onTestAndSave).toHaveBeenCalledWith(expect.objectContaining({ modelId: "actual-upstream-id" }));
@@ -87,6 +94,9 @@ describe("ConfigQuickSetupPanel single form", () => {
   it.each(["checking", "saving"] as const)("blocks edits, model fetching and duplicate submits during %s", (phase) => {
     const current = props(); current.state.phase = phase; mount(current);
     expect(host.querySelector("fieldset")?.disabled).toBe(true);
+    const selects = [...host.querySelectorAll<HTMLButtonElement>('[role="combobox"]')];
+    expect(selects).toHaveLength(3);
+    expect(selects.every((control) => control.disabled)).toBe(true);
     expect(button(CONFIG_COPY.zh.quickSetupGetModels).disabled).toBe(true);
     expect(button(CONFIG_COPY.zh.quickSetupTestAndSave).disabled).toBe(true);
     expect(button(CONFIG_COPY.zh.quickSetupTestAndSave).getAttribute("aria-busy")).toBe("true"); submit();
@@ -108,11 +118,11 @@ describe("ConfigQuickSetupPanel single form", () => {
     act(() => button(CONFIG_COPY.zh.quickSetupGoAgents).click()); expect(current.onConfigureAgent).toHaveBeenCalledOnce();
   });
   it("uses the backend custom preset credential reference and restores it when auth is re-enabled", () => {
-    const current = props(); mount(current); select("provider", "custom");
+    const current = props(); mount(current); select("provider", CONFIG_COPY.zh.quickSetupCustomService);
     const provider = vi.mocked(current.onProviderChange).mock.calls[0][0];
     expect(provider).toMatchObject({ templateId: "custom_openai_compatible_relay", credentialRef: "env:CUSTOM_API_KEY" });
     expect(templates.find((template) => template.provider_preset_id === provider.templateId)).toBeDefined();
-    mount({ ...current, state: { ...current.state, provider: { ...provider, authKind: "none", credentialRef: "none" } } }); select("auth", "api_key");
+    mount({ ...current, state: { ...current.state, provider: { ...provider, authKind: "none", credentialRef: "none" } } }); select("auth", "API Key");
     expect(current.onProviderChange).toHaveBeenLastCalledWith(expect.objectContaining({ authKind: "api_key", credentialRef: "env:CUSTOM_API_KEY" }));
   });
   it("wires cancel without invoking save and renders translated copy", () => {

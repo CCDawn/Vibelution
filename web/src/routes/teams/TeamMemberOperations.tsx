@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
-import { VButton, VNativeSelect } from "../../components/vui";
+import { VButton, VStringSelect } from "../../components/vui";
 import {
   buildTeamSettingsPayload,
   createTeamSettingsDraft,
@@ -93,14 +93,17 @@ export function TeamMemberOperations({
           {stale ? <p className={styles.hint}>{zh ? "当前成员配置不可用，请重新绑定可用 Agent。" : "Member configuration is unavailable. Rebind an available Agent."}</p> : null}
           <label className={styles.field} htmlFor={`${controlId}-agent`}>
             {zh ? "绑定 Agent" : "Agent binding"}
-            <VNativeSelect id={`${controlId}-agent`} aria-label={zh ? "选择成员 Agent" : "Select member Agent"}
-              className={styles.select} value={agentId} disabled={locked || busy}
-              onChange={(event) => { actions.reset(); setAgentId(event.currentTarget.value); }}>
-              {!selectedOption ? <option value={agentId} disabled>{name || (zh ? "选择 Agent" : "Select Agent")}</option> : null}
-              {options.map((option) => <option key={option.id} value={option.id} disabled={option.disabled}>
-                {option.label}{option.disabled ? (zh ? " · 已绑定其他团队" : " · Bound to another team") : ""}
-              </option>)}
-            </VNativeSelect>
+            <VStringSelect id={`${controlId}-agent`} ariaLabel={zh ? "选择成员 Agent" : "Select member Agent"}
+              className={styles.select} value={agentId} isDisabled={locked || busy}
+              placeholder={!selectedOption ? (name || (zh ? "选择 Agent" : "Select Agent"))
+                : selectedOption.disabled ? `${selectedOption.label}${zh ? " · 已绑定其他团队" : " · Bound to another team"}` : undefined}
+              options={options.map((option) => ({
+                value: option.id,
+                label: `${option.label}${option.disabled ? (zh ? " · 已绑定其他团队" : " · Bound to another team") : ""}`,
+                disabled: option.disabled,
+              }))}
+              onValueChange={(nextAgentId) => { actions.reset(); setAgentId(nextAgentId); }}
+            />
           </label>
           <VButton type="button" className={styles.action} isDisabled={!canApply} isPending={actions.pending} onClick={apply}>
             {zh ? "应用配置" : "Apply configuration"}

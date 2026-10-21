@@ -56,11 +56,16 @@ describe("TeamMemberOperations", () => {
     act(() => button(text).click());
   }
   function select(value: string) {
-    const node = host.querySelector("select")!;
-    act(() => {
-      node.value = value;
-      node.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    const node = host.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    act(() => node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((item) => item.textContent?.startsWith(`Agent ${value}`));
+    if (!option) throw Error(`Missing Agent ${value}`);
+    act(() => option.click());
+    if (option.getAttribute("aria-disabled") === "true") {
+      act(() => option.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    }
+    return option;
   }
 
   beforeEach(() => {
@@ -77,7 +82,7 @@ describe("TeamMemberOperations", () => {
     render();
     expect(host.textContent).toContain("人物操作");
     expect(host.textContent).toContain("Agent a");
-    expect(host.querySelector("select")).toBeNull();
+    expect(host.querySelector('[role="combobox"]')).toBeNull();
     click("配置成员");
     expect(button("配置成员").getAttribute("aria-expanded")).toBe("true");
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -92,7 +97,7 @@ describe("TeamMemberOperations", () => {
       { memberId: "second", agentId: "b", role: "updated reviewer", purpose: "Review", responsibilities: ["New requirement"] },
     ] });
     act(() => mock.options.onSaved?.(team));
-    expect(host.querySelector("select")).toBeNull();
+    expect(host.querySelector('[role="combobox"]')).toBeNull();
   });
 
   it("opens on recovery revisions and allows stale repair using the same available agent", () => {
@@ -103,9 +108,9 @@ describe("TeamMemberOperations", () => {
     click("应用配置");
     expect(mock.submit.mock.calls[0][1].members[0]).toMatchObject({ memberId: "first", agentId: "a" });
     click("配置成员");
-    expect(host.querySelector("select")).toBeNull();
+    expect(host.querySelector('[role="combobox"]')).toBeNull();
     render({ configureRevision: 2 });
-    expect(host.querySelector("select")).not.toBeNull();
+    expect(host.querySelector('[role="combobox"]')).not.toBeNull();
   });
 
   it.each([
@@ -115,7 +120,7 @@ describe("TeamMemberOperations", () => {
   ] as Partial<Team>[])("keeps readonly teams locked: %j", (patch) => {
     render({ team: makeTeam(patch), configureRevision: 1 });
     expect(button("配置成员").disabled).toBe(true);
-    expect(host.querySelector("select")?.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('[role="combobox"]')?.disabled).toBe(true);
     expect(button("应用配置").disabled).toBe(true);
     click("应用配置");
     expect(mock.submit).not.toHaveBeenCalled();
@@ -124,11 +129,17 @@ describe("TeamMemberOperations", () => {
   it("rejects occupied and missing agent choices while keeping recovery available", () => {
     const other = makeTeam({ teamId: "other", members: [{ ...makeTeam().members[0], agentId: "occupied" }] });
     render({ teams: [other], configureRevision: 1 });
-    expect(host.querySelector<HTMLOptionElement>('option[value="occupied"]')?.disabled).toBe(true);
-    select("occupied");
+    expect(select("occupied").getAttribute("aria-disabled")).toBe("true");
+    expect(host.querySelector('[role="combobox"]')?.textContent).toContain("Agent a");
+    expect(mock.reset).not.toHaveBeenCalled();
+    expect(button("应用配置").disabled).toBe(true);
+    const occupiedTeam = makeTeam(); occupiedTeam.members[0] = { ...occupiedTeam.members[0], agentId: "occupied" };
+    render({ team: occupiedTeam });
+    expect(host.querySelector('[role="combobox"]')?.textContent).toContain("Agent occupied · 已绑定其他团队");
     expect(button("应用配置").disabled).toBe(true);
     const team = makeTeam(); team.members[0] = { ...team.members[0], agentId: "missing", agentStatus: "stale" };
     render({ team });
+    expect(host.querySelector('[role="combobox"]')?.textContent).toContain("Alpha");
     expect(button("应用配置").disabled).toBe(true);
     select("c"); click("应用配置");
     expect(mock.submit.mock.calls[0][1].members[0].agentId).toBe("c");
@@ -139,7 +150,7 @@ describe("TeamMemberOperations", () => {
     mock.pending = true; mock.errorMessage = "保存失败";
     render({ syncError: "同步失败" });
     expect(button("配置成员").disabled).toBe(true);
-    expect(host.querySelector("select")?.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>('[role="combobox"]')?.disabled).toBe(true);
     expect(button("应用配置").getAttribute("aria-busy")).toBe("true");
     click("同步会话"); expect(props.onSyncRoom).not.toHaveBeenCalled();
     expect(Array.from(host.querySelectorAll('[role="alert"]')).map((node) => node.textContent)).toEqual(["保存失败", "同步失败"]);
@@ -152,7 +163,7 @@ describe("TeamMemberOperations", () => {
     expect(host.textContent).toContain("团队运行中");
     render({ syncDisabledReason: "" }); click("同步会话");
     expect(props.onSyncRoom).toHaveBeenCalledOnce();
-    expect(host.querySelector("select")?.value).toBe("c");
+    expect(host.querySelector('[role="combobox"]')?.textContent).toContain("Agent c");
   });
 
   it("keeps the submitted member identity when selection changes during a save", () => {

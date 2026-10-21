@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, Search } from "lucide-react";
 
 import type { ConfigProviderPresetOption } from "../api/types";
-import { VButton, VFieldRow, VInput, VNativeSelect, VSection } from "../components/vui";
+import { VButton, VFieldRow, VInput, VSection, VStringSelect } from "../components/vui";
 import {
   canonicalProviderRoute,
   providerPresetToWizardState,
@@ -87,17 +87,19 @@ export function ConfigQuickSetupPanel({
         <legend className="sr-only">{copy.quickSetupTitle}</legend>
         <div className={styles.twoFields}>
           <VFieldRow label={copy.quickSetupProviderLabel} htmlFor={`${id}-provider`}>
-            <VNativeSelect className={styles.control} id={`${id}-provider`} value={state.provider.templateId} onChange={(event) => {
-              const templateId = event.target.value;
-              const template = templateId === "custom" ? customTemplate : templates.find((item) => item.provider_preset_id === templateId);
-              if (!template) return;
-              const provider = templateToProvider(template);
-              onProviderChange(templateId === "custom" ? { ...provider, label: "", baseUrl: "" } : provider);
-            }}>
-              <option value="" disabled>{copy.quickSetupProviderPlaceholder}</option>
-              {templates.map((template) => <option key={template.provider_preset_id} value={template.provider_preset_id}>{template.label}</option>)}
-              <option value="custom" disabled={!customTemplate}>{copy.quickSetupCustomService}</option>
-            </VNativeSelect>
+            <VStringSelect className={styles.control} id={`${id}-provider`} ariaLabel={copy.quickSetupProviderLabel} isDisabled={locked}
+              placeholder={copy.quickSetupProviderPlaceholder} value={state.provider.templateId}
+              options={[
+                ...templates.map((template) => ({ value: template.provider_preset_id, label: template.label })),
+                { value: "custom", label: copy.quickSetupCustomService, disabled: !customTemplate },
+              ]}
+              onValueChange={(templateId) => {
+                const template = templateId === "custom" ? customTemplate : templates.find((item) => item.provider_preset_id === templateId);
+                if (!template) return;
+                const provider = templateToProvider(template);
+                onProviderChange(templateId === "custom" ? { ...provider, label: "", baseUrl: "" } : provider);
+              }}
+            />
           </VFieldRow>
           <VFieldRow label={copy.label} htmlFor={`${id}-label`}>
             <VInput className={styles.control} id={`${id}-label`} value={state.provider.label} onChange={(event) => onProviderChange({ ...state.provider, label: event.target.value })} />
@@ -130,45 +132,58 @@ export function ConfigQuickSetupPanel({
           </span>
         </VFieldRow>
         {state.discoveredModels.length > 0 && <VFieldRow label={copy.quickSetupModelListLabel} htmlFor={`${id}-catalog`}>
-          <VNativeSelect className={styles.control} id={`${id}-catalog`} value={selectedCatalogModel?.modelRef || ""} onChange={(event) => {
-            const model = state.discoveredModels.find((candidate) => candidate.modelRef === event.target.value);
-            if (!model?.upstreamId) return;
-            setModelDraft({ templateId: state.provider.templateId, value: model.upstreamId }); onModelChange(model.modelRef);
-          }}>
-            <option value="">{copy.quickSetupKeepManualModel}</option>
-            {state.discoveredModels.filter((model) => model.upstreamId).map((model) => <option key={model.modelRef} value={model.modelRef}>{model.label || model.upstreamId} · {model.upstreamId}</option>)}
-          </VNativeSelect>
+          <VStringSelect className={styles.control} id={`${id}-catalog`} ariaLabel={copy.quickSetupModelListLabel} isDisabled={locked}
+            value={selectedCatalogModel?.modelRef || ""}
+            options={[
+              { value: "", label: copy.quickSetupKeepManualModel },
+              ...state.discoveredModels.filter((model) => model.upstreamId).map((model) => ({
+                value: model.modelRef,
+                label: `${model.label || model.upstreamId} · ${model.upstreamId}`,
+              })),
+            ]}
+            onValueChange={(modelRef) => {
+              const model = state.discoveredModels.find((candidate) => candidate.modelRef === modelRef);
+              if (!model?.upstreamId) return;
+              setModelDraft({ templateId: state.provider.templateId, value: model.upstreamId }); onModelChange(model.modelRef);
+            }}
+          />
         </VFieldRow>}
         <details className={styles.advanced}>
           <summary className={styles.advancedSummary}>{copy.quickSetupAdvanced}</summary>
           <div className={styles.twoFields}>
             <VFieldRow label={copy.quickSetupProtocolLabel} htmlFor={`${id}-protocol`}>
-              <VNativeSelect className={styles.control} id={`${id}-protocol`} value={canonicalProviderRoute(state.provider.defaultProtocol) || state.provider.defaultProtocol} onChange={(event) => {
-                const next = providerRouteSelection(event.target.value, [], "replace");
-                if (!next) return;
-                onProviderChange({
-                  ...state.provider,
-                  driver: next.driver,
-                  defaultProtocol: next.defaultProtocol,
-                  allowedProtocols: next.allowedProtocols,
-                });
-              }}>
-                {resolvedRouteSelectOptions(copy, state.provider.defaultProtocol).map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </VNativeSelect>
+              <VStringSelect className={styles.control} id={`${id}-protocol`} ariaLabel={copy.quickSetupProtocolLabel} isDisabled={locked}
+                value={canonicalProviderRoute(state.provider.defaultProtocol) || state.provider.defaultProtocol}
+                options={resolvedRouteSelectOptions(copy, state.provider.defaultProtocol).map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onValueChange={(value) => {
+                  const next = providerRouteSelection(value, [], "replace");
+                  if (!next) return;
+                  onProviderChange({
+                    ...state.provider,
+                    driver: next.driver,
+                    defaultProtocol: next.defaultProtocol,
+                    allowedProtocols: next.allowedProtocols,
+                  });
+                }} />
             </VFieldRow>
             <VFieldRow label={copy.quickSetupAuthMethodLabel} htmlFor={`${id}-auth`}>
-              <VNativeSelect className={styles.control} id={`${id}-auth`} value={state.provider.authKind} onChange={(event) => {
-                const authKind = event.target.value as ProviderAuthKind;
-                const template = selectedTemplate || customTemplate;
-                const credentialRef = authKind === "none" ? "none" : template ? templateToProvider(template).credentialRef
-                  : state.provider.credentialRef === "none" ? "" : state.provider.credentialRef;
-                onProviderChange({ ...state.provider, authKind, credentialRef });
-              }}>
-                <option value="api_key">API Key</option><option value="none">{copy.quickSetupNoAuthLabel}</option>
-                {state.provider.authKind === "oauth" && <option value="oauth">OAuth</option>}
-              </VNativeSelect>
+              <VStringSelect className={styles.control} id={`${id}-auth`} ariaLabel={copy.quickSetupAuthMethodLabel} isDisabled={locked}
+                value={state.provider.authKind}
+                options={[
+                  { value: "api_key", label: "API Key" },
+                  { value: "none", label: copy.quickSetupNoAuthLabel },
+                  ...(state.provider.authKind === "oauth" ? [{ value: "oauth", label: "OAuth" }] : []),
+                ]}
+                onValueChange={(value) => {
+                  const authKind = value as ProviderAuthKind;
+                  const template = selectedTemplate || customTemplate;
+                  const credentialRef = authKind === "none" ? "none" : template ? templateToProvider(template).credentialRef
+                    : state.provider.credentialRef === "none" ? "" : state.provider.credentialRef;
+                  onProviderChange({ ...state.provider, authKind, credentialRef });
+                }} />
             </VFieldRow>
           </div>
         </details>
