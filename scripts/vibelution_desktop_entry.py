@@ -44,12 +44,19 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from vibelution_storage import resolve_active_project_storage_paths, resolve_project_runtime_home
+from core.logging.log_rotation import (
+    DEFAULT_LOG_BACKUP_COUNT,
+    DEFAULT_LOG_MAX_BYTES,
+    append_rotating_text,
+)
 from core.runtime_manager.process_identity import capture_process_identity, inspect_process_identity
 
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
 RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
 PYTHON_BRIDGE_LOG_PATH = RUNTIME_DIR / "desktop-entry-python.log"
+PYTHON_BRIDGE_LOG_MAX_BYTES = DEFAULT_LOG_MAX_BYTES
+PYTHON_BRIDGE_LOG_BACKUP_COUNT = DEFAULT_LOG_BACKUP_COUNT
 LAUNCHER_STDOUT_PATH = RUNTIME_DIR / "launcher-backend.stdout.log"
 LAUNCHER_STDERR_PATH = RUNTIME_DIR / "launcher-backend.stderr.log"
 LAUNCHER_BROWSER_PROFILE_DIR = RUNTIME_DIR / "launcher-control-profile"
@@ -99,8 +106,12 @@ def _append_log(event: str, *, level: str = "info", **fields: object) -> None:
         "event": event,
         "fields": fields,
     }
-    with PYTHON_BRIDGE_LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    append_rotating_text(
+        PYTHON_BRIDGE_LOG_PATH,
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+        max_bytes=PYTHON_BRIDGE_LOG_MAX_BYTES,
+        backup_count=PYTHON_BRIDGE_LOG_BACKUP_COUNT,
+    )
 
 
 def _desktop_process_group_flag() -> int:
