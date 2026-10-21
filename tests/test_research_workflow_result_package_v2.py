@@ -124,6 +124,48 @@ def test_citation_checks_preserve_unverified_evidence_as_failed() -> None:
     assert all(item["status"] == "passed" for item in checks[1:])
 
 
+def test_citation_checks_human_verification_flips_only_mapped_urls() -> None:
+    output = _output(96)
+    evidence = deepcopy(output["evidence"])
+    evidence[0]["verification_status"] = "unverified"
+    evidence[1]["verification_status"] = "unverified"
+    receipt = {
+        "sourceUrl": evidence[0]["source_url"],
+        "reviewer": "Acceptance Authority",
+        "rationale": "Institutional news page confirmed manually; origin is dead.",
+        "authorityDoi": "",
+        "verifiedAt": "2026-10-21T00:00:00Z",
+    }
+    baseline = result_package_v2._citation_checks(evidence)
+    assert baseline == result_package_v2._citation_checks(
+        evidence, human_verification=None
+    )
+
+    checks = result_package_v2._citation_checks(
+        evidence, human_verification={receipt["sourceUrl"]: receipt}
+    )
+
+    # Only the mapped URL flips; the original failing status is kept for audit.
+    assert checks[0] == {
+        "evidenceId": evidence[0]["evidence_id"],
+        "sourceUrl": evidence[0]["source_url"],
+        "verificationStatus": "unverified",
+        "status": "passed",
+        "verificationMethod": "human_review",
+        "pageVerificationFailureReason": "unverified",
+    }
+    # Unmapped failing rows stay failed and gain no human method marker.
+    assert checks[1] == {
+        "evidenceId": evidence[1]["evidence_id"],
+        "sourceUrl": evidence[1]["source_url"],
+        "verificationStatus": "unverified",
+        "status": "failed",
+    }
+    # Canonical-pass rows are untouched by the human fallback.
+    assert all(item["status"] == "passed" for item in checks[2:])
+    assert all("verificationMethod" not in item for item in checks[2:])
+
+
 def test_v2_producer_fails_closed_without_problem_scope(monkeypatch) -> None:
     expected, artifacts = _authority_sections()
     artifacts["problem_understanding"]["scope"] = ""

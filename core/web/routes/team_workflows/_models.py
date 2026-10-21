@@ -536,6 +536,21 @@ class ChallengeQuestionReviewPayload(BaseModel):
     decisions: dict[str, str]
 
 
+class ChallengeQuestionCitationManualVerifyPayload(BaseModel):
+    """Operator manual (human) citation verification for one registered run.
+
+    ``sourceUrl`` must exactly match one evidence row's source URL of the
+    run; the receipt (reviewer/rationale/authorityDoi) is stored on the run
+    record for audit and only commits when the full citation validation
+    passes afterwards (fail-closed).
+    """
+
+    sourceUrl: str = Field(..., min_length=1, max_length=2048)
+    reviewer: str = Field(..., min_length=1, max_length=160)
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    authorityDoi: str = Field("", max_length=512)
+
+
 class ChallengeQuestionArtifactResponse(BaseModel):
     path: str
     sha256: str

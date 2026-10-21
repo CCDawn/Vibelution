@@ -3839,3 +3839,184 @@ def read_citation_recheck_progress(
         question_id=normalized_question_id,
         run_id=normalized_run_id,
     )
+
+
+def verify_citation_receipt_manually(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Record an operator's manual (human) citation verification receipt.
+
+    Second sanctioned post-registration citation repair, next to
+    :func:`reverify_citation_receipts`' DOI-registry fallback: for registered
+    Challenge Question runs whose ``validation.citationValidation`` fails on
+    exactly the URLs no machine authority can cover (dead origin/DNS, no
+    DOI), the acceptance authority may manually verify one cited source URL
+    and record who verified it and why.  The receipt lives on the run record
+    (``citationHumanVerifications``, latest entry per sourceUrl wins); the
+    stored citation projection is then refreshed in place with the same
+    write precedent as the DOI recheck (``audit.citation_validation`` /
+    ``audit.output_sha256`` are registration-time projections excluded from
+    replay identity).  Behaviour:
+
+    * already-``passed`` records short-circuit (idempotent, no writes, no
+      network);
+    * the source URL must exactly match one evidence row's source URL — a
+      URL the run does not cite is refused (fail-closed);
+    * machine-verified URLs from prior DOI recheck passes (the
+      ``<run>.citation-recheck.jsonl`` resume ledger) still count, so the
+      two verification authorities compose; this function never touches the
+      network itself;
+    * unless every evidence source URL is covered afterwards the stored
+      record is left untouched (fail-closed, no partial relaxation) and the
+      receipt is not persisted;
+    * the immutable ``sourceResultPackageHash`` binding and the evidence
+      rows themselves are never modified.
+
+    Returns a report with the resulting status (``already_passed`` /
+    ``verified`` / ``still_failed``), the refreshed record, the citation
+    validation summary and, on success, the recorded human receipt.
+    """
+
+    from .citation_recheck import read_resume_verified
+    from .research_runtime.result_package_v2 import _citation_checks
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_question_id or not normalized_run_id:
+        raise ValueError("questionId and runId are required.")
+
+    source_url = str(payload.get("sourceUrl") or "").strip()
+    reviewer = str(payload.get("reviewer") or "").strip()
+    rationale = str(payload.get("rationale") or "").strip()
+    authority_doi = str(payload.get("authorityDoi") or "").strip()
+    if not source_url or not reviewer or not rationale:
+        raise ValueError("sourceUrl, reviewer and rationale are required.")
+
+    artifact_path = _artifact_path(team_id, normalized_question_id, normalized_run_id)
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        record = next(
+            (
+                item
+                for item in store.get("records", [])
+                if isinstance(item, dict)
+                and item.get("questionId") == normalized_question_id
+                and item.get("runId") == normalized_run_id
+            ),
+            None,
+        )
+        if record is None:
+            raise ValueError("Challenge question run record was not found.")
+        output = _read_json(artifact_path)
+        if not output:
+            raise ValueError("Challenge question run artifact is missing.")
+        stored_hash = str(record.get("outputSha256") or "").strip().lower()
+        if stored_hash and _output_sha256(output) != stored_hash:
+            raise ValueError(
+                "Challenge question run artifact does not match its immutable "
+                "index record; refusing to record a manual citation verification."
+            )
+        validation = record.get("validation") if isinstance(record.get("validation"), dict) else {}
+        if validation.get("citationValidation") == "passed":
+            return {
+                "status": "already_passed",
+                "record": deepcopy(record),
+                "output": output,
+                "citation": deepcopy(validation.get("citation") or {}),
+                "summary": challenge_question_run_summary(team_id),
+            }
+
+        evidence = output.get("evidence") if isinstance(output.get("evidence"), list) else []
+        cited_urls = {
+            str(
+                item.get("source_url") or item.get("sourceUrl") or ""
+            ).strip()
+            for item in evidence
+            if isinstance(item, dict)
+        }
+        if source_url not in cited_urls:
+            raise ValueError(
+                "sourceUrl is not cited by this run's evidence; refusing to "
+                f"record a manual verification: {source_url}"
+            )
+
+        receipt = {
+            "sourceUrl": source_url,
+            "reviewer": reviewer,
+            "rationale": rationale,
+            "authorityDoi": authority_doi,
+            "verifiedAt": _utc_now(),
+        }
+        prior_receipts = [
+            item
+            for item in (
+                record.get("citationHumanVerifications")
+                if isinstance(record.get("citationHumanVerifications"), list)
+                else []
+            )
+            if isinstance(item, dict)
+        ]
+        merged_receipts = [*prior_receipts, receipt]
+        # Latest entry per sourceUrl wins in the projection; the stored list
+        # keeps the full audit history.
+        human_verification: dict[str, dict[str, Any]] = {}
+        for item in merged_receipts:
+            key = str(item.get("sourceUrl") or "").strip()
+            if key:
+                human_verification[key] = item
+
+        # Machine-verified URLs from prior DOI recheck passes are the other
+        # verification authority; compose both, offline (no network here).
+        ledger_path = artifact_path.with_name(f"{normalized_run_id}.citation-recheck.jsonl")
+        resume_verified = read_resume_verified(ledger_path)
+        checks = _citation_checks(
+            evidence,
+            doi_verification=resume_verified,
+            human_verification=human_verification,
+        )
+        citation = _citation_validation(output, checks)
+        if citation["status"] != "passed":
+            return {
+                "status": "still_failed",
+                "record": deepcopy(record),
+                "output": output,
+                "citation": citation,
+                "summary": challenge_question_run_summary(team_id),
+            }
+
+        output.setdefault("audit", {})["citation_validation"] = "passed"
+        output["audit"]["output_sha256"] = _output_sha256(output)
+        validation["citationValidation"] = "passed"
+        validation["citation"] = citation
+        record["outputSha256"] = output["audit"]["output_sha256"]
+        record["citationHumanVerifications"] = merged_receipts
+        store["updatedAt"] = _utc_now()
+        _write_json_bundle([(artifact_path, output), (_store_path(team_id), store)])
+        summary = challenge_question_run_summary(team_id)
+    record_runtime_scene_event(
+        "team_workflow_orchestration",
+        "challenge_question_run",
+        "challenge_question_run.citation_human_verified",
+        message="Challenge Cup citation receipts were verified manually by the acceptance authority.",
+        outcome="passed",
+        fields={
+            "teamId": team_id,
+            "questionId": normalized_question_id,
+            "runId": normalized_run_id,
+            "sourceUrl": source_url,
+            "reviewer": reviewer,
+        },
+        lifecycle=True,
+    )
+    return {
+        "status": "verified",
+        "record": deepcopy(record),
+        "output": output,
+        "citation": citation,
+        "receipt": receipt,
+        "summary": summary,
+    }

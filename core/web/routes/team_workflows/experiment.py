@@ -276,6 +276,33 @@ def team_workflow_challenge_question_run_reverify_citations_progress(
 
 
 @router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/verify-citation-manual",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_question_run_verify_citation_manual(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+    payload: ChallengeQuestionCitationManualVerifyPayload,
+) -> dict:
+    try:
+        return verify_citation_receipt_manually(
+            team_id, question_id, run_id, payload.model_dump()
+        )
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.verify_citation_manual",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"questionId": question_id, "runId": run_id, "sourceUrl": payload.sourceUrl},
+        )
+
+
+@router.post(
     "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/repair-registration",
     response_model=ExperimentRouteResponse,
     response_model_exclude_unset=True,

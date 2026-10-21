@@ -1851,6 +1851,196 @@ def test_reverify_citation_receipts_requires_registered_record(tmp_path, monkeyp
         )
 
 
+# -------- operator manual (human) citation verification receipts
+
+
+MACHINE_VERIFIED_URL = "https://doi.org/10.1103/machine-verified"
+DEAD_ORIGIN_URL = "https://dead-origin.example.org/news"
+
+
+def _dead_origin_output() -> dict:
+    """Two unverified URLs: one DOI-resolvable, one machine-unverifiable."""
+    output = _output()
+    output["evidence"][0]["source_url"] = MACHINE_VERIFIED_URL
+    output["evidence"][0]["doi"] = "10.1103/machine-verified"
+    output["evidence"][0]["verification_status"] = "unverified"
+    output["evidence"][1]["source_url"] = DEAD_ORIGIN_URL
+    output["evidence"][1]["verification_status"] = "unverified"
+    return output
+
+
+def _seed_recheck_ledger(tmp_path, monkeypatch, *, verified_urls: list[str]) -> None:
+    ledger_path = (
+        challenge_question_runs._workflow_root("research-team")
+        / "challenge_program"
+        / "question_runs"
+        / "SCI-096"
+        / "run-sci-096.citation-recheck.jsonl"
+    )
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "recordKind": citation_recheck.RECORD_KIND,
+                "kind": citation_recheck.KIND_URL_RESULT,
+                "sourceUrl": url,
+                "outcome": citation_recheck.OUTCOME_VERIFIED,
+            }
+        )
+        for url in verified_urls
+    ]
+    ledger_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _manual_payload(**overrides) -> dict:
+    payload = {
+        "sourceUrl": DEAD_ORIGIN_URL,
+        "reviewer": "Acceptance Authority",
+        "rationale": "Institutional news page manually confirmed before the origin went dark.",
+        "authorityDoi": "",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_manual_citation_verification_covers_unverifiable_url(tmp_path, monkeypatch):
+    output = _dead_origin_output()
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+    _seed_recheck_ledger(tmp_path, monkeypatch, verified_urls=[MACHINE_VERIFIED_URL])
+
+    response = challenge_question_runs.verify_citation_receipt_manually(
+        "research-team", "sci-096", "run-sci-096", _manual_payload()
+    )
+
+    assert response["status"] == "verified"
+    assert response["citation"]["status"] == "passed"
+    assert response["citation"]["missingUrls"] == []
+    receipt = response["receipt"]
+    assert receipt["sourceUrl"] == DEAD_ORIGIN_URL
+    assert receipt["reviewer"] == "Acceptance Authority"
+    assert receipt["rationale"] == _manual_payload()["rationale"]
+    assert receipt["authorityDoi"] == ""
+    assert receipt["verifiedAt"]
+
+    stored_record = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored_record["validation"]["citationValidation"] == "passed"
+    human_receipts = stored_record["citationHumanVerifications"]
+    assert len(human_receipts) == 1
+    assert human_receipts[0]["reviewer"] == "Acceptance Authority"
+    assert human_receipts[0]["authorityDoi"] == ""
+    assert human_receipts[0]["sourceUrl"] == DEAD_ORIGIN_URL
+    assert human_receipts[0]["verifiedAt"]
+
+    artifact = challenge_question_runs._read_json(
+        challenge_question_runs._artifact_path("research-team", "SCI-096", "run-sci-096")
+    )
+    assert artifact["audit"]["citation_validation"] == "passed"
+    assert challenge_question_runs._output_sha256(artifact) == stored_record["outputSha256"]
+    # The evidence rows themselves are never rewritten by the manual receipt.
+    assert artifact["evidence"][1]["verification_status"] == "unverified"
+
+
+def test_manual_citation_verification_refuses_uncited_url_without_writes(tmp_path, monkeypatch):
+    output = _dead_origin_output()
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    artifact_before = challenge_question_runs._read_json(
+        challenge_question_runs._artifact_path("research-team", "SCI-096", "run-sci-096")
+    )
+
+    with pytest.raises(ValueError, match="not cited by this run's evidence"):
+        challenge_question_runs.verify_citation_receipt_manually(
+            "research-team",
+            "SCI-096",
+            "run-sci-096",
+            _manual_payload(sourceUrl="https://example.org/not-cited"),
+        )
+
+    stored_record = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored_record["validation"]["citationValidation"] == "failed"
+    assert stored_record["outputSha256"] == record["outputSha256"]
+    assert "citationHumanVerifications" not in stored_record
+    assert challenge_question_runs._read_json(
+        challenge_question_runs._artifact_path("research-team", "SCI-096", "run-sci-096")
+    ) == artifact_before
+
+
+def test_manual_citation_verification_stays_failed_while_other_urls_uncovered(tmp_path, monkeypatch):
+    output = _dead_origin_output()
+    record = _register_paywalled_run(tmp_path, monkeypatch, output)
+    assert record["validation"]["citationValidation"] == "failed"
+    # No recheck ledger: the DOI-resolvable URL is not machine-verified yet,
+    # so covering only the dead-origin URL cannot pass the whole set.
+
+    response = challenge_question_runs.verify_citation_receipt_manually(
+        "research-team", "SCI-096", "run-sci-096", _manual_payload()
+    )
+
+    assert response["status"] == "still_failed"
+    assert response["citation"]["status"] == "failed"
+    assert response["citation"]["missingUrls"] == [MACHINE_VERIFIED_URL]
+    stored_record = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored_record["validation"]["citationValidation"] == "failed"
+    assert stored_record["outputSha256"] == record["outputSha256"]
+    assert "citationHumanVerifications" not in stored_record
+
+
+def test_manual_citation_verification_is_idempotent_after_passed(tmp_path, monkeypatch):
+    output = _dead_origin_output()
+    _register_paywalled_run(tmp_path, monkeypatch, output)
+    _seed_recheck_ledger(tmp_path, monkeypatch, verified_urls=[MACHINE_VERIFIED_URL])
+    first = challenge_question_runs.verify_citation_receipt_manually(
+        "research-team", "SCI-096", "run-sci-096", _manual_payload()
+    )
+    assert first["status"] == "verified"
+    store_before = challenge_question_runs._load_store("research-team")
+    artifact_before = challenge_question_runs._read_json(
+        challenge_question_runs._artifact_path("research-team", "SCI-096", "run-sci-096")
+    )
+
+    second = challenge_question_runs.verify_citation_receipt_manually(
+        "research-team", "SCI-096", "run-sci-096", _manual_payload()
+    )
+
+    assert second["status"] == "already_passed"
+    assert challenge_question_runs._load_store("research-team") == store_before
+    assert challenge_question_runs._read_json(
+        challenge_question_runs._artifact_path("research-team", "SCI-096", "run-sci-096")
+    ) == artifact_before
+
+
+def test_manual_citation_verification_refuses_tampered_artifact(tmp_path, monkeypatch):
+    output = _dead_origin_output()
+    _register_paywalled_run(tmp_path, monkeypatch, output)
+    artifact_path = challenge_question_runs._artifact_path(
+        "research-team", "SCI-096", "run-sci-096"
+    )
+    tampered = challenge_question_runs._read_json(artifact_path)
+    tampered["evidence"][0]["fact"] = "Tampered factual statement."
+    challenge_question_runs._write_json(artifact_path, tampered)
+
+    with pytest.raises(ValueError, match="does not match its immutable"):
+        challenge_question_runs.verify_citation_receipt_manually(
+            "research-team", "SCI-096", "run-sci-096", _manual_payload()
+        )
+
+    stored_record = challenge_question_runs._load_store("research-team")["records"][0]
+    assert stored_record["validation"]["citationValidation"] == "failed"
+    assert "citationHumanVerifications" not in stored_record
+
+
+def test_manual_citation_verification_requires_reviewer_and_rationale(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="sourceUrl, reviewer and rationale"):
+        challenge_question_runs.verify_citation_receipt_manually(
+            "research-team",
+            "SCI-096",
+            "run-sci-096",
+            _manual_payload(reviewer=""),
+        )
+
+
 # ---------------- legacy proposal records: sanctioned registration repair
 
 

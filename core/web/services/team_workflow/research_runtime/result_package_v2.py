@@ -1199,6 +1199,7 @@ def _citation_checks(
     evidence: Sequence[Mapping[str, Any]],
     *,
     doi_verification: Mapping[str, Any] | None = None,
+    human_verification: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the citation receipts consumed by the Challenge Program gate.
 
@@ -1221,6 +1222,15 @@ def _citation_checks(
     audit.  Without the report the projection stays unchanged, pure and
     offline — paywalled/auth-walled publisher pages therefore remain failed
     unless the caller explicitly ran the fallback.
+
+    ``human_verification`` is the second sanctioned post-registration
+    fallback: source URLs mapped to an operator's manual (human) verification
+    receipt recorded on the challenge record (reviewer, rationale, authority
+    DOI — the details live there, not in the check).  A receipt that would
+    fail the canonical floor but whose URL carries such a record is marked
+    ``passed`` with ``verificationMethod: "human_review"`` and keeps the
+    original failing status in ``pageVerificationFailureReason`` for audit.
+    URLs absent from the map are untouched.
     """
 
     passed_verification_statuses = {
@@ -1256,6 +1266,14 @@ def _citation_checks(
         ):
             check["status"] = "passed"
             check["verificationMethod"] = "doi_metadata"
+            check["pageVerificationFailureReason"] = verification_status
+        if (
+            not passed
+            and human_verification is not None
+            and source_url in human_verification
+        ):
+            check["status"] = "passed"
+            check["verificationMethod"] = "human_review"
             check["pageVerificationFailureReason"] = verification_status
         checks.append(check)
     if not checks:
