@@ -20,8 +20,9 @@
 
 本模块是被动数据服务：不进单轮调用链、不写回任何 Session/Journal 字段；
 owner 表登记归 T9（docs/plans/2026-10-18-intent-alignment-module.md §8.2）。
-T1 范围不含：规则预筛 / 回执解析 / packet 组装（T2）、工具 handler（T4）、
-markdown 渲染（章节读 ctx packet，不读本 store）。
+T2 在 store 段之后追加「判定段」（§4.1-§4.3 / §5.2 / §3.9）：规则预筛信号、
+IntentAlignmentReply 回执解析与落账、IntentAlignmentPacket 组装，纯函数为主；
+仍不含工具 handler（T4）与 markdown 渲染（章节读 ctx packet，不读本 store）。
 """
 
 from __future__ import annotations
@@ -49,6 +50,16 @@ __all__ = [
     "get_intent_alignment_store",
     "reset_intent_alignment_store",
     "intent_storage_override",
+    # ── T2 判定段 ──
+    "GATE_DECIDED_BY",
+    "MAX_QUESTIONS_PER_TURN",
+    "REPLY_SCHEMA_VERSION",
+    "detect_clear_imperative_signal",
+    "detect_fork_signals",
+    "run_rule_prefilter",
+    "parse_intent_alignment_reply",
+    "apply_reply",
+    "assemble_packet",
 ]
 
 
@@ -1054,3 +1065,511 @@ def reset_intent_alignment_store() -> None:
     _intent_alignment_store_instance = None
     _intent_alignment_store_root = None
     IntentAlignmentStore._instance = None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# T2 判定段：规则预筛 / IntentAlignmentReply 回执解析与落账 / packet 组装
+# （设计文档 §4.1-§4.3 / §5.2 / §3.9）。
+#
+# 分层纪律（§2.2）：本段以纯函数为主（唯一例外是 apply_reply 转调
+# store.record_answer），无 LLM、无 IO；规则层只产「提示与审计」信号，不裁决、
+# 不短路 turn、不代替模型产出 assistant 内容；规则不确定时保守给出 ask 倾向或
+# 中性输出，绝不误标已答/已对齐。
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── 规则预筛信号（§4.1 / §4.3 判据 5） ─────────────────────────────────────
+
+GATE_DECIDED_BY = "rules"
+"""§4.2 gate.decidedBy 固定取值：规则预筛；主 agent 的最终决策体现为其行为。"""
+
+MAX_QUESTIONS_PER_TURN = 3
+"""§4.2 budget.maxQuestionsPerTurn：对齐 BRT 现规则「一组简短问题」语义
+（prompt_template_service.py:77）。"""
+
+REPLY_SCHEMA_VERSION = 1
+"""§5.2 IntentAlignmentReply / IntentAlignmentCardPayload 的 schemaVersion。"""
+
+_GATE_CONFIDENCE_CLEAR = 0.7
+_GATE_CONFIDENCE_FORK = 0.8
+_GATE_CONFIDENCE_UNCERTAIN = 0.3
+
+# clear 快路径信号：明确祈使句 + 明确对象（中文祈使动词白名单，可枚举、从简）。
+_CLEAR_POLITE_LEAD = r"^(?:\s*(?:请|帮我|麻烦|帮忙|劳驾|能否|可以|你|您)\s*[，,、。]?)*"
+_CLEAR_IMPERATIVE_VERBS = (
+    "写一个",
+    "搭建", "创建", "新建", "生成", "添加", "增加", "删除", "移除", "修改",
+    "更新", "实现", "编写", "开发", "修复", "重构", "部署", "发布", "导出", "导入",
+    "运行", "执行", "构建", "设计", "翻译", "总结", "列出", "安装", "配置", "清洗",
+)
+_CLEAR_PATTERN = re.compile(
+    _CLEAR_POLITE_LEAD
+    + "("
+    + "|".join(sorted(_CLEAR_IMPERATIVE_VERBS, key=len, reverse=True))
+    + r")(.+)",
+    re.DOTALL,
+)
+
+# 分叉信号一：多义指代。近似边界：初版以保守代词表正则近似，规则层无法解析真实
+# 先行词；命中（含「这个文件」这类带显式宾语的短语）只提示 ask 不裁决，保守方向安全。
+_AMBIGUOUS_PRONOUN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])(它们|这些|那些|这个|那个|上述|它)(?![A-Za-z0-9])"
+)
+
+# 分叉信号二：缺失量纲。近似边界：模糊改进动词 + 全文无任何量纲提示才命中；
+# 「把响应时间优化到 200ms 以内」这类带量纲的说法不命中。
+_VAGUE_IMPROVEMENT_PATTERN = re.compile(
+    r"(优化|改进|改善|完善|提升|增强|美化|加速|加快|调整一下|改一下)"
+)
+_METRIC_HINT_PATTERN = re.compile(
+    r"(\d+(?:\.\d+)?\s*(?:ms|s|秒|毫秒|分钟|小时|天|倍|%|％|mb|gb|kb|条|个|行|次)"
+    r"|[一二两三四五六七八九十百千万]+\s*(?:秒|毫秒|倍|条|个|行|次)"
+    r"|性能|速度|内存|指标|响应时间|吞吐|占用|准确率|命中率|耗时|延迟)",
+    re.IGNORECASE,
+)
+
+# 分叉信号三：互斥约束并存。近似边界：初版从简——枚举互斥关键词对 + 「既要…又要…」
+# 句式；语义级互斥判定归主 agent。
+_EXCLUSIVE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("全量", "增量"),
+    ("同步", "异步"),
+    ("离线", "在线"),
+    ("只读", "可写"),
+    ("本地", "云端"),
+    ("单机", "多人"),
+)
+_EXCLUSIVE_BOTH_PATTERN = re.compile(r"既要.{1,16}又(?:要|得|能|想)|既要.{1,16}也要")
+
+
+def detect_clear_imperative_signal(message_text: str) -> dict[str, Any]:
+    """识别「明确祈使句 + 明确对象」clear 快路径信号（§4.3 判据 1 的规则侧近似）。
+
+    确定性正则：礼貌前缀（请/帮我/麻烦…）+ 中文祈使动词白名单 + 非空宾语。
+    返回 ``{"hit": bool, "verb": str, "object": str}``。纯函数，无 LLM、无 IO。
+    近似边界：不解析句法；英文、白名单外动词、礼貌前缀组合过复杂的表达会漏检——
+    漏检只是不给 proceed 倾向（保守方向安全），不会误标已对齐。
+    """
+    text = str(message_text or "").strip()
+    if not text:
+        return {"hit": False, "verb": "", "object": ""}
+    match = _CLEAR_PATTERN.match(text)
+    if match is None:
+        return {"hit": False, "verb": "", "object": ""}
+    verb = match.group(1)
+    obj = match.group(2).strip("。，,、；;：:！!？? \t\n")
+    if len(obj) < 2:
+        return {"hit": False, "verb": "", "object": ""}
+    return {"hit": True, "verb": verb, "object": obj}
+
+
+def detect_fork_signals(message_text: str) -> list[dict[str, str]]:
+    """检测 §4.3 判据 5 的分叉信号清单（确定性正则近似，初版从简）。
+
+    返回 ``[{"signal": "多义指代"|"缺失量纲"|"互斥约束", "evidence": str}, ...]``
+    （每类信号至多一条）。纯函数。近似边界见各模式处注释；规则层不做裁决，
+    命中只意味着「不得给出 proceed 倾向」，判定权始终在主 agent。
+    """
+    text = str(message_text or "").strip()
+    hits: list[dict[str, str]] = []
+    if not text:
+        return hits
+
+    def add(signal: str, evidence: str) -> None:
+        if all(hit["signal"] != signal for hit in hits):
+            hits.append({"signal": signal, "evidence": evidence})
+
+    pronouns = _AMBIGUOUS_PRONOUN_PATTERN.findall(text)
+    if pronouns:
+        add("多义指代", "、".join(dict.fromkeys(pronouns)))
+
+    vague = _VAGUE_IMPROVEMENT_PATTERN.search(text)
+    if vague is not None and _METRIC_HINT_PATTERN.search(text) is None:
+        add("缺失量纲", vague.group(1))
+
+    for left, right in _EXCLUSIVE_PAIRS:
+        if left in text and right in text:
+            add("互斥约束", f"{left}+{right}")
+            break
+    both = _EXCLUSIVE_BOTH_PATTERN.search(text)
+    if both is not None:
+        add("互斥约束", both.group(0))
+    return hits
+
+
+def run_rule_prefilter(message_text: str) -> dict[str, Any]:
+    """规则预筛（§4.1/§4.3）：输出 §4.2 gate 段信号——提示与审计，非裁决。
+
+    - 分叉信号命中 → action="ask"（规则层不得给出 proceed 倾向）；
+    - 无分叉且命中 clear 快路径信号 → action="proceed"（仅直通倾向提示）；
+    - 无任何确定性信号 → 保守 ask 倾向（低置信度；绝不误标已答/已对齐）。
+
+    纯函数：无 LLM、无 IO、不读 store。输出固定四字段
+    ``{action, confidence, decidedBy, reason}``，不携带任何对齐状态结论。
+    """
+    fork_hits = detect_fork_signals(message_text)
+    if fork_hits:
+        evidence = "、".join(f"{hit['signal']}({hit['evidence']})" for hit in fork_hits)
+        return {
+            "action": "ask",
+            "confidence": _GATE_CONFIDENCE_FORK,
+            "decidedBy": GATE_DECIDED_BY,
+            "reason": f"命中分叉信号，交由本轮自判: {evidence}",
+        }
+    clear = detect_clear_imperative_signal(message_text)
+    if clear["hit"]:
+        return {
+            "action": "proceed",
+            "confidence": _GATE_CONFIDENCE_CLEAR,
+            "decidedBy": GATE_DECIDED_BY,
+            "reason": (
+                f"命中明确祈使句+明确对象信号（动词「{clear['verb']}」），"
+                "仅作直通倾向提示，判定权在主 agent"
+            ),
+        }
+    return {
+        "action": "ask",
+        "confidence": _GATE_CONFIDENCE_UNCERTAIN,
+        "decidedBy": GATE_DECIDED_BY,
+        "reason": "未命中确定性信号，保守交由本轮自判（不作 proceed 倾向）",
+    }
+
+
+# ── IntentAlignmentReply 回执解析与落账（§5.2 / §3.9） ────────────────────
+
+_REPLY_KIND = "intent_alignment_reply"
+_CARD_KIND = "intent_alignment_card"
+_REPLY_ACTIONS = frozenset({"confirm", "dismiss"})
+
+
+def _parse_reply_entry(
+    entry: Mapping[str, Any], questions_by_id: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """单题答案规范化：选中项 label（"；"连接）或 freeText；skipped/无内容 → 空串。"""
+    question_id = str(entry.get("questionId") or "")
+    question = questions_by_id.get(question_id)
+    selected = entry.get("selectedOptionIds")
+    selected_ids = [str(item) for item in selected] if isinstance(selected, list) else []
+    free_text = str(entry.get("freeText") or "").strip()
+    skipped = bool(entry.get("skipped"))
+
+    labels: list[str] = []
+    if question is not None:
+        options = {
+            str(option.get("optionId")): str(
+                option.get("label") or option.get("optionId") or ""
+            )
+            for option in (question.get("options") or [])
+            if isinstance(option, Mapping)
+        }
+        labels = [options.get(option_id, option_id) for option_id in selected_ids]
+    else:
+        # 无卡上下文（调用方未提供 card_payload）：退化用 optionId 原文。
+        labels = list(selected_ids)
+
+    parts = [label for label in labels if label]
+    if free_text:
+        parts.append(free_text)
+    answer_text = "；".join(parts).strip()
+    if not answer_text:
+        skipped = True
+        answer_text = ""
+    return {
+        "questionId": question_id,
+        "answerText": answer_text,
+        "skipped": skipped,
+        "selectedOptionIds": selected_ids,
+        "selectedLabels": labels,
+        "freeText": free_text,
+        "raw": dict(entry),
+    }
+
+
+def parse_intent_alignment_reply(reply: Any, card_payload: Any = None) -> dict[str, Any]:
+    """解析 IntentAlignmentReply（§5.2 schema）。纯函数，不写 store。
+
+    - 校验 schemaVersion==1、kind=="intent_alignment_reply"、action∈{confirm,dismiss}、
+      cardId 非空、revision 为正整数；任一不满足 → ok=False，errors 收集原因。
+    - card_payload（IntentAlignmentCardPayload）提供时按 cardId+revision 对卡匹配：
+      匹配成功再按 questionId 映射题目并解析选中项 label；cardId/revision 不匹配
+      （三元组不成立）→ 整卡条目全部原样进 unmapped；卡匹配但 questionId 不在卡内
+      → 该条目原样进 unmapped（§3.9 三元组映射失败留档）。未提供 card_payload 时
+      只做 schema 级解析（label 退化用 optionId 原文）。
+    - 每题答案文本规范化拼接：选中项 label（"；"连接）或 freeText（自由输入/自定义
+      答案保留原文），两者并存时拼接；skipped 或无任何答案内容 → answerText=""。
+    - action="dismiss"：解析照常返回；其 store 处置为设计开放点（设计文档 §5.3 /
+      §7.2-9），apply_reply 对 dismiss 保守不动 store。
+    """
+    result: dict[str, Any] = {
+        "ok": True,
+        "errors": [],
+        "cardId": "",
+        "revision": None,
+        "action": "",
+        "cardMatched": False,
+        "answers": [],
+        "unmapped": [],
+    }
+    if not isinstance(reply, Mapping):
+        result["ok"] = False
+        result["errors"].append("reply 不是 JSON 对象")
+        return result
+
+    card_id = str(reply.get("cardId") or "")
+    revision = reply.get("revision")
+    action = str(reply.get("action") or "")
+    result["cardId"] = card_id
+    result["revision"] = (
+        revision if isinstance(revision, int) and not isinstance(revision, bool) else None
+    )
+    result["action"] = action
+
+    if reply.get("schemaVersion") != REPLY_SCHEMA_VERSION:
+        result["ok"] = False
+        result["errors"].append(f"schemaVersion 非法: {reply.get('schemaVersion')!r}")
+    if str(reply.get("kind") or "") != _REPLY_KIND:
+        result["ok"] = False
+        result["errors"].append(f"kind 非法: {reply.get('kind')!r}")
+    if action not in _REPLY_ACTIONS:
+        result["ok"] = False
+        result["errors"].append(f"action 非法: {action!r}")
+    if not card_id:
+        result["ok"] = False
+        result["errors"].append("cardId 缺失")
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        result["ok"] = False
+        result["errors"].append(f"revision 非法: {revision!r}")
+
+    questions_by_id: dict[str, Mapping[str, Any]] = {}
+    card_provided = card_payload is not None
+    if card_provided:
+        card_matched = (
+            isinstance(card_payload, Mapping)
+            and str(card_payload.get("kind") or "") == _CARD_KIND
+            and str(card_payload.get("cardId") or "") == card_id
+            and card_payload.get("revision") == revision
+        )
+        result["cardMatched"] = card_matched
+        if card_matched:
+            for question in card_payload.get("questions") or []:
+                if isinstance(question, Mapping):
+                    questions_by_id[str(question.get("questionId") or "")] = question
+
+    answers = reply.get("answers")
+    if answers is not None and not isinstance(answers, list):
+        result["ok"] = False
+        result["errors"].append("answers 必须是列表")
+        answers = []
+    for entry in list(answers or []):
+        if not isinstance(entry, Mapping):
+            result["unmapped"].append(entry)
+            continue
+        if card_provided and not result["cardMatched"]:
+            # cardId/revision 三元组不成立：整卡条目全部留档，不解析不落账。
+            result["unmapped"].append(entry)
+            continue
+        parsed_entry = _parse_reply_entry(entry, questions_by_id)
+        if questions_by_id and parsed_entry["questionId"] not in questions_by_id:
+            # 卡已匹配但 questionId 不在卡内：映射失败，原样留档。
+            result["unmapped"].append(entry)
+            continue
+        result["answers"].append(parsed_entry)
+    return result
+
+
+def apply_reply(
+    store: "IntentAlignmentStore",
+    session_id: str,
+    reply: Any,
+    turn_ref: Mapping[str, Any],
+    card_payload: Any = None,
+) -> dict[str, Any]:
+    """回执落账辅助（§2.1 gate P1 / §4.4）：映射成功的每题转调 store.record_answer。
+
+    - 一律 merge=None（§3.4-2 gate 回执路径）：只落台账、标 answered、存答案原文，
+      不产生结构化变更与新版本；语义归并仍归主 agent 的 intent_alignment_merge。
+    - 映射不到（schema 非法 / 卡不匹配 / questionId 不在当前台账——含未问过、
+      已答、已撤销——）的条目原样留档进 unmapped 返回，由调用方（worker gate /
+      agent）处置；台账 askedInCard 非空且与回执 cardId 不一致同样留档。
+    - 任何单题失败不阻断其余题：逐题 try，错误收集进 failed。
+    - action="dismiss"：store 处置为设计开放点（§5.3 / §7.2-9），保守不动 store，
+      解析结果经 parsed 原样返回。
+
+    返回 ``{action, ok, errors, dismissed, applied, skipped, failed, unmapped,
+    storeTouched, parsed}``。
+    """
+    parsed = parse_intent_alignment_reply(reply, card_payload)
+    outcome: dict[str, Any] = {
+        "action": parsed["action"],
+        "ok": parsed["ok"],
+        "errors": list(parsed["errors"]),
+        "dismissed": parsed["action"] == "dismiss",
+        "applied": [],
+        "skipped": [],
+        "failed": [],
+        "unmapped": list(parsed["unmapped"]),
+        "storeTouched": False,
+        "parsed": parsed,
+    }
+    if not parsed["ok"] or outcome["dismissed"]:
+        # schema 非法或 dismiss：不写 store；已解析条目并入 unmapped 留档。
+        outcome["unmapped"].extend(entry["raw"] for entry in parsed["answers"])
+        return outcome
+
+    normalized_turn = _normalize_turn_ref(turn_ref)
+    open_by_id = {
+        str(question.get("id") or ""): question
+        for question in store.open_questions(session_id)
+    }
+    for answer in parsed["answers"]:
+        question_id = answer["questionId"]
+        raw_entry = answer["raw"]
+        ledger_question = open_by_id.get(question_id)
+        if ledger_question is None:
+            # 台账无此问题（未问过/已答/已撤销）：原样留档，由调用方处置。
+            outcome["unmapped"].append(raw_entry)
+            continue
+        asked_in_card = str(ledger_question.get("askedInCard") or "")
+        if asked_in_card and asked_in_card != parsed["cardId"]:
+            outcome["unmapped"].append(raw_entry)
+            continue
+        if answer["skipped"]:
+            # skipped（required=False）：无可落账答案原文，保守保留 asked 交自判。
+            outcome["skipped"].append({"questionId": question_id, "raw": raw_entry})
+            continue
+        try:
+            store.record_answer(
+                session_id,
+                question_id,
+                answer_text=answer["answerText"],
+                turn_ref=normalized_turn,
+                merge=None,
+            )
+        except Exception as exc:  # 逐题 try：单题失败不阻断其余题
+            outcome["failed"].append(
+                {"questionId": question_id, "raw": raw_entry, "error": str(exc)}
+            )
+            continue
+        outcome["applied"].append(
+            {"questionId": question_id, "answerText": answer["answerText"]}
+        )
+        outcome["storeTouched"] = True
+    return outcome
+
+
+# ── IntentAlignmentPacket 组装（§4.2） ────────────────────────────────────
+
+_PACKET_SCHEMA_VERSION = 1
+_CONFIRMED_REQUIREMENTS_LIMIT = 5
+_SETTLED_AS_LIMIT = 80
+
+
+def _point_text(value: Any) -> str:
+    """一句话化：取文本（Mapping 取 text/criterion）并折叠全部空白。"""
+    if isinstance(value, Mapping):
+        value = value.get("text") or value.get("criterion") or ""
+    return " ".join(str(value or "").split()).strip()
+
+
+def _confirmed_requirement_points(snapshot: Mapping[str, Any]) -> list[str]:
+    """四要素要点（≤5 条、一句话化）：goal 在首位，随后 boundaries/constraints/acceptance。"""
+    points: list[str] = []
+    goal_text = _point_text(snapshot.get("goal") or {})
+    if goal_text:
+        points.append(goal_text)
+    for field in ("boundaries", "constraints"):
+        for item in snapshot.get(field) or []:
+            text = _point_text(item)
+            if text:
+                points.append(text)
+    for item in snapshot.get("acceptance") or []:
+        text = _point_text(item.get("criterion") if isinstance(item, Mapping) else item)
+        if text:
+            points.append(text)
+    return points[:_CONFIRMED_REQUIREMENTS_LIMIT]
+
+
+def assemble_packet(snapshot: Any, gate: Any) -> Optional[dict[str, Any]]:
+    """组装 IntentAlignmentPacket（§4.2）。派生投影：纯函数，绝不回写 store。
+
+    snapshot 为 store.get_current 的版本快照投影；None/空 → 返回 None（章节空态）。
+    gate 为 run_rule_prefilter 的信号输出；None/非法时填充保守中性段。
+
+    映射（§4.2）：
+    - confirmedRequirements ← 当前版本四要素要点（≤5 条、一句话化；settledAt 记
+      版本号；evidence（用户原话短引用）由归并路径回填，此处为空串）；
+    - openQuestions ← 台账 asked ∧ 未 answered ∧ 未 withdrawn（impactFork←
+      whyItMatters；options 台账不承载，由发卡侧 packet 刷新回填，此处为空表；
+      askedAt←askedAtTurn，未记为 None）；
+    - clarifyHistory ← 已答条目（settledAs 优先取 changes 中引用该 questionId 的
+      折算结果并截断 80 字符；无折算记录为空串）；
+    - budget.questionsAskedThisSession ← 台账全部条目计数（每条均经
+      record_question_asked 进入台账，按累计提问量计以防追问循环）。
+    """
+    if not isinstance(snapshot, Mapping) or not snapshot.get("version"):
+        return None
+    try:
+        version = int(snapshot["version"])
+    except (TypeError, ValueError):
+        return None
+    ledger = list(snapshot.get("openQuestions") or [])
+
+    change_notes: dict[str, list[str]] = {}
+    for change in snapshot.get("changes") or []:
+        if not isinstance(change, Mapping):
+            continue
+        question_id = str(change.get("questionId") or "")
+        folded = _point_text(change.get("to"))
+        if question_id and folded:
+            change_notes.setdefault(question_id, []).append(folded)
+
+    open_items: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
+    for question in ledger:
+        if not isinstance(question, Mapping):
+            continue
+        question_id = str(question.get("id") or "")
+        status = str(question.get("status") or "")
+        if status == "asked":
+            open_items.append(
+                {
+                    "id": question_id,
+                    "question": str(question.get("question") or ""),
+                    "impactFork": str(question.get("whyItMatters") or ""),
+                    "options": [],
+                    "askedAt": str(question.get("askedAtTurn") or "") or None,
+                }
+            )
+        elif status == "answered":
+            settled = "；".join(change_notes.get(question_id, []))
+            history.append(
+                {
+                    "questionId": question_id,
+                    "question": str(question.get("question") or ""),
+                    "answer": str((question.get("answer") or {}).get("text") or ""),
+                    "settledAs": settled[:_SETTLED_AS_LIMIT],
+                }
+            )
+
+    if isinstance(gate, Mapping):
+        gate_segment: dict[str, Any] = dict(gate)
+    else:
+        gate_segment = {
+            "action": "ask",
+            "confidence": _GATE_CONFIDENCE_UNCERTAIN,
+            "decidedBy": GATE_DECIDED_BY,
+            "reason": "无预筛信号输入，保守交由本轮自判",
+        }
+    return {
+        "schemaVersion": _PACKET_SCHEMA_VERSION,
+        "status": "clarifying" if open_items else "aligned",
+        "confirmedRequirements": [
+            {"point": point, "settledAt": f"v{version}", "evidence": ""}
+            for point in _confirmed_requirement_points(snapshot)
+        ],
+        "openQuestions": open_items,
+        "clarifyHistory": history,
+        "gate": gate_segment,
+        "budget": {
+            "questionsAskedThisSession": len(ledger),
+            "maxQuestionsPerTurn": MAX_QUESTIONS_PER_TURN,
+        },
+    }
