@@ -150,6 +150,7 @@ def test_codebase_map_task_view_reuses_signature_cache(tmp_path, monkeypatch):
     source.write_text('"""demo module"""\n', encoding="utf-8")
     goal = {"value": "demo"}
     collect_calls = 0
+    impact_calls = []
 
     def collect_python_files(project_root):
         nonlocal collect_calls
@@ -157,8 +158,7 @@ def test_codebase_map_task_view_reuses_signature_cache(tmp_path, monkeypatch):
         return [source]
 
     with builder._task_focused_view_cache_lock:
-        builder._task_focused_view_cache["signature"] = None
-        builder._task_focused_view_cache["value"] = ""
+        builder._task_focused_view_cache.clear()
 
     monkeypatch.setattr(builder, "_get_prompt_runtime_context", lambda: (goal["value"], ""))
     monkeypatch.setattr(builder, "_collect_python_files", collect_python_files)
@@ -167,7 +167,10 @@ def test_codebase_map_task_view_reuses_signature_cache(tmp_path, monkeypatch):
         "_scan_file",
         lambda path: {"docstring": "demo module", "imports": [], "line_count": 1},
     )
-    monkeypatch.setattr(builder, "_build_impact_chain_view", lambda *args, **kwargs: "")
+    def impact(*args, **kwargs):
+        impact_calls.append(1)
+        return ""
+    monkeypatch.setattr(builder, "_build_impact_chain_view", impact)
 
     first = builder._build_task_focused_view(tmp_path, "## 子系统概览\n- demo\n")
     second = builder._build_task_focused_view(tmp_path, "## 子系统概览\n- demo\n")
@@ -177,7 +180,9 @@ def test_codebase_map_task_view_reuses_signature_cache(tmp_path, monkeypatch):
     assert "core/demo.py" in first
     assert second == first
     assert third
-    assert collect_calls == 2
+    # Inventory/version checks remain live; unchanged tasks skip derived work.
+    assert collect_calls == 3
+    assert len(impact_calls) == 2
 
 
 def _seed_prompt_runtime_scene(project_root, scene_id="scene-prompt"):

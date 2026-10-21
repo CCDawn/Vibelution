@@ -17,12 +17,13 @@ import re
 import hashlib
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 
 from core.logging import debug as _debug_logger
+from core.prompt_manager.codebase_file_index import file_version, scan_python_file as _scan_file
 
 _SCAN_DIRS = ["tools", "core", "tests", "config"]
 
@@ -38,8 +39,10 @@ _CACHE_TTL_HOURS = 24
 # ── 变更日志（内存中，最多保留 10 条）──────────────────────────────
 _change_log: List[Dict[str, str]] = []
 _change_log_lock = threading.Lock()
-_task_focused_view_cache: Dict[str, object] = {"signature": None, "value": ""}
-_task_focused_view_cache_lock = threading.Lock()
+_TASK_VIEW_CACHE_LIMIT = 32
+_task_focused_view_cache: OrderedDict[tuple, str] = OrderedDict()
+_task_focused_view_cache_lock = threading.RLock()
+_map_build_lock = threading.RLock()
 
 
 def _record_change(filepath: str, action: str = "modified"):
@@ -93,48 +96,6 @@ def _get_codebase_map_path() -> Path:
 # ═══════════════════════════════════════════════════════════════════════════════
 # AST 扫描
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-def _scan_file(file_path: Path) -> Optional[dict]:
-    """Parse a .py file: docstring, project-internal imports, line count, test counts."""
-    try:
-        import ast
-        with open(file_path, "r", encoding="utf-8") as f:
-            source = f.read()
-        tree = ast.parse(source, filename=str(file_path))
-
-        doc = ast.get_docstring(tree)
-        docstring = doc.split("\n")[0].strip() if doc else ""
-
-        _INTERNAL = ("core", "tools", "config")
-        imports: List[str] = []
-        n_classes = 0
-        n_functions = 0
-        n_methods = 0
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, ast.ClassDef):
-                n_classes += 1
-                n_methods += sum(1 for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                n_functions += 1
-            # Collect imports (same pass)
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if any(alias.name.startswith(p) for p in _INTERNAL):
-                        imports.append(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and any(node.module.startswith(p) for p in _INTERNAL):
-                    imports.append(node.module)
-
-        return {
-            "line_count": len(source.splitlines()),
-            "docstring": docstring,
-            "imports": list(dict.fromkeys(imports)),
-            "n_classes": n_classes,
-            "n_tests": n_methods + n_functions,
-        }
-    except Exception:
-        return None
 
 
 def _collect_python_files(project_root: Path) -> List[Path]:
@@ -360,6 +321,13 @@ def _build_test_coverage(files: List[Path], project_root: Path) -> str:
 
 
 def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool = False) -> str:
+    """Build the persisted map while serializing concurrent rebuilds."""
+    # Share cold rebuild work across readers and the background updater.
+    with _map_build_lock:
+        return _scan_and_build_codebase_map(project_root, force)
+
+
+def _scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool = False) -> str:
     """扫描代码库，生成/更新 CODEBASE_MAP.md。
 
     Args:
@@ -492,7 +460,7 @@ def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool
             # 深层子目录（>1 层）摘要化：只显示文件数量和名称
             if "/" in subdir:
                 file_names = ", ".join(f.name for f in sub_files)
-                total_lines = sum(_scan_file(f).get("line_count", 0) if _scan_file(f) else 0 for f in sub_files)
+                total_lines = sum((_scan_file(f) or {}).get("line_count", 0) for f in sub_files)
                 lines.append(f"### 📂 {sub_label}/ — {len(sub_files)} 文件, {total_lines} 行")
                 lines.append(f"> `{file_names}`")
                 lines.append("")
@@ -908,6 +876,17 @@ def _build_task_focused_view(
     current_goal: str | None = None,
     state_memory: str | None = None,
 ) -> str:
+    with _task_focused_view_cache_lock:
+        return _render_task_focused_view(project_root, full_content, current_goal=current_goal, state_memory=state_memory)
+
+
+def _render_task_focused_view(
+    project_root: Path,
+    full_content: str,
+    *,
+    current_goal: str | None = None,
+    state_memory: str | None = None,
+) -> str:
     """构建面向当前任务的局部导航视图。"""
     fallback_goal = ""
     fallback_state_memory = ""
@@ -937,9 +916,12 @@ def _build_task_focused_view(
         if getattr(change, "path", None):
             hot_paths.add(change.path)
 
+    files = _collect_python_files(project_root)
+    versions = tuple(sorted((str(path), file_version(path)) for path in files))
     signature = (
         str(project_root.resolve()),
         hashlib.sha1(full_content.encode("utf-8", errors="ignore")).hexdigest(),
+        hashlib.sha256(repr(versions).encode("utf-8")).digest(),
         goal,
         state_memory_text,
         tuple(str(path) for path in (attention.get("modified_paths") or [])),
@@ -956,10 +938,10 @@ def _build_task_focused_view(
         ),
     )
     with _task_focused_view_cache_lock:
-        if _task_focused_view_cache.get("signature") == signature:
-            return str(_task_focused_view_cache.get("value") or "")
+        if signature in _task_focused_view_cache:
+            _task_focused_view_cache.move_to_end(signature)
+            return _task_focused_view_cache[signature]
 
-    files = _collect_python_files(project_root)
     context_text = "\n".join(
         part for part in [goal, state_memory_text] if part
     ).strip()
@@ -1019,12 +1001,25 @@ def _build_task_focused_view(
     sections.append("\n".join(compact_sections).strip())
     value = "\n\n".join(section for section in sections if section).strip()
     with _task_focused_view_cache_lock:
-        _task_focused_view_cache["signature"] = signature
-        _task_focused_view_cache["value"] = value
+        if versions == tuple(sorted((str(path), file_version(path)) for path in files)):
+            _task_focused_view_cache[signature] = value
+            while len(_task_focused_view_cache) > _TASK_VIEW_CACHE_LIMIT:
+                _task_focused_view_cache.popitem(last=False)
     return value
 
 
 def get_codebase_map(
+    force_refresh: bool = False,
+    *,
+    current_goal: str | None = None,
+    state_memory: str | None = None,
+) -> str:
+    """Return the current map and task view, coalescing concurrent cold reads."""
+    with _map_build_lock:
+        return _get_codebase_map(force_refresh, current_goal=current_goal, state_memory=state_memory)
+
+
+def _get_codebase_map(
     force_refresh: bool = False,
     *,
     current_goal: str | None = None,
