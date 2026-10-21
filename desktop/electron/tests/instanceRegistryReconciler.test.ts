@@ -174,6 +174,8 @@ describe("instanceRegistryReconciler", () => {
       generation: 5
     });
 
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const beforeSecond = readFileSync(registryPath, "utf8");
     const second = await reconciler.reconcile({
       branchInstances,
       registryPath,
@@ -181,6 +183,7 @@ describe("instanceRegistryReconciler", () => {
       pythonPath: "python"
     });
     expect(second.adopted).toEqual([]);
+    expect(readFileSync(registryPath, "utf8")).toBe(beforeSecond);
     entry = readRegistryFile(registryPath).instances["worktree:orphan"];
     expect(entry.generation).toBe(5);
     expect(identityCalls).toEqual([4242]);
