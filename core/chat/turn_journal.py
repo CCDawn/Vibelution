@@ -2346,7 +2346,8 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
                     },
                 }
             )
-    return _dedupe_adjacent_messages(messages)
+    from .message_identity import dedupe_messages_by_identity
+    return dedupe_messages_by_identity(messages)
 
 
 def replay_visible_messages(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
