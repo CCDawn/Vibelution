@@ -10,6 +10,7 @@ import {
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { conversationStreamingFrameIdentity } from "./conversationStreamingMetrics";
 
 import type {
   ConversationMessage,
@@ -439,7 +440,9 @@ export const ConversationView = React.memo(function ConversationView({
   autoScrollToLatestRef.current = autoScrollToLatest;
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
-  const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
+  const streamingPaintMetricsRef = useRef({
+    streamingMessageCount: 0, renderedTextLength: 0, ...conversationStreamingFrameIdentity(undefined),
+  });
   const [copiedAnswerMessageId, setCopiedAnswerMessageId] = useState("");
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
   // In-chat SFT curation: server map + optimistic overlay for instant button
@@ -863,6 +866,7 @@ export const ConversationView = React.memo(function ConversationView({
     [agentRenderStatesByMessageId, showMentalSnapshots, streamingTimelineMessages],
   );
   streamingPaintMetricsRef.current = {
+    ...conversationStreamingFrameIdentity(activeTurnMessage),
     streamingMessageCount: streamingTimelineMessages.length,
     renderedTextLength: streamingTimelineMessages.reduce(
       (total, message) => total + (agentRenderStatesByMessageId.get(message.id)?.renderedTextLength ?? 0),
@@ -1073,6 +1077,9 @@ export const ConversationView = React.memo(function ConversationView({
     const metrics = streamingPaintMetricsRef.current;
     onStreamingFramePaint({
       sessionId,
+      turnId: metrics.turnId,
+      ledgerSeq: metrics.ledgerSeq,
+      assistantDeltaAppliedAtMs: metrics.assistantDeltaAppliedAtMs,
       paintedAtMs: conversationPerformanceNowMs(),
       streamingMessageCount: metrics.streamingMessageCount,
       renderedTextLength: metrics.renderedTextLength,
