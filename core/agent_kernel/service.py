@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -22,11 +24,26 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 from .source_authority import attach_source_ref, projection_edit_contract, source_ref
 from .store import KernelJsonlStore, utc_now_iso
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_SCOPED_PROJECT_ROOT: ContextVar[Path | None] = ContextVar("kernel_project_root", default=None)
 _KERNEL_LOCK = threading.RLock()
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _TERMINAL_TASK_STATUSES = {"succeeded", "failed", "cancelled", "blocked"}
+
+
+def _active_project_root() -> Path:
+    scoped = _SCOPED_PROJECT_ROOT.get()
+    return scoped if scoped is not None else Path(PROJECT_ROOT).resolve()
+
+
+@contextmanager
+def scoped_project_root(project_root: Path):
+    """Bind one Kernel operation without changing shared service defaults."""
+    token = _SCOPED_PROJECT_ROOT.set(Path(project_root).resolve())
+    try:
+        yield
+    finally:
+        _SCOPED_PROJECT_ROOT.reset(token)
 
 
 class KernelError(ValueError):
@@ -266,8 +283,12 @@ def list_kernel_tasks(*, status: str = "", limit: int = 50) -> dict[str, Any]:
 
 
 def list_agent_inbox(agent_id: str, *, status: str = "pending", limit: int = 20) -> dict[str, Any]:
+    with agent_directory_service.scoped_project_root(_active_project_root()):
+        return _list_agent_inbox(agent_id, status=status, limit=limit)
+
+
+def _list_agent_inbox(agent_id: str, *, status: str, limit: int) -> dict[str, Any]:
     normalized_agent_id = _required_id(agent_id, label="agent id")
-    _ensure_agent_directory_root()
     if not agent_directory_service.get_agent(normalized_agent_id):
         raise KernelNotFoundError(f"Agent not found: {agent_id}")
     messages = agent_directory_service.list_agent_inbox_messages_for_agent(
@@ -291,7 +312,17 @@ def ack_agent_inbox_message(
     consumed_by_session_id: str = "",
     consumed_by_turn_id: str = "",
 ) -> dict[str, Any]:
-    _ensure_agent_directory_root()
+    with agent_directory_service.scoped_project_root(_active_project_root()):
+        return _ack_agent_inbox_message(
+            agent_id, event_id,
+            consumed_by_session_id=consumed_by_session_id,
+            consumed_by_turn_id=consumed_by_turn_id,
+        )
+
+
+def _ack_agent_inbox_message(
+    agent_id: str, event_id: str, *, consumed_by_session_id: str, consumed_by_turn_id: str,
+) -> dict[str, Any]:
     try:
         message = agent_directory_service.consume_agent_inbox_message(
             _required_id(agent_id, label="agent id"),
@@ -317,7 +348,7 @@ def _store() -> KernelJsonlStore:
 
 def _kernel_root() -> Path:
     return developer_sandbox.route_workspace_path(
-        PROJECT_ROOT,
+        _active_project_root(),
         "agent_kernel",
         "agent_kernel",
         intent="state",
@@ -527,8 +558,11 @@ def _persist_execution_transition(
 
 
 def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
-    _ensure_agent_directory_root()
-    _ensure_session_root()
+    with agent_directory_service.scoped_project_root(_active_project_root()):
+        return _deliver_event_to_recipients_in_project(event, task)
+
+
+def _deliver_event_to_recipients_in_project(event: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
     semantic = event.get("semanticPayload") if isinstance(event.get("semanticPayload"), dict) else {}
     payload = semantic.get("payload") if isinstance(semantic.get("payload"), dict) else {}
     content = str(payload.get("content") or payload.get("message") or task.get("goal") or "").strip()
@@ -575,6 +609,10 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
             },
         }
         try:
+            # Native Session has no project scope. Reject before persisting a
+            # summary-only Inbox row or dispatching into a different project.
+            if wake_target or session_ssot:
+                _ensure_session_root()
             shared_message_id = str(
                 _metadata_text(inbox_metadata, "sourceMessageId")
                 or _metadata_text(inbox_metadata, "agentMessageToolSourceId")
@@ -723,6 +761,7 @@ def _append_collab_body_to_session(
     if not normalized_session_id:
         return {"historyStatus": "rejected", "historyMessageId": ""}
     try:
+        _ensure_session_root()
         turn_id = f"collab-{message_id or utc_now_iso()}"
         session_service._append_session_conversation_event(  # noqa: SLF001 — kernel landing path
             normalized_session_id,
@@ -1195,14 +1234,9 @@ def _safe_external_id(value: Any, *, prefix: str) -> str:
     return cleaned
 
 
-def _ensure_agent_directory_root() -> None:
-    if getattr(agent_directory_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
-        agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
-
-
 def _ensure_session_root() -> None:
-    if getattr(session_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
-        session_service.PROJECT_ROOT = PROJECT_ROOT
+    if Path(session_service.PROJECT_ROOT).resolve() != _active_project_root():
+        raise KernelValidationError("Native Session project root does not match Kernel project root.")
 
 
 def _new_id(prefix: str) -> str:

@@ -175,18 +175,24 @@ def list_personal_assistant_dispatches(*, limit: int = DEFAULT_LIMIT) -> dict[st
         reply_to = _text(_metadata(row), "replyToMessageId")
         thread_id = _text(row, "threadId")
         target_dispatch = None
-        for dispatch_row in dispatch_rows:
-            if reply_to and reply_to == (_text(dispatch_row, "messageId") or _text(dispatch_row, "eventId")):
-                target_dispatch = dispatch_row
-                break
-            if (
-                thread_id
-                and thread_id == _text(dispatch_row, "threadId")
-                and source_agent_id
+        if reply_to:
+            for dispatch_row in dispatch_rows:
+                if (
+                    reply_to == (_text(dispatch_row, "messageId") or _text(dispatch_row, "eventId"))
+                    and source_agent_id
+                    and source_agent_id == _text(dispatch_row, "targetAgentId")
+                ):
+                    target_dispatch = dispatch_row
+                    break
+        elif thread_id and source_agent_id:
+            thread_candidates = [
+                dispatch_row
+                for dispatch_row in dispatch_rows
+                if thread_id == _text(dispatch_row, "threadId")
                 and source_agent_id == _text(dispatch_row, "targetAgentId")
-            ):
-                target_dispatch = dispatch_row
-                break
+            ]
+            if len(thread_candidates) == 1:
+                target_dispatch = thread_candidates[0]
         if target_dispatch is not None:
             receipts_by_message_id.setdefault(
                 _text(target_dispatch, "messageId") or _text(target_dispatch, "eventId"), []
