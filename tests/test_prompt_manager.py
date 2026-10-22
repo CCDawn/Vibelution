@@ -1902,3 +1902,110 @@ class TestStableSectionRenderCacheUnit:
         assert hit_c and value_c == "c"
         stats = cache.stats()
         assert stats["entries"] == 2 and stats["capacity"] == 2
+
+
+class TestSourceFingerprintMemo:
+    """_source_fingerprint_digest 身份备忘录：命中字节等价、变异失效、LRU、monkeypatch 敏感"""
+
+    @staticmethod
+    def _full_digest(source):
+        from core.prompt_manager import prompt_manager as pm_mod
+
+        return pm_mod._fingerprint_digest(pm_mod._project_cache_input(source))
+
+    def test_same_object_hits_with_byte_identical_digest(self):
+        from core.prompt_manager.prompt_manager import _SourceFingerprintMemo
+
+        memo = _SourceFingerprintMemo()
+        packet = _make_stable_goal_packet("同对象命中")
+        first = memo.digest_for(packet)
+        assert first == self._full_digest(packet)
+        second = memo.digest_for(packet)
+        assert second == first, "同对象命中返回的 digest 必须与全量计算逐位一致"
+        stats = memo.stats()
+        assert stats["hits"] == 1 and stats["misses"] == 1
+
+    def test_replaced_object_misses_with_new_digest(self):
+        import dataclasses
+
+        from core.prompt_manager.prompt_manager import _SourceFingerprintMemo
+
+        memo = _SourceFingerprintMemo()
+        packet_a = _make_stable_goal_packet("目标甲")
+        packet_b = dataclasses.replace(packet_a, goal="目标乙")
+        digest_a = memo.digest_for(packet_a)
+        digest_b = memo.digest_for(packet_b)
+        assert digest_a == self._full_digest(packet_a)
+        assert digest_b == self._full_digest(packet_b)
+        assert digest_b != digest_a, "内容变化的 packet 必须产出新指纹"
+        stats = memo.stats()
+        assert stats["misses"] == 2 and stats["hits"] == 0
+
+    def test_mutable_graph_never_serves_stale_digest(self):
+        from core.prompt_manager.prompt_manager import _SourceFingerprintMemo
+
+        memo = _SourceFingerprintMemo()
+        packet = {"goal": "v1", "items": ["a", "b"]}
+        first = memo.digest_for(packet)
+        assert first == self._full_digest(packet)
+        packet["goal"] = "v2"  # 原地变异
+        second = memo.digest_for(packet)
+        assert second == self._full_digest(packet), "变异后必须反映新内容"
+        assert second != first
+        assert memo.stats()["hits"] == 0, "可变图不入身份备忘录，不允许 stale 命中"
+
+    def test_lru_capacity_eviction_recomputes_same_value(self):
+        from core.prompt_manager.prompt_manager import _SourceFingerprintMemo
+
+        memo = _SourceFingerprintMemo(capacity=1)
+        packet_a = _make_stable_goal_packet("甲")
+        packet_b = _make_stable_goal_packet("乙")
+        digest_a = memo.digest_for(packet_a)
+        memo.digest_for(packet_b)  # 淘汰 packet_a
+        assert memo.stats()["entries"] == 1
+        digest_a_again = memo.digest_for(packet_a)  # 被淘汰 → 重算
+        assert digest_a_again == digest_a, "淘汰重算必须与原值逐位一致"
+        stats = memo.stats()
+        assert stats["misses"] == 3 and stats["hits"] == 0
+
+    def test_monkeypatched_digest_fn_bypasses_memo(self, monkeypatch):
+        from core.prompt_manager import prompt_manager as pm_mod
+
+        memo = pm_mod._SourceFingerprintMemo()
+        packet = _make_stable_goal_packet("patch 敏感")
+        baseline = memo.digest_for(packet)
+        assert baseline == self._full_digest(packet)
+
+        monkeypatch.setattr(
+            pm_mod, "_fingerprint_digest", lambda projection: "patched-digest"
+        )
+        assert memo.digest_for(packet) == "patched-digest", (
+            "callable 被替换后不得用旧值命中"
+        )
+        monkeypatch.undo()
+        assert memo.digest_for(packet) == self._full_digest(packet)
+
+    def test_unprojectable_source_stays_none_and_not_cached(self):
+        from core.prompt_manager.prompt_manager import _SourceFingerprintMemo
+
+        memo = _SourceFingerprintMemo()
+        assert memo.digest_for(object()) is None
+        assert memo.digest_for(object()) is None
+        assert memo.digest_for(None) == self._full_digest(None)
+        assert memo.stats()["entries"] == 1  # None 可投影且身份稳定
+
+    def test_stable_section_fingerprints_byte_equivalent_via_memo(self):
+        from core.prompt_manager import prompt_manager as pm_mod
+
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("端到端等价"))
+        fingerprints = pm._stable_section_fingerprints()
+        packet = pm.get_runtime_goal_packet()
+        assert fingerprints["RUNTIME_GOAL"] == (
+            "v1",
+            pm._registry_generation,
+            self._full_digest(packet),
+        )
+        again = pm._stable_section_fingerprints()
+        assert again == fingerprints, "命中路径指纹必须与首算逐位一致"
+        assert pm_mod._FINGERPRINT_MEMO.stats()["hits"] >= 1

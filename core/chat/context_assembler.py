@@ -1046,17 +1046,10 @@ def assemble_conversation_context(
                 cache_policy="dynamic",
             )
         )
-    memoized_dynamic_hash = _ASSEMBLY_MEMO.lookup(
-        ("dynamic_context_hash", session_id),
+    memoized_dynamic_hash = _dynamic_context_hash_memoized(
         history_messages,
+        session_id=session_id,
     )
-    if memoized_dynamic_hash is _MISS:
-        memoized_dynamic_hash = _hash_messages(history_messages)
-        _ASSEMBLY_MEMO.store(
-            ("dynamic_context_hash", session_id),
-            history_messages,
-            memoized_dynamic_hash,
-        )
     return ContextAssemblyResult(
         history_messages=history_messages,
         events=events,
@@ -1528,23 +1521,113 @@ def _message_chars(messages: Iterable[dict[str, Any]]) -> int:
     return total
 
 
+def _message_hash_parts(message: dict[str, Any]) -> list[str]:
+    parts: list[str] = []
+    parts.append(str(message.get("role") or ""))
+    parts.append(str(message.get("content") or ""))
+    parts.append(str(message.get("tool_call_id") or message.get("toolCallId") or ""))
+    parts.append(str(message.get("metadata") or ""))
+    for tool in list(message.get("toolCalls") or message.get("tool_calls") or message.get("tools") or []):
+        if isinstance(tool, dict):
+            function_block = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+            parts.append(str(tool.get("id") or tool.get("tool_call_id") or tool.get("toolCallId") or ""))
+            parts.append(str(tool.get("name") or tool.get("toolName") or ""))
+            parts.append(str(function_block.get("name") or ""))
+            parts.append(str(tool.get("arguments") or tool.get("args") or function_block.get("arguments") or ""))
+            parts.append(str(tool.get("status") or tool.get("semanticStatus") or ""))
+            parts.append(str(tool.get("result") or tool.get("resultPreview") or tool.get("error") or ""))
+    return parts
+
+
+def _hash_parts_text(messages: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for message in messages:
+        parts.extend(_message_hash_parts(message))
+    return "\n".join(parts)
+
+
 def _hash_messages(messages: Iterable[dict[str, Any]]) -> str:
-    parts = []
-    for message in list(messages or []):
-        parts.append(str(message.get("role") or ""))
-        parts.append(str(message.get("content") or ""))
-        parts.append(str(message.get("tool_call_id") or message.get("toolCallId") or ""))
-        parts.append(str(message.get("metadata") or ""))
-        for tool in list(message.get("toolCalls") or message.get("tool_calls") or message.get("tools") or []):
-            if isinstance(tool, dict):
-                function_block = tool.get("function") if isinstance(tool.get("function"), dict) else {}
-                parts.append(str(tool.get("id") or tool.get("tool_call_id") or tool.get("toolCallId") or ""))
-                parts.append(str(tool.get("name") or tool.get("toolName") or ""))
-                parts.append(str(function_block.get("name") or ""))
-                parts.append(str(tool.get("arguments") or tool.get("args") or function_block.get("arguments") or ""))
-                parts.append(str(tool.get("status") or tool.get("semanticStatus") or ""))
-                parts.append(str(tool.get("result") or tool.get("resultPreview") or tool.get("error") or ""))
-    return _hash_text("\n".join(parts))
+    return _hash_text(_hash_parts_text(list(messages or [])))
+
+
+# 追加前缀备忘录暂存的拼接文本上限（字符）：超过则只记函数身份、不记文本，
+# 追加路径退回全量重算，防止超大历史把 LRU 条目撑成内存长尾。
+_DYNAMIC_HASH_JOINED_CHAR_LIMIT = 512_000
+
+
+def _dynamic_context_hash_memoized(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str,
+) -> str:
+    """``dynamic_context_hash`` 的身份 + 追加前缀备忘录。
+
+    复用 ``_IdentityListMemo`` 的身份检查约定（``_ASSEMBLY_MEMO`` 同例）：
+
+    - 精确命中=逐元素 ``is`` 同一（原 lookup 语义）；
+    - 追加命中=新列表在共享前缀上逐元素 ``is`` 延伸：哈希输入文本是逐消息
+      部件的纯拼接，前缀部件不变，故 ``stored_joined + "\\n" + tail_joined``
+      与全量 join 逐字节相同，digest 字节等价由构造保证；条目强引用全部
+      消息对象，杜绝 id 复用碰撞；
+    - 对 monkeypatch 敏感：条目记录产出 digest 时的 ``_hash_text`` /
+      ``_hash_messages`` 函数身份，任一被替换即 miss 重算；
+    - 任何不匹配（缩短、重排、消息对象换新）都退回全量重算，只能拿重算
+      换重算。
+    """
+
+    items = list(messages or [])
+    scope = ("dynamic_context_hash", session_id)
+    cur_hash_fn = globals().get("_hash_text")
+    cur_messages_fn = globals().get("_hash_messages")
+    entry = _ASSEMBLY_MEMO.entry(scope)
+    if (
+        entry is not None
+        and cur_hash_fn is not None
+        and cur_messages_fn is not None
+        and entry.extra.get("hash_fn") is cur_hash_fn
+        and entry.extra.get("messages_fn") is cur_messages_fn
+    ):
+        stored = entry.items
+        if len(items) == len(stored) and all(
+            items[index] is kept for index, kept in enumerate(stored)
+        ):
+            return entry.value
+        stored_joined = entry.extra.get("joined")
+        if (
+            len(items) > len(stored)
+            and isinstance(stored_joined, str)
+            and all(items[index] is kept for index, kept in enumerate(stored))
+        ):
+            tail_parts: list[str] = []
+            for message in items[len(stored):]:
+                tail_parts.extend(_message_hash_parts(message))
+            tail_text = "\n".join(tail_parts)
+            joined = f"{stored_joined}\n{tail_text}" if stored_joined else tail_text
+            digest = cur_hash_fn(joined)
+            _ASSEMBLY_MEMO.store(
+                scope,
+                items,
+                digest,
+                extra={
+                    "joined": joined if len(joined) <= _DYNAMIC_HASH_JOINED_CHAR_LIMIT else None,
+                    "hash_fn": cur_hash_fn,
+                    "messages_fn": cur_messages_fn,
+                },
+            )
+            return digest
+    joined = _hash_parts_text(items)
+    digest = _hash_text(joined) if cur_hash_fn is not None else _hash_messages(items)
+    _ASSEMBLY_MEMO.store(
+        scope,
+        items,
+        digest,
+        extra={
+            "joined": joined if len(joined) <= _DYNAMIC_HASH_JOINED_CHAR_LIMIT else None,
+            "hash_fn": cur_hash_fn,
+            "messages_fn": cur_messages_fn,
+        },
+    )
+    return digest
 
 
 def _hash_text(text: str) -> str:
