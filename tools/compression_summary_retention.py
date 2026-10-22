@@ -16,6 +16,11 @@ _REMEMBER = re.compile(
     re.IGNORECASE,
 )
 _SENTENCES = re.compile(r"(?<=[。！？!?;；])|\n|(?<=\.)[ \t]+")
+_USER_CONSTRAINT = re.compile(
+    r"约束|必须|不要|不得|禁止|不允许|只能|仅(?:限|允许|回答|输出|使用)|只(?:回答|输出|使用|读)|"
+    r"只作为(?:历史)?素材|仅供参考|仅作(?:历史)?素材|"
+    r"(?<![\w-])(?:must|never|only)(?![\w-])|\bdo\s+not\b", re.IGNORECASE,
+)
 
 
 def explicit_user_facts(text: str, *, pattern: re.Pattern[str] | None = None) -> list[str]:
@@ -64,9 +69,36 @@ def _prior_facts_and_body(text: str) -> tuple[list[str], str]:
     return values, body
 
 
+def user_preserved_statements(text: str) -> list[str]:
+    """Source-bound memory requests and constraints, excluding document blocks."""
+    direct, fenced, keep_value, value_intro = [], False, False, False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(">") and not value_intro:
+            continue
+        if stripped.startswith("```"):
+            if not fenced:
+                keep_value = value_intro
+            if keep_value:
+                direct.append(line)
+            fenced = not fenced
+            if not fenced:
+                value_intro = False
+            continue
+        if fenced:
+            if keep_value:
+                direct.append(line)
+            continue
+        direct.append(line)
+        if stripped:
+            value_intro = bool(_REMEMBER.search(line) or _USER_CONSTRAINT.search(line)) and stripped.endswith((":", "："))
+    text = "\n".join(direct)
+    return list(dict.fromkeys([*explicit_user_facts(text), *explicit_user_facts(text, pattern=_USER_CONSTRAINT)]))
+
+
 def retained_user_facts(user_texts: Iterable[str], prior_summaries: Iterable[str]) -> list[str]:
     facts = [fact for prior in prior_summaries for fact in _prior_facts_and_body(prior)[0]]
-    facts.extend(fact for text in user_texts for fact in explicit_user_facts(text))
+    facts.extend(fact for text in user_texts for fact in user_preserved_statements(text))
     return list(dict.fromkeys(facts))
 
 
