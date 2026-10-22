@@ -73,7 +73,7 @@ import {
 } from "./notifications/humanAttentionNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
-import { planProjectSlot, projectSlotWindowAction } from "./protocol/applyProjectSlot.js";
+import { PROJECT_SLOT_LIFECYCLE_COMMANDS, planProjectSlot, projectSlotWindowAction } from "./protocol/applyProjectSlot.js";
 import {
   classifyTrayBranchInstances,
   fetchLauncherBranchInstances,
@@ -133,7 +133,7 @@ import {
   type ServingProcessIdentity
 } from "./process/servingVersion.js";
 import { recordAdmissionOutcome } from "./lifecycle/instanceAdmissionStore.js";
-import { resolveConfigHome, resolveDataHomeForProject, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
+import { normalizeInstanceKey, resolveConfigHome, resolveDataHomeForProject, resolveRuntimeManagerDir } from "./lifecycle/projectStoragePaths.js";
 import {
   claimStopIfGeneration,
   instancesRegistryPath,
@@ -5159,6 +5159,22 @@ async function applyPendingProjectSlot(
       return;
     }
     pendingProjectRoot = "";
+    const requested = lifecycleCommand.trim().toLowerCase();
+    if (!hiddenPresentation && PROJECT_SLOT_LIFECYCLE_COMMANDS.has(requested)
+      && normalizeInstanceKey(wanted) === normalizeInstanceKey(createDesktopPathsForApp().workspaceRoot)) {
+      // The shell already owns this exact project. Its lifecycle verifies the
+      // backend and opens the window; unrelated inventory cannot admit it.
+      const result = await orchestrateLauncherLifecycle(requested, {
+        schemaVersion: 1,
+        path: "project-slot"
+      }, provenance);
+      if (!result.accepted) {
+        receipt.failed(result.code || "lifecycle_rejected", result.message || "Launcher 拒绝了生命周期请求。");
+        return;
+      }
+      receipt.dispatched();
+      return;
+    }
     await launcherStateStore.refresh("project_slot");
     let items = parseBranchInstanceRecords(launcherStateStore.projectBranchInstances());
     const needsLookup = () => {
@@ -5295,20 +5311,7 @@ app.whenReady()
     resolveLauncherControlPlaneReady?.();
     resolveLauncherControlPlaneReady = null;
     updateLauncherWindowTruth();
-    startLauncherStateFileHints(paths);
     startDeferredRestartFulfillment();
-    if (!app.isPackaged) {
-      // Follow active.json switches while the shell stays resident so an
-      // already-open launcher window reloads onto the fresh release; the
-      // protocol layer alone only helps the next navigation.
-      launcherActiveReleaseWatcher = startLauncherActiveReleaseWatcher({
-        buildsRoot: join(paths.workspaceRoot, "web", ".vibelution-builds"),
-        onChange: () => {
-          windowProvider?.refreshLauncherIfReleaseChanged();
-        }
-      });
-    }
-    scheduleLauncherStatusCliRefresh();
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {
         void windowProvider?.openLauncher().catch((error: unknown) => {
@@ -5409,7 +5412,7 @@ app.whenReady()
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
         markWorkbenchOpenRequested();
-        void startOrFocusWorkbenchFromProductEntryOnShell().catch((error: unknown) => {
+        await startOrFocusWorkbenchFromProductEntryOnShell().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         });
       } else {
@@ -5429,6 +5432,26 @@ app.whenReady()
         })
       );
     }
+  })
+  .finally(() => {
+    if (launcherBootstrap === null || windowProvider === null || shutdownApproved) {
+      return;
+    }
+    // Startup state writes must not launch full Git/status scans alongside
+    // backend admission. One fresh read also covers hints missed meanwhile.
+    const paths = createDesktopPathsForApp();
+    startLauncherStateFileHints(paths);
+    if (!app.isPackaged) {
+      // Install after hints: their reset also disposes this release watcher.
+      launcherActiveReleaseWatcher = startLauncherActiveReleaseWatcher({
+        buildsRoot: join(paths.workspaceRoot, "web", ".vibelution-builds"),
+        onChange: () => {
+          windowProvider?.refreshLauncherIfReleaseChanged();
+        }
+      });
+      windowProvider.refreshLauncherIfReleaseChanged();
+    }
+    scheduleLauncherStatusCliRefresh();
   })
   .catch(async (error: unknown) => {
     await drainTelemetryWithDeadline(() =>
