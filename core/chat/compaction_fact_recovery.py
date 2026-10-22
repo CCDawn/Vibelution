@@ -7,50 +7,20 @@ creates a second transcript, and cannot derive user facts from model/tool text.
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import replace
 
 from tools.compression_summary_retention import (
-    compose_retained_summary, explicit_user_facts, retained_user_facts,
+    compose_retained_summary, retained_user_facts, user_preserved_statements,
 )
 
 from .turn_journal import EVENT_COMPACTION_CHECKPOINT, EVENT_USER_MESSAGE, TurnJournalEvent
 
 MAX_RECOVERED_FACT_CHARS = 8_000
-_CONSTRAINT = re.compile(
-    r"约束|必须|不要|不得|禁止|不允许|只能|仅(?:限|允许|回答|输出|使用)|只(?:回答|输出|使用|读)|"
-    r"只作为(?:历史)?素材|仅供参考|仅作(?:历史)?素材|"
-    r"(?<![\w-])(?:must|never|only)(?![\w-])|\bdo\s+not\b", re.IGNORECASE,
-)
 
 
 def recoverable_user_statements(text: str) -> list[str]:
     """Keep explicit memory requests and constraints as quoted historical data."""
-    direct, fenced, keep_value, memory_intro = [], False, False, False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(">") and not memory_intro:
-            continue
-        if stripped.startswith("```"):
-            if not fenced:
-                keep_value = memory_intro
-            if keep_value:
-                direct.append(line)
-            fenced = not fenced
-            if not fenced:
-                memory_intro = False
-            continue
-        if fenced:
-            if keep_value:
-                direct.append(line)
-            continue
-        direct.append(line)
-        if stripped:
-            memory_intro = bool(explicit_user_facts(line) or _CONSTRAINT.search(line)) and stripped.endswith((":", "："))
-    text = "\n".join(direct)
-    statements = explicit_user_facts(text)
-    statements.extend(explicit_user_facts(text, pattern=_CONSTRAINT))
-    return list(dict.fromkeys(statements))
+    return user_preserved_statements(text)
 
 
 def _ordinary_source(event: TurnJournalEvent) -> bool:

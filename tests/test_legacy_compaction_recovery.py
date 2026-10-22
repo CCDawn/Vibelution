@@ -118,6 +118,21 @@ def test_recovery_overflow_retains_original_user_history(tmp_path):
     assert any(m.get("role") == "user" and m.get("content") == user.payload["content"] for m in replay)
 
 
+def test_overflow_constraint_is_not_lost_by_following_actual_compression(tmp_path):
+    from core.orchestration.turn_message_assembly import langchain_messages_from_conversation_layer
+    from tools.token_manager import EnhancedTokenCompressor
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    user, _ = _legacy(tmp_path, text="Do not modify this exact path: " + "LONG-CONSTRAINT-CANARY" * 500)
+    replay = conversation_model_messages_from_events(load_conversation_events(tmp_path, "legacy"))
+    assert any(m.get("content") == user.payload["content"] for m in replay)
+    messages = [SystemMessage(content="policy"), *langchain_messages_from_conversation_layer(replay), AIMessage(content="work done"), HumanMessage(content="Please report deployment status")]
+    output = EnhancedTokenCompressor().compress(messages, max_chars=500, keep_count=0, preserve_errors=False, use_llm_summary=False)
+    assert output.retention_refusal_reason == "required_user_facts_exceed_summary_budget"
+    assert output.messages == messages
+    assert not output.summary
+
+
 def test_formal_scope_and_cross_scope_sources_are_unchanged(tmp_path):
     user, cp = _legacy(tmp_path)
     events = load_conversation_events(tmp_path, "legacy")
