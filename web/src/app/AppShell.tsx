@@ -1156,8 +1156,10 @@ export function AppShell() {
     }
   }, [backendHealthQuery.data, configQuery.data]);
   // This is a document-start latch: later route switches do not stop background owners.
+  // The root still needs HomeRedirect to choose its route; it cannot release
+  // this latch before the chat route gets a chance to report startup readiness.
   useEffect(() => {
-    if (shellStartupDataReady && (location.pathname !== "/chat" || routeStartupSettled)) {
+    if (shellStartupDataReady && location.pathname !== "/" && (location.pathname !== "/chat" || routeStartupSettled)) {
       setShellBackgroundReady(true);
     }
   }, [location.pathname, routeStartupSettled, shellStartupDataReady]);

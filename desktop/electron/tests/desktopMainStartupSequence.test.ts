@@ -1,10 +1,41 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
+import { ScriptTarget, transpileModule } from "typescript";
+import { describe, expect, it, vi } from "vitest";
+import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
+import { shouldDeferWorkbenchOpenUntilLifecycleStart } from "../src/process/desktopShellFreshness.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
 describe("Electron main startup sequence", () => {
+  it.each([
+    { argv: ["--open-workbench", "open"] },
+    { argv: ["--open-workbench"] },
+    { argv: ["open"] },
+  ])("dispatches one startup open for argv $argv", async ({ argv }) => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const begin = source.indexOf("const firstLifecycle = String(desktopCliArgs.lifecycleCommand");
+    const end = source.indexOf("// T6:", begin);
+    expect(begin).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(begin);
+    const desktopCliArgs = parseDesktopCliArgs(argv);
+    const open = vi.fn(async () => undefined);
+    const sandbox = {
+      desktopCliArgs,
+      pendingOpenWorkbenchRequest: desktopCliArgs.openWorkbench,
+      pendingProjectRoot: "",
+      windowProvider: {},
+      shouldDeferWorkbenchOpenUntilLifecycleStart,
+      startOrFocusWorkbenchFromProductEntryOnShell: open,
+      markWorkbenchOpenRequested: vi.fn(),
+    };
+    await runInNewContext(transpileModule(`(async () => { ${source.slice(begin, end)} })()`, {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText, sandbox);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
   it("uses launch readiness before opening windows and leaves full freshness on the resident watcher", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const startup = source.slice(source.indexOf("app.whenReady()"));
