@@ -9861,3 +9861,521 @@ def test_auto_rejected_convergence_keeps_claim_gate_reason(monkeypatch):
     assert state.convergence.accepted is False
     assert state.convergence.claimBeliefGate["reason"] == "candidate_evidence_gap"
     assert not any(a.kind == "command" and a.command == "create_formal_run" for a in state.allowedActions)
+
+
+# ---------------------------------------------------------------------------
+# Full-experiment bridge: stage-one completion -> full 3.0.0 run offer
+
+
+def _stage_one_workflow_version_id() -> str:
+    from core.research.workflow.stage_one_definition import (
+        stage_one_creation_definition,
+    )
+
+    return stage_one_creation_definition()[1].workflowVersionId
+
+
+def _full_workflow_version_id() -> str:
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.research.workflow.definition_registry import definition_identity
+
+    return definition_identity(
+        build_challenge_cup_workflow_definition()
+    ).workflowVersionId
+
+
+def _bridge_stage_one_run(
+    run_id: str = "run-stage-one",
+    *,
+    status: str = "succeeded",
+) -> dict[str, Any]:
+    return {
+        "runId": run_id,
+        "teamId": "team-1",
+        "questionId": "SCI-001",
+        "status": status,
+        "runVersion": 3,
+        "completionKind": "completed",
+        "parentRunId": None,
+        "workflowVersionId": _stage_one_workflow_version_id(),
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-02T00:00:00Z",
+    }
+
+
+def _bridge_accepted_program_output(
+    run_id: str = "run-stage-one",
+    *,
+    decisions: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "record": {
+            "recordId": "output-1",
+            "runId": run_id,
+            "status": "validated",
+            "validation": {
+                "schemaValidation": "passed",
+                "citationValidation": "passed",
+                "semanticValidation": "passed",
+                "officialModelCall": True,
+            },
+            "humanGates": {
+                "decisions": decisions
+                or {
+                    "H1_problem_understanding": "approved",
+                    "H2_hypothesis_selection": "approved",
+                    "H3_research_plan": "approved",
+                    "H4_external_output": "approved",
+                },
+            },
+            "review": {
+                "reviewer": "reviewer-1",
+                "rationale": "accepted",
+                "decidedAt": "2026-01-03T00:00:00Z",
+            },
+        }
+    }
+
+
+def _bridge_state(**overrides: Any) -> Any:
+    kwargs: dict[str, Any] = dict(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[],
+        selection_records=[],
+        meeting_records=[],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+        formal_runs=[_bridge_stage_one_run()],
+        formal_snapshots={
+            "run-stage-one": {
+                "deliveryStatus": "succeeded",
+                "artifactSummary": {
+                    "finalArtifactLocator": "artifact://delivery/run-stage-one"
+                },
+            }
+        },
+        program_output=_bridge_accepted_program_output(),
+    )
+    kwargs.update(overrides)
+    return HypothesisFirstStateV2.model_validate(project_state_from_records(**kwargs))
+
+
+def _bridge_command(state: Any) -> Any:
+    return next(
+        (
+            action
+            for action in state.allowedActions
+            if action.kind == "command"
+            and action.command == "create_full_experiment_run"
+        ),
+        None,
+    )
+
+
+def test_full_experiment_bridge_offer_appears_when_program_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_covering_full_experiment_authorization",
+        lambda team_id, question_id: {
+            "authorizationId": "auth-1",
+            "teamId": team_id,
+            "planId": "plan-1",
+        },
+    )
+    state = _bridge_state()
+
+    assert state.currentPhase == "completed"
+    action = _bridge_command(state)
+    assert action is not None
+    assert action.enabled is True
+    assert action.targetPhase == "completed"
+    assert action.requiresConfirmation is True
+    assert (action.confirmationText or "").strip()
+    assert action.payload.questionId == "SCI-001"
+    assert action.payload.sourceRunId == "run-stage-one"
+    # The rebuild ordinal binds the key to the question's full run history
+    # (the stage-one run exists -> ordinal 1), so it is offer-stable here.
+    assert action.actionId == "create-full-experiment-run:1"
+    assert action.idempotencyKey.startswith("hf2:create-full-experiment-run:")
+
+
+def test_full_experiment_bridge_offer_disabled_without_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_covering_full_experiment_authorization",
+        lambda team_id, question_id: None,
+    )
+    state = _bridge_state()
+
+    action = _bridge_command(state)
+    assert action is not None
+    # Fail closed: the offer stays visible but is not executable, and the
+    # disabled reason names the real-batch authorize surface.
+    assert action.enabled is False
+    assert "real-batches" in (action.disabledReason or "")
+    assert "authorize" in (action.disabledReason or "")
+
+
+def test_full_experiment_bridge_offer_absent_when_program_not_accepted() -> None:
+    state = _bridge_state(
+        program_output=_bridge_accepted_program_output(
+            decisions={
+                "H1_problem_understanding": "approved",
+                "H2_hypothesis_selection": "approved",
+                "H3_research_plan": "pending",
+                "H4_external_output": "approved",
+            }
+        )
+    )
+
+    assert state.programDelivery.humanReviewStatus == "waiting_human"
+    assert _bridge_command(state) is None
+
+
+def test_full_experiment_bridge_offer_suppressed_when_full_run_exists() -> None:
+    full_run = dict(_bridge_stage_one_run("run-full"), **{
+        "workflowVersionId": _full_workflow_version_id(),
+        "status": "queued",
+        "createdAt": "2026-01-04T00:00:00Z",
+    })
+    state = _bridge_state(formal_runs=[_bridge_stage_one_run(), full_run])
+
+    assert _bridge_command(state) is None
+
+
+def test_full_experiment_bridge_offer_rekeys_after_run_history_grows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_covering_full_experiment_authorization",
+        lambda team_id, question_id: {"authorizationId": "auth-1"},
+    )
+    archived_full_run = dict(_bridge_stage_one_run("run-full-archived"), **{
+        "workflowVersionId": _full_workflow_version_id(),
+        "status": "archived",
+        "createdAt": "2026-01-04T00:00:00Z",
+    })
+    state = _bridge_state(
+        formal_runs=[_bridge_stage_one_run(), archived_full_run]
+    )
+
+    # An archived full run does not block a rebuild, and the rebuild ordinal
+    # re-keys the creation identity.
+    action = _bridge_command(state)
+    assert action is not None
+    assert action.actionId == "create-full-experiment-run:2"
+
+
+_FULL_EXPERIMENT_ACTION_ID = "create-full-experiment-run"
+_FULL_EXPERIMENT_IDEMPOTENCY_KEY = "hf2:create-full-experiment-run:bridge-hash"
+
+
+def _patch_full_experiment_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    authorization: dict[str, Any] | None,
+    question_runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Shared scaffolding: v2 envelope for create_full_experiment_run + fakes.
+
+    Returns a ``calls`` dict with the captured create_run/auto-start inputs.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        question_launch,
+        run_creation,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+
+    snapshot = {
+        "stateVersion": "hf2-action:bridge",
+        "programDelivery": {
+            "humanReviewStatus": "approved",
+            "outputRunId": "run-stage-one",
+        },
+        "convergence": {"latestHypothesisRoundId": "round-accepted"},
+        "allowedActions": [{
+            "kind": "command",
+            "actionId": _FULL_EXPERIMENT_ACTION_ID,
+            "label": "创建完整实验运行（实验设计+执行迭代）",
+            "enabled": True,
+            "disabledReason": None,
+            "targetPhase": "completed",
+            "targetNodeId": "program_delivery",
+            "command": "create_full_experiment_run",
+            "payload": {
+                "questionId": "SCI-001",
+                "sourceRunId": "run-stage-one",
+            },
+            "inputSchemaRef": None,
+            "idempotencyKey": _FULL_EXPERIMENT_IDEMPOTENCY_KEY,
+            "expectedStateVersion": "hf2-action:bridge",
+            "requiresConfirmation": True,
+            "confirmationText": "real model-call costs",
+        }],
+    }
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_covering_full_experiment_authorization",
+        lambda team_id, question_id: authorization,
+    )
+
+    class Query:
+        def list_runs(self, *, team_id: str, workflow_id: str):
+            return {"runs": list(question_runs or [])}
+
+    monkeypatch.setattr(
+        formal_read_runtime, "get_query_service", lambda: Query()
+    )
+
+    calls: dict[str, Any] = {"create_run": [], "auto_start": [], "handoff": []}
+
+    def fake_build_question_run_input(team_id, *, question_id, safety_limits):
+        return {
+            "teamId": team_id,
+            "projectId": "project-1",
+            "questionId": question_id,
+            "researchScopeEnvelope": {
+                "program": "p",
+                "theme": "t",
+                "campaign": "c",
+                "question": question_id,
+                "branch": "main",
+                "workflow": "hypothesis_first",
+                "agentId": "agent-1",
+                "mode": "dev",
+                "scopeHash": "hash-hf",
+            },
+            "constraintSnapshot": {"challengeQuestionArtifact": "artifact://x"},
+        }
+
+    monkeypatch.setattr(
+        question_launch, "build_question_run_input", fake_build_question_run_input
+    )
+
+    def fake_handoff(team_id, question_id, *, hypothesis_round_id):
+        calls["handoff"].append(hypothesis_round_id)
+        return {
+            "hypothesisSelection": {
+                "schemaVersion": 1,
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["candidate-1"],
+            },
+            "hypothesisConvergenceHandoff": {
+                "schemaVersion": 1,
+                "roundId": hypothesis_round_id,
+                "confirmedCandidateId": "candidate-1",
+            },
+        }
+
+    monkeypatch.setattr(run_creation, "_formal_hypothesis_handoff", fake_handoff)
+
+    def fake_resolve_research_scope(team_id, *, agent_id, scope_seed):
+        calls["scope_seed"] = dict(scope_seed)
+        return {
+            **dict(scope_seed),
+            "mode": scope_seed.get("mode") or "dev",
+            "scopeHash": "hash-full",
+            "artifactLocator": "research-artifact://full",
+            "ledgerRoot": "ledger://full",
+            "cacheKey": "cache://full",
+        }
+
+    from core.web.services.team_workflow import research_scope
+
+    monkeypatch.setattr(
+        research_scope, "resolve_research_scope", fake_resolve_research_scope
+    )
+
+    def fake_create_run(workflow_id, *, run_input, idempotency_key,
+                        catalog_run_authorization=None, workflow_definition=None):
+        calls["create_run"].append({
+            "workflowId": workflow_id,
+            "runInput": dict(run_input),
+            "idempotencyKey": idempotency_key,
+            "authorization": catalog_run_authorization,
+            "workflowDefinition": workflow_definition,
+        })
+        return {
+            "runId": "run-full",
+            "workflowId": workflow_id,
+            "workflowVersionId": _full_workflow_version_id(),
+            "teamId": "team-1",
+            "questionId": "SCI-001",
+            "status": "queued",
+            "runVersion": 1,
+        }
+
+    monkeypatch.setattr(run_creation, "create_run", fake_create_run)
+
+    def fake_auto_start(team_id, *, run, idempotency_key):
+        calls["auto_start"].append({
+            "runId": str(run.get("runId") or ""),
+            "idempotencyKey": idempotency_key,
+        })
+        return {"status": "accepted"}
+
+    monkeypatch.setattr(
+        hypothesis_first_chain, "_auto_start_created_formal_run", fake_auto_start
+    )
+    return calls
+
+
+_FULL_EXPERIMENT_REQUEST = {
+    "actionId": _FULL_EXPERIMENT_ACTION_ID,
+    "idempotencyKey": _FULL_EXPERIMENT_IDEMPOTENCY_KEY,
+    "expectedStateVersion": "hf2-action:bridge",
+    "command": "create_full_experiment_run",
+    "payload": {"questionId": "SCI-001", "sourceRunId": "run-stage-one"},
+}
+
+
+def test_create_full_experiment_run_creates_seeded_full_run_when_authorized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+
+    calls = _patch_full_experiment_envelope(
+        monkeypatch,
+        tmp_path,
+        authorization={
+            "authorizationId": "auth-1",
+            "teamId": "team-1",
+            "planId": "plan-1",
+        },
+    )
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        dict(_FULL_EXPERIMENT_REQUEST),
+        question_id="SCI-001",
+    )
+
+    assert result["command"] == "create_full_experiment_run"
+    assert result["result"]["runId"] == "run-full"
+    assert result["result"]["sourceRunId"] == "run-stage-one"
+    assert result["result"]["sourceHypothesisRoundId"] == "round-accepted"
+    assert result["result"]["authorizationId"] == "auth-1"
+    assert len(calls["create_run"]) == 1
+    invocation = calls["create_run"][0]
+    # Full definition resolution: canonical workflow id, no pinned override.
+    assert invocation["workflowId"] == CHALLENGE_CUP_WORKFLOW_ID
+    assert invocation["workflowDefinition"] is None
+    assert invocation["idempotencyKey"] == _FULL_EXPERIMENT_IDEMPOTENCY_KEY
+    assert invocation["authorization"]["authorizationId"] == "auth-1"
+    run_input = invocation["runInput"]
+    assert run_input["researchScopeEnvelope"]["workflow"] == CHALLENGE_CUP_WORKFLOW_ID
+    assert calls["scope_seed"]["workflow"] == CHALLENGE_CUP_WORKFLOW_ID
+    assert run_input["constraintSnapshot"]["sourceStageOneRunId"] == "run-stage-one"
+    assert run_input["hypothesisSelection"]["selectionId"] == "selection-1"
+    assert run_input["hypothesisConvergenceHandoff"]["roundId"] == "round-accepted"
+    assert calls["handoff"] == ["round-accepted"]
+    # The created run auto-starts its entry node exactly like create_formal_run.
+    assert calls["auto_start"] == [{
+        "runId": "run-full",
+        "idempotencyKey": _FULL_EXPERIMENT_IDEMPOTENCY_KEY,
+    }]
+
+
+def test_create_full_experiment_run_rejects_without_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_chain_store import (
+        FormalCommandRejectedError,
+    )
+
+    calls = _patch_full_experiment_envelope(
+        monkeypatch, tmp_path, authorization=None
+    )
+
+    with pytest.raises(FormalCommandRejectedError) as excinfo:
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            dict(_FULL_EXPERIMENT_REQUEST),
+            question_id="SCI-001",
+        )
+
+    assert excinfo.value.code == "catalog_run_authorization_required"
+    assert "real-batches" in str(excinfo.value)
+    assert calls["create_run"] == []
+    assert calls["auto_start"] == []
+
+
+def test_create_full_experiment_run_duplicate_fence_blocks_second_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing_full_run = dict(_bridge_stage_one_run("run-full-earlier"), **{
+        "workflowVersionId": _full_workflow_version_id(),
+        "status": "queued",
+    })
+    calls = _patch_full_experiment_envelope(
+        monkeypatch,
+        tmp_path,
+        authorization={"authorizationId": "auth-1"},
+        question_runs=[_bridge_stage_one_run(), existing_full_run],
+    )
+
+    with pytest.raises(hypothesis_first_chain.HypothesisFirstChainError):
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            dict(_FULL_EXPERIMENT_REQUEST),
+            question_id="SCI-001",
+        )
+
+    assert calls["create_run"] == []
+
+
+def test_create_full_experiment_run_replay_reuses_the_same_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.run_lifecycle import (
+        run_id_for_create,
+    )
+
+    replay_run_id = run_id_for_create(
+        "challenge-cup-research", _FULL_EXPERIMENT_IDEMPOTENCY_KEY
+    )
+    replayed_run = dict(_bridge_stage_one_run(replay_run_id), **{
+        "workflowVersionId": _full_workflow_version_id(),
+        "status": "queued",
+    })
+    calls = _patch_full_experiment_envelope(
+        monkeypatch,
+        tmp_path,
+        authorization={"authorizationId": "auth-1"},
+        question_runs=[_bridge_stage_one_run(), replayed_run],
+    )
+
+    # Same envelope replay: the run derived from this idempotency key is the
+    # replay identity, so create_run replays it instead of forking a sibling.
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        dict(_FULL_EXPERIMENT_REQUEST),
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["runId"] == "run-full"
+    assert len(calls["create_run"]) == 1
