@@ -1483,6 +1483,7 @@ def _normalize_messages(
     source_start_index: int = 1,
     transcript_scope: Any = "all",
     include_timeline: bool = True,
+    include_display_metadata: bool = True,
 ) -> list[dict[str, Any]]:
     s = _service()
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
@@ -1754,22 +1755,23 @@ def _normalize_messages(
             # ledger (read-only projection; never written here). Only turns
             # with ledgered changes gain the key, so sessions without
             # checkpoints keep byte-identical message metadata.
-            if file_changes_by_turn is None:
-                file_changes_by_turn = {}
-            if turn_id not in file_changes_by_turn:
-                try:
-                    from core.chat import file_change_ledger
+            if include_display_metadata:
+                if file_changes_by_turn is None:
+                    file_changes_by_turn = {}
+                if turn_id not in file_changes_by_turn:
+                    try:
+                        from core.chat import file_change_ledger
 
-                    file_changes_by_turn[turn_id] = file_change_ledger.turn_file_changes(
-                        s.PROJECT_ROOT,
-                        conversation_id,
-                        turn_id,
-                    )
-                except Exception:
-                    file_changes_by_turn[turn_id] = []
-            turn_changed_files = file_changes_by_turn.get(turn_id) or []
-            if turn_changed_files:
-                metadata["changedFiles"] = turn_changed_files
+                        file_changes_by_turn[turn_id] = file_change_ledger.turn_file_changes(
+                            s.PROJECT_ROOT,
+                            conversation_id,
+                            turn_id,
+                        )
+                    except Exception:
+                        file_changes_by_turn[turn_id] = []
+                turn_changed_files = file_changes_by_turn.get(turn_id) or []
+                if turn_changed_files:
+                    metadata["changedFiles"] = turn_changed_files
         if (
             role == "assistant"
             and turn_id
@@ -1821,14 +1823,15 @@ def _normalize_messages(
                 "metadata": dict(metadata) if isinstance(metadata, dict) else {},
                 **({"usageStats": usage_stats} if usage_stats else {}),
             }
-            turn_header = s._assistant_turn_header_fields(
-                conversation_id,
-                turn_id,
-                streaming=bool(raw.get("streaming")),
-                fallback_status=assistant_status,
-            )
-            if turn_header:
-                entry.update(turn_header)
+            if include_display_metadata:
+                turn_header = s._assistant_turn_header_fields(
+                    conversation_id,
+                    turn_id,
+                    streaming=bool(raw.get("streaming")),
+                    fallback_status=assistant_status,
+                )
+                if turn_header:
+                    entry.update(turn_header)
         node_id = str(raw.get("nodeId") or "").strip()
         if node_id:
             entry["nodeId"] = node_id
@@ -2156,6 +2159,9 @@ def _session_detail_messages_with_window(
         raw_messages,
         transcript_scope="none",
         include_timeline=False,
+        # Metrics still need canonical turn items, filtering and coalescing,
+        # but never historical file checkpoints or per-turn work headers.
+        include_display_metadata=False,
     )
     if live_message is not None:
         stat_messages = s._without_live_turn_ledger_partials(stat_messages, live_message) + [live_message]

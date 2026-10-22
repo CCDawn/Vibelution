@@ -1664,7 +1664,12 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
         # every select forced the next poll to rebuild the whole projection.
         s._invalidate_session_list_cache()
     if lightweight:
-        normalized = s._normalize_conversation(selected_conversation) or selected_conversation
+        normalized = s._normalize_conversation(
+            selected_conversation,
+            agent_by_id=agent_by_id,
+            lightweight=True,
+            load_message_preview=False,
+        ) or selected_conversation
         detail = s._build_lightweight_session_detail(normalized)
         if isinstance(detail, dict):
             detail.setdefault("id", normalized_session_id)
