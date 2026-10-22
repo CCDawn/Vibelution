@@ -663,10 +663,6 @@ def compress_turn_messages(
     # predate the field): the ledger checkpoint needs it to cover only the
     # events that really entered the summary.
     summarized_messages = getattr(compression_output, "summarized_messages", None)
-    replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
-    if replacement_summary:
-        summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
-
     def fail_closed(
         guard_reason: str,
         retention_after: Mapping[str, Any],
@@ -701,6 +697,14 @@ def compress_turn_messages(
         )
         return messages, True, False, compression_count_this_turn, last_compression_iteration
 
+    normalized_hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
+    refusal_reason = getattr(compression_output, "retention_refusal_reason", "")
+    if refusal_reason:
+        return fail_closed(str(refusal_reason), before_pairing, current_tokens)
+    replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
+    if replacement_summary:
+        summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
+
     # Retention gate, check-first: judge the RAW compressed output before any
     # repair. normalize_tool_call_pairing is an explicit post-gate repair step
     # for damage that already existed in the input; running the gate on its
@@ -708,7 +712,6 @@ def compress_turn_messages(
     # unresolved calls and drops orphan results by construction), so a
     # compression cut that broke the tool chain was silently repaired instead
     # of failing closed.
-    normalized_hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
     raw_after_pairing = _tool_call_pairing_snapshot(compressed)
     raw_retention_violation = _retention_violation_reason(before_pairing, raw_after_pairing)
     if raw_retention_violation:
