@@ -303,7 +303,9 @@ def test_actual_executor_registration_dispatches_finance_wrapper(monkeypatch):
         SimpleNamespace(create_key_tools=lambda: [wrapper]),
     )
     monkeypatch.setitem(
-        sys.modules, "tools.agent_tools", SimpleNamespace(spawn_agent=lambda: None)
+        sys.modules,
+        "tools.agent_tools",
+        SimpleNamespace(spawn_agent=lambda: None, SPAWN_AGENT_EXECUTOR_BUDGET_SECONDS=150),
     )
     executor = SimpleNamespace(_tool_map={})
     namespace = {"IMAGE2_TOOL_TIMEOUT_SECONDS": 300}
