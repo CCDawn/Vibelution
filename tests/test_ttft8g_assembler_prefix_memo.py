@@ -100,18 +100,27 @@ def test_unchanged_state_reuses_projections_without_replay(tmp_path, monkeypatch
                                   status="completed", payload={})
     events = load_conversation_events(tmp_path, session_id)
 
+    # The projection seam now lives in the resumable replay class; the gate's
+    # intent is unchanged: the warm re-assembly of an unchanged journal state
+    # must not run a single additional projection replay.
+    import core.chat.turn_journal as turn_journal_module
+
     replays = {"count": 0}
-    original = context_assembler.conversation_model_messages_from_events
+    original_finish = turn_journal_module.ModelProjectionReplay.finish
 
-    def counting(events_arg, **kwargs):
+    def counting_finish(self):
         replays["count"] += 1
-        return original(events_arg, **kwargs)
+        return original_finish(self)
 
-    monkeypatch.setattr(context_assembler, "conversation_model_messages_from_events", counting)
+    monkeypatch.setattr(
+        turn_journal_module.ModelProjectionReplay, "finish", counting_finish
+    )
 
     forced_snap, warm_snap = _cold_and_warm(session_id, events)
     assert warm_snap == forced_snap
-    assert replays["count"] == 1, "unchanged journal state must hit the memo without replay"
+    assert replays["count"] == 2, (
+        "cold assembly runs exactly the model and canonical replays once each"
+    )
 
 
 # ---------------------------------------------------------------------------
