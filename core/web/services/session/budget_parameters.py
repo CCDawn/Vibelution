@@ -119,6 +119,7 @@ def update_session_budget_parameters(
         if not s._ensure_session_conversation_record(
             normalized_session_id,
             source="session.budget_parameters.update",
+            sync_wait=False,
         ):
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         bound_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()

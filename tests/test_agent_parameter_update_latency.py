@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import Future
 import threading
 from types import SimpleNamespace
 
@@ -273,3 +274,58 @@ def test_budget_rejects_sealed_session_before_any_directory_work(tmp_path, monke
     monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", forbidden)
     monkeypatch.setattr(agent_directory_service, "update_agent_budget_parameters_if_current", forbidden)
     assert _patch("budget", agent).status_code == status
+
+
+@pytest.mark.parametrize("kind", ["model", "budget"])
+def test_parameter_patch_does_not_join_blocked_directory_writer(tmp_path, monkeypatch, kind):
+    from core.web.services.session import conversation_index, directory_runtime
+
+    agent = _session_agent(tmp_path, monkeypatch)
+    pending = Future()
+    writes = []
+
+    def upsert(**values):
+        writes.append(values)
+        return pending
+
+    repository = SimpleNamespace(
+        get_agent=lambda _id: {"currentConfigRevisionId": "existing-revision"},
+        get_session=lambda *_a, **_k: {"agentId": agent["agentId"]},
+        upsert_directory_session=upsert,
+    )
+    monkeypatch.setattr(directory_runtime, "get_open_directory_store", lambda: SimpleNamespace(repository=repository))
+    monkeypatch.setattr(directory_runtime, "is_legacy_discard_in_progress", lambda: False)
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", conversation_index._ensure_session_conversation_record)
+    monkeypatch.setattr(session_service, "_session_has_openable_body", lambda *_a: True)
+    monkeypatch.setattr(session_service, "_ensure_agent_directory_conversation_materialized", lambda *_a, **_k: False)
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda *_a: {"id": "session-parameters", "agent_id": agent["agentId"]})
+    done, read_done = threading.Event(), threading.Event()
+    observed = {}
+
+    def update():
+        try:
+            observed["response"] = _patch(kind, agent)
+        except BaseException as exc:
+            observed["error"] = exc
+        finally:
+            done.set()
+
+    def read():
+        with session_service._CHAT_STATE_LOCK:
+            read_done.set()
+
+    writer, reader = threading.Thread(target=update, daemon=True), threading.Thread(target=read, daemon=True)
+    writer.start()
+    try:
+        completed = done.wait(3)
+        reader.start()
+        readable = read_done.wait(3)
+    finally:
+        pending.set_result({})
+        writer.join(10)
+        reader.join(10)
+    assert completed, "parameter PATCH joined an unrelated directory write queue"
+    assert readable, "directory write queue kept the session lock occupied"
+    assert "error" not in observed, observed
+    assert observed["response"].status_code == 200, observed["response"].json()
+    assert len(writes) == 1

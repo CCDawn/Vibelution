@@ -10,6 +10,7 @@ from core.llm.agent_model_parameters import (
     LEGACY_REASONING_EFFORT_METADATA_KEY,
 )
 from core.orchestration.session_budget_resolve import SESSION_BUDGET_PARAMETERS_METADATA_KEY
+from .repair_store import _copy_json_value
 
 ParameterKind = Literal["compression", "model", "budget"]
 _METADATA_KEYS = {
@@ -82,6 +83,6 @@ def save_parameter_update(
             return False
     except (OSError, s.AgentDirectoryError):
         return False
-    s._REPAIRED_STATE_CACHE = copy.deepcopy(payload)
+    s._REPAIRED_STATE_CACHE = _copy_json_value(payload)
     s._REPAIRED_STATE_CACHE_SIGNATURE = signature
     return True
