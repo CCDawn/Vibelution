@@ -844,6 +844,39 @@ def count_active_agents(
         )
 
 
+def find_agent_ids_by_metadata(
+    metadata_key: str,
+    metadata_value: Any,
+    *,
+    status: str = "active",
+    project_root: Path | None = None,
+) -> list[str]:
+    """Find IDs without hydrating policies, copying registry records or building DTOs.
+
+    Reuse the repaired-state authority used by count_active_agents. Return only
+    detached scalar IDs, in the same recency order as list_agents.
+    """
+    s = _service()
+    with s.scoped_project_root(project_root):
+        with s._STATE_LOCK:
+            state, _cache_hit = s._load_repaired_state_for_read()
+            matches = []
+            for agent in state.get("agents") or []:
+                if not isinstance(agent, dict):
+                    continue
+                metadata = agent.get("metadata")
+                if not isinstance(metadata, dict) or metadata.get(metadata_key) != metadata_value:
+                    continue
+                if (str(agent.get("status") or "active").strip() or "active") != status:
+                    continue
+                agent_id = str(agent.get("agentId") or "").strip()
+                if agent_id:
+                    recency = str(agent.get("updatedAt") or "").strip() or str(agent.get("createdAt") or "").strip()
+                    matches.append((recency, agent_id))
+            matches.sort(key=lambda row: row[0], reverse=True)
+            return [agent_id for _recency, agent_id in matches]
+
+
 def prewarm_registry_caches() -> dict[str, Any]:
     """Warm the repaired-state read cache and the summary projection cache.
 

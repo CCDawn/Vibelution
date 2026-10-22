@@ -152,6 +152,7 @@ from .agent_directory.projections import (
     _build_agent_api_hydration_context,
     list_agents,
     count_active_agents,
+    find_agent_ids_by_metadata,
     prewarm_registry_caches,
     _agent_to_api_summary,
     _build_agent_api_config_hydration_context,
