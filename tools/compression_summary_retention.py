@@ -95,13 +95,14 @@ def summary_source_excerpt(text: str, limit: int) -> str:
 
 def compose_retained_summary(
     user_texts: list[str], prior_summaries: list[str], candidate: str, max_chars: int,
+    *, preserved_user_statements: Iterable[str] = (),
 ) -> str | None:
     """Reserve facts first; share remaining space between old and new context.
 
     None means the requested exact facts cannot fit. No replacement checkpoint
     should be published in that case; the original history remains authoritative.
     """
-    facts = retained_user_facts(user_texts, prior_summaries)
+    facts = list(dict.fromkeys([*retained_user_facts(user_texts, prior_summaries), *preserved_user_statements]))
     protected = _facts_block(facts)
     limit = max(0, max_chars)
     if limit <= 0 or len(protected) > limit:

@@ -517,7 +517,9 @@ def apply_context_compression_checkpoints(
         if _event_is_covered(event, covered_ids=covered_ids, covered_ranges=covered_ranges):
             continue
         filtered.append(event)
-    return filtered
+    from .compaction_fact_recovery import recover_legacy_checkpoint_facts
+
+    return recover_legacy_checkpoint_facts(event_list, filtered)
 
 
 def _completed_tool_lifecycle_ids(
