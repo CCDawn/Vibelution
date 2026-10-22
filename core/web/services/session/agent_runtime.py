@@ -403,6 +403,7 @@ def update_session_model_parameters(
         if not s._ensure_session_conversation_record(
             normalized_session_id,
             source="session.model_parameters.update",
+            sync_wait=False,
         ):
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         conversation = s._ensure_session_mutable(normalized_session_id)
