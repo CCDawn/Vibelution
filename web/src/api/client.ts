@@ -6,6 +6,7 @@ import {
 const CONTROL_TOKEN_ENDPOINT = "/api/control-token";
 const CONTROL_TOKEN_HEADER_FALLBACK = "X-Vibelution-Control-Token";
 const INVALID_CONTROL_TOKEN_DETAIL = "Missing or invalid web control token";
+export const CONTROL_TOKEN_TIMEOUT_MS = 8_000;
 
 const controlTokenPromises = new Map<string, Promise<{ header: string; token: string }>>();
 let fetchJsonFailureReporter: ((report: FetchJsonFailureReport) => void) | null = null;
@@ -86,14 +87,33 @@ export function isFetchAbortError(error: unknown): boolean {
   );
 }
 
-export async function getControlToken(origin = ""): Promise<{ header: string; token: string }> {
+/** Wait locally; a caller leaving must never abort a shared bootstrap flight. */
+function waitForSignal<T>(pending: Promise<T>, signal?: AbortSignal | null): Promise<T> {
+  if (!signal) return pending;
+  if (signal.aborted) {
+    // pending may already have rejected before we saw the cancelled caller.
+    void pending.catch(() => {});
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", abort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+export async function getControlToken(origin = "", signal?: AbortSignal | null): Promise<{ header: string; token: string }> {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
   const controlOrigin = normalizeControlOrigin(origin);
   const cacheKey = controlTokenCacheKey(controlOrigin);
   if (!controlTokenPromises.has(cacheKey)) {
     const endpoint = controlOrigin ? `${controlOrigin}${CONTROL_TOKEN_ENDPOINT}` : CONTROL_TOKEN_ENDPOINT;
-    const tokenPromise = fetch(endpoint, {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(createTimeoutAbortReason(CONTROL_TOKEN_TIMEOUT_MS)), CONTROL_TOKEN_TIMEOUT_MS);
+    const tokenRequest = fetch(endpoint, {
       headers: { Accept: "application/json" },
       credentials: controlOrigin ? "include" : "same-origin",
+      signal: controller.signal,
     })
       .then(async (response) => {
         if (!response.ok) {
@@ -108,14 +128,17 @@ export async function getControlToken(origin = ""): Promise<{ header: string; to
           header: String(payload.header ?? CONTROL_TOKEN_HEADER_FALLBACK).trim() || CONTROL_TOKEN_HEADER_FALLBACK,
           token,
         };
-      })
-      .catch((error) => {
-        controlTokenPromises.delete(cacheKey);
-        throw error;
       });
+    const tokenPromise = waitForSignal(tokenRequest, controller.signal)
+      .catch((error) => {
+        // A cleared/replaced flight may still fail late. It owns only its slot.
+        if (controlTokenPromises.get(cacheKey) === tokenPromise) controlTokenPromises.delete(cacheKey);
+        throw error;
+      })
+      .finally(() => clearTimeout(timeout));
     controlTokenPromises.set(cacheKey, tokenPromise);
   }
-  return controlTokenPromises.get(cacheKey)!;
+  return waitForSignal(controlTokenPromises.get(cacheKey)!, signal);
 }
 
 function normalizeControlOrigin(origin: string): string {
@@ -209,8 +232,18 @@ export async function fetchWithControl(input: string, init?: RequestInit): Promi
   headers.set("Accept", headers.get("Accept") ?? "application/json");
   const controlOrigin = controlOriginForRequest(input);
   let controlHeaderName: string | null = null;
+  let usedControlFlight: Promise<{ header: string; token: string }> | undefined;
+  const readControl = async () => {
+    const result = getControlToken(controlOrigin!, init?.signal);
+    usedControlFlight = controlTokenPromises.get(controlTokenCacheKey(normalizeControlOrigin(controlOrigin!)));
+    return result;
+  };
+  const clearRejectedControl = () => {
+    const key = controlTokenCacheKey(normalizeControlOrigin(controlOrigin!));
+    if (controlTokenPromises.get(key) === usedControlFlight) clearControlToken(controlOrigin!);
+  };
   if (controlOrigin !== null) {
-    const control = await getControlToken(controlOrigin);
+    const control = await readControl();
     controlHeaderName = control.header;
     headers.set(control.header, control.token);
   }
@@ -246,8 +279,8 @@ export async function fetchWithControl(input: string, init?: RequestInit): Promi
   if (!response.ok && response.status === 403 && controlOrigin !== null) {
     parsedFailureDetails = await readFailureDetails(response);
     if (parsedFailureDetails.message === INVALID_CONTROL_TOKEN_DETAIL) {
-      clearControlToken(controlOrigin);
-      const refreshedControl = await getControlToken(controlOrigin);
+      clearRejectedControl();
+      const refreshedControl = await readControl();
       if (controlHeaderName) {
         headers.delete(controlHeaderName);
       }
@@ -268,7 +301,7 @@ export async function fetchWithControl(input: string, init?: RequestInit): Promi
     ) {
       // The bounded retry has already been used. Leave the next user action
       // able to bootstrap again without turning this request into a loop.
-      clearControlToken(controlOrigin);
+      clearRejectedControl();
     }
     reportFetchJsonFailure(input, {
       method,
@@ -315,9 +348,10 @@ export async function fetchJsonWithTimeout<T>(
   init: RequestInit & { timeoutMs: number },
 ): Promise<T> {
   const { timeoutMs, ...restInit } = init;
+  if (restInit.signal?.aborted) throw restInit.signal.reason ?? new DOMException("Aborted", "AbortError");
   const controller = new AbortController();
   const externalSignal = restInit.signal ?? null;
-  const abortFromExternal = () => controller.abort();
+  const abortFromExternal = () => controller.abort(externalSignal?.reason);
   if (externalSignal) {
     if (externalSignal.aborted) {
       abortFromExternal();
@@ -330,7 +364,7 @@ export async function fetchJsonWithTimeout<T>(
     timeoutMs,
   );
   try {
-    return await fetchJson<T>(input, { ...restInit, signal: controller.signal });
+    return await waitForSignal(fetchJson<T>(input, { ...restInit, signal: controller.signal }), controller.signal);
   } finally {
     clearTimeout(timeoutHandle);
     if (externalSignal) {

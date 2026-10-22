@@ -1053,15 +1053,6 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
     try:
         archive_summary: dict[str, Any] | None = None
         requested_status = str(payload.status or "").strip()
-        current = get_agent(agent_id, include_archived=True)
-        if current is None:
-            raise AgentNotFoundError(f"Agent not found: {agent_id}")
-        current_status = str(current.get("status") or "active").strip()
-        if current_status == "archived" and requested_status == "active":
-            raise AgentDirectoryError(
-                "Archived Agent cannot be reactivated through PATCH; "
-                "a complete restore transaction is required."
-            )
         if requested_status == "archived":
             updated, archive_summary = _archive_agent_with_session_lifecycle(
                 agent_id,
@@ -1095,6 +1086,15 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
                 **updated,
                 "archiveSummary": archive_summary,
             })
+        current = get_agent(agent_id, include_archived=True)
+        if current is None:
+            raise AgentNotFoundError(f"Agent not found: {agent_id}")
+        current_status = str(current.get("status") or "active").strip()
+        if current_status == "archived" and requested_status == "active":
+            raise AgentDirectoryError(
+                "Archived Agent cannot be reactivated through PATCH; "
+                "a complete restore transaction is required."
+            )
         updated = update_agent_instance(
             agent_id,
             display_name=payload.displayName,
@@ -1249,7 +1249,7 @@ def _run_agent_archive_compensations(
     return failures
 
 
-@session_service.session_agent_lifecycle_serialized
+@session_service.agent_archive_serialized
 def _archive_agent_with_session_lifecycle(
     agent_id: str,
     *,

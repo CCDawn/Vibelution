@@ -3,10 +3,9 @@
  * Config-draft cluster lives in useAgentConfigDraftMutations.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import { useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import {
-  archiveAgent,
   consumeAllAgentInboxMessages,
   consumeAgentInboxMessage,
   createAgentToolGovernanceRequest,
@@ -32,6 +31,7 @@ import type { AgentModeMembershipDraft } from "../AgentModeMembershipPanel";
 import type { AgentMemoryPolicyDraft } from "../AgentMemoryPolicyPanel";
 import type { AgentResetOptions } from "../AgentDebugResetPanel";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import { AgentArchiveInProgressError, archiveSnapshotIsCurrent, createAgentArchiveRecovery } from "./agentArchiveRecovery";
 
 type Notice = { tone: "success" | "error"; text: string };
 type ChatCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -84,6 +84,13 @@ export type UseAgentWorkbenchMutationsOptions = {
 
 export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOptions) {
   const queryClient = useQueryClient();
+  const [archivePendingAgentIds, setArchivePendingAgentIds] = useState<ReadonlySet<string>>(new Set());
+  const [archiveRecovery] = useState(() => createAgentArchiveRecovery(setArchivePendingAgentIds));
+
+  function patchArchiveSummary(agent: AgentConfigWorkspaceAgent) {
+    queryClient.setQueryData<AgentConfigWorkspaceAgent[]>(queryKeys.agentSummary(true), current =>
+      current?.map(row => row.agentId === agent.agentId && archiveSnapshotIsCurrent(row, agent) ? { ...row, ...agent } : row));
+  }
 
   const updatePersonaMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any }) =>
@@ -129,32 +136,45 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      archiveAgent(payload.agentId),
+      archiveRecovery.single(payload.agentId),
     onMutate: async (payload) => {
+      const release = archiveRecovery.begin([payload.agentId]);
       const telemetry = startUserAction("agent_archive", { agentId: payload.agentId }, { destructive: true });
-      await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
-      const previousSelectedAgentId = options.getSelectedAgentId();
-      const previousActivePane = options.getActivePane();
-      const optimisticAgent = previousWorkspace?.agents.find((agent) => agent.agentId === payload.agentId) ?? options.getSelectedAgent();
-      if (optimisticAgent) {
-        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-          queryKeys.agentConfigWorkspace(),
-          (current) => options.archivedWorkspaceCache(current, options.optimisticArchivedAgent(optimisticAgent)),
-        );
+      try {
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace(), exact: true }),
+          queryClient.cancelQueries({ queryKey: queryKeys.agentSummary(true), exact: true }),
+        ]);
+        const previousAgent = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace())?.agents.find(agent => agent.agentId === payload.agentId);
+        const previousSummaryAgent = queryClient.getQueryData<AgentConfigWorkspaceAgent[]>(queryKeys.agentSummary(true))?.find(agent => agent.agentId === payload.agentId);
+        const agent = previousAgent ?? previousSummaryAgent ?? options.getSelectedAgent();
+        if (agent?.agentId === payload.agentId) {
+          // Before confirmation only this row is optimistic. Shared bindings and
+          // rooms change on authoritative success, so rollback cannot revert B.
+          const optimistic = options.optimisticArchivedAgent(agent);
+          queryClient.setQueryData<AgentConfigWorkspace | undefined>(queryKeys.agentConfigWorkspace(), current => options.updatedAgentWorkspaceCache(current, optimistic));
+          patchArchiveSummary(optimistic);
+        }
+        const optimisticAgent = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace())?.agents.find(agent => agent.agentId === payload.agentId);
+        const optimisticSummaryAgent = queryClient.getQueryData<AgentConfigWorkspaceAgent[]>(queryKeys.agentSummary(true))?.find(agent => agent.agentId === payload.agentId);
+        if (options.getSelectedAgentId() === payload.agentId) {
+          options.setSelectedAgentId("");
+          options.setActivePane("overview");
+        }
+        return { previousAgent, previousSummaryAgent, optimisticAgent, optimisticSummaryAgent, telemetry, release };
+      } catch (error) {
+        release();
+        throw error;
       }
-      options.setSelectedAgentId("");
-      options.setActivePane("overview");
-      return { previousWorkspace, previousSelectedAgentId, previousActivePane, telemetry };
     },
     onSuccess: (agent, _variables, context) => {
       context?.telemetry?.succeeded({ agentId: agent.agentId });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
-        (current) => options.archivedWorkspaceCache(current, agent),
+        (current) => archiveSnapshotIsCurrent(current?.agents.find(row => row.agentId === agent.agentId), agent)
+          ? options.archivedWorkspaceCache(current, agent) : current,
       );
-      options.setSelectedAgentId("");
-      options.setActivePane("overview");
+      patchArchiveSummary(agent);
       options.setNotice({
         tone: "success",
         text: options.lang === "zh" ? `已安全归档 ${options.agentLabel(agent)}` : `Archived ${options.agentLabel(agent)}`,
@@ -162,15 +182,22 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       void options.chatWorkspaceCache.afterAgentArchived();
     },
     onError: (error, variables, context) => {
+      if (error instanceof AgentArchiveInProgressError) return;
       context?.telemetry?.failed(error, { agentId: variables.agentId });
-      if (context?.previousWorkspace) {
-        queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
+      if (context?.previousAgent) {
+        queryClient.setQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace(), current => !current ? current : ({
+          ...current,
+          agents: current.agents.map(row => row === context.optimisticAgent ? context.previousAgent! : row),
+        }));
       }
-      options.setSelectedAgentId(context?.previousSelectedAgentId ?? "");
-      options.setActivePane(context?.previousActivePane ?? "overview");
+      if (context?.previousSummaryAgent) {
+        queryClient.setQueryData<AgentConfigWorkspaceAgent[]>(queryKeys.agentSummary(true), current =>
+          current?.map(row => row === context.optimisticSummaryAgent ? context.previousSummaryAgent! : row));
+      }
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
       void options.chatWorkspaceCache.afterAgentArchived();
     },
+    onSettled: (_agent, _error, _payload, context) => { context?.release(); },
   });
 
   const purgeAgentMutation = useMutation({
@@ -522,6 +549,12 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
   });
 
   return {
+    isAgentArchivePending: (agentId: string) => archivePendingAgentIds.has(agentId) || archiveRecovery.isPending(agentId),
+    archiveAgents: async (agentIds: string[]) => {
+      const release = archiveRecovery.begin(agentIds);
+      try { return await archiveRecovery.bulk(agentIds); }
+      finally { release(); }
+    },
     updatePersonaMutation,
     updateTaskMutation,
     archiveAgentMutation,

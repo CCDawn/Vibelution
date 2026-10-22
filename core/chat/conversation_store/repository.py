@@ -1704,6 +1704,35 @@ class ConversationRepository:
             force_flush=True,
         )
 
+    def upsert_session_runtime_states(
+        self,
+        conversations: Sequence[Mapping[str, Any]],
+        *,
+        activate_session_id: str = "",
+    ) -> Future[dict[str, Any]]:
+        """Commit related runtime rows in one writer transaction and flush.
+
+        Unlike replacing chat state, this never prunes unmentioned siblings.
+        A failed row rolls back every runtime row in the batch.
+        """
+        frozen = [dict(conversation) for conversation in conversations]
+        activate = str(activate_session_id or "").strip()
+
+        def upsert(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            session_ids: list[str] = []
+            for conversation in frozen:
+                session_id = str(
+                    conversation.get("conversation_id") or conversation.get("conversationId") or ""
+                ).strip()
+                result = unit_of_work.chat_state.upsert_one(
+                    session_id, conversation, activate=session_id == activate,
+                )
+                session_ids.append(session_id)
+            return {**result, "sessionIds": session_ids}
+
+        return self._writer.submit(upsert, force_flush=True)
+
     def get_chat_state_directory_overlay(self) -> tuple[str, dict[str, dict[str, Any]]]:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).directory_overlay()

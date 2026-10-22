@@ -936,11 +936,19 @@ update_agent_budget_parameters_if_current = agent_session_lifecycle_serialized(
 ensure_agent_for_session = agent_session_lifecycle_serialized(ensure_agent_for_session)
 reactivate_agent_instance = agent_session_lifecycle_serialized(reactivate_agent_instance)
 @contextmanager
-def agent_session_lifecycle_transaction():
+def agent_session_lifecycle_transaction(*, timeout: float | None = None):
     """Hold the cross-store Agent/session lifecycle serialization lock."""
 
-    with _AGENT_SESSION_LIFECYCLE_LOCK:
+    if timeout is None:
+        acquired = _AGENT_SESSION_LIFECYCLE_LOCK.acquire()
+    else:
+        acquired = _AGENT_SESSION_LIFECYCLE_LOCK.acquire(timeout=max(0.0, float(timeout)))
+    if not acquired:
+        raise TimeoutError("Agent/session lifecycle is busy.")
+    try:
         yield
+    finally:
+        _AGENT_SESSION_LIFECYCLE_LOCK.release()
 
 
 @dataclass(frozen=True)

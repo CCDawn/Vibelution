@@ -5,6 +5,8 @@ import {
   fetchJson,
   fetchJsonWithTimeout,
   fetchWithControl,
+  getControlToken,
+  clearControlToken,
   isFetchJsonHttpError,
   isFetchAbortError,
   resetControlTokenForTests,
@@ -12,6 +14,128 @@ import {
   seedControlTokenForTests,
   setFetchJsonFailureReporter,
 } from "./client";
+
+describe("control-token waiting boundaries", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetControlTokenForTests();
+  });
+
+  it("rejects a pre-aborted caller without starting work or leaking an unhandled rejection", async () => {
+    const runtime = globalThis as unknown as { process: { on: (name: string, listener: (error: unknown) => void) => void; off: (name: string, listener: (error: unknown) => void) => void } };
+    const unhandled: unknown[] = [];
+    const listener = (error: unknown) => { unhandled.push(error); };
+    runtime.process.on("unhandledRejection", listener);
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController(); controller.abort();
+    try {
+      await expect(fetchJsonWithTimeout("/api/agents", { timeoutMs: 20, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(unhandled).toEqual([]);
+    } finally { runtime.process.off("unhandledRejection", listener); }
+  });
+
+  it("lets a timed-out caller leave a shared bootstrap without cancelling another caller", async () => {
+    vi.useFakeTimers();
+    let release!: (value: unknown) => void;
+    const token = new Promise(resolve => { release = resolve; });
+    const fetchMock = vi.fn((input: string) => input === "/api/control-token"
+      ? token : Promise.resolve({ ok: true, json: async () => ({ ok: true }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    let failure: unknown;
+    const timed = fetchJsonWithTimeout("/api/health", { timeoutMs: 20 }).catch(error => { failure = error; });
+    const survivor = fetchJson("/api/agents");
+    await vi.advanceTimersByTimeAsync(25);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const bootstrapSignal = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]?.signal;
+    expect(bootstrapSignal?.aborted).not.toBe(true);
+    release({ ok: true, json: async () => ({ controlToken: "shared-token" }) });
+    await expect(survivor).resolves.toEqual({ ok: true });
+    await timed;
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(["/api/control-token", "/api/agents"]);
+  });
+
+  it("honors explicit cancellation while the shared token request is unresolved", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    const controller = new AbortController();
+    let failure: unknown;
+    const pending = fetchJson("/api/agents", { signal: controller.signal }).catch(error => { failure = error; });
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(failure).toMatchObject({ name: "AbortError" });
+    await pending;
+  });
+
+  it("expires a hung bootstrap independently and permits a fresh flight", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValue({ ok: true, json: async () => ({ controlToken: "replacement" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    let failure: unknown;
+    const pending = getControlToken().catch(error => { failure = error; });
+    await vi.advanceTimersByTimeAsync(8_001);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    await pending;
+    await expect(getControlToken()).resolves.toMatchObject({ token: "replacement" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let an obsolete failed flight evict a newer cached token", async () => {
+    let rejectOld!: (error: Error) => void;
+    const fetchMock = vi.fn().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }))
+      .mockResolvedValue({ ok: true, json: async () => ({ controlToken: "new-token" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const old = getControlToken().catch(() => undefined);
+    clearControlToken();
+    await getControlToken();
+    rejectOld(new Error("old flight failed"));
+    await old;
+    await expect(getControlToken()).resolves.toMatchObject({ token: "new-token" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds a token refresh after a 403 by the original caller deadline", async () => {
+    vi.useFakeTimers();
+    seedControlTokenForTests();
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false, status: 403, headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({ detail: "Missing or invalid web control token" }),
+    }).mockImplementation(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    let failure: unknown;
+    const pending = fetchJsonWithTimeout("/api/agents", { timeoutMs: 20 }).catch(error => { failure = error; });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(failure).toMatchObject({ name: "TimeoutError" });
+    await pending;
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(["/api/agents", "/api/control-token"]);
+  });
+
+  it("joins the newer refresh when another old-token request receives a late 403", async () => {
+    seedControlTokenForTests();
+    let first403!: (value: unknown) => void, second403!: (value: unknown) => void, tokenReady!: (value: unknown) => void;
+    const first = new Promise(resolve => { first403 = resolve; });
+    const second = new Promise(resolve => { second403 = resolve; });
+    const token = new Promise(resolve => { tokenReady = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second).mockReturnValueOnce(token)
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const a = fetchJson("/api/agents/a"), b = fetchJson("/api/agents/b");
+    const denied = () => ({ ok: false, status: 403, headers: new Headers({ "content-type": "application/json" }), json: async () => ({ detail: "Missing or invalid web control token" }) });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    first403(denied());
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    second403(denied());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    tokenReady({ ok: true, json: async () => ({ controlToken: "new-token" }) });
+    await expect(Promise.all([a, b])).resolves.toEqual([{ ok: true }, { ok: true }]);
+  });
+});
 import {
   pushClientOperationContext,
   resetClientOperationContextForTests,

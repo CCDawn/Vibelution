@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -102,3 +103,71 @@ def test_cross_process_file_lock_depth_is_reentrant_per_thread(tmp_path):
     with cross_process_file_lock(target, timeout=1.0):
         with cross_process_file_lock(target, timeout=1.0):
             pass
+
+
+def test_cross_process_file_lock_timeout_includes_another_thread(tmp_path):
+    target = tmp_path / "thread-contention.bin"
+    started = threading.Event()
+    finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def contend():
+        started.set()
+        try:
+            with cross_process_file_lock(target, timeout=0.05):
+                pass
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    with cross_process_file_lock(target):
+        worker = threading.Thread(target=contend, daemon=True)
+        worker.start()
+        assert started.wait(timeout=2)
+        timed_out_while_held = finished.wait(timeout=1)
+    worker.join(timeout=2)
+
+    assert timed_out_while_held, "Thread contention must honor the lock timeout."
+    assert not worker.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], TimeoutError)
+    with cross_process_file_lock(target, timeout=0):
+        pass
+
+
+def test_cross_process_lock_passes_only_remaining_budget_to_os(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    target = tmp_path / "shared-budget.bin"
+    clock = [100.0]
+    budgets: list[float | None] = []
+
+    class ThreadLock:
+        def acquire(self, **kwargs):
+            clock[0] += 0.4
+            return True
+
+        def release(self):
+            pass
+
+        def __enter__(self):
+            self.acquire()
+
+        def __exit__(self, *args):
+            self.release()
+
+    @contextmanager
+    def os_lock(*args, timeout, **kwargs):
+        budgets.append(timeout)
+        yield
+
+    entry = file_lock._ThreadLockEntry()
+    entry.lock = ThreadLock()
+    monkeypatch.setitem(file_lock._THREAD_LOCKS, file_lock._path_key(file_lock.lock_path_for(target)), entry)
+    monkeypatch.setattr(file_lock.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(file_lock, "_locked_sidecar", os_lock)
+
+    with cross_process_file_lock(target, timeout=0.5):
+        pass
+
+    assert budgets == [pytest.approx(0.1)]
