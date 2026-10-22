@@ -525,7 +525,7 @@ def _agent_to_api(
 ) -> dict[str, Any]:
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
-    metadata = dict(agent.get("metadata") or {})
+    metadata = copy.deepcopy(agent.get("metadata") or {})
     avatar_path = s.resolve_agent_avatar_path_for_projection({**agent, "metadata": metadata})
     profileless_session_agent = s._is_profileless_session_agent({**agent, "metadata": metadata})
     if profileless_session_agent:
@@ -868,7 +868,7 @@ def _agent_to_api_summary(
 ) -> dict[str, Any]:
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
-    metadata = dict(agent.get("metadata") or {})
+    metadata = copy.deepcopy(agent.get("metadata") or {})
     avatar_path = s.resolve_agent_avatar_path_for_projection(
         {**agent, "metadata": metadata},
         available_avatar_filenames=available_avatar_filenames,
