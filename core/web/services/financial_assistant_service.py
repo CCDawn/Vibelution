@@ -132,6 +132,11 @@ def composer_starters_for_agent(agent_id: str) -> list[dict[str, str]] | None:
     return [dict(item) for item in starters]
 
 
+def active_financial_assistant_ids() -> list[str]:
+    """Worker discovery needs identity only; keep full configuration on demand."""
+    return directory.find_agent_ids_by_metadata("financialAssistantProfile", PROFILE)
+
+
 def _agents() -> list[dict]:
     return [
         a

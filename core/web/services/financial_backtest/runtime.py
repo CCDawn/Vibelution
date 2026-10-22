@@ -832,12 +832,7 @@ def run_forever(*, stop_requested: Callable[[], bool]) -> None:
 
 
 def _financial_assistant_ids() -> list[str]:
-    return [
-        str(agent.get("agentId") or "").strip()
-        for agent in financial_assistant_service._agents()
-        if str(agent.get("status") or "active") == "active"
-        and str(agent.get("agentId") or "").strip()
-    ]
+    return financial_assistant_service.active_financial_assistant_ids()
 
 
 def _validate_decision_result(
