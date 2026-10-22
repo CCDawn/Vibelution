@@ -449,6 +449,7 @@ export function createConversationCodexSurface({
     // assistant turn, placed ahead of the transcript it summarizes, so a turn
     // never splits its worked time across two places.
     const transcriptWorkSummary = message.role === "assistant"
+      && message.metadata?.guidanceSegmentIsLast !== false
       && !isCompanionMode
       && !isAgentInboxMessage(message)
       && !isGroupRoomTranscriptMessage(message)

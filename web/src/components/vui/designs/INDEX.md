@@ -162,6 +162,7 @@
 | `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
 | `ConversationTodoProgressButton` | [product/conversation.md](./product/conversation.md#conversationtodoprogressbutton) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
+| 运行中引导工作段 | [product/conversation.md](./product/conversation.md#运行中引导工作段) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
 | 本轮文件面板（`ConversationFileDeliveries`） | [product/conversation.md](./product/conversation.md#conversationfiledeliveries) |
 | 用户消息折叠（`AgentUserContentSectionView`） | [product/conversation.md](./product/conversation.md#agentusercontentsectionview-用户消息折叠) |

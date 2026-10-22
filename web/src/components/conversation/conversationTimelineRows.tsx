@@ -83,6 +83,7 @@ import {
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
 import type { ConversationModelSwitchBoundary } from "./conversationModelSwitch";
+import { guidanceDisplayState } from "./conversationGuidanceSegments";
 import type { createConversationOperationGroups } from "./conversationOperationGroups";
 import {
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
@@ -721,6 +722,12 @@ export function createConversationTimelineRows({
             const timelineRendersAssistantText = false;
             const showUserContent = agentSections.hasUserContent;
             const steerGuidanceMessage = isSteerGuidanceMessage(message);
+            const guidanceState = guidanceDisplayState(message);
+            const guidanceStatusLabel = guidanceState === "drained"
+              ? (lang === "zh" ? "已纳入" : "Included")
+              : guidanceState === "pending"
+                ? (lang === "zh" ? "等待纳入" : "Waiting")
+                : (lang === "zh" ? "已接收" : "Received");
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
               && showResponseBlock
@@ -1036,8 +1043,8 @@ export function createConversationTimelineRows({
                     ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
                     : steerGuidanceMessage
                       ? (
-                        <VChip data-conversation-guidance-status="received">
-                          {resolvedSafeGuidanceLabel} · {lang === "zh" ? "已接收" : "Received"}
+                        <VChip data-conversation-guidance-status={guidanceState}>
+                          {resolvedSafeGuidanceLabel} · {guidanceStatusLabel}
                         </VChip>
                       )
                       : null

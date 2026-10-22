@@ -1492,6 +1492,7 @@ def _normalize_messages(
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = s._normalize_session_detail_transcript_scope(transcript_scope)
+    guidance_metadata: dict[str, dict[str, Any]] | None = None
     # Startup-recovery supersede marks (display-only): turns whose interrupted
     # partial was superseded by an auto-resume get metadata.recoverySuperseded
     # so the display layer can drop the stale partial. The journal keeps both
@@ -1747,6 +1748,15 @@ def _normalize_messages(
         if references:
             entry["references"] = references
         metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if role == "user" and metadata.get("kind") in {"user_guidance", "user_interrupt_guidance"}:
+            if guidance_metadata is None:
+                from .turn_steer import guidance_metadata_from_events
+
+                guidance_metadata = guidance_metadata_from_events(
+                    s._load_session_conversation_events_cached(conversation_id)
+                )
+            event_id = str(metadata.get("eventId") or "").strip()
+            metadata.update(guidance_metadata.get(event_id) or {})
         if role == "assistant" and turn_id:
             client_submission_id = client_submission_id_by_turn.get(turn_id, "")
             if client_submission_id:
@@ -2648,6 +2658,7 @@ def _merge_live_reasoning_cells_into_turn_items(
     turn_id: str,
     message_id: str,
     source: str,
+    order_provenance: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Merge each feedback reasoning segment by stable identity, never as one turn blob."""
 
@@ -2675,6 +2686,7 @@ def _merge_live_reasoning_cells_into_turn_items(
             continue
         feedback_sequence = s._coerce_nonnegative_int(cell.get("sequence") or index)
         item_id = f"{s._session_turn_item_base_id(session_id, turn_id)}-reasoning-{feedback_sequence}"
+        item_id = str((order_provenance or {}).get(item_id, {}).get("itemId") or item_id)
         live_item["id"] = f"{item_id}:{s._coerce_nonnegative_int(live_item.get('revision'))}"
         live_item["itemId"] = item_id
         live_text = str(live_item.get("text") or live_item.get("summary") or "").strip()
@@ -2777,9 +2789,22 @@ def _build_session_turn_items_projection(
             turn_id=normalized_turn_id,
         )
     # Require turn_id for journal projection so we never return other turns' items.
+    order_provenance: dict[str, dict[str, Any]] = {}
     if normalized_turn_id:
+        from .turn_steer import display_item_order_provenance
+
+        journal_events = s._load_session_conversation_events_cached(str(session_id or "").strip())
+        order_provenance = display_item_order_provenance(journal_events, normalized_turn_id)
+        response_origin = order_provenance.get("latest:agent_message")
+        if response_origin:
+            order_provenance[s._session_turn_agent_message_item_id(session_id, normalized_turn_id)] = response_origin
+            # Capture content is cumulative across requests. Only the current
+            # native response segment may inhabit its temporary display item.
+            if not done and source in {"assistant_delta", "session_live_overlay"}:
+                offset = s._coerce_nonnegative_int(response_origin.get("contentOffset"))
+                content = str(content or "")[offset:]
         canonical_items = s.conversation_turn_items_from_events(
-            s._load_session_conversation_events_cached(str(session_id or "").strip()),
+            journal_events,
             turn_id=normalized_turn_id,
         )
         if canonical_items:
@@ -2799,6 +2824,7 @@ def _build_session_turn_items_projection(
                 turn_id=normalized_turn_id,
                 message_id=normalized_message_id,
                 source=source,
+                order_provenance=order_provenance,
             )
             merged = _merge_live_content_into_turn_items(
                 stamped,
@@ -2825,6 +2851,7 @@ def _build_session_turn_items_projection(
                 merged,
                 session_id=session_id,
                 turn_id=normalized_turn_id,
+                order_provenance=order_provenance,
             )
     if (
         str(normalized_metadata.get("kind") or "").strip() == "turn_error"
@@ -2842,6 +2869,7 @@ def _build_session_turn_items_projection(
             ],
             session_id=session_id,
             turn_id=normalized_turn_id,
+            order_provenance=order_provenance,
         )
     if not normalized_message_id:
         return []
@@ -2999,6 +3027,7 @@ def _build_session_turn_items_projection(
         items,
         session_id=session_id,
         turn_id=normalized_turn_id,
+        order_provenance=order_provenance,
     )
 
 
@@ -3007,6 +3036,7 @@ def _canonicalize_session_turn_items_for_protocol(
     *,
     session_id: str,
     turn_id: str,
+    order_provenance: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Emit the v3 SessionTurnItem algebra and discard v2 renderer aliases.
 
@@ -3054,6 +3084,11 @@ def _canonicalize_session_turn_items_for_protocol(
         item_id = str(raw.get("itemId") or raw.get("id") or "").strip()
         if not item_id:
             item_id = f"{s._session_turn_item_base_id(session_id, turn_id or 'turn')}-{index + 1}"
+        origin = (order_provenance or {}).get(item_id) or (order_provenance or {}).get(
+            f"call:{str(raw.get('callId') or '').strip()}"
+        )
+        if origin:
+            item_id = str(origin.get("itemId") or item_id)
         revision = max(0, int(raw.get("revision") or 0))
         text = s._sanitize_message_content(
             "assistant",
@@ -3074,6 +3109,8 @@ def _canonicalize_session_turn_items_for_protocol(
         }
         if raw_item_metadata:
             metadata = {**raw_item_metadata, **metadata}
+        if origin and int(origin.get("orderSequence") or 0) > 0:
+            metadata["orderSequence"] = int(origin["orderSequence"])
         item: dict[str, Any] = {
             "id": f"{item_id}:{revision}",
             "itemId": item_id,
@@ -5052,7 +5089,9 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     if not events:
         return []
     messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
-    return messages
+    from .turn_steer import restore_guidance_display_messages
+
+    return restore_guidance_display_messages(messages, events)
 
 
 def _session_branch_metadata(session_id: str) -> tuple[str, str]:
