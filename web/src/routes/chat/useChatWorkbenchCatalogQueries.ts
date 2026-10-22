@@ -317,10 +317,9 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: ({ signal }) => listTeams({ signal }),
-    // Must load whenever the left-rail agent directory is active — not only when the
-    // group-room picker is open. With teams=[], research/evolution members all dump into
-    // 「特殊 Agent」and team rooms fall into 未归属.
-    enabled: sessionDirectoryEnabled && (secondaryChatDataEnabled || sessionIndexQueryEnabled),
+    // Restore the current transcript first. The rail still hydrates its team
+    // grouping afterward; explicit group entry needs the catalog immediately.
+    enabled: sessionDirectoryEnabled && (secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive),
     refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });

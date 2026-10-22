@@ -5344,12 +5344,11 @@ app.whenReady()
     startPeriodicShellFreshnessWatch();
     startWorkbenchBackendWatchdogLoop();
     void maybeRestoreTrayRestartAllPending();
-    await recordElectronSupervisorEvent(launcherBootstrap, {
+    const trayStartupEvents: RuntimeSceneElectronEvent[] = [{
       eventCode: "electron.tray.created",
       message: "Electron system tray created.",
       fields: { provider: "electron" }
-    });
-    await recordElectronSupervisorEvent(launcherBootstrap, {
+    }, {
       eventCode: "electron.launcher.supervisor.started",
       message: "Electron launcher supervisor started.",
       fields: {
@@ -5358,16 +5357,14 @@ app.whenReady()
         deepLinkRegistrationRegistered: deepLinkRegistration.registered,
         deepLinkRegistrationReason: deepLinkRegistration.reason
       }
-    });
-    await recordElectronSupervisorEvent(launcherBootstrap, {
+    }, {
       eventCode: "electron.launcher_service.started",
       message: "Electron main is the Launcher control plane; leftover Python launcher is not attached.",
       fields: {
         mode: launcherBootstrap?.mode ?? "",
         launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0
       }
-    });
-    await recordElectronSupervisorEvent(launcherBootstrap, {
+    }, {
       eventCode: "electron.tray.ready",
       message: "Lightweight tray started.",
       fields: electronStartupFields({
@@ -5375,6 +5372,12 @@ app.whenReady()
         stage: "tray_ready",
         stageDurationMs: electronStageElapsedMs(trayStartedAtMs)
       })
+    }];
+    // Capture the ready timestamp now; observational I/O must not delay first open.
+    scheduleTelemetryWithoutWaiting(async () => {
+      for (const event of trayStartupEvents) {
+        await recordElectronSupervisorEvent(launcherBootstrap, event);
+      }
     });
     const rawUrl = findVibelutionDeepLinkArg(process.argv.slice(1));
     if (rawUrl) {
