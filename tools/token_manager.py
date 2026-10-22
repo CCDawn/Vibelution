@@ -501,26 +501,26 @@ HISTORY_SUMMARY_NOTICE_MARKER = "历史摘要:"
 
 def _is_summary_user_source(message: Any) -> bool:
     """User role, or the host's legacy system-role external request only."""
-    return _is_provider_user_message(message) or (
+    return not _has_checkpoint_provenance(message) and (_is_provider_user_message(message) or (
         _message_role(message) == "system" and is_external_request_message(message)
-    )
+    ))
 
 
-def _is_history_summary_notice(message: Any) -> bool:
-    """判断一条消息是否是前代压缩写回的历史摘要载体。
-
-    等价判据：system 角色且正文携带历史摘要标记；外部任务输入永远不算
-    历史摘要（它们有独立的保留语义）。
-    """
+def _has_checkpoint_provenance(message: Any) -> bool:
     kwargs = getattr(message, "additional_kwargs", {})
     provenance = kwargs.get("vibelution_compaction_checkpoint") if isinstance(kwargs, dict) else None
-    if (
+    return bool(
         _message_role(message) in {"system", "assistant", "runtime", "runtime_context"}
         and isinstance(provenance, dict)
         and provenance.get("kind") == "compaction_checkpoint"
         and isinstance(provenance.get("eventId"), str)
         and provenance["eventId"].strip()
-    ):
+    )
+
+
+def _is_history_summary_notice(message: Any) -> bool:
+    """Recognize host checkpoint identity before legacy content markers."""
+    if _has_checkpoint_provenance(message):
         return True
     if is_external_request_message(message):
         return False
