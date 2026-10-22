@@ -1179,7 +1179,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // Paint effect must not depend on Map/array identities that change every render.
     const paintBlock = conversationViewSource.slice(
       conversationViewSource.indexOf("if (!streamingTimelineScrollSignal || !onStreamingFramePaint)"),
-      conversationViewSource.indexOf("if (!previewImage)"),
+      conversationViewSource.indexOf("readingViewportAnchorRef.current = null"),
     );
     expect(paintBlock).toContain("streamingTimelineScrollSignal");
     expect(paintBlock).not.toContain("agentRenderStatesByMessageId");
