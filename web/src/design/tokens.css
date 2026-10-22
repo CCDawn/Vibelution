@@ -81,6 +81,24 @@
   --vui-workbench-border: color-mix(in srgb, var(--fg-primary) 5%, transparent);
   --vui-workbench-shadow: none;
   --vui-radius-overlay: 8px;
+  /* Preserve established notification geometry when consuming shared tokens. */
+  --vui-radius-tile: 10px;
+  --vui-radius-notice-content: 9px;
+  --vui-workflow-edge: #8b9d91;
+  /* The knowledge graph keeps its fixed dark palette in both app themes. */
+  --vui-memory-graph-base: #090d15;
+  --vui-memory-graph-workspace: #090e17;
+  --vui-memory-graph-rail: #0c111b;
+  --vui-memory-graph-panel: #0c111b;
+  --vui-memory-graph-chat: #0a0f18;
+  --vui-memory-graph-inset: #101722;
+  --vui-memory-graph-raised: #161e2a;
+  --vui-memory-graph-control-muted: #182130;
+  --vui-memory-graph-border: #ffffff12;
+  --vui-memory-graph-fg-primary: #dbe2ed;
+  --vui-memory-graph-fg-secondary: #a4b0c3;
+  --vui-memory-graph-fg-tertiary: #8491a6;
+  --vui-memory-graph-accent: #a7bce2;
   /* Small pill/chip radius (inline code pills); ≈ the legacy 0.3rem wash. */
   --vui-radius-chip: 5px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
@@ -255,6 +273,12 @@
   --vui-line-normal: 1.5;
   --vui-line-readable: 1.58;
   --vui-line-relaxed: 1.65;
+  /* Preserve native text-slot line heights during class-name migrations. */
+  --vui-line-slot-xs: calc(1 / 0.75);
+  --vui-line-slot-sm: calc(1.25 / 0.875);
+  --vui-line-slot-base: var(--vui-line-normal);
+  --vui-line-slot-lg: calc(1.75 / 1.125);
+  --vui-line-slot-xl: calc(1.75 / 1.25);
 
   /* Weight ladder */
   --vui-weight-regular: 400;

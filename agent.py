@@ -3600,6 +3600,45 @@ class AgentRuntime:
                     except Exception:
                         pass
                     if should_break:
+                        # 压缩成功但仍触发 fail-closed 时不能静默 break：用户侧
+                        # 只看到“压缩完成”然后没有后续输出，会话表现为卡死。
+                        # 先补一条可见 notice，再落结构化 turn 诊断，让这一轮
+                        # 以可读原因结束（context_budget_exhausted）。
+                        if bool(getattr(self, "_last_context_compression_applied", False)):
+                            messages.append(build_runtime_notice_message(
+                                f"上下文已压缩（{current_tokens} → {after_tokens} tokens），"
+                                f"但仍未满足安全输入预算，本轮不再调用模型。"
+                            ))
+                            try:
+                                ui.add_log(
+                                    "[上下文预算] 压缩后 "
+                                    f"{after_tokens} tokens 仍不满足安全输入预算，"
+                                    "本轮停止调用模型（context_budget_exhausted）。",
+                                    "ERROR",
+                                )
+                            except Exception:
+                                pass
+                        if not bool(getattr(self, "_last_turn_failed", False)):
+                            self._record_turn_failure_diagnostic(
+                                category="context_error",
+                                reason_code="context_budget_exhausted",
+                                reason_summary="上下文压缩后仍超出安全输入预算",
+                                reason_detail=(
+                                    "压缩已执行，但压缩结果仍超过硬输入上限或切断了"
+                                    "未完结的工具调用链，模型调用被跳过；请新开会话或"
+                                    "缩短上下文后重试（context_budget_exhausted）。"
+                                ),
+                                chain_stage="llm_preflight",
+                                event_code="agent.context_budget_exhausted",
+                                retryable=False,
+                                recovery_action="compress_context_or_new_session",
+                                fields={
+                                    "iteration": iteration,
+                                    "compressedTokens": after_tokens,
+                                    "beforeTokens": current_tokens,
+                                    "messageCount": len(messages),
+                                },
+                            )
                         break
                     # 只有实际缩减上下文时才写 notice，禁止把 guard skip 伪装成已压缩。
                     if bool(getattr(self, "_last_context_compression_applied", False)):

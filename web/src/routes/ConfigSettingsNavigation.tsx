@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Activity, Bot, Braces, BrainCircuit, FileSliders, Globe, Keyboard, Palette, Plug, ShieldCheck, User } from "lucide-react";
 
 import type { ConfigSummary } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VPanelHeader } from "../components/vui";
+import { VButton, VNativeInput, VPanelHeader, VStringSelect } from "../components/vui";
 import styles from "./ConfigSettingsNavigation.styles";
 import {
   searchConfigSettings,
@@ -304,23 +304,24 @@ export function ConfigSettingsSidebar({
       </div>
       <label className={styles.mobileCategory}>
         <span className={styles.searchLabel}>{language === "zh" ? "设置分类" : "Settings category"}</span>
-        <VNativeSelect
-          aria-label={language === "zh" ? "设置分类" : "Settings category"}
+        <VStringSelect
+          ariaLabel={language === "zh" ? "设置分类" : "Settings category"}
+          placeholder={language === "zh" ? "选择设置分类" : "Select a settings category"}
           value={activeGroupId ? currentPageId : ""}
-          onChange={(event) => {
-            const pageId = event.target.value;
+          options={[
+            ...(onShowAll ? [{ value: "", label: language === "zh" ? "全部设置" : "All settings" }] : []),
+            ...categories.flatMap((category) => category.entries.map(({ page }) => ({
+              value: page.id,
+              label: page.title,
+              description: category.title,
+            }))),
+          ]}
+          onValueChange={(pageId) => {
             if (!pageId) { onShowAll?.(); return; }
             const entry = categories.flatMap((category) => category.entries).find((candidate) => candidate.page.id === pageId);
             if (entry) navigateToPage(entry.group.id, entry.page.id);
           }}
-        >
-          {onShowAll ? <option value="">{language === "zh" ? "全部设置" : "All settings"}</option> : null}
-          {categories.map((category) => (
-            <optgroup key={category.title} label={category.title}>
-              {category.entries.map(({ page }) => <option key={page.id} value={page.id}>{page.title}</option>)}
-            </optgroup>
-          ))}
-        </VNativeSelect>
+        />
       </label>
       <nav className={styles.groupNav} aria-label={language === "zh" ? "设置分类" : "Settings categories"}>
         {categories.map((category) => (

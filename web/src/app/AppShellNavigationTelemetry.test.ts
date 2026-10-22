@@ -247,17 +247,11 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain("primaryRoutePreloadPromises[key] = null");
   });
 
-  it("warms all primary nav route chunks on idle after mount, silently in tests", () => {
-    expect(appShellSource).toContain("function startPrimaryNavIdleWarm");
-    expect(appShellSource).toContain("function warmPrimaryNavRouteChunkAt");
-    expect(appShellSource).toContain("function schedulePrimaryNavIdleWork");
-    expect(appShellSource).toContain("startPrimaryNavIdleWarm();");
-    // Low-priority idle scheduling with a setTimeout degradation path.
-    expect(appShellSource).toContain("requestIdleCallback");
-    // Test/jsdom environments skip the warm pass entirely.
-    expect(appShellSource).toContain('import.meta.env.MODE === "test"');
-    // Chat warms through the telemetry-free shared import, never chunk telemetry.
-    expect(appShellSource).toContain("importChatCodingRouteChunk");
+  it("leaves unvisited route chunks cold until navigation or hover/focus intent", () => {
+    expect(appShellSource).not.toContain("startPrimaryNavIdleWarm");
+    expect(appShellSource).not.toContain("warmPrimaryNavRouteChunkAt");
+    expect(appShellSource).toContain("preloadPrimaryRouteChunk");
+    expect(appShellSource).toContain("primaryRoutePreloadLoaders");
   });
 
   it("preloads the settings chunk chain so the first gear open has no blank suspense or route waterfall", () => {

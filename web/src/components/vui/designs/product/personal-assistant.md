@@ -134,7 +134,7 @@ VDialog size=sm + 纵向表单行；读取中 VStateSurface loading 骨架，读
 ## HumanAttentionNoticeStack
 
 ### 功能
-助理浮动窗内的“人工注意”通知卡堆叠：监听壳层经 preload 暴露的投递订阅（`onHumanAttentionOpened`，通道 `launcher:human-attention-opened`），把完整 payload 渲染为窗口内通知卡——标题 + 正文（两行截断）+ severity（critical/high/medium）边框与图标着色 + 分类角标；点击卡片按 targetUrl（或 kind 默认路由）窗内导航并关卡，右上角可手动关闭，12s 自动消失、hover 暂停计时，最多堆叠 3 张（超出丢最旧，同 id 重复投递刷新为一张置顶）。
+助理浮动窗内的“人工注意”通知卡堆叠：监听壳层经 preload 暴露的投递订阅（`onHumanAttentionOpened`，通道 `launcher:human-attention-opened`），把完整 payload 渲染为窗口内通知卡——标题 + 正文（两行截断）+ severity（critical/high/medium/info，info 为完成类好消息专用低平档：无警示着色、CheckCircle2 图标）边框与图标着色 + 分类角标；点击卡片按 targetUrl（或 kind 默认路由）窗内导航并关卡，右上角可手动关闭，12s 自动消失、hover 暂停计时，最多堆叠 3 张（超出丢最旧，同 id 重复投递刷新为一张置顶）。
 ### 适用范围
 仅 DesktopAssistantRoute（/desktop-assistant 浮动助理窗，收起与展开两态都覆盖，fixed 定位浮于舞台/聊天窗之上）。裸 `{ id, targetUrl? }` 打开事件不建卡、直接窗内导航。主工作台不挂载本组件。
 ### 使用方式
@@ -142,7 +142,7 @@ VDialog size=sm + 纵向表单行；读取中 VStateSurface loading 骨架，读
 ### 非职责
 不触发通知（触发链归 HumanAttentionNotifier）、不与系统通知竞争（壳层决定通道）、不持有 attention 数据副本、不写后端。
 ### 视觉与状态
-severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-surface-panel` 的 color-mix 令牌着色（对齐 VStateSurface error/unavailable 口径）；桥缺失时渲染 null；hover 暂停与自动消失遵循 prefers-reduced-motion（过渡禁用）。文案 zh/en 双语。
+severity 用 `--state-error`/`--state-warning` 与 `--vui-border-subtle`/`--vui-surface-panel` 的 color-mix 令牌着色（对齐 VStateSurface error/unavailable 口径）；info 档不着警示色，落默认中性卡面；桥缺失时渲染 null；hover 暂停与自动消失遵循 prefers-reduced-motion（过渡禁用）。文案 zh/en 双语。
 ### 实现落点
 `routes/desktopPet/HumanAttentionNoticeStack.tsx`、`routes/desktopPet/HumanAttentionNoticeStack.styles.ts`、`design/route-css/desktop-pet.tailwind.css`（@source 登记）。
 ### 反冗余

@@ -29,10 +29,89 @@ from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
 _MAX_RECURSION_DEPTH = 1
 _SUBAGENT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 _MAX_SCENE_TEXT = 1200
+# spawn_agent_tool 的执行器预算上限（秒）。模型传入的 timeout 在工具入口被 clamp
+# 到该值以内，tool_executor 的外层预算也以它为界（外层多留少量缓冲），预算不再
+# 随模型请求无界拉伸。
+SPAWN_AGENT_EXECUTOR_BUDGET_SECONDS = 150
+_DEFAULT_SPAWN_TIMEOUT_SECONDS = 120
 # Execution model is the Agent slot. Global profile ids subagent_worker and
 # subagent_explorer are not model selectors; those strings remain tool scopes.
 _SUBAGENT_EXECUTION_LLM_SLOT = "subagentExecution"
 _stream_sink_local = threading.local()
+
+# ── 活跃子代理进程注册表 ────────────────────────────────────────────────────
+# spawn_agent 在子进程启动后登记，收尾（完成/取消/超时/异常）时注销。执行器
+# 超时路径通过 terminate_active_subagent_processes() 物理终止仍在等待的子进程
+# 树，避免“外层已报超时、spawn 线程+子进程继续烧 LLM”的孤儿。
+_ACTIVE_SPAWN_LOCK = threading.Lock()
+_ACTIVE_SPAWN_PROCESSES: Dict[str, Dict[str, Any]] = {}
+
+
+def clamp_spawn_timeout(value: Any) -> int:
+    """把模型传入的 spawn 超时收窄到执行器预算内；非法值回落默认值。"""
+
+    try:
+        seconds = int(float(value))
+    except (TypeError, ValueError):
+        return _DEFAULT_SPAWN_TIMEOUT_SECONDS
+    if seconds <= 0:
+        return _DEFAULT_SPAWN_TIMEOUT_SECONDS
+    return min(seconds, SPAWN_AGENT_EXECUTOR_BUDGET_SECONDS)
+
+
+def _register_active_spawn_process(
+    sub_run_id: str,
+    process: "subprocess.Popen",
+    *,
+    cancel_checker: Optional[Callable[[], str]] = None,
+) -> None:
+    with _ACTIVE_SPAWN_LOCK:
+        _ACTIVE_SPAWN_PROCESSES[str(sub_run_id)] = {
+            "process": process,
+            "cancelChecker": cancel_checker,
+        }
+
+
+def _unregister_active_spawn_process(sub_run_id: str) -> None:
+    with _ACTIVE_SPAWN_LOCK:
+        _ACTIVE_SPAWN_PROCESSES.pop(str(sub_run_id), None)
+
+
+def terminate_active_subagent_processes(
+    reason: str = "executor_timeout",
+    *,
+    owner: Optional[Callable[[], str]] = None,
+) -> int:
+    """终止仍在运行的已派发子代理进程树，返回终止数量。
+
+    ``owner`` 传入本次工具调用的 cancel checker（探测闭包）时只终止属于该次
+    调用的子进程，避免误杀并发会话里健康的子代理；``owner=None`` 终止全部。
+    """
+
+    with _ACTIVE_SPAWN_LOCK:
+        entries = list(_ACTIVE_SPAWN_PROCESSES.items())
+    terminated = 0
+    for sub_run_id, entry in entries:
+        if owner is not None and entry.get("cancelChecker") is not owner:
+            continue
+        process = entry.get("process")
+        _unregister_active_spawn_process(sub_run_id)
+        if process is None:
+            continue
+        try:
+            if process.poll() is not None:
+                continue
+            _terminate_process_tree(process)
+            terminated += 1
+            _debug_logger.warning(
+                f"[子代理] 执行器超时终止子进程树: subRunId={sub_run_id} reason={reason}"
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[子代理] 终止子进程树失败: subRunId={sub_run_id} "
+                f"{type(exc).__name__}: {exc}"
+            )
+    return terminated
 
 
 def set_subagent_stream_sink(callback: Optional[Callable[[Dict[str, str]], None]]) -> None:
@@ -672,6 +751,7 @@ def _open_subagent_address_record(
     task: str,
     task_type: str,
     status: str,
+    pid: Optional[int] = None,
 ) -> Dict[str, Any]:
     try:
         from core.orchestration.subagent_address import open_subagent_address
@@ -681,6 +761,7 @@ def _open_subagent_address_record(
             task=task,
             task_type=task_type,
             status=status,
+            pid=pid,
         )
     except Exception as exc:
         _debug_logger.warning(f"[子代理] 登记子代理编号失败: {type(exc).__name__}: {exc}")
@@ -710,7 +791,12 @@ def _settle_subagent_address_record(
         _debug_logger.warning(f"[子代理] 写回子代理会话失败: {type(exc).__name__}: {exc}")
 
 
-def continue_subagent(to: str = "", message: str = "", summary: str = "") -> str:
+def continue_subagent(
+    to: str = "",
+    message: str = "",
+    summary: str = "",
+    _cancel_checker: Optional[Callable[[], str]] = None,
+) -> str:
     """Continue an existing subagent by id. Does not allocate a new session."""
 
     agent_id = str(to or "").strip()
@@ -742,6 +828,7 @@ def continue_subagent(to: str = "", message: str = "", summary: str = "") -> str
             goal=str(summary or "").strip(),
             resume_agent_id=agent_id,
             _resume_ready=True,
+            _cancel_checker=_cancel_checker,
         )
 
     from core.orchestration.subagent_address import continue_addressed
@@ -766,6 +853,8 @@ def spawn_agent(
     _resume_ready: bool = False,
 ) -> str:
     """启动子 Agent 执行指定任务并返回结构化结果。"""
+    # 预算红线：工具入口把 timeout clamp 到执行器预算内，模型请求不再无界拉伸。
+    timeout = clamp_spawn_timeout(timeout)
     normalized_constraints = _normalize_constraints(constraints)
     normalized_deliverables = _normalize_deliverables(deliverables)
     normalized_scope = _normalize_scope(scope)
@@ -1068,6 +1157,9 @@ def spawn_agent(
             ensure_ascii=False,
         )
 
+    # 执行器超时终止 hook 的登记点：进程句柄一出现就入册，任何收尾路径注销。
+    _register_active_spawn_process(sub_run_id, process, cancel_checker=_cancel_checker)
+
     _record_subagent_scene_event(
         sub_run_id=sub_run_id,
         event_code="subagent.run.started",
@@ -1098,249 +1190,254 @@ def spawn_agent(
             task=str(goal or task or ""),
             task_type=effective_task_type,
             status="running",
+            pid=getattr(process, "pid", None),
         )
         child_session_id = str(opened.get("childSessionId") or child_session_id)
 
-    output_queue: queue.Queue[tuple[str, Optional[str]]] = queue.Queue()
-    stdout_parts: List[str] = []
-    stderr_parts: List[str] = []
-    stdout_console_parts: List[str] = []
-    marker_seen = False
+    # 任何收尾路径（完成/取消/超时/异常）都注销登记，注册表不残留死句柄。
+    try:
+        output_queue: queue.Queue[tuple[str, Optional[str]]] = queue.Queue()
+        stdout_parts: List[str] = []
+        stderr_parts: List[str] = []
+        stdout_console_parts: List[str] = []
+        marker_seen = False
 
-    def _reader(stream_name: str, pipe) -> None:
-        try:
-            while True:
-                chunk = pipe.readline()
-                if chunk == "":
+        def _reader(stream_name: str, pipe) -> None:
+            try:
+                while True:
+                    chunk = pipe.readline()
+                    if chunk == "":
+                        break
+                    output_queue.put((stream_name, chunk))
+            finally:
+                try:
+                    pipe.close()
+                except Exception:
+                    pass
+                output_queue.put((stream_name, None))
+
+        stdout_thread = threading.Thread(target=_reader, args=("stdout", process.stdout), daemon=True)
+        stderr_thread = threading.Thread(target=_reader, args=("stderr", process.stderr), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        finished_streams = set()
+        deadline = time.monotonic() + max(int(timeout), 1)
+        timed_out = False
+        cancelled_reason = ""
+
+        while len(finished_streams) < 2:
+            if callable(_cancel_checker):
+                try:
+                    cancelled_reason = str(_cancel_checker() or "").strip()
+                except Exception:
+                    cancelled_reason = ""
+                if cancelled_reason:
+                    _terminate_process_tree(process)
                     break
-                output_queue.put((stream_name, chunk))
-        finally:
-            try:
-                pipe.close()
-            except Exception:
-                pass
-            output_queue.put((stream_name, None))
-
-    stdout_thread = threading.Thread(target=_reader, args=("stdout", process.stdout), daemon=True)
-    stderr_thread = threading.Thread(target=_reader, args=("stderr", process.stderr), daemon=True)
-    stdout_thread.start()
-    stderr_thread.start()
-
-    finished_streams = set()
-    deadline = time.monotonic() + max(int(timeout), 1)
-    timed_out = False
-    cancelled_reason = ""
-
-    while len(finished_streams) < 2:
-        if callable(_cancel_checker):
-            try:
-                cancelled_reason = str(_cancel_checker() or "").strip()
-            except Exception:
-                cancelled_reason = ""
-            if cancelled_reason:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
                 _terminate_process_tree(process)
                 break
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            timed_out = True
-            _terminate_process_tree(process)
-            break
-        try:
-            stream_name, chunk = output_queue.get(timeout=min(0.2, max(remaining, 0.01)))
-        except queue.Empty:
-            if process.poll() is not None and not stdout_thread.is_alive() and not stderr_thread.is_alive():
-                break
-            continue
+            try:
+                stream_name, chunk = output_queue.get(timeout=min(0.2, max(remaining, 0.01)))
+            except queue.Empty:
+                if process.poll() is not None and not stdout_thread.is_alive() and not stderr_thread.is_alive():
+                    break
+                continue
 
-        if chunk is None:
-            finished_streams.add(stream_name)
-            continue
+            if chunk is None:
+                finished_streams.add(stream_name)
+                continue
 
-        if stream_name == "stdout":
-            visible = chunk
-            if not marker_seen and _SUBAGENT_MARKER in visible:
-                before, _sep, after = visible.partition(_SUBAGENT_MARKER)
-                marker_seen = True
-                visible = before
-                stdout_parts.append(before + _SUBAGENT_MARKER + after)
+            if stream_name == "stdout":
+                visible = chunk
+                if not marker_seen and _SUBAGENT_MARKER in visible:
+                    before, _sep, after = visible.partition(_SUBAGENT_MARKER)
+                    marker_seen = True
+                    visible = before
+                    stdout_parts.append(before + _SUBAGENT_MARKER + after)
+                else:
+                    stdout_parts.append(chunk)
+                if marker_seen and _SUBAGENT_MARKER not in chunk:
+                    visible = ""
+                if visible:
+                    stdout_console_parts.append(visible)
+                    _emit_stream_event("stdout", visible.rstrip("\r\n"))
             else:
-                stdout_parts.append(chunk)
-            if marker_seen and _SUBAGENT_MARKER not in chunk:
-                visible = ""
-            if visible:
-                stdout_console_parts.append(visible)
-                _emit_stream_event("stdout", visible.rstrip("\r\n"))
-        else:
-            stderr_parts.append(chunk)
-            _emit_stream_event("stderr", chunk.rstrip("\r\n"))
+                stderr_parts.append(chunk)
+                _emit_stream_event("stderr", chunk.rstrip("\r\n"))
 
-    if cancelled_reason:
-        stdout = "".join(stdout_parts).strip()
-        stderr = "".join(stderr_parts).strip()
-        process_output = "".join(stdout_console_parts).strip()
-        raw_output = process_output
-        if stderr:
-            raw_output = (raw_output + f"\n\n[stderr]\n{stderr}").strip()
-        try:
-            process.wait(timeout=5)
-        except Exception:
-            _terminate_process_tree(process)
-        _record_subagent_scene_event(
-            sub_run_id=sub_run_id,
-            event_code="subagent.run.cancelled",
-            status="cancelled",
-            task_type=effective_task_type,
-            goal=goal or task,
-            scope=normalized_scope,
-            parent_session_id=parent_session_id,
-            parent_turn=parent_turn,
-            pid=getattr(process, "pid", None),
-            outcome="cancelled",
-            level="warning",
-            fields={"stopReason": cancelled_reason},
-            child_payload={
-                "stopReason": cancelled_reason,
-                "processOutputPreview": _truncate_scene_text(process_output),
-                "rawOutputPreview": _truncate_scene_text(raw_output),
-            },
-        )
-        cancelled_payload = _stamp_subagent_payload(
-            {
-                "status": "cancelled",
-                "task_type": task_type or "inspect",
-                "goal": goal or task[:100],
-                "subRunId": sub_run_id,
-                "depth": depth + 1,
-                "summary": "子 Agent 已随停止请求终止。",
-                "message": "子 Agent 已随停止请求终止。",
-                "stop_reason": cancelled_reason,
-                "scope_touched": normalized_scope,
-                "raw_output": raw_output[:8000],
-                "process_output": process_output[:8000],
-            },
-            sub_run_id,
-            child_session_id,
-        )
-        _settle_subagent_address_record(
-            sub_run_id,
-            status="cancelled",
-            summary=str(cancelled_payload.get("summary") or ""),
-            user_text=resume_user_text,
-            assistant_text=str(cancelled_payload.get("summary") or ""),
-        )
-        return json.dumps(cancelled_payload, ensure_ascii=False)
+        if cancelled_reason:
+            stdout = "".join(stdout_parts).strip()
+            stderr = "".join(stderr_parts).strip()
+            process_output = "".join(stdout_console_parts).strip()
+            raw_output = process_output
+            if stderr:
+                raw_output = (raw_output + f"\n\n[stderr]\n{stderr}").strip()
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                _terminate_process_tree(process)
+            _record_subagent_scene_event(
+                sub_run_id=sub_run_id,
+                event_code="subagent.run.cancelled",
+                status="cancelled",
+                task_type=effective_task_type,
+                goal=goal or task,
+                scope=normalized_scope,
+                parent_session_id=parent_session_id,
+                parent_turn=parent_turn,
+                pid=getattr(process, "pid", None),
+                outcome="cancelled",
+                level="warning",
+                fields={"stopReason": cancelled_reason},
+                child_payload={
+                    "stopReason": cancelled_reason,
+                    "processOutputPreview": _truncate_scene_text(process_output),
+                    "rawOutputPreview": _truncate_scene_text(raw_output),
+                },
+            )
+            cancelled_payload = _stamp_subagent_payload(
+                {
+                    "status": "cancelled",
+                    "task_type": task_type or "inspect",
+                    "goal": goal or task[:100],
+                    "subRunId": sub_run_id,
+                    "depth": depth + 1,
+                    "summary": "子 Agent 已随停止请求终止。",
+                    "message": "子 Agent 已随停止请求终止。",
+                    "stop_reason": cancelled_reason,
+                    "scope_touched": normalized_scope,
+                    "raw_output": raw_output[:8000],
+                    "process_output": process_output[:8000],
+                },
+                sub_run_id,
+                child_session_id,
+            )
+            _settle_subagent_address_record(
+                sub_run_id,
+                status="cancelled",
+                summary=str(cancelled_payload.get("summary") or ""),
+                user_text=resume_user_text,
+                assistant_text=str(cancelled_payload.get("summary") or ""),
+            )
+            return json.dumps(cancelled_payload, ensure_ascii=False)
 
-    if timed_out:
-        stdout = "".join(stdout_parts).strip()
-        stderr = "".join(stderr_parts).strip()
-        process_output = "".join(stdout_console_parts).strip()
-        raw_output = process_output
-        if stderr:
-            raw_output = (raw_output + f"\n\n[stderr]\n{stderr}").strip()
-        _record_subagent_scene_event(
-            sub_run_id=sub_run_id,
-            event_code="subagent.run.timeout",
-            status="timeout",
-            task_type=effective_task_type,
-            goal=goal or task,
-            scope=normalized_scope,
-            parent_session_id=parent_session_id,
-            parent_turn=parent_turn,
-            pid=getattr(process, "pid", None),
-            outcome="timeout",
-            level="error",
-            fields={"timeoutSeconds": max(int(timeout), 1)},
-            child_payload={
-                "timeoutSeconds": max(int(timeout), 1),
-                "processOutputPreview": _truncate_scene_text(process_output),
-                "rawOutputPreview": _truncate_scene_text(raw_output),
-            },
-        )
-        timeout_payload = _stamp_subagent_payload(
-            {
-                "status": "timeout",
-                "task_type": task_type or "inspect",
-                "goal": goal or task[:100],
-                "subRunId": sub_run_id,
-                "depth": depth + 1,
-                "summary": f"子 Agent 执行超时 ({timeout}s)",
-                "message": f"子 Agent 执行超时 ({timeout}s)",
-                "scope_touched": normalized_scope,
-                "raw_output": raw_output[:8000],
-                "process_output": process_output[:8000],
-            },
-            sub_run_id,
-            child_session_id,
-        )
-        _settle_subagent_address_record(
-            sub_run_id,
-            status="timeout",
-            summary=str(timeout_payload.get("summary") or ""),
-            user_text=resume_user_text,
-            assistant_text=str(timeout_payload.get("summary") or ""),
-        )
-        return json.dumps(timeout_payload, ensure_ascii=False)
+        if timed_out:
+            stdout = "".join(stdout_parts).strip()
+            stderr = "".join(stderr_parts).strip()
+            process_output = "".join(stdout_console_parts).strip()
+            raw_output = process_output
+            if stderr:
+                raw_output = (raw_output + f"\n\n[stderr]\n{stderr}").strip()
+            _record_subagent_scene_event(
+                sub_run_id=sub_run_id,
+                event_code="subagent.run.timeout",
+                status="timeout",
+                task_type=effective_task_type,
+                goal=goal or task,
+                scope=normalized_scope,
+                parent_session_id=parent_session_id,
+                parent_turn=parent_turn,
+                pid=getattr(process, "pid", None),
+                outcome="timeout",
+                level="error",
+                fields={"timeoutSeconds": max(int(timeout), 1)},
+                child_payload={
+                    "timeoutSeconds": max(int(timeout), 1),
+                    "processOutputPreview": _truncate_scene_text(process_output),
+                    "rawOutputPreview": _truncate_scene_text(raw_output),
+                },
+            )
+            timeout_payload = _stamp_subagent_payload(
+                {
+                    "status": "timeout",
+                    "task_type": task_type or "inspect",
+                    "goal": goal or task[:100],
+                    "subRunId": sub_run_id,
+                    "depth": depth + 1,
+                    "summary": f"子 Agent 执行超时 ({timeout}s)",
+                    "message": f"子 Agent 执行超时 ({timeout}s)",
+                    "scope_touched": normalized_scope,
+                    "raw_output": raw_output[:8000],
+                    "process_output": process_output[:8000],
+                },
+                sub_run_id,
+                child_session_id,
+            )
+            _settle_subagent_address_record(
+                sub_run_id,
+                status="timeout",
+                summary=str(timeout_payload.get("summary") or ""),
+                user_text=resume_user_text,
+                assistant_text=str(timeout_payload.get("summary") or ""),
+            )
+            return json.dumps(timeout_payload, ensure_ascii=False)
 
-    try:
-        returncode = process.wait(timeout=5)
-    except Exception:
-        _terminate_process_tree(process)
         try:
             returncode = process.wait(timeout=5)
         except Exception:
-            # process tree may still be stuck after terminate; never raise into agent main loop
-            _debug_logger.warning(
-                "[子代理] 终止后进程树仍未退出，降级返回失败码："
-                f"pid={getattr(process, 'pid', None)} task_type={task_type or 'inspect'}"
-            )
-            returncode = getattr(process, "returncode", None)
-            if returncode is None:
-                returncode = -1
+            _terminate_process_tree(process)
+            try:
+                returncode = process.wait(timeout=5)
+            except Exception:
+                # process tree may still be stuck after terminate; never raise into agent main loop
+                _debug_logger.warning(
+                    "[子代理] 终止后进程树仍未退出，降级返回失败码："
+                    f"pid={getattr(process, 'pid', None)} task_type={task_type or 'inspect'}"
+                )
+                returncode = getattr(process, "returncode", None)
+                if returncode is None:
+                    returncode = -1
 
-    payload = _extract_structured_result(
-        stdout="".join(stdout_parts),
-        stderr="".join(stderr_parts),
-        exit_code=returncode,
-        task_type=task_type,
-        goal=goal or task,
-        scope=normalized_scope,
-    )
-    payload["subRunId"] = sub_run_id
-    payload["depth"] = depth + 1
-    _stamp_subagent_payload(payload, sub_run_id, child_session_id)
-    final_status = str(payload.get("status") or "").strip().lower() or "unknown"
-    success_statuses = {"completed", "success", "ok", "partial"}
-    _record_subagent_scene_event(
-        sub_run_id=sub_run_id,
-        event_code="subagent.run.finished",
-        status=final_status,
-        task_type=effective_task_type,
-        goal=goal or task,
-        scope=normalized_scope,
-        parent_session_id=parent_session_id,
-        parent_turn=parent_turn,
-        pid=getattr(process, "pid", None),
-        outcome="succeeded" if final_status in success_statuses else final_status,
-        level="info" if final_status in success_statuses else "warning",
-        fields={
-            "exitCode": returncode,
-            "confidence": str(payload.get("confidence") or "").strip(),
-            "evidenceCount": len(payload.get("evidence") or []),
-            "findingCount": len(payload.get("findings") or []),
-        },
-        child_payload={
-            "exitCode": returncode,
-            "summary": _truncate_scene_text(payload.get("summary"), 600),
-            "confidence": str(payload.get("confidence") or "").strip(),
-            "processOutputPreview": _truncate_scene_text(payload.get("process_output")),
-            "rawOutputPreview": _truncate_scene_text(payload.get("raw_output")),
-        },
-    )
-    _settle_subagent_address_record(
-        sub_run_id,
-        status=final_status,
-        summary=str(payload.get("summary") or ""),
-        user_text=resume_user_text,
-        assistant_text=str(payload.get("summary") or ""),
-    )
-    return json.dumps(payload, ensure_ascii=False)
+        payload = _extract_structured_result(
+            stdout="".join(stdout_parts),
+            stderr="".join(stderr_parts),
+            exit_code=returncode,
+            task_type=task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+        )
+        payload["subRunId"] = sub_run_id
+        payload["depth"] = depth + 1
+        _stamp_subagent_payload(payload, sub_run_id, child_session_id)
+        final_status = str(payload.get("status") or "").strip().lower() or "unknown"
+        success_statuses = {"completed", "success", "ok", "partial"}
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.finished",
+            status=final_status,
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            parent_session_id=parent_session_id,
+            parent_turn=parent_turn,
+            pid=getattr(process, "pid", None),
+            outcome="succeeded" if final_status in success_statuses else final_status,
+            level="info" if final_status in success_statuses else "warning",
+            fields={
+                "exitCode": returncode,
+                "confidence": str(payload.get("confidence") or "").strip(),
+                "evidenceCount": len(payload.get("evidence") or []),
+                "findingCount": len(payload.get("findings") or []),
+            },
+            child_payload={
+                "exitCode": returncode,
+                "summary": _truncate_scene_text(payload.get("summary"), 600),
+                "confidence": str(payload.get("confidence") or "").strip(),
+                "processOutputPreview": _truncate_scene_text(payload.get("process_output")),
+                "rawOutputPreview": _truncate_scene_text(payload.get("raw_output")),
+            },
+        )
+        _settle_subagent_address_record(
+            sub_run_id,
+            status=final_status,
+            summary=str(payload.get("summary") or ""),
+            user_text=resume_user_text,
+            assistant_text=str(payload.get("summary") or ""),
+        )
+        return json.dumps(payload, ensure_ascii=False)
+    finally:
+        _unregister_active_spawn_process(sub_run_id)

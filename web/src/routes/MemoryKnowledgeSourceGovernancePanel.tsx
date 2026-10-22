@@ -8,7 +8,7 @@ import type {
   KnowledgeSourceArtifact,
   KnowledgeSourceLifecycleStatus,
 } from "../api/types";
-import { VButton, VNativeInput, VNativeTextarea, VStatusChip, VStringSelect, VTextarea } from "../components/vui";
+import { VButton, VCheckbox, VNativeInput, VNativeTextarea, VStatusChip, VStringSelect, VTextarea } from "../components/vui";
 import styles from "./MemoryKnowledgeSourceGovernancePanel.styles";
 
 export type MemoryKnowledgeSourceOwnerType = "team" | "agent";
@@ -83,6 +83,10 @@ export type MemoryKnowledgeSourceGovernancePanelCopy = {
   lifecycleUpdated: string;
   lifecycleReasonRequired: string;
   noLinkedKnowledgeSources: string;
+  bulkAcceptSources: string;
+  bulkRejectSources: string;
+  selectVisibleSources: string;
+  skippedSources: string;
 };
 
 type MemoryKnowledgeSourceGovernancePanelProps = {
@@ -120,6 +124,10 @@ type MemoryKnowledgeSourceGovernancePanelProps = {
   onDuplicateCentralSourceIdChange: (value: string) => void;
   onSubmitOwnerSource: () => void;
   onReviewOwnerSource: (source: KnowledgeOwnerSource, decision: MemoryKnowledgeSourceReviewDecision) => void;
+  selectedInboxSourceIds: string[];
+  onToggleInboxSourceSelection: (inboxSourceId: string) => void;
+  onToggleVisibleInboxSources: () => void;
+  onBulkReviewOwnerSource: (decision: "accepted" | "rejected") => void;
   onAttachCentralSource: (centralSourceId: string) => void;
   formatTimestamp: (value: string) => string;
 };
@@ -200,6 +208,10 @@ export function MemoryKnowledgeSourceGovernancePanel({
   onDuplicateCentralSourceIdChange,
   onSubmitOwnerSource,
   onReviewOwnerSource,
+  selectedInboxSourceIds,
+  onToggleInboxSourceSelection,
+  onToggleVisibleInboxSources,
+  onBulkReviewOwnerSource,
   onAttachCentralSource,
   formatTimestamp,
 }: MemoryKnowledgeSourceGovernancePanelProps) {
@@ -374,12 +386,55 @@ export function MemoryKnowledgeSourceGovernancePanel({
               <VNativeInput value={duplicateCentralSourceId} onChange={(event) => onDuplicateCentralSourceIdChange(event.target.value)} />
             </label>
           </div>
+          {(() => {
+            const reviewableIds = ownerInboxSources
+              .filter((source) => sourceIsReviewable(source))
+              .map((source) => source.inboxSourceId);
+            const selectedReviewableCount = reviewableIds.filter((id) => selectedInboxSourceIds.includes(id)).length;
+            return reviewableIds.length ? (
+              <div className={styles.sourceGovernanceControls} data-inbox-bulk-toolbar="true">
+                <VCheckbox
+                  aria-label={copy.selectVisibleSources}
+                  isSelected={selectedReviewableCount === reviewableIds.length}
+                  onChange={() => onToggleVisibleInboxSources()}
+                >
+                  <span>{copy.selectVisibleSources} ({selectedReviewableCount}/{reviewableIds.length})</span>
+                </VCheckbox>
+                <VButton
+                  type="button"
+                  className={styles.detailActionButton}
+                  isDisabled={knowledgeBusy || selectedReviewableCount === 0}
+                  onClick={() => onBulkReviewOwnerSource("accepted")}
+                  icon={<CheckCircle2 size={14} />}
+                >
+                  <span>{copy.bulkAcceptSources}</span>
+                </VButton>
+                <VButton
+                  type="button"
+                  className={styles.detailActionButton}
+                  isDisabled={knowledgeBusy || selectedReviewableCount === 0}
+                  onClick={() => onBulkReviewOwnerSource("rejected")}
+                  icon={<XCircle size={14} />}
+                >
+                  <span>{copy.bulkRejectSources}</span>
+                </VButton>
+              </div>
+            ) : null;
+          })()}
           <div className={styles.sourceRecordList}>
             {ownerInboxSources.map((source) => {
               const reviewable = sourceIsReviewable(source);
+              const selected = selectedInboxSourceIds.includes(source.inboxSourceId);
               return (
-                <article key={source.inboxSourceId} className={styles.sourceRecord}>
+                <article key={source.inboxSourceId} className={styles.sourceRecord} data-inbox-source-selected={selected || undefined}>
                   <div className={styles.sourceRecordHeader}>
+                    {reviewable ? (
+                      <VCheckbox
+                        aria-label={source.title || source.inboxSourceId}
+                        isSelected={selected}
+                        onChange={() => onToggleInboxSourceSelection(source.inboxSourceId)}
+                      />
+                    ) : null}
                     <strong>{source.title || source.inboxSourceId}</strong>
                     <VStatusChip tone={reviewable ? "success" : "neutral"}>{source.status}</VStatusChip>
                   </div>

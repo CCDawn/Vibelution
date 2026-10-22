@@ -10,6 +10,7 @@ import {
   humanAttentionTargetFor,
   isHumanAttentionKind,
   localDayKey,
+  normalizeHumanAttentionSeverity,
   parseHumanAttentionEvent,
   sanitizeHumanAttentionTargetUrl,
 } from "./humanAttentionNotifications";
@@ -152,13 +153,57 @@ describe("human attention target resolution", () => {
     expect(humanAttentionTargetFor({ kind: "human_gate" })).toBe("/teams?researchView=workflow");
     expect(HUMAN_ATTENTION_FALLBACK_TITLES.human_gate).toContain("审批");
   });
-  it("whitelists exactly the four dual-channel kinds (mirrored by the Electron shell)", () => {
+  it("whitelists exactly the eight dual-channel kinds (mirrored by the Electron shell)", () => {
     expect([...HUMAN_ATTENTION_KINDS].sort()).toEqual([
       "affair_reminder",
       "anomaly",
+      "assistant_digest",
+      "dispatch_receipt",
       "human_gate",
       "knowledge_review",
+      "run_completed",
+      "session_completed",
     ]);
+  });
+  it("accepts assistant_digest rows with the assistant-page default target", () => {
+    expect(isHumanAttentionKind("assistant_digest")).toBe(true);
+    expect(isHumanAttentionKind("assistant-digest")).toBe(false);
+    expect(humanAttentionTargetFor({ kind: "assistant_digest" })).toBe("/personal-assistant");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.assistant_digest).toContain("派遣");
+  });
+  it("maps the three completion kinds to real pages with info severity", () => {
+    // 完成类事件（好消息）：targetUrl 必须落到真实页面，不许是空状态页。
+    expect(humanAttentionTargetFor({ kind: "dispatch_receipt" })).toBe("/personal-assistant?panel=dispatches");
+    expect(humanAttentionTargetFor({ kind: "run_completed" })).toBe("/teams?researchView=workflow");
+    expect(humanAttentionTargetFor({ kind: "session_completed" })).toBe("/chat");
+    expect(isHumanAttentionKind("dispatch_receipt") && isHumanAttentionKind("run_completed") && isHumanAttentionKind("session_completed")).toBe(true);
+    expect(normalizeHumanAttentionSeverity("info")).toBe("info");
+    expect(normalizeHumanAttentionSeverity("urgent")).toBe("medium");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.dispatch_receipt).toContain("派遣");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.run_completed).toContain("完成");
+    expect(HUMAN_ATTENTION_FALLBACK_TITLES.session_completed).toContain("完成");
+  });
+  it("builds completion payloads carrying the server targetUrl verbatim", () => {
+    const payload = buildHumanAttentionNotificationPayload({
+      id: "run-completed:team-r:run-1",
+      kind: "run_completed",
+      severity: "info",
+      title: "研究运行完成：SCI-001",
+      targetUrl: "/teams?teamId=team-r&researchView=workflow&workflowId=challenge-cup-research&runId=run-1&panel=progress",
+      body: "攻坚一组 · SCI-001",
+    } as PersonalAssistantAttentionRow);
+    expect(payload).not.toBeNull();
+    expect(payload?.severity).toBe("info");
+    expect(payload?.targetUrl).toContain("runId=run-1");
+    expect(payload?.targetUrl).toContain("panel=progress");
+    const sessionPayload = buildHumanAttentionNotificationPayload({
+      id: "session-completed:session-a:1800000000",
+      kind: "session_completed",
+      severity: "info",
+      title: "会话已完成：量子调研",
+      targetUrl: "/chat?session=session-a",
+    } as PersonalAssistantAttentionRow);
+    expect(sessionPayload?.targetUrl).toBe("/chat?session=session-a");
   });
 });
 

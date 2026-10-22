@@ -163,6 +163,23 @@ def _recover_interrupted_session_turns_on_startup(
     return recover_interrupted_session_turns_on_startup(should_stop=should_stop)
 
 
+def _recover_stale_subagent_addresses_on_startup(
+    *, should_stop: Callable[[], bool] | None = None
+) -> object:
+    """Fail subagent address records orphaned by a parent crash.
+
+    The spawned child deliberately outlives the parent process group, so a
+    crash leaves its address record stuck ``running`` forever (resumes queue
+    eternally). Best-effort sweep, never blocks startup.
+    """
+
+    from core.orchestration.subagent_address import (
+        recover_stale_subagent_addresses_on_startup,
+    )
+
+    return recover_stale_subagent_addresses_on_startup(should_stop=should_stop)
+
+
 def _validate_challenge_fence_config_on_startup() -> int | None:
     """Validate the operator per-call fence pin once at backend boot.
 
@@ -229,6 +246,31 @@ def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
 
     project_root = Path(__file__).resolve().parents[2]
     return list(get_default_service(project_root).reconcile())
+
+
+def _start_pa_patrol_job(startup_jobs: StartupJobGroup):
+    """Schedule the personal-assistant dispatch patrol (chase + wake + digest).
+
+    Mirrors the external-agent reconcile loop shape: an async forever job whose
+    per-iteration sync body runs through ``startup_jobs.run_sync``. Skipped
+    under pytest so tests never chase or wake against the operator's live
+    stores; the ``VIBELUTION_PA_PATROL`` env switch is the runtime kill switch.
+    """
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        async def _skipped_pa_patrol() -> dict[str, bool]:
+            return {"started": False}
+
+        return startup_jobs.start_async("startup-pa-patrol", _skipped_pa_patrol())
+
+    from .services.personal_assistant_patrol_service import (
+        run_personal_assistant_patrol_forever,
+    )
+
+    return startup_jobs.start_async(
+        "startup-pa-patrol",
+        run_personal_assistant_patrol_forever(startup_jobs=startup_jobs),
+    )
 
 
 async def reconcile_external_agent_tasks_forever(
@@ -622,6 +664,13 @@ async def web_workbench_lifespan(app: FastAPI | None):
         _recover_interrupted_session_turns_on_startup,
         stop_keyword="should_stop",
     )
+    # Subagent address orphan sweep (crash-left running records). Same
+    # best-effort recovery family; see core/orchestration/subagent_address.py.
+    startup_jobs.start_thread(
+        "startup-subagent-address-recovery",
+        _recover_stale_subagent_addresses_on_startup,
+        stop_keyword="should_stop",
+    )
     startup_research_task_recovery = _start_research_task_recovery_job(
         startup_jobs, startup_session_recovery_task,
     )
@@ -632,6 +681,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-external-agent-reconcile",
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
+    startup_pa_patrol_task = _start_pa_patrol_job(startup_jobs)
     startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs)
     startup_generic_workflow_task = startup_jobs.start_async(
         "startup-generic-workflows",

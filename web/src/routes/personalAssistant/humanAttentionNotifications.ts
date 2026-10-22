@@ -13,8 +13,17 @@ import { reportHumanAttentionDeliveryFailure } from "../../api/personalAttention
 
 export type PersonalAssistantAttentionRow = PersonalAssistantOverview["attention"][number];
 
-export type HumanAttentionKind = "knowledge_review" | "anomaly" | "affair_reminder" | "human_gate";
-export type HumanAttentionSeverity = "critical" | "high" | "medium";
+export type HumanAttentionKind =
+  | "knowledge_review"
+  | "anomaly"
+  | "affair_reminder"
+  | "human_gate"
+  | "dispatch_receipt"
+  | "run_completed"
+  | "session_completed"
+  | "assistant_digest";
+/** info 只用于完成类事件（好消息），不占用停靠/异常的 critical/high 语义。 */
+export type HumanAttentionSeverity = "critical" | "high" | "medium" | "info";
 export type HumanAttentionDelivery = "assistant_window" | "system_notification" | "attention_fallback";
 
 /** Server-labeled approve affordance (human_gate rows render these inline). */
@@ -65,8 +74,17 @@ const ATTENTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
  * both sides must accept the same set and `desktop/electron/tests/humanAttentionNotifications.test.ts`
  * asserts they stay in sync.
  */
-export const HUMAN_ATTENTION_KINDS = new Set<string>(["knowledge_review", "anomaly", "affair_reminder", "human_gate"]);
-const SEVERITIES = new Set<string>(["critical", "high", "medium"]);
+export const HUMAN_ATTENTION_KINDS = new Set<string>([
+  "knowledge_review",
+  "anomaly",
+  "affair_reminder",
+  "human_gate",
+  "dispatch_receipt",
+  "run_completed",
+  "session_completed",
+  "assistant_digest",
+]);
+const SEVERITIES = new Set<string>(["critical", "high", "medium", "info"]);
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 400;
 const MAX_TARGET_LENGTH = 500;
@@ -85,6 +103,13 @@ export const HUMAN_ATTENTION_DEFAULT_TARGETS: Record<HumanAttentionKind, string>
   anomaly: "/teams?researchView=workflow",
   affair_reminder: "/personal-assistant",
   human_gate: "/teams?researchView=workflow",
+  // 完成类事件的默认深链与后端 targetUrl 缺省兜底保持同一落点：
+  // 派遣 tab / 科研工作流 / 会话页。
+  dispatch_receipt: "/personal-assistant?panel=dispatches",
+  run_completed: "/teams?researchView=workflow",
+  session_completed: "/chat",
+  // PA 心跳巡检的定时摘要卡：点击落回助理面板。
+  assistant_digest: "/personal-assistant",
 };
 
 export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string> = {
@@ -92,6 +117,10 @@ export const HUMAN_ATTENTION_FALLBACK_TITLES: Record<HumanAttentionKind, string>
   anomaly: "研究流程异常待处理",
   affair_reminder: "事务提醒待处理",
   human_gate: "研究流程等待人工审批",
+  dispatch_receipt: "派遣回执已到达",
+  run_completed: "研究运行已完成",
+  session_completed: "会话已完成",
+  assistant_digest: "助理派遣摘要",
 };
 
 function normalizeText(value: unknown): string {

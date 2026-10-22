@@ -1020,6 +1020,86 @@ def review_owner_inbox_source(
     }
 
 
+def review_owner_inbox_sources_bulk(
+    owner_type: str,
+    owner_id: str,
+    *,
+    inbox_source_ids: list[str] | None,
+    decision: str,
+    reviewed_by_agent_id: str = "",
+    resolution_note: str = "",
+) -> dict[str, Any]:
+    """Bulk-accept or bulk-reject owner inbox sources; failures report per item.
+
+    Mirrors the rating-suggestion bulk review shape: one owner permission check
+    up front, then each source resolves through the single-item authority so
+    dedupe, promotion, and audit trails stay canonical. Direct ingestion is
+    intentionally not supported in bulk (single-item only). Re-running the same
+    batch is idempotent: already-reviewed sources come back as ``skipped`` with
+    reason ``not_reviewable`` instead of failing.
+    """
+
+    s = _service()
+    owner = s._require_owner_context(owner_type, owner_id)
+    reviewer_id = str(reviewed_by_agent_id or "").strip()
+    if not s._can_review_owner_source(owner, reviewer_id):
+        raise s.TeamKnowledgePermissionError("Agent is not allowed to review this owner source inbox.")
+    normalized_decision = s._normalize_source_review_decision(decision)
+    if normalized_decision not in {"accepted", "rejected"}:
+        raise s.TeamKnowledgeError("Bulk source review decision must be accepted or rejected.")
+    normalized_ids = s._unique_strings(inbox_source_ids or [])
+    if not normalized_ids:
+        raise s.TeamKnowledgeError("At least one inbox source id is required.")
+
+    reviewed: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    for inbox_source_id in normalized_ids:
+        try:
+            result = review_owner_inbox_source(
+                owner_type,
+                owner_id,
+                inbox_source_id,
+                decision=normalized_decision,
+                reviewed_by_agent_id=reviewer_id,
+                resolution_note=resolution_note,
+            )
+        except s.TeamKnowledgeNotFoundError:
+            skipped.append({"inboxSourceId": inbox_source_id, "reason": "not_found"})
+        except s.TeamKnowledgePermissionError as exc:
+            skipped.append({"inboxSourceId": inbox_source_id, "reason": "permission_denied", "detail": str(exc)})
+        except s.TeamKnowledgeError:
+            # Not reviewable anymore (already resolved by a concurrent pass),
+            # corrupted source, or staging failure — report and keep going.
+            skipped.append({"inboxSourceId": inbox_source_id, "reason": "not_reviewable"})
+        else:
+            reviewed.append(result)
+    s._record_event(
+        "knowledge.source_inbox.bulk_reviewed",
+        owner,
+        "",
+        actor_agent_id=reviewer_id,
+        fields={
+            "decision": normalized_decision,
+            "reviewedCount": len(reviewed),
+            "skippedCount": len(skipped),
+        },
+    )
+    return {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "decision": normalized_decision,
+        "reviewed": reviewed,
+        "skipped": skipped,
+        "summary": {
+            "requestedCount": len(normalized_ids),
+            "reviewedCount": len(reviewed),
+            "skippedCount": len(skipped),
+        },
+        "updatedAt": s.utc_now_iso(),
+    }
+
+
 def create_source_artifact_from_central_source(
     knowledge_base_id: str,
     central_source_id: str,

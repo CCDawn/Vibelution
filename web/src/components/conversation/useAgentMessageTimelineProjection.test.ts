@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 
 import type { ConversationMessage, SessionTurnItem } from "../../api/types";
+import { assistantFinalAnswerText } from "../../routes/chatTurnProtocol";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import { buildAgentMessageOperations } from "./agentMessageOperations";
 import { buildAgentMessageTimelineItems } from "./agentMessageTimeline";
@@ -24,6 +25,65 @@ function assistantMessage(
 }
 
 describe("projectAgentMessageTimelineMessages", () => {
+  it("keeps repeated received guidance before the live tail across snapshots and final settlement", () => {
+    const turnId = "turn-steer";
+    const item: SessionTurnItem = {
+      version: 3,
+      id: "answer",
+      itemId: "answer",
+      sessionId: "session-1",
+      turnId,
+      type: "agent_message",
+      phase: "final_answer",
+      status: "running",
+      revision: 1,
+      sequence: 1,
+      terminal: false,
+      text: "Answer before guidance",
+    };
+    const guidance: ConversationMessage[] = [58, 60].map((index) => ({
+      id: `session-1-message-${index}`,
+      role: "user",
+      content: `Guidance ${index}`,
+      timestamp: "2026-10-21T15:00:00Z",
+      metadata: { kind: "user_guidance", source: "steer", turnId },
+    }));
+    const durable = assistantMessage("session-1-message-44", {
+      turnId,
+      status: "running",
+      turnItems: [item],
+      metadata: { turnId, messageIndex: 44 },
+    });
+    for (const revision of [2, 3]) {
+      const active = assistantMessage("session-1-message-active-turn-steer", {
+        turnId,
+        status: "running",
+        turnItems: [{ ...item, revision, text: `Answer continues ${revision}` }],
+        metadata: { kind: "session_active_turn_layer", turnId },
+      });
+      const projection = projectAgentMessageTimelineMessages({
+        timelineMessages: [durable, ...guidance],
+        activeTurnMessage: active,
+      });
+      expect(projection.messages.map((message) => message.id)).toEqual([
+        ...guidance.map((message) => message.id),
+        durable.id,
+      ]);
+      expect(assistantFinalAnswerText(projection.messages.at(-1)!)).toBe(`Answer continues ${revision}`);
+    }
+    const completed = assistantMessage("session-1-message-62", {
+      turnId,
+      status: "completed",
+      turnItems: [{ ...item, revision: 4, text: "Final answer", status: "completed", terminal: true }],
+      metadata: { turnId, messageIndex: 62 },
+    });
+    const settled = projectAgentMessageTimelineMessages({ timelineMessages: [...guidance, completed] });
+    expect(settled.messages.map((message) => message.id)).toEqual([
+      ...guidance.map((message) => message.id),
+      completed.id,
+    ]);
+  });
+
   it("keeps active-turn projection on an AgentMessage-named hook module", () => {
     expect(existsSync(new URL("./useAgentMessageTimelineProjection.ts", import.meta.url))).toBe(true);
     expect(existsSync(new URL("./useConversationTimelineProjection.ts", import.meta.url))).toBe(false);

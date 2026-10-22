@@ -82,6 +82,7 @@ import {
   collectBrowserMemorySnapshot,
   collectBrowserPageSnapshot,
   postBrowserTelemetry,
+  setBrowserTelemetryStartupPending,
   shouldCaptureConsoleTelemetry,
   summarizeConsoleArgs,
   type BrowserTelemetryEventInput,
@@ -124,7 +125,8 @@ import {
   readStoredUiFontBasePx,
   subscribeStoredUiFontBasePx,
 } from "./uiFontPreference";
-import { startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
+import { hydrateWorkbenchUiPreferencesSync, startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
+import { WorkbenchStartupReadyContext } from "./workbenchStartupReady";
 import { startWorkbenchWindowMemory } from "./workbenchWindowMemory";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import {
@@ -494,62 +496,6 @@ function preloadPrimaryRouteChunkForNav(key: PrimaryRoutePreloadKey, trigger: Pr
   } else {
     primaryRouteSoftPreloadHandles[key] = window.setTimeout(scheduleSoft, 250);
   }
-}
-
-/**
- * Startup idle warm (F1 follow-up): once the shell has mounted and the main
- * thread goes idle, import every primary nav route chunk one after another —
- * low priority, yielding between chunks, silent on failure. The per-chunk
- * dynamic imports dedupe against hover preloads and real navigations.
- */
-let primaryNavIdleWarmStarted = false;
-
-function schedulePrimaryNavIdleWork(callback: () => void, timeoutMs: number) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  const idleRequest = (window as Window & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-  }).requestIdleCallback;
-  if (typeof idleRequest === "function") {
-    idleRequest(callback, { timeout: timeoutMs });
-    return;
-  }
-  window.setTimeout(callback, 250);
-}
-
-function warmPrimaryNavRouteChunkAt(index: number) {
-  // Nav order; chat warms through the telemetry-free shared import so the
-  // warm pass never emits navigation chunk telemetry outside a real navigation.
-  const warmLoaders: Array<() => Promise<() => Promise<unknown>>> = [
-    () => routerRouteChunkLoaders().then((module) => module.importChatCodingRouteChunk),
-    () => routerRouteChunkLoaders().then((module) => module.loadCompanionsRouteChunk),
-    () => routerRouteChunkLoaders().then((module) => module.loadTeamsRouteChunk),
-    () => routerRouteChunkLoaders().then((module) => module.loadEvolutionRouteChunk),
-    () => routerRouteChunkLoaders().then((module) => module.loadMemoryRouteChunk),
-    () => routerRouteChunkLoaders().then((module) => module.loadAgentsRouteChunk),
-  ];
-  if (index >= warmLoaders.length) {
-    return;
-  }
-  schedulePrimaryNavIdleWork(() => {
-    void warmLoaders[index]()
-      .then((loadChunk) => loadChunk())
-      .catch(() => undefined)
-      .then(() => warmPrimaryNavRouteChunkAt(index + 1));
-  }, 8_000);
-}
-
-function startPrimaryNavIdleWarm() {
-  if (primaryNavIdleWarmStarted || typeof window === "undefined") {
-    return;
-  }
-  // Test/jsdom environments have no real idle budget; keep suites silent.
-  if (import.meta.env.MODE === "test") {
-    return;
-  }
-  primaryNavIdleWarmStarted = true;
-  warmPrimaryNavRouteChunkAt(0);
 }
 
 type SettingsPreloadTarget = "settings-menu" | "config-route";
@@ -1122,6 +1068,10 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
+  const [routeStartupSettled, setRouteStartupSettled] = useState(false);
+  const [shellBackgroundReady, setShellBackgroundReady] = useState(false);
+  const shellOptionalReadyRef = useRef(false);
+  const reportRouteStartupReady = useCallback(() => setRouteStartupSettled(true), []);
   const [updateBannerDismissedHead, setUpdateBannerDismissedHead] = useState(readStoredUpdateBannerDismissedHead);
   const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
@@ -1169,7 +1119,6 @@ export function AppShell() {
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
   // Chrome-only polls wait out the boot volley (see useBootStaggeredPollReady).
-  const shellDeferredPollReady = useBootStaggeredPollReady(shellStartupDataReady);
   const lifecycleControlActive = shutdownOpen || shutdownRequested || restartRequested;
   const runtimeRefetchInterval = resolvePollingInterval(
     shellPollingVisible,
@@ -1179,6 +1128,7 @@ export function AppShell() {
       force: lifecycleControlActive,
     },
   );
+  const backendRoutesPending = queryClient.getQueryData<BackendHealth>(queryKeys.backendHealth())?.routesReady === false;
   const backendHealthQuery = useQuery({
     queryKey: queryKeys.backendHealth(),
     queryFn: ({ signal }) =>
@@ -1188,19 +1138,34 @@ export function AppShell() {
         // A hung backend must degrade to offline instead of pending forever.
         timeoutMs: BACKEND_HEALTH_TIMEOUT_MS,
       }),
-    refetchInterval: runtimeRefetchInterval,
-    refetchIntervalInBackground: shellStartupWarmupActive,
+    refetchInterval: (query) => query.state.data?.routesReady === false ? 1_000 : runtimeRefetchInterval,
+    refetchIntervalInBackground: shellStartupWarmupActive || backendRoutesPending,
     staleTime: 0,
     retry: false,
     // Ignore fetchStatus churn so background health polls do not re-render the whole shell.
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
+  // Older backends omit routesReady; preserve compatibility for those hosts.
+  const shellOptionalReady = shellBackgroundReady && backendHealthQuery.data?.routesReady !== false;
+  shellOptionalReadyRef.current = shellOptionalReady;
+  const shellDeferredPollReady = useBootStaggeredPollReady(shellOptionalReady);
   // Phase-1 shell ready depends only on config + health; runtime summary is a phase-2 enhancement.
   useEffect(() => {
     if (configQuery.data && backendHealthQuery.data) {
       setShellStartupDataReady(true);
     }
   }, [backendHealthQuery.data, configQuery.data]);
+  // This is a document-start latch: later route switches do not stop background owners.
+  useEffect(() => {
+    if (shellStartupDataReady && (location.pathname !== "/chat" || routeStartupSettled)) {
+      setShellBackgroundReady(true);
+    }
+  }, [location.pathname, routeStartupSettled, shellStartupDataReady]);
+  useEffect(() => {
+    if (shellOptionalReady || configQuery.isError || backendHealthQuery.isError) {
+      setBrowserTelemetryStartupPending(false);
+    }
+  }, [backendHealthQuery.isError, configQuery.isError, shellOptionalReady]);
   // Opening the gear popover is the hard trigger for the settings chunk chain:
   // it covers touch/no-hover devices that never fire pointerenter, and warms
   // the config route chunk so "全部设置" navigates with zero chunk wait.
@@ -1218,7 +1183,7 @@ export function AppShell() {
         signal,
         timeoutMs: RUNTIME_SUMMARY_TIMEOUT_MS,
       }),
-    enabled: shellStartupDataReady,
+    enabled: shellBackgroundReady || lifecycleControlActive || activeWorkOpen,
     refetchInterval: runtimeRefetchInterval,
     refetchIntervalInBackground: shellStartupWarmupActive,
     // Heartbeat-only field churn must not re-render the whole shell + route tree.
@@ -1291,7 +1256,7 @@ export function AppShell() {
         queryClient.getQueryData<RuntimeTaskListPayload>(queryKeys.runtimeTasks("", "shell")),
         signal,
       ),
-    enabled: shellStartupDataReady,
+    enabled: shellOptionalReady || activeWorkOpen,
     refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000),
     refetchIntervalInBackground: false,
     staleTime: 30_000,
@@ -1344,13 +1309,11 @@ export function AppShell() {
   }, []);
 
   // Project-local layout memory (port/origin stable) + F11/windowed size memory.
-  useEffect(() => startWorkbenchUiPreferencesSync(), []);
-  useEffect(() => startWorkbenchWindowMemory(), []);
-
-  // Warm the primary nav route chunks once the shell is idle (serial, silent).
+  useEffect(() => startWorkbenchUiPreferencesSync({ deferHydration: true }), []);
+  useEffect(() => startWorkbenchWindowMemory({ canPersist: () => shellOptionalReadyRef.current }), []);
   useEffect(() => {
-    startPrimaryNavIdleWarm();
-  }, []);
+    if (shellOptionalReady) hydrateWorkbenchUiPreferencesSync();
+  }, [shellOptionalReady]);
 
   useEffect(() => {
     const previous = previousReturnLocationRef.current;
@@ -2899,7 +2862,7 @@ export function AppShell() {
       style={shellStyle}
     >
       <DesktopAssistantReturnNotice />
-      <HumanAttentionNotifier />
+      <HumanAttentionNotifier startupReady={shellOptionalReady} />
       {startupOverlayActive && !shutdownOpen ? (
         <div
           className={styles.startupOverlay}
@@ -3296,7 +3259,7 @@ export function AppShell() {
         onRecover={() => { void beginRestart(); }}
         onRetry={() => { void backendHealthQuery.refetch(); }}
       /></div>
-        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}>{routeContent}</VWorkbenchFrame></>}
+        <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention startupReady={shellOptionalReady} /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}><WorkbenchStartupReadyContext.Provider value={reportRouteStartupReady}>{routeContent}</WorkbenchStartupReadyContext.Provider></VWorkbenchFrame></>}
           aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
           resize={{ layoutId: WORKBENCH_LAYOUT_IDS.projectUtilities, aside: { defaultWidth: 420, minWidth: 320, maxWidth: 640 } }} />
       </div>

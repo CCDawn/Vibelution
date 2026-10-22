@@ -578,7 +578,11 @@ export function useConversationTimelineFollow({
       if (consumeProgrammatic) {
         ignoreNextProgrammaticFollowRef.current = false;
       }
-      const scrollSource: TimelineScrollSource = programmaticFollow ? "programmatic" : "user";
+      // Rebinding after a received guidance row measures layout; it is not an
+      // upward scrollbar drag, even if virtual row measurement clamped scrollTop.
+      const scrollSource: TimelineScrollSource = !consumeProgrammatic
+        ? "layout"
+        : programmaticFollow ? "programmatic" : "user";
       const nextState = resolveTimelineFollowState({
         scrollHeight: timeline.scrollHeight,
         clientHeight: timeline.clientHeight,
