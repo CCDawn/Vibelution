@@ -463,7 +463,9 @@ export const ConversationView = React.memo(function ConversationView({
   const messageCurationQuery = useQuery({
     queryKey: queryKeys.sessionMessageCuration(sessionId),
     queryFn: () => fetchSessionMessageCuration(sessionId),
-    enabled: Boolean(sessionId) && !companionMode,
+    // Curation decorates loaded messages; its queue scan must not compete with
+    // the initial transcript request while there is nothing to annotate yet.
+    enabled: Boolean(sessionId) && !companionMode && !transcriptPending,
   });
   const serverMessageCurationMap = useMemo(
     () => buildMessageCurationMap(messageCurationQuery.data?.items ?? []),
