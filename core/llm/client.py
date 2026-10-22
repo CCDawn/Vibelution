@@ -39,7 +39,10 @@ from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import ProtocolResolutionError, resolve_model_protocol
 from .protocols import ModelProtocol, WireProtocol
-from .prompt_cache_observation import observe_prompt_cache_usage
+from .prompt_cache_observation import (
+    CACHE_KEEPALIVE_PROMPT_PURPOSE,
+    observe_prompt_cache_usage,
+)
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .resilience_policy import CONNECTION_BACKOFF_CAP_CATEGORIES
 from .responses_websocket import (
@@ -5455,7 +5458,10 @@ class LLMClient:
         probe_metadata = {
             **dict(metadata or {}),
             "conversationBound": False,
-            "promptPurpose": "qwen_inflight_cache_keepalive",
+            # 与 prompt_cache_observation 的探测跳过判定共享同一常量：
+            # promptPurpose 是调用目的（真实轮次恒带 main_reply），只有这个
+            # 精确值被当作 keepalive 探测跳过逐轮观测。
+            "promptPurpose": CACHE_KEEPALIVE_PROMPT_PURPOSE,
         }
         invocation_id = str(probe_metadata.get("invocationId") or "").strip()
 
