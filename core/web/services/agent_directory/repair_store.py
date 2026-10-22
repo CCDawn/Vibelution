@@ -2328,29 +2328,51 @@ def default_state() -> dict[str, Any]:
 
 
 def load_state() -> dict[str, Any]:
-    global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
+    """Return an independent mutable snapshot of the complete registry."""
     s = _service()
     with s._STATE_LOCK:
-        before = s._registry_state_signature()
-        if _LOAD_STATE_CACHE_STATE is not None and _LOAD_STATE_CACHE_SIGNATURE == before:
-            # 缓存保存的是规范化后的快照；返回独立副本，调用方（如 repair）可自由修改。
-            return _copy_json_value(_LOAD_STATE_CACHE_STATE)
-        path = s.registry_path()
-        if not path.exists():
-            state = s.default_state()
-        else:
-            payload = s._load_existing_registry_payload_or_raise(path)
-            state = s.default_state()
-            state.update(payload)
-            state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
-            state["toolPolicies"] = s._tool_policies(state)
-            state["memoryPolicies"] = s._memory_policies(state)
-        after = s._registry_state_signature()
-        if before == after:
-            # 读取期间签名未变，缓存内容与磁盘严格对应；否则放弃本次缓存。
-            _LOAD_STATE_CACHE_SIGNATURE = after
-            _LOAD_STATE_CACHE_STATE = _copy_json_value(state)
-        return state
+        return _copy_json_value(_load_state_snapshot_locked())
+
+
+def load_agent_record(agent_id: str, *, include_archived: bool = True) -> dict[str, Any] | None:
+    """Copy one raw record without copying or hydrating unrelated Agents."""
+    s = _service()
+    normalized = str(agent_id or "").strip()
+    with s._STATE_LOCK:
+        state = _load_state_snapshot_locked()
+        for agent in state.get("agents") or []:
+            if not isinstance(agent, dict):
+                continue
+            if not include_archived and str(agent.get("status") or "active").strip() == "archived":
+                continue
+            if normalized and str(agent.get("agentId") or "").strip() == normalized:
+                return _copy_json_value(agent)
+    return None
+
+
+def _load_state_snapshot_locked() -> dict[str, Any]:
+    """Internal snapshot: callers must hold _STATE_LOCK and never mutate it."""
+    global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
+    s = _service()
+    before = s._registry_state_signature()
+    if _LOAD_STATE_CACHE_STATE is not None and _LOAD_STATE_CACHE_SIGNATURE == before:
+        return _LOAD_STATE_CACHE_STATE
+    path = s.registry_path()
+    if not path.exists():
+        state = s.default_state()
+    else:
+        payload = s._load_existing_registry_payload_or_raise(path)
+        state = s.default_state()
+        state.update(payload)
+        state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
+        state["toolPolicies"] = s._tool_policies(state)
+        state["memoryPolicies"] = s._memory_policies(state)
+    after = s._registry_state_signature()
+    if before == after:
+        # 仅签名稳定的快照进入缓存；对外只返回调用方所需部分的独立副本。
+        _LOAD_STATE_CACHE_SIGNATURE = after
+        _LOAD_STATE_CACHE_STATE = state
+    return state
 
 
 def _has_established_config_identity(agent: dict[str, Any]) -> bool:
