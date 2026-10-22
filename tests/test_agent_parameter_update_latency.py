@@ -23,7 +23,7 @@ def _session_agent(tmp_path, monkeypatch):
     )
     agent = agent_directory_service.get_agent(agent["agentId"])
     monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: True)
-    monkeypatch.setattr(session_service, "_ensure_session_mutable", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_ensure_session_mutable", lambda *_a, **_k: {"agent_id": agent["agentId"]})
     monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda *_a: agent["agentId"])
     choice = {"modelId": "dialogue-model", "modelRef": "dialogue-model", "reasoningEffortValues": ["low", "high"]}
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda *_a: choice)
@@ -176,3 +176,100 @@ def test_parameter_update_telemetry_is_bounded_and_best_effort(tmp_path, monkeyp
     assert events[0]["repairedSnapshotRefreshed"] is True
     assert events[0]["durationMs"] >= 0
     assert "metadata" not in events[0]
+
+
+@pytest.mark.parametrize("kind", ["model", "budget"])
+def test_parameter_patch_reuses_one_validated_session_and_saved_agent(tmp_path, monkeypatch, kind):
+    from core.web.services.session import agent_runtime, session_ops
+
+    agent = _session_agent(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "_session_agent_id_snapshot", agent_runtime._session_agent_id_snapshot)
+    monkeypatch.setattr(session_service, "_session_fixed_model_choice", session_ops._session_fixed_model_choice)
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda *_a: {"agent_id": agent["agentId"]})
+    saved = False
+    calls = []
+
+    def counted(name, function):
+        def wrapped(*args, **kwargs):
+            calls.append((name, saved))
+            return function(*args, **kwargs)
+        return wrapped
+
+    for name in ("_ensure_session_conversation_record", "get_agent", "_session_llm_model_choices"):
+        monkeypatch.setattr(session_service, name, counted(name, getattr(session_service, name)))
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", counted(
+        "get_agent_parameter_snapshot", agent_directory_service.get_agent_parameter_snapshot,
+    ))
+    owner = session_service if kind == "model" else agent_directory_service
+    name = f"update_agent_{kind}_parameters_if_current"
+    writer = getattr(owner, name)
+
+    def write(*args, **kwargs):
+        nonlocal saved
+        result = writer(*args, **kwargs)
+        saved = True
+        return result
+
+    monkeypatch.setattr(owner, name, write)
+    response = _patch(kind, agent)
+    assert response.status_code == 200, response.json()
+    assert calls.count(("_ensure_session_conversation_record", False)) == 1
+    assert calls.count(("get_agent", False)) == 0
+    assert calls.count(("get_agent_parameter_snapshot", False)) == 1
+    assert calls.count(("_session_llm_model_choices", False)) == (1 if kind == "model" else 0)
+    assert not any(after_save for _name, after_save in calls), calls
+
+
+@pytest.mark.parametrize("kind", ["model", "budget"])
+def test_parameter_patch_view_matches_get_and_keeps_admission_checks(tmp_path, monkeypatch, kind):
+    agent = _session_agent(tmp_path, monkeypatch)
+    response = _patch(kind, agent)
+    assert response.status_code == 200, response.json()
+    get_path = "llm-options" if kind == "model" else "budget-parameters"
+    assert response.json() == client.get(f"/api/sessions/session-parameters/{get_path}").json()
+    current = agent_directory_service.get_agent(agent["agentId"])
+    before_disk = agent_directory_service.registry_path().read_bytes()
+    with monkeypatch.context() as missing:
+        missing.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: False)
+        assert _patch(kind, current).status_code == 404
+    with monkeypatch.context() as sealed:
+        def read_only(*_args, **_kwargs):
+            raise session_service.SessionValidationError("Session is read-only")
+        sealed.setattr(session_service, "_ensure_session_mutable", read_only)
+        if kind == "budget":
+            sealed.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: pytest.fail("read-only PATCH reached directory repair"))
+        assert _patch(kind, current).status_code == 422
+    assert agent_directory_service.registry_path().read_bytes() == before_disk
+
+
+def test_parameter_snapshot_repairs_cold_state_and_does_not_share_metadata(tmp_path, monkeypatch):
+    agent = _session_agent(tmp_path, monkeypatch)
+    real_repair = agent_directory_service.repair_agent_directory
+    repairs = []
+    monkeypatch.setattr(agent_directory_service, "repair_agent_directory", lambda: repairs.append(True) or real_repair())
+    monkeypatch.setattr(agent_directory_service, "_agent_to_api", lambda *_a, **_k: pytest.fail("parameter read hydrated UI activity"))
+    agent_directory_service._invalidate_repaired_state_cache()
+    current = agent_directory_service.get_agent_parameter_snapshot(agent["agentId"])
+    assert len(repairs) == 1
+    current["metadata"]["mustNotEscape"] = {"nested": True}
+    assert "mustNotEscape" not in agent_directory_service.get_agent_parameter_snapshot(agent["agentId"])["metadata"]
+    assert len(repairs) == 1
+
+
+@pytest.mark.parametrize(("reason", "status"), [("deleted", 404), ("read_only", 422)])
+def test_budget_rejects_sealed_session_before_any_directory_work(tmp_path, monkeypatch, reason, status):
+    from core.web.services.session import runtime_glue
+
+    agent = _session_agent(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "_ensure_session_mutable", runtime_glue._ensure_session_mutable)
+    monkeypatch.setattr(session_service, "load_session_chat_state", lambda *_a: {"agent_id": agent["agentId"]})
+    monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_a: reason == "deleted")
+    monkeypatch.setattr(session_service, "_conversation_is_read_only", lambda *_a: reason == "read_only")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("sealed budget PATCH reached directory work")
+
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", forbidden)
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", forbidden)
+    monkeypatch.setattr(agent_directory_service, "update_agent_budget_parameters_if_current", forbidden)
+    assert _patch("budget", agent).status_code == status
