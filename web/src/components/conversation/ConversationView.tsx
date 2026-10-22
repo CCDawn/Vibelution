@@ -80,9 +80,12 @@ import {
 } from "./agentMessageTimeline";
 import {
   buildCodexTranscriptCells,
-  compactCodexTranscriptCellsAcrossMessages,
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
+import {
+  compactCodexTranscriptCellsIncrementally,
+  type CodexTranscriptCompactionCache,
+} from "./codexTranscriptCompactionCache";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import { ConversationToolActivityPills } from "./ConversationToolActivityPills";
 import { type AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
@@ -795,6 +798,10 @@ export const ConversationView = React.memo(function ConversationView({
     }
     return itemsByMessageId;
   }, [agentOperationGroupsByMessageId, agentThread, lang]);
+  // Cross-message compaction is one forward pass whose state resets at every
+  // user row. Keeping its cache across frames is what limits a streaming frame
+  // to the active turn segment instead of the whole transcript.
+  const transcriptCompactionCacheRef = useRef<CodexTranscriptCompactionCache | null>(null);
   const agentCodexSurfacesByMessageId = useMemo(() => {
     const surfacesByMessageId = new Map<string, CodexTranscriptSurface>();
     for (const agentMessage of agentThread.messages) {
@@ -808,13 +815,15 @@ export const ConversationView = React.memo(function ConversationView({
       }
       surfacesByMessageId.set(agentMessage.id, resolveCodexTranscriptSurface(sourceMessage, projectedCells));
     }
-    const compactedCellsByMessageId = compactCodexTranscriptCellsAcrossMessages(
+    transcriptCompactionCacheRef.current = compactCodexTranscriptCellsIncrementally(
+      transcriptCompactionCacheRef.current,
       agentThread.messages.map((agentMessage) => ({
         messageId: agentMessage.id,
         cells: surfacesByMessageId.get(agentMessage.id)?.cells ?? [],
         barrier: agentMessage.role === "user",
       })),
     );
+    const compactedCellsByMessageId = transcriptCompactionCacheRef.current.cellsByMessageId;
     for (const [messageId, surface] of surfacesByMessageId) {
       const compactedCells = compactedCellsByMessageId.get(messageId);
       if (!compactedCells || transcriptCellSequenceMatches(surface.cells, compactedCells)) {
