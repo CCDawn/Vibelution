@@ -1126,6 +1126,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
         "agent_create", "agent_update", "agent_archive", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
         "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
+        "team_create", "knowledge_ingest", "config_update",
     }
     action = args.get("action")
     if not isinstance(action, str) or action not in actions:
@@ -1193,6 +1194,38 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             result["assistantChangedFields"] = sorted(display_fields.intersection(updates))
         except (ValueError, TypeError, RecursionError):
             result["assistantArgumentsInvalid"] = True
+    if action == "team_create":
+        name = values.get("name")
+        if not isinstance(name, str) or not name.strip():
+            result["assistantArgumentsInvalid"] = True
+        else:
+            targets["name"] = " ".join(name.split())[:120]
+        for key in ("description", "templateId"):
+            value = values.get(key)
+            if isinstance(value, str) and value.strip():
+                targets[key] = " ".join(value.split())[:160]
+    if action == "knowledge_ingest":
+        for key in ("inboxSourceId", "ownerType", "ownerId", "knowledgeBaseId"):
+            value = values.get(key)
+            if isinstance(value, str) and value.strip():
+                targets[key] = " ".join(value.split())[:160]
+        if not all(str(values.get(key) or "").strip() for key in ("inboxSourceId", "ownerType", "ownerId")):
+            result["assistantArgumentsInvalid"] = True
+    if action == "config_update":
+        updates = values.get("updates")
+        if not isinstance(updates, list) or not updates or len(updates) > 20:
+            result["assistantArgumentsInvalid"] = True
+        else:
+            labels: list[str] = []
+            for item in updates:
+                if not isinstance(item, dict) or not {"section", "key", "value"} <= set(item):
+                    result["assistantArgumentsInvalid"] = True
+                    labels = []
+                    break
+                labels.append(f"{item.get('section')}.{item.get('key')}")
+            if labels:
+                # Values are never projected; only which keys are touched.
+                result["assistantChangedFields"] = sorted(labels)[:20]
     result["assistantDetailsOmitted"] = bool(set(values).difference(targets)) or any(
         targets.get(key) != values[key] for key in ("title", "display_name") if key in targets
     )

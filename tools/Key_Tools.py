@@ -3069,6 +3069,13 @@ def _build_key_tools() -> List[BaseTool]:
         bind 的 payload 包含 expectedRevision、repairFlowId、directorAgentId、developerAgentId、
         reviewerAgentId、acknowledgeAutomaticRecovery=true，可选 replaySafety、有限重试额度和有效期。
         revoke 的 payload 为 expectedRevision；start 为 expectedRevision、idempotencyKey、values。
+        还支持 team_create、knowledge_ingest、config_update（同样逐次审批）：
+        team_create: name（必填）、description、templateId（如 dev-team；不给则建空团队）。
+        knowledge_ingest: inboxSourceId、ownerType、ownerId（必填）、knowledgeBaseId（可选）；
+        只按 source_document 模式原样入库已暂存来源，不代写内容，也不替代人工复核。
+        config_update: updates 数组，每条 {section, key, value}；仅允许白名单内的
+        用户偏好、界面语言/开关和默认模型档位（profiles.<id>.model_ref），
+        任何 provider、密钥或网关相关键整体拒绝；被其他操作抢先修改时回执提示重试。
         这些操作不创建 Agent、不授予工具权限，也不授权自动合入、部署或重启。
         arguments_json 使用相应原生工具的具名参数 JSON 对象；restart 仅接受 reason。
         agent_create 需要提供 display_name、primary_mode、prompt_template_id、model_id

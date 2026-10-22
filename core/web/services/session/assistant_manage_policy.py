@@ -30,6 +30,7 @@ ASSISTANT_MANAGE_ACTIONS = frozenset(
         "agent_create", "agent_update", "agent_archive", "session_create",
         "session_update", "session_stop", "session_delete", "knowledge_acl_grant",
         "restart", "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
+        "team_create", "knowledge_ingest", "config_update",
     }
 )
 

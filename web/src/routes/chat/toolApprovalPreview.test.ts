@@ -20,6 +20,25 @@ describe("toolApprovalPreview", () => {
     expect(toolApprovalActionPreview({ assistantAction: "agent_update", assistantChangedFields: ["tool_policy_json"], assistantDetailsOmitted: true }, "personal_assistant_manage_tool", "en"))
       .toContain("Values omitted");
   });
+  it("covers managed write actions with names, targets and changed fields", () => {
+    expect(toolApprovalActionPreview(
+      { assistantAction: "team_create", assistantTargets: { name: "交付团队", templateId: "dev-team" } },
+      "personal_assistant_manage_tool", "zh",
+    )).toBe("创建团队\nname: 交付团队\ntemplateId: dev-team");
+    expect(toolApprovalActionPreview(
+      { assistantAction: "knowledge_ingest", assistantTargets: { inboxSourceId: "isrc-1", ownerType: "team", ownerId: "team-1" } },
+      "personal_assistant_manage_tool", "en",
+    )).toContain("Ingest knowledge");
+    expect(toolApprovalActionPreview(
+      { assistantAction: "config_update", assistantChangedFields: ["ui.language", "llm.profiles.primary.model_ref"], assistantDetailsOmitted: true },
+      "personal_assistant_manage_tool", "zh",
+    )).toContain("修改字段: ui.language, llm.profiles.primary.model_ref");
+    // An unknown manage action still renders the refuse-and-retry guidance.
+    expect(toolApprovalActionPreview(
+      { assistantAction: "config_write" }, "personal_assistant_manage_tool", "zh",
+    )).toContain("参数无法核对");
+  });
+
   it("prefers command preview for shell tools like Codex", () => {
     expect(toolApprovalActionPreview({
       commandPreview: "curl https://example.com",

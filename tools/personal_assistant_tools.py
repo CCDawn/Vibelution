@@ -92,6 +92,7 @@ def _receipt(raw: str) -> str:
         "directSessionId",
         "deletedSessionId",
         "knowledgeBaseId",
+        "knowledgeItemId",
         "targetAgentId",
         "actorAgentId",
         "teamId",
@@ -138,7 +139,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
 
     Actions: agent_create, agent_update, agent_archive, session_create,
     session_update, session_stop, session_delete, knowledge_acl_grant, restart,
-    workflow_recovery_bind, workflow_recovery_revoke, workflow_start.
+    workflow_recovery_bind, workflow_recovery_revoke, workflow_start,
+    team_create, knowledge_ingest, config_update.
     Arguments use the corresponding canonical tool's named parameters.
     No arbitrary API, command, purge, restore, or private data read is accepted.
     """
@@ -153,6 +155,8 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             return _workflow_action(action, args, runtime)
         # Closed dispatch table; signature binding rejects extra fields before
         # invoking any underlying service. Approval stays in native execution.
+        from tools import pa_managed_writes
+
         dispatch = {
             "agent_create": operations.agent_create_tool,
             "agent_update": operations.agent_update_tool,
@@ -162,6 +166,9 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
             "session_stop": operations.session_stop_tool,
             "session_delete": operations.session_delete_tool,
             "knowledge_acl_grant": operations.knowledge_base_acl_grant_tool,
+            "team_create": pa_managed_writes.team_create_tool,
+            "knowledge_ingest": pa_managed_writes.knowledge_ingest_tool,
+            "config_update": pa_managed_writes.config_update_tool,
         }
         if action == "restart":
             if (
