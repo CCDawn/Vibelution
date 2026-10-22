@@ -63,6 +63,7 @@ import { useChatSessionMutations } from "./useChatSessionMutations";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
+import { isSessionIndexQueryStaleAfterTurn } from "../../api/sessionQueryScope";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { ConversationRerunFileChoiceDialog } from "../../components/conversation/ConversationRerunFileChoiceDialog";
@@ -1660,8 +1661,14 @@ export function ChatCodingRouteWorkbench() {
       ...terminalIndexRefreshKeysBySessionRef.current,
       [activeSessionId]: terminalIndexRefreshKey,
     };
+    // A committed turn only changes the recency of the session that ran it.
+    // Invalidating the whole `sessions` prefix would also refetch the search a
+    // user is typing into and deep cursor pages nobody is looking at.
     void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions(),
+        predicate: (query) => isSessionIndexQueryStaleAfterTurn(query.queryKey),
+      }),
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
     ]);
