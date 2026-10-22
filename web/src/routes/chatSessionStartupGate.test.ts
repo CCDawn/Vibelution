@@ -6,6 +6,18 @@ import {
 } from "./chatSessionStartupGate";
 
 describe("chat session startup gate", () => {
+  it("waits for a reusable bootstrap page without blocking differently filtered indexes", () => {
+    const input = {
+      hasRouteTarget: true, hasActiveSession: true, bootstrapIsFetched: false,
+      bootstrapIsError: false, bootstrapFetchStatus: "fetching" as const,
+    };
+    expect(shouldEnableSessionIndexQuery({ ...input, bootstrapMatchesIndex: true })).toBe(false);
+    expect(shouldEnableSessionIndexQuery({ ...input, bootstrapMatchesIndex: false })).toBe(true);
+    expect(shouldEnableSessionIndexQuery({ ...input, bootstrapMatchesIndex: true, directoryReadyWaitExpired: true })).toBe(true);
+    expect(shouldEnableSessionIndexQuery({ ...input, bootstrapMatchesIndex: true, bootstrapIsError: true })).toBe(true);
+    expect(shouldEnableSessionIndexQuery({ ...input, bootstrapMatchesIndex: true, bootstrapIsFetched: true })).toBe(true);
+  });
+
   it("keeps the staged session index paused only while the bootstrap is actively fetching", () => {
     expect(shouldEnableSessionIndexQuery({
       hasRouteTarget: false,

@@ -1116,6 +1116,7 @@ export function ChatCodingRouteWorkbench() {
     // Its fallback always restores a visible direct session when one exists.
     bareRouteRestorePending: shouldWaitForChatStartupRestore({
       bareRoute: chatRouteSelection.kind === "bare",
+      directoryGatePending,
       routeVisibleSessions,
       agentDirectoryFailed: agentsQuery.isError,
     }),

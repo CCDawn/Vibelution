@@ -5,7 +5,7 @@
  */
 
 import { useInfiniteQuery, useQueries, useQuery, type InfiniteData, type QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listAgentSummaries } from "../../api/agents";
 import {
@@ -57,7 +57,7 @@ const CONVERSATIONS_CATALOG_PAGE_SIZE = 100;
  * can only receive the startup empty page.
  */
 const DIRECTORY_READY_POLL_MS = 1_000;
-/** Bounded fallback so a wedged directory startup can never gate the list forever. */
+/** Bound both the first bootstrap and a directory store that stays unready. */
 const DIRECTORY_READY_WAIT_TIMEOUT_MS = 20_000;
 
 export type ChatWorkbenchCatalogQueriesInput = {
@@ -122,6 +122,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [directoryReadyWaitExpired, setDirectoryReadyWaitExpired] = useState(false);
+  const directoryWaitStartedAtRef = useRef<number | null>(null);
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
     enabled: sessionDirectoryEnabled,
@@ -129,6 +130,9 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
       const payload = await fetchChatWorkbenchBootstrap({ signal });
       signal.throwIfAborted();
       queryClient.setQueryData(queryKeys.agents(), payload.agents);
+      // A startup empty page is not an authoritative empty directory. Leave
+      // loaded pages and optimistic rows untouched until the store can answer.
+      if (payload.directoryReady === false) return payload;
       // Seed the group-room catalog with the bootstrap projection so the rail
       // paints before the paginated catalog query resolves; the catalog query
       // reconciles (and continues paging) right after.
@@ -199,29 +203,39 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     refetchInterval: (query) =>
       query.state.data?.directoryReady === false ? DIRECTORY_READY_POLL_MS : false,
   });
-  const bootstrapSettled = !sessionDirectoryEnabled || activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError;
+  const bootstrapSettled = !sessionDirectoryEnabled || activeSessionBootstrapQuery.isFetched
+    || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired;
   const bootstrapDirectoryReady = activeSessionBootstrapQuery.data?.directoryReady !== false;
+  const initialBootstrapPending = !activeSessionBootstrapQuery.isFetched
+    && !activeSessionBootstrapQuery.isError && activeSessionBootstrapQuery.fetchStatus === "fetching";
   // Bounded fallback: if the directory never reports ready, open the gate so the
   // index recovers through the normal poll cycle instead of waiting forever.
   useEffect(() => {
-    if (!sessionDirectoryEnabled || bootstrapDirectoryReady || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
+    if (!sessionDirectoryEnabled || (!initialBootstrapPending && bootstrapDirectoryReady)
+      || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
+      directoryWaitStartedAtRef.current = null;
       return;
     }
+    const startedAt = directoryWaitStartedAtRef.current ?? Date.now();
+    directoryWaitStartedAtRef.current = startedAt;
     const timer = window.setTimeout(
       () => setDirectoryReadyWaitExpired(true),
-      DIRECTORY_READY_WAIT_TIMEOUT_MS,
+      Math.max(0, DIRECTORY_READY_WAIT_TIMEOUT_MS - (Date.now() - startedAt)),
     );
     return () => window.clearTimeout(timer);
-  }, [sessionDirectoryEnabled, bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
-  const directoryGatePending = sessionDirectoryEnabled && !bootstrapDirectoryReady && !directoryReadyWaitExpired;
-  // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
-  // the canonical session index recover instead of leaving the directory gated.
+  }, [sessionDirectoryEnabled, initialBootstrapPending, bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
+  const directoryGatePending = sessionDirectoryEnabled && !bootstrapDirectoryReady
+    && !activeSessionBootstrapQuery.isError && !directoryReadyWaitExpired;
+  // Target detail reads stay independent. Only an equivalent default directory
+  // waits for bootstrap; search/custom ordering and error recovery read normally.
   const sessionIndexQueryEnabled = sessionDirectoryEnabled && shouldEnableSessionIndexQuery({
     hasRouteTarget: Boolean(input.requestedSessionId || input.requestedRoomId),
     hasActiveSession: Boolean(activeSessionId),
     bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
     bootstrapIsError: activeSessionBootstrapQuery.isError,
     bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus,
+    bootstrapMatchesIndex: !sessionQueryText.trim()
+      && (!sessionListSort.trim() || sessionListSort.trim() === "updatedAt_desc"),
     directoryReady: bootstrapDirectoryReady,
     directoryReadyWaitExpired,
   });

@@ -28,6 +28,106 @@ from core.chat.turn_journal import (
 )
 
 
+def _projection_event(sequence, event_type, *, event_id=None, turn_id="turn", payload=None):
+    return turn_journal.TurnJournalEvent.from_dict({
+        "eventId": event_id or f"event-{sequence}", "sessionId": "session", "turnId": turn_id,
+        "sequence": sequence, "eventType": event_type, "status": "completed",
+        "timestamp": f"2026-10-22T00:00:{sequence:02d}Z", "payload": payload or {},
+    })
+
+
+@pytest.mark.parametrize("operation", ["edit", "regenerate", "head_select"])
+@pytest.mark.parametrize("duplicate_sequence", [False, True])
+def test_detail_active_projection_matches_raw_entry_points(operation, duplicate_sequence, monkeypatch):
+    from core.web.services.session import projection, turn_steer
+    from core.web.services import session_service
+
+    events = [
+        _projection_event(1, "user_message"),
+        _projection_event(2, "assistant_item_committed", payload={
+            "kind": "tool_call", "itemId": "tool", "callId": "call", "status": "ready",
+            "metadata": {"nested": {"value": "original"}},
+        }),
+        _projection_event(3, "tool_call_started", payload={"toolCall": {"callId": "call"}}),
+        _projection_event(4, "turn_steer", payload={
+            "disposition": "display_item_started", "itemId": "answer", "kind": "agent_message",
+            "contentOffset": 3, "projectionItemId": "alias",
+        }),
+        _projection_event(5, "assistant_item_committed", payload={
+            "kind": "assistant_message", "itemId": "answer", "text": "original",
+        }),
+        _projection_event(6, "tool_result", payload={
+            "toolCall": {"callId": "call", "status": "done", "summary": "result"},
+        }),
+        _projection_event(7, "turn_completed"),
+        _projection_event(8, "branch_rebase", payload={
+            "operation": "edit", "fromEventId": "event-3", "branchId": "other",
+        }),
+        _projection_event(9, "assistant_item_committed", payload={
+            "kind": "assistant_message", "itemId": "alternative", "text": "alternative",
+        }),
+        _projection_event(10, "branch_rebase", payload={
+            "operation": operation, "fromEventId": "event-7" if operation == "head_select" else "event-3",
+        }),
+        _projection_event(11, "turn_failed"),
+        _projection_event(12, "turn_steer", payload={
+            "disposition": "display_content_rebased", "itemId": "answer",
+        }),
+    ]
+    if duplicate_sequence:
+        # The two public entry points deliberately have distinct tie ordering.
+        events[4] = _projection_event(4, "assistant_item_committed", event_id="a-tied", payload={
+            "kind": "assistant_message", "itemId": "answer", "text": "original",
+        })
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda _: events)
+    snapshot = projection._SessionJournalProjection("session")
+    expected_items = turn_journal.session_turn_items_from_events(events, turn_id="turn")
+    expected_order = turn_steer.display_item_order_provenance(events, "turn")
+    tree_calls = []
+    build_tree = turn_journal.build_journal_event_tree
+
+    def counted_tree(rows):
+        tree_calls.append(1)
+        return build_tree(rows)
+
+    monkeypatch.setattr(turn_journal, "build_journal_event_tree", counted_tree)
+    items, order = snapshot.for_turn("session", "turn")
+    assert len(tree_calls) == (2 if duplicate_sequence else 1)
+    assert items == expected_items
+    assert order == expected_order
+    # Cached dictionaries, including nested metadata and alias records, cannot
+    # become owned by a message/live merge or by the caller.
+    items[0]["metadata"]["nested"]["value"] = "mutated"
+    order["injected"] = {"orderSequence": 999}
+    if "alias" in order:
+        order["alias"]["contentOffset"] = 999
+    assert snapshot.for_turn("session", "turn") == (expected_items, expected_order)
+    # The same active slices may feed multiple message identities and live
+    # content merges; no returned item/alias may retain the first message.
+    for source, done in [("session_detail", True), ("assistant_delta", False)]:
+        kwargs = dict(
+            session_id="session", turn_id="turn", message_id="first", content="prefix-answer",
+            thought="reasoning", source=source, done=done,
+        )
+        expected = projection._build_session_turn_items_projection(**kwargs)
+        first = projection._build_session_turn_items_projection(**kwargs, journal_projection=snapshot)
+        assert first == expected
+        first[0]["messageId"] = "mutated"
+        kwargs["message_id"] = "second"
+        second = projection._build_session_turn_items_projection(**kwargs, journal_projection=snapshot)
+        assert second == projection._build_session_turn_items_projection(**kwargs)
+        # The v3 DTO may omit messageId, but must never inherit an earlier
+        # message's identity or a caller's injected value.
+        assert all(item.get("messageId") not in {"first", "mutated"} for item in second)
+    with pytest.raises(ValueError, match="session"):
+        snapshot.for_turn("different-session", "turn")
+    with pytest.raises(ValueError, match="session"):
+        projection._build_session_turn_items_projection(
+            session_id="different-session", turn_id="turn", message_id="message",
+            metadata={"kind": "context_compression_marker"}, journal_projection=snapshot,
+        )
+
+
 @pytest.fixture(autouse=True)
 def isolate_developer_sandbox(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"

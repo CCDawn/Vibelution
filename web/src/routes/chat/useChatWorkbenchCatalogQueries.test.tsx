@@ -17,6 +17,7 @@ const bootstrapControl = vi.hoisted(() => ({
 }));
 const sessionIndexGate = vi.hoisted(() => ({ enabledFlags: [] as boolean[] }));
 const directoryReads = vi.hoisted(() => ({
+  agents: vi.fn(async () => []),
   sessions: vi.fn(async (_filters: unknown, _options?: unknown): Promise<SessionQueryResponse> => ({ items: [], nextCursor: "" })),
   conversations: vi.fn(async () => ({ items: [], nextCursor: "" })),
   teams: vi.fn(async () => []),
@@ -42,7 +43,7 @@ vi.mock("../../api/chat", () => ({
   queryConversations: directoryReads.conversations,
   querySessions: directoryReads.sessions,
 }));
-vi.mock("../../api/agents", () => ({ listAgentSummaries: async () => [] }));
+vi.mock("../../api/agents", () => ({ listAgentSummaries: directoryReads.agents }));
 vi.mock("../../api/teams", () => ({ listTeams: directoryReads.teams }));
 vi.mock("../../api/sessionArchive", () => ({ listArchivedChatSessions: directoryReads.archived }));
 vi.mock("../../api/runtime", () => ({ fetchRuntimeSummary: async () => ({}) }));
@@ -113,6 +114,76 @@ function bootstrapPayload(items: SessionSummary[] = []) {
 }
 
 describe("Chat bootstrap session cache reuse", () => {
+  it.each([{}, { requestedSessionId: "requested-session", activeSessionId: "requested-session" }])(
+    "falls back to directory reads when the first bootstrap never settles for %j", async (route) => {
+    vi.useFakeTimers();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const input = catalogInput(client, route);
+    let result: ReturnType<typeof useChatWorkbenchCatalogQueries>;
+    function Page() { result = useChatWorkbenchCatalogQueries(input); return null; }
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
+      expect(directoryReads.sessions).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(result!.sessionIndexQueryEnabled).toBe(true);
+      expect(directoryReads.sessions).toHaveBeenCalledOnce();
+      expect(directoryReads.agents).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares one wait budget across a slow bootstrap and its unready-directory response", async () => {
+    vi.useFakeTimers();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveBootstrap!: (payload: Record<string, unknown>) => void;
+    bootstrapControl.payload = new Promise((resolve) => { resolveBootstrap = resolve; });
+    let result: ReturnType<typeof useChatWorkbenchCatalogQueries>;
+    function Page() { result = useChatWorkbenchCatalogQueries(catalogInput(client)); return null; }
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      await act(async () => resolveBootstrap({ ...bootstrapPayload(), directoryReady: false }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(4_999); });
+      expect(directoryReads.sessions).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(result!.sessionIndexQueryEnabled).toBe(true);
+      expect(directoryReads.sessions).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { requestedSessionId: "requested-session", activeSessionId: "requested-session" },
+    { requestedRoomId: "requested-room", standardGroupRoomActive: true },
+  ])("reuses the matching bootstrap catalog with an explicit route %j", async (route) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveBootstrap!: (payload: Record<string, unknown>) => void;
+    bootstrapControl.payload = new Promise((resolve) => { resolveBootstrap = resolve; });
+    const input = catalogInput(client, route);
+    let result: ReturnType<typeof useChatWorkbenchCatalogQueries>;
+    function Page() { result = useChatWorkbenchCatalogQueries(input); return null; }
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
+      expect(directoryReads.sessions).not.toHaveBeenCalled();
+      expect(result!.sessionIndexQueryEnabled).toBe(false);
+      await act(async () => resolveBootstrap(bootstrapPayload([{ id: "server-session" } as SessionSummary])));
+      expect(await actUntil(() => result.rawSessionsQuery.data?.[0]?.id === "server-session")).toBe(true);
+      expect(directoryReads.sessions).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+    }
+  });
+
   it.each(["", "updatedAt_desc", " updatedAt_desc "])("uses the bootstrap page without an index request for sort %j", async (sort) => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const serverSession = { id: "bootstrap-session" } as SessionSummary;
@@ -146,7 +217,7 @@ describe("Chat bootstrap session cache reuse", () => {
     bootstrapControl.payload = Promise.resolve(bootstrapPayload([{ id: "bootstrap-session" } as SessionSummary]));
     let resolveIndex!: (page: SessionQueryResponse) => void;
     directoryReads.sessions.mockReturnValueOnce(new Promise((resolve) => { resolveIndex = resolve; }));
-    const input = catalogInput(client, { sessionListSort: sort, sessionQueryText: q });
+    const input = catalogInput(client, { sessionListSort: sort, sessionQueryText: q, requestedSessionId: "requested-session" });
     let result: ReturnType<typeof useChatWorkbenchCatalogQueries>;
     function Page() { result = useChatWorkbenchCatalogQueries(input); return null; }
     const container = document.createElement("div");
@@ -466,10 +537,13 @@ describe("Chat catalog request lifecycle", () => {
       expect(await actUntil(() => bootstrapState()?.directoryReady === false)).toBe(true);
       expect(sessionIndexGate.enabledFlags.length > 0).toBe(true);
       expect(sessionIndexGate.enabledFlags.at(-1)).toBe(false);
+      expect(client.getQueryData(queryKeys.sessionQuery("", 50))).toBeUndefined();
+      expect(client.getQueryData(queryKeys.sessionQuery("", 50, "", "updatedAt_desc"))).toBeUndefined();
+      expect(client.getQueryData(queryKeys.sessions())).toBeUndefined();
 
       bootstrapControl.payload = Promise.resolve({
         activeSessionId: "",
-        sessionPage: { items: [], nextCursor: "" },
+        sessionPage: { items: [{ id: "restored-session" }], nextCursor: "" },
         agents: [],
         conversations: [],
         directoryReady: true,
@@ -480,10 +554,37 @@ describe("Chat catalog request lifecycle", () => {
       // A resolved refetch can commit one notifyManager batch later; wait for
       // the flip deterministically instead of asserting on a single flush.
       expect(await actUntil(() => sessionIndexGate.enabledFlags.at(-1) === true)).toBe(true);
+      expect(client.getQueryData<{ pages: SessionQueryResponse[] }>(queryKeys.sessionQuery("", 50))?.pages[0].items)
+        .toEqual([{ id: "restored-session" }]);
+      expect(client.getQueryData(queryKeys.sessions())).toEqual([{ id: "restored-session" }]);
+      expect(directoryReads.sessions).not.toHaveBeenCalled();
     } finally {
       await act(async () => root.unmount());
       client.clear();
       container.remove();
+    }
+  });
+
+  it("releases directory recovery after an unready bootstrap refetch fails", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    bootstrapControl.payload = Promise.resolve({ ...bootstrapPayload(), directoryReady: false });
+    let result: ReturnType<typeof useChatWorkbenchCatalogQueries>;
+    function Page() { result = useChatWorkbenchCatalogQueries(catalogInput(client)); return null; }
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
+      expect(await actUntil(() => result.directoryGatePending)).toBe(true);
+      await act(async () => {
+        bootstrapControl.payload = Promise.reject(new Error("directory bootstrap unavailable"));
+        await client.refetchQueries({ queryKey: ["sessions", "active-bootstrap"] });
+      });
+      expect(await actUntil(() => result.activeSessionBootstrapQuery.isError)).toBe(true);
+      expect(result!.directoryGatePending).toBe(false);
+      expect(result!.sessionIndexQueryEnabled).toBe(true);
+      expect(await actUntil(() => directoryReads.sessions.mock.calls.length > 0)).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
     }
   });
 });

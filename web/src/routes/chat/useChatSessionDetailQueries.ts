@@ -31,8 +31,10 @@ export function shouldWaitForChatStartupRestore(options: {
   bareRoute: boolean;
   routeVisibleSessions: SessionSummary[] | undefined;
   agentDirectoryFailed: boolean;
+  directoryGatePending?: boolean;
 }): boolean {
   if (!options.bareRoute) return false;
+  if (options.directoryGatePending) return true;
   if (!options.routeVisibleSessions) return !options.agentDirectoryFailed;
   return options.routeVisibleSessions.some((session) => isVisibleDirectSession(session));
 }

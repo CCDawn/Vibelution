@@ -116,6 +116,29 @@ async function mount(overrides: Partial<UseChatSessionDetailQueriesInput> = {}, 
 }
 
 describe("Chat startup detail priority", () => {
+  it("does not finish a bare route from an unready empty directory", async () => {
+    let resolveDetail!: (detail: SessionDetail) => void;
+    reads.detail.mockReturnValue(new Promise((resolve) => { resolveDetail = resolve; }));
+    const pending = (directoryGatePending: boolean, routeVisibleSessions: SessionSummary[]) => shouldWaitForChatStartupRestore({
+      bareRoute: true, directoryGatePending, routeVisibleSessions, agentDirectoryFailed: false,
+    });
+    const page = await mount({ sessions: [], bareRouteRestorePending: pending(true, []) });
+    try {
+      expect(page.ready).toBe(false);
+      expect(page.reportReady).not.toHaveBeenCalled();
+      expect(reads.telemetry).not.toHaveBeenCalled();
+      await page.render({ sessions: [summary], bareRouteRestorePending: pending(false, [summary]) });
+      expect(page.ready).toBe(false);
+      await page.render({ sessions: [summary], activeSessionId: summary.id });
+      expect(page.ready).toBe(false);
+      await act(async () => resolveDetail(fullDetail));
+      await flush();
+      expect(page.ready).toBe(true);
+      expect(page.reportReady).toHaveBeenCalledOnce();
+      expect(reads.telemetry).toHaveBeenCalledWith(expect.objectContaining({ eventCode: "browser.chat_route.startup_data_ready" }));
+    } finally { await page.dispose(); }
+  });
+
   it("waits when the session index wins the race with the Agent directory", async () => {
     const pending = (routeVisibleSessions: SessionSummary[] | undefined, agentDirectoryFailed = false) => shouldWaitForChatStartupRestore({
       bareRoute: true, routeVisibleSessions, agentDirectoryFailed,

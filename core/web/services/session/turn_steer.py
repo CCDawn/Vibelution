@@ -212,10 +212,18 @@ def display_item_order_provenance(events: Any, turn_id: str) -> dict[str, dict[s
     """
     from core.chat.turn_journal import fold_active_events
 
+    return _display_item_order_provenance_from_active_events(
+        fold_active_events(sorted(events or [], key=lambda row: _sequence(getattr(row, "sequence", 0)))),
+        turn_id,
+    )
+
+
+def _display_item_order_provenance_from_active_events(events: Any, turn_id: str) -> dict[str, dict[str, Any]]:
+    """Project creation positions from an already ordered active path."""
     result: dict[str, dict[str, Any]] = {}
     call_orders: dict[str, int] = {}
     anchors: list[Any] = []
-    for event in fold_active_events(sorted(events or [], key=lambda row: _sequence(getattr(row, "sequence", 0)))):
+    for event in events:
         if str(getattr(event, "turn_id", "") or "").strip() != turn_id:
             continue
         payload = dict(getattr(event, "payload", None) or {})

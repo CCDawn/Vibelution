@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -49,6 +50,51 @@ class _SessionListBuildResult:
     phase_timings: Mapping[str, Any] = field(default_factory=dict)
     summary_projection_ms: int | None = None
     published_signature: tuple[Any, ...] | None = None
+
+
+@dataclass
+class _SessionJournalProjection:
+    """One read's derived active paths; never retained across detail requests."""
+
+    session_id: str
+    _items_events_by_turn: dict[str, list[Any]] | None = field(default=None, init=False)
+    _order_events_by_turn: dict[str, list[Any]] = field(default_factory=dict, init=False)
+
+    def for_turn(self, session_id: str, turn_id: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        if session_id != self.session_id:
+            raise ValueError("Journal projection belongs to a different session")
+        from core.chat.turn_journal import fold_active_events, _session_turn_items_from_active_events
+        from .turn_steer import _display_item_order_provenance_from_active_events, _sequence
+
+        if self._items_events_by_turn is None:
+            events = _service()._load_session_conversation_events_cached(str(session_id or "").strip())
+            items_order = sorted(events, key=lambda event: (event.sequence, event.event_id))
+            active_items = fold_active_events(items_order)
+            # Legacy entry points differ only on tied sequence values. Preserve
+            # stable provenance order rather than silently changing old logs.
+            order_order = (
+                items_order if len({event.sequence for event in events}) == len(events)
+                else sorted(events, key=lambda event: _sequence(getattr(event, "sequence", 0)))
+            )
+            active_order = active_items if all(
+                left is right for left, right in zip(items_order, order_order)
+            ) else fold_active_events(order_order)
+            self._items_events_by_turn = {}
+            for event in active_items:
+                self._items_events_by_turn.setdefault(event.turn_id, []).append(event)
+            for event in active_order:
+                self._order_events_by_turn.setdefault(str(event.turn_id or "").strip(), []).append(event)
+        items = _session_turn_items_from_active_events(self._items_events_by_turn.get(turn_id, []), turn_id=turn_id)
+        # Retain event slices only, never message-owned projected dictionaries.
+        # The canonical projector creates scalar fields afresh; detach its two
+        # nested payload fields from the shared journal event objects as well.
+        for item in items:
+            for key in ("metadata", "diagnosticSummary"):
+                if key in item:
+                    item[key] = deepcopy(item[key])
+        return items, _display_item_order_provenance_from_active_events(
+            self._order_events_by_turn.get(turn_id, []), turn_id,
+        )
 
 
 def list_sessions(
@@ -1484,8 +1530,13 @@ def _normalize_messages(
     transcript_scope: Any = "all",
     include_timeline: bool = True,
     include_display_metadata: bool = True,
+    journal_projection: _SessionJournalProjection | None = None,
 ) -> list[dict[str, Any]]:
     s = _service()
+    if journal_projection is None:
+        journal_projection = _SessionJournalProjection(conversation_id)
+    elif journal_projection.session_id != conversation_id:
+        raise ValueError("Journal projection belongs to a different session")
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
     file_changes_by_turn: dict[str, list[dict[str, Any]]] | None = None
     raw_items = list(items or [])
@@ -1685,6 +1736,7 @@ def _normalize_messages(
                     source="session_detail",
                     metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
                     stage=raw.get("streamStage"),
+                    journal_projection=journal_projection,
                 )
                 if (
                     turn_items
@@ -1806,6 +1858,7 @@ def _normalize_messages(
                     source="session_detail",
                     metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
                     stage=raw.get("streamStage"),
+                    journal_projection=journal_projection,
                 )
             assistant_status = (
                 "running"
@@ -2155,11 +2208,13 @@ def _session_detail_messages_with_window(
     raw_start = max(0, start_index - 1)
     raw_end = min(raw_message_count, end_index)
     raw_window = raw_messages[raw_start:raw_end]
+    journal_projection = _SessionJournalProjection(session_id)
     detail_messages = s._normalize_messages(
         session_id,
         raw_window,
         source_start_index=raw_start + 1,
         transcript_scope=normalized_transcript_scope,
+        journal_projection=journal_projection,
     )
     if live_message is not None and start_index <= total_messages <= end_index:
         detail_messages = s._without_live_turn_ledger_partials(detail_messages, live_message) + [live_message]
@@ -2172,6 +2227,7 @@ def _session_detail_messages_with_window(
         # Metrics still need canonical turn items, filtering and coalescing,
         # but never historical file checkpoints or per-turn work headers.
         include_display_metadata=False,
+        journal_projection=journal_projection,
     )
     if live_message is not None:
         stat_messages = s._without_live_turn_ledger_partials(stat_messages, live_message) + [live_message]
@@ -2735,6 +2791,7 @@ def _build_session_turn_items_projection(
     source: str = "assistant_delta",
     metadata: Mapping[str, Any] | None = None,
     stage: Any = "",
+    journal_projection: _SessionJournalProjection | None = None,
 ) -> list[dict[str, Any]]:
     """Project SessionTurnItem v2 for a turn.
 
@@ -2743,6 +2800,8 @@ def _build_session_turn_items_projection(
     single UI source of truth for the committed body.
     """
     s = _service()
+    if journal_projection is not None and journal_projection.session_id != session_id:
+        raise ValueError("Journal projection belongs to a different session")
     normalized_metadata = dict(metadata or {})
     normalized_turn_id = str(
         turn_id
@@ -2793,8 +2852,12 @@ def _build_session_turn_items_projection(
     if normalized_turn_id:
         from .turn_steer import display_item_order_provenance
 
-        journal_events = s._load_session_conversation_events_cached(str(session_id or "").strip())
-        order_provenance = display_item_order_provenance(journal_events, normalized_turn_id)
+        if journal_projection is None:
+            journal_events = s._load_session_conversation_events_cached(str(session_id or "").strip())
+            order_provenance = display_item_order_provenance(journal_events, normalized_turn_id)
+            canonical_items = s.conversation_turn_items_from_events(journal_events, turn_id=normalized_turn_id)
+        else:
+            canonical_items, order_provenance = journal_projection.for_turn(session_id, normalized_turn_id)
         response_origin = order_provenance.get("latest:agent_message")
         if response_origin:
             order_provenance[s._session_turn_agent_message_item_id(session_id, normalized_turn_id)] = response_origin
@@ -2803,10 +2866,6 @@ def _build_session_turn_items_projection(
             if not done and source in {"assistant_delta", "session_live_overlay"}:
                 offset = s._coerce_nonnegative_int(response_origin.get("contentOffset"))
                 content = str(content or "")[offset:]
-        canonical_items = s.conversation_turn_items_from_events(
-            journal_events,
-            turn_id=normalized_turn_id,
-        )
         if canonical_items:
             stamped = s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
             stamped = _merge_live_tool_start_metadata_into_turn_items(

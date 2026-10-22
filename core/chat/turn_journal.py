@@ -1805,6 +1805,19 @@ def session_turn_items_from_events(
     event_list = fold_active_events(
         sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
     )
+    return _session_turn_items_from_active_events(event_list, turn_id=normalized_turn_id)
+
+
+def _session_turn_items_from_active_events(
+    event_list: Iterable["TurnJournalEvent"], *, turn_id: str = "",
+) -> list[dict[str, Any]]:
+    """Project an already ordered active path, without sorting or folding again.
+
+    Internal read-snapshot consumers may supply a single turn's active slice.
+    Keep lifecycle resolution here shared with the raw journal entry point.
+    """
+    normalized_turn_id = str(turn_id or "").strip()
+    event_list = list(event_list)
     tool_outcomes: dict[str, str] = {}
     tool_semantic_statuses: dict[str, str] = {}
     tool_summaries: dict[str, str] = {}
