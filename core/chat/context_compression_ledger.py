@@ -16,7 +16,11 @@ from typing import Any, Iterable
 from .turn_journal import (
     EVENT_COMPACTION_CHECKPOINT,
     EVENT_COMPRESSION_ATTEMPT,
+    EVENT_CLI_TASK_RESULT,
+    EVENT_TOOL_CALL_STARTED,
+    EVENT_TOOL_RESULT,
     TurnJournalEvent,
+    _event_tool_correlation_key,
     append_turn_event,
     fold_active_events,
     load_turn_events,
@@ -495,6 +499,16 @@ def apply_context_compression_checkpoints(
         if start and end and end >= start:
             covered_ranges.append((start, end))
 
+    # Older checkpoints only name the projected result event. Its suppressed
+    # start records must stay suppressed after that result is folded away.
+    covered_ids = _completed_tool_lifecycle_ids(
+        event_list,
+        {
+            event.event_id for event in event_list
+            if _event_is_covered(event, covered_ids=covered_ids, covered_ranges=covered_ranges)
+        },
+    )
+
     filtered: list[TurnJournalEvent] = []
     for event in event_list:
         if normalized_current_turn_id and event.turn_id == normalized_current_turn_id:
@@ -504,6 +518,46 @@ def apply_context_compression_checkpoints(
             continue
         filtered.append(event)
     return filtered
+
+
+def _completed_tool_lifecycle_ids(
+    events: Iterable[TurnJournalEvent], covered_ids: set[str],
+) -> set[str]:
+    """Include starts suppressed by a covered, unambiguously resolved result.
+
+    A call id is local to a Session/turn. Name-only correlation is not enough
+    to discard history, and an uncovered result sharing the identity protects
+    its starts. Later unresolved uses of an id also remain replayable.
+    """
+    event_list = fold_active_events(events)
+    covered_through: dict[tuple[str, str, str], int] = {}
+    retained_keys: set[tuple[str, str, str]] = set()
+
+    def key_for(event: TurnJournalEvent) -> tuple[str, str, str] | None:
+        correlation = _event_tool_correlation_key(event)
+        if not event.session_id or not event.turn_id or not correlation.startswith("id:"):
+            return None
+        return event.session_id, event.turn_id, correlation
+
+    for event in event_list:
+        if not event.visible_in_model or event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
+            continue
+        key = key_for(event)
+        if key is None:
+            continue
+        if event.event_id in covered_ids:
+            covered_through[key] = max(covered_through.get(key, 0), event.sequence)
+        else:
+            retained_keys.add(key)
+
+    expanded = set(covered_ids)
+    for event in event_list:
+        if event.event_type != EVENT_TOOL_CALL_STARTED:
+            continue
+        key = key_for(event)
+        if key in covered_through and key not in retained_keys and event.sequence <= covered_through[key]:
+            expanded.add(event.event_id)
+    return expanded
 
 
 def latest_context_compression_checkpoint(
@@ -617,6 +671,7 @@ def _summarized_checkpoint_events(
                 unconsumed.remove(position)
                 matched_ids.add(event_id)
                 break
+    matched_ids = _completed_tool_lifecycle_ids(event_list, matched_ids)
     return [event for event in event_list if str(event.event_id or "").strip() in matched_ids]
 
 
