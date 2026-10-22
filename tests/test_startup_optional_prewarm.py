@@ -14,6 +14,21 @@ from core.web import lifecycle
 from core.web.startup_jobs import StartupJobGroup
 
 
+@pytest.mark.parametrize("web,enabled,delay", [(True, "1", 12.0), (False, "1", 0.0), (True, "0", 0.0)])
+def test_only_bulk_hypothesis_recovery_yields_the_startup_budget(monkeypatch, web, enabled, delay):
+    monkeypatch.setenv("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM", enabled)
+    monkeypatch.delenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", raising=False)
+    calls = []
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda **kwargs: calls.append(kwargs) or "ready")
+
+    async def exercise():
+        result = await lifecycle._start_workflow_runtime_job(StartupJobGroup(), app=FastAPI() if web else None)
+        assert result == "ready"
+
+    asyncio.run(exercise())
+    assert calls == ([{"hypothesis_recovery_delay_s": delay}] if delay else [{}])
+
+
 def _stub_prewarm(monkeypatch):
     calls: list[tuple[str, int]] = []
     events: list[dict] = []
