@@ -90,6 +90,7 @@ def build_llm_ttft_breakdown_fields(
     first_raw_chunk_ms: int | None = None,
     first_projected_chunk_ms: int | None = None,
     first_chunk_ms: int | None = None,
+    first_reasoning_chunk_ms: int | None = None,
 ) -> dict[str, int]:
     """Derive turn-level TTFT segments from anchors; missing segments omitted.
 
@@ -103,6 +104,9 @@ def build_llm_ttft_breakdown_fields(
     - ``firstRawChunkMs`` / ``firstProjectedChunkMs``: first provider wire
       event / first normalized chunk relative to the stream timing start.
     - ``firstChunkMs``: first projected chunk relative to the client request start.
+    - ``firstReasoningChunkMs``: first reasoning delta relative to the client
+      request start; present only when the first projected chunk *is* a
+      reasoning delta, separating model thinking onset from on-device latency.
     - ``ttftTotalMs``: accept → first projected chunk (user-perceived TTFT).
     """
 
@@ -122,6 +126,7 @@ def build_llm_ttft_breakdown_fields(
         ("firstRawChunkMs", first_raw_chunk_ms),
         ("firstProjectedChunkMs", first_projected_chunk_ms),
         ("firstChunkMs", first_chunk_ms),
+        ("firstReasoningChunkMs", first_reasoning_chunk_ms),
     ):
         cleaned = _clean_nonnegative_ms(value)
         if cleaned is not None:

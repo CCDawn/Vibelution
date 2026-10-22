@@ -960,6 +960,7 @@ def _record_llm_ttft_breakdown_event(
     route_gate_wait_ms: int | None,
     http_timings: Any,
     first_chunk_ms: int | None,
+    first_reasoning_chunk_ms: int | None,
     identity: Dict[str, Any],
 ) -> None:
     """Emit the turn-level TTFT segment breakdown at the first projected chunk.
@@ -983,6 +984,7 @@ def _record_llm_ttft_breakdown_event(
         first_raw_chunk_ms=getattr(http_timings, "first_raw_event_ms", None),
         first_projected_chunk_ms=getattr(http_timings, "first_projected_chunk_ms", None),
         first_chunk_ms=first_chunk_ms,
+        first_reasoning_chunk_ms=first_reasoning_chunk_ms,
     )
     if not segments:
         return
@@ -5570,9 +5572,18 @@ class LLMClient:
         receipt_builder: Optional[
             Callable[[TurnOutcome, UsageStats | None], TurnOutcome]
         ] = None,
-    ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
+    ) -> Tuple[
+        Iterator[StreamChunk],
+        Callable[[], bool],
+        Callable[[], bool],
+        Callable[[], Optional[TurnOutcome]],
+    ]:
         _raise_if_llm_cancelled()
         emitted = False
+        # ``emitted`` = 任一 chunk（含思考增量）已跨消费者边界；``content_emitted``
+        # = 可转写内容（正文/工具调用）已跨边界。思考增量即时投影后，仅前者为真
+        # 的失败仍可安全重试：消费端凭 streamRestart 边界标记替换失败残段。
+        content_emitted = False
         turn_outcome: TurnOutcome | None = None
 
         # 独立的 total-deadline watcher：永远挂载，不受
@@ -5653,25 +5664,9 @@ class LLMClient:
                 )
 
         def events() -> Iterator[StreamChunk]:
-            nonlocal emitted, turn_outcome
+            nonlocal emitted, content_emitted, turn_outcome
             iterator: Any = None
             normalized_iterator: Any = None
-            pending_reasoning: list[StreamChunk] = []
-            # Only incomplete DeepSeek/Responses attempts can discard their
-            # reasoning and retry. Other protocols must deliver live reasoning
-            # immediately, including to the idle-progress watchdog.
-            buffer_reasoning_for_retry = (
-                self.protocol_route.protocol == ModelProtocol.DEEPSEEK_REASONING
-                or self.protocol_route.wire_protocol == WireProtocol.RESPONSES
-            )
-
-            def flush_pending_reasoning() -> Iterator[StreamChunk]:
-                nonlocal emitted
-                buffered = tuple(pending_reasoning)
-                pending_reasoning.clear()
-                for chunk in buffered:
-                    emitted = True
-                    yield chunk
 
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
                 iterator = self._open_provider_stream(payload)
@@ -5769,11 +5764,17 @@ class LLMClient:
                                         ),
                                     }
                                 )
-                            if projected is not None and projected.type == "reasoning_delta" and buffer_reasoning_for_retry:
-                                pending_reasoning.append(projected)
-                            elif projected is not None:
-                                yield from flush_pending_reasoning()
+                            # 思考增量即时投影：首个思考增量就是消费者可见的
+                            # 首帧，不再等待正文/工具调用才整体冲刷。缓冲最初
+                            # 是为了「纯思考阶段流失败可无感静默重试」；重试
+                            # 安全现由 partial-emission 重试链路承担（新 attempt
+                            # 前的 llm.stream.restart / streamRestart 边界标记
+                            # 让 capture 重置边界、替换失败残段），任何协议都
+                            # 不再需要为重试扣压思考流。
+                            if projected is not None:
                                 emitted = True
+                                if projected.type != "reasoning_delta":
+                                    content_emitted = True
                                 yield projected
                             _raise_if_llm_cancelled()
                         turn_outcome = normalized_iterator.outcome
@@ -5786,8 +5787,8 @@ class LLMClient:
                                 turn_outcome, provider_usage or canonical_usage
                             )
                         if turn_outcome.tool_calls:
-                            yield from flush_pending_reasoning()
                             emitted = True
+                            content_emitted = True
                             yield StreamChunk(
                                 type="tool_call_final",
                                 tool_calls=[
@@ -5801,12 +5802,15 @@ class LLMClient:
                                 ],
                             )
                         allow_chat_retry = self.protocol_route.protocol == ModelProtocol.DEEPSEEK_REASONING
+                        # 「not content_emitted」：思考增量虽已即时投影，但正文
+                        # 未出门，瞬态 done 仍可被吞掉交给外层重试环（消费端
+                        # 由 streamRestart 标记替换思考残段），与旧缓冲下的
+                        # 静默重试语义等价。
                         suppress_transient_done = _is_retryable_stream_exhaustion(
                             turn_outcome,
                             allow_chat=allow_chat_retry,
-                        ) and (turn_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL or not emitted)
+                        ) and (turn_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL or not content_emitted)
                         if not suppress_transient_done:
-                            yield from flush_pending_reasoning()
                             emitted = True
                             yield StreamChunk(
                                 type="done",
@@ -5871,7 +5875,12 @@ class LLMClient:
                     _teardown_stream_idle_guard()
                     _record_stream_http_timing_summary(timings, identity=identity)
 
-        return timed_events(), lambda: emitted, lambda: turn_outcome
+        return (
+            timed_events(),
+            lambda: emitted,
+            lambda: content_emitted,
+            lambda: turn_outcome,
+        )
 
     def stream_events(
         self,
@@ -6009,6 +6018,7 @@ class LLMClient:
             stream_total_deadline_seconds = _llm_stream_total_deadline_seconds()
             stream_deadline_at: float | None = None
             emitted = False
+            content_emitted = False
             chunk_count = 0
             text_delta_count = 0
             reasoning_delta_count = 0
@@ -6083,7 +6093,7 @@ class LLMClient:
                     )
                     try:
                         provider_started = True
-                        events, emitted_fn, outcome_fn = self._stream_attempt(
+                        events, emitted_fn, content_emitted_fn, outcome_fn = self._stream_attempt(
                             attempt_payload,
                             message_count=message_count,
                             tool_count=tool_count,
@@ -6174,6 +6184,9 @@ class LLMClient:
                                     route_gate_wait_ms=route_gate_wait_ms,
                                     http_timings=http_timings,
                                     first_chunk_ms=first_chunk_ms,
+                                    first_reasoning_chunk_ms=(
+                                        first_chunk_ms if event.type == "reasoning_delta" else None
+                                    ),
                                     identity={
                                         "role": self.role,
                                         "profileId": self.profile_id,
@@ -6192,6 +6205,7 @@ class LLMClient:
                                 inter_chunk_count += 1
                             previous_chunk_at = now
                             emitted = emitted_fn()
+                            content_emitted = content_emitted_fn()
                             chunk_count += 1
                             if event.type == "text_delta":
                                 text_delta_count += 1
@@ -6370,7 +6384,10 @@ class LLMClient:
                     model=self.profile.model,
                     phase="stream",
                 )
-                chat_partial_output = bool(emitted) and canonical_outcome.error in {
+                # 只看正文/工具调用残段：仅思考增量出过门的失败仍视作可整段
+                # 重试（消费端由 streamRestart 边界替换思考残段），不因思考已
+                # 可见就把半截思考当 partial output 收尾。
+                chat_partial_output = bool(content_emitted) and canonical_outcome.error in {
                     STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
                     TOOL_ARGUMENTS_UNPARSABLE,
                 }
@@ -6459,10 +6476,13 @@ class LLMClient:
                         retry_count=max(0, attempt - 1),
                     )
                 if emitted:
-                    if str((getattr(llm_error, "details", {}) or {}).get("terminal_reason") or "").strip():
+                    if content_emitted and str(
+                        (getattr(llm_error, "details", {}) or {}).get("terminal_reason") or ""
+                    ).strip():
                         # wire 干净结束但缺 canonical terminal（stream exhaustion /
                         # 输出截断 / provider 控制泄漏）：重发同请求只会整段重生成
-                        # 重复内容，保持终死不重试。
+                        # 重复内容，保持终死不重试。仅思考增量出过门的不在此列：
+                        # 思考残段由 streamRestart 边界替换，走下方重试环。
                         _record_llm_scene_event(
                             "stream",
                             "llm.stream.failed",

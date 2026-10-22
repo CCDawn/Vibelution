@@ -99,6 +99,33 @@ def test_build_breakdown_fields_rejects_bool_and_nan_anchors():
     assert fields == {}
 
 
+def test_build_breakdown_fields_reports_first_reasoning_chunk_when_present():
+    fields = build_llm_ttft_breakdown_fields(
+        chain={"acceptedAtPerf": 1000.0, "workerStartedAtPerf": 1000.1, "queueWaitMs": 100},
+        request_started_perf=1000.5,
+        first_chunk_perf=1002.0,
+        first_chunk_ms=420,
+        first_reasoning_chunk_ms=420,
+    )
+
+    assert fields["firstChunkMs"] == 420
+    assert fields["firstReasoningChunkMs"] == 420
+    assert fields["ttftTotalMs"] == 2000
+
+
+def test_build_breakdown_fields_omits_first_reasoning_chunk_without_reasoning():
+    fields = build_llm_ttft_breakdown_fields(
+        chain={"acceptedAtPerf": 100.0, "workerStartedAtPerf": None, "queueWaitMs": None},
+        request_started_perf=100.5,
+        first_chunk_perf=101.25,
+        first_chunk_ms=750,
+        first_reasoning_chunk_ms=None,
+    )
+
+    assert fields == {"firstChunkMs": 750, "ttftTotalMs": 1250}
+    assert "firstReasoningChunkMs" not in fields
+
+
 def test_chain_context_scopes_state_and_resets():
     assert current_llm_ttft_chain() is None
     with llm_ttft_chain_context(
