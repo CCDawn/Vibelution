@@ -254,8 +254,23 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     assert by_id["worktree:feat-task"]["pids"]["backend"] == 0
     assert by_id["worktree:feat-task"]["promotable"] is True
     assert by_id["branch:codex/not-open"]["checkedOut"] is False
+    assert by_id["branch:codex/not-open"]["head"] == _git(project, "rev-parse", "codex/not-open")[:12]
     assert by_id["retired:shell-only"]["promotable"] is False
     assert len(payload["items"]) == len({item["id"] for item in payload["items"]})
+
+
+def test_local_branch_refs_do_not_search_the_object_database_for_abbreviations(tmp_path, monkeypatch):
+    commit = "1234567890abcdef1234567890abcdef12345678"
+    calls = []
+
+    def run_git(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, f"codex/task\t{commit}\n", "")
+
+    monkeypatch.setattr(workspace.git_process, "run_git", run_git)
+
+    assert workspace._local_branch_refs(tmp_path) == [("codex/task", commit[:12])]
+    assert calls == [["for-each-ref", "--format=%(refname:short)%09%(objectname)", "refs/heads"]]
 
 
 def test_pool_external_nested_worktrees_get_distinct_ids(tmp_path):

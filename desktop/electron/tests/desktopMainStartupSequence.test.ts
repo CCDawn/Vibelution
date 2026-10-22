@@ -5,6 +5,8 @@ import { ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { parseDesktopCliArgs } from "../src/cli/desktopCli.js";
 import { shouldDeferWorkbenchOpenUntilLifecycleStart } from "../src/process/desktopShellFreshness.js";
+import { normalizeInstanceKey } from "../src/lifecycle/projectStoragePaths.js";
+import { PROJECT_SLOT_LIFECYCLE_COMMANDS } from "../src/protocol/applyProjectSlot.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
@@ -117,6 +119,152 @@ describe("Electron main startup sequence", () => {
     expect(startupIndex).toBeGreaterThan(0);
     expect(deferIndex).toBeGreaterThan(startupIndex);
     expect(source.slice(startupIndex, deferIndex)).not.toContain("openLauncher");
+  });
+});
+
+describe("main project lifecycle admission", () => {
+  function harness() {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const begin = source.indexOf("async function applyPendingProjectSlot(");
+    const end = source.indexOf("if (runPrimaryWhenReady)", begin);
+    const receipt = { duplicate: false, failed: vi.fn(), dispatched: vi.fn() };
+    const sandbox = {
+      Error,
+      windowProvider: { openOrFocusWorkbench: vi.fn(), openOrFocusInstanceWorkbench: vi.fn() },
+      launcherBootstrap: {},
+      pendingProjectRoot: "",
+      createDesktopPathsForApp: () => ({ workspaceRoot: "C:/repo" }),
+      normalizeInstanceKey,
+      PROJECT_SLOT_LIFECYCLE_COMMANDS,
+      beginLaunchRequestReceipt: () => receipt,
+      orchestrateLauncherLifecycle: vi.fn(async () => ({ accepted: true })),
+      launcherStateStore: { refresh: vi.fn(async () => { throw new Error("inventory fallback"); }) },
+      notifyDesktopTray: vi.fn(),
+    };
+    const apply = runInNewContext(transpileModule(`${source.slice(begin, end)}\napplyPendingProjectSlot;`, {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText, sandbox) as (root: string, command: string, provenance?: string,
+      options?: { hiddenPresentation?: boolean }) => Promise<void>;
+    return { apply, receipt, ...sandbox };
+  }
+
+  it.each([...PROJECT_SLOT_LIFECYCLE_COMMANDS])("admits exact main %s without any inventory or duplicate window open", async command => {
+    const h = harness();
+    await h.apply("C:/repo/", command, "forwarded");
+    expect(h.orchestrateLauncherLifecycle).toHaveBeenCalledWith(command, {
+      schemaVersion: 1, path: "project-slot",
+    }, "forwarded");
+    expect(h.launcherStateStore.refresh).not.toHaveBeenCalled();
+    expect(h.windowProvider.openOrFocusWorkbench).not.toHaveBeenCalled();
+    expect(h.receipt.dispatched).toHaveBeenCalledOnce();
+  });
+
+  it("does not acknowledge a pending or rejected main lifecycle as dispatched", async () => {
+    const h = harness();
+    let settle!: (value: { accepted: boolean; code: string; message: string }) => void;
+    h.orchestrateLauncherLifecycle.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+    const pending = h.apply("C:/repo", "restart");
+    expect(h.receipt.dispatched).not.toHaveBeenCalled();
+    expect(h.launcherStateStore.refresh).not.toHaveBeenCalled();
+    settle({ accepted: false, code: "lifecycle_rejected", message: "admission denied" });
+    await pending;
+    expect(h.receipt.failed).toHaveBeenCalledWith("lifecycle_rejected", "admission denied");
+    expect(h.receipt.dispatched).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a queued restart without bypassing lifecycle readiness", async () => {
+    const h = harness();
+    h.orchestrateLauncherLifecycle.mockResolvedValueOnce({ accepted: true, ...{ code: "restart_queued" } });
+    await h.apply("C:/repo", "restart", "forwarded");
+    expect(h.receipt.dispatched).toHaveBeenCalledOnce();
+    expect(h.receipt.failed).not.toHaveBeenCalled();
+    expect(h.launcherStateStore.refresh).not.toHaveBeenCalled();
+    expect(h.windowProvider.openOrFocusWorkbench).not.toHaveBeenCalled();
+  });
+
+  it("keeps preparation failures on the existing failed receipt path", async () => {
+    const h = harness();
+    h.orchestrateLauncherLifecycle.mockRejectedValueOnce(new Error("admission failed"));
+    await h.apply("C:/repo", "start");
+    expect(h.receipt.failed).toHaveBeenCalledWith("launch_preparation_failed", "admission failed");
+    expect(h.receipt.dispatched).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { root: "C:/repo/.worktrees/task", command: "start" },
+    { root: "C:/repo-other", command: "start" },
+    { root: "C:/repo", command: "status" },
+    { root: "C:/repo", command: "toggle" },
+    { root: "C:/repo", command: "" },
+    { root: "C:/repo", command: "start", hiddenPresentation: true },
+  ])("retains registered inventory routing for $root $command", async ({ root, command, hiddenPresentation }) => {
+    const h = harness();
+    await h.apply(root, command, "operator", { hiddenPresentation });
+    expect(h.orchestrateLauncherLifecycle).not.toHaveBeenCalled();
+    expect(h.launcherStateStore.refresh).toHaveBeenCalledWith("project_slot");
+  });
+});
+
+describe("passive startup inventory", () => {
+  it.each(["open", "start", ""])("waits for the initial %s dispatch before installing hints and scanning", async command => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const startup = source.indexOf("app.whenReady()");
+    const begin = source.indexOf("const firstLifecycle = String(desktopCliArgs.lifecycleCommand", startup);
+    const end = source.indexOf("// T6:", begin);
+    const finallyStart = source.indexOf(".finally(() => {", end);
+    const finallyEnd = source.indexOf(".catch(async", finallyStart);
+    const beforeDispatch = source.slice(startup, begin);
+    expect(beforeDispatch).not.toContain("startLauncherStateFileHints(paths)");
+    expect(beforeDispatch).not.toContain("scheduleLauncherStatusCliRefresh();");
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const sandbox = {
+      desktopCliArgs: parseDesktopCliArgs(command ? [command] : []),
+      pendingOpenWorkbenchRequest: false,
+      pendingProjectRoot: "",
+      windowProvider: {}, launcherBootstrap: {}, shutdownApproved: false,
+      app: { isPackaged: true },
+      shouldDeferWorkbenchOpenUntilLifecycleStart,
+      markWorkbenchOpenRequested: vi.fn(),
+      startOrFocusWorkbenchFromProductEntryOnShell: vi.fn(() => gate),
+      handleSecondInstanceLifecycleCommand: vi.fn(() => gate),
+      desktopLifecycleProvenance: "operator",
+      createDesktopPathsForApp: () => ({ workspaceRoot: "C:/repo" }),
+      startLauncherStateFileHints: vi.fn(), scheduleLauncherStatusCliRefresh: vi.fn(),
+    };
+    const pending = runInNewContext(transpileModule(
+      `(async () => { ${source.slice(begin, end)} })()${source.slice(finallyStart, finallyEnd)}`, {
+        compilerOptions: { target: ScriptTarget.ES2022 },
+      }).outputText, sandbox);
+    expect(sandbox.scheduleLauncherStatusCliRefresh).not.toHaveBeenCalled();
+    release();
+    await pending;
+    expect(sandbox.startLauncherStateFileHints).toHaveBeenCalledOnce();
+    expect(sandbox.scheduleLauncherStatusCliRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the unpackaged release watcher alive after the file hints reset", async () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const startup = source.indexOf("app.whenReady()");
+    const begin = source.indexOf(".finally(() => {", startup);
+    const end = source.indexOf(".catch(async", begin);
+    const order: string[] = [];
+    const watcher = {};
+    const sandbox = {
+      windowProvider: { refreshLauncherIfReleaseChanged: () => { order.push("catchup"); } },
+      launcherBootstrap: {}, shutdownApproved: false,
+      app: { isPackaged: false }, launcherActiveReleaseWatcher: null,
+      createDesktopPathsForApp: () => ({ workspaceRoot: "C:/repo" }),
+      join: (...parts: string[]) => parts.join("/"),
+      startLauncherStateFileHints: () => { order.push("hints"); },
+      startLauncherActiveReleaseWatcher: () => { order.push("release"); return watcher; },
+      scheduleLauncherStatusCliRefresh: () => { order.push("refresh"); },
+    };
+    await runInNewContext(transpileModule(`Promise.resolve()${source.slice(begin, end)}`, {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText, sandbox);
+    expect(order).toEqual(["hints", "release", "catchup", "refresh"]);
+    expect(sandbox.launcherActiveReleaseWatcher).toBe(watcher);
   });
 });
 

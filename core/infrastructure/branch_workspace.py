@@ -551,8 +551,10 @@ def _registered_worktrees(integration_root: Path) -> list[dict[str, str]]:
 
 
 def _local_branch_refs(integration_root: Path) -> list[tuple[str, str]]:
+    # Git's unique abbreviation searches the object database for every ref.
+    # These heads are display-only, just like registered worktree heads.
     result = git_process.run_git(
-        ["for-each-ref", "--format=%(refname:short)%09%(objectname:short)", "refs/heads"],
+        ["for-each-ref", "--format=%(refname:short)%09%(objectname)", "refs/heads"],
         cwd=str(integration_root),
         capture_output=True,
         text=True,
@@ -571,7 +573,7 @@ def _local_branch_refs(integration_root: Path) -> list[tuple[str, str]]:
         name = name.strip()
         head = head.strip()
         if name:
-            refs.append((name, head))
+            refs.append((name, _short_sha(head)))
     return refs
 
 
