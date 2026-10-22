@@ -219,10 +219,17 @@ def _is_test_path(relative: Path) -> bool:
 
 def _production_input_paths(web_dir: Path) -> list[Path]:
     paths: list[Path] = []
+    web_depth = len(web_dir.parts)
     for relative_root in (Path("src"), Path("public")):
         root = web_dir / relative_root
         if root.is_dir():
-            paths.extend(path for path in root.rglob("*") if path.is_file() and not _is_test_path(path.relative_to(web_dir)))
+            # rglob supplies lexical descendants of this exact root. Avoid
+            # walking every ancestor merely to classify each test filename;
+            # canonical target confinement remains checked in the scan below.
+            paths.extend(
+                path for path in root.rglob("*")
+                if path.is_file() and not _is_test_path(Path(*path.parts[web_depth:]))
+            )
     resolved_paths: set[Path] = set()
     resolved_parents: dict[Path, Path] = {}
     for path in paths:
@@ -261,7 +268,10 @@ def _scan_production_inputs(web_dir: Path) -> tuple[str, int, str]:
     input_count = 0
     resolved_web_dir = web_dir.resolve()
     for path in _production_input_paths(web_dir):
-        relative = path.relative_to(resolved_web_dir).as_posix()
+        relative_native = os.path.relpath(path, resolved_web_dir)
+        if relative_native == os.pardir or relative_native.startswith(os.pardir + os.sep):
+            raise ValueError(f"Build input is outside the frontend root: {path}")
+        relative = relative_native.replace(os.sep, "/")
         relative_bytes = relative.encode("utf-8")
         source_digest.update(relative_bytes)
         source_digest.update(b"\0")

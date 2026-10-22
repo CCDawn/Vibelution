@@ -103,6 +103,12 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
     def shell_read():
         return {"shell": True}
 
+    @config.get("/config/avatar-image/{filename}")
+    @config.get("/config/theme-background-image/{filename}")
+    def image_read(filename: str):
+        assert initialized == []
+        return {"image": filename}
+
     @sessions.get("/sessions/bootstrap")
     def session_read():
         assert initialized == [True]
@@ -169,6 +175,15 @@ def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_
                     assert (await client.get(path)).status_code == 403
                     assert (await client.get(path, headers={**headers, "Origin": "https://untrusted.invalid"})).status_code == 403
                 assert initialized == []
+                for path in (
+                    "/api/config/avatar-image/avatar.png",
+                    "/api/config/theme-background-image/background.png",
+                ):
+                    assert (await client.get(path)).status_code == 200
+                    assert (await client.get(path, headers={"Origin": "https://untrusted.invalid"})).status_code == 403
+                    assert not route_bootstrap.is_bootstrap_route_path(path, method="POST")
+                    assert not route_bootstrap.is_bootstrap_route_path(path + "/extra")
+                assert not route_bootstrap.is_bootstrap_route_path("/api/config/theme-background-image")
                 pending = [asyncio.create_task(client.request(method, path, headers=headers)) for method, path in (
                     ("GET", "/api/sessions/bootstrap"),
                     ("GET", "/api/config/public"),
