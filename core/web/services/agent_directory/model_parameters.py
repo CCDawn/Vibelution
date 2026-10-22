@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import time
 from typing import Any, Mapping, Sequence
 
 from core.llm.agent_model_parameters import (
@@ -14,6 +16,7 @@ from core.orchestration.session_budget_resolve import (
     normalize_session_budget_parameters,
 )
 from ..agent_config_authority import materialize_agent_config_identity
+from .parameter_snapshot import save_parameter_update
 
 
 def _service():
@@ -89,6 +92,7 @@ def update_agent_model_parameters_if_current(
     if expected_config_revision < 0:
         raise AgentModelParametersError("expectedConfigRevision must be non-negative.")
 
+    started = time.perf_counter()
     with s._STATE_LOCK:
         state = s.load_state()
         agent = s._find_agent(state, normalized_agent_id)
@@ -114,6 +118,7 @@ def update_agent_model_parameters_if_current(
             supported_reasoning_efforts=supported_reasoning_efforts,
         )
 
+        previous_agent = copy.deepcopy(agent)
         materialize_agent_config_identity(agent)
         previous_hash = str(agent.get("configHash") or "").strip()
         metadata = merge_agent_model_parameter_entry(
@@ -141,7 +146,7 @@ def update_agent_model_parameters_if_current(
             previous_hash=previous_hash,
         )
         agent["updatedAt"] = s.utc_now_iso()
-        s.save_state(state)
+        refreshed = save_parameter_update(state, agent, previous_agent, kind="model")
 
     s._record_agent_event("agent.model_parameters.updated", agent)
     try:
@@ -158,6 +163,8 @@ def update_agent_model_parameters_if_current(
                 "configRevision": int(agent.get("configRevision") or 0),
                 "contextWindow": normalized_values["contextWindow"],
                 "reasoningEffort": normalized_values["reasoningEffort"],
+                "repairedSnapshotRefreshed": refreshed,
+                "durationMs": round((time.perf_counter() - started) * 1000, 1),
             },
             lifecycle=True,
         )
@@ -196,6 +203,7 @@ def update_agent_budget_parameters_if_current(
         if normalized_parameters is None
         else normalized_parameters.as_storage_payload()
     )
+    started = time.perf_counter()
     with s._STATE_LOCK:
         state = s.load_state()
         agent = s._find_agent(state, normalized_agent_id)
@@ -207,6 +215,7 @@ def update_agent_budget_parameters_if_current(
         if str(agent.get("status") or "active").strip().lower() == "archived":
             raise s.AgentArchivedError("Archived Agent budget parameters cannot be changed.")
 
+        previous_agent = copy.deepcopy(agent)
         metadata = dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {}
         if payload:
             metadata[SESSION_BUDGET_PARAMETERS_METADATA_KEY] = dict(payload)
@@ -219,7 +228,7 @@ def update_agent_budget_parameters_if_current(
         agent["configRevision"] = max(1, int(agent.get("configRevision") or 0)) + 1
         materialize_agent_config_identity(agent)
         agent["updatedAt"] = s.utc_now_iso()
-        s.save_state(state)
+        refreshed = save_parameter_update(state, agent, previous_agent, kind="budget")
 
     s._record_agent_event("agent.budget_parameters.updated", agent)
     try:
@@ -234,6 +243,8 @@ def update_agent_budget_parameters_if_current(
                 "agentId": normalized_agent_id,
                 "configRevision": int(agent.get("configRevision") or 0),
                 "maxCallsPerTurn": payload.get("maxCallsPerTurn"),
+                "repairedSnapshotRefreshed": refreshed,
+                "durationMs": round((time.perf_counter() - started) * 1000, 1),
             },
             lifecycle=True,
         )

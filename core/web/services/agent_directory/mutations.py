@@ -31,6 +31,7 @@ from core.llm.agent_model_parameters import (
     sync_dialogue_reasoning_effort_to_model,
 )
 from .avatar_model_defaults import model_default_avatar_filename
+from .parameter_snapshot import save_parameter_update
 
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
@@ -41,47 +42,6 @@ def _service():
     from core.web.services import agent_directory_service
 
     return agent_directory_service
-
-
-def _save_compression_parameter_update(
-    state: dict[str, Any], agent: dict[str, Any], previous_agent: dict[str, Any],
-) -> bool:
-    """Carry a validated snapshot across a parameter-only canonical write.
-
-    Generic writes still invalidate repair. A warm compression-only update
-    preserves the workspace, role and tool-policy invariants already checked
-    by repair, so its revision publication and subsequent session reads must
-    not repeat all unrelated Agent filesystem probes under the registry lock.
-    The caller owns _STATE_LOCK throughout the CAS, write and cache handoff.
-    """
-    s = _service()
-    warm = (
-        s._REPAIRED_STATE_CACHE is not None
-        and s._REPAIRED_STATE_CACHE_SIGNATURE == s._registry_state_signature()
-    )
-    payload = s.save_state(state)
-    changed_keys = {
-        key for key in previous_agent.keys() | agent.keys()
-        if previous_agent.get(key) != agent.get(key)
-    }
-    parameter_only = changed_keys <= {
-        "contextCompressionPolicy", "configRevision", "configHash",
-        "configSchemaVersion", "updatedAt",
-    }
-    if not warm or not parameter_only:
-        return False
-    # _STATE_LOCK does not serialize external processes. Only publish a
-    # signature proven to describe this payload, never a later external write.
-    try:
-        signature = s._registry_state_signature()
-        persisted = s._load_existing_registry_payload_or_raise(s.registry_path())
-        if signature != s._registry_state_signature() or persisted != payload:
-            return False
-    except (OSError, s.AgentDirectoryError):
-        return False
-    s._REPAIRED_STATE_CACHE = copy.deepcopy(payload)
-    s._REPAIRED_STATE_CACHE_SIGNATURE = signature
-    return True
 
 
 def _record_compression_parameter_update(agent: dict[str, Any], *, refreshed: bool, started: float) -> None:
@@ -423,7 +383,7 @@ def update_agent_instance(
         )
         agent["updatedAt"] = s.utc_now_iso()
         if context_compression_policy is not None:
-            parameter_snapshot_refreshed = _save_compression_parameter_update(state, agent, previous_agent)
+            parameter_snapshot_refreshed = save_parameter_update(state, agent, previous_agent, kind="compression")
         else:
             s.save_state(state)
     s._record_agent_event("agent.updated", agent)
