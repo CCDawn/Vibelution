@@ -781,7 +781,7 @@ def test_web_lifespan_records_ready_scene_event_after_entering_context(monkeypat
     monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda **_kwargs: "")
     monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
     monkeypatch.setattr(
         cli_agent_terminal_service,
@@ -941,7 +941,7 @@ def test_runtime_scene_retention_waits_for_routes_and_is_reaped_on_shutdown(monk
     monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", lambda **_kwargs: None)
-    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda **_kwargs: "")
     monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
     monkeypatch.setattr(lifecycle, "_recover_challenge_meeting_drivers_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "_recover_orphaned_chat_room_rounds_on_startup", lambda: None)
@@ -1073,7 +1073,7 @@ def test_create_app_starts_financial_coordinator_after_cold_route_mount(monkeypa
     monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", lambda **_kwargs: None)
-    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda **_kwargs: "")
     monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
     monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: None)
     monkeypatch.setattr(

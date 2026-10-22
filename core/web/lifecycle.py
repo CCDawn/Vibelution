@@ -750,7 +750,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
     startup_pa_patrol_task = _start_pa_patrol_job(startup_jobs)
-    startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs)
+    startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs, app=app)
     startup_generic_workflow_task = startup_jobs.start_async(
         "startup-generic-workflows",
         _start_generic_workflows_after_session_recovery(startup_session_recovery_task, startup_jobs),
@@ -1216,12 +1216,12 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
 
 
 
-def _start_research_workflow_runtime() -> str:
+def _start_research_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.0) -> str:
     from .services.team_workflow.research_runtime.runtime_factory import (
         start_production_workflow_runtime,
     )
 
-    return start_production_workflow_runtime()
+    return start_production_workflow_runtime(hypothesis_recovery_delay_s=hypothesis_recovery_delay_s)
 
 
 def _begin_generic_workflow_runtime(*, should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
@@ -1244,11 +1244,14 @@ async def _start_generic_workflows_after_session_recovery(
     )
 
 
-def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
+def _start_workflow_runtime_job(startup_jobs: StartupJobGroup, *, app: FastAPI | None = None):
     """Start the Ledger-backed research workflow runtime (workers + reads)."""
 
+    kwargs = {}
+    if app is not None and _startup_cache_prewarm_gate_enabled():
+        kwargs["hypothesis_recovery_delay_s"] = _startup_prewarm_stagger_seconds()
     return startup_jobs.start_thread(
-        "startup-workflow-runtime", _start_research_workflow_runtime
+        "startup-workflow-runtime", _start_research_workflow_runtime, **kwargs,
     )
 
 

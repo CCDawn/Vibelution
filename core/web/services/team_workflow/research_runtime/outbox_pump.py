@@ -55,10 +55,12 @@ class WorkflowOutboxPump:
         idle_poll_s: float = 1.0,
         batch_limit: int = 8,
         workers: int = DEFAULT_WORKERS,
+        hypothesis_recovery_delay_s: float = 0.0,
     ) -> None:
         self._idle_poll_s = max(0.05, float(idle_poll_s))
         self._batch_limit = max(1, int(batch_limit))
         self._workers = max(1, int(workers))
+        self._hypothesis_recovery_delay_s = max(0.0, float(hypothesis_recovery_delay_s))
         self._runtime: Any | None = None
         # One token per wake: each token lets one idle worker run one extra
         # claim pass. Unlike the old single-thread Event this keeps the wake
@@ -247,6 +249,15 @@ class WorkflowOutboxPump:
 
     def _hypothesis_recovery_loop(self) -> None:
         """One recovery lane replays the existing durable meeting authority."""
+        # Bulk evidence repair and automatic hypothesis generation are not
+        # needed to dispatch a user command. Yield the first-screen budget
+        # while the dispatch, maintenance and receipt lanes remain available.
+        deadline = time.monotonic() + self._hypothesis_recovery_delay_s
+        while not self._stop.is_set() and not self._fatal.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._stop.wait(timeout=min(remaining, 0.05))
         while not self._stop.is_set() and not self._fatal.is_set():
             recover = getattr(self._runtime, "run_hypothesis_recovery_once", None)
             if recover is not None:

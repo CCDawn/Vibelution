@@ -873,7 +873,7 @@ def wake_production_workflow_runtime() -> bool:
     return True
 
 
-def start_production_workflow_runtime() -> str:
+def start_production_workflow_runtime(*, hypothesis_recovery_delay_s: float = 0.0) -> str:
     """Open the Ledger-backed runtime or fail closed (no JSON fallback).
 
     The singleton build is serialized behind ``_LIFECYCLE_LOCK``. A start
@@ -906,7 +906,10 @@ def start_production_workflow_runtime() -> str:
             return "migration_required"
         from .outbox_pump import WorkflowOutboxPump
 
-        pump = WorkflowOutboxPump(workers=workflow_worker_count())
+        pump = WorkflowOutboxPump(
+            workers=workflow_worker_count(),
+            hypothesis_recovery_delay_s=hypothesis_recovery_delay_s,
+        )
         try:
             _PRODUCTION = build_workflow_runtime(
                 workflow_ledger_path(data_root),

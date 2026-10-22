@@ -15,6 +15,28 @@ from typing import Any
 
 import pytest
 
+
+def test_startup_can_delay_hypothesis_repair_without_delaying_runtime_readiness(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.research_runtime import outbox_pump, runtime_factory
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    runtime_factory.stop_production_workflow_runtime()
+    delays = []
+    original_init = outbox_pump.WorkflowOutboxPump.__init__
+
+    def capture_delay(self, **kwargs):
+        delays.append(kwargs["hypothesis_recovery_delay_s"])
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(outbox_pump.WorkflowOutboxPump, "__init__", capture_delay)
+    try:
+        assert runtime_factory.start_production_workflow_runtime(hypothesis_recovery_delay_s=30) == "ready"
+        assert runtime_factory.production_workflow_runtime() is not None
+        assert runtime_factory.start_production_workflow_runtime(hypothesis_recovery_delay_s=30) == "ready"
+        assert delays == [30]
+    finally:
+        runtime_factory.stop_production_workflow_runtime()
+
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.services.team_workflow.research_runtime.real_readiness_context import (
     RealDomainReadinessContext,

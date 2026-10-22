@@ -525,6 +525,47 @@ def test_slow_hypothesis_recovery_does_not_starve_maintenance():
         pump.stop(timeout=10)
 
 
+def test_startup_recovery_delay_keeps_dispatch_and_receipts_live_and_stops_promptly():
+    class RecoveryRuntime(_ClaimRuntime):
+        def __init__(self):
+            super().__init__(["accepted-user-command"], exec_s=0)
+            self.recovered = threading.Event()
+
+        def run_hypothesis_recovery_once(self, limit=4):
+            self.recovered.set()
+            return 0
+
+    runtime = RecoveryRuntime()
+    pump = WorkflowOutboxPump(workers=1, idle_poll_s=0.05, hypothesis_recovery_delay_s=30)
+    pump.attach(runtime)
+    threads = pump.threads
+    try:
+        pump.wake()
+        assert runtime.first_start.wait(timeout=3)
+        assert _wait_until(lambda: runtime.receipt_persistence_calls > 0)
+        assert runtime.maintenance_calls > 0
+        assert not runtime.recovered.is_set()
+    finally:
+        pump.stop(timeout=1)
+    assert all(not thread.is_alive() for thread in threads)
+
+
+def test_hypothesis_recovery_starts_after_its_startup_delay():
+    recovered = threading.Event()
+
+    class RecoveryRuntime(_ClaimRuntime):
+        def run_hypothesis_recovery_once(self, limit=4):
+            recovered.set()
+            return 0
+
+    pump = WorkflowOutboxPump(workers=1, idle_poll_s=0.05, hypothesis_recovery_delay_s=0.1)
+    pump.attach(RecoveryRuntime([]))
+    try:
+        assert recovered.wait(timeout=3)
+    finally:
+        pump.stop()
+
+
 def test_closed_ledger_stops_lanes_instead_of_retrying() -> None:
     """A terminal ledger error must end every lane.
 
