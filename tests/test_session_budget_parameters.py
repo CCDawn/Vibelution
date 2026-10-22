@@ -252,8 +252,9 @@ def budget_service_env(monkeypatch: pytest.MonkeyPatch):
     stub = _BudgetRegistryStub(agent)
     monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: True)
     monkeypatch.setattr(session_service, "_session_agent_id_snapshot", lambda _sid: "agent-1")
-    monkeypatch.setattr(session_service, "_ensure_session_mutable", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_ensure_session_mutable", lambda *_a, **_k: {"agent_id": "agent-1"})
     monkeypatch.setattr(session_service, "get_agent", lambda _aid, **_k: dict(agent))
+    monkeypatch.setattr(agent_directory_service, "get_agent_parameter_snapshot", lambda _aid, **_k: dict(agent))
     monkeypatch.setattr(
         agent_directory_service,
         "update_agent_budget_parameters_if_current",

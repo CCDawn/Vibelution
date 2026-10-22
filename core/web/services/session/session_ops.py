@@ -1243,10 +1243,16 @@ def _session_fixed_model_choice(session_id: str) -> dict[str, Any]:
     ).strip()
     if not model_ref:
         raise s.SessionValidationError("当前会话的 Agent 尚未绑定对话模型。")
+    return _agent_fixed_model_choice(model_ref, s._session_llm_model_choices())
+
+
+def _agent_fixed_model_choice(model_ref: str, choices: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resolve the bound model against one request's candidate snapshot."""
+    s = _service()
     selected = next(
         (
             choice
-            for choice in s._session_llm_model_choices()
+            for choice in choices
             if model_ref
             in {
                 str(choice.get("modelRef") or "").strip(),

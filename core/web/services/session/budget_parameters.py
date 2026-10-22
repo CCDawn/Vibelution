@@ -47,6 +47,11 @@ def _session_budget_agent(session_id: str, *, source: str, sync_wait: bool = Tru
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     agent_id = s._session_agent_id_snapshot(normalized_session_id)
     agent = s.get_agent(agent_id, include_archived=True) if agent_id else None
+    return _validate_budget_agent(agent)
+
+
+def _validate_budget_agent(agent: dict[str, Any] | None) -> dict[str, Any]:
+    s = _service()
     if isinstance(agent, dict) and str(agent.get("status") or "").strip() == "archived":
         raise s.SessionValidationError("会话所属 Agent 已归档，此会话仅供只读查看。")
     if not isinstance(agent, dict):
@@ -62,6 +67,10 @@ def get_session_budget_parameters_view(session_id: str) -> dict[str, Any]:
         source="session.budget_parameters.get",
         sync_wait=False,
     )
+    return _budget_parameters_view(agent)
+
+
+def _budget_parameters_view(agent: dict[str, Any]) -> dict[str, Any]:
     parameters = session_budget_parameters_from_agent(agent)
     return {
         "revision": max(0, int(agent.get("configRevision") or 0)),
@@ -106,11 +115,14 @@ def update_session_budget_parameters(
         raise s.SessionValidationError(str(exc)) from exc
 
     with s.session_agent_lifecycle_transaction():
-        s._ensure_session_mutable(normalized_session_id)
-        agent = _session_budget_agent(
+        conversation = s._ensure_session_mutable(normalized_session_id)
+        if not s._ensure_session_conversation_record(
             normalized_session_id,
             source="session.budget_parameters.update",
-        )
+        ):
+            raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        bound_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        agent = _validate_budget_agent(s.agent_directory_service.get_agent_parameter_snapshot(bound_agent_id))
         agent_id = str(agent.get("agentId") or "").strip()
         current = session_budget_parameters_from_agent(agent)
         next_max_calls = (
@@ -126,7 +138,7 @@ def update_session_budget_parameters(
         from core.llm.agent_model_parameters import AgentModelParametersError
 
         try:
-            s.agent_directory_service.update_agent_budget_parameters_if_current(
+            updated_agent = s.agent_directory_service.update_agent_budget_parameters_if_current(
                 agent_id,
                 expected_config_revision=int(expected_revision),
                 values=next_payload,
@@ -140,4 +152,4 @@ def update_session_budget_parameters(
         except AgentModelParametersError as exc:
             raise s.SessionValidationError(str(exc)) from exc
 
-        return get_session_budget_parameters_view(normalized_session_id)
+        return _budget_parameters_view(updated_agent)

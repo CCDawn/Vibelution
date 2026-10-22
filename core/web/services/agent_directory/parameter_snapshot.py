@@ -18,6 +18,25 @@ _METADATA_KEYS = {
 }
 
 
+def get_agent_parameter_snapshot(agent_id: str, *, include_archived: bool = True) -> dict[str, Any] | None:
+    """Read canonical parameter fields without hydrating the Agent's UI activity.
+
+    Share get_agent's repaired registry authority, but do not load avatars,
+    inboxes or tool-governance activity for a configuration-only operation.
+    """
+    from core.web.services import agent_directory_service as s
+
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    with s._STATE_LOCK:
+        state, _ = s._load_repaired_state_for_read()
+        agent = s._find_agent(state, normalized)
+        if not agent or (not include_archived and str(agent.get("status") or "") == "archived"):
+            return None
+        return copy.deepcopy(agent)
+
+
 def save_parameter_update(
     state: dict[str, Any], agent: dict[str, Any], previous_agent: dict[str, Any], *, kind: ParameterKind,
 ) -> bool:

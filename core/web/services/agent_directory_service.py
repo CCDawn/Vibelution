@@ -143,6 +143,7 @@ from .agent_directory.lifecycle import (
     purge_system_team_agent_instance,
     reset_agent_instance,
 )
+from .agent_directory.parameter_snapshot import get_agent_parameter_snapshot
 from .agent_directory.projections import (
     build_agent_runtime_context_block,
     build_agent_runtime_static_lines,
