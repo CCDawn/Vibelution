@@ -61,3 +61,47 @@ def test_reports_not_applied_when_nothing_fits() -> None:
     assert applied is False
     assert window == []
     assert tokens == 0
+
+
+def test_budget_window_protects_rules_summary_and_current_request() -> None:
+    messages = [
+        {"role": "system", "content": "rules"},
+        {"role": "system", "content": "history summary"},
+        {"role": "assistant", "content": "old reply"},
+        {"role": "user", "content": "current request"},
+    ]
+    window, tokens, applied = build_token_budget_window(
+        messages, hard_limit=30, estimator=_fixed_estimator(),
+    )
+    assert applied is True
+    assert window == [messages[0], messages[1], messages[3]]
+    assert tokens == 30
+
+
+def test_budget_window_cannot_drop_required_context_to_meet_budget() -> None:
+    messages = [
+        {"role": "system", "content": "required rules"},
+        {"role": "user", "content": "current request"},
+    ]
+    assert build_token_budget_window(
+        messages, hard_limit=10, estimator=_fixed_estimator(),
+    ) == ([], 0, False)
+
+
+def test_budget_window_keeps_multicall_and_results_as_one_group() -> None:
+    messages = [
+        {"role": "system", "content": "rules"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "one"}, {"id": "two"}]},
+        {"role": "tool", "tool_call_id": "one", "content": "result one"},
+        {"role": "tool", "tool_call_id": "two", "content": "result two"},
+        {"role": "user", "content": "current request"},
+    ]
+    window, _, applied = build_token_budget_window(
+        messages, hard_limit=40, estimator=_fixed_estimator(),
+    )
+    assert applied is True
+    assert window == [messages[0], messages[-1]]
+    complete, _, _ = build_token_budget_window(
+        messages, hard_limit=50, estimator=_fixed_estimator(),
+    )
+    assert complete == messages

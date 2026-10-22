@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage, ToolMessage
 
 from core.infrastructure.feature_gate import resolve_feature_decision
+from core.infrastructure.runtime_input import build_runtime_notice_message
 from core.infrastructure.state import AgentState, get_state_manager
 from core.orchestration import llm_summary_breaker
 from core.orchestration.agent_modes import AgentMode
@@ -86,36 +87,72 @@ def build_token_budget_window(
     *,
     hard_limit: int,
     estimator: Any,
+    keep_history: bool = True,
 ) -> Tuple[List[Any], int, bool]:
-    """Codex-parity token-budget compaction window.
+    """Keep required context and the newest complete history groups that fit.
 
-    ``codex-rs/core/src/compact_token_budget.rs`` runs token-budget compaction
-    without asking a model to summarize: it installs a fresh window sized to
-    the budget instead of failing the turn. This helper does the same for an
-    already-summarized payload that still exceeds the hard input limit: keep
-    the newest messages that fit, then trim leading orphan tool results whose
-    assistant tool call fell out of the window (an orphan result alone breaks
-    the provider tool chain).
-
-    Returns ``(window, tokens, applied)``. ``applied`` is False when nothing
-    fits; the caller must then fail closed instead of calling the model.
+    System/runtime messages include the summary and policy prefix; the newest
+    user message is the current request. Neither may be retired to make room.
+    Tool calls and their results are selected together, in original order.
+    The caller may meter a subsequent notice through ``estimator`` as well.
     """
 
     items = _coerce_message_list(messages)
     budget = _coerce_nonnegative_int(hard_limit)
     if not items or budget <= 0:
         return [], 0, False
-    kept: List[Any] = []
-    for message in reversed(items):
-        candidate = [message, *kept]
+    required = {
+        index for index, message in enumerate(items)
+        if _pairing_role(message) in {"system", "developer", "runtime", "runtime_context"}
+    }
+    latest_user = next(
+        (index for index in range(len(items) - 1, -1, -1)
+         if _pairing_role(items[index]) in {"user", "human"}),
+        None,
+    )
+    if latest_user is not None:
+        required.add(latest_user)
+    groups: list[list[int]] = []
+    call_groups: dict[str, list[int]] = {}
+    for index, message in enumerate(items):
+        if index in required:
+            continue
+        role = _pairing_role(message)
+        result_id = _pairing_tool_result_id(message)
+        if role == "tool":
+            group = call_groups.get(result_id)
+            if group is not None:
+                group.append(index)
+            # An orphan result must never survive on its own.
+            continue
+        group = [index]
+        groups.append(group)
+        for call_id in _pairing_tool_call_ids(message):
+            call_groups[call_id] = group
+    kept_indices = set(required)
+    kept = [message for index, message in enumerate(items) if index in kept_indices]
+    if _coerce_nonnegative_int(estimator(kept)) > budget:
+        return [], 0, False
+    if not keep_history:
+        return kept, _coerce_nonnegative_int(estimator(kept)), bool(kept)
+    for group in reversed(groups):
+        candidate_indices = kept_indices.union(group)
+        candidate = [message for index, message in enumerate(items) if index in candidate_indices]
         if _coerce_nonnegative_int(estimator(candidate)) > budget:
             break
+        kept_indices = candidate_indices
         kept = candidate
-    while kept and _pairing_role(kept[0]) == "tool":
-        kept.pop(0)
     if not kept:
         return [], 0, False
     return kept, _coerce_nonnegative_int(estimator(kept)), True
+
+
+def build_context_compression_notice(before_tokens: int, after_tokens: int) -> Any:
+    """One notice shared by the compressor's budget and the eventual send."""
+    return build_runtime_notice_message(
+        f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
+        f"（{before_tokens} → {after_tokens} tokens）。"
+    )
 
 
 # --- Context retention contract (versioned compression policy v3) -----------
@@ -735,48 +772,88 @@ def compress_turn_messages(
     # unresolved calls / orphan results), the hard-limit half is new here.
     after_pairing = _tool_call_pairing_snapshot(compressed)
     retention_violation = _retention_violation_reason(before_pairing, after_pairing)
-    over_hard_limit = normalized_hard_limit > 0 and after_tokens > normalized_hard_limit
-    if over_hard_limit and not retention_violation:
-        # Codex parity (codex-rs/core/src/compact_token_budget.rs): when the
-        # summarizer cannot bring the payload under the hard input limit, a
-        # token-budget window that keeps only the newest fitting history lets
-        # the turn continue instead of failing closed. The window must still
-        # pass the same retention contract, so a cut that breaks the tool chain
-        # is rejected rather than silently repaired.
+
+    def estimate_send_payload(candidate: list) -> int:
+        candidate_tokens = _coerce_nonnegative_int(estimator(candidate))
+        if current_tokens > candidate_tokens:
+            return _coerce_nonnegative_int(estimator([
+                *candidate, build_context_compression_notice(current_tokens, candidate_tokens),
+            ]))
+        return candidate_tokens
+
+    send_tokens = estimate_send_payload(compressed)
+    budget_window_applied = False
+    budget_window_event: Dict[str, Any] | None = None
+    over_hard_limit = normalized_hard_limit > 0 and send_tokens > normalized_hard_limit
+    window_limit = min((
+        value for value in (
+            normalized_hard_limit,
+            _coerce_nonnegative_int(post_compression_target_tokens),
+            max(1, threshold_tokens - 1) if threshold_tokens > 0 else 0,
+        ) if value > 0
+    ), default=0)
+    if normalized_hard_limit > 0 and send_tokens > window_limit and not retention_violation:
+        # Install a window below the next compression trigger when possible,
+        # including the notice the caller appends. The ledger receives both
+        # source and retained boundaries so this replacement survives replay.
         budget_window, budget_tokens, budget_applied = build_token_budget_window(
             compressed,
-            hard_limit=normalized_hard_limit,
-            estimator=estimator,
+            hard_limit=window_limit,
+            estimator=estimate_send_payload,
         )
+        target_unreachable = not budget_applied and window_limit < normalized_hard_limit
+        if target_unreachable:
+            # The target is soft: never discard required context just to hit it.
+            # Continue only if that complete context plus notice meets the hard gate.
+            budget_window, budget_tokens, budget_applied = build_token_budget_window(
+                compressed, hard_limit=normalized_hard_limit, estimator=estimate_send_payload,
+                keep_history=False,
+            )
         if budget_applied:
             budget_pairing = _tool_call_pairing_snapshot(budget_window)
             budget_violation = _retention_violation_reason(before_pairing, budget_pairing)
             if not budget_violation:
-                recorder(
-                    "runtime",
-                    "agent.context_compression.token_budget_applied",
-                    message=(
-                        "Summarized history still exceeded the hard input limit; "
-                        "fell back to a token-budget window."
-                    ),
-                    outcome="applied",
-                    fields={
-                        "agentId": agent_id,
-                        "sessionId": session_id,
-                        "turnId": turn_id,
-                        "iteration": iteration,
-                        "beforeTokens": current_tokens,
-                        "summarizedTokens": after_tokens,
-                        "windowTokens": budget_tokens,
-                        "contextInputHardLimit": normalized_hard_limit,
-                        "messageCount": len(budget_window),
-                    },
-                )
+                if not summary and len(budget_window) < len(compressed):
+                    # Without a checkpoint summary this cut would live only in
+                    # memory and silently disappear on the next ledger replay.
+                    return fail_closed("budget_window_requires_summary", budget_pairing, budget_tokens)
+                budget_window_applied = len(budget_window) < len(compressed)
+                if budget_window_applied:
+                    budget_window_event = dict(
+                        message=(
+                            "Summarized history and its notice exceeded the compression target; "
+                            "installed a token-budget window."
+                        ),
+                        outcome="applied",
+                        fields={
+                            "agentId": agent_id,
+                            "sessionId": session_id,
+                            "turnId": turn_id,
+                            "iteration": iteration,
+                            "beforeTokens": current_tokens,
+                            "summarizedTokens": after_tokens,
+                            "windowTokens": _coerce_nonnegative_int(estimator(budget_window)),
+                            "sendTokens": budget_tokens,
+                            "targetTokens": window_limit,
+                            "targetUnreachable": target_unreachable,
+                            "retiredMessageCount": len(compressed) - len(budget_window),
+                            "contextInputHardLimit": normalized_hard_limit,
+                            "messageCount": len(budget_window),
+                        },
+                    )
                 compressed = budget_window
-                after_tokens = budget_tokens
+                after_tokens = _coerce_nonnegative_int(estimator(compressed))
                 after_pairing = budget_pairing
                 token_saved = current_tokens - after_tokens
                 over_hard_limit = False
+                if target_unreachable:
+                    recorder(
+                        "runtime", "agent.context_compression.target_unreachable",
+                        message="Required context and notice fit the hard limit but exceed the compression target.",
+                        outcome="continued",
+                        fields={"targetTokens": window_limit, "sendTokens": budget_tokens,
+                                "contextInputHardLimit": normalized_hard_limit},
+                    )
     if retention_violation or over_hard_limit:
         guard_reason = retention_violation or "post_compression_over_hard_limit"
         return fail_closed(guard_reason, after_pairing, after_tokens)
@@ -858,7 +935,12 @@ def compress_turn_messages(
     except Exception:
         effectiveness_threshold = 0.0
     effectiveness_ratio = (max(0, token_saved) / current_tokens) if current_tokens > 0 else 0.0
-    compression_effective = bool(token_saved > 0 and (effectiveness_threshold <= 0 or effectiveness_ratio >= effectiveness_threshold))
+    # A budget window is an actual context replacement. Persist it even when
+    # savings are below the advisory threshold, or replay resurrects its cuts.
+    compression_effective = bool(
+        budget_window_applied
+        or (token_saved > 0 and (effectiveness_threshold <= 0 or effectiveness_ratio >= effectiveness_threshold))
+    )
     ui.add_log(
         f"[压缩] {level.value.upper()} | {token_saved:+d} tokens "
         f"({current_tokens} -> {after_tokens}) | {combined_reason[:60]}",
@@ -876,6 +958,7 @@ def compress_turn_messages(
     ledger_checkpoint_written = False
     if summary:
         if session_id and mode_text == AgentMode.CHAT and project_root:
+            replacement_checkpoint_written = False
             try:
                 from core.chat.conversation_ledger import (
                     append_context_compression_attempt,
@@ -883,7 +966,10 @@ def compress_turn_messages(
                 )
 
                 if compression_effective:
-                    checkpoint_kwargs: Dict[str, Any] = {}
+                    checkpoint_kwargs: Dict[str, Any] = {
+                        "source_messages": messages_for_compression,
+                        "retained_messages": compressed,
+                    }
                     if summarized_messages is not None:
                         # Exact covered domain: only the events whose messages
                         # really entered the summary. Kept-window / error-
@@ -908,6 +994,9 @@ def compress_turn_messages(
                         tool_result_replacement_state=tool_result_replacement_state,
                         **checkpoint_kwargs,
                     )
+                    if budget_window_applied and event is None:
+                        raise RuntimeError("Context replacement checkpoint was not written.")
+                    replacement_checkpoint_written = event is not None
                 else:
                     event = append_context_compression_attempt(
                         Path(project_root),
@@ -960,8 +1049,9 @@ def compress_turn_messages(
                         effectiveness_ratio=effectiveness_ratio,
                         error_type=type(exc).__name__,
                     )
-                    ledger_checkpoint_written = event is not None
-                    summary_written = ledger_checkpoint_written
+                    if not budget_window_applied:
+                        ledger_checkpoint_written = event is not None
+                        summary_written = ledger_checkpoint_written
                 except Exception as fallback_exc:
                     recorder(
                         "runtime",
@@ -980,6 +1070,8 @@ def compress_turn_messages(
                             "stage": "attempt_fallback",
                         },
                     )
+            if budget_window_applied and not replacement_checkpoint_written:
+                return fail_closed("budget_window_checkpoint_not_written", after_pairing, after_tokens)
         try:
             if not ledger_checkpoint_written and prompt_manager is not None:
                 prompt_manager.update_state_memory(
@@ -988,6 +1080,9 @@ def compress_turn_messages(
                 summary_written = True
         except Exception:
             pass
+
+    if budget_window_event is not None:
+        recorder("runtime", "agent.context_compression.token_budget_applied", **budget_window_event)
 
     try:
         ui.note_context_compression_event(

@@ -73,6 +73,7 @@ ActionCommand = Literal[
     "record_program_review",
     "create_formal_revision",
     "create_stage_one_run",
+    "create_full_experiment_run",
 ]
 ProgramHumanGateKey = Literal[
     "H1_problem_understanding",
@@ -252,6 +253,11 @@ class CreateFormalRevisionPayload(RunActionPayload):
     outputRecordId: str = Field(..., min_length=1)
 
 
+class CreateFullExperimentRunPayload(QuestionActionPayload):
+    # The accepted stage-one delivery the full experiment is seeded from.
+    sourceRunId: str = Field(..., min_length=1)
+
+
 ActionPayload = (
     QuestionActionPayload
     | OpenGenerationPayload
@@ -270,6 +276,7 @@ ActionPayload = (
     | RetryProgramHandoffPayload
     | RecordProgramReviewPayload
     | CreateFormalRevisionPayload
+    | CreateFullExperimentRunPayload
 )
 
 _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
@@ -297,6 +304,7 @@ _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
     "retry_program_handoff": RetryProgramHandoffPayload,
     "record_program_review": RecordProgramReviewPayload,
     "create_formal_revision": CreateFormalRevisionPayload,
+    "create_full_experiment_run": CreateFullExperimentRunPayload,
 }
 
 

@@ -419,6 +419,67 @@ def test_submit_reuses_open_partial_submission_turn_identity(tmp_path: Path, mon
         _reset_seeded_session_runtime(session_id)
 
 
+def test_lightweight_submit_appends_acceptance_markers_in_one_batch(tmp_path: Path, monkeypatch) -> None:
+    """The acceptance scaffold lands turn_started + user_message in one lock section.
+
+    Both markers share a single journal lock acquisition (same append order
+    and per-event durability as two sequential appends), and the journal ends
+    up with exactly the same two correlated events for the submission.
+    """
+
+    from core.web.services import agent_directory_service
+
+    session_id = _prepare_default_submit_session(tmp_path, monkeypatch)
+    batch_calls: list[list[dict]] = []
+    real_batch = submit.append_turn_events
+
+    def spy_batch(project_root, batch_session_id, batch_turn_id, event_specs):
+        specs = [dict(spec) for spec in event_specs]
+        batch_calls.append(specs)
+        return real_batch(project_root, batch_session_id, batch_turn_id, specs)
+
+    monkeypatch.setattr(submit, "append_turn_events", spy_batch)
+    scheduled: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled.append(dict(context)),
+    )
+
+    try:
+        receipt = submit.submit_session_message_lightweight(
+            session_id,
+            "batched acceptance markers",
+            client_submission_id="submission-batch-markers",
+            mental_model_enabled=False,
+        )
+
+        assert receipt["turnId"]
+        assert len(batch_calls) == 1
+        assert [spec["event_type"] for spec in batch_calls[0]] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert batch_calls[0][0]["visible_in_model"] is False
+        assert batch_calls[0][1]["payload"]["content"] == "batched acceptance markers"
+        correlated_events = [
+            event
+            for event in load_conversation_events(tmp_path, session_id)
+            if event.correlation_id == "submission-batch-markers"
+        ]
+        assert [event.event_type for event in correlated_events] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert [event.turn_id for event in correlated_events] == [
+            receipt["turnId"],
+            receipt["turnId"],
+        ]
+        assert [context["turn_id"] for context in scheduled] == [receipt["turnId"]]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
 def test_journal_correlation_index_hits_cache_and_refreshes_after_append(tmp_path: Path, monkeypatch) -> None:
     from core.web.services.session import journal_bridge
 

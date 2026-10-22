@@ -308,6 +308,41 @@ describe("Chat bootstrap session cache reuse", () => {
 });
 
 describe("Chat catalog request lifecycle", () => {
+  it("waits for the current conversation before fetching teams", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    bootstrapControl.payload = Promise.resolve(bootstrapPayload([{ id: "restoring-session" } as SessionSummary]));
+    let result: ReturnType<typeof useChatWorkbenchCatalogQueries>;
+    function Page({ secondaryReady }: { secondaryReady: boolean }) {
+      result = useChatWorkbenchCatalogQueries(catalogInput(client, { secondaryChatDataEnabled: secondaryReady }));
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page secondaryReady={false} /></QueryClientProvider>));
+      expect(await actUntil(() => result.sessionIndexQueryEnabled && Boolean(result.rawSessionsQuery.data))).toBe(true);
+      expect(directoryReads.teams).not.toHaveBeenCalled();
+      await act(async () => root.render(<QueryClientProvider client={client}><Page secondaryReady /></QueryClientProvider>));
+      expect(await actUntil(() => directoryReads.teams.mock.calls.length === 1)).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+    }
+  });
+
+  it.each(["groupComposerOpen", "standardGroupRoomActive"] as const)("loads teams on demand for %s during startup", async (entry) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const input = catalogInput(client, { [entry]: true });
+    function Page() { useChatWorkbenchCatalogQueries(input); return null; }
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
+      expect(await actUntil(() => directoryReads.teams.mock.calls.length === 1)).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+    }
+  });
+
   it("skips hidden Finance directory reads and cached catalog auto-pagination", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(queryKeys.conversationsCatalogQuery(100), {

@@ -2616,7 +2616,7 @@ describe("ConversationView historical failed turn retry", () => {
   it("keeps the retry action wired to the regenerate handler with the busy/pending gates", () => {
     expect(conversationTimelineRowsSource).toContain("const canRetryFailedTurnMessage = message.role === \"assistant\"");
     expect(conversationTimelineRowsSource).toContain(
-      "onClick={() => onRegenerateAssistantMessage?.(message)}",
+      "onClick={() => onRegenerateAssistantMessage?.(sourceMessage)}",
     );
     expect(conversationTimelineRowsSource).toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}");
     expect(conversationTimelineRowsSource).not.toContain("isDisabled={regenerateDisabled}\n                              isPending={regeneratePending}\n                              title={t(\"regenerateAnswer\")}");

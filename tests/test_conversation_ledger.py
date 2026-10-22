@@ -563,6 +563,162 @@ def test_checkpoint_sparse_summarized_boundary_suppresses_sequence_range(tmp_pat
     assert "SPARSE-FOLD-TWO" not in contents
 
 
+def test_checkpoint_replacement_survives_next_turn_without_replaying_folded_current_turn(tmp_path):
+    session_id = "session-compression-continuation"
+    records = [
+        ("old", EVENT_USER_MESSAGE, "OLD REQUEST"),
+        ("old", EVENT_ASSISTANT_MESSAGE, "OLD ANSWER"),
+        ("current", EVENT_USER_MESSAGE, "CURRENT REQUEST"),
+        ("current", EVENT_ASSISTANT_MESSAGE, "FOLDED CURRENT WORK"),
+        ("current", EVENT_ASSISTANT_MESSAGE, "RETAINED CURRENT WORK"),
+    ]
+    originals = [
+        append_conversation_event(
+            tmp_path, session_id, turn, kind, status="completed", payload={"content": text}
+        )
+        for turn, kind, text in records
+    ]
+    source = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+    retained = [message for message in source if message["content"] in {"CURRENT REQUEST", "RETAINED CURRENT WORK"}]
+    folded = [message for message in source if message not in retained]
+    checkpoint = append_context_compression_checkpoint(
+        tmp_path, session_id, turn_id="current", current_turn_id="current",
+        summary="Summary of old history and completed current work.", level="standard", reason="context_pressure",
+        before_tokens=1000, after_tokens=200, summarized_messages=folded,
+        source_messages=source, retained_messages=retained,
+    )
+    assert checkpoint is not None
+    assert originals[3].event_id in checkpoint.payload["coveredEventIds"]
+    assert originals[2].event_id not in checkpoint.payload["coveredEventIds"]
+    append_conversation_event(
+        tmp_path, session_id, "current", EVENT_ASSISTANT_MESSAGE,
+        status="completed", payload={"content": "FINAL ANSWER AFTER COMPRESSION"},
+    )
+    append_conversation_event(
+        tmp_path, session_id, "next", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "NEXT QUESTION"},
+    )
+    events = load_conversation_events(tmp_path, session_id)
+    replay = conversation_model_messages_from_events(events)
+    contents = "\n".join(str(message.get("content") or "") for message in replay)
+    assert "OLD REQUEST" not in contents
+    assert "FOLDED CURRENT WORK" not in contents
+    for text in ["CURRENT REQUEST", "RETAINED CURRENT WORK", "FINAL ANSWER AFTER COMPRESSION", "NEXT QUESTION"]:
+        assert text in contents
+    # Compression changes only model replay. The original transcript remains available.
+    visible = conversation_ledger.conversation_visible_messages_from_events(events)
+    assert any("FOLDED CURRENT WORK" in str(message.get("content")) for message in visible)
+
+
+def test_checkpoint_records_budget_retirement_without_claiming_it_was_summarized(tmp_path):
+    session_id = "session-budget-retirement"
+    dropped = append_conversation_event(
+        tmp_path, session_id, "old", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "BUDGET RETIRED HISTORY"},
+    )
+    kept = append_conversation_event(
+        tmp_path, session_id, "current", EVENT_USER_MESSAGE,
+        status="recorded", payload={"content": "PROTECTED CURRENT REQUEST"},
+    )
+    source = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+    checkpoint = append_context_compression_checkpoint(
+        tmp_path, session_id, turn_id="current", current_turn_id="current",
+        summary="Existing anchored summary.", level="emergency", reason="token_budget",
+        before_tokens=1000, after_tokens=200, summarized_messages=[],
+        source_messages=source, retained_messages=[source[-1]],
+    )
+    assert checkpoint is not None
+    assert dropped.event_id in checkpoint.payload["retiredEventIds"]
+    assert dropped.event_id not in checkpoint.payload["coveredEventIds"]
+    assert kept.event_id not in checkpoint.payload["retiredEventIds"]
+    events = load_conversation_events(tmp_path, session_id)
+    contents = "\n".join(str(message.get("content")) for message in conversation_model_messages_from_events(events))
+    assert "BUDGET RETIRED HISTORY" not in contents
+    assert "PROTECTED CURRENT REQUEST" in contents
+    assert any(event.event_id == dropped.event_id for event in events)
+
+
+def test_replacement_checkpoint_retires_previous_summary_and_preserves_duplicate_latest_user(tmp_path):
+    session_id = "session-anchored-summary-replacement"
+    old_user = append_conversation_event(
+        tmp_path, session_id, "old", EVENT_USER_MESSAGE, status="recorded", payload={"content": "SAME USER REQUEST"}
+    )
+    first = append_context_compression_checkpoint(
+        tmp_path, session_id, turn_id="first", current_turn_id="first",
+        summary="PREVIOUS ANCHORED SUMMARY", level="standard", reason="context_pressure",
+        before_tokens=1000, after_tokens=200,
+    )
+    current_user = append_conversation_event(
+        tmp_path, session_id, "current", EVENT_USER_MESSAGE, status="recorded", payload={"content": "SAME USER REQUEST"}
+    )
+    source = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+    checkpoint = append_context_compression_checkpoint(
+        tmp_path, session_id, turn_id="current", current_turn_id="current",
+        summary="NEW ANCHORED SUMMARY", level="standard", reason="context_pressure",
+        before_tokens=1000, after_tokens=200,
+        summarized_messages=source[:-1], source_messages=source, retained_messages=[source[-1]],
+    )
+    assert first is not None and checkpoint is not None
+    assert first.event_id in checkpoint.payload["coveredEventIds"]
+    assert current_user.event_id not in checkpoint.payload["coveredEventIds"]
+    events = load_conversation_events(tmp_path, session_id)
+    replay = conversation_model_messages_from_events(events)
+    contents = "\n".join(str(message.get("content")) for message in replay)
+    assert "PREVIOUS ANCHORED SUMMARY" not in contents
+    assert "NEW ANCHORED SUMMARY" in contents
+    assert len([message for message in replay if message.get("role") == "user" and message.get("content") == "SAME USER REQUEST"]) == 1
+    assert any(event.event_id == old_user.event_id for event in events)
+
+
+@pytest.mark.parametrize("second_text", ["SHORT WITH MORE CONTEXT", "SHORT"])
+def test_replacement_does_not_infer_retirement_from_substrings_or_ambiguous_twins(tmp_path, second_text):
+    session_id = "session-exact-replacement-boundary"
+    first = append_conversation_event(
+        tmp_path, session_id, "first", EVENT_USER_MESSAGE, status="recorded", payload={"content": "SHORT"}
+    )
+    second = append_conversation_event(
+        tmp_path, session_id, "second", EVENT_USER_MESSAGE, status="recorded", payload={"content": second_text}
+    )
+    source = [{"role": "user", "content": "SHORT"}, {"role": "user", "content": second_text}]
+    checkpoint = append_context_compression_checkpoint(
+        tmp_path, session_id, turn_id="compression", current_turn_id="compression",
+        summary="The second request was summarized.", level="standard", reason="context_pressure",
+        before_tokens=1000, after_tokens=200,
+        summarized_messages=[source[1]], source_messages=source, retained_messages=[source[0]],
+    )
+    assert checkpoint is not None
+    assert first.event_id not in checkpoint.payload["coveredEventIds"]
+    assert first.event_id not in checkpoint.payload["retiredEventIds"]
+    if second_text != "SHORT":
+        assert second.event_id in checkpoint.payload["coveredEventIds"]
+    else:
+        # Identical text without identity is not proof either event was removed.
+        assert checkpoint.payload["coveredEventIds"] == []
+        assert checkpoint.payload["retiredEventIds"] == []
+
+
+def test_checkpoint_protects_ambiguous_retained_message_when_source_has_strong_identity(tmp_path):
+    session_id = "session-mixed-retained-identity"
+    for turn in ["old", "current"]:
+        append_conversation_event(
+            tmp_path, session_id, turn, EVENT_USER_MESSAGE,
+            status="recorded", payload={"content": "SAME REQUEST"},
+        )
+    source = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+    checkpoint = append_context_compression_checkpoint(
+        tmp_path, session_id, turn_id="current", current_turn_id="current",
+        summary="Old request summarized.", level="standard", reason="context_pressure",
+        before_tokens=1000, after_tokens=200,
+        summarized_messages=[source[0]], source_messages=source,
+        retained_messages=[{"role": "user", "content": "SAME REQUEST"}],
+    )
+    assert checkpoint is not None
+    assert checkpoint.payload["coveredEventIds"] == []
+    assert checkpoint.payload["retiredEventIds"] == []
+    replay = conversation_model_messages_from_events(load_conversation_events(tmp_path, session_id))
+    assert len([message for message in replay if message.get("content") == "SAME REQUEST"]) == 2
+
+
 def test_conversation_ledger_projects_compression_checkpoint_as_visible_marker(tmp_path):
     append_conversation_event(
         tmp_path,
