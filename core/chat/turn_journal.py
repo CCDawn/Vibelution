@@ -8,7 +8,7 @@ import re
 import threading
 from collections.abc import Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +18,13 @@ from uuid import uuid4
 from core.infrastructure import developer_sandbox
 from core.infrastructure.file_lock import locked_sidecar
 
-from .model_messages import EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT, normalize_model_messages
+from .model_messages import (
+    EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT,
+    ProviderChainNormalizer,
+    ProviderNormalizeCarry,
+    _LogSet,
+    normalize_model_messages,
+)
 
 
 SCHEMA_VERSION = 2
@@ -2217,7 +2223,31 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
     return _model_visible_messages_from_events(fold_active_events(events))
 
 
-def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> list[dict[str, Any]]:
+def _model_visible_messages_from_events(
+    event_list: list[TurnJournalEvent],
+    *,
+    extra_resolved_tool_keys: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    messages, _flushed_start = _visible_replay_stream(
+        event_list, extra_resolved_tool_keys=extra_resolved_tool_keys
+    )
+    from .message_identity import dedupe_messages_by_identity
+
+    return dedupe_messages_by_identity(messages)
+
+
+def _visible_replay_stream(
+    event_list: list[TurnJournalEvent],
+    *,
+    extra_resolved_tool_keys: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Stream form of :func:`_model_visible_messages_from_events`.
+
+    Returns the replayed messages (identity dedupe NOT applied) plus the
+    offset where the open-turn partial flush begins, so resumable pipelines
+    can tell streamed rows from end-flushed ones.
+    """
+
     canonical_final_turn_ids = {
         event.turn_id
         for event in event_list
@@ -2243,6 +2273,8 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
         for key in [_event_tool_correlation_key(event)]
         if key
     }
+    if extra_resolved_tool_keys:
+        resolved_tool_keys = resolved_tool_keys | set(extra_resolved_tool_keys)
 
     for event in event_list:
         if not event.visible_in_model and event.event_type != EVENT_COMPRESSION_ATTEMPT:
@@ -2403,6 +2435,7 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
                     }
                 )
 
+    flushed_start = len(messages)
     for turn_id, partial in latest_partial_by_turn.items():
         if turn_id and turn_id not in final_turn_ids and turn_id not in terminal_turn_ids:
             partial = dict(partial)
@@ -2422,8 +2455,7 @@ def _model_visible_messages_from_events(event_list: list[TurnJournalEvent]) -> l
                     },
                 }
             )
-    from .message_identity import dedupe_messages_by_identity
-    return dedupe_messages_by_identity(messages)
+    return messages, flushed_start
 
 
 def replay_visible_messages(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
@@ -2442,49 +2474,471 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
 
     The legacy visible replay keeps UI-era ``toolCalls`` bundles. This model
     replay splits assistant tool calls from tool results so provider payloads
-    have a single, protocol-valid source.
+    have a single, protocol-valid source. The replay runs through
+    :class:`ModelProjectionReplay`, the resumable form of this pipeline; a
+    single full-window run is byte-identical to the historical one-pass
+    implementation.
     """
 
     raw_events = list(events or [])
     event_list = fold_active_events(raw_events)
-    event_by_id = {event.event_id: event for event in event_list if event.event_id}
-    lifecycle_tool_identities = _lifecycle_resolved_tool_identities(event_list)
-    visible_messages = _model_visible_messages_from_events(event_list)
-    # Local import: stream recovery reads events and must not import this module.
-    from core.chat.stream_recovery import omit_discarded_stream_tail
+    return ModelProjectionReplay().feed_and_finish(event_list)
 
-    visible_messages = omit_discarded_stream_tail(visible_messages, raw_events)
-    messages: list[dict[str, Any]] = []
-    for message in _filter_recoverable_status_messages(visible_messages):
+
+def _finalize_model_messages(
+    messages: list[dict[str, Any]],
+    *,
+    event_by_id: dict[str, TurnJournalEvent],
+    lifecycle_tool_identities: dict[str, tuple[set[str], set[str]]],
+) -> list[dict[str, Any]]:
+    """Terminal per-message pass: checkpoint conversion + lifecycle strip."""
+
+    finalized: list[dict[str, Any]] = []
+    for message in messages:
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         if metadata.get("kind") == "context_compression_marker":
             checkpoint_message = _checkpoint_model_message_from_event(
                 event_by_id.get(str(metadata.get("eventId") or ""))
             )
             if checkpoint_message:
-                messages.append(checkpoint_message)
+                finalized.append(checkpoint_message)
             continue
-        messages.append(
+        finalized.append(
             _message_without_lifecycle_projected_tool_results(
                 message,
                 lifecycle_tool_identities,
             )
         )
-    return normalize_model_messages(messages)
+    return finalized
 
 
-def _filter_recoverable_status_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+class _ProjectionResumeBail(Exception):
+    """Incremental resume cannot prove byte equivalence; fall back to full."""
+
+
+@dataclass
+class _ProjectionCarry:
+    """Committed (frozen) state of a :class:`ModelProjectionReplay`.
+
+    Everything here is plain restorable data: the frozen output messages, the
+    normalize-chain carry (whose chain id sets are undo-logged :class:`_LogSet`
+    instances), three undo-logged id sets for the visible stage, and the set
+    of turns already committed. ``fork`` copies everything so a resume window
+    can fail without corrupting the committed state, and concurrent assemblers
+    never share mutable state.
+    """
+
+    frozen_output: list[dict[str, Any]] = field(default_factory=list)
+    normalize: ProviderNormalizeCarry = field(default_factory=ProviderNormalizeCarry)
+    resolved_keys: Any = field(default_factory=_LogSet)
+    open_call_keys: Any = field(default_factory=_LogSet)
+    identity_keys: Any = field(default_factory=_LogSet)
+    committed_turns: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        # Chain id sets must be undo-logged for precise commit rollback; the
+        # standalone full path may keep plain sets, so normalize lazily.
+        if not isinstance(self.normalize.chain_known_ids, _LogSet):
+            self.normalize.chain_known_ids = _LogSet(self.normalize.chain_known_ids)
+        if not isinstance(self.normalize.chain_used_ids, _LogSet):
+            self.normalize.chain_used_ids = _LogSet(self.normalize.chain_used_ids)
+
+    def fork(self) -> "_ProjectionCarry":
+        return _ProjectionCarry(
+            frozen_output=list(self.frozen_output),
+            normalize=self.normalize.fork(),
+            resolved_keys=(
+                self.resolved_keys.snapshot()
+                if isinstance(self.resolved_keys, _LogSet)
+                else _LogSet(self.resolved_keys)
+            ),
+            open_call_keys=(
+                self.open_call_keys.snapshot()
+                if isinstance(self.open_call_keys, _LogSet)
+                else _LogSet(self.open_call_keys)
+            ),
+            identity_keys=(
+                self.identity_keys.snapshot()
+                if isinstance(self.identity_keys, _LogSet)
+                else _LogSet(self.identity_keys)
+            ),
+            committed_turns=set(self.committed_turns),
+        )
+
+
+def _visible_prescan_resolved_keys(events: list[TurnJournalEvent]) -> set[str]:
+    """Correlation keys of resolved tool results (mirrors the replay pre-scan)."""
+
+    return {
+        key
+        for event in events
+        if event.visible_in_model and event.event_type in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}
+        for key in [_event_tool_correlation_key(event)]
+        if key
+    }
+
+
+def _leading_unanchored_run(messages: list[dict[str, Any]]) -> int:
+    """Length of the leading plain assistant/tool run the head trim would drop."""
+
+    start = 0
+    while start < len(messages):
+        message = messages[start]
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"assistant", "tool"}:
+            break
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() in _CONTEXT_SEED_ASSISTANT_KINDS:
+            break
+        start += 1
+    return start
+
+
+@dataclass
+class _ChunkMark:
+    """Per-chunk commit bookkeeping captured during a window run."""
+
+    output_len: int
+    normalize_snapshot: ProviderNormalizeCarry
+    known_mark: int
+    used_mark: int
+    resolved_mark: int
+    open_mark: int
+    identity_mark: int
+    turn: str
+    start: int
+    end: int
+    sealed: bool
+    retained: bool
+
+
+def run_projection_window(
+    base_carry: _ProjectionCarry,
+    window: list[TurnJournalEvent],
+) -> tuple[list[dict[str, Any]], _ProjectionCarry, list[TurnJournalEvent]]:
+    """Run the model-projection pipeline over one append window.
+
+    Pure function: ``base_carry`` is forked, never mutated; on success returns
+    ``(full_output, new_carry, pending_events)`` where ``new_carry`` freezes
+    everything up to the last provably-sealed turn boundary and
+    ``pending_events`` are the events a future resume must re-derive. Raises
+    :class:`_ProjectionResumeBail` whenever incremental continuation cannot be
+    proven byte-equivalent — the caller then recomputes from scratch.
+    """
+
+    carry = base_carry.fork()
+    window = list(window or [])
+    frozen = carry.frozen_output
+
+    # ---- chunking: maximal same-turn runs; flushed rows form a trailing
+    # pseudo-chunk that is never eligible.
+    chunks: list[dict[str, Any]] = []
+    for index, event in enumerate(window):
+        turn = str(event.turn_id or "").strip()
+        if chunks and chunks[-1]["turn"] == turn:
+            chunks[-1]["end"] = index + 1
+        else:
+            chunks.append({"turn": turn, "start": index, "end": index + 1})
+    turn_chunk: dict[str, int] = {}
+    degraded = False
+    for chunk_index, chunk in enumerate(chunks):
+        turn = chunk["turn"]
+        if not turn:
+            continue
+        if turn in turn_chunk or turn in carry.committed_turns:
+            degraded = True
+        turn_chunk[turn] = chunk_index
+
+    # ---- defensive: a turn spanning the commit boundary breaks the prefix
+    # assumptions outright.
+    if any(chunk["turn"] and chunk["turn"] in carry.committed_turns for chunk in chunks):
+        raise _ProjectionResumeBail("window re-plays an already committed turn")
+
+    # ---- defensive: an appended result resolving a committed open call would
+    # retroactively remove a frozen message (the full replay pre-scans it).
+    prescan_resolved = _visible_prescan_resolved_keys(window)
+    if any(key in carry.open_call_keys for key in prescan_resolved):
+        raise _ProjectionResumeBail("appended result resolves a committed open call")
+
+    # ---- defensive: a committed rename pinned the tool-call id space; any
+    # later tool traffic must recompute (the whole-list pass sees future ids).
+    if carry.normalize.chain_renamed:
+        raise _ProjectionResumeBail("committed rename pins the chain id space")
+
+    # ---- visible stream (flush included at the tail).
+    visible_messages, flushed_start = _visible_replay_stream(
+        window, extra_resolved_tool_keys=set(carry.resolved_keys)
+    )
+
+    # Per-message chunk tags: streamed rows inherit their event's chunk in
+    # order; flushed rows belong to open turns and never commit.
+    message_tags: list[int] = []
+    for index, message in enumerate(visible_messages):
+        if index >= flushed_start:
+            message_tags.append(-1)
+            continue
+        message_tags.append(turn_chunk.get(_message_turn_id(message), -1))
+
+    # Emitted-but-unresolved calls of this window join the open-call set
+    # (tagged by chunk) so a later resolution can bail instead of diverging.
+    for chunk_index, chunk in enumerate(chunks):
+        carry.resolved_keys.set_position(chunk_index)
+        carry.open_call_keys.set_position(chunk_index)
+        for event in window[chunk["start"]:chunk["end"]]:
+            if event.visible_in_model and event.event_type == EVENT_TOOL_CALL_STARTED:
+                key = _event_tool_correlation_key(event)
+                if key and key not in prescan_resolved and key not in carry.resolved_keys:
+                    carry.open_call_keys.add(key)
+
+    # ---- identity dedupe with committed-prior collision defense.
+    from .message_identity import dedupe_messages_by_identity_indexed, message_identity_key
+
+    deduped: list[dict[str, Any]] = []
+    deduped_tags: list[int] = []
+    for source_index, message in dedupe_messages_by_identity_indexed(visible_messages):
+        if isinstance(message, dict):
+            key = message_identity_key(message)
+            tag = message_tags[source_index]
+            carry.identity_keys.set_position(max(0, tag))
+            if key in carry.identity_keys:
+                raise _ProjectionResumeBail("appended row collides with a committed identity")
+            carry.identity_keys.add(key)
+        deduped.append(message)
+        deduped_tags.append(message_tags[source_index])
+
+    # ---- stream-recovery omission (window turns; committed facts cannot
+    # arrive incrementally — llm_resilience is an unsafe type).
+    from .stream_recovery import turns_with_stream_recovery
+
+    recovered = turns_with_stream_recovery(window)
+    if recovered:
+        from .stream_recovery import filter_stream_recovered_messages
+
+        kept: list[dict[str, Any]] = []
+        kept_tags: list[int] = []
+        for message, tag in zip(deduped, deduped_tags):
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            if str(metadata.get("turnId") or "").strip() in recovered:
+                kind = str(metadata.get("kind") or "").strip()
+                reason = str(metadata.get("reason") or "").strip()
+                if kind == "journal_assistant_partial":
+                    continue
+                if kind == "turn_interrupted" and reason == "open_turn_replay":
+                    continue
+            kept.append(message)
+            kept_tags.append(tag)
+        deduped, deduped_tags = kept, kept_tags
+
+    # ---- recoverable-status filter. The trailing provider-failure collapse
+    # is exact here because commits only freeze up to a retained turn: the
+    # full-replay walk stops at or before this window's start.
+    frozen_exists = bool(frozen)
+    if frozen_exists and _leading_unanchored_run(frozen) > 0:
+        # A collapse anywhere also trims the *global* head; if the frozen head
+        # is trimmable, only a full replay can apply it faithfully.
+        probe_trimmed = _filter_recoverable_status_messages(list(deduped), trim_head=True)
+        probe_raw = _filter_recoverable_status_messages(list(deduped), trim_head=False)
+        if probe_trimmed != probe_raw:
+            raise _ProjectionResumeBail("collapse would rewrite the frozen head")
+        filtered, filtered_tags = _filter_recoverable_status_messages(
+            list(deduped), trim_head=False, tags=deduped_tags
+        )
+    else:
+        filtered, filtered_tags = _filter_recoverable_status_messages(
+            list(deduped), trim_head=not frozen_exists, tags=deduped_tags
+        )
+
+    # ---- lifecycle finalize (window-local maps).
+    event_by_id = {event.event_id: event for event in window if event.event_id}
+    lifecycle_tool_identities = _lifecycle_resolved_tool_identities(window)
+    finalized = _finalize_model_messages(
+        filtered,
+        event_by_id=event_by_id,
+        lifecycle_tool_identities=lifecycle_tool_identities,
+    )
+    finalized_tags = list(filtered_tags)
+
+    # ---- commit bookkeeping: streamed rows must carry valid, monotone chunk
+    # tags and flushed rows must sit at the tail, otherwise provenance is
+    # unreliable and the window degrades to one single normalize feed with no
+    # commit.
+    streamed_end = len(finalized_tags)
+    while streamed_end > 0 and finalized_tags[streamed_end - 1] == -1:
+        streamed_end -= 1
+    tail_clean = all(tag == -1 for tag in finalized_tags[streamed_end:])
+    monotone = (
+        tail_clean
+        and all(
+            0 <= finalized_tags[i] < len(chunks) for i in range(streamed_end)
+        )
+        and all(
+            finalized_tags[i] <= finalized_tags[i + 1] for i in range(streamed_end - 1)
+        )
+    )
+    split_feeds = monotone and not degraded
+    retained_flags = [False] * len(chunks)
+    if split_feeds:
+        for message, tag in zip(finalized, finalized_tags):
+            if 0 <= tag < len(chunks) and _is_meaningful_non_user_message(message):
+                retained_flags[tag] = True
+
+    # ---- normalize: one stream normalizer, fed once per chunk so the undo-
+    # logged id sets can be rolled back to a chunk mark at commit time.
+    normalizer = ProviderChainNormalizer(carry.normalize)
+    normalize_carry = normalizer.carry
+    normalize_output: list[dict[str, Any]] = []
+    marks: list[_ChunkMark] = []
+    if split_feeds:
+        cursor = 0
+        for chunk_index in range(len(chunks)):
+            scan = cursor
+            while scan < len(finalized_tags) and finalized_tags[scan] < chunk_index:
+                scan += 1
+            span_start = scan
+            while scan < len(finalized_tags) and finalized_tags[scan] == chunk_index:
+                scan += 1
+            span_end = scan
+            cursor = span_end
+            carry.resolved_keys.set_position(chunk_index)
+            carry.open_call_keys.set_position(chunk_index)
+            carry.identity_keys.set_position(chunk_index)
+            normalize_carry.chain_known_ids.set_position(chunk_index)
+            normalize_carry.chain_used_ids.set_position(chunk_index)
+            normalize_output.extend(normalizer.feed(finalized[span_start:span_end]))
+            chunk = chunks[chunk_index]
+            sealed = any(
+                event.event_type in TERMINAL_EVENTS
+                for event in window[chunk["start"]:chunk["end"]]
+            )
+            marks.append(
+                _ChunkMark(
+                    output_len=len(normalize_output),
+                    normalize_snapshot=normalize_carry.snapshot_light(),
+                    known_mark=normalize_carry.chain_known_ids.mark(),
+                    used_mark=normalize_carry.chain_used_ids.mark(),
+                    resolved_mark=carry.resolved_keys.mark(),
+                    open_mark=carry.open_call_keys.mark(),
+                    identity_mark=carry.identity_keys.mark(),
+                    turn=chunk["turn"],
+                    start=chunk["start"],
+                    end=chunk["end"],
+                    sealed=sealed,
+                    retained=retained_flags[chunk_index],
+                )
+            )
+        # trailing flushed rows (tag -1, open-turn partials) ride the last feed.
+        if cursor < len(finalized):
+            normalize_output.extend(normalizer.feed(finalized[cursor:]))
+    else:
+        normalize_output.extend(normalizer.feed(finalized))
+
+    output = [*frozen, *normalize_output]
+
+    # ---- commit: last chunk with a fully sealed prefix and a retained tail
+    # turn. Everything up to it becomes the new frozen state.
+    eligible = -1
+    all_sealed = True
+    for chunk_index, mark in enumerate(marks):
+        all_sealed = all_sealed and mark.sealed
+        if not degraded and mark.turn and all_sealed and mark.retained:
+            eligible = chunk_index
+    if eligible >= 0:
+        mark = marks[eligible]
+        normalize_carry.chain_known_ids.rollback_to(mark.known_mark)
+        normalize_carry.chain_used_ids.rollback_to(mark.used_mark)
+        carry.resolved_keys.rollback_to(mark.resolved_mark)
+        carry.open_call_keys.rollback_to(mark.open_mark)
+        carry.identity_keys.rollback_to(mark.identity_mark)
+        new_carry = _ProjectionCarry(
+            frozen_output=[*frozen, *normalize_output[: mark.output_len]],
+            normalize=mark.normalize_snapshot,
+            resolved_keys=carry.resolved_keys,
+            open_call_keys=carry.open_call_keys,
+            identity_keys=carry.identity_keys,
+            committed_turns=carry.committed_turns
+            | {chunk["turn"] for chunk in chunks[: eligible + 1] if chunk["turn"]},
+        )
+        pending = window[mark.end:]
+    else:
+        new_carry = base_carry
+        pending = window
+    return output, new_carry, pending
+
+
+class ModelProjectionReplay:
+    """Resumable model projection over a folded, checkpoint-applied event list.
+
+    ``feed`` queues appended events; ``finish`` replays the queued window from
+    the committed carry and freezes every whole, retained, sealed turn it can
+    prove — the returned message list is byte-identical to a single cold replay
+    of the whole input (:func:`model_messages_from_events` routes through this
+    class, so the two paths share one implementation). Resume safety is
+    conservative: anything that cannot be proven byte-equivalent raises
+    internally and the caller falls back to a fresh full replay.
+    """
+
+    def __init__(self, carry: _ProjectionCarry | None = None) -> None:
+        self._carry = carry if carry is not None else _ProjectionCarry()
+        self._pending: list[TurnJournalEvent] = []
+
+    @property
+    def carry(self) -> _ProjectionCarry:
+        return self._carry
+
+    @property
+    def pending_events(self) -> list[TurnJournalEvent]:
+        """Consumed-but-uncommitted events a stored resume must re-feed."""
+
+        return self._pending
+
+    def feed(self, events: Iterable[TurnJournalEvent]) -> None:
+        self._pending.extend(events or [])
+
+    def finish(self) -> list[dict[str, Any]]:
+        """Replay the queued window; on a resume bail the caller must fall
+        back to a fresh full replay (the bail is raised again here so no
+        silently-divergent output can escape)."""
+
+        window, self._pending = self._pending, []
+        if not window:
+            return list(self._carry.frozen_output)
+        output, carry, pending = run_projection_window(self._carry, window)
+        self._carry = carry
+        self._pending = pending
+        return output
+
+    def feed_and_finish(self, events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
+        self.feed(events)
+        return self.finish()
+
+
+def _filter_recoverable_status_messages(
+    messages: Iterable[dict[str, Any]],
+    *,
+    trim_head: bool = True,
+    tags: list[int] | None = None,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[int]]:
     """Keep retry/error status UI out of the semantic model history.
 
     Provider failure recovery collapses only the trailing unresolved failure
     region (see ``_scoped_provider_failure_recovery_history``); healthy
-    multi-turn/tool history before that region is preserved.
+    multi-turn/tool history before that region is preserved. ``trim_head``
+    mirrors the head trim that fires together with a collapse; the resumable
+    window runner disables it and guards the frozen head itself. ``tags``
+    (parallel row provenance) is threaded through every pass in lockstep and
+    makes the function return ``(messages, tags)``.
     """
 
-    first_pass: list[dict[str, Any]] = []
+    tagged = tags is not None
+    if tagged:
+        pairs: list[tuple[dict[str, Any], int]] = list(zip(messages, tags or []))
+    else:
+        pairs = [(message, 0) for message in list(messages or [])]
+
+    first_pass: list[tuple[dict[str, Any], int]] = []
     meaningful_non_user_turn_ids: set[str] = set()
     provider_failure_turn_ids: set[str] = set()
-    for raw in list(messages or []):
+    for raw, tag in pairs:
         if not isinstance(raw, dict):
             continue
         message = dict(raw)
@@ -2493,36 +2947,48 @@ def _filter_recoverable_status_messages(messages: Iterable[dict[str, Any]]) -> l
             if turn_id:
                 provider_failure_turn_ids.add(turn_id)
             continue
-        first_pass.append(message)
+        first_pass.append((message, tag))
         if _is_meaningful_non_user_message(message):
             turn_id = _message_turn_id(message)
             if turn_id:
                 meaningful_non_user_turn_ids.add(turn_id)
 
-    second_pass: list[dict[str, Any]] = []
-    for message in first_pass:
+    second_pass: list[tuple[dict[str, Any], int]] = []
+    for message, tag in first_pass:
         if _is_turn_interrupted_marker_message(message) and _message_turn_id(message) not in meaningful_non_user_turn_ids:
             continue
-        second_pass.append(message)
+        second_pass.append((message, tag))
 
     retained_non_user_turn_ids = {
         _message_turn_id(message)
-        for message in second_pass
+        for message, _tag in second_pass
         if _is_meaningful_non_user_message(message)
     }
-    filtered = [
-        message
-        for message in second_pass
+    filtered_pairs = [
+        (message, tag)
+        for message, tag in second_pass
         if not (
             _is_continuation_only_user_message(message)
             and _message_turn_id(message) not in retained_non_user_turn_ids
         )
     ]
-    return _scoped_provider_failure_recovery_history(
+    filtered = [message for message, _tag in filtered_pairs]
+    filtered_tags = [tag for _message, tag in filtered_pairs]
+    scoped = _scoped_provider_failure_recovery_history(
         filtered,
         retained_turn_ids=retained_non_user_turn_ids,
         provider_failure_turn_ids=provider_failure_turn_ids,
+        trim_head=trim_head,
     )
+    if scoped is filtered:
+        return (scoped, filtered_tags) if tagged else scoped
+    # The collapse replaced a suffix with a seed drawn from the dropped region:
+    # re-attach provenance by identity (the seed is one of the input rows).
+    seed_ids = {id(message) for message in scoped}
+    scoped_tags = [tag for message, tag in filtered_pairs if id(message) in seed_ids]
+    if len(scoped_tags) != len(scoped):
+        scoped_tags = filtered_tags[-len(scoped):] if scoped else []
+    return (scoped, scoped_tags) if tagged else scoped
 
 
 def _scoped_provider_failure_recovery_history(
@@ -2530,6 +2996,7 @@ def _scoped_provider_failure_recovery_history(
     *,
     retained_turn_ids: set[str],
     provider_failure_turn_ids: set[str],
+    trim_head: bool = True,
 ) -> list[dict[str, Any]]:
     """Collapse only the trailing unresolved provider-failure region.
 
@@ -2565,6 +3032,8 @@ def _scoped_provider_failure_recovery_history(
 
     recovered = list(messages[:tail_start])
     recovered.extend(_minimal_provider_failure_recovery_history(messages[tail_start:]))
+    if not trim_head:
+        return recovered
     return _trim_leading_unanchored_assistant_messages(recovered)
 
 

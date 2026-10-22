@@ -13,7 +13,7 @@ completed tools into truncated "历史工具结果" prose.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 
@@ -72,39 +72,591 @@ def normalize_provider_turn_messages(messages: Iterable[Any]) -> list[Any]:
     return ProviderMessageChain.from_messages(messages).to_provider_payload()
 
 
-def _normalize_provider_turn_messages_impl(messages: Iterable[Any]) -> list[Any]:
-    """Internal implementation owned by ProviderMessageChain."""
+class _LogSet:
+    """A set with a position-tagged undo log for resumable projections.
 
-    normalized: list[Any] = []
-    raw_messages = _coalesce_ledger_tool_result_messages(list(messages or []))
-    for index, raw in enumerate(raw_messages):
-        if not isinstance(raw, dict):
-            if hasattr(raw, "content") and hasattr(raw, "type"):
-                normalized.append(raw)
+    Set-valued carry state that grows with the stream (tool-call id spaces,
+    identity keys) cannot be copied per commit without O(n) cost per turn, so
+    additions are logged under the window position that produced them. A
+    commit at position ``p`` simply rolls the log back to ``p``'s mark; the
+    rolled-back state is exactly the committed prefix's state. Not
+    thread-safe by itself: callers fork (copy) before mutating.
+    """
+
+    __slots__ = ("_values", "_log", "_position")
+
+    def __init__(self, values: Iterable[Any] = (), *, position: int = 0) -> None:
+        self._values: set[Any] = set(values)
+        self._log: list[tuple[int, Any, bool]] = []
+        self._position = int(position)
+
+    def set_position(self, position: int) -> None:
+        self._position = int(position)
+
+    def add(self, value: Any) -> None:
+        if value in self._values:
+            return
+        self._values.add(value)
+        self._log.append((self._position, value, True))
+
+    def discard(self, value: Any) -> None:
+        if value not in self._values:
+            return
+        self._values.discard(value)
+        self._log.append((self._position, value, False))
+
+    def update(self, values: Iterable[Any]) -> None:
+        for value in values:
+            self.add(value)
+
+    def mark(self) -> int:
+        return len(self._log)
+
+    def rollback_to(self, mark: int) -> None:
+        while len(self._log) > mark:
+            _position, value, added = self._log.pop()
+            if added:
+                self._values.discard(value)
+            else:
+                self._values.add(value)
+
+    def snapshot(self) -> "_LogSet":
+        """Fork: same contents, fresh empty log, safe to diverge."""
+
+        return _LogSet(self._values)
+
+    def __contains__(self, value: Any) -> bool:
+        return value in self._values
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return f"_LogSet({sorted(self._values, key=repr)!r})"
+
+
+def _copy_id_set(value: Any) -> Any:
+    """Copy a carry id set, preserving :class:`_LogSet` capability."""
+
+    if isinstance(value, _LogSet):
+        return value.snapshot()
+    return set(value)
+
+
+@dataclass
+class ProviderNormalizeCarry:
+    """Resumable carry for the provider-chain normalize pipeline.
+
+    Every field is plain, restorable data (ints, strings, dicts of strings) —
+    no external object references — so a carried state can be forked/persisted
+    and an appended message tail replayed from it with byte-identical output.
+    The repair-stage pending chain is intentionally absent: each feed window
+    ends with the deterministic tail demote, so the chain is always closed at
+    the carry boundary (an open chain crossing into a later window can only
+    happen for same-turn message appends, which the assembler memo guard
+    already rejects back to a full replay).
+    """
+
+    # Stage 1 (coalesce): pending assistant tool-call envelope awaiting results,
+    # plus the running position in the coalesce *input* list (embedded result
+    # messages carry it as their sourceIndex).
+    coalesce_pending_ids: set[str] = field(default_factory=set)
+    coalesce_pending_turn: str = ""
+    coalesce_input_seen: int = 0
+    # Stage 2 (per-message projection): running position in the coalesced list;
+    # this is the provenance baseline every emitted message's sourceIndex
+    # continues from.
+    message_input_seen: int = 0
+    # Stage 3 (adjacent tool-result dedupe): previous key.
+    adjacent_prev_key: tuple[str, str, str, str] | None = None
+    # Stage 4/5 (chain repair + semantic dedupe): absolute output offset of the
+    # current window inside the cumulative repaired list (drives source_index),
+    # and the previous semantic-dedupe key.
+    repair_output_base: int = 0
+    semantic_prev_key: tuple[str, str, str, str] | None = None
+    # Stage 6 (chain-wide tool-call-id dedupe): known/used id spaces, the
+    # per-turn rename tables, and whether any rename ever fired (a committed
+    # rename pins the id space; later appends carrying tool-call ids must fall
+    # back to a full replay because the original pass sees future ids in
+    # ``known_ids`` that an incremental window cannot).
+    chain_known_ids: set[str] = field(default_factory=set)
+    chain_used_ids: set[str] = field(default_factory=set)
+    chain_turn_final_ids: dict[str, list[str]] = field(default_factory=dict)
+    chain_turn_result_seen: dict[str, int] = field(default_factory=dict)
+    chain_renamed: bool = False
+
+    def fork(self) -> "ProviderNormalizeCarry":
+        """Deep-ish copy: safe to mutate for one append window."""
+
+        return ProviderNormalizeCarry(
+            coalesce_pending_ids=set(self.coalesce_pending_ids),
+            coalesce_pending_turn=self.coalesce_pending_turn,
+            coalesce_input_seen=self.coalesce_input_seen,
+            message_input_seen=self.message_input_seen,
+            adjacent_prev_key=self.adjacent_prev_key,
+            repair_output_base=self.repair_output_base,
+            semantic_prev_key=self.semantic_prev_key,
+            chain_known_ids=_copy_id_set(self.chain_known_ids),
+            chain_used_ids=_copy_id_set(self.chain_used_ids),
+            chain_turn_final_ids={
+                key: list(value) for key, value in self.chain_turn_final_ids.items()
+            },
+            chain_turn_result_seen=dict(self.chain_turn_result_seen),
+            chain_renamed=self.chain_renamed,
+        )
+
+    def snapshot_light(self) -> "ProviderNormalizeCarry":
+        """Commit-point copy: small fields copied, log-sets shared by reference.
+
+        The shared :class:`_LogSet` objects are rolled back to the matching
+        marks by the caller, so the snapshot must not copy them.
+        """
+
+        clone = ProviderNormalizeCarry.__new__(ProviderNormalizeCarry)
+        clone.coalesce_pending_ids = set(self.coalesce_pending_ids)
+        clone.coalesce_pending_turn = self.coalesce_pending_turn
+        clone.coalesce_input_seen = self.coalesce_input_seen
+        clone.message_input_seen = self.message_input_seen
+        clone.adjacent_prev_key = self.adjacent_prev_key
+        clone.repair_output_base = self.repair_output_base
+        clone.semantic_prev_key = self.semantic_prev_key
+        clone.chain_known_ids = self.chain_known_ids
+        clone.chain_used_ids = self.chain_used_ids
+        clone.chain_turn_final_ids = {
+            key: list(value) for key, value in self.chain_turn_final_ids.items()
+        }
+        clone.chain_turn_result_seen = dict(self.chain_turn_result_seen)
+        clone.chain_renamed = self.chain_renamed
+        return clone
+
+
+class ProviderChainNormalizer:
+    """Resumable form of :func:`_normalize_provider_turn_messages_impl`.
+
+    The original is a strict left-to-right pipeline of stream transforms, each
+    with finite carry state (coalesce window, per-message sourceIndex counter,
+    adjacent-dedupe key, repair pending chain, chain-wide id tables). Feeding
+    appended message tails with the carried state therefore produces exactly
+    the messages a full replay produces, provided the tail starts at a message
+    boundary the carry was taken at and no committed rename pins the id space.
+    Each :meth:`feed` window runs the deterministic repair tail-demote at its
+    end, so the demote outcome — identical whether it fires at a window
+    boundary or at the list end — is always folded in before the carry is
+    taken.
+    """
+
+    def __init__(self, carry: ProviderNormalizeCarry | None = None) -> None:
+        self._carry = carry.fork() if carry is not None else ProviderNormalizeCarry()
+
+    @property
+    def carry(self) -> ProviderNormalizeCarry:
+        return self._carry
+
+    def feed(self, messages: list[Any]) -> list[Any]:
+        carry = self._carry
+
+        # Stage 1: coalesce ledger result bundles into their call envelopes.
+        raw_messages = _coalesce_ledger_tool_result_messages_resumable(
+            list(messages or []), carry
+        )
+
+        # Stage 2: per-message provider projection; sourceIndex continues from
+        # the carried position in the coalesced list.
+        normalized: list[Any] = []
+        message_base = carry.message_input_seen
+        for offset, raw in enumerate(raw_messages):
+            index = message_base + offset
+            carry.message_input_seen = index + 1
+            if not isinstance(raw, dict):
+                if hasattr(raw, "content") and hasattr(raw, "type"):
+                    normalized.append(raw)
+                    continue
+                text = str(raw or "").strip()
+                if text:
+                    normalized.append(_base_message("user", text, source_index=index))
                 continue
-            text = str(raw or "").strip()
-            if text:
-                normalized.append(_base_message("user", text, source_index=index))
+            role = _normalize_role(raw.get("role"))
+            if role == "assistant":
+                normalized.extend(_assistant_provider_messages(raw, source_index=index))
+                continue
+            if role == "tool":
+                tool_message = _tool_role_message(raw, source_index=index)
+                if tool_message:
+                    normalized.append(tool_message)
+                continue
+            message = _base_message(role, _content_value(raw.get("content")), source_index=index)
+            _copy_optional(raw, message, ("attachments", "metadata", "references", "reasoning_content"))
+            if role == "assistant" and not message.get("content"):
+                continue
+            if role == "user" and not message.get("content") and not message.get("attachments") and not message.get("references"):
+                continue
+            normalized.append(message)
+
+        # Stage 3: adjacent tool-result dedupe with the carried previous key.
+        deduped: list[Any] = []
+        previous_key = carry.adjacent_prev_key
+        for message in normalized:
+            if not isinstance(message, dict):
+                deduped.append(message)
+                previous_key = None
+                continue
+            stable_identity = _message_turn_identity(message)
+            key = (
+                str(message.get("role") or ""),
+                str(message.get("tool_call_id") or ""),
+                str(message.get("content") or ""),
+                stable_identity,
+            )
+            if stable_identity and message.get("role") == "tool" and key == previous_key:
+                continue
+            deduped.append(message)
+            previous_key = key if stable_identity else None
+        carry.adjacent_prev_key = previous_key
+
+        # Stage 4: tool-chain repair over the window, with the deterministic
+        # tail demote folded in at the window end.
+        repaired = _repair_provider_tool_chain_resumable(
+            deduped, index_base=carry.repair_output_base
+        )
+        # Stage 5: semantic adjacent dedupe with the carried previous key.
+        semantically_deduped: list[Any] = []
+        previous_key = carry.semantic_prev_key
+        for message in repaired:
+            if not isinstance(message, dict):
+                semantically_deduped.append(message)
+                previous_key = None
+                continue
+            role = str(message.get("role") or "")
+            identity = ""
+            if role == "tool":
+                identity = str(message.get("tool_call_id") or message.get("toolCallId") or "")
+            stable_identity = _message_turn_identity(message)
+            key = (role, str(message.get("content") or ""), identity, stable_identity)
+            if stable_identity and key == previous_key:
+                continue
+            semantically_deduped.append(message)
+            previous_key = key if stable_identity else None
+        carry.semantic_prev_key = previous_key
+
+        # Stage 6: chain-wide tool-call-id dedupe with the carried id tables.
+        carry.chain_known_ids.update(_collect_chain_tool_call_ids(semantically_deduped))
+        output = _dedupe_chain_tool_call_ids_resumable(semantically_deduped, carry)
+        carry.repair_output_base += len(output)
+        return output
+
+
+def _coalesce_ledger_tool_result_messages_resumable(
+    messages: list[Any], carry: ProviderNormalizeCarry
+) -> list[Any]:
+    """Stream form of :func:`_coalesce_ledger_tool_result_messages`.
+
+    Identical walk; the pending envelope state and the input position counter
+    live on the carry so appended tails continue exactly where the previous
+    window stopped (embedded result messages keep their absolute sourceIndex).
+    """
+
+    coalesced: list[Any] = []
+    pending_ids = carry.coalesce_pending_ids
+    pending_turn_identity = carry.coalesce_pending_turn
+    input_base = carry.coalesce_input_seen
+    for offset, raw in enumerate(messages):
+        source_index = input_base + offset
+        carry.coalesce_input_seen = source_index + 1
+        if not isinstance(raw, dict):
+            coalesced.append(raw)
+            pending_ids = set()
+            pending_turn_identity = ""
+            carry.coalesce_pending_ids = pending_ids
+            carry.coalesce_pending_turn = pending_turn_identity
             continue
         role = _normalize_role(raw.get("role"))
+        entries = _tool_entries(raw) if role == "assistant" else []
+        result_entries = [
+            entry
+            for entry in entries
+            if _tool_entry_has_result(entry) or _tool_entry_has_empty_result_container(entry)
+        ]
+        result_ids = [_explicit_tool_call_id(entry) for entry in result_entries]
+        result_turn_identity = _message_turn_identity(raw)
+        same_pending_turn = (
+            not pending_turn_identity
+            or not result_turn_identity
+            or pending_turn_identity == result_turn_identity
+        )
+        if (
+            pending_ids
+            and result_entries
+            and len(result_entries) == len(entries)
+            and all(result_ids)
+            and set(result_ids).issubset(pending_ids)
+            and same_pending_turn
+        ):
+            for tool_index, entry in enumerate(result_entries, start=1):
+                normalized = _normalize_tool_call(
+                    entry,
+                    source_index=source_index,
+                    tool_index=tool_index,
+                )
+                result_content = _tool_result_content(normalized["name"], entry)
+                if not result_content and _tool_entry_has_empty_result_container(entry):
+                    # An empty result container (journal ``result: []``) still
+                    # closes the envelope call: emit the explicit placeholder
+                    # instead of dropping the bundle and orphaning the call.
+                    result_content = EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT
+                if result_content:
+                    coalesced.append(
+                        _embedded_tool_result_message(
+                            raw,
+                            normalized,
+                            result_content=result_content,
+                            source_index=source_index,
+                        )
+                    )
+                pending_ids.discard(normalized["id"])
+            if not pending_ids:
+                pending_turn_identity = ""
+            carry.coalesce_pending_ids = pending_ids
+            carry.coalesce_pending_turn = pending_turn_identity
+            continue
+
+        coalesced.append(raw)
+        if role == "assistant" and entries and not result_entries:
+            pending_ids = {
+                normalized["id"]
+                for tool_index, entry in enumerate(entries, start=1)
+                for normalized in [_normalize_tool_call(entry, source_index=source_index, tool_index=tool_index)]
+                if normalized
+            }
+            pending_turn_identity = _message_turn_identity(raw)
+            carry.coalesce_pending_ids = pending_ids
+            carry.coalesce_pending_turn = pending_turn_identity
+            continue
+        if role == "tool" and pending_ids:
+            pending_ids.discard(_tool_call_id_from_message(raw))
+            if not pending_ids:
+                pending_turn_identity = ""
+            carry.coalesce_pending_ids = pending_ids
+            carry.coalesce_pending_turn = pending_turn_identity
+            continue
+        pending_ids = set()
+        pending_turn_identity = ""
+        carry.coalesce_pending_ids = pending_ids
+        carry.coalesce_pending_turn = pending_turn_identity
+    return coalesced
+
+
+def _repair_provider_tool_chain_resumable(
+    messages: list[Any], *, index_base: int = 0
+) -> list[Any]:
+    """Window form of :func:`_repair_provider_tool_chain`.
+
+    Identical walk over the window with the deterministic tail demote folded
+    in at the end. ``index_base`` shifts every source_index into cumulative
+    list coordinates so renamed/rewritten messages keep the sourceIndex a full
+    replay would assign. The pending chain is always closed when this returns.
+    """
+
+    repaired: list[Any] = []
+    pending_ids: list[str] = []
+    pending_assistant_index = -1
+    pending_result_indices: list[int] = []
+    pending_tool_names: dict[str, str] = {}
+    pending_interrupted_ids: set[str] = set()
+
+    def clear_pending_chain() -> None:
+        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names, pending_interrupted_ids
+        pending_ids = []
+        pending_assistant_index = -1
+        pending_result_indices = []
+        pending_tool_names = {}
+        pending_interrupted_ids = set()
+
+    def demote_pending_chain() -> None:
+        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
+        if pending_ids and set(pending_ids).issubset(pending_interrupted_ids):
+            for tool_call_id in pending_ids:
+                repaired.append(
+                    {
+                        "role": "tool",
+                        "content": "aborted",
+                        "tool_call_id": tool_call_id,
+                        "metadata": {
+                            "schemaVersion": MODEL_MESSAGE_SCHEMA_VERSION,
+                            "kind": "interrupted_tool_result",
+                            "status": "aborted",
+                            "toolName": pending_tool_names.get(tool_call_id, "unknown_tool"),
+                        },
+                    }
+                )
+            clear_pending_chain()
+            return
+        if 0 <= pending_assistant_index < len(repaired):
+            assistant = repaired[pending_assistant_index]
+            if _provider_message_role(assistant) == "assistant":
+                tool_calls = _provider_message_tool_calls(assistant)
+                if tool_calls:
+                    content_parts = [_visible_text(_provider_message_content(assistant))]
+                    for call in tool_calls:
+                        name = _provider_tool_call_name(call)
+                        content_parts.append(f"历史工具调用未返回结果: {name}")
+                    demoted = {
+                        "role": "assistant",
+                        "content": _join_text_blocks(content_parts),
+                    }
+                    metadata = _provider_message_metadata(assistant)
+                    metadata["kind"] = "historical_unresolved_tool_call"
+                    metadata["repairedProviderToolChain"] = True
+                    demoted["metadata"] = metadata
+                    repaired[pending_assistant_index] = demoted
+        for result_index in pending_result_indices:
+            if 0 <= result_index < len(repaired):
+                result_message = repaired[result_index]
+                if _provider_message_role(result_message) == "tool":
+                    result_message = _provider_tool_message_dict(
+                        result_message, source_index=result_index + index_base
+                    )
+                    tool_call_id = _provider_message_tool_call_id(result_message)
+                    tool_name = pending_tool_names.get(tool_call_id, "")
+                    if tool_name:
+                        metadata = dict(result_message.get("metadata") or {})
+                        metadata.setdefault("toolName", tool_name)
+                        result_message["metadata"] = metadata
+                    repaired[result_index] = _tool_role_history_message(
+                        result_message, source_index=result_index + index_base
+                    )
+        clear_pending_chain()
+
+    for raw in list(messages or []):
+        message = dict(raw) if isinstance(raw, dict) else raw
+        role = _provider_message_role(message)
         if role == "assistant":
-            normalized.extend(_assistant_provider_messages(raw, source_index=index))
+            if pending_ids:
+                demote_pending_chain()
+            repaired.append(message)
+            tool_call_ids = _message_tool_call_ids(message)
+            if tool_call_ids:
+                pending_ids = list(tool_call_ids)
+                pending_assistant_index = len(repaired) - 1
+                pending_result_indices = []
+                pending_tool_names = _message_tool_call_names(message)
+                metadata = _provider_message_metadata(message)
+                interrupted_ids = metadata.get("interruptedToolCallIds") or metadata.get(
+                    "interrupted_tool_call_ids"
+                ) or []
+                pending_interrupted_ids = {
+                    str(item or "").strip()
+                    for item in list(interrupted_ids or [])
+                    if str(item or "").strip()
+                }
             continue
         if role == "tool":
-            tool_message = _tool_role_message(raw, source_index=index)
-            if tool_message:
-                normalized.append(tool_message)
+            tool_call_id = _provider_message_tool_call_id(message)
+            if tool_call_id and tool_call_id in pending_ids:
+                repaired.append(message)
+                pending_result_indices.append(len(repaired) - 1)
+                pending_ids = [item for item in pending_ids if item != tool_call_id]
+                if not pending_ids:
+                    clear_pending_chain()
+                continue
+            if pending_ids:
+                demote_pending_chain()
+            orphan_history = _tool_role_history_message(
+                _provider_tool_message_dict(message, source_index=len(repaired) + index_base),
+                source_index=len(repaired) + index_base,
+            )
+            metadata = dict(orphan_history.get("metadata") or {})
+            metadata["repairedProviderToolChain"] = True
+            orphan_history["metadata"] = metadata
+            repaired.append(orphan_history)
             continue
-        message = _base_message(role, _content_value(raw.get("content")), source_index=index)
-        _copy_optional(raw, message, ("attachments", "metadata", "references", "reasoning_content"))
-        if role == "assistant" and not message.get("content"):
+        if pending_ids:
+            demote_pending_chain()
+        repaired.append(message)
+    if pending_ids:
+        demote_pending_chain()
+    return repaired
+
+
+def _dedupe_chain_tool_call_ids_resumable(
+    messages: list[Any], carry: ProviderNormalizeCarry
+) -> list[Any]:
+    """Stream form of :func:`_dedupe_chain_tool_call_ids`.
+
+    Identical walk; the known/used id spaces and the per-turn rename tables
+    live on the carry. Any rename marks ``chain_renamed`` so the caller can
+    refuse later incremental windows (the original pass consults future ids
+    through its whole-list ``known_ids`` pre-scan).
+    """
+
+    known_ids = carry.chain_known_ids
+    used_ids = carry.chain_used_ids
+    turn_final_ids = carry.chain_turn_final_ids
+    turn_result_seen = carry.chain_turn_result_seen
+    deduped: list[Any] = []
+    for message in messages:
+        role = _provider_message_role(message)
+        if role == "assistant":
+            turn_final_ids = {}
+            turn_result_seen = {}
+            tool_calls = _provider_message_tool_calls(message)
+            if not tool_calls:
+                deduped.append(message)
+                continue
+            finals_by_id: dict[str, list[str]] = {}
+            renamed_calls: list[dict[Any, Any]] = []
+            renamed_any = False
+            for call in tool_calls:
+                call = dict(call)
+                call_id = str(call.get("id") or "").strip()
+                if call_id:
+                    finals = finals_by_id.setdefault(call_id, [])
+                    if not finals and call_id not in used_ids:
+                        finals.append(call_id)
+                        used_ids.add(call_id)
+                    else:
+                        new_id = _next_deduped_tool_call_id(call_id, known_ids, used_ids)
+                        known_ids.add(new_id)
+                        used_ids.add(new_id)
+                        finals.append(new_id)
+                        call["id"] = new_id
+                        renamed_any = True
+                        carry.chain_renamed = True
+                renamed_calls.append(call)
+            if renamed_any:
+                message = _replace_message_tool_calls(message, renamed_calls)
+                _rewrite_assistant_tool_call_id_metadata(message, finals_by_id)
+            turn_final_ids = finals_by_id
+            deduped.append(message)
             continue
-        if role == "user" and not message.get("content") and not message.get("attachments") and not message.get("references"):
+        if role == "tool":
+            tool_call_id = _provider_message_tool_call_id(message)
+            finals = turn_final_ids.get(tool_call_id) if tool_call_id else None
+            if finals:
+                position = turn_result_seen.get(tool_call_id, 0)
+                turn_result_seen[tool_call_id] = position + 1
+                if position < len(finals):
+                    new_id = finals[position]
+                    if new_id != tool_call_id:
+                        message = _replace_message_tool_call_id(message, new_id)
+                        _rewrite_tool_message_call_id_metadata(message, tool_call_id, new_id)
+            deduped.append(message)
             continue
-        normalized.append(message)
-    return _dedupe_chain_tool_call_ids(
-        _repair_provider_tool_chain(_dedupe_adjacent_tool_results(normalized))
-    )
+        turn_final_ids = {}
+        turn_result_seen = {}
+        deduped.append(message)
+    carry.chain_turn_final_ids = turn_final_ids
+    carry.chain_turn_result_seen = turn_result_seen
+    return deduped
+
+
+def _normalize_provider_turn_messages_impl(messages: Iterable[Any]) -> list[Any]:
+    """Internal implementation owned by :class:`ProviderChainNormalizer`."""
+
+    normalizer = ProviderChainNormalizer()
+    return normalizer.feed(list(messages or []))
 
 
 def _assistant_history_messages(
@@ -536,88 +1088,6 @@ def _embedded_tool_result_message(
         "tool_call_id": str(normalized_call.get("id") or ""),
         "metadata": metadata,
     }
-
-
-def _coalesce_ledger_tool_result_messages(messages: list[Any]) -> list[Any]:
-    """Join ledger result bundles to their preceding assistant call envelope."""
-
-    coalesced: list[Any] = []
-    pending_ids: set[str] = set()
-    pending_turn_identity = ""
-    for source_index, raw in enumerate(list(messages or [])):
-        if not isinstance(raw, dict):
-            coalesced.append(raw)
-            pending_ids = set()
-            pending_turn_identity = ""
-            continue
-        role = _normalize_role(raw.get("role"))
-        entries = _tool_entries(raw) if role == "assistant" else []
-        result_entries = [
-            entry
-            for entry in entries
-            if _tool_entry_has_result(entry) or _tool_entry_has_empty_result_container(entry)
-        ]
-        result_ids = [_explicit_tool_call_id(entry) for entry in result_entries]
-        result_turn_identity = _message_turn_identity(raw)
-        same_pending_turn = (
-            not pending_turn_identity
-            or not result_turn_identity
-            or pending_turn_identity == result_turn_identity
-        )
-        if (
-            pending_ids
-            and result_entries
-            and len(result_entries) == len(entries)
-            and all(result_ids)
-            and set(result_ids).issubset(pending_ids)
-            and same_pending_turn
-        ):
-            for tool_index, entry in enumerate(result_entries, start=1):
-                normalized = _normalize_tool_call(
-                    entry,
-                    source_index=source_index,
-                    tool_index=tool_index,
-                )
-                result_content = _tool_result_content(normalized["name"], entry)
-                if not result_content and _tool_entry_has_empty_result_container(entry):
-                    # An empty result container (journal ``result: []``) still
-                    # closes the envelope call: emit the explicit placeholder
-                    # instead of dropping the bundle and orphaning the call.
-                    result_content = EMPTY_TOOL_RESULT_PLACEHOLDER_TEXT
-                if result_content:
-                    coalesced.append(
-                        _embedded_tool_result_message(
-                            raw,
-                            normalized,
-                            result_content=result_content,
-                            source_index=source_index,
-                        )
-                    )
-                pending_ids.discard(normalized["id"])
-            if not pending_ids:
-                pending_turn_identity = ""
-            continue
-
-        coalesced.append(raw)
-        if role == "assistant" and entries and not result_entries:
-            pending_ids = {
-                normalized["id"]
-                for tool_index, entry in enumerate(entries, start=1)
-                for normalized in [_normalize_tool_call(entry, source_index=source_index, tool_index=tool_index)]
-                if normalized
-            }
-            pending_turn_identity = _message_turn_identity(raw)
-            continue
-        if role == "tool" and pending_ids:
-            pending_ids.discard(_tool_call_id_from_message(raw))
-            if not pending_ids:
-                pending_turn_identity = ""
-            continue
-        pending_ids = set()
-        pending_turn_identity = ""
-    return coalesced
-
-
 def _tool_call_id_from_message(message: dict[str, Any]) -> str:
     return str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
 
@@ -778,30 +1248,6 @@ def _first_non_empty(*values: Any) -> Any:
             continue
         return value
     return ""
-
-
-def _dedupe_adjacent_tool_results(messages: list[Any]) -> list[Any]:
-    deduped: list[Any] = []
-    previous_key: tuple[str, str, str, str] | None = None
-    for message in messages:
-        if not isinstance(message, dict):
-            deduped.append(message)
-            previous_key = None
-            continue
-        stable_identity = _message_turn_identity(message)
-        key = (
-            str(message.get("role") or ""),
-            str(message.get("tool_call_id") or ""),
-            str(message.get("content") or ""),
-            stable_identity,
-        )
-        if stable_identity and message.get("role") == "tool" and key == previous_key:
-            continue
-        deduped.append(message)
-        previous_key = key if stable_identity else None
-    return deduped
-
-
 def _dedupe_adjacent_semantic_messages(messages: list[Any]) -> list[Any]:
     deduped: list[Any] = []
     previous_key: tuple[str, str, str, str] | None = None
@@ -830,91 +1276,6 @@ def _message_turn_identity(message: dict[str, Any]) -> str:
         return f"turn:{turn_id}"
     event_id = str(metadata.get("eventId") or metadata.get("event_id") or "").strip()
     return f"event:{event_id}" if event_id else ""
-
-
-def _dedupe_chain_tool_call_ids(messages: list[Any]) -> list[Any]:
-    """Deterministically rename duplicate tool call ids in the provider projection.
-
-    Some providers replay an earlier tool call id when nudged to continue a
-    turn ("继续" / pagination nudges). The projector and payload validator
-    treat the whole request chain as one id space, so any repeated id is
-    rejected as ``duplicate_tool_call_id`` before provider send. This pass
-    runs after chain repair, on a fully paired projection, and renames later
-    duplicates to ``<orig>-dedup-<n>`` together with their paired ``tool``
-    result messages so call/result pairing stays intact. The projector and
-    validator remain the strict terminal gates — nothing is relaxed here.
-
-    Idempotent: once ids are unique the pass is a no-op, and ``-dedup-``
-    suffixes are never stacked because renamed ids are registered as known.
-
-    Both dict messages and non-dict LangChain-style messages (``AIMessage`` /
-    ``ToolMessage``) are covered: the live turn chain mixes ledger-replayed
-    dicts with in-flight LangChain objects, and the projector accepts both
-    shapes, so a replayed id must be renamed in either shape.
-
-    Persisted journal/session ids are untouched: every mutated dict here is a
-    fresh copy created by this normalization pass, and non-dict messages are
-    only replaced through ``model_copy`` (copy-on-write projection).
-    """
-
-    known_ids = _collect_chain_tool_call_ids(messages)
-    used_ids: set[str] = set()
-    turn_final_ids: dict[str, list[str]] = {}
-    turn_result_seen: dict[str, int] = {}
-    deduped: list[Any] = []
-    for message in messages:
-        role = _provider_message_role(message)
-        if role == "assistant":
-            turn_final_ids = {}
-            turn_result_seen = {}
-            tool_calls = _provider_message_tool_calls(message)
-            if not tool_calls:
-                deduped.append(message)
-                continue
-            finals_by_id: dict[str, list[str]] = {}
-            renamed_calls: list[dict[str, Any]] = []
-            renamed_any = False
-            for call in tool_calls:
-                call = dict(call)
-                call_id = str(call.get("id") or "").strip()
-                if call_id:
-                    finals = finals_by_id.setdefault(call_id, [])
-                    if not finals and call_id not in used_ids:
-                        finals.append(call_id)
-                        used_ids.add(call_id)
-                    else:
-                        new_id = _next_deduped_tool_call_id(call_id, known_ids, used_ids)
-                        known_ids.add(new_id)
-                        used_ids.add(new_id)
-                        finals.append(new_id)
-                        call["id"] = new_id
-                        renamed_any = True
-                renamed_calls.append(call)
-            if renamed_any:
-                message = _replace_message_tool_calls(message, renamed_calls)
-                _rewrite_assistant_tool_call_id_metadata(message, finals_by_id)
-            turn_final_ids = finals_by_id
-            deduped.append(message)
-            continue
-        if role == "tool":
-            tool_call_id = _provider_message_tool_call_id(message)
-            finals = turn_final_ids.get(tool_call_id) if tool_call_id else None
-            if finals:
-                position = turn_result_seen.get(tool_call_id, 0)
-                turn_result_seen[tool_call_id] = position + 1
-                if position < len(finals):
-                    new_id = finals[position]
-                    if new_id != tool_call_id:
-                        message = _replace_message_tool_call_id(message, new_id)
-                        _rewrite_tool_message_call_id_metadata(message, tool_call_id, new_id)
-            deduped.append(message)
-            continue
-        turn_final_ids = {}
-        turn_result_seen = {}
-        deduped.append(message)
-    return deduped
-
-
 def _replace_message_tool_calls(message: Any, renamed_calls: list[dict[str, Any]]) -> Any:
     """Return ``message`` with ``tool_calls`` replaced, copy-on-write."""
 
@@ -1102,126 +1463,6 @@ def _rewrite_tool_message_call_id_metadata(message: dict[str, Any], old_id: str,
             changed = True
     if changed:
         message["metadata"] = updated
-
-
-def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
-    repaired: list[Any] = []
-    pending_ids: list[str] = []
-    pending_assistant_index = -1
-    pending_result_indices: list[int] = []
-    pending_tool_names: dict[str, str] = {}
-    pending_interrupted_ids: set[str] = set()
-
-    def clear_pending_chain() -> None:
-        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names, pending_interrupted_ids
-        pending_ids = []
-        pending_assistant_index = -1
-        pending_result_indices = []
-        pending_tool_names = {}
-        pending_interrupted_ids = set()
-
-    def demote_pending_chain() -> None:
-        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
-        if pending_ids and set(pending_ids).issubset(pending_interrupted_ids):
-            for tool_call_id in pending_ids:
-                repaired.append(
-                    {
-                        "role": "tool",
-                        "content": "aborted",
-                        "tool_call_id": tool_call_id,
-                        "metadata": {
-                            "schemaVersion": MODEL_MESSAGE_SCHEMA_VERSION,
-                            "kind": "interrupted_tool_result",
-                            "status": "aborted",
-                            "toolName": pending_tool_names.get(tool_call_id, "unknown_tool"),
-                        },
-                    }
-                )
-            clear_pending_chain()
-            return
-        if 0 <= pending_assistant_index < len(repaired):
-            assistant = repaired[pending_assistant_index]
-            if _provider_message_role(assistant) == "assistant":
-                tool_calls = _provider_message_tool_calls(assistant)
-                if tool_calls:
-                    content_parts = [_visible_text(_provider_message_content(assistant))]
-                    for call in tool_calls:
-                        name = _provider_tool_call_name(call)
-                        content_parts.append(f"历史工具调用未返回结果: {name}")
-                    demoted = {
-                        "role": "assistant",
-                        "content": _join_text_blocks(content_parts),
-                    }
-                    metadata = _provider_message_metadata(assistant)
-                    metadata["kind"] = "historical_unresolved_tool_call"
-                    metadata["repairedProviderToolChain"] = True
-                    demoted["metadata"] = metadata
-                    repaired[pending_assistant_index] = demoted
-        for result_index in pending_result_indices:
-            if 0 <= result_index < len(repaired):
-                result_message = repaired[result_index]
-                if _provider_message_role(result_message) == "tool":
-                    result_message = _provider_tool_message_dict(result_message, source_index=result_index)
-                    tool_call_id = _provider_message_tool_call_id(result_message)
-                    tool_name = pending_tool_names.get(tool_call_id, "")
-                    if tool_name:
-                        metadata = dict(result_message.get("metadata") or {})
-                        metadata.setdefault("toolName", tool_name)
-                        result_message["metadata"] = metadata
-                    repaired[result_index] = _tool_role_history_message(result_message, source_index=result_index)
-        clear_pending_chain()
-
-    for raw in list(messages or []):
-        message = dict(raw) if isinstance(raw, dict) else raw
-        role = _provider_message_role(message)
-        if role == "assistant":
-            if pending_ids:
-                demote_pending_chain()
-            repaired.append(message)
-            tool_call_ids = _message_tool_call_ids(message)
-            if tool_call_ids:
-                pending_ids = list(tool_call_ids)
-                pending_assistant_index = len(repaired) - 1
-                pending_result_indices = []
-                pending_tool_names = _message_tool_call_names(message)
-                metadata = _provider_message_metadata(message)
-                interrupted_ids = metadata.get("interruptedToolCallIds") or metadata.get(
-                    "interrupted_tool_call_ids"
-                ) or []
-                pending_interrupted_ids = {
-                    str(item or "").strip()
-                    for item in list(interrupted_ids or [])
-                    if str(item or "").strip()
-                }
-            continue
-        if role == "tool":
-            tool_call_id = _provider_message_tool_call_id(message)
-            if tool_call_id and tool_call_id in pending_ids:
-                repaired.append(message)
-                pending_result_indices.append(len(repaired) - 1)
-                pending_ids = [item for item in pending_ids if item != tool_call_id]
-                if not pending_ids:
-                    clear_pending_chain()
-                continue
-            if pending_ids:
-                demote_pending_chain()
-            orphan_history = _tool_role_history_message(
-                _provider_tool_message_dict(message, source_index=len(repaired)),
-                source_index=len(repaired),
-            )
-            metadata = dict(orphan_history.get("metadata") or {})
-            metadata["repairedProviderToolChain"] = True
-            orphan_history["metadata"] = metadata
-            repaired.append(orphan_history)
-            continue
-        if pending_ids:
-            demote_pending_chain()
-        repaired.append(message)
-    if pending_ids:
-        demote_pending_chain()
-    return _dedupe_adjacent_semantic_messages(repaired)
-
-
 def _provider_chain_to_semantic_history(messages: list[Any]) -> list[Any]:
     semantic: list[Any] = []
     pending_tool_names: dict[str, str] = {}

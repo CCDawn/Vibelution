@@ -78,6 +78,30 @@ def historical_conversation_events(
     ]
 
 
+def canonical_replay_input(
+    events: Iterable[ConversationLedgerEvent],
+    *,
+    current_turn_id: str = "",
+) -> list[ConversationLedgerEvent]:
+    """Derive the exact model-replay input behind
+    :func:`canonical_conversation_messages_from_events`.
+
+    Declared transforms: fold the active path, exclude ``current_turn_id``,
+    then apply compression checkpoints. The resumable canonical memo uses this
+    to detect identity-prefix growth of the replay input and continue the
+    projection incrementally.
+    """
+
+    historical = historical_conversation_events(
+        fold_active_events(events),
+        current_turn_id=current_turn_id,
+    )
+    return apply_context_compression_checkpoints(
+        historical,
+        current_turn_id=current_turn_id,
+    )
+
+
 def canonical_conversation_messages_from_events(
     events: Iterable[ConversationLedgerEvent],
     *,
@@ -90,14 +114,7 @@ def canonical_conversation_messages_from_events(
     applied here.
     """
 
-    historical = historical_conversation_events(
-        fold_active_events(events),
-        current_turn_id=current_turn_id,
-    )
-    replayed = apply_context_compression_checkpoints(
-        historical,
-        current_turn_id=current_turn_id,
-    )
+    replayed = canonical_replay_input(events, current_turn_id=current_turn_id)
     return conversation_layer_messages(conversation_model_messages_from_events(replayed))
 
 

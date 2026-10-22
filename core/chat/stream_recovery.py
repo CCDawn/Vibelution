@@ -158,7 +158,17 @@ def omit_discarded_stream_tail(messages: Iterable[Any], events: Iterable[Any]) -
     """
 
     recovered = turns_with_stream_recovery(events)
-    if not recovered:
+    return filter_stream_recovered_messages(messages, recovered_turn_ids=recovered)
+
+
+def filter_stream_recovered_messages(
+    messages: Iterable[Any],
+    *,
+    recovered_turn_ids: set[str],
+) -> list[Any]:
+    """Drop messages of stream-recovered turns (partials and open replays)."""
+
+    if not recovered_turn_ids:
         return list(messages or [])
     kept: list[Any] = []
     for message in list(messages or []):
@@ -167,7 +177,7 @@ def omit_discarded_stream_tail(messages: Iterable[Any], events: Iterable[Any]) -
             continue
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         turn_id = str(metadata.get("turnId") or "").strip()
-        if turn_id not in recovered:
+        if turn_id not in recovered_turn_ids:
             kept.append(message)
             continue
         kind = str(metadata.get("kind") or "").strip()

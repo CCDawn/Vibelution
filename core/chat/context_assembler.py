@@ -35,6 +35,14 @@ from .projection_stickiness import (
     content_digest,
     projection_locks_from_ledger_events,
 )
+from .conversation_invariant import (
+    ConversationSeedInvariantError,
+    canonical_conversation_messages_from_events,
+    canonical_replay_input,
+    check_conversation_payload_invariant,
+    conversation_layer_fingerprint,
+    conversation_layer_messages,
+)
 from .conversation_ledger import (
     ConversationLedgerEvent,
     apply_context_compression_checkpoints,
@@ -43,6 +51,8 @@ from .conversation_ledger import (
     latest_context_compression_checkpoint,
 )
 from .turn_journal import (
+    ModelProjectionReplay,
+    _ProjectionResumeBail,
     EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
@@ -469,11 +479,12 @@ def _model_messages_memoized(
     Exact element-wise replay of the stored input reuses the cached message
     list (zero replay) — this covers every re-assembly of an unchanged
     journal state, including all mid-turn growth of the *current* turn, which
-    the historical window never sees. Appended growth recomputes in full: a
-    block replay is not byte-equivalent to a full replay because provenance
-    numbering (``sourceIndex``) and the block-local visible projection
-    (cross-boundary tool-result coalescing, block-local trailing collapse)
-    both depend on prefix context this stage cannot reconstruct cheaply.
+    the historical window never sees. Appended growth resumes from the stored
+    provenance carry (the batch-8 fix-G follow-up): the projection's
+    sourceIndex baseline and scan state ride the memo, so a safe append
+    replays only the appended turns and must match a cold replay byte for
+    byte. Anything the carry cannot prove — rewinds, marker appends, same-turn
+    rewrites, cross-turn id collisions — recomputes in full.
     """
 
     scope = ("conversation_model_messages", session_id)
@@ -483,8 +494,47 @@ def _model_messages_memoized(
             ledger_replay_events[index] is kept for index, kept in enumerate(entry.items)
         ):
             return entry.value
-    messages = conversation_model_messages_from_events(ledger_replay_events)
-    _ASSEMBLY_MEMO.store(scope, ledger_replay_events, messages)
+        extra = entry.extra
+        guard = _prefix_append_guard(
+            entry.items,
+            ledger_replay_events,
+            known_turn_ids=extra["knownTurnIds"],
+        )
+        if guard is not None:
+            appended = guard[0]
+            try:
+                replay = ModelProjectionReplay(carry=extra["carry"])
+                replay.feed(extra["pendingEvents"])
+                replay.feed(appended)
+                messages = replay.finish()
+            except _ProjectionResumeBail:
+                messages = None
+            if messages is not None:
+                _ASSEMBLY_MEMO.store(
+                    scope,
+                    ledger_replay_events,
+                    messages,
+                    {
+                        "carry": replay.carry,
+                        "pendingEvents": replay.pending_events,
+                        "knownTurnIds": extra["knownTurnIds"]
+                        | {turn for turn in map(_event_turn_id, appended) if turn},
+                    },
+                )
+                return messages
+    replay = ModelProjectionReplay()
+    replay.feed(ledger_replay_events)
+    messages = replay.finish()
+    _ASSEMBLY_MEMO.store(
+        scope,
+        ledger_replay_events,
+        messages,
+        {
+            "carry": replay.carry,
+            "pendingEvents": replay.pending_events,
+            "knownTurnIds": _input_turn_ids(ledger_replay_events),
+        },
+    )
     return messages
 
 
@@ -499,8 +549,11 @@ def _canonical_messages_memoized(
     The canonical window excludes the in-flight turn inside the projection,
     so journal growth of the *current* turn leaves the value untouched: the
     cached value is reused while only the stored input tuple rolls forward.
-    Any other change (turn rollover, rewrites, other-turn appends)
-    recomputes in full, matching a cold assembly byte for byte.
+    A turn rollover admits the previously excluded block — the replay input
+    grows by an identity-checked prefix, and the projection resumes from the
+    stored provenance carry over exactly the admitted delta. Any change the
+    carry cannot prove byte-equivalent recomputes in full, matching a cold
+    assembly byte for byte.
     """
 
     scope = ("canonical_conversation_messages", session_id)
@@ -522,20 +575,50 @@ def _canonical_messages_memoized(
                 entry.extra,
             )
             return entry.value
-    value = canonical_conversation_messages_from_events(
+    replay_input = canonical_replay_input(
         raw_ledger_event_list,
-        current_turn_id=current_turn_id,
+        current_turn_id=normalized_turn_id,
     )
+    messages = None
+    used_carry = None
+    used_pending: list[ConversationLedgerEvent] = []
+    if entry is not None:
+        stored_input = entry.extra["replayInput"]
+        if len(replay_input) > len(stored_input) and all(
+            replay_input[index] is kept for index, kept in enumerate(stored_input)
+        ):
+            block = replay_input[len(stored_input):]
+            try:
+                replay = ModelProjectionReplay(carry=entry.extra["carry"])
+                replay.feed(entry.extra["pendingEvents"])
+                replay.feed(block)
+                model_messages = replay.finish()
+            except _ProjectionResumeBail:
+                model_messages = None
+            if model_messages is not None:
+                messages = conversation_layer_messages(model_messages)
+                used_carry = replay.carry
+                used_pending = replay.pending_events
+    if messages is None:
+        replay = ModelProjectionReplay()
+        replay.feed(replay_input)
+        model_messages = replay.finish()
+        messages = conversation_layer_messages(model_messages)
+        used_carry = replay.carry
+        used_pending = replay.pending_events
     _ASSEMBLY_MEMO.store(
         scope,
         raw_ledger_event_list,
-        value,
+        messages,
         {
             "turnId": normalized_turn_id,
             "knownTurnIds": _input_turn_ids(raw_ledger_event_list),
+            "carry": used_carry,
+            "pendingEvents": used_pending if used_carry is not None else [],
+            "replayInput": replay_input,
         },
     )
-    return value
+    return messages
 
 
 def _identity_value_memoized(scope: tuple[Any, ...], items: list[Any], compute) -> Any:
@@ -616,15 +699,14 @@ def _sticky_overlay_memoized(
     session_id: str,
     state: dict[str, Any],
 ) -> tuple[list[Any], dict[str, Any]]:
-    """Memoized sticky overlay with appended-tail delta.
+    """Memoized sticky overlay with an exact-replay fast path.
 
-    The overlay is per-message (lock lookup by call id/digest), so a shared
-    prefix only needs its tail re-projected; the carried state is extended
-    with the new restorations and the freshly appended entries get their
-    messageIndex shifted back into whole-list coordinates. Hit conditions:
-    locks object identity (the lock-index memo reuses one object while the
-    ledger only appends), incoming-state equality, and the identity-prefix
-    guard on the messages themselves.
+    The overlay's per-message projection is cheap, but its *state* accounting
+    (restoration counts) is whole-list: a tail-only replay would under-count
+    locked forms the raw derivation no longer selects. Unchanged windows
+    replay from the cache; any growth takes the full overlay call — identical
+    to an unmemoized assembly — so the returned state always matches a cold
+    round byte for byte.
     """
 
     if projection_locks is None:
@@ -639,33 +721,6 @@ def _sticky_overlay_memoized(
                 source_messages[index] is kept for index, kept in enumerate(stored)
             ):
                 return list(entry.value[0]), _clone_overlay_state(entry.value[1])
-            if (
-                len(source_messages) > offset
-                and all(source_messages[index] is kept for index, kept in enumerate(stored))
-            ):
-                # Growth path: replay the appended tail against the cached
-                # output state so accumulated restorations ride along, then
-                # shift the new entries' messageIndex into place.
-                appended = source_messages[offset:]
-                base_state = _clone_overlay_state(entry.value[1])
-                known_entries = len(base_state.get("replacements") or [])
-                delta_out, new_state = overlay(
-                    appended,
-                    projection_locks=projection_locks,
-                    session_id=session_id,
-                    state=base_state,
-                )
-                for fresh in list((new_state.get("replacements") or []))[known_entries:]:
-                    if isinstance(fresh, dict) and "messageIndex" in fresh:
-                        fresh["messageIndex"] = int(fresh["messageIndex"]) + offset
-                new_out = [*entry.value[0], *delta_out]
-                _ASSEMBLY_MEMO.store(
-                    scope,
-                    source_messages,
-                    (new_out, new_state),
-                    {"locks": projection_locks, "inState": _clone_overlay_state(state)},
-                )
-                return new_out, new_state
     out_list, out_state = overlay(
         source_messages,
         projection_locks=projection_locks,
