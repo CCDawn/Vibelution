@@ -311,10 +311,7 @@ def _raw_agent(agent_id: str, *, include_archived: bool) -> dict[str, Any] | Non
     normalized = str(agent_id or "").strip()
     if not normalized:
         return None
-    for agent in _raw_agents(include_archived=include_archived):
-        if str(agent.get("agentId") or "").strip() == normalized:
-            return dict(agent)
-    return None
+    return agent_directory_service.load_agent_record(normalized, include_archived=include_archived)
 
 
 def _raw_agents(*, include_archived: bool) -> list[dict[str, Any]]:

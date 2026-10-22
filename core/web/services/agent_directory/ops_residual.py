@@ -1216,8 +1216,7 @@ def promote_agent_inbox_message_body(
 
 def count_agent_inbox_messages_for_agent(agent_id: str, *, status: str = "pending") -> int:
     s = _service()
-    state = s.load_state()
-    agent = s._find_agent(state, agent_id)
+    agent = s.load_agent_record(agent_id)
     if not agent:
         return 0
     return s._count_jsonl_matching_status(s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl"), status=status)
@@ -1730,8 +1729,7 @@ def list_agent_inbox_messages_for_agent(
     prompt_eligible_only: bool = False,
 ) -> list[dict[str, Any]]:
     s = _service()
-    state = s.load_state()
-    agent = s._find_agent(state, agent_id)
+    agent = s.load_agent_record(agent_id)
     if not agent:
         return []
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
@@ -1759,8 +1757,7 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
 
 def list_group_context_events_for_agent(agent_id: str, *, limit: int = 8, prompt_eligible_only: bool = False) -> list[dict[str, Any]]:
     s = _service()
-    state = s.load_state()
-    agent = s._find_agent(state, agent_id)
+    agent = s.load_agent_record(agent_id)
     if not agent:
         return []
     path = s._resolve_project_path(str(agent.get("workspacePath") or "")) / "events" / "group_context_events.jsonl"

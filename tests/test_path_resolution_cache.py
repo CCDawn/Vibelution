@@ -413,3 +413,99 @@ def test_load_state_is_thread_safe(agent_registry_env):
 
     assert not errors
     assert [a["agentId"] for a in agent_directory_service.load_state()["agents"]] == ["agent-thread"]
+
+
+@pytest.mark.parametrize("warm", [False, True])
+def test_load_agent_record_copies_only_selected_record(agent_registry_env, monkeypatch, warm):
+    from core.web.services.agent_directory import repair_store
+
+    agent_directory_service.save_state({"agents": [
+        {"agentId": "selected", "metadata": {"nested": ["original"]}},
+        {"agentId": "unrelated", "metadata": {"nested": ["other"]}},
+    ]})
+    if warm:
+        agent_directory_service.load_state()
+    original_copy = repair_store._copy_json_value
+    copied_agents = []
+
+    def tracked_copy(value):
+        if isinstance(value, dict) and "agentId" in value:
+            copied_agents.append(value["agentId"])
+        return original_copy(value)
+
+    monkeypatch.setattr(repair_store, "_copy_json_value", tracked_copy)
+    first = agent_directory_service.load_agent_record(" selected ")
+    first["metadata"]["nested"].append("local mutation")
+    second = agent_directory_service.load_agent_record("selected")
+
+    assert copied_agents == ["selected", "selected"]
+    assert second["metadata"]["nested"] == ["original"]
+    assert agent_directory_service.load_agent_record("missing") is None
+    assert agent_directory_service.load_agent_record("") is None
+    assert agent_directory_service.load_state()["agents"][0] == second
+
+
+def test_load_agent_record_preserves_archived_selection_order(agent_registry_env):
+    from core.web.services import agent_tool_governance_service
+
+    agent_directory_service.save_state({"agents": [
+        {"agentId": "duplicate", "status": " archived ", "displayName": "Archived"},
+        {"agentId": "duplicate", "status": "active", "displayName": "Active"},
+    ]})
+    assert agent_directory_service.load_agent_record("duplicate")["displayName"] == "Archived"
+    assert agent_tool_governance_service._raw_agent("duplicate", include_archived=False)["displayName"] == "Active"
+    assert agent_tool_governance_service._raw_agent("duplicate", include_archived=True)["displayName"] == "Archived"
+
+
+@pytest.mark.parametrize("write_mode", ["save", "external", "delete"])
+def test_load_agent_record_observes_registry_changes(agent_registry_env, write_mode):
+    agent_directory_service.save_state({"agents": [{"agentId": "target", "displayName": "Before"}]})
+    assert agent_directory_service.load_agent_record("target")["displayName"] == "Before"
+    state = agent_directory_service.load_state()
+    state["agents"][0]["displayName"] = "After"
+    registry = agent_directory_service.registry_path()
+    if write_mode == "save":
+        agent_directory_service.save_state(state)
+    elif write_mode == "external":
+        registry.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    else:
+        registry.unlink()
+    result = agent_directory_service.load_agent_record("target")
+    assert result is None if write_mode == "delete" else result["displayName"] == "After"
+
+
+@pytest.mark.parametrize("payload", ["{bad json", "[]"])
+@pytest.mark.parametrize("agent_id", ["target", ""])
+def test_load_agent_record_rejects_corruption_after_warm_read(agent_registry_env, payload, agent_id):
+    agent_directory_service.save_state({"agents": [{"agentId": "target"}]})
+    assert agent_directory_service.load_agent_record("target")
+    agent_directory_service.registry_path().write_text(payload, encoding="utf-8")
+    with pytest.raises(agent_directory_service.AgentDirectoryError):
+        agent_directory_service.load_agent_record(agent_id)
+
+
+def test_load_agent_record_isolates_project_roots(agent_registry_env):
+    root, _ = agent_registry_env
+    other_root = root.parent / "other-project"
+    other_root.mkdir()
+    _write_identity(other_root, "other-project")
+    agent_directory_service.save_state({"agents": [{"agentId": "same-id", "displayName": "First"}]})
+    assert agent_directory_service.load_agent_record("same-id")["displayName"] == "First"
+    with agent_directory_service.scoped_project_root(other_root):
+        agent_directory_service.save_state({"agents": [{"agentId": "same-id", "displayName": "Second"}]})
+        assert agent_directory_service.load_agent_record("same-id")["displayName"] == "Second"
+    assert agent_directory_service.load_agent_record("same-id")["displayName"] == "First"
+
+
+def test_load_agent_record_is_thread_safe(agent_registry_env):
+    agent_directory_service.save_state({"agents": [{"agentId": "target", "metadata": {"values": ["original"]}}]})
+
+    def read_and_mutate(_):
+        for _ in range(20):
+            record = agent_directory_service.load_agent_record("target")
+            assert record["metadata"]["values"] == ["original"]
+            record["metadata"]["values"].append("local")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(read_and_mutate, range(8)))
+    assert agent_directory_service.load_state()["agents"][0]["metadata"]["values"] == ["original"]
