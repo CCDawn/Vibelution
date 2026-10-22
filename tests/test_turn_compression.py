@@ -7,6 +7,7 @@ emergency vs chat early-exit contract using injected fakes.
 
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from core.orchestration.agent_modes import AgentMode
@@ -484,6 +485,48 @@ def test_budget_window_persists_replacement_even_below_savings_threshold(monkeyp
     assert captured[0]["effective"] is True
     assert captured[0]["source_messages"] == original
     assert captured[0]["retained_messages"] == [rules, current_request]
+
+
+@pytest.mark.parametrize("checkpoint_result", ["raises", "none"])
+@pytest.mark.parametrize("attempt_result", ["written", "none", "raises"])
+def test_budget_window_requires_a_real_checkpoint_before_continuing(
+    monkeypatch, tmp_path, checkpoint_result, attempt_result,
+):
+    attempts = []
+
+    def checkpoint(*args, **kwargs):
+        if checkpoint_result == "raises":
+            raise OSError("checkpoint unavailable")
+        return None
+
+    def attempt(*args, **kwargs):
+        attempts.append(kwargs)
+        if attempt_result == "raises":
+            raise OSError("attempt unavailable")
+        return SimpleNamespace(event_id="attempt-only") if attempt_result == "written" else None
+
+    monkeypatch.setattr("core.chat.conversation_ledger.append_context_compression_checkpoint", checkpoint)
+    monkeypatch.setattr("core.chat.conversation_ledger.append_context_compression_attempt", attempt)
+    rules = SystemMessage(content="rules and history summary")
+    current_request = HumanMessage(content="current request")
+    original = [rules, AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 800), current_request]),
+        config=_feature_config(), extra=extras, project_root=str(tmp_path),
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result == (original, True, False, 0, 0)
+    assert attempts[0]["status"] == "failed_preserved"
+    assert attempts[0]["summary"] == ""
+    assert not extras["ui"].events
+    assert not any(item["args"][1] == "agent.context_compression.token_budget_applied" for item in extras["events"])
+    blocked = next(item for item in extras["events"] if item["args"][1] == "agent.context_budget_exhausted")
+    assert blocked["kwargs"]["fields"]["guardReason"] == "budget_window_checkpoint_not_written"
+    failed = next(item for item in extras["events"] if item["args"][1] == "agent.context_compression_checkpoint_failed")
+    assert failed["kwargs"]["fields"]["stage"] == "checkpoint"
+    assert failed["kwargs"]["fields"]["errorType"] == ("OSError" if checkpoint_result == "raises" else "RuntimeError")
 
 
 def test_unreachable_target_without_removable_history_does_not_report_budget_applied():

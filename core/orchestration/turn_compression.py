@@ -783,6 +783,7 @@ def compress_turn_messages(
 
     send_tokens = estimate_send_payload(compressed)
     budget_window_applied = False
+    budget_window_event: Dict[str, Any] | None = None
     over_hard_limit = normalized_hard_limit > 0 and send_tokens > normalized_hard_limit
     window_limit = min((
         value for value in (
@@ -818,9 +819,7 @@ def compress_turn_messages(
                     return fail_closed("budget_window_requires_summary", budget_pairing, budget_tokens)
                 budget_window_applied = len(budget_window) < len(compressed)
                 if budget_window_applied:
-                    recorder(
-                        "runtime",
-                        "agent.context_compression.token_budget_applied",
+                    budget_window_event = dict(
                         message=(
                             "Summarized history and its notice exceeded the compression target; "
                             "installed a token-budget window."
@@ -959,6 +958,7 @@ def compress_turn_messages(
     ledger_checkpoint_written = False
     if summary:
         if session_id and mode_text == AgentMode.CHAT and project_root:
+            replacement_checkpoint_written = False
             try:
                 from core.chat.conversation_ledger import (
                     append_context_compression_attempt,
@@ -994,6 +994,9 @@ def compress_turn_messages(
                         tool_result_replacement_state=tool_result_replacement_state,
                         **checkpoint_kwargs,
                     )
+                    if budget_window_applied and event is None:
+                        raise RuntimeError("Context replacement checkpoint was not written.")
+                    replacement_checkpoint_written = event is not None
                 else:
                     event = append_context_compression_attempt(
                         Path(project_root),
@@ -1046,8 +1049,9 @@ def compress_turn_messages(
                         effectiveness_ratio=effectiveness_ratio,
                         error_type=type(exc).__name__,
                     )
-                    ledger_checkpoint_written = event is not None
-                    summary_written = ledger_checkpoint_written
+                    if not budget_window_applied:
+                        ledger_checkpoint_written = event is not None
+                        summary_written = ledger_checkpoint_written
                 except Exception as fallback_exc:
                     recorder(
                         "runtime",
@@ -1066,6 +1070,8 @@ def compress_turn_messages(
                             "stage": "attempt_fallback",
                         },
                     )
+            if budget_window_applied and not replacement_checkpoint_written:
+                return fail_closed("budget_window_checkpoint_not_written", after_pairing, after_tokens)
         try:
             if not ledger_checkpoint_written and prompt_manager is not None:
                 prompt_manager.update_state_memory(
@@ -1074,6 +1080,9 @@ def compress_turn_messages(
                 summary_written = True
         except Exception:
             pass
+
+    if budget_window_event is not None:
+        recorder("runtime", "agent.context_compression.token_budget_applied", **budget_window_event)
 
     try:
         ui.note_context_compression_event(
