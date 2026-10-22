@@ -74,6 +74,201 @@ def test_shell_readiness_rejects_missing_referenced_assets(tmp_path):
     assert "missing asset" in app.state.web_shell_error
 
 
+def test_shell_bootstrap_reads_do_not_wait_for_catalog_but_session_reads_do(tmp_path, monkeypatch):
+    from core.web import route_bootstrap
+    from core.web.control import CONTROL_TOKEN_HEADER, WebControlGuardMiddleware, get_control_token
+    from core.web.services.agent_directory import bootstrap
+
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    app.add_middleware(WebControlGuardMiddleware)
+    app.add_middleware(WaitForWebRoutesMiddleware, timeout_seconds=2)
+    (tmp_path / "index.html").write_text("shell", encoding="utf-8")
+    register_spa_routes(app, web_dist=tmp_path)
+    mounts = []
+    original_include = app.include_router
+
+    def include(router, **kwargs):
+        mounts.append(router)
+        return original_include(router, **kwargs)
+
+    monkeypatch.setattr(app, "include_router", include)
+    config = APIRouter()
+    launcher = APIRouter()
+    sessions = APIRouter()
+    initialized = []
+
+    @config.api_route("/config/bootstrap", methods=["GET", "HEAD"])
+    @launcher.api_route("/launcher/current-instance", methods=["GET", "HEAD"])
+    def shell_read():
+        return {"shell": True}
+
+    @sessions.get("/sessions/bootstrap")
+    def session_read():
+        assert initialized == [True]
+        return {"sessions": True}
+
+    @config.get("/config/public")
+    @config.post("/config/bootstrap")
+    @config.get("/config/bootstrap/extra")
+    @launcher.get("/launcher/status")
+    def full_read():
+        return {"full": True}
+
+    startup_modules = [
+        SimpleNamespace(__name__="core.web.routes.config", router=config),
+        SimpleNamespace(__name__="core.web.routes.launcher", router=launcher),
+        SimpleNamespace(__name__="core.web.routes.sessions", router=sessions),
+    ]
+    monkeypatch.setattr(bootstrap, "initialize_builtin_agent_catalog", lambda: initialized.append(True))
+
+    async def exercise():
+        for name in ("web_routes_ready_event", "web_startup_routes_ready_event", "web_bootstrap_routes_ready_event"):
+            setattr(app.state, name, asyncio.Event())
+        catalog_entered = asyncio.Event()
+        release_catalog = asyncio.Event()
+        remaining_entered = asyncio.Event()
+        release_remaining = asyncio.Event()
+        waiting = asyncio.Event()
+        wait_count = 0
+        original_wait = route_bootstrap.wait_for_web_routes
+        pending = []
+
+        async def observe_wait(*args, **kwargs):
+            nonlocal wait_count
+            if not kwargs.get("bootstrap_only"):
+                wait_count += 1
+                if wait_count == 5:
+                    waiting.set()
+            return await original_wait(*args, **kwargs)
+
+        async def run_sync(name, callback, *args, **kwargs):
+            if name == "web-route-import":
+                if kwargs["startup_only"]:
+                    return startup_modules
+                remaining_entered.set()
+                await release_remaining.wait()
+                return []
+            if name == "builtin-agent-bootstrap":
+                catalog_entered.set()
+                await release_catalog.wait()
+                return callback(*args, **kwargs)
+            return None
+
+        monkeypatch.setattr("core.web.middleware.wait_for_routes.wait_for_web_routes", observe_wait)
+        warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, web_dist=tmp_path, run_sync=run_sync))
+        try:
+            await asyncio.wait_for(catalog_entered.wait(), 1)
+            assert app.state.web_bootstrap_routes_registered
+            assert not getattr(app.state, "web_startup_routes_registered", False)
+            headers = {CONTROL_TOKEN_HEADER: get_control_token()}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
+                for path in ("/api/config/bootstrap", "/api/launcher/current-instance"):
+                    assert (await client.get(path, headers=headers)).json() == {"shell": True}
+                    assert (await client.head(path, headers=headers)).status_code == 200
+                    assert (await client.get(path)).status_code == 403
+                    assert (await client.get(path, headers={**headers, "Origin": "https://untrusted.invalid"})).status_code == 403
+                assert initialized == []
+                pending = [asyncio.create_task(client.request(method, path, headers=headers)) for method, path in (
+                    ("GET", "/api/sessions/bootstrap"),
+                    ("GET", "/api/config/public"),
+                    ("POST", "/api/config/bootstrap"),
+                    ("GET", "/api/config/bootstrap/extra"),
+                    ("GET", "/api/launcher/status"),
+                )]
+                await asyncio.wait_for(waiting.wait(), 1)
+                assert not any(task.done() for task in pending)
+                release_catalog.set()
+                await asyncio.wait_for(remaining_entered.wait(), 1)
+                assert (await asyncio.wait_for(pending[0], 1)).json() == {"sessions": True}
+                assert not any(task.done() for task in pending[1:])
+                release_remaining.set()
+                await warming
+                assert all(response.json() == {"full": True} for response in await asyncio.gather(*pending[1:]))
+                assert mounts.count(config) == mounts.count(launcher) == mounts.count(sessions) == 1
+        finally:
+            release_catalog.set()
+            release_remaining.set()
+            if not warming.done():
+                warming.cancel()
+            await asyncio.gather(warming, *pending, return_exceptions=True)
+            for name in ("financial_team_coordinator_task", "financial_job_scheduler_task", "financial_backtest_worker_task"):
+                task = getattr(app.state, name, None)
+                if task is not None:
+                    await task
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("stage", ["import", "catalog", "remaining"])
+@pytest.mark.parametrize("cancel", [False, True])
+def test_failed_or_cancelled_warm_releases_waiters_and_preserves_completed_gates(monkeypatch, stage, cancel):
+    from core.web import route_bootstrap
+
+    app = FastAPI()
+    app.state.web_routes_registered = False
+    modules = [SimpleNamespace(__name__="core.web.routes.config", router=APIRouter())]
+    monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *a, **k: None)
+    recoveries = []
+
+    def unavailable(*args, **kwargs):
+        recoveries.append(True)
+        raise RuntimeError("recovery unavailable")
+
+    monkeypatch.setattr(route_bootstrap, "ensure_web_routes_registered", unavailable)
+
+    async def exercise():
+        waiting = asyncio.Event()
+        wait_count = 0
+        expected_wait_count = {"import": 3, "catalog": 2, "remaining": 1}[stage]
+
+        class ObservedEvent(asyncio.Event):
+            async def wait(self):
+                nonlocal wait_count
+                wait_count += 1
+                if wait_count == expected_wait_count:
+                    waiting.set()
+                return await super().wait()
+
+        for name in ("web_routes_ready_event", "web_startup_routes_ready_event", "web_bootstrap_routes_ready_event"):
+            setattr(app.state, name, ObservedEvent())
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def run_sync(name, callback, *args, **kwargs):
+            current_stage = "catalog" if name == "builtin-agent-bootstrap" else (
+                "import" if kwargs.get("startup_only") else "remaining"
+            )
+            if current_stage == stage:
+                entered.set()
+                await release.wait()
+                raise RuntimeError("warm unavailable")
+            return modules if current_stage == "import" else None
+
+        warming = asyncio.create_task(route_bootstrap.warm_web_routes_in_background(app, run_sync=run_sync))
+        await asyncio.wait_for(entered.wait(), 1)
+        waiters = [asyncio.create_task(route_bootstrap.wait_for_web_routes(app, **kwargs)) for kwargs in (
+            {"bootstrap_only": True}, {"startup_only": True}, {},
+        )]
+        await asyncio.wait_for(waiting.wait(), 1)
+        if cancel:
+            warming.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await warming
+        else:
+            release.set()
+            with pytest.raises(RuntimeError, match="warm unavailable"):
+                await warming
+        assert await asyncio.wait_for(asyncio.gather(*waiters), 1) == [stage != "import", stage == "remaining", False]
+        assert app.state.web_bootstrap_routes_ready_event.is_set()
+        assert app.state.web_startup_routes_ready_event.is_set()
+        assert app.state.web_routes_ready_event.is_set()
+        if cancel:
+            assert recoveries == []
+
+    asyncio.run(exercise())
+
+
 def test_first_frame_reads_work_before_unrelated_imports_finish(monkeypatch):
     from core.web import route_bootstrap
     from core.web.control import CONTROL_TOKEN_HEADER, WebControlGuardMiddleware, get_control_token
