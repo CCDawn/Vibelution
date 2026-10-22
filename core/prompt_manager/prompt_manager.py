@@ -218,6 +218,109 @@ def _fingerprint_digest(projection: Any) -> Optional[str]:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _identity_stable_for_memo(value: Any, *, depth: int = 0) -> bool:
+    """判断输入对象图是否「身份稳定」：图内不含任何可变容器或可变数据类。
+
+    只有身份稳定的图才允许进身份备忘录——frozen dataclass 字段不可重绑、
+    tuple/frozenset/原语/Enum 不可变，此后同一根对象必然产出同一投影，
+    身份命中即内容命中，杜绝原地变异下的 stale 摘要。含 dict/list/set 或
+    非 frozen dataclass 的图一律返回 False，调用方保持全量计算路径。
+    """
+
+    if depth > 6:
+        return False
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, enum.Enum):
+        return True
+    if is_dataclass(value):
+        params = getattr(type(value), "__dataclass_params__", None)
+        if params is None or not getattr(params, "frozen", False):
+            return False
+        return all(
+            _identity_stable_for_memo(getattr(value, field.name, None), depth=depth + 1)
+            for field in dataclass_fields(value)
+        )
+    if isinstance(value, (dict, list, set)):
+        return False
+    if isinstance(value, (tuple, frozenset)):
+        return all(_identity_stable_for_memo(item, depth=depth + 1) for item in value)
+    return False
+
+
+class _SourceFingerprintMemo:
+    """源对象身份备忘录：同一未变对象图重复求指纹时跳过投影+repr+sha256 整段。
+
+    复用 ``_IdentityListMemo`` / ``_SeededHistoryFingerprintMemo`` 的身份检查
+    约定，适配到单根对象图：
+
+    - 命中=根对象 ``is`` 同一；条目强引用源对象，杜绝 id 复用碰撞；
+    - 只有身份稳定（``_identity_stable_for_memo``）的图才入库，冻结图不可
+      原地变异，身份命中即字节等价命中；digest 字节等价由构造保证——命中
+      返回的正是此前同源全量计算的产物；
+    - 对 monkeypatch 敏感：条目记录产出 digest 时的 ``_project_cache_input``
+      / ``_fingerprint_digest`` 函数身份，模块属性被替换后一律 miss 重算；
+    - LRU 有界；miss 永远走全量计算，只能拿重算换重算。
+    """
+
+    def __init__(self, capacity: int = 64):
+        self._capacity = max(1, int(capacity))
+        self._lock = threading.Lock()
+        # key=id(source)；value=(source, digest, proj_fn, digest_fn)
+        self._entries: "OrderedDict[int, tuple]" = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def digest_for(self, source: Any) -> Optional[str]:
+        """``_project_cache_input`` → ``_fingerprint_digest`` 链的免重算入口。"""
+
+        cur_proj = globals().get("_project_cache_input")
+        cur_digest = globals().get("_fingerprint_digest")
+        key = id(source)
+        with self._lock:
+            entry = self._entries.get(key)
+            if (
+                entry is not None
+                and entry[0] is source
+                and cur_proj is not None
+                and entry[2] is cur_proj
+                and cur_digest is not None
+                and entry[3] is cur_digest
+            ):
+                self._entries.move_to_end(key)
+                self.hits += 1
+                return entry[1]
+            self.misses += 1
+        projection = _project_cache_input(source)
+        digest = _fingerprint_digest(projection)
+        if digest is not None and _identity_stable_for_memo(source):
+            with self._lock:
+                self._entries[key] = (source, digest, cur_proj, cur_digest)
+                self._entries.move_to_end(key)
+                while len(self._entries) > self._capacity:
+                    self._entries.popitem(last=False)
+        return digest
+
+    def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "entries": len(self._entries),
+                "capacity": self._capacity,
+                "hits": self.hits,
+                "misses": self.misses,
+            }
+
+
+_FINGERPRINT_MEMO_CAPACITY = 64
+_FINGERPRINT_MEMO = _SourceFingerprintMemo(capacity=_FINGERPRINT_MEMO_CAPACITY)
+
+
+def _source_fingerprint_digest(source: Any) -> Optional[str]:
+    """带身份备忘录的源对象指纹；输出与全量计算逐字节一致。"""
+
+    return _FINGERPRINT_MEMO.digest_for(source)
+
+
 class StableSectionRenderCache:
     """跨轮稳定段渲染缓存：键=(section 名, 输入指纹)，值=渲染文本。
 
@@ -705,13 +808,11 @@ class PromptManager:
         generation = self._registry_generation
         ctx = self._build_context
 
-        goal_projection = _project_cache_input(ctx.runtime_goal_packet)
-        goal_digest = _fingerprint_digest(goal_projection)
+        goal_digest = _source_fingerprint_digest(ctx.runtime_goal_packet)
         if goal_digest is not None:
             fingerprints["RUNTIME_GOAL"] = ("v1", generation, goal_digest)
 
-        intent_projection = _project_cache_input(ctx.intent_alignment_packet)
-        intent_digest = _fingerprint_digest(intent_projection)
+        intent_digest = _source_fingerprint_digest(ctx.intent_alignment_packet)
         if intent_digest is not None:
             fingerprints["INTENT_ALIGNMENT"] = ("v1", generation, intent_digest)
 
