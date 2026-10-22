@@ -2984,6 +2984,129 @@ def _active_stage_one_run(
     )[-1]
 
 
+def _is_full_scope_run(run: Mapping[str, Any]) -> bool:
+    """True when the run's frozen definition is the full 3.0.0 experiment.
+
+    Stage-one and full-scope runs share ``workflowId=challenge-cup-research``
+    and the run-store rows do not expose the input scope envelope, so the
+    frozen workflow version id is the honest scope discriminator: any version
+    that is not the pinned stage-one identity belongs to a full experiment
+    run (including historical full definitions).
+    """
+
+    from core.research.workflow.stage_one_definition import (
+        is_stage_one_workflow_version,
+    )
+
+    return not is_stage_one_workflow_version(str(run.get("workflowVersionId") or ""))
+
+
+def _full_scope_run_exists(formal_runs: Sequence[Mapping[str, Any]]) -> bool:
+    """True when a live (non-archived) full experiment run already exists.
+
+    Archived full runs keep history without blocking a rebuild — the offer's
+    rebuild ordinal re-keys the creation, matching the stage-one rebuild
+    semantics.
+    """
+
+    return any(
+        _is_full_scope_run(run)
+        and str(run.get("status") or "").strip().lower() != "archived"
+        for run in formal_runs
+    )
+
+
+def _covering_full_experiment_authorization(
+    team_id: str,
+    question_id: str,
+) -> dict[str, Any] | None:
+    """Return the newest durable CatalogRunAuthorization covering the question.
+
+    The bridge never records authorizations (that stays on the real-batch
+    route); it only looks one up.  Validation mirrors
+    ``run_creation._load_catalog_run_authorization`` (immutable content,
+    team binding, frozen questionIds) without pinning a client-supplied
+    authorization id: the offer resolves the covering record itself so both
+    enablement and dispatch stay fail-closed on the same lookup.
+    """
+
+    from .catalog_run_authorization import (
+        authorization_to_dict,
+        validate_catalog_run_authorization,
+    )
+    from .formal_write_runtime import get_write_store
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_team_id or not normalized_question_id:
+        return None
+    try:
+        records = get_write_store().list_catalog_run_authorizations(
+            normalized_team_id
+        )
+    except Exception:  # noqa: BLE001 - an unreadable ledger only disables the offer
+        return None
+    # list_catalog_run_authorizations orders newest approval first; the first
+    # content-valid record whose frozen scope covers the question wins.
+    for record in records:
+        if validate_catalog_run_authorization(
+            record,
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
+        ):
+            return authorization_to_dict(record)
+    return None
+
+
+def _full_experiment_bridge_action(
+    *,
+    team_id: str,
+    question_id: str,
+    source_run_id: str,
+    rebuild_ordinal: int,
+) -> dict[str, Any] | None:
+    """Build the ``create_full_experiment_run`` offer for an accepted question.
+
+    Returns None when the accepted program record carries no deliverable run
+    identity.  The offer stays visible but disabled until a durable
+    CatalogRunAuthorization covers the question — real experiment launch is a
+    user-authorized decision, and a disabled command is not executable
+    (``_find_allowed_command`` rejects it).
+    """
+
+    normalized_source_run_id = str(source_run_id or "").strip()
+    if not normalized_source_run_id:
+        return None
+    # Same rebuild-ordinal suffix as create_stage_one_run: after the run
+    # history grows (for example a rebuilt stage-one delivery), the offer
+    # re-keys so a replay never collides with a retired create fingerprint.
+    creation_suffix = f":{rebuild_ordinal}" if rebuild_ordinal else ""
+    action = _command_action(
+        "create_full_experiment_run",
+        action_id=f"create-full-experiment-run{creation_suffix}",
+        label="创建完整实验运行（实验设计+执行迭代）",
+        target_phase="completed",
+        target_node_id="program_delivery",
+        payload={
+            "questionId": question_id,
+            "sourceRunId": normalized_source_run_id,
+        },
+        requires_confirmation=True,
+        confirmation_text=(
+            "完整实验运行会执行 3.0.0 全流程（实验设计与执行迭代），"
+            "产生真实模型调用费用，且需要持久的批次授权。"
+        ),
+    )
+    if _covering_full_experiment_authorization(team_id, question_id) is None:
+        action["enabled"] = False
+        action["disabledReason"] = (
+            "尚未找到覆盖该赛题的 CatalogRunAuthorization："
+            "请先在真实批次授权面（workflow-orchestration/challenge-program/"
+            "real-batches/{planId}/authorize）完成授权后重试。"
+        )
+    return action
+
+
 def project_state_from_records(
     *,
     team_id: str,
@@ -4477,6 +4600,25 @@ def project_state_from_records(
                 },
             )
         )
+    # Stage-one completion bridge: when the Challenge Program record for the
+    # question is human-accepted (all H1-H4 gates approved on a fully
+    # validated delivery) the chain is terminal and the designed next step is
+    # a full 3.0.0 experiment run seeded from the accepted stage-one outputs.
+    # The offer is fenced against an existing live full-scope run and stays
+    # disabled until a durable CatalogRunAuthorization covers the question.
+    if (
+        str(program_delivery.get("humanReviewStatus") or "") == "approved"
+        and formal_phase == "completed"
+        and not _full_scope_run_exists(formal_runs)
+    ):
+        bridge_action = _full_experiment_bridge_action(
+            team_id=team_id,
+            question_id=normalized_question_id,
+            source_run_id=str(program_delivery.get("outputRunId") or ""),
+            rebuild_ordinal=len(formal_runs),
+        )
+        if bridge_action is not None:
+            allowed_actions.append(bridge_action)
     allowed_actions.extend(formal_actions)
 
     any_facts = bool(

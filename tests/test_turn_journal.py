@@ -526,6 +526,401 @@ def test_pure_append_still_reuses_cached_prefix_event_objects(tmp_path):
     assert all(second[index] is first[index] for index in range(3))
 
 
+def test_prefix_reuse_parses_only_the_appended_tail(tmp_path, monkeypatch):
+    """Incremental replay: a pure append must parse only the new tail bytes.
+
+    The acceptance path reloads the ledger after every turn append; the whole
+    point of the prefix cache is that the reload resumes from the previously
+    parsed byte offset instead of re-parsing the full file.
+    """
+    session_id = "session-tail-parse"
+    for index in range(3):
+        append_turn_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+    first = load_turn_events(tmp_path, session_id)
+    cached_after_first = dict(turn_journal._TURN_EVENTS_PREFIX_CACHE[str(turn_journal_path(tmp_path, session_id))])
+
+    offsets: list[int] = []
+    real_parse = turn_journal._parse_journal_segment
+
+    def spy_parse(handle, *, start_offset):
+        offsets.append(int(start_offset))
+        return real_parse(handle, start_offset=start_offset)
+
+    monkeypatch.setattr(turn_journal, "_parse_journal_segment", spy_parse)
+
+    append_turn_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        payload={"content": "message-3"},
+    )
+    second = load_turn_events(tmp_path, session_id)
+
+    assert offsets == [int(cached_after_first["size"])]
+    assert [event.sequence for event in second] == [1, 2, 3, 4]
+    assert all(second[index] is first[index] for index in range(3))
+
+
+def test_watermark_signature_change_alone_forces_full_reparse(tmp_path, monkeypatch):
+    """A watermark epoch change invalidates the cached prefix even without growth.
+
+    ``rewrite_turn_events`` force-touches the watermark to publish the rewrite
+    epoch to other processes. A reader whose cache still keys on the old
+    watermark signature must fall back to a full re-parse — never stitch its
+    stale prefix onto a rewritten file — while the replayed events stay
+    identical when the file itself was untouched.
+    """
+    session_id = "session-watermark-epoch-only"
+    for index in range(3):
+        append_turn_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_USER_MESSAGE,
+            payload={"content": f"message-{index}"},
+        )
+    first = load_turn_events(tmp_path, session_id)
+    assert [event.sequence for event in first] == [1, 2, 3]
+
+    offsets: list[int] = []
+    real_parse = turn_journal._parse_journal_segment
+
+    def spy_parse(handle, *, start_offset):
+        offsets.append(int(start_offset))
+        return real_parse(handle, start_offset=start_offset)
+
+    monkeypatch.setattr(turn_journal, "_parse_journal_segment", spy_parse)
+
+    # No append happens here: only the watermark file appears (signature moves
+    # from the missing-file sentinel to a real stat), which must defeat the
+    # prefix cache entirely.
+    turn_journal._write_sequence_watermark(
+        turn_journal_path(tmp_path, session_id),
+        max(1, turn_journal._read_sequence_watermark(turn_journal_path(tmp_path, session_id))),
+        force_touch=True,
+    )
+    second = load_turn_events(tmp_path, session_id)
+
+    assert offsets == [0]
+    assert [event.sequence for event in second] == [1, 2, 3]
+    assert [(event.event_type, event.payload.get("content")) for event in second] == [
+        (event.event_type, event.payload.get("content")) for event in first
+    ]
+
+
+def test_concurrent_append_and_load_keeps_replay_consistent(tmp_path):
+    """Writers and readers on one journal never corrupt the replay."""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    session_id = "session-concurrent-replay"
+    appends_per_writer = 12
+    writer_count = 4
+
+    def write_batch(writer_index: int) -> None:
+        for index in range(appends_per_writer):
+            append_turn_event(
+                tmp_path,
+                session_id,
+                f"turn-{writer_index}",
+                EVENT_USER_MESSAGE,
+                payload={"content": f"w{writer_index}-{index}"},
+            )
+
+    def read_repeatedly() -> None:
+        for _ in range(12):
+            load_turn_events(tmp_path, session_id)
+
+    with ThreadPoolExecutor(max_workers=writer_count + 2) as pool:
+        futures = [pool.submit(write_batch, index) for index in range(writer_count)]
+        futures.extend(pool.submit(read_repeatedly) for _ in range(2))
+        for future in futures:
+            future.result(timeout=60)
+
+    final = load_turn_events(tmp_path, session_id)
+    assert len(final) == writer_count * appends_per_writer
+    sequences = [event.sequence for event in final]
+    assert sorted(sequences) == list(range(1, len(final) + 1))
+    assert all(event.event_type == EVENT_USER_MESSAGE for event in final)
+    assert all(str(event.payload.get("content") or "").strip() for event in final)
+
+
+def test_latest_turn_sequence_stat_fast_path_skips_journal_locks(tmp_path, monkeypatch):
+    """Warm sequence probes return from stat without thread or sidecar locks.
+
+    The acceptance chain probes the latest sequence several times per submit;
+    each probe used to queue on the journal thread lock plus the cross-process
+    sidecar lock. A matching cached (journal, watermark) stat signature must
+    answer without either lock, and any foreign append must miss, lock once,
+    and refresh the cache for the following probes.
+    """
+    import contextlib
+
+    session_id = "session-seq-fastpath"
+    append_turn_event(tmp_path, session_id, "turn-1", EVENT_USER_MESSAGE, payload={"content": "one"})
+    append_turn_event(tmp_path, session_id, "turn-1", EVENT_USER_MESSAGE, payload={"content": "two"})
+    # Warm the cache through the locked authoritative read once.
+    assert latest_turn_sequence(tmp_path, session_id) == 2
+
+    lock_calls: list[int] = []
+    real_locked_sidecar = turn_journal.locked_sidecar
+
+    def spy_locked_sidecar(path, *, timeout, **kwargs):
+        lock_calls.append(1)
+        return real_locked_sidecar(path, timeout=timeout, **kwargs)
+
+    monkeypatch.setattr(turn_journal, "locked_sidecar", spy_locked_sidecar)
+    thread_lock_calls: list[int] = []
+    real_thread_lock = turn_journal._journal_thread_lock
+
+    @contextlib.contextmanager
+    def spy_thread_lock(target):
+        thread_lock_calls.append(1)
+        with real_thread_lock(target):
+            yield
+
+    monkeypatch.setattr(turn_journal, "_journal_thread_lock", spy_thread_lock)
+
+    assert latest_turn_sequence(tmp_path, session_id) == 2
+    assert not lock_calls
+    assert not thread_lock_calls
+
+    # Foreign append (raw bytes, bypassing the in-process cache update) moves
+    # the stat signature: exactly one locked read, then the fresh value.
+    with turn_journal_path(tmp_path, session_id).open("ab") as handle:
+        handle.write(
+            b'{"schemaVersion":2,"eventId":"foreign-9","sessionId":"session-seq-fastpath",'
+            b'"turnId":"turn-1","sequence":9,"eventType":"user_message","status":"recorded",'
+            b'"timestamp":"2026-10-22T00:00:00+00:00","source":"foreign","payload":{}}\n'
+        )
+        handle.flush()
+
+    assert latest_turn_sequence(tmp_path, session_id) == 9
+    assert len(lock_calls) == 1
+    assert len(thread_lock_calls) == 1
+
+    # The locked read refreshed the cache: probes are lock-free again.
+    assert latest_turn_sequence(tmp_path, session_id) == 9
+    assert len(lock_calls) == 1
+    assert len(thread_lock_calls) == 1
+
+
+def test_append_turn_events_batch_keeps_single_lock_order_and_fsync(tmp_path, monkeypatch):
+    """The acceptance scaffold batch: one lock section, order and durability kept."""
+    session_id = "session-batch-append"
+    lock_calls: list[int] = []
+    real_locked_sidecar = turn_journal.locked_sidecar
+
+    def spy_locked_sidecar(path, *, timeout, **kwargs):
+        lock_calls.append(1)
+        return real_locked_sidecar(path, timeout=timeout, **kwargs)
+
+    monkeypatch.setattr(turn_journal, "locked_sidecar", spy_locked_sidecar)
+    fsynced_fds: list[int] = []
+    real_fsync = os.fsync
+
+    def record_fsync(fd: int) -> None:
+        fsynced_fds.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr(turn_journal.os, "fsync", record_fsync)
+
+    events = turn_journal.append_turn_events(
+        tmp_path,
+        session_id,
+        "turn-1",
+        (
+            {
+                "event_type": turn_journal.EVENT_TURN_STARTED,
+                "status": "running",
+                "payload": {"source": "submit"},
+                "source": "test",
+                "visible_in_model": False,
+                "correlation_id": "submission-1",
+            },
+            {
+                "event_type": EVENT_USER_MESSAGE,
+                "status": "recorded",
+                "payload": {"content": "hello"},
+                "source": "test",
+                "correlation_id": "submission-1",
+            },
+        ),
+    )
+
+    # One sidecar acquisition for both appends; append order preserved.
+    assert [event.event_type for event in events] == [
+        turn_journal.EVENT_TURN_STARTED,
+        EVENT_USER_MESSAGE,
+    ]
+    assert [event.sequence for event in events] == [1, 2]
+    assert len(lock_calls) == 1
+    # Durability semantics per event: user content fsyncs exactly once,
+    # turn_started stays flush-only (deferred).
+    assert len(fsynced_fds) == 1
+
+    loaded = load_turn_events(tmp_path, session_id)
+    assert [event.event_type for event in loaded] == [
+        turn_journal.EVENT_TURN_STARTED,
+        EVENT_USER_MESSAGE,
+    ]
+
+
+def test_append_turn_events_empty_specs_is_a_no_op(tmp_path):
+    session_id = "session-batch-empty"
+
+    assert turn_journal.append_turn_events(tmp_path, session_id, "turn-1", []) == []
+    assert load_turn_events(tmp_path, session_id) == []
+
+
+def test_append_turn_events_shadow_violation_records_and_still_writes(tmp_path):
+    """Shadow-mode violations must not stop the batch.
+
+    A pristine turn receiving a tool-phase event is illegal per the transition
+    table but shadow by default: the hook observes it and the write proceeds.
+    The agent's hidden-tool-block path relies on exactly this (it journals a
+    ``tool_call_started`` as the turn's first event when no scaffold exists).
+    """
+    violations: list[dict] = []
+    turn_journal.set_turn_transition_guard_hook(violations.append)
+    try:
+        session_id = "session-batch-shadow"
+        events = turn_journal.append_turn_events(
+            tmp_path,
+            session_id,
+            "turn-1",
+            (
+                {
+                    "event_type": turn_journal.EVENT_TOOL_CALL_STARTED,
+                    "status": "blocked",
+                    "payload": {"toolCall": {"name": "hidden_tool", "status": "blocked"}},
+                    "source": "agent_hidden_tool_block",
+                    "tool_call_id": "call-1",
+                    "correlation_id": "call-1",
+                    "source_kind": "agent_tool_visibility",
+                },
+                {
+                    "event_type": turn_journal.EVENT_TOOL_RESULT,
+                    "status": "blocked",
+                    "payload": {"toolCall": {"name": "hidden_tool", "result": "blocked"}},
+                    "source": "agent_hidden_tool_block",
+                    "tool_call_id": "call-1",
+                    "correlation_id": "call-1",
+                    "source_kind": "agent_tool_visibility",
+                },
+            ),
+        )
+
+        # Both events are written despite the pristine-tool phase violation.
+        assert [event.event_type for event in events] == [
+            turn_journal.EVENT_TOOL_CALL_STARTED,
+            turn_journal.EVENT_TOOL_RESULT,
+        ]
+        assert [event.sequence for event in events] == [1, 2]
+        shadow_records = [
+            record
+            for record in violations
+            if record.get("mode") == turn_journal.TURN_TRANSITION_GUARD_SHADOW
+        ]
+        assert len(shadow_records) == 1
+        assert shadow_records[0]["eventType"] == turn_journal.EVENT_TOOL_CALL_STARTED
+
+        loaded = load_turn_events(tmp_path, session_id)
+        assert [event.event_type for event in loaded] == [
+            turn_journal.EVENT_TOOL_CALL_STARTED,
+            turn_journal.EVENT_TOOL_RESULT,
+        ]
+    finally:
+        turn_journal.set_turn_transition_guard_hook(None)
+
+
+def test_append_turn_events_failure_keeps_durable_prefix_and_raises(tmp_path, monkeypatch):
+    """Batch failure semantics match sequential appends: prefix stays, raise wins."""
+    violations: list[dict] = []
+    turn_journal.set_turn_transition_guard_hook(violations.append)
+    try:
+        session_id = "session-batch-failure"
+        append_turn_event(tmp_path, session_id, "turn-1", EVENT_USER_MESSAGE, payload={"content": "hi"})
+        append_turn_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            turn_journal.EVENT_TURN_INTERRUPTED,
+            status="interrupted",
+            payload={"reason": "settled"},
+        )
+
+        # Case 1: the second spec hits the post-terminal guard for the settled
+        # turn; the first spec (turn-2 scaffold) must remain durably written.
+        with pytest.raises(turn_journal.TurnJournalPostTerminalWriteError):
+            turn_journal.append_turn_events(
+                tmp_path,
+                session_id,
+                "turn-2",
+                (
+                    {
+                        "event_type": turn_journal.EVENT_TURN_STARTED,
+                        "status": "running",
+                        "payload": {},
+                        "source": "test",
+                        "visible_in_model": False,
+                    },
+                    {
+                        "event_type": EVENT_USER_MESSAGE,
+                        "status": "recorded",
+                        "payload": {"content": "late"},
+                        "turn_id": "turn-1",
+                        "source": "test",
+                    },
+                ),
+            )
+        loaded = load_turn_events(tmp_path, session_id)
+        assert any(
+            event.turn_id == "turn-2" and event.event_type == turn_journal.EVENT_TURN_STARTED
+            for event in loaded
+        )
+        assert not any(
+            event.turn_id == "turn-1"
+            and event.event_type == EVENT_USER_MESSAGE
+            and str(event.payload.get("content") or "") == "late"
+            for event in loaded
+        )
+
+        # Case 2: a duplicate terminal for the settled turn is a hard rejection;
+        # the batch writes nothing and raises the dedicated error.
+        before = len(load_turn_events(tmp_path, session_id))
+        with pytest.raises(turn_journal.TurnJournalIllegalTransitionError):
+            turn_journal.append_turn_events(
+                tmp_path,
+                session_id,
+                "turn-1",
+                (
+                    {
+                        "event_type": turn_journal.EVENT_TURN_COMPLETED,
+                        "status": "completed",
+                        "payload": {},
+                        "source": "test",
+                    },
+                ),
+            )
+        assert len(load_turn_events(tmp_path, session_id)) == before
+        hard_records = [
+            record
+            for record in violations
+            if record.get("mode") == turn_journal.TURN_TRANSITION_GUARD_ENFORCE
+        ]
+        assert hard_records, "hard rejection must reach the telemetry hook"
+    finally:
+        turn_journal.set_turn_transition_guard_hook(None)
+
+
 def test_loading_missing_journal_has_no_filesystem_side_effect(tmp_path):
     path = turn_journal_path(tmp_path, "session-missing")
 

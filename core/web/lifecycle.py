@@ -527,6 +527,37 @@ async def _run_llm_warmup_after_routes_ready(
     )
 
 
+def _codebase_map_warmup_worker(gate_timings: dict[str, Any] | None = None) -> Any:
+    from core.prompt_manager.codebase_map_builder import warm_codebase_map_cache
+
+    return warm_codebase_map_cache()
+
+
+async def _run_codebase_map_warmup_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> Any:
+    """Defer the CODEBASE_MAP cold build behind the shared heavy-prewarm gate.
+
+    The first ``get_codebase_map`` of a fresh process pays a full-repo AST
+    parse (~12s on this repo) for the task-focused view scoring, even when the
+    persisted map file is still valid. Warming it inside the stagger window
+    means the first turn's prompt assembly only pays the warm read (~0.2s).
+    The warm runs the exact production code path (same locks, same content
+    semantics), never raises, and never runs under pytest.
+    """
+
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _codebase_map_warmup_worker,
+        worker_name="codebase-map-prewarm-worker",
+        startup_jobs=startup_jobs,
+    )
+
+
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     if os.name != "nt":
         return False
@@ -601,6 +632,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
     # readiness and no-ops fast when the operator kill switch is set.
     startup_llm_warmup_task = startup_jobs.start_async(
         "startup-llm-warmup", _run_llm_warmup_after_routes_ready(app, startup_jobs=startup_jobs)
+    )
+    # CODEBASE_MAP cold-build warmup（任务视图首建的全仓 AST parse，本仓实测
+    # ~12s）挂同一延迟门；首个正式轮次的 prompt 组装只付温态读成本。
+    startup_codebase_map_warmup_task = startup_jobs.start_async(
+        "startup-codebase-map-warmup",
+        _run_codebase_map_warmup_after_routes_ready(app, startup_jobs=startup_jobs),
     )
     from .services.session.directory_runtime import (
         begin_directory_startup,
@@ -730,6 +767,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     )
     startup_llm_warmup_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="LLM startup warmup failed during startup.")
+    )
+    startup_codebase_map_warmup_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="CODEBASE_MAP startup warmup failed during startup.")
     )
     startup_directory_task.add_done_callback(
         lambda task: consume_startup_task_result(

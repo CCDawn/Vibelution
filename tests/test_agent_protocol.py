@@ -6746,6 +6746,86 @@ class TestLocalProviderBootstrap:
         )
         return agent
 
+    @pytest.mark.parametrize("retained_chars", [880, 920])
+    def test_real_compression_reserves_notice_budget_and_invokes_with_protected_context(self, monkeypatch, retained_chars):
+        from types import MethodType
+        from core.orchestration import turn_compression
+        from tools.compression_strategy import CompressionConfig, CompressionLevel
+        from tools.token_manager import consume_compression_request
+
+        consume_compression_request()
+        invoke_calls, compress_calls, scene_events = [], [], []
+        final_text = "压缩后继续完成的最终回答"
+
+        def invoke(messages, replay_state=None):
+            invoke_calls.append(list(messages))
+            outcome = _canonical_agent_test_outcome(text=final_text)
+            return outcome, AIMessage(content=outcome.final_text)
+
+        agent = self._provider_context_retry_agent(
+            monkeypatch, max_retries=1,
+            invoke=invoke,
+            compress_calls=compress_calls, ui_logs=[],
+        )
+        ui = MagicMock()
+        monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
+        monkeypatch.setattr(agent_module.logger, "log_llm_response", lambda *a, **k: None, raising=False)
+        agent.event_bus = SimpleNamespace(publish=lambda *a, **k: None)
+        agent.mental_model = None
+        agent._record_language_drift = lambda *a, **k: None
+        agent._record_inference_activity = lambda *a, **k: None
+        agent._record_turn_cache_diagnostics = lambda **kwargs: None
+        agent.response_surface_controller = ResponseSurfaceController(
+            estimate_tokens=lambda messages: agent._estimate_context_input_tokens(messages),
+            ui_getter=lambda: ui, logger=MagicMock(), debug_logger=MagicMock(),
+            pet_getter=lambda: MagicMock(), print_tokens=lambda *a: None,
+        )
+        agent._context_input_hard_limit = 1000
+        agent._context_compression_trigger_tokens = 800
+        agent._post_compression_target_tokens = 700
+        agent._apply_turn_status_bar = lambda messages, **kwargs: messages
+        agent._active_turn_messages = [SystemMessage(content="rules"), AIMessage(content="old" * 600)]
+        summary = SystemMessage(content="历史摘要: task evidence")
+
+        def compress(messages, **kwargs):
+            compress_calls.append(list(messages))
+            return [messages[0], summary, AIMessage(content="x" * retained_chars), messages[-1]], "task evidence"
+
+        agent.token_compressor = SimpleNamespace(compress=compress)
+        agent._compression_strategy = SimpleNamespace(
+            determine_level_with_iteration=lambda *args: CompressionLevel.STANDARD,
+            get_config=lambda *args: CompressionConfig(
+                level=CompressionLevel.STANDARD, summary_max_chars=80, keep_ai_messages=1,
+            ),
+        )
+        agent._compress_messages = MethodType(AgentRuntime._compress_messages, agent)
+        agent._estimate_context_input_tokens = lambda messages, *args: sum(
+            40 if isinstance(message, dict) else len(str(getattr(message, "content", "")))
+            for message in messages
+        )
+        monkeypatch.setattr(turn_compression, "resolve_feature_decision", lambda *a, **k: SimpleNamespace(effective_enabled=True))
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=lambda *a, **k: None))
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda phase, code, **kwargs: scene_events.append((code, kwargs)))
+
+        completed = agent._run_orchestrated_turn(user_prompt="continue after compression")
+
+        assert completed is True
+        assert agent._last_turn_failed is False
+        assert agent._last_visible_response_text == final_text
+        assert agent._active_turn_messages[-1].content == final_text
+        ui.note_turn_result.assert_called_once_with(success=True, had_progress=True)
+        ui.stream_response.assert_called_once_with(final_text, done=True)
+        assert len(compress_calls) == 1
+        assert len(invoke_calls) == 1
+        sent = invoke_calls[0]
+        assert sent[0] is compress_calls[0][0]
+        assert summary in sent
+        assert compress_calls[0][-1] in sent
+        assert "continue after compression" in str(compress_calls[0][-1])
+        assert any("强制进行了一次压缩" in str(getattr(item, "content", "")) for item in sent)
+        assert agent._estimate_context_input_tokens(sent) <= 700
+        assert not any(code == "agent.context_budget_exhausted" for code, _ in scene_events)
+
     @pytest.mark.parametrize(
         "compressed_tokens, notice_tokens, should_invoke",
         [(110_068, 60, True), (256_001, 0, False), (255_990, 60, False)],

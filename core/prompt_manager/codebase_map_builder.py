@@ -691,6 +691,68 @@ def _do_rebuild():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 启动预热（只治冷构建时机，不改地图内容语义）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 冷构建真凶（批八 11.9s，实测本仓 ~12s）：进程内首次 get_codebase_map 时，
+# 任务视图评分（_score_file_relevance）要逐文件取 docstring/imports 做相关性
+# 打分；即使盘上 CODEBASE_MAP.md 仍然有效，进程内 codebase_file_index 的
+# AST 缓存也是空的，全仓 ~2900 个 .py 全部要现读现 parse。预热在后台 worker
+# （core/web/lifecycle 的 StartupJobGroup 守护线程）里提前走与正式构建完全
+# 相同的 get_codebase_map 路径付掉这笔成本；首个正式轮次命中温态（AST 缓存
+# + 任务视图签名缓存），内容产出路径零改动。
+
+_warmup_done = False
+_warmup_state_lock = threading.Lock()
+
+
+def warm_codebase_map_cache() -> Dict[str, object]:
+    """提前执行一次真实地图构建路径，把冷成本付在后台 worker 里。
+
+    与正式构建共用同一条代码路径与 _map_build_lock（并发到达自动合并成同一
+    次构建），因此地图内容语义不变：同样输入产出同样结果。约束：
+
+    - 每进程只预热一次；重复调用返回 ``skipped=already_warmed``；
+    - 预热以空 goal/state_memory 执行（不触碰 PromptManager 单例，避免在
+      后台线程提前创建会话态）；首个正式轮次若 goal 不同，任务视图会基于
+      已预热的 AST 缓存以温态成本（~0.2s）重建；
+    - 任何异常都吞进返回摘要并记一条 warning，预热失败不影响正式构建照常
+      冷跑（行为与无预热时完全一致）。
+
+    调用方（lifecycle 启动 job）负责把本函数放进后台守护线程执行，不得在
+    会话提交链路上同步调用。
+    """
+
+    global _warmup_done
+    with _warmup_state_lock:
+        if _warmup_done:
+            return {"warmed": False, "skipped": "already_warmed"}
+        _warmup_done = True
+    started = time.perf_counter()
+    try:
+        content = get_codebase_map(current_goal="", state_memory="")
+        return {
+            "warmed": True,
+            "durationMs": max(0, int((time.perf_counter() - started) * 1000)),
+            "contentChars": len(content),
+            "contentSha1": hashlib.sha1(content.encode("utf-8", errors="ignore")).hexdigest(),
+        }
+    except Exception as exc:  # noqa: BLE001 - 预热是尽力而为，绝不外抛
+        _debug_logger.warning(
+            f"[CodebaseMap] 启动预热失败（正式构建照常冷跑）: {type(exc).__name__}: {exc}"
+        )
+        return {"warmed": False, "skipped": "error", "errorType": type(exc).__name__}
+
+
+def reset_warmup_state_for_tests() -> None:
+    """清理每进程预热标记，供测试从干净状态出发。"""
+
+    global _warmup_done
+    with _warmup_state_lock:
+        _warmup_done = False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 缓存验证
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1133,4 +1195,6 @@ __all__ = [
     "on_file_modified",
     "is_file_modifying_tool",
     "extract_file_path",
+    "warm_codebase_map_cache",
+    "reset_warmup_state_for_tests",
 ]

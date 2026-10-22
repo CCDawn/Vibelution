@@ -37,7 +37,7 @@ import {
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
+import { shouldWaitForChatStartupRestore, useChatSessionDetailQueries } from "./useChatSessionDetailQueries";
 import { useReportWorkbenchStartupReady } from "../../app/workbenchStartupReady";
 import { useChatSessionWarmup } from "./useChatSessionWarmup";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
@@ -994,6 +994,17 @@ export function ChatCodingRouteWorkbench() {
     () => (showArchivedSessions ? archivedSessionsQuery.data?.items ?? [] : []),
     [archivedSessionsQuery.data, showArchivedSessions],
   );
+  const routeVisibleSessions = useMemo(() => {
+    const base = sessionsForChatRoute({
+      sessions: sessionsQuery.data,
+      agents: agentsQuery.data,
+      companionRouteVerified: verifiedCompanionMode,
+    });
+    if (!showArchivedSessions || archivedSessions.length === 0) {
+      return base;
+    }
+    return mergeArchivedSessionSummaries(base, archivedSessions);
+  }, [agentsQuery.data, archivedSessions, sessionsQuery.data, showArchivedSessions, verifiedCompanionMode]);
   const {
     sessionArchiveMutation,
     pinSessionMutation,
@@ -1100,6 +1111,13 @@ export function ChatCodingRouteWorkbench() {
     childSessionsQuery,
   } = useChatSessionDetailQueries({
     activeSessionId,
+    // Bare-route selection is committed below by the existing URL authority.
+    // Its fallback always restores a visible direct session when one exists.
+    bareRouteRestorePending: shouldWaitForChatStartupRestore({
+      bareRoute: chatRouteSelection.kind === "bare",
+      routeVisibleSessions,
+      agentDirectoryFailed: agentsQuery.isError,
+    }),
     queryClient,
     sessions: sessionsQuery.data,
     directSessionActiveSummary,
@@ -2304,18 +2322,6 @@ export function ChatCodingRouteWorkbench() {
     }
     return mergeArchivedSessionSummaries(rawSessionsQuery.data, archivedSessions);
   }, [archivedSessions, rawSessionsQuery.data, showArchivedSessions]);
-  const routeVisibleSessions = useMemo(() => {
-    const base = sessionsForChatRoute({
-      sessions: sessionsQuery.data,
-      agents: agentsQuery.data,
-      companionRouteVerified: verifiedCompanionMode,
-    });
-    if (!showArchivedSessions || archivedSessions.length === 0) {
-      return base;
-    }
-    return mergeArchivedSessionSummaries(base, archivedSessions);
-  }, [agentsQuery.data, archivedSessions, sessionsQuery.data, showArchivedSessions, verifiedCompanionMode]);
-
   const requestedCompanionAgentId = useMemo(() => (
     requestedCompanionId
       ? ""

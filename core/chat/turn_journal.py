@@ -552,50 +552,107 @@ def append_turn_event(
     correlation_id: str = "",
     source_kind: str = "",
 ) -> TurnJournalEvent:
+    return append_turn_events(
+        project_root,
+        session_id,
+        turn_id,
+        [
+            {
+                "event_type": event_type,
+                "status": status,
+                "payload": payload,
+                "source": source,
+                "timestamp": timestamp,
+                "parent_event_id": parent_event_id,
+                "visible_in_model": visible_in_model,
+                "projection_kind": projection_kind,
+                "provider_role": provider_role,
+                "tool_call_id": tool_call_id,
+                "correlation_id": correlation_id,
+                "source_kind": source_kind,
+            }
+        ],
+    )[0]
+
+
+def append_turn_events(
+    project_root: Path,
+    session_id: str,
+    turn_id: str,
+    event_specs: Iterable[Mapping[str, Any]],
+) -> list[TurnJournalEvent]:
+    """Append several journal events inside one journal lock acquisition.
+
+    The submit acceptance path writes ``turn_started`` and ``user_message``
+    back to back; two separate appends used to pay the journal thread lock and
+    the cross-process sidecar file lock twice and let concurrent readers
+    interleave between the two writes. This batch keeps every per-event
+    semantic of :func:`append_turn_event` — post-terminal guard, declarative
+    transition table, sequence allocation, per-event durability (user content
+    still fsyncs; deferred-fsync markers stay flush-only), append order, and
+    cache folding — inside a single lock section.
+
+    Failure semantics match sequential appends: events before the failing one
+    stay durably written (append-only, no rollback), a hard transition
+    rejection stops the batch and raises exactly like the single-event append,
+    and the telemetry hook only runs after the file lock is released.
+    """
+
+    specs = [dict(spec) for spec in (event_specs or []) if isinstance(spec, Mapping)]
+    if not specs:
+        return []
     path = turn_journal_path(project_root, session_id)
     _ensure_journal_parent(path)
     normalized_session_id = str(session_id or "").strip()
-    normalized_turn_id = str(turn_id or "").strip()
-    normalized_event_type = str(event_type or "").strip()
-    transition_violation: dict[str, Any] | None = None
+    default_turn_id = str(turn_id or "").strip()
+    transition_violations: list[dict[str, Any]] = []
     hard_rejection: dict[str, Any] | None = None
+    post_terminal_error: TurnJournalPostTerminalWriteError | None = None
+    events: list[TurnJournalEvent] = []
     with _journal_thread_lock(path):
         with _journal_file_lock(path):
-            if (
-                normalized_event_type in POST_TERMINAL_MODEL_EVENT_TYPES
-                and _turn_has_terminal_event(path, normalized_turn_id)
-            ):
-                raise TurnJournalPostTerminalWriteError(
-                    f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
-                )
-            # Declarative transition table (supplements, never replaces, the
-            # post-terminal guard above). Duplicate terminals are dropped here.
-            # Other illegal moves stay shadow unless the env hard gate is on:
-            # the hook sees them and the write proceeds. A hard rejection is
-            # raised only after this lock is released, so the telemetry hook
-            # never runs while the journal file is locked.
-            if normalized_turn_id:
-                summary = _cached_turn_transition_summary(path, normalized_turn_id)
-                legal, reason = classify_turn_event_transition(summary, normalized_event_type)
-                if not legal:
-                    hard = transition_rejection_is_hard(summary, normalized_event_type)
-                    record = {
-                        "schema": "turn_transition_guard.v1",
-                        "mode": TURN_TRANSITION_GUARD_ENFORCE if hard else TURN_TRANSITION_GUARD_SHADOW,
-                        "sessionId": normalized_session_id,
-                        "turnId": normalized_turn_id,
-                        "eventType": normalized_event_type,
-                        "phase": turn_event_phase(normalized_event_type),
-                        "priorEventCount": summary[0],
-                        "priorHasTurnStarted": summary[1],
-                        "priorTerminalType": summary[2],
-                        "reason": reason,
-                    }
-                    if hard:
-                        hard_rejection = record
-                    else:
-                        transition_violation = record
-            if hard_rejection is None:
+            for spec in specs:
+                normalized_turn_id = str(spec.get("turn_id") or "").strip() or default_turn_id
+                normalized_event_type = str(spec.get("event_type") or "").strip()
+                if (
+                    normalized_event_type in POST_TERMINAL_MODEL_EVENT_TYPES
+                    and _turn_has_terminal_event(path, normalized_turn_id)
+                ):
+                    post_terminal_error = TurnJournalPostTerminalWriteError(
+                        f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
+                    )
+                    break
+                # Declarative transition table (supplements, never replaces, the
+                # post-terminal guard above). Duplicate terminals are dropped here.
+                # Other illegal moves stay shadow unless the env hard gate is on:
+                # the hook sees them and the write proceeds. A hard rejection is
+                # raised only after this lock is released, so the telemetry hook
+                # never runs while the journal file is locked.
+                if normalized_turn_id:
+                    summary = _cached_turn_transition_summary(path, normalized_turn_id)
+                    legal, reason = classify_turn_event_transition(summary, normalized_event_type)
+                    if not legal:
+                        hard = transition_rejection_is_hard(summary, normalized_event_type)
+                        record = {
+                            "schema": "turn_transition_guard.v1",
+                            "mode": TURN_TRANSITION_GUARD_ENFORCE if hard else TURN_TRANSITION_GUARD_SHADOW,
+                            "sessionId": normalized_session_id,
+                            "turnId": normalized_turn_id,
+                            "eventType": normalized_event_type,
+                            "phase": turn_event_phase(normalized_event_type),
+                            "priorEventCount": summary[0],
+                            "priorHasTurnStarted": summary[1],
+                            "priorTerminalType": summary[2],
+                            "reason": reason,
+                        }
+                        if hard:
+                            hard_rejection = record
+                            # A hard rejection stops the batch before this
+                            # event is written; a shadow violation only
+                            # records and the write proceeds, exactly like
+                            # the single-event append.
+                            break
+                        transition_violations.append(record)
                 sequence = _next_sequence(path)
                 event = TurnJournalEvent(
                     schema_version=SCHEMA_VERSION,
@@ -604,17 +661,17 @@ def append_turn_event(
                     turn_id=normalized_turn_id,
                     sequence=sequence,
                     event_type=normalized_event_type,
-                    status=str(status or "").strip(),
-                    timestamp=str(timestamp or "").strip() or _now_timestamp(),
-                    source=str(source or "").strip(),
-                    payload=dict(payload or {}),
-                    parent_event_id=str(parent_event_id or "").strip(),
-                    visible_in_model=bool(visible_in_model),
-                    projection_kind=str(projection_kind or "").strip(),
-                    provider_role=str(provider_role or "").strip(),
-                    tool_call_id=str(tool_call_id or "").strip(),
-                    correlation_id=str(correlation_id or "").strip(),
-                    source_kind=str(source_kind or "").strip(),
+                    status=str(spec.get("status") or "").strip(),
+                    timestamp=str(spec.get("timestamp") or "").strip() or _now_timestamp(),
+                    source=str(spec.get("source") or "").strip(),
+                    payload=dict(spec.get("payload") or {}),
+                    parent_event_id=str(spec.get("parent_event_id") or "").strip(),
+                    visible_in_model=bool(spec.get("visible_in_model", True)),
+                    projection_kind=str(spec.get("projection_kind") or "").strip(),
+                    provider_role=str(spec.get("provider_role") or "").strip(),
+                    tool_call_id=str(spec.get("tool_call_id") or "").strip(),
+                    correlation_id=str(spec.get("correlation_id") or "").strip(),
+                    source_kind=str(spec.get("source_kind") or "").strip(),
                 )
                 encoded = (
                     json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n"
@@ -633,17 +690,20 @@ def append_turn_event(
                 else:
                     _refresh_terminal_cache_signature(path)
                 _remember_turn_transition_summary(path, normalized_turn_id, normalized_event_type)
+                events.append(event)
+    if post_terminal_error is not None:
+        raise post_terminal_error
     if hard_rejection is not None:
         _emit_turn_transition_violation(hard_rejection)
         raise TurnJournalIllegalTransitionError(
             f"Illegal turn transition for turn {normalized_turn_id}: "
-            f"{normalized_event_type} -> {hard_rejection['reason']}."
+            f"{hard_rejection['eventType']} -> {hard_rejection['reason']}."
         )
-    if transition_violation is not None:
+    for violation in transition_violations:
         # Emitted after the file lock is released: the hook may be a heavy
         # scene-service sink and must never run under the journal lock.
-        _emit_turn_transition_violation(transition_violation)
-    return event
+        _emit_turn_transition_violation(violation)
+    return events
 
 
 def _turn_has_terminal_event(path: Path, turn_id: str) -> bool:
@@ -3144,6 +3204,29 @@ def latest_turn_sequence(project_root: Path, session_id: str) -> int:
     if not path.exists():
         _forget_sequence(path)
         return _read_sequence_watermark(path)
+    # Stat fast path: the submit acceptance chain probes the latest sequence
+    # several times per submission, and every probe used to queue on the
+    # journal thread lock plus the cross-process sidecar file lock just to
+    # confirm an unchanged file. When the cached (journal, watermark)
+    # signature still matches the on-disk stat, the locked
+    # :func:`_latest_sequence` below would return exactly this cached value,
+    # so return it without touching either lock. Any foreign append or
+    # rewrite moves the stat signature, misses the fast path, and falls
+    # through to the locked authoritative read; the write path keeps the
+    # cache fresh through ``_remember_sequence`` / ``_forget_sequence``.
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    watermark_mtime_ns, watermark_size = _sequence_file_signature(_sequence_watermark_path(path))
+    with _SEQUENCE_CACHE_LOCK:
+        cached = _SEQUENCE_CACHE.get(key)
+    if (
+        cached is not None
+        and cached[1] == mtime_ns
+        and cached[2] == size
+        and cached[3] == watermark_mtime_ns
+        and cached[4] == watermark_size
+    ):
+        return cached[0]
     with _journal_thread_lock(path):
         with _journal_file_lock(path):
             return _latest_sequence(path)
@@ -3419,6 +3502,7 @@ __all__ = [
     "append_interrupted_if_open",
     "append_canonical_turn_outcome",
     "append_turn_event",
+    "append_turn_events",
     "build_journal_event_tree",
     "event_has_model_projection",
     "event_projection_category",
