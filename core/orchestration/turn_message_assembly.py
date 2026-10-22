@@ -192,6 +192,30 @@ def sanitize_seeded_chat_content(role: str, content: str) -> str:
     return cleaned.strip()
 
 
+def canonical_compaction_checkpoint_kwargs(message: Mapping[str, Any]) -> Dict[str, Any]:
+    """Carry ledger checkpoint provenance privately across LangChain restore.
+
+    Only canonical host messages may bypass ordinary assistant sanitization.
+    Summary-looking text and user/tool metadata cannot grant this trust.
+    """
+
+    if _message_role_name(message) not in {"assistant", "system", "runtime", "runtime_context"}:
+        return {}
+    metadata = message.get("metadata")
+    if not isinstance(metadata, Mapping) or metadata.get("kind") != "compaction_checkpoint":
+        return {}
+    event_id = metadata.get("eventId")
+    if not isinstance(event_id, str) or not event_id.strip():
+        return {}
+    return {
+        "vibelution_compaction_checkpoint": {
+            "kind": "compaction_checkpoint",
+            "eventId": event_id,
+            "turnId": metadata.get("turnId") or "",
+        }
+    }
+
+
 def _default_insert_volatile() -> InsertContextFn:
     from core.orchestration.turn_outcome import TurnOutcomeController
 
@@ -373,6 +397,7 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
             restored.append(item)
             continue
         role = _message_role_name(item)
+        checkpoint_kwargs = canonical_compaction_checkpoint_kwargs(item)
         assistant_tool_calls = (
             normalize_seeded_tool_calls(
                 _mapping_get(item, "tool_calls", "toolCalls") or []
@@ -382,16 +407,16 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
         )
         raw_content = _mapping_get(item, "content")
         content = raw_content if isinstance(raw_content, list) else _coerce_text(raw_content).strip()
-        if isinstance(content, str):
+        if isinstance(content, str) and not checkpoint_kwargs:
             content = sanitize_seeded_chat_content(role, content)
         if not content and not assistant_tool_calls and role != "tool":
             continue
         if role in {"runtime_context", "runtime", "system"}:
-            restored.append(SystemMessage(content=_coerce_text(content)))
+            restored.append(SystemMessage(content=_coerce_text(content), additional_kwargs=checkpoint_kwargs))
         elif role == "user":
             restored.append({"role": "user", "content": content})
         elif role == "assistant":
-            additional_kwargs: Dict[str, Any] = {}
+            additional_kwargs: Dict[str, Any] = dict(checkpoint_kwargs)
             reasoning_content = _coerce_text(item.get("reasoning_content")).strip()
             if reasoning_content:
                 # DeepSeek-class thinking endpoints require the journaled

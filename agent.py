@@ -348,6 +348,7 @@ from core.orchestration.tool_authorization_binding import (
 from core.orchestration.turn_message_assembly import (
     TurnJournalReplayError,
     assemble_prepared_turn_messages,
+    canonical_compaction_checkpoint_kwargs,
     current_turn_has_journal_conversation_layer,
     insert_pending_volatile_context_messages,
     ledger_conversation_fingerprint_for_messages,
@@ -2224,6 +2225,7 @@ class AgentRuntime:
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role") or "").strip().lower()
+            checkpoint_kwargs = canonical_compaction_checkpoint_kwargs(item)
             assistant_tool_calls = (
                 self._normalize_seeded_tool_calls(item.get("tool_calls") or item.get("toolCalls") or [])
                 if role == "assistant"
@@ -2231,19 +2233,19 @@ class AgentRuntime:
             )
             raw_content = item.get("content")
             content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
-            if isinstance(content, str):
+            if isinstance(content, str) and not checkpoint_kwargs:
                 content = self._sanitize_seeded_chat_content(role, content)
             if not content and not assistant_tool_calls:
                 continue
             if role in {"runtime_context", "runtime", "system"}:
-                restored.append(SystemMessage(content=str(content)))
+                restored.append(SystemMessage(content=str(content), additional_kwargs=checkpoint_kwargs))
             elif role == "user":
                 if isinstance(content, list):
                     restored.append({"role": "user", "content": content})
                 else:
                     restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                assistant_kwargs: Dict[str, Any] = {}
+                assistant_kwargs: Dict[str, Any] = dict(checkpoint_kwargs)
                 seeded_reasoning = str(item.get("reasoning_content") or "").strip()
                 if assistant_tool_calls and seeded_reasoning:
                     # DeepSeek thinking-mode relays require tool-call assistants
