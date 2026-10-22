@@ -18,13 +18,13 @@ _REMEMBER = re.compile(
 _SENTENCES = re.compile(r"(?<=[。！？!?;；])|\n|(?<=\.)[ \t]+")
 
 
-def explicit_user_facts(text: str) -> list[str]:
+def explicit_user_facts(text: str, *, pattern: re.Pattern[str] | None = None) -> list[str]:
     """Keep complete original statements, before any history-preview truncation."""
     statements = _SENTENCES.split(text)
     facts = []
     for index, raw in enumerate(statements):
         statement = raw.strip()
-        if not statement or not _REMEMBER.search(statement):
+        if not statement or not (pattern or _REMEMBER).search(statement):
             continue
         # A colon commonly introduces a value on the next Markdown line.
         # Keep that continuation verbatim, including a fenced multi-line value.

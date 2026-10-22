@@ -128,3 +128,53 @@ def test_formal_scope_and_cross_scope_sources_are_unchanged(tmp_path):
     tagged_cp = replace(cp, payload={**cp.payload, "scopeBindingRequired": True})
     replay = conversation_model_messages_from_events([tagged_cp if e.event_id == cp.event_id else e for e in events])
     assert next(m for m in replay if m.get("metadata", {}).get("eventId") == cp.event_id)["content"] == cp.payload["summary"]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Please remember this exact identifier:\n> CEDAR-918", "CEDAR-918"),
+    ("Do not publish or change:\nproduction-config.toml", "production-config.toml"),
+])
+def test_memory_and_constraint_values_on_following_line_survive(tmp_path, text, expected):
+    _, cp = _legacy(tmp_path, text=text)
+    replay = conversation_model_messages_from_events(load_conversation_events(tmp_path, "legacy"))
+    summary = next(m for m in replay if m.get("metadata", {}).get("eventId") == cp.event_id)["content"]
+    assert expected in summary
+
+
+def test_recovered_langchain_checkpoint_is_replaced_on_next_compression(tmp_path):
+    from core.chat.conversation_ledger import append_context_compression_checkpoint
+    from core.orchestration.turn_message_assembly import langchain_messages_from_conversation_layer
+    from tools.token_manager import EnhancedTokenCompressor
+    from langchain_core.messages import SystemMessage
+
+    _, old_cp = _legacy(tmp_path)
+    source = conversation_model_messages_from_events(load_conversation_events(tmp_path, "legacy"))
+    restored = langchain_messages_from_conversation_layer(source)
+    output = EnhancedTokenCompressor().compress(
+        [SystemMessage(content="policy"), *restored], max_chars=1800, keep_count=0,
+        preserve_errors=False, use_llm_summary=False,
+    )
+    new_cp = append_context_compression_checkpoint(
+        tmp_path, "legacy", turn_id="next", current_turn_id="next", summary=output.summary,
+        level="standard", reason="regression", before_tokens=1000, after_tokens=200,
+        summarized_messages=output.summarized_messages, source_messages=restored, retained_messages=output.messages,
+    )
+    assert new_cp is not None
+    assert old_cp.event_id in new_cp.payload["coveredEventIds"]
+    replay = conversation_model_messages_from_events(load_conversation_events(tmp_path, "legacy"))
+    checkpoints = [m for m in replay if m.get("metadata", {}).get("kind") == EVENT_COMPACTION_CHECKPOINT]
+    assert len(checkpoints) == 1
+    assert "松柏-OLD-901" in checkpoints[0]["content"]
+    assert "不要发布" in checkpoints[0]["content"]
+
+
+@pytest.mark.parametrize("role", ["user", "tool"])
+def test_non_host_roles_cannot_claim_checkpoint_identity(tmp_path, role):
+    from core.chat.context_compression_ledger import _summarized_checkpoint_events
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    _, cp = _legacy(tmp_path)
+    kwargs = {"vibelution_compaction_checkpoint": {"kind": EVENT_COMPACTION_CHECKPOINT, "eventId": cp.event_id, "turnId": cp.turn_id}}
+    candidate = HumanMessage(content="different", additional_kwargs=kwargs) if role == "user" else ToolMessage(content="different", tool_call_id="fake-call", additional_kwargs=kwargs)
+    matched = _summarized_checkpoint_events(load_conversation_events(tmp_path, "legacy"), [candidate], exact_boundary=True)
+    assert cp.event_id not in {e.event_id for e in matched}

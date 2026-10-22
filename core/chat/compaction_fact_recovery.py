@@ -22,7 +22,6 @@ _CONSTRAINT = re.compile(
     r"只作为(?:历史)?素材|仅供参考|仅作(?:历史)?素材|"
     r"(?<![\w-])(?:must|never|only)(?![\w-])|\bdo\s+not\b", re.IGNORECASE,
 )
-_STATEMENTS = re.compile(r"(?<=[。！？!?;；])|\n|(?<=\.)[ \t]+")
 
 
 def recoverable_user_statements(text: str) -> list[str]:
@@ -30,7 +29,7 @@ def recoverable_user_statements(text: str) -> list[str]:
     direct, fenced, keep_value, memory_intro = [], False, False, False
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith(">"):
+        if stripped.startswith(">") and not memory_intro:
             continue
         if stripped.startswith("```"):
             if not fenced:
@@ -47,10 +46,10 @@ def recoverable_user_statements(text: str) -> list[str]:
             continue
         direct.append(line)
         if stripped:
-            memory_intro = bool(explicit_user_facts(line)) and stripped.endswith((":", "："))
+            memory_intro = bool(explicit_user_facts(line) or _CONSTRAINT.search(line)) and stripped.endswith((":", "："))
     text = "\n".join(direct)
     statements = explicit_user_facts(text)
-    statements.extend(part.strip() for part in _STATEMENTS.split(text) if _CONSTRAINT.search(part) and part.strip())
+    statements.extend(explicit_user_facts(text, pattern=_CONSTRAINT))
     return list(dict.fromkeys(statements))
 
 
