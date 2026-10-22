@@ -195,6 +195,8 @@ def append_context_compression_checkpoint(
     source_message_count: int = 0,
     tool_result_replacement_state: dict[str, Any] | None = None,
     summarized_messages: Iterable[Any] | None = None,
+    source_messages: Iterable[Any] | None = None,
+    retained_messages: Iterable[Any] | None = None,
     source: str = "agent_context_compression",
     scope: Mapping[str, Any] | None = None,
     scope_hash: str = "",
@@ -202,15 +204,19 @@ def append_context_compression_checkpoint(
     child_session_scope: Mapping[str, Any] | None = None,
     scope_binding_required: bool = False,
 ) -> TurnJournalEvent | None:
-    """Append a compression checkpoint that covers only historical events.
+    """Append a compression checkpoint without rewriting the transcript.
 
     ``summarized_messages`` is the set of messages the summary actually folded
     (the compression output's ``summarized_messages``). When provided, the
     checkpoint covers exactly the historical events projecting to those
     messages — kept-window and error-preserved events must stay uncovered, or
     the next replay silently drops history that never entered the summary.
-    Callers that cannot prove the folded boundary keep the legacy blanket
-    coverage (every historical event).
+    ``source_messages`` and ``retained_messages`` describe an explicit context
+    replacement. They let replay retire only proven source events missing from
+    the actual kept window, including completed work from the in-flight turn.
+    Budget-retired events are recorded separately from summarized events. No
+    provider messages or system prompts are stored in the checkpoint.
+    Callers without that boundary retain the legacy historical-only behavior.
     """
 
     normalized_session_id = str(session_id or "").strip()
@@ -235,12 +241,35 @@ def append_context_compression_checkpoint(
     )
     normalized_current_turn_id = str(current_turn_id or turn_id or "").strip()
     events = load_turn_events(Path(project_root), normalized_session_id)
+    replacement = source_messages is not None and retained_messages is not None
     coverable = [
         event
         for event in events
-        if _is_coverable_by_checkpoint(event, current_turn_id=normalized_current_turn_id)
+        if replacement or _is_coverable_by_checkpoint(event, current_turn_id=normalized_current_turn_id)
     ]
-    if summarized_messages is None:
+    retired_events: list[TurnJournalEvent] = []
+    if replacement:
+        source_events = _summarized_checkpoint_events(coverable, source_messages, exact_boundary=True)
+        source_ids = {event.event_id for event in source_events}
+        # Protect the kept window before assigning covered/retired events.
+        # Ambiguous identical messages without identity remain replayable.
+        retained_ids = {
+            event.event_id
+            for event in _summarized_checkpoint_events(
+                coverable, retained_messages, exact_boundary=True, protect_ambiguous=True,
+            )
+        }
+        covered_events = [
+            event for event in _summarized_checkpoint_events(coverable, summarized_messages or [], exact_boundary=True)
+            if event.event_id in source_ids and event.event_id not in retained_ids
+        ]
+        covered_ids = {event.event_id for event in covered_events}
+        retired_events = [
+            event for event in source_events
+            if event.event_id not in covered_ids and event.event_id not in retained_ids
+        ]
+        include_sequence_range = False
+    elif summarized_messages is None:
         covered_events = coverable
         include_sequence_range = True
     else:
@@ -249,6 +278,7 @@ def append_context_compression_checkpoint(
         # a sequence range: replay treats the whole range as covered.
         include_sequence_range = _sequences_contiguous(covered_events)
     _assert_covered_events_scope(covered_events, scope=scope, required=scope_binding_required)
+    _assert_covered_events_scope(retired_events, scope=scope, required=scope_binding_required)
     payload = build_context_compression_checkpoint_payload(
         summary=summary_text,
         level=level,
@@ -270,6 +300,12 @@ def append_context_compression_checkpoint(
         child_session_scope=child_session_scope,
         scope_binding_required=scope_binding_required,
     )
+    if replacement:
+        payload.update({
+            "retentionMode": "replacement",
+            "retiredEventIds": [event.event_id for event in retired_events],
+            "retiredEventCount": len(retired_events),
+        })
     return append_turn_event(
         Path(project_root),
         normalized_session_id,
@@ -448,10 +484,9 @@ def apply_context_compression_checkpoints(
         return event_list
     covered_ids: set[str] = set()
     covered_ranges: list[tuple[int, int]] = []
-    checkpoint_ids = {event.event_id for event in checkpoints}
     for checkpoint in checkpoints:
         payload = dict(checkpoint.payload or {})
-        for event_id in list(payload.get("coveredEventIds") or []):
+        for event_id in [*list(payload.get("coveredEventIds") or []), *list(payload.get("retiredEventIds") or [])]:
             normalized = str(event_id or "").strip()
             if normalized:
                 covered_ids.add(normalized)
@@ -462,9 +497,6 @@ def apply_context_compression_checkpoints(
 
     filtered: list[TurnJournalEvent] = []
     for event in event_list:
-        if event.event_id in checkpoint_ids:
-            filtered.append(event)
-            continue
         if normalized_current_turn_id and event.turn_id == normalized_current_turn_id:
             filtered.append(event)
             continue
@@ -516,6 +548,9 @@ def _is_coverable_by_checkpoint(event: TurnJournalEvent, *, current_turn_id: str
 def _summarized_checkpoint_events(
     events: Iterable[TurnJournalEvent],
     summarized_messages: Iterable[Any],
+    *,
+    exact_boundary: bool = False,
+    protect_ambiguous: bool = False,
 ) -> list[TurnJournalEvent]:
     """Return the events whose projected model messages were folded into a summary.
 
@@ -545,6 +580,29 @@ def _summarized_checkpoint_events(
     # kept-window twin can never be marked covered through its folded twin.
     unconsumed = list(range(len(candidates)))
     matched_ids: set[str] = set()
+    if exact_boundary:
+        # Without a durable event/tool identity, only an unambiguous complete
+        # content match proves a replacement boundary. In particular, SHORT
+        # must never claim SHORT WITH MORE CONTEXT or an identical older twin.
+        proven_positions: list[int] = []
+        for position in unconsumed:
+            candidate = candidates[position]
+            if _candidate_has_checkpoint_identity(candidate):
+                proven_positions.append(position)
+                continue
+            possible_ids = {
+                str(message.get("metadata", {}).get("eventId") or "")
+                for message in projected
+                if isinstance(message, Mapping)
+                and _projects_to_summary_input(message, candidate, exact_content=True)
+            } - {""}
+            if len(possible_ids) == 1:
+                proven_positions.append(position)
+            elif protect_ambiguous:
+                # Retaining too much is safe; treating an ambiguous kept
+                # message as absent would silently retire a live request.
+                matched_ids.update(possible_ids)
+        unconsumed = proven_positions
     for message in projected:
         if not isinstance(message, Mapping):
             continue
@@ -555,25 +613,67 @@ def _summarized_checkpoint_events(
         if not event_id or event_id not in event_by_id:
             continue
         for position in list(unconsumed):
-            if _projects_to_summary_input(message, candidates[position]):
+            if _projects_to_summary_input(message, candidates[position], exact_content=exact_boundary):
                 unconsumed.remove(position)
                 matched_ids.add(event_id)
                 break
     return [event for event in event_list if str(event.event_id or "").strip() in matched_ids]
 
 
-def _projects_to_summary_input(projected: Mapping[str, Any], candidate: Any) -> bool:
+def _candidate_has_checkpoint_identity(candidate: Any) -> bool:
+    metadata = (
+        candidate.get("metadata") if isinstance(candidate, Mapping)
+        else getattr(candidate, "additional_kwargs", None)
+    )
+    return bool(
+        (isinstance(metadata, Mapping) and metadata.get("eventId"))
+        or _candidate_tool_call_id(candidate)
+        or _candidate_tool_call_ids(candidate)
+    )
+
+
+def _projects_to_summary_input(
+    projected: Mapping[str, Any], candidate: Any, *, exact_content: bool = False,
+) -> bool:
     """Best-effort identity match between a projected event message and the
     in-memory message compression folded."""
 
+    metadata = projected.get("metadata")
+    candidate_metadata = (
+        candidate.get("metadata") if isinstance(candidate, Mapping)
+        else getattr(candidate, "additional_kwargs", None)
+    )
+    projected_id = str(metadata.get("eventId") or "") if isinstance(metadata, Mapping) else ""
+    candidate_id = str(candidate_metadata.get("eventId") or "") if isinstance(candidate_metadata, Mapping) else ""
+    if projected_id and candidate_id:
+        return projected_id == candidate_id
     projected_role = str(projected.get("role") or "").strip().lower()
+    # History assembly promotes checkpoint summaries to runtime/system notices.
+    # A later checkpoint must replace that earlier summary rather than append
+    # another copy on every turn.
+    if (
+        isinstance(metadata, Mapping)
+        and metadata.get("kind") == EVENT_COMPACTION_CHECKPOINT
+        and _candidate_message_role(candidate) in {"system", "runtime", "runtime_context"}
+    ):
+        if exact_content:
+            from core.infrastructure.runtime_input import build_runtime_notice_message
+
+            summary_text = str(projected.get("content") or "").strip()
+            candidate_text = str(_candidate_content_text(candidate) or "").strip()
+            return candidate_text in {
+                summary_text,
+                f"历史摘要:\n{summary_text}",
+                build_runtime_notice_message(f"历史摘要:\n{summary_text}").content,
+            }
+        return _content_overlaps(projected.get("content"), candidate)
     if projected_role != _candidate_message_role(candidate):
         return False
     if projected_role == "tool":
         projected_call_id = str(projected.get("tool_call_id") or "").strip()
         candidate_call_id = _candidate_tool_call_id(candidate)
-        if projected_call_id and candidate_call_id and projected_call_id != candidate_call_id:
-            return False
+        if projected_call_id and candidate_call_id:
+            return projected_call_id == candidate_call_id
     else:
         projected_calls = _projected_tool_call_ids(projected)
         candidate_calls = _candidate_tool_call_ids(candidate)
@@ -583,6 +683,19 @@ def _projects_to_summary_input(projected: Mapping[str, Any], candidate: Any) -> 
             # Tool-call ids are a strong identity anchor; content may have
             # been legitimately rewritten downstream (redaction/replacement).
             return True
+    if exact_content:
+        projected_content = projected.get("content")
+        candidate_content = _candidate_content_text(candidate)
+        if isinstance(projected_content, str) and isinstance(candidate_content, str):
+            projected_text, candidate_text = projected_content.strip(), candidate_content.strip()
+            if projected_text == candidate_text:
+                return True
+            if projected_role == "user":
+                from core.infrastructure.runtime_input import build_chat_user_message
+
+                return candidate_text == build_chat_user_message(projected_text)["content"]
+            return False
+        return projected_content == candidate_content
     return _content_overlaps(projected.get("content"), candidate)
 
 

@@ -327,6 +327,7 @@ from core.orchestration.turn_carryover import (
     serialize_turn_messages,
 )
 from core.orchestration.turn_compression import (
+    build_context_compression_notice,
     compress_turn_messages,
     evaluate_context_budget_preflight,
 )
@@ -3649,10 +3650,7 @@ class AgentRuntime:
                         break
                     # 只有实际缩减上下文时才写 notice，禁止把 guard skip 伪装成已压缩。
                     if bool(getattr(self, "_last_context_compression_applied", False)):
-                        messages.append(build_runtime_notice_message(
-                            f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
-                            f"（{current_tokens} → {after_tokens} tokens）。"
-                        ))
+                        messages.append(build_context_compression_notice(current_tokens, after_tokens))
                         if provider_replay_state is not None:
                             # Responses 续锚与轮内压缩互斥：压缩只重写本地
                             # messages，provider 侧历史仍停在旧 response_id；
