@@ -66,90 +66,131 @@ def build_history_events(
 ) -> list[HistoryEvent]:
     """Build a stable event view from persisted conversation messages."""
 
-    events: list[HistoryEvent] = []
-    tool_call_lookup: dict[str, dict[str, Any]] = {}
-    for index, raw in enumerate(list(messages or [])):
-        if not isinstance(raw, dict):
-            continue
-        role = str(raw.get("role") or "").strip().lower()
-        if role == "tool":
-            tool_result_event = _tool_role_result_event(
-                dict(raw),
-                index=index,
-                session_id=session_id,
-                tool_call_lookup=tool_call_lookup,
-            )
-            if tool_result_event is not None:
-                events.append(tool_result_event)
-            continue
-        if role not in {"user", "assistant", "runtime_context", "runtime", "system"}:
-            continue
-        message = dict(raw)
-        metadata = _metadata_dict(message)
-        content = _content_text(message.get("content"))
-        turn_id = _turn_id(message, metadata)
-        event_type = _message_event_type(role, metadata)
-        message_event_id = _stable_event_id(session_id, index, event_type, message)
-        events.append(
-            HistoryEvent(
-                event_id=message_event_id,
-                event_type=event_type,
-                session_id=session_id,
-                message_index=index,
-                turn_id=turn_id,
-                role=role,
-                content=content,
-                timestamp=str(message.get("timestamp") or "").strip(),
-                summary=_summary_for_message(content, message),
-                metadata=metadata,
-                source=message,
-            )
-        )
-        for tool_index, tool in enumerate(_tool_entries(message), start=1):
-            tool_name = _tool_name(tool)
-            if not tool_name:
+    builder = HistoryEventBuilder(session_id=session_id)
+    builder.feed(messages)
+    return builder.events
+
+
+class HistoryEventBuilder:
+    """Incremental builder behind :func:`build_history_events`.
+
+    The projection is a single ordered walk over messages with one piece of
+    carried state (``tool_call_lookup``), and event ids are keyed by the
+    absolute message index. That makes the walk resumable: feeding only an
+    appended message tail — with a lookup carried over from the previous feed
+    and the index continuing where it stopped — produces exactly the same
+    events as replaying the whole list from scratch.
+    """
+
+    def __init__(self, *, session_id: str = "") -> None:
+        self._session_id = str(session_id or "")
+        self._events: list[HistoryEvent] = []
+        self._tool_call_lookup: dict[str, dict[str, Any]] = {}
+        self._next_index = 0
+
+    @property
+    def events(self) -> list[HistoryEvent]:
+        return self._events
+
+    @property
+    def message_count(self) -> int:
+        return self._next_index
+
+    def fork(self) -> "HistoryEventBuilder":
+        """Clone the carried state for an appended-tail continuation."""
+
+        continuation = HistoryEventBuilder(session_id=self._session_id)
+        continuation._tool_call_lookup = dict(self._tool_call_lookup)
+        continuation._next_index = self._next_index
+        return continuation
+
+    def feed(self, messages: Iterable[dict[str, Any] | Any]) -> list[HistoryEvent]:
+        session_id = self._session_id
+        tool_call_lookup = self._tool_call_lookup
+        for raw in list(messages or []):
+            index = self._next_index
+            self._next_index += 1
+            if not isinstance(raw, dict):
                 continue
-            tool_call_id = _tool_call_id(tool, index=index, tool_index=tool_index)
-            tool_summary = _tool_summary(tool)
-            common = {
-                "session_id": session_id,
-                "message_index": index,
-                "turn_id": turn_id,
-                "role": role,
-                "timestamp": str(message.get("timestamp") or "").strip(),
-                "tool_name": tool_name,
-                "tool_call_id": tool_call_id,
-                "status": str(tool.get("status") or "").strip(),
-                "summary": tool_summary,
-                "metadata": {"messageEventId": message_event_id},
-                "source": tool,
-            }
-            tool_call_lookup[tool_call_id] = {
-                "tool_name": tool_name,
-                "tool_call_id": tool_call_id,
-                "status": str(tool.get("status") or "").strip(),
-                "message_event_id": message_event_id,
-                "timestamp": str(message.get("timestamp") or "").strip(),
-                "turn_id": turn_id,
-            }
-            events.append(
+            role = str(raw.get("role") or "").strip().lower()
+            if role == "tool":
+                tool_result_event = _tool_role_result_event(
+                    dict(raw),
+                    index=index,
+                    session_id=session_id,
+                    tool_call_lookup=tool_call_lookup,
+                )
+                if tool_result_event is not None:
+                    self._events.append(tool_result_event)
+                continue
+            if role not in {"user", "assistant", "runtime_context", "runtime", "system"}:
+                continue
+            message = dict(raw)
+            metadata = _metadata_dict(message)
+            content = _content_text(message.get("content"))
+            turn_id = _turn_id(message, metadata)
+            event_type = _message_event_type(role, metadata)
+            message_event_id = _stable_event_id(session_id, index, event_type, message)
+            self._events.append(
                 HistoryEvent(
-                    event_id=_stable_event_id(session_id, index, EVENT_TOOL_CALL, tool, suffix=str(tool_index)),
-                    event_type=EVENT_TOOL_CALL,
-                    content=_json_preview(_tool_arguments(tool), limit=1000),
-                    **common,
+                    event_id=message_event_id,
+                    event_type=event_type,
+                    session_id=session_id,
+                    message_index=index,
+                    turn_id=turn_id,
+                    role=role,
+                    content=content,
+                    timestamp=str(message.get("timestamp") or "").strip(),
+                    summary=_summary_for_message(content, message),
+                    metadata=metadata,
+                    source=message,
                 )
             )
-            if tool_summary:
-                events.append(
+            for tool_index, tool in enumerate(_tool_entries(message), start=1):
+                tool_name = _tool_name(tool)
+                if not tool_name:
+                    continue
+                tool_call_id = _tool_call_id(tool, index=index, tool_index=tool_index)
+                tool_summary = _tool_summary(tool)
+                common = {
+                    "session_id": session_id,
+                    "message_index": index,
+                    "turn_id": turn_id,
+                    "role": role,
+                    "timestamp": str(message.get("timestamp") or "").strip(),
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "status": str(tool.get("status") or "").strip(),
+                    "summary": tool_summary,
+                    "metadata": {"messageEventId": message_event_id},
+                    "source": tool,
+                }
+                tool_call_lookup[tool_call_id] = {
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "status": str(tool.get("status") or "").strip(),
+                    "message_event_id": message_event_id,
+                    "timestamp": str(message.get("timestamp") or "").strip(),
+                    "turn_id": turn_id,
+                }
+                self._events.append(
                     HistoryEvent(
-                        event_id=_stable_event_id(session_id, index, EVENT_TOOL_RESULT, tool, suffix=str(tool_index)),
-                        event_type=EVENT_TOOL_RESULT,
-                        content=tool_summary,
+                        event_id=_stable_event_id(session_id, index, EVENT_TOOL_CALL, tool, suffix=str(tool_index)),
+                        event_type=EVENT_TOOL_CALL,
+                        content=_json_preview(_tool_arguments(tool), limit=1000),
                         **common,
                     )
                 )
-    return events
+                if tool_summary:
+                    self._events.append(
+                        HistoryEvent(
+                            event_id=_stable_event_id(session_id, index, EVENT_TOOL_RESULT, tool, suffix=str(tool_index)),
+                            event_type=EVENT_TOOL_RESULT,
+                            content=tool_summary,
+                            **common,
+                        )
+                    )
+        return self._events
 
 
 def _tool_role_result_event(
@@ -445,6 +486,7 @@ __all__ = [
     "EVENT_TOOL_RESULT",
     "EVENT_USER_MESSAGE",
     "HistoryEvent",
+    "HistoryEventBuilder",
     "build_history_events",
     "fetch_history_event",
     "latest_checkpoint",
