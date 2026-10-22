@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -35,6 +36,21 @@ from tools.token_manager import estimate_messages_tokens
 # is still non-blocking in that case (there is no limit to fail closed on),
 # but it is now explicit in results and diagnostics.
 BUDGET_LIMIT_UNCONFIGURED_GUARD_REASON = "budget_limit_unconfigured"
+
+
+def _cooperative_yield() -> None:
+    """GIL courtesy between serial estimator sweeps (compressionGateMs).
+
+    The budget-window gate re-estimates one full candidate per history group;
+    on a ~186k-token history that keeps one core busy for seconds without a
+    yield and starves the interactive turn's small CPU segments (same
+    precedent as the hypothesis_first_chain sweep wall-clock budget).
+    ``sleep(0)`` returns immediately when no other thread is ready, so the
+    scheduling-only cost is negligible: every estimate and its order are
+    unchanged.
+    """
+
+    time.sleep(0)
 
 
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
@@ -136,6 +152,9 @@ def build_token_budget_window(
     if not keep_history:
         return kept, _coerce_nonnegative_int(estimator(kept)), bool(kept)
     for group in reversed(groups):
+        # One full estimator sweep per group: hand the GIL back between
+        # groups so a long compression preflight cannot monopolize a core.
+        _cooperative_yield()
         candidate_indices = kept_indices.union(group)
         candidate = [message for index, message in enumerate(items) if index in candidate_indices]
         if _coerce_nonnegative_int(estimator(candidate)) > budget:

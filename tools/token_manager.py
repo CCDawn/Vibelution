@@ -544,6 +544,19 @@ def _history_summary_notice_payload(message: Any) -> str:
     return content[marker_index + len(HISTORY_SUMMARY_NOTICE_MARKER):].strip()
 
 
+# 分片协作让出（GIL 减负）：precise 扫描对非 ASCII 内容走逐字符 Python 循环，
+# 18.6 万 token 量级的历史一次全量扫可占用单核数百毫秒到数秒（compressionGate
+# 预检 + 微压缩计量都走这里）。每 N 条消息让出一次 GIL（sleep(0) 无就绪线程时
+# 立即返回），把长扫切成几十片，交互轮的小 CPU 段得以插入。仅调度不变更任何
+# 估算算术：各函数均为逐消息可加求和，分片求和与整表求和逐位相同。
+_SCAN_YIELD_EVERY_MESSAGES = 16
+
+
+def _cooperative_yield() -> None:
+    """释放 GIL 一个调度量子；无就绪线程时 sleep(0) 立即返回，开销可忽略。"""
+    time.sleep(0)
+
+
 def _estimate_message_content_tokens(content: Any) -> int:
     if isinstance(content, str):
         return estimate_tokens_precise(content)
@@ -563,10 +576,12 @@ def _estimate_message_content_tokens(content: Any) -> int:
 
 
 def _estimate_messages_tokens_uncached(messages: list) -> int:
-    return sum(
-        _estimate_message_content_tokens(_message_content(message))
-        for message in messages
-    )
+    total = 0
+    for index, message in enumerate(messages):
+        if index % _SCAN_YIELD_EVERY_MESSAGES == 0 and index:
+            _cooperative_yield()
+        total += _estimate_message_content_tokens(_message_content(message))
+    return total
 
 
 def _content_char_upper_bound(content: Any) -> int:
@@ -668,11 +683,14 @@ def _scan_messages_tokens(messages: list) -> tuple[int, int]:
     """One pass over contents returning (precise_tokens, rough_upper_bound).
 
     rough 与 precise 共享这次遍历：需要 precise 时 rough 免费得到，避免
-    同一列表在一次判定里被完整走两遍。
+    同一列表在一次判定里被完整走两遍。每 N 条消息做一次协作让出（见
+    ``_SCAN_YIELD_EVERY_MESSAGES``），求和算术与整表扫描逐位相同。
     """
     precise_total = 0
     rough_total = 0
-    for message in messages:
+    for index, message in enumerate(messages):
+        if index % _SCAN_YIELD_EVERY_MESSAGES == 0 and index:
+            _cooperative_yield()
         content = _message_content(message)
         precise_total += _estimate_message_content_tokens(content)
         rough_total += _content_char_upper_bound(content) + 50  # matches precise structure floor
@@ -797,12 +815,16 @@ def estimate_messages_tokens_with_tool_payloads(messages: list, threshold: int) 
     limit = max(0, int(threshold or 0))
     rough = rough_upper_bound_messages_tokens(messages)
     payload_bound = 0
-    for message in list(messages or []):
+    for index, message in enumerate(list(messages or [])):
+        if index % _SCAN_YIELD_EVERY_MESSAGES == 0 and index:
+            _cooperative_yield()
         payload_bound += sum(len(part) for part in _message_tool_payload_parts(message))
     if rough + payload_bound <= limit:
         return rough + payload_bound
     total = 0
-    for message in list(messages or []):
+    for index, message in enumerate(list(messages or [])):
+        if index % _SCAN_YIELD_EVERY_MESSAGES == 0 and index:
+            _cooperative_yield()
         text_parts: list = [_message_content_text(message)]
         text_parts.extend(_message_tool_payload_parts(message))
         total += estimate_tokens_precise("\n".join(part for part in text_parts if part))
