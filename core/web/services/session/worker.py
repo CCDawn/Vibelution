@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
-from core.web.services.session.runtime_glue import _is_steer_guidance_kind
 from core.infrastructure.tool_execution_scope import (
     ToolExecutionScope,
     tool_execution_scope,
@@ -1376,41 +1375,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             events = s._load_session_conversation_events_cached(session_id)
         except Exception:
             return []
-        steer_events: list[Any] = []
-        for event in events or []:
-            if str(getattr(event, "event_type", "") or "") != s.EVENT_USER_MESSAGE:
-                continue
-            if str(getattr(event, "turn_id", "") or "").strip() != guidance_turn_id:
-                continue
-            payload = dict(getattr(event, "payload", None) or {})
-            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-            if not _is_steer_guidance_kind(metadata.get("kind")):
-                continue
-            steer_events.append(event)
-        pending: list[str] = []
-        # Keep the historical per-drain cap: only the latest 8 steer events of
-        # this turn are eligible, matching the previous source-window limit.
-        for event in steer_events[-8:]:
-            payload = dict(getattr(event, "payload", None) or {})
-            content = str(payload.get("content") or "").strip()
-            if not content:
-                continue
-            event_id = str(getattr(event, "event_id", "") or "").strip()
-            sequence = getattr(event, "sequence", "")
-            if event_id:
-                key = event_id
-            elif sequence:
-                key = f"seq:{sequence}"
-            else:
-                # Last resort for degenerate rows: key on text, but only here —
-                # an ``or``-chain would make f"seq:{''}" truthy and both drop
-                # the text fallback and collide distinct degenerate rows.
-                key = f"text:{content}"
-            if key in consumed_guidance_keys:
-                continue
-            consumed_guidance_keys.add(key)
-            pending.append(content)
-        return pending
+        from .turn_steer import drain_guidance_events
+
+        return drain_guidance_events(session_id, guidance_turn_id, events, consumed_guidance_keys)
 
     # The LLM adapter receives a bound ``current_stop_reason`` method, so the
     # capability marker must live on the session-owned checker before the

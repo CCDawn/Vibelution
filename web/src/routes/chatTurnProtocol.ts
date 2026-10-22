@@ -4,6 +4,7 @@ import type {
   SessionTurnItem,
 } from "../api/types/chat";
 import { parseToolCallInput } from "../api/toolCallInput";
+import { sessionTurnItemOrderSequence } from "../agent-thread/turnItemOrder";
 
 /** The transport label is retained; the render protocol is now only TurnItems. */
 export type ChatTurnRenderProtocol = "turn_items" | "empty";
@@ -91,7 +92,7 @@ export const consolidateSessionTurnItemsV2 = (
   });
   return [...byIdentity.entries()]
     .sort(([leftIdentity, left], [rightIdentity, right]) => (
-      left.item.sequence - right.item.sequence
+      sessionTurnItemOrderSequence(left.item) - sessionTurnItemOrderSequence(right.item)
       || left.firstIndex - right.firstIndex
       || leftIdentity.localeCompare(rightIdentity)
     ))

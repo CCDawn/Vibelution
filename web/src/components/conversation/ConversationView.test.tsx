@@ -1193,7 +1193,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("nextVisibleMessageLimit");
     // Trailing in-flight rows leave the virtual window as the live-tail block.
     expect(conversationViewSource).toContain("const timelineLiveTailStartIndex = useMemo");
-    expect(conversationViewSource).toContain("!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)");
+    expect(conversationViewSource).toContain("conversationLiveTailStartIndex(activeTimelineMessages)");
     expect(conversationViewSource).toContain("timelineLiveTailMessages.length");
     expect(conversationViewSource).toContain('data-conversation-virtual-host="1"');
     // Follow/anchor semantics keep the production contracts.
@@ -2006,7 +2006,51 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).not.toContain("已执行");
     expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
     expect(html).toContain('data-vui="chip"');
-  });  it("renders user image attachments and composer image chips", () => {
+  });
+
+  it.each([
+    ["pending", undefined, "等待纳入"],
+    ["drained", 30, "已纳入"],
+    ["unconfirmed", undefined, "已接收"],
+  ])("renders the durable guidance state %s without claiming model execution", (state, consumed, label) => {
+    const html = renderConversation([{
+      id: "guide-state", role: "user", content: "检查并行操作",
+      timestamp: "2026-10-22T05:28:00Z",
+      metadata: {
+        kind: "user_guidance", turnId: "turn-state", guidanceState: state,
+        guidanceSequence: 20, guidanceConsumedSequence: consumed,
+      },
+    }]);
+    expect(html).toContain(label);
+    expect(html).toContain(`data-conversation-guidance-status="${state === "unconfirmed" ? "received" : state}"`);
+    expect(html).not.toContain("已执行");
+  });
+
+  it("renders completed work around guidance in the same order as the turn items", () => {
+    const html = renderConversation([
+      {
+        id: "ordered-answer", role: "assistant", turnId: "ordered-turn", status: "completed",
+        timestamp: "2026-10-22T05:30:00Z",
+        ...{ turnState: "completed", turnActiveMs: 90000 },
+        turnItems: [
+          { version: 3, id: "before", itemId: "before", type: "agent_message", sessionId: "ordered-session", turnId: "ordered-turn", channel: "commentary", text: "ORDER_BEFORE_GUIDE", status: "completed", revision: 1, sequence: 10, terminal: true },
+          { version: 3, id: "after", itemId: "after", type: "agent_message", sessionId: "ordered-session", turnId: "ordered-turn", channel: "answer", phase: "final_answer", text: "ORDER_AFTER_GUIDE", status: "completed", revision: 1, sequence: 40, terminal: true },
+        ],
+      },
+      {
+        id: "ordered-guide", role: "user", content: "ORDER_GUIDANCE_INPUT",
+        timestamp: "2026-10-22T05:28:00Z",
+        metadata: { kind: "user_guidance", turnId: "ordered-turn", guidanceEventId: "ordered-guide", guidanceSequence: 20, guidanceConsumedSequence: 30, guidanceState: "drained" },
+      },
+    ]);
+    expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeGreaterThan(-1);
+    expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeLessThan(html.indexOf("ORDER_GUIDANCE_INPUT"));
+    expect(html.indexOf("ORDER_GUIDANCE_INPUT")).toBeLessThan(html.indexOf("ORDER_AFTER_GUIDE"));
+    expect(html).toContain("已纳入");
+    expect(html.match(/已工作/g)).toHaveLength(1);
+  });
+
+  it("renders user image attachments and composer image chips", () => {
     const userMessage: ConversationMessage = {
       id: "message-user",
       role: "user",

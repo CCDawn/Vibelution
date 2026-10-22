@@ -479,6 +479,13 @@ def invoke_agent_llm_turn(
                 ):
                     def on_protocol_event(event: Any) -> None:
                         hooks.raise_if_stop()
+                        observer = getattr(ui, "note_protocol_item", None)
+                        if callable(observer):
+                            try:
+                                observer(event)
+                            except Exception:
+                                # Display provenance cannot interrupt provider output.
+                                pass
                         if event.kind == "reasoning_delta" and event.text:
                             ui.stream_thought(event.text, done=False)
                         elif event.kind in {

@@ -1,5 +1,6 @@
 import type { ConversationMessage, SessionTurnItem } from "../api/types";
 import { parseToolCallInput } from "../api/toolCallInput";
+import { sessionTurnItemOrderSequence } from "./turnItemOrder";
 import type {
   AgentMentalPart,
   AgentMentalSnapshot,
@@ -59,7 +60,7 @@ export function conversationMessageToAgentParts(message: ConversationMessage): A
 function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): AgentMessagePart[] {
   return [...items]
     .sort((left, right) => (
-      normalizedSequence(left.sequence) - normalizedSequence(right.sequence)
+      sessionTurnItemOrderSequence(left) - sessionTurnItemOrderSequence(right)
       || normalizedSequence(left.revision) - normalizedSequence(right.revision)
     ))
     .flatMap((item): AgentMessagePart[] => {
@@ -87,7 +88,7 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           text,
           summary,
           status: item.status,
-          sequence: item.sequence,
+          sequence: sessionTurnItemOrderSequence(item),
           timestamp: item.updatedAt ?? item.createdAt,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -100,7 +101,7 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           status: item.status,
           snapshot: mentalSnapshotFromTurnItem(item.metadata?.mentalSnapshot),
           summary: compactText(item.text || item.summary),
-          sequence: item.sequence,
+          sequence: sessionTurnItemOrderSequence(item),
           timestamp: item.updatedAt ?? item.createdAt,
         } satisfies AgentMentalPart];
       }
@@ -115,7 +116,7 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           // target; result-derived summaries do not exist until it finishes.
           arguments: parseToolCallInput(item.input),
           resultPreview: compactText(item.output),
-          sequence: item.sequence,
+          sequence: sessionTurnItemOrderSequence(item),
           timestamp: item.updatedAt ?? item.createdAt,
           source: "feedback-event",
         } satisfies AgentToolCallPart];
@@ -129,7 +130,7 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
         status: item.status,
         summary: retry ? item.reason : item.text,
         error: item.type === "error" ? item.text : undefined,
-        sequence: item.sequence,
+        sequence: sessionTurnItemOrderSequence(item),
         timestamp: item.updatedAt ?? item.createdAt,
       } satisfies AgentRuntimeEventPart];
     });

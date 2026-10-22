@@ -204,6 +204,19 @@
 - 卡片继续固定在 composer 附近；当前待审批 `requestId` 与 transcript 的 `toolCallId`/`operationId` 没有可靠映射，不以工具名猜测精确关联。
 - 保留一次、始终授权、拒绝的操作按钮及可用快捷键提示。
 
+## 运行中引导工作段
+
+### 功能
+普通会话沿用同一个 Turn，以 Journal 的引导消费回执划分显示段，依次呈现已有步骤、引导、后续步骤。每段复用既有助手消息和工作详情控件，独立折叠；只保留最后一段的流式状态与最终答案操作。
+
+### 适用范围
+原生普通会话的安全/中断引导与历史回放。Companion 投影沿用原路径；没有引导的会话保持原有显示。此显示拆分不创建新 Turn、消息事实、SSE 通道或模型历史。
+
+### 使用方式与状态
+`projectAgentMessageTimelineMessages` 先合并 item revisions，再由 `conversationGuidanceSegments` 按服务端 `guidanceConsumedSequence` 切段。等待中的引导位于当前工作之后，复用 VChip 显示「等待纳入」；drained 回执显示「已纳入」，仅表示执行循环取出该输入。缺少消费回执的终态记录仍放在当前工作之后，保留「已接收」，避免在任务停止或失败时挪动已有步骤。
+
+稳定段身份由 turnId 与 guidanceEventId 定位，刷新和终态回放保持一致；工作项按持久化的首次创建顺序分段，后续 revision 只更新内容和状态。末段和同轮待纳入引导共处实时尾部，避免静态用户行使增长中的工作进入历史虚拟器。节点操作和 token 用量只归最终段，沿用原始后端消息/节点身份。
+
 ## ConversationFollowupQueueBar
 
 ### 功能

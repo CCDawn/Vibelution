@@ -91,6 +91,7 @@ import { ConversationToolActivityPills } from "./ConversationToolActivityPills";
 import { type AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
 import { useAgentThread } from "./useAgentThread";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
+import { conversationLiveTailStartIndex } from "./conversationGuidanceSegments";
 import { projectConversationDisplayMessages } from "./conversationDisplayMessages";
 import {
   imageArtifactForMessage,
@@ -639,15 +640,7 @@ export const ConversationView = React.memo(function ConversationView({
    * a single row.
    */
   const timelineLiveTailStartIndex = useMemo(() => {
-    let index = activeTimelineMessages.length;
-    while (index > 0) {
-      const message = activeTimelineMessages[index - 1];
-      if (!assistantTurnIsStreaming(message) && !assistantTurnIsInFlight(message)) {
-        break;
-      }
-      index -= 1;
-    }
-    return index;
+    return conversationLiveTailStartIndex(activeTimelineMessages);
   }, [activeTimelineMessages]);
   const timelineHistoryMessages = useMemo(
     () => activeTimelineMessages.slice(0, timelineLiveTailStartIndex),
