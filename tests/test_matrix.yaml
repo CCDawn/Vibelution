@@ -453,8 +453,10 @@ rules:
       - "local-parallel"
     paths:
       - "core/chat/turn_journal.py"
+      - "core/chat/context_compression_ledger.py"
       - "core/chat/conversation_branches.py"
       - "tests/test_conversation_branches.py"
+      - "tests/test_conversation_ledger.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_turn_journal.py tests/test_turn_journal_splice.py tests/test_turn_journal_perf.py tests/test_session_turn_journal.py tests/test_session_journal_bridge.py tests/test_conversation_invariant.py tests/test_conversation_branches.py tests/test_conversation_ledger.py tests/test_model_messages.py tests/test_clear_chat_journal_state_script.py tests/test_session_detail_contract.py -q"
     notes:
