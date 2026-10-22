@@ -7,7 +7,7 @@ emergency vs chat early-exit contract using injected fakes.
 
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from core.orchestration.agent_modes import AgentMode
 from core.orchestration.turn_compression import (
@@ -218,6 +218,7 @@ def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path
     from core.chat import conversation_ledger as ledger
     from core.chat import turn_journal
     from core.web.services import agent_directory_service
+    from tools.token_manager import CompressionOutput, CompressionResult
 
     monkeypatch.setattr(
         turn_journal, "turn_journal_workspace_root", lambda root: tmp_path / "workspace"
@@ -239,11 +240,14 @@ def test_next_turn_replays_compression_from_its_own_ledger(monkeypatch, tmp_path
             ledger.EVENT_USER_MESSAGE,
             payload={"content": f"original history of {session_id}"},
         )
+    historical_message = HumanMessage(content="original history of workspace-session")
     _run(
-        messages=[AIMessage(content="long-context-message")],
-        compressor=_FakeCompressor(
-            [AIMessage(content="x")], summary="retained task summary"
-        ),
+        messages=[historical_message],
+        compressor=_FakeOutputCompressor(CompressionOutput(
+            [AIMessage(content="x")],
+            CompressionResult("retained task summary", 40, 1),
+            summarized_messages=[historical_message],
+        )),
         config=_feature_config(),
         project_root=str(tmp_path),
         turn_runtime_fn=dict,
@@ -308,8 +312,10 @@ def test_checkpoint_receives_exact_summarized_boundary(monkeypatch, tmp_path):
     )
     assert captured
     assert captured[0]["summarized_messages"] == [folded]
+    assert captured[0]["retained_messages"] == boundary_output.messages
+    assert captured[0]["source_messages"] == [AIMessage(content="long-context-message")]
 
-    # 旧式 (messages, stats) 压缩器证明不了边界：不传参，走既有 blanket 语义。
+    # 旧式压缩器不伪造摘要覆盖域；source/retained 仍显式描述实际替换边界。
     captured.clear()
     _run(
         messages=[AIMessage(content="long-context-message")],
@@ -320,6 +326,8 @@ def test_checkpoint_receives_exact_summarized_boundary(monkeypatch, tmp_path):
     )
     assert captured
     assert "summarized_messages" not in captured[0]
+    assert "source_messages" in captured[0]
+    assert "retained_messages" in captured[0]
 
 
 def test_disabled_feature_or_missing_compressor_skips_without_counting():
@@ -398,6 +406,117 @@ def test_successful_compression_updates_count_and_marks_applied():
     assert result[4] == 6
     assert compressor.calls
     assert compressor.calls[0]["use_llm_summary"] is False
+
+
+def test_budget_fallback_continues_when_required_context_exceeds_soft_target():
+    current_request = HumanMessage(content="q" * 700)
+    original = [AIMessage(content="old" * 1000), current_request]
+    rules = SystemMessage(content="r" * 50)
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 400), current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == [rules, current_request]
+    assert result[1] is False
+    assert result[2] is True
+    assert any(item["args"][1] == "agent.context_compression.target_unreachable" for item in extras["events"])
+    fallback = next(item for item in extras["events"] if item["args"][1] == "agent.context_compression.token_budget_applied")
+    assert fallback["kwargs"]["fields"]["sendTokens"] <= 1000
+    assert fallback["kwargs"]["fields"]["retiredMessageCount"] == 1
+
+
+def test_budget_fallback_reaches_target_even_when_summary_fits_hard_limit():
+    current_request = HumanMessage(content="current request")
+    rules = SystemMessage(content="rules and history summary")
+    original = [AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 800), current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == [rules, current_request]
+    assert result[1] is False
+    fallback = next(item for item in extras["events"] if item["args"][1] == "agent.context_compression.token_budget_applied")
+    assert fallback["kwargs"]["fields"]["sendTokens"] <= 600
+    assert fallback["kwargs"]["fields"]["targetUnreachable"] is False
+
+
+def test_budget_window_without_summary_cannot_retire_history_only_in_memory():
+    current_request = HumanMessage(content="current request")
+    original = [AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([AIMessage(content="k" * 800), current_request], summary=""),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == original
+    assert result[1] is True
+    assert result[2] is False
+    blocked = next(item for item in extras["events"] if item["args"][1] == "agent.context_budget_exhausted")
+    assert blocked["kwargs"]["fields"]["guardReason"] == "budget_window_requires_summary"
+
+
+def test_budget_window_persists_replacement_even_below_savings_threshold(monkeypatch, tmp_path):
+    captured = []
+    extras = {}
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *args, **kwargs: captured.append(kwargs) or object(),
+    )
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 850)
+    original = [rules, AIMessage(content="old" * 40), current_request]
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, AIMessage(content="k" * 40), current_request]),
+        config=_feature_config(threshold=0.5), project_root=str(tmp_path), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[1] is False
+    assert captured, extras
+    assert captured[0]["effectiveness_ratio"] < 0.5
+    assert captured[0]["effective"] is True
+    assert captured[0]["source_messages"] == original
+    assert captured[0]["retained_messages"] == [rules, current_request]
+
+
+def test_unreachable_target_without_removable_history_does_not_report_budget_applied():
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 850)
+    extras = {}
+    result = _run(
+        messages=[AIMessage(content="old" * 1000), current_request],
+        compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == [rules, current_request]
+    assert result[1] is False
+    codes = [item["args"][1] for item in extras["events"]]
+    assert "agent.context_compression.target_unreachable" in codes
+    assert "agent.context_compression.token_budget_applied" not in codes
+
+
+def test_budget_fallback_fails_closed_when_required_context_and_notice_exceed_hard_limit():
+    current_request = HumanMessage(content="q" * 950)
+    rules = SystemMessage(content="r" * 20)
+    original = [AIMessage(content="old" * 1000), current_request]
+    extras = {}
+    result = _run(
+        messages=original, compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    assert result[0] == original
+    assert result[1] is True
+    assert result[2] is False
+    assert any(item["args"][1] == "agent.context_budget_exhausted" for item in extras["events"])
+    assert not extras["ui"].events
 
 
 def test_explicit_trigger_source_overrides_reason_guessing():
