@@ -40,6 +40,7 @@ from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, LLMRouteGateTimeoutError, LLMStreamIdleDeadlineError, LLMStreamTotalDeadlineError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
+from core.llm.ttft_breakdown import llm_ttft_chain_context
 from tests.helpers.isolated_config import isolated_settings_config
 
 
@@ -2080,7 +2081,13 @@ def test_responses_stream_exhaustion_after_partial_output_does_not_retry(monkeyp
     assert attempts["count"] == 1
 
 
-def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reasoning(monkeypatch):
+def test_chat_reasoning_only_exhaustion_retries_with_restart_boundary_replacement(monkeypatch):
+    """思考流即时投影后，纯思考阶段 exhaustion 仍走重试环且不发半截正文。
+
+    思考增量「transient」已即时跨消费者边界，但正文未出门：瞬态 done 被吞、
+    attempt 以可重试 exhaustion 失败，新 attempt 前发 streamRestart 边界标记，
+    消费端据此替换思考残段——转写里不出现重复/错序的思考内容。
+    """
     config = make_config(
         **{
             "llm.providers.default.kind": "deepseek",
@@ -2092,6 +2099,7 @@ def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reaso
         }
     )
     attempts = {"count": 0}
+    statuses = []
 
     def backend(_payload):
         attempts["count"] += 1
@@ -2113,14 +2121,117 @@ def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reaso
         )
 
     monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: statuses.append((status, fields)),
+    )
     client = LLMClient(config=config, backend=backend)
 
     events = list(client.stream_events([{"role": "user", "content": "ping"}]))
 
     assert attempts["count"] == 2
+    assert [event.type for event in events] == ["reasoning_delta", "reasoning_delta", "text_delta", "done"]
+    assert [event.text for event in events[:3]] == ["transient", "recovered", "answer"]
+    # 首个思考增量即消费者可见首帧，不再等正文才整体冲刷。
+    assert events[0].type == "reasoning_delta"
+    # 半截思考 + 重试成功：新 attempt 前发边界标记，消费端替换失败残段。
+    restart_statuses = [item for item in statuses if item[1].get("streamRestart")]
+    assert [item[1]["streamRestart"] for item in restart_statuses] == [2]
+
+
+def test_ttft_breakdown_reports_first_reasoning_chunk_ms(monkeypatch):
+    """ttft_breakdown 在首帧即思考增量时透出 firstReasoningChunkMs。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4-flash",
+        }
+    )
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"reasoning_content": "thinking"}}]},
+        {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]},
+    ]
+    recorded = []
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    with llm_ttft_chain_context(accepted_at_perf=time.perf_counter()):
+        events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
     assert [event.type for event in events] == ["reasoning_delta", "text_delta", "done"]
-    assert events[0].text == "recovered"
-    assert events[1].text == "answer"
+    breakdown = next(item for item in recorded if item[0][1] == "llm.stream.ttft_breakdown")
+    fields = breakdown[1]["fields"]
+    assert fields["firstReasoningChunkMs"] == fields["firstChunkMs"]
+    assert fields["firstReasoningChunkMs"] >= 0
+
+
+def test_ttft_breakdown_omits_first_reasoning_chunk_ms_without_reasoning(monkeypatch):
+    """无思考增量的流不发明 firstReasoningChunkMs（缺段省略，不虚构）。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    chunks = [
+        {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]},
+    ]
+    recorded = []
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    with llm_ttft_chain_context(accepted_at_perf=time.perf_counter()):
+        events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    breakdown = next(item for item in recorded if item[0][1] == "llm.stream.ttft_breakdown")
+    assert "firstReasoningChunkMs" not in breakdown[1]["fields"]
+
+
+def test_deepseek_reasoning_first_delta_is_first_consumer_chunk_without_waiting_for_answer():
+    """DEEPSEEK_REASONING 协议下首个思考增量即时放行，不等正文/工具调用。"""
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4-flash",
+        }
+    )
+    consumed = []
+
+    def backend(_payload):
+        def chunks():
+            consumed.append("reasoning")
+            yield {"choices": [{"index": 0, "delta": {"reasoning_content": "thinking"}}]}
+            consumed.append("answer")
+            yield {"choices": [{"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    client = LLMClient(config=config, backend=backend)
+    events = client.stream_events([{"role": "user", "content": "ping"}])
+    try:
+        first = next(events)
+        assert first.type == "reasoning_delta"
+        assert first.text == "thinking"
+        assert consumed == ["reasoning"], "reasoning was withheld until the provider answer"
+        assert [event.type for event in events] == ["text_delta", "done"]
+    finally:
+        events.close()
 
 
 def test_responses_transport_streams_output_item_done_message_when_no_delta(monkeypatch):
