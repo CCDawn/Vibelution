@@ -1044,7 +1044,7 @@ describe("ConversationView native Codex transcript surface", () => {
     // details, so the body markup exists but starts collapsed).
     expect(withWork).not.toMatch(/<details[^>]*\sopen[=\s>]/);
 
-    // Short turns stay quiet.
+    // Short turns report their real time instead of hiding behind a noise floor.
     const short = renderConversation([{
       ...base,
       id: "assistant-work-header-short",
@@ -1054,7 +1054,7 @@ describe("ConversationView native Codex transcript surface", () => {
           : item
       )),
     }]);
-    expect(short).not.toContain("已工作");
+    expect(short).toContain("已工作");
 
     // In-flight turns stay quiet too.
     const streaming = renderConversation([{ ...base, id: "assistant-work-header-live", status: "running" as const }]);
