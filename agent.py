@@ -3269,6 +3269,13 @@ class AgentRuntime:
                 "gitRefreshPolicy": "tool_driven",
                 "runtimeStateSyncMs": initial_runtime_sync_ms,
                 "promptBuildMs": initial_prompt_build_ms,
+                "promptBuildCacheHit": bool(
+                    getattr(
+                        self.prompt_manager,
+                        "last_build_stable_cache",
+                        {},
+                    ).get("all_hit")
+                ),
                 "totalMs": max(0, int((time.perf_counter() - initial_context_started) * 1000)),
                 "stableSessionPrompt": stable_session_prompt,
                 "excludedPromptSections": self._excluded_system_prompt_sections_for_turn(
@@ -3695,6 +3702,13 @@ class AgentRuntime:
                         "runtimeStateSyncMs": runtime_sync_ms,
                         "promptBuildMs": prompt_build_ms,
                         "promptBuildReused": prompt_build_reused,
+                        "promptBuildCacheHit": bool(
+                            getattr(
+                                self.prompt_manager,
+                                "last_build_stable_cache",
+                                {},
+                            ).get("all_hit")
+                        ),
                         "contextEstimateMs": context_estimate_ms,
                         "delegationMs": delegation_ms,
                         # Send-path timing anchors (TTFT dark zone): preflight

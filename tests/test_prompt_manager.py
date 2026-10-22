@@ -1675,3 +1675,230 @@ class TestIntentAlignmentSection:
         open_region = content.split("待澄清问题", 1)[1].split("澄清历史", 1)[0]
         assert "改哪部分" not in open_region
         assert "需要支持导出 Excel 吗" in open_region
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 跨轮稳定段渲染缓存（指纹键控）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _make_stable_goal_packet(goal: str, max_calls: int = 12) -> RuntimeGoalPacket:
+    return RuntimeGoalPacket(
+        goal=goal,
+        source="test",
+        objective_type="execute",
+        allow_auto_continue=False,
+        allow_file_writes=False,
+        allow_git_commit=False,
+        allow_evolution_transaction=False,
+        allow_subagents=False,
+        completion_standard="证据闭合即收束",
+        max_calls_per_turn=max_calls,
+    )
+
+
+def _patch_section_compute(pm: PromptManager, name: str):
+    """把指定章节的 compute 替换为带调用计数的原 compute，返回计数列表。"""
+    import threading as _threading
+    from dataclasses import replace as _dc_replace
+
+    section = pm._sections[name]
+    calls: list[int] = []
+    lock = _threading.Lock()
+    original_compute = section.compute
+
+    def counting_compute():
+        with lock:
+            calls.append(1)
+        return original_compute()
+
+    pm._sections[name] = _dc_replace(section, compute=counting_compute)
+    return calls
+
+
+class TestStableSectionRenderCache:
+    """跨轮稳定段指纹缓存：命中等价、输入失效、并发安全、有界容量"""
+
+    def test_second_build_hits_and_is_byte_identical(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("验证稳定段缓存命中"))
+        pm.set_intent_alignment_packet(_make_intent_alignment_packet())
+        goal_calls = _patch_section_compute(pm, "RUNTIME_GOAL")
+        intent_calls = _patch_section_compute(pm, "INTENT_ALIGNMENT")
+
+        first = to_string(pm.build())
+        assert pm.last_build_stable_cache["all_hit"] is False
+        assert set(pm.last_build_stable_cache["miss_sections"]) >= {
+            "RUNTIME_GOAL",
+            "INTENT_ALIGNMENT",
+        }
+
+        second = to_string(pm.build())
+        assert second == first, "命中产物必须与全量重建逐字节相同"
+        assert pm.last_build_stable_cache["all_hit"] is True
+        assert "RUNTIME_GOAL" in pm.last_build_stable_cache["hit_sections"]
+        assert "INTENT_ALIGNMENT" in pm.last_build_stable_cache["hit_sections"]
+        # 命中轮不再触发底层 compute（第三轮仍命中，计数不增长）
+        third = to_string(pm.build())
+        assert third == first
+        assert len(goal_calls) == 1
+        assert len(intent_calls) == 1
+
+    def test_input_change_invalidates_only_affected_section(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("目标甲"))
+        first = to_string(pm.build())
+        assert "目标甲" in first
+
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("目标乙"))
+        second = to_string(pm.build())
+        assert "目标乙" in second and "目标甲" not in second
+        stats = pm.last_build_stable_cache
+        assert "RUNTIME_GOAL" in stats["miss_sections"]
+        assert "INTENT_ALIGNMENT" in stats["hit_sections"]
+
+        third = to_string(pm.build())
+        assert third == second
+        assert pm.last_build_stable_cache["all_hit"] is True
+
+    def test_spec_digest_invalidates_on_budget_change(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("预算不变", max_calls=12))
+        pm.build()
+        pm.build()
+        assert "SPEC_DIGEST" in pm.last_build_stable_cache["hit_sections"]
+
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("预算不变", max_calls=7))
+        pm.build()
+        assert "SPEC_DIGEST" in pm.last_build_stable_cache["miss_sections"]
+
+    def test_unkeyable_packet_bypasses_cache_without_breaking_build(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(object())
+        result = to_string(pm.build())
+        stats = pm.last_build_stable_cache
+        # 不可投影 packet：RUNTIME_GOAL/SPEC_DIGEST 不进缓存（宁可不缓存）
+        assert "RUNTIME_GOAL" not in stats["hit_sections"]
+        assert "RUNTIME_GOAL" not in stats["miss_sections"]
+        assert result  # 构建本身不受影响
+
+    def test_mixed_variable_segments_stay_byte_equivalent(self):
+        """变量段（MEMORY）不进缓存键也不破坏命中段的字节等价。"""
+        from core.web.services import runtime_scene_service
+
+        fixed_scene_index = "## 最近运行场景\n- scene-1"
+        pm = PromptManager()
+        fresh_pm = PromptManager()
+        state_a = "### 状态记忆\n- 轮次A 的状态"
+        state_b = "### 状态记忆\n- 轮次B 的状态，内容不同"
+
+        with patch.object(
+            runtime_scene_service,
+            "build_runtime_scene_prompt_index",
+            return_value=fixed_scene_index,
+        ):
+            pm.set_runtime_goal_packet(_make_stable_goal_packet("混排等价验证"))
+            fresh_pm.set_runtime_goal_packet(_make_stable_goal_packet("混排等价验证"))
+
+            turn_a_cached = to_string(pm.build(state_memory=state_a))
+            turn_a_fresh = to_string(fresh_pm.build(state_memory=state_a))
+            assert turn_a_cached == turn_a_fresh
+
+            turn_b_cached = to_string(pm.build(state_memory=state_b))
+            turn_b_fresh = to_string(fresh_pm.build(state_memory=state_b))
+            assert turn_b_cached == turn_b_fresh
+            assert turn_a_cached != turn_b_cached  # 变量段真实生效
+
+            # 变量段变化不拖垮稳定段：稳定段在缓存管理器内持续命中
+            assert "RUNTIME_GOAL" in pm.last_build_stable_cache["hit_sections"]
+            assert pm.last_build_stable_cache["miss_sections"] == []
+
+    def test_concurrent_same_key_builds_are_safe_and_identical(self):
+        import threading
+
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("并发同键构建"))
+        goal_calls = _patch_section_compute(pm, "RUNTIME_GOAL")
+
+        barrier = threading.Barrier(4)
+        results: list[str] = []
+        errors: list[Exception] = []
+        results_lock = threading.Lock()
+
+        def worker():
+            try:
+                barrier.wait(timeout=10)
+                text = to_string(pm.build())
+                with results_lock:
+                    results.append(text)
+            except Exception as exc:  # pragma: no cover - 汇集到断言
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert errors == []
+        assert len(results) == 4
+        assert len(set(results)) == 1, "并发同键构建产物必须逐字节一致"
+        # 缓存竞态允许重复 compute，但结果确定；后续构建必须全命中
+        assert len(goal_calls) <= 4
+        pm.build()
+        assert pm.last_build_stable_cache["all_hit"] is True
+
+    def test_invalidate_cache_clears_stable_render_cache(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("失效链路验证"))
+        pm.build()
+        pm.build()
+        assert pm.last_build_stable_cache["all_hit"] is True
+
+        pm.invalidate_cache()  # 全部清除，含稳定段缓存
+        goal_calls = _patch_section_compute(pm, "RUNTIME_GOAL")
+        pm.build()
+        assert "RUNTIME_GOAL" in pm.last_build_stable_cache["miss_sections"]
+        assert len(goal_calls) == 1
+
+    def test_registry_change_bumps_fingerprint_generation(self):
+        pm = PromptManager()
+        pm.set_runtime_goal_packet(_make_stable_goal_packet("注册代数验证"))
+        pm.build()
+        pm.build()
+        assert pm.last_build_stable_cache["all_hit"] is True
+        generation_before = pm._registry_generation
+
+        pm.register(
+            SystemPromptSection(
+                name="EXTRA_TEST",
+                compute=lambda: "- 额外章节",
+                priority=95,
+            )
+        )
+        assert pm._registry_generation == generation_before + 1
+        pm.build()
+        # 注册代数变化 → 指纹变化 → 必须重算，不允许旧指纹命中
+        assert pm.last_build_stable_cache["all_hit"] is False
+
+
+class TestStableSectionRenderCacheUnit:
+    """StableSectionRenderCache 数据结构级行为"""
+
+    def test_lru_capacity_eviction(self):
+        from core.prompt_manager.prompt_manager import StableSectionRenderCache
+
+        cache = StableSectionRenderCache(capacity=2)
+        hit, _ = cache.get(("A", "fp"))
+        assert hit is False
+        cache.put(("A", "fp"), "a")
+        cache.put(("B", "fp"), "b")
+        hit_a, value_a = cache.get(("A", "fp"))
+        assert hit_a and value_a == "a"
+        cache.put(("C", "fp"), "c")  # 容量满，淘汰最旧的 ("B", "fp")
+        hit_b, _ = cache.get(("B", "fp"))
+        assert hit_b is False
+        hit_c, value_c = cache.get(("C", "fp"))
+        assert hit_c and value_c == "c"
+        stats = cache.stats()
+        assert stats["entries"] == 2 and stats["capacity"] == 2
