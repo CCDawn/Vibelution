@@ -684,9 +684,21 @@ def _candidate_has_checkpoint_identity(candidate: Any) -> bool:
     )
     return bool(
         (isinstance(metadata, Mapping) and metadata.get("eventId"))
+        or _candidate_checkpoint_provenance(candidate)
         or _candidate_tool_call_id(candidate)
         or _candidate_tool_call_ids(candidate)
     )
+
+
+def _candidate_checkpoint_provenance(candidate: Any) -> Mapping[str, Any]:
+    if _candidate_message_role(candidate) not in {"assistant", "system", "runtime", "runtime_context"}:
+        return {}
+    kwargs = getattr(candidate, "additional_kwargs", None)
+    provenance = kwargs.get("vibelution_compaction_checkpoint") if isinstance(kwargs, Mapping) else None
+    if (isinstance(provenance, Mapping) and provenance.get("kind") == EVENT_COMPACTION_CHECKPOINT
+            and isinstance(provenance.get("eventId"), str) and provenance["eventId"].strip()):
+        return provenance
+    return {}
 
 
 def _projects_to_summary_input(
@@ -701,6 +713,13 @@ def _projects_to_summary_input(
         else getattr(candidate, "additional_kwargs", None)
     )
     projected_id = str(metadata.get("eventId") or "") if isinstance(metadata, Mapping) else ""
+    provenance = _candidate_checkpoint_provenance(candidate)
+    if provenance:
+        return bool(
+            isinstance(metadata, Mapping) and metadata.get("kind") == EVENT_COMPACTION_CHECKPOINT
+            and projected_id == provenance["eventId"]
+            and (not provenance.get("turnId") or metadata.get("turnId") == provenance["turnId"])
+        )
     candidate_id = str(candidate_metadata.get("eventId") or "") if isinstance(candidate_metadata, Mapping) else ""
     if projected_id and candidate_id:
         return projected_id == candidate_id
