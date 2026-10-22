@@ -17,6 +17,7 @@ import hashlib
 import os
 import copy
 import re
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -858,6 +859,126 @@ def agent_session_purge_cleanup_failure_result(
     return result
 
 
+_AGENT_ARCHIVE_TRANSACTION = threading.local()
+
+
+def _archive_direct_session_id(agent_id: str, *, timeout: float) -> str:
+    """Read the binding without hydrating the Agent API projection."""
+    directory = _service().agent_directory_service
+    if not directory._STATE_LOCK.acquire(timeout=max(0.0, timeout)):
+        raise TimeoutError("Timed out reading the Agent archive binding.")
+    try:
+        state = directory.load_state()
+    finally:
+        directory._STATE_LOCK.release()
+    return next(
+        (
+            str(row.get("directSessionId") or "").strip()
+            for row in state.get("agents") or []
+            if isinstance(row, dict) and str(row.get("agentId") or "").strip() == agent_id
+        ),
+        "",
+    )
+
+
+def _archive_session_ids(agent_id: str, direct_session_id: str, *, timeout: float) -> set[str]:
+    s = _service()
+    with s.chat_state_transaction(s.PROJECT_ROOT, timeout=max(0.0, timeout)):
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    return set(s._agent_session_conversation_ids(
+        list(payload.get("conversations") or []),
+        agent_id=agent_id,
+        direct_session_id=direct_session_id,
+    ))
+
+
+@contextmanager
+def agent_archive_transaction(
+    agent_id: str, *, direct_session_id: str = "", timeout: float = 30.0,
+):
+    """Fence admission before serializing the entire archive and compensation.
+
+    Both HTTP single-Agent and bulk-item orchestration enter here before any
+    reference writes. Nested session sealing reuses the same admission set;
+    it must never expand that set while holding the global lifecycle locks.
+    """
+    s = _service()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise s.SessionValidationError("Agent id is required to archive sessions.")
+    identity = (str(s.PROJECT_ROOT.resolve()), normalized_agent_id)
+    active = getattr(_AGENT_ARCHIVE_TRANSACTION, "active", None)
+    if active is not None:
+        if active[0] != identity:
+            raise s.SessionBusyError("Cannot extend an active Agent archive transaction.")
+        yield active[1]
+        return
+
+    started = time.monotonic()
+    deadline = started + max(0.0, timeout)
+    admitted_session_ids: set[str] = set()
+    stage = "snapshot"
+
+    def record(event: str, *, outcome: str, level: str = "info") -> None:
+        _record_agent_session_lifecycle_event(
+            "archive", f"agent.archive.lock.{event}", outcome=outcome, level=level,
+            fields={
+                "agentId": normalized_agent_id,
+                "sessionCount": len(admitted_session_ids),
+                "waitMs": round((time.monotonic() - started) * 1000, 1),
+                "stage": stage,
+                **({"errorType": "SessionBusyError"} if event == "busy" else {}),
+            },
+        )
+
+    record("requested", outcome="requested")
+    admit_locks: list[Any] = []
+    try:
+        with ExitStack() as lifecycle:
+            try:
+                direct_id = str(direct_session_id or "").strip() or _archive_direct_session_id(
+                    normalized_agent_id, timeout=max(0.0, deadline - time.monotonic()),
+                )
+                # End the snapshot's brief file transaction before admission.
+                admitted_session_ids = _archive_session_ids(
+                    normalized_agent_id, direct_id, timeout=max(0.0, deadline - time.monotonic()),
+                )
+                stage = "admission"
+                record("waiting", outcome="requested")
+                for session_id in sorted(admitted_session_ids):
+                    admit_lock = s._session_submit_admit_lock(session_id)
+                    admit_lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+                    admit_locks.append(admit_lock)
+                stage = "chat_agent_lifecycle"
+                lifecycle.enter_context(s.session_agent_lifecycle_transaction(
+                    timeout=max(0.0, deadline - time.monotonic()),
+                ))
+                stage = "coverage"
+                current_direct_id = _archive_direct_session_id(
+                    normalized_agent_id, timeout=max(0.0, deadline - time.monotonic()),
+                )
+                selected = _archive_session_ids(
+                    normalized_agent_id, current_direct_id or direct_id,
+                    timeout=max(0.0, deadline - time.monotonic()),
+                )
+                if selected - admitted_session_ids:
+                    raise s.SessionBusyError("Agent sessions changed during archive; retry shortly.")
+            except (TimeoutError, s.SessionBusyError) as exc:
+                record("busy", outcome="failed", level="warning")
+                if isinstance(exc, s.SessionBusyError):
+                    raise
+                raise s.SessionBusyError("Agent archive is busy; retry shortly.") from exc
+            record("acquired", outcome="succeeded")
+            _AGENT_ARCHIVE_TRANSACTION.active = (identity, admitted_session_ids)
+            try:
+                yield admitted_session_ids
+            finally:
+                del _AGENT_ARCHIVE_TRANSACTION.active
+    finally:
+        for admit_lock in reversed(admit_locks):
+            admit_lock.release()
+
+
 def archive_agent_sessions(
     agent_id: str,
     *,
@@ -871,43 +992,15 @@ def archive_agent_sessions(
     normalized_direct_session_id = str(direct_session_id or "").strip()
     if not normalized_agent_id:
         raise s.SessionValidationError("Agent id is required to archive sessions.")
-    # G4 (chat-fix2 R4): sealing must exclude the per-session submit admission
-    # window exactly like delete does. Session ids are snapshotted before the
-    # chat-state lock so admission locks are taken in the canonical order
-    # (admission lock before _CHAT_STATE_LOCK), and sorted acquisition keeps
-    # concurrent archives deadlock-free. A session that joins the Agent after
-    # the snapshot is refused as retryable busy instead of sealed without
-    # admission exclusion. Acquisition is bounded and raises SessionBusyError.
-    admit_locks: list[Any] = []
-    try:
-        pre_payload = s.load_chat_state(s.PROJECT_ROOT)
-        pre_conversations = (
-            pre_payload.get("conversations") if isinstance(pre_payload, dict) else None
-        )
-        admitted_session_ids = set(
-            s._agent_session_conversation_ids(
-                list(pre_conversations or []),
-                agent_id=normalized_agent_id,
-                direct_session_id=normalized_direct_session_id,
-            )
-        )
-        for locked_session_id in sorted(admitted_session_ids):
-            admit_lock = s._session_submit_admit_lock(locked_session_id)
-            admit_lock.acquire()
-            admit_locks.append(admit_lock)
-        # Serialization is applied inside the pack on purpose: the facade
-        # re-exports this composer directly, and wrapping it again on the
-        # facade would take _CHAT_STATE_LOCK before these admission locks and
-        # invert the canonical (admission -> chat-state) lock order.
-        return s.session_agent_lifecycle_serialized(_archive_agent_sessions_sealed)(
+    with agent_archive_transaction(
+        normalized_agent_id, direct_session_id=normalized_direct_session_id,
+    ) as admitted_session_ids:
+        return _archive_agent_sessions_sealed(
             normalized_agent_id,
             direct_session_id=normalized_direct_session_id,
             include_restore_token=include_restore_token,
             admitted_session_ids=admitted_session_ids,
         )
-    finally:
-        for admit_lock in reversed(admit_locks):
-            admit_lock.release()
 
 
 def _archive_agent_sessions_sealed(
@@ -955,6 +1048,7 @@ def _archive_agent_sessions_sealed(
                     en=f"Session {uncovered_session_ids[0]} joined the Agent during archive; retry shortly.",
                 )
             )
+        agent_by_id = s._agent_lookup_for_conversations()
         for raw in conversations:
             if not isinstance(raw, dict):
                 continue
@@ -963,9 +1057,10 @@ def _archive_agent_sessions_sealed(
                 continue
             normalized = s._normalize_conversation(
                 raw,
-                agent_by_id=s._agent_lookup_for_conversations(),
+                agent_by_id=agent_by_id,
                 ensure_workspace=False,
                 lightweight=True,
+                load_message_preview=False,
             ) or {"id": session_id}
             phase = s._conversation_phase(session_id, normalized)
             if phase in {"queued", "running", "stopping", "paused"}:
@@ -1036,7 +1131,7 @@ def _archive_agent_sessions_sealed(
             found = s._find_conversation_entry(payload, activate_id)
             if isinstance(found, dict) and activate_id not in selected:
                 dirty_rows.append(dict(found))
-        s._persist_dirty_session_runtime_rows(dirty_rows, activate_session_id=activate_id)
+        s._persist_dirty_session_runtime_rows(dirty_rows, activate_session_id=activate_id, batch=True)
         archived_rows = [
             dict(raw)
             for raw in conversations

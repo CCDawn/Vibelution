@@ -1,4 +1,4 @@
-import { fetchJson } from "./client";
+import { fetchJson, fetchJsonWithTimeout, isFetchJsonHttpError } from "./client";
 import type {
   AgentAvatarOptionsPayload,
   AgentAvatarUploadResponse,
@@ -89,9 +89,21 @@ export function updateAgent(
 }
 
 export function archiveAgent(agentId: string): Promise<AgentConfigWorkspaceAgent> {
-  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
+  return fetchJsonWithTimeout<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
     method: "DELETE",
+    timeoutMs: 30_000,
   });
+}
+
+/** Bounded authoritative readback; a lost archive reply does not prove failure. */
+export function fetchAgentArchiveState(agentId: string): Promise<AgentConfigWorkspaceAgent> {
+  return fetchJsonWithTimeout<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
+    timeoutMs: 10_000,
+  });
+}
+
+export function isAgentArchiveOutcomeUncertain(error: unknown): boolean {
+  return !isFetchJsonHttpError(error) || error.status >= 500 || error.status === 408;
 }
 
 export function resetAgent<T = AgentDirectSessionResetResponse>(
@@ -252,10 +264,11 @@ export function bulkUpdateAgentPromptTemplate<T>(payload: {
 }
 
 export function bulkArchiveAgents<T>(agentIds: string[]): Promise<T> {
-  return fetchJson<T>("/api/agents/bulk-archive", {
+  return fetchJsonWithTimeout<T>("/api/agents/bulk-archive", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agentIds }),
+    timeoutMs: 60_000,
   });
 }
 

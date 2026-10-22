@@ -14,7 +14,6 @@ import { lazy, Suspense, type MouseEvent, useEffect, useMemo, useRef, useState }
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
-  bulkArchiveAgents as requestBulkArchiveAgents,
   bulkPurgeAgents as requestBulkPurgeAgents,
   bulkUpdateAgentConfig,
   bulkUpdateAgentPromptTemplate,
@@ -69,6 +68,7 @@ import { mergeAgentsRouteCopyWithDictionary } from "../i18n/mergeAgentsWorkbench
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useAgentConfigDraftMutations } from "./agents/useAgentConfigDraftMutations";
 import { useAgentWorkbenchMutations } from "./agents/useAgentWorkbenchMutations";
+import { archiveSnapshotIsCurrent } from "./agents/agentArchiveRecovery";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
@@ -627,7 +627,6 @@ export function AgentsRoute() {
     () => AGENT_PRIMARY_MODE_OPTIONS.map((mode) => ({ value: mode, label: modeLabel(mode, lang) })),
     [lang],
   );
-  const bulkConfigCanSave = selectedBulkAgents.length > 1 && bulkConfigReady(bulkConfigDraft, bulkConfigApply) && !bulkAgentPending;
   const allVisibleAgentsSelected = visibleAgents.length > 0 && selectedBulkAgents.length === visibleAgents.length;
   const visiblePolicyTools = useMemo(() => {
     const query = normalizeText(toolSearchText);
@@ -1040,6 +1039,8 @@ export function AgentsRoute() {
     updatePersonaMutation,
     updateTaskMutation,
     archiveAgentMutation,
+    archiveAgents,
+    isAgentArchivePending,
     purgeAgentMutation,
     resetAgentMutation,
     updateAvatarMutation,
@@ -1067,7 +1068,7 @@ export function AgentsRoute() {
     setMembershipDraft,
     setToolGovernanceDraft,
     getWorkspace: () => workspace,
-    getSelectedAgentId: () => selectedAgentId,
+    getSelectedAgentId: () => selectedAgentIdRef.current,
     getActivePane: () => activePane,
     getSelectedAgent: () => selectedAgent,
     reconcileResetDirectSession,
@@ -1093,6 +1094,9 @@ export function AgentsRoute() {
   });
 
   const selectedAgentAvatarUpdatePending = updateAvatarMutation.isPending && updateAvatarMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedBulkArchivePending = selectedBulkAgents.some(agent => isAgentArchivePending(agent.agentId));
+  const selectedBulkPending = bulkAgentPending || selectedBulkArchivePending;
+  const bulkConfigCanSave = selectedBulkAgents.length > 1 && bulkConfigReady(bulkConfigDraft, bulkConfigApply) && !selectedBulkPending;
   const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConsumeAllPending = consumeAllMessagesMutation.isPending && consumeAllMessagesMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConfigPending = updateAgentMutation.isPending && updateAgentMutation.variables?.agentId === selectedAgent?.agentId;
@@ -1104,8 +1108,9 @@ export function AgentsRoute() {
   const selectedAgentToolPolicyPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentMemoryPolicyPending = updateMemoryPolicyMutation.isPending && updateMemoryPolicyMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentRuntimePolicyPending = updateRuntimePolicyMutation.isPending && updateRuntimePolicyMutation.variables?.agentId === selectedAgent?.agentId;
-  const selectedAgentArchivePending = archiveAgentMutation.isPending && archiveAgentMutation.variables?.agentId === selectedAgent?.agentId;
-  const selectedAgentPurgePending = purgeAgentMutation.isPending && purgeAgentMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentArchivePending = isAgentArchivePending(selectedAgent?.agentId ?? "");
+  const selectedAgentPurgePending = isAgentArchivePending(selectedAgent?.agentId ?? "")
+    || (purgeAgentMutation.isPending && purgeAgentMutation.variables?.agentId === selectedAgent?.agentId);
   const selectedAgentToolGovernanceCreatePending =
     createToolGovernanceMutation.isPending && createToolGovernanceMutation.variables?.agentId === selectedAgent?.agentId;
 
@@ -1519,7 +1524,7 @@ export function AgentsRoute() {
   };
 
   const bulkApplyAgentConfig = async () => {
-    if (bulkAgentPending) {
+    if (selectedBulkPending) {
       return;
     }
     if (selectedBulkAgents.length < 2) {
@@ -1556,9 +1561,9 @@ export function AgentsRoute() {
     } catch (error) {
       failed = selectedBulkAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBulkAgentPending(false);
     }
-
-    setBulkAgentPending(false);
     setNotice({
       tone: failed > 0 ? "error" : "success",
       text: agentBulkActionSummary(copy.bulkConfigResult, success, skipped, failed, notes, lang),
@@ -1567,7 +1572,7 @@ export function AgentsRoute() {
   };
 
   const bulkApplyPromptTemplate = async () => {
-    if (bulkAgentPending) {
+    if (selectedBulkPending) {
       return;
     }
     if (!selectedBulkAgents.length) {
@@ -1603,9 +1608,9 @@ export function AgentsRoute() {
     } catch (error) {
       failed = selectedBulkAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBulkAgentPending(false);
     }
-
-    setBulkAgentPending(false);
     setNotice({
       tone: failed > 0 ? "error" : "success",
       text: agentBulkActionSummary(copy.bulkPromptResult, success, skipped, failed, notes, lang),
@@ -1624,62 +1629,65 @@ export function AgentsRoute() {
     }
     // Confirm UI lives in AgentBulkOperationsPanel (VConfirmDialog).
 
-    setBulkAgentPending(true);
     const notes: string[] = [];
     const archivedAgents = selectedBulkAgents.filter((agent) => agent.status === "archived");
     const protectedAgents = selectedBulkAgents.filter((agent) => agent.status !== "archived" && agentArchiveProtected(agent));
-    const archiveAgents = selectedBulkAgents.filter((agent) => agent.status !== "archived" && !agentArchiveProtected(agent));
+    const pendingAgents = selectedBulkAgents.filter((agent) => agent.status !== "archived" && !agentArchiveProtected(agent) && isAgentArchivePending(agent.agentId));
+    const eligibleAgents = selectedBulkAgents.filter((agent) => agent.status !== "archived" && !agentArchiveProtected(agent) && !isAgentArchivePending(agent.agentId));
     archivedAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedArchived}`));
     protectedAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`));
+    pendingAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${lang === "zh" ? "归档仍在处理中" : "Archive in progress"}`));
     const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
     let success = 0;
-    let skipped = archivedAgents.length + protectedAgents.length;
+    let skipped = archivedAgents.length + protectedAgents.length + pendingAgents.length;
     let failed = 0;
-    let archivedSelectedAgent = false;
+    let unconfirmed = 0;
+    const confirmedAgentIds = new Set<string>();
 
     try {
-      if (archiveAgents.length) {
-        const response = await requestBulkArchiveAgents<AgentBulkActionResponse>(
-          archiveAgents.map((agent) => agent.agentId),
+      if (eligibleAgents.length) {
+        const response = await archiveAgents(
+          eligibleAgents.map((agent) => agent.agentId),
         );
         response.success.forEach((item) => {
           const archivedAgent = item as AgentConfigWorkspaceAgent;
-          if (archivedAgent.agentId === selectedAgent?.agentId) {
-            archivedSelectedAgent = true;
-          }
           if (archivedAgent.agentId) {
+            confirmedAgentIds.add(archivedAgent.agentId);
             queryClient.setQueryData<AgentConfigWorkspace | undefined>(
               queryKeys.agentConfigWorkspace(),
-              (current) => archivedWorkspaceCache(current, archivedAgent),
+              (current) => archiveSnapshotIsCurrent(current?.agents.find(row => row.agentId === archivedAgent.agentId), archivedAgent)
+                ? archivedWorkspaceCache(current, archivedAgent) : current,
             );
+            queryClient.setQueryData<AgentConfigWorkspaceAgent[]>(queryKeys.agentSummary(true), current => current?.map(row =>
+              row.agentId === archivedAgent.agentId && archiveSnapshotIsCurrent(row, archivedAgent) ? { ...row, ...archivedAgent } : row));
           }
         });
         response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedArchived)));
         response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, "")));
+        unconfirmed = response.uncertain.length;
+        response.uncertain.forEach(item => notes.push(agentBulkActionItemNote(item, agentsById, "")));
         success += response.summary.successCount;
         skipped += response.summary.skippedCount;
         failed += response.summary.failedCount;
       }
     } catch (error) {
-      failed += archiveAgents.length;
+      failed += eligibleAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
     }
-
-    if (archivedSelectedAgent && success > 0) {
-      setSelectedAgentId("");
-      setActivePane("overview");
-    }
-    setBulkAgentPending(false);
     setNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: agentBulkActionSummary(copy.bulkArchiveResult, success, skipped, failed, notes, lang),
+      tone: failed > 0 || unconfirmed > 0 ? "error" : "success",
+      text: [
+        agentBulkActionSummary(copy.bulkArchiveResult, success, skipped, failed, notes, lang),
+        unconfirmed ? (lang === "zh" ? `${unconfirmed} 个 Agent 的归档结果尚未确认；再次归档会先核对状态。` : `${unconfirmed} archive results are unconfirmed; the next explicit action checks their state first.`) : "",
+      ].filter(Boolean).join(" "),
     });
-    clearBulkAgents();
+    setSelectedBulkAgentIds(current => new Set([...current].filter(id => !confirmedAgentIds.has(id))));
+    setBulkSelectionAnchorAgentId(current => confirmedAgentIds.has(current) ? "" : current);
     void chatWorkspaceCache.afterAgentArchived();
   };
 
   const bulkPurgeAgents = async () => {
-    if (bulkAgentPending) {
+    if (selectedBulkPending) {
       return;
     }
     if (!selectedBulkAgents.length) {
@@ -1692,12 +1700,14 @@ export function AgentsRoute() {
     const notes: string[] = [];
     const protectedAgents = selectedBulkAgents.filter((agent) => agentArchiveProtected(agent));
     const activeAgents = selectedBulkAgents.filter((agent) => !agentArchiveProtected(agent) && agent.status !== "archived");
-    const purgeAgents = selectedBulkAgents.filter((agent) => !agentArchiveProtected(agent) && agent.status === "archived");
+    const pendingAgents = selectedBulkAgents.filter(agent => !agentArchiveProtected(agent) && agent.status === "archived" && isAgentArchivePending(agent.agentId));
+    const purgeAgents = selectedBulkAgents.filter((agent) => !agentArchiveProtected(agent) && agent.status === "archived" && !isAgentArchivePending(agent.agentId));
     protectedAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`));
     activeAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedActive}`));
+    pendingAgents.forEach(agent => notes.push(`${agentLabel(agent)}: ${lang === "zh" ? "归档仍在处理中" : "Archive in progress"}`));
     const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
     let success = 0;
-    let skipped = protectedAgents.length + activeAgents.length;
+    let skipped = protectedAgents.length + activeAgents.length + pendingAgents.length;
     let failed = 0;
     let purgedSelectedAgent = false;
 
@@ -1731,13 +1741,14 @@ export function AgentsRoute() {
     } catch (error) {
       failed += purgeAgents.length;
       notes.push(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBulkAgentPending(false);
     }
 
     if (purgedSelectedAgent && success > 0) {
       setSelectedAgentId("");
       setActivePane("overview");
     }
-    setBulkAgentPending(false);
     setNotice({
       tone: failed > 0 ? "error" : "success",
       text: agentBulkActionSummary(copy.bulkPurgeResult, success, skipped, failed, notes, lang),
@@ -2886,7 +2897,7 @@ export function AgentsRoute() {
             selectedCount: selectedBulkAgents.length,
             visibleCount: visibleAgents.length,
             allVisibleSelected: allVisibleAgentsSelected,
-            pending: bulkAgentPending,
+            pending: selectedBulkPending,
             selectedPromptTemplateId: bulkPromptTemplateId,
             promptTemplateOptions: bulkPromptTemplateOptions,
             onSelectVisible: selectVisibleBulkAgents,
@@ -2941,7 +2952,7 @@ export function AgentsRoute() {
             draft: bulkConfigDraft,
             apply: bulkConfigApply,
             mixed: bulkConfigMixed,
-            pending: bulkAgentPending,
+            pending: selectedBulkPending,
             canSave: bulkConfigCanSave,
             notice,
             modelOptions: bulkModelOptions,

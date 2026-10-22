@@ -1159,6 +1159,7 @@ def _persist_dirty_session_runtime_rows(
     conversations: list[Any],
     *,
     activate_session_id: str = "",
+    batch: bool = False,
 ) -> None:
     """Write only the supplied session runtime rows; do not prune siblings."""
 
@@ -1166,6 +1167,7 @@ def _persist_dirty_session_runtime_rows(
     now = s._now_timestamp()
     activate = str(activate_session_id or "").strip()
     persisted_ids: set[str] = set()
+    batch_rows: list[dict[str, Any]] = []
     for conversation in conversations:
         if not isinstance(conversation, dict):
             continue
@@ -1177,17 +1179,27 @@ def _persist_dirty_session_runtime_rows(
         if not session_id:
             continue
         conversation.setdefault("updated_at", now)
-        s.save_session_chat_state(
-            s.PROJECT_ROOT,
-            session_id,
-            conversation,
-            activate=session_id == activate,
-        )
+        if batch:
+            batch_rows.append(conversation)
+        else:
+            s.save_session_chat_state(
+                s.PROJECT_ROOT,
+                session_id,
+                conversation,
+                activate=session_id == activate,
+            )
         persisted_ids.add(session_id)
     if activate and activate not in persisted_ids:
         current = s.load_session_chat_state(s.PROJECT_ROOT, activate)
         if current is not None:
-            s.save_session_chat_state(s.PROJECT_ROOT, activate, current, activate=True)
+            if batch:
+                batch_rows.append(current)
+            else:
+                s.save_session_chat_state(s.PROJECT_ROOT, activate, current, activate=True)
+    if batch_rows:
+        from core.ui.chat_state import save_session_chat_states
+
+        save_session_chat_states(s.PROJECT_ROOT, batch_rows, activate_session_id=activate)
 
 
 def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, Any]:
