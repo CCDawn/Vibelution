@@ -69,8 +69,8 @@ export async function stopPythonLauncherService(input: LauncherServiceStopInput)
       if (state && typeof state === "object" && !Array.isArray(state)) {
         const record = state as Record<string, unknown>;
         const statePid = Number(record.launcherBackendPid ?? 0);
-        if (typeof record.workspaceRoot === "string" && record.workspaceRoot.trim()
-          && resolve(record.workspaceRoot).toLowerCase() === resolve(input.workspaceRoot).toLowerCase()
+        if (typeof record.runtimeProjectRoot === "string" && record.runtimeProjectRoot.trim()
+          && resolve(record.runtimeProjectRoot).toLowerCase() === resolve(input.workspaceRoot).toLowerCase()
           && Number.isSafeInteger(statePid) && statePid <= 0) {
           return {
             schemaVersion: 1, status: "skipped", reason: "owned_backend_pid_required",

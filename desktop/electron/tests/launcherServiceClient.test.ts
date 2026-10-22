@@ -8,7 +8,7 @@ describe("stopPythonLauncherService", () => {
     const spawnImpl = vi.fn();
     await expect(stopPythonLauncherService({
       workspaceRoot: "C:/repo", pythonPath: "python", operatorConfigPath: "",
-      spawnImpl, readState: () => ({ workspaceRoot: "C:/repo", launcherBackendPid: 0 })
+      spawnImpl, readState: () => ({ runtimeProjectRoot: "C:/repo", launcherBackendPid: 0 })
     })).resolves.toEqual({
       schemaVersion: 1, status: "skipped", reason: "owned_backend_pid_required",
       expectedBackendPid: 0, launcherBackendPid: 0, terminatedPids: []
@@ -17,9 +17,10 @@ describe("stopPythonLauncherService", () => {
   });
 
   it.each([
-    { workspaceRoot: "C:/repo", launcherBackendPid: 100 },
-    { workspaceRoot: "C:/another", launcherBackendPid: 0 },
-    { workspaceRoot: "C:/repo", launcherBackendPid: "invalid" },
+    { runtimeProjectRoot: "C:/repo", launcherBackendPid: 100 },
+    { runtimeProjectRoot: "C:/another", launcherBackendPid: 0 },
+    { runtimeProjectRoot: "C:/repo", launcherBackendPid: "invalid" },
+    { workspaceRoot: "C:/repo", launcherBackendPid: 0 },
     null,
   ])("keeps the identity bridge for uncertain or owned state %j", async (state) => {
     const child = fakeChildProcess();
@@ -55,7 +56,7 @@ describe("stopPythonLauncherService", () => {
       pythonPath: "C:/Python/python.exe",
       operatorConfigPath: "C:/operator/config.toml",
       launcherBackendPid: 1234,
-      readState: () => ({ workspaceRoot: "C:/repo", launcherBackendPid: 0 }),
+      readState: () => ({ runtimeProjectRoot: "C:/repo", launcherBackendPid: 0 }),
       spawnImpl: (command, args, options) => {
         spawnCalls.push({ command, args: [...args], options: options as Record<string, unknown> });
         return child;
@@ -208,7 +209,7 @@ describe("stopPythonLauncherService", () => {
         pythonPath: "C:/Python/python.exe",
         operatorConfigPath: "C:/operator/config.toml",
         spawnImpl,
-        readState: () => ({ workspaceRoot: "C:/repo", launcherBackendPid: 0 }),
+        readState: () => ({ runtimeProjectRoot: "C:/repo", launcherBackendPid: 0 }),
         signal: controller.signal
       })
     ).rejects.toMatchObject({ code: "aborted" });
