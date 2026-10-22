@@ -468,6 +468,27 @@ async def _await_startup_prewarm_gate(app: FastAPI | None) -> dict[str, int]:
     }
 
 
+async def _run_session_recovery_after_first_frame(
+    app: FastAPI | None,
+    directory_ready: asyncio.Task[Any],
+    startup_jobs: StartupJobGroup,
+    callback: Callable[..., Any],
+    *,
+    worker_name: str,
+    stop_keyword: str | None = None,
+) -> Any:
+    """Reuse the published store and leave first-frame reads ahead of bulk repair."""
+
+    # load_chat_state otherwise opens a second standalone ConversationStore
+    # against the same SQLite database while its real owner is still opening.
+    await asyncio.shield(directory_ready)
+    if app is not None and _startup_cache_prewarm_gate_enabled():
+        await _await_startup_prewarm_gate(app)
+    if startup_jobs.should_stop():
+        raise asyncio.CancelledError
+    return await startup_jobs.run_sync(worker_name, callback, stop_keyword=stop_keyword)
+
+
 async def _run_config_workspace_prewarm_after_routes_ready(
     app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
 ) -> dict[str, Any]:
@@ -603,6 +624,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         # Enable async waiters for non-health requests while routes mount in background.
         app.state.web_routes_ready_event = asyncio.Event()
         app.state.web_startup_routes_ready_event = asyncio.Event()
+        app.state.web_bootstrap_routes_ready_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
         startup_routes_task = startup_jobs.start_async(
@@ -681,8 +703,13 @@ async def web_workbench_lifespan(app: FastAPI | None):
         startup_config_workspace_prewarm_task = startup_jobs.start_thread(
             "startup-config-workspace-prewarm", _prewarm_config_workspace_on_startup
         )
-    startup_agent_inbox_recovery_task = startup_jobs.start_thread(
-        "startup-agent-inbox-recovery", _recover_wakeable_agent_inbox_messages_on_startup
+    startup_agent_inbox_recovery_task = startup_jobs.start_async(
+        "startup-agent-inbox-recovery",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_wakeable_agent_inbox_messages_on_startup,
+            worker_name="startup-agent-inbox-recovery-worker",
+        ),
     )
     startup_meeting_driver_recovery_task = _start_meeting_driver_recovery_job(
         startup_jobs
@@ -696,10 +723,14 @@ async def web_workbench_lifespan(app: FastAPI | None):
     # Session startup recovery sweep (interrupted turns + queue drain). Kept
     # adjacent to the other *_recovery_* hooks; later recovery hooks append
     # below this block.
-    startup_session_recovery_task = startup_jobs.start_thread(
+    startup_session_recovery_task = startup_jobs.start_async(
         "startup-session-recovery",
-        _recover_interrupted_session_turns_on_startup,
-        stop_keyword="should_stop",
+        _run_session_recovery_after_first_frame(
+            app, startup_directory_task, startup_jobs,
+            _recover_interrupted_session_turns_on_startup,
+            worker_name="startup-session-recovery-worker",
+            stop_keyword="should_stop",
+        ),
     )
     # Subagent address orphan sweep (crash-left running records). Same
     # best-effort recovery family; see core/orchestration/subagent_address.py.

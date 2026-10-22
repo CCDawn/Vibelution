@@ -91,6 +91,97 @@ def test_operator_can_disable_optional_cache_gate(monkeypatch):
     assert len(calls) == 3
 
 
+def test_session_recovery_waits_for_directory_and_first_request_window(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0")
+    monkeypatch.delenv("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM", raising=False)
+    calls = []
+    loop_thread = threading.get_ident()
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_routes_ready_event = asyncio.Event()
+        directory_gate = asyncio.Event()
+        directory = asyncio.create_task(directory_gate.wait())
+        jobs = StartupJobGroup()
+
+        def recover(*, should_stop):
+            assert not should_stop()
+            calls.append(threading.get_ident())
+            return {"recovered": True}
+
+        task = asyncio.create_task(lifecycle._run_session_recovery_after_first_frame(
+            app, directory, jobs, recover, worker_name="test-recovery", stop_keyword="should_stop",
+        ))
+        await asyncio.sleep(0.02)
+        assert calls == []
+        directory_gate.set()
+        await directory
+        await asyncio.sleep(0.02)
+        assert calls == []
+        app.state.web_routes_ready_event.set()
+        assert await asyncio.wait_for(task, 5) == {"recovered": True}
+
+    asyncio.run(exercise())
+    assert len(calls) == 1
+    assert calls[0] != loop_thread
+
+
+@pytest.mark.parametrize("cancel_during", ["directory", "settle"])
+def test_cancelled_deferred_recovery_never_opens_a_second_store(monkeypatch, cancel_during):
+    calls = []
+
+    async def exercise():
+        directory_gate = asyncio.Event()
+        settle_gate = asyncio.Event()
+        entered_settle = asyncio.Event()
+
+        async def wait_for_first_requests(_app):
+            entered_settle.set()
+            await settle_gate.wait()
+
+        monkeypatch.setattr(lifecycle, "_await_startup_prewarm_gate", wait_for_first_requests)
+        monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: True)
+        directory = asyncio.create_task(directory_gate.wait())
+        task = asyncio.create_task(lifecycle._run_session_recovery_after_first_frame(
+            FastAPI(), directory, StartupJobGroup(), lambda: calls.append("opened"),
+            worker_name="test-cancelled-recovery",
+        ))
+        if cancel_during == "settle":
+            directory_gate.set()
+            await entered_settle.wait()
+        else:
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not directory.cancelled()
+        directory_gate.set()
+        await directory
+
+    asyncio.run(exercise())
+    assert calls == []
+
+
+def test_disabling_optional_delay_still_reuses_the_directory_owner(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM", "0")
+    calls = []
+
+    async def exercise():
+        directory_gate = asyncio.Event()
+        directory = asyncio.create_task(directory_gate.wait())
+        task = asyncio.create_task(lifecycle._run_session_recovery_after_first_frame(
+            FastAPI(), directory, StartupJobGroup(), lambda: calls.append("recovered"),
+            worker_name="test-recovery-no-delay",
+        ))
+        await asyncio.sleep(0.02)
+        assert calls == []
+        directory_gate.set()
+        await asyncio.wait_for(task, 5)
+
+    asyncio.run(exercise())
+    assert calls == ["recovered"]
+
+
 @pytest.mark.parametrize("worker", ["_prewarm_key_tool_definitions", "_prewarm_web_search_availability"])
 def test_tool_imports_execute_in_owned_worker_not_on_event_loop(monkeypatch, worker):
     loop_thread = threading.get_ident()
