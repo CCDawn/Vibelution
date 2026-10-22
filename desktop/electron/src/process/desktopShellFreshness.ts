@@ -178,7 +178,10 @@ export function thenLifecycleFromDesktopCli(input: {
 }
 
 export function shouldDeferWorkbenchOpenUntilLifecycleStart(lifecycleCommand: string): boolean {
-  return REFRESH_BEFORE_LIFECYCLE.has(String(lifecycleCommand || "").trim().toLowerCase());
+  const command = String(lifecycleCommand || "").trim().toLowerCase();
+  // Explicit open already owns the first-instance dispatch. Do not consume
+  // --open-workbench first and supersede its pending READY with a second start.
+  return command === "open" || REFRESH_BEFORE_LIFECYCLE.has(command);
 }
 
 export function shouldInspectDesktopShellBeforeLifecycle(operation: string, isPackaged: boolean): boolean {

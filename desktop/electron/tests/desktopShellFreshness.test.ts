@@ -260,7 +260,7 @@ describe("desktop shell freshness", () => {
     expect(shouldDeferWorkbenchOpenUntilLifecycleStart("start")).toBe(true);
     expect(shouldDeferWorkbenchOpenUntilLifecycleStart("restart")).toBe(true);
     expect(shouldDeferWorkbenchOpenUntilLifecycleStart("rebuild-and-start")).toBe(true);
-    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("open")).toBe(false);
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("open")).toBe(true);
     expect(shouldDeferWorkbenchOpenUntilLifecycleStart("stop")).toBe(false);
     expect(shouldDeferWorkbenchOpenUntilLifecycleStart("")).toBe(false);
   });
