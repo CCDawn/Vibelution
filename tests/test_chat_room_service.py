@@ -6498,6 +6498,9 @@ def test_reconcile_signature_gate_reruns_after_run_index_change(tmp_path, monkey
     chat_room_service._work_run_store().save_run_index(
         chat_room_service.RUN_KIND,
         latest_run_id="round-index-change",
+        # Change the durable input, rather than replaying identical contents
+        # and relying on distinct Windows file timestamps for cache invalidation.
+        recent_run_ids=["round-index-change", "older-terminal-round"],
         active_run_ids=[],
         emit_event=False,
     )
