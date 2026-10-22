@@ -25,11 +25,14 @@ const composedGridTemplateModifiers = new Set([
   "ChatCodingRoute.styles.ts:layoutCompactDesktop",
   "ChatCodingRoute.styles.ts:rightPaneWithTabs",
   "ChatCodingRoute.styles.ts:rightPaneWithoutTabs",
+  "ChatCodingRoute.styles.ts:sessionRowHost",
+  "ChatCodingRoute.styles.ts:centerPaneBodyRow",
   "ConfigRoute.styles.ts:configAdvancedGrid",
   "ConfigRoute.styles.ts:treeFieldCardView",
   "GitRoute.styles.ts:workspaceOverview",
   "GitRoute.styles.ts:historyPanel",
   "GitRoute.styles.ts:modelActionRow",
+  "GitRoute.styles.ts:pendingChangePanel",
   "DirectSessionIndexItem.styles.ts:sessionItemWithBulkSelect",
   "AgentWorkspaceLayoutPanel.styles.ts:directoryWithActions",
 ]);
@@ -81,10 +84,21 @@ describe("route style display contract", () => {
     expect(chatLayoutSource).toContain("`${styles.layout} ${styles.layoutCompactDesktop}`");
     expect(chatLayoutSource).toContain("`${styles.rightPane} ${rightPaneLayoutClassName}`");
     expect(chatRouteSource).toContain("className={chatLayoutClassName}");
+    expect(chatLayoutSource).toContain("sessionRowSpansRail ? styles.sessionRowHost");
+    expect(chatLayoutSource).toContain('`${styles.centerPane} ${styles.centerPaneDocked}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}`');
+    const chatStyles = readFileSync(new URL("./ChatCodingRoute.styles.ts", import.meta.url), "utf8");
+    for (const key of ["layout", "centerPane"]) {
+      const baseClasses = chatStyles.match(new RegExp(`${key}:\\s*` + "`([^`]*)`"))?.[1] ?? "";
+      expect(hasHostGridDisplay(baseClasses), `${key} must own the grid display`).toBe(true);
+    }
 
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");
     expect(gitRouteSource).toContain("cn(styles.commitPanel, styles.historyPanel, VUI_WORKBENCH_PANE_CLASS)");
     expect(gitRouteSource).toContain("`${styles.modelDefaultRow} ${styles.modelActionRow}`");
+    expect(gitRouteSource).toContain("cn(styles.changePanel, styles.pendingChangePanel,");
+    const gitStyles = readFileSync(new URL("./GitRoute.styles.ts", import.meta.url), "utf8");
+    const changePanelClasses = gitStyles.match(/changePanel:\s*"([^"]*)"/)?.[1] ?? "";
+    expect(hasHostGridDisplay(changePanelClasses)).toBe(true);
 
     // Settings-align wave 3: ConfigSectionEditor (the only consumer of these
     // composed classes) moved to config/ConfigSectionEditor.tsx; the contract

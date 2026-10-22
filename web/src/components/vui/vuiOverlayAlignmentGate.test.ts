@@ -42,6 +42,10 @@ const productScanRoots = ["app", "routes", "components"] as const;
 
 const createPortalAllowlist = new Set([
   "design/challenge-cup-platform-home-preview-tooltips.tsx",
+  // Existing pane docking reuses the opposite pane's local ref host. These are
+  // ordinary layout nodes, not floating surfaces; exact calls are pinned below.
+  "routes/chat/ChatCodingRouteWorkbench.tsx",
+  "routes/chat/ChatRightRail.tsx",
 ]);
 
 const fixedInsetAllowlist = new Set([
@@ -60,6 +64,21 @@ const handRolledDialogAllowlist = new Set([
 ]);
 
 describe("VUI overlay alignment gate", () => {
+  it("limits chat docking portals to the existing pane contents and local ref hosts", () => {
+    const workbench = read("routes/chat/ChatCodingRouteWorkbench.tsx");
+    const rail = read("routes/chat/ChatRightRail.tsx");
+    expect(workbench.match(/\bcreatePortal\s*\(/g)).toHaveLength(1);
+    expect(rail.match(/\bcreatePortal\s*\(/g)).toHaveLength(1);
+    expect(workbench).toContain("createPortal(nativeSessionWorkspace, paneDock.parkHost)");
+    expect(rail).toContain("createPortal(railBody, paneDock.centerHost)");
+    expect(workbench).toContain('ref={paneDock.onCenterHostChange} className={centerSurfaceStyles.dockHost} data-chat-center-dock=""');
+    expect(rail).toContain("ref={paneDock.onDockHostChange}");
+    const dock = read("routes/chat/useChatPaneDock.ts");
+    expect(dock).toContain("onCenterHostChange");
+    expect(dock).toContain("onDockHostChange");
+    expect(dock).not.toMatch(/document\.(?:body|getElementById|querySelector)/);
+  });
+
   it("forbids product createPortal outside intentional allowlist", () => {
     const hits: string[] = [];
     for (const root of productScanRoots) {

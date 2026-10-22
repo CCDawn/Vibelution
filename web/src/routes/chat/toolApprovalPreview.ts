@@ -98,6 +98,8 @@ export function toolApprovalCodexButtonLabels(lang: "zh" | "en") {
     return {
       yes: "是",
       always: "始终（此 Agent）",
+      toolSession: "本会话此工具",
+      actionWindow: "同意并授权 4 小时",
       no: "否",
       resolving: "处理中…",
     };
@@ -105,7 +107,50 @@ export function toolApprovalCodexButtonLabels(lang: "zh" | "en") {
   return {
     yes: "Yes",
     always: "Always (this agent)",
+    toolSession: "This tool, this session",
+    actionWindow: "Allow for 4 hours",
     no: "No",
     resolving: "Resolving…",
   };
+}
+
+/** Human-readable remaining authorization window, e.g. "2 小时 13 分". */
+export function formatActionWindowRemaining(seconds: number, lang: "zh" | "en") {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (lang === "zh") {
+    if (hours > 0) return minutes > 0 ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`;
+    if (minutes > 0) return `${minutes} 分钟`;
+    return "不足 1 分钟";
+  }
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return `${minutes} min`;
+  return "<1 min";
+}
+
+/** One line per already-delegated low-risk manage action for the approval card. */
+export function assistantActionWindowSummary(
+  window: {
+    eligible?: boolean;
+    durationSeconds?: number;
+    activeWindows?: Array<{ action: string; remainingSeconds: number }>;
+  } | null | undefined,
+  lang: "zh" | "en",
+): string {
+  const active = Array.isArray(window?.activeWindows) ? window!.activeWindows : [];
+  if (!active.length) return "";
+  const labels: Record<string, [string, string]> = {
+    session_create: ["创建会话", "Create session"],
+    session_stop: ["停止会话任务", "Stop session turn"],
+    session_update: ["更新会话", "Update session"],
+  };
+  return active
+    .map((item) => {
+      const label = labels[item.action]?.[lang === "zh" ? 0 : 1] ?? item.action;
+      return lang === "zh"
+        ? `${label}：授权剩余 ${formatActionWindowRemaining(item.remainingSeconds, lang)}`
+        : `${label}: ${formatActionWindowRemaining(item.remainingSeconds, lang)} left`;
+    })
+    .join("\n");
 }

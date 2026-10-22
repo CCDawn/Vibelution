@@ -6,6 +6,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import {
   bulkReviewKnowledgeRatingSuggestions,
+  bulkReviewKnowledgeSourceInbox,
   collectKnowledgeSourceInbox,
   createKnowledgeCentralSourceArtifact,
   createKnowledgeRatingSuggestion,
@@ -25,6 +26,7 @@ import type {
   KnowledgeRefinementProposal,
   KnowledgeReviewResponse,
   KnowledgeSourceArtifact,
+  KnowledgeSourceInboxBulkReviewResponse,
   KnowledgeSourceInboxReviewResponse,
 } from "../../api/types";
 
@@ -35,6 +37,7 @@ export type UseMemoryKnowledgeMutationsOptions = {
     mutationDone: string;
     mutationFailed: string;
     skippedSuggestions?: string;
+    skippedSources?: string;
   };
   setProposalDraft: Dispatch<SetStateAction<any>>;
   setOwnerSourceDraft: Dispatch<SetStateAction<any>>;
@@ -349,6 +352,60 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
     },
   });
 
+  const sourceInboxBulkReviewMutation = useMutation({
+    mutationFn: async ({
+      inboxSourceIds,
+      decision,
+    }: {
+      inboxSourceIds: string[];
+      decision: "accepted" | "rejected";
+    }) =>
+      bulkReviewKnowledgeSourceInbox<KnowledgeSourceInboxBulkReviewResponse>(
+        options.getActiveSourceOwnerType(),
+        options.getActiveSourceOwnerId(),
+        {
+          inboxSourceIds,
+          decision,
+          reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
+          resolutionNote: options.getSourceReviewNote(),
+        },
+      ),
+    onSuccess: (payload) => {
+      const summary = payload.summary;
+      const skippedNote = summary?.skippedCount
+        ? ` · ${options.copy.skippedSources ?? options.copy.skippedSuggestions ?? "skipped"}: ${summary.skippedCount}`
+        : "";
+      options.setKnowledgeFeedback({
+        tone: summary?.reviewedCount ? "success" : "error",
+        text: `${options.copy.mutationDone} · ${summary?.reviewedCount ?? 0}/${summary?.requestedCount ?? 0}${skippedNote}`,
+      });
+      const actor = options.getActiveKnowledgeActorAgentId();
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeSourceInbox(
+          options.getActiveSourceOwnerType(),
+          options.getActiveSourceOwnerId(),
+          actor,
+          options.getActiveSourceInboxStatus(),
+        ),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeCentralSources(
+          actor,
+          options.getActiveSourceOwnerType(),
+          options.getActiveSourceOwnerId(),
+        ),
+      });
+      options.invalidateKnowledgeDashboard(queryClient, actor);
+      options.invalidateMemoryQueries(queryClient);
+    },
+    onError: (error) => {
+      options.setKnowledgeFeedback({
+        tone: "error",
+        text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    },
+  });
+
   const centralSourceAttachMutation = useMutation({
     mutationFn: async (centralSourceId: string) =>
       createKnowledgeCentralSourceArtifact<KnowledgeSourceArtifact>(
@@ -390,6 +447,7 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
     ratingSuggestionBulkReviewMutation,
     sourceInboxCollectMutation,
     sourceInboxReviewMutation,
+    sourceInboxBulkReviewMutation,
     centralSourceAttachMutation,
   };
 }

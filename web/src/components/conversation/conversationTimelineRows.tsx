@@ -119,7 +119,7 @@ import {
 import { resolveConversationTurnUsageLabel } from "./conversationTurnUsageLabel";
 import type { ConversationForkScope } from "./conversationViewTypes";
 import type { ResponseSegment } from "./messageResponseSegments";
-import { VActionGroup, VButton, VNativeTextarea } from "../vui";
+import { VActionGroup, VButton, VChip, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
 // Group-transcript rows are chat lines, not documents: they render through the
@@ -1022,7 +1022,11 @@ export function createConversationTimelineRows({
                   isEditingMessage
                     ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
                     : steerGuidanceMessage
-                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
+                      ? (
+                        <VChip data-conversation-guidance-status="received">
+                          {resolvedSafeGuidanceLabel} · {lang === "zh" ? "已接收" : "Received"}
+                        </VChip>
+                      )
                       : null
                 }
                 metaActions={

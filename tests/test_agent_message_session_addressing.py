@@ -598,7 +598,6 @@ def _patch_kernel_delivery(
 
     calls = SimpleNamespace(wake=[], append=[], consume=[], inbox=[], promote=[], scenes=[])
 
-    monkeypatch.setattr(kernel_service, "_ensure_agent_directory_root", lambda: None)
     monkeypatch.setattr(kernel_service, "_ensure_session_root", lambda: None)
     monkeypatch.setattr(
         kernel_service,

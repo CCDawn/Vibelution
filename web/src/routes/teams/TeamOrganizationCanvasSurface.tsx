@@ -312,8 +312,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                       : (lang === "zh" ? "同步群聊" : "Sync room")}
                   </VButton>
                 )}
-                <VButton type="button" onClick={onAddNode} isDisabled={!hasWritableCanvas}>
-                  <Plus size={14} />
+                <VButton type="button" onClick={onAddNode} isDisabled={!hasWritableCanvas} icon={<Plus size={14} />}>
                   {lang === "zh" ? "节点" : "Node"}
                 </VButton>
                 {authoring ? (
@@ -346,8 +345,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                       onClick={authoring.onBeginNodeRename}
                       isDisabled={!authoringEditable || !selectedNodeId}
                       data-testid="team-canvas-rename-toggle"
+                      icon={<Pencil size={14} />}
                     >
-                      <Pencil size={14} />
                       {authoring.renamingNodeId
                         ? (lang === "zh" ? "改名中" : "Renaming")
                         : (lang === "zh" ? "改名" : "Rename")}
@@ -597,8 +596,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                     type="button"
                     onClick={authoring.onCommitEdgeLabel}
                     data-testid="team-canvas-edge-label-save"
+                    icon={<Check size={14} />}
                   >
-                    <Check size={14} />
                     {lang === "zh" ? "保存" : "Save"}
                   </VButton>
                   <VButton
@@ -644,8 +643,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                     type="button"
                     onClick={authoring.onCommitNodeRename}
                     data-testid="team-canvas-node-rename-save"
+                    icon={<Check size={14} />}
                   >
-                    <Check size={14} />
                     {lang === "zh" ? "保存" : "Save"}
                   </VButton>
                 </div>

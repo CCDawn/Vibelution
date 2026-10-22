@@ -387,7 +387,7 @@ describe("AppShell layout contract", () => {
     // The boot volley races the backend's lifespan warmup tasks; badge-only
     // polls (code freshness, git status, agent broadcast bell) latch behind
     // useBootStaggeredPollReady instead of firing the instant data is ready.
-    expect(shellSource).toContain("useBootStaggeredPollReady(shellStartupDataReady)");
+    expect(shellSource).toContain("useBootStaggeredPollReady(shellOptionalReady)");
     expect(shellSource).toMatch(
       /queryKey: queryKeys\.codeFreshness\(\),[\s\S]*?enabled: shellDeferredPollReady,/,
     );
@@ -395,10 +395,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toMatch(
       /queryKey: queryKeys\.projectAgentBusLatestEvent\(\),[\s\S]*?enabled: shellDeferredPollReady,/,
     );
-    // Startup-critical polls stay on the immediate ready flag: runtime summary
-    // drives the status chip, aux tasks drive the running badge.
-    expect(shellSource).toMatch(/queryKey: queryKeys\.runtimeSummary\(\),[\s\S]*?enabled: shellStartupDataReady,/);
-    expect(shellSource).toMatch(/queryKeys\.runtimeTasks\("", "shell"\),[\s\S]*?enabled: shellStartupDataReady,/);
+    // Background chrome waits for route data; explicit lifecycle/menu actions
+    // can still demand fresh state before the initial route has settled.
+    expect(shellSource).toMatch(/queryKey: queryKeys\.runtimeSummary\(\),[\s\S]*?enabled: shellBackgroundReady \|\| lifecycleControlActive \|\| activeWorkOpen,/);
+    expect(shellSource).toMatch(/queryKeys\.runtimeTasks\("", "shell"\),[\s\S]*?enabled: shellOptionalReady \|\| activeWorkOpen,/);
+    expect(shellSource).toContain("<CompanionDesktopAttention startupReady={shellOptionalReady}");
+    expect(shellSource).toContain("startWorkbenchUiPreferencesSync({ deferHydration: true })");
   });
 
   it("keeps the top bar free of brand text so every control shares one row", () => {

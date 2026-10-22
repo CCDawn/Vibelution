@@ -264,6 +264,18 @@ export function reviewKnowledgeSourceInbox<T>(
   );
 }
 
+export function bulkReviewKnowledgeSourceInbox<T>(
+  ownerType: string,
+  ownerId: string,
+  body: unknown,
+): Promise<T> {
+  return sendJson<T>(
+    `/api/knowledge/sources/inbox/${encodeURIComponent(ownerType)}/${encodeURIComponent(ownerId)}/review-batch`,
+    "PATCH",
+    body,
+  );
+}
+
 export function updateKnowledgeSourceGovernance<T>(
   ownerType: string,
   ownerId: string,

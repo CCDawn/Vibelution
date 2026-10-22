@@ -230,13 +230,22 @@ class Attention(BaseModel):
 
         "human_gate",
 
+        "dispatch_receipt",
+
+        "run_completed",
+
+        "session_completed",
+
+        "assistant_digest",
+
     ]
 
     title: str
 
     sessionId: str = ""
 
-    severity: Literal["critical", "high", "medium"] | None = None
+    # info 只用于完成类事件（好消息），不占用停靠/异常的 critical/high。
+    severity: Literal["critical", "high", "medium", "info"] | None = None
 
     targetUrl: str = ""
 

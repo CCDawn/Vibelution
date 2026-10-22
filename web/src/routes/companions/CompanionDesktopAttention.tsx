@@ -18,7 +18,7 @@ import {
 } from "./companionActivityRefreshPolicy";
 
 /** Companion-only observer for hidden native Session activity and notification deep links. */
-export function CompanionDesktopAttention() {
+export function CompanionDesktopAttention({ startupReady = true }: { startupReady?: boolean }) {
   const location = useLocation();
   const { openCompanionSession } = useChatRouteSelection();
   const desktopBridge = useMemo(() => browserDesktopNotificationBridge(), []);
@@ -30,6 +30,7 @@ export function CompanionDesktopAttention() {
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanionActivity(),
     queryFn: listVirtualHumanCompanionActivity,
+    enabled: startupReady,
     // Product decision: stop the poll while the page is hidden instead of
     // polling in the desktop bridge background. refetchIntervalInBackground is
     // false so query-core skips interval ticks while hidden and resumes them

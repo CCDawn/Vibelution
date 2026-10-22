@@ -561,6 +561,7 @@ def _submit_team_workflow_inbox_via_kernel(
     wake_target: bool,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     s = _service()
+    from core.agent_kernel import service as kernel_service
     from core.agent_kernel.adapters import submit_agent_message_event
 
     normalized_metadata = dict(metadata or {})
@@ -585,16 +586,20 @@ def _submit_team_workflow_inbox_via_kernel(
         if source_agent_id
         else {"type": "system", "id": created_by_value}
     )
-    kernel_result = submit_agent_message_event(
-        source="team_workflow",
-        sender=sender,
-        recipient_agent_ids=[target_agent_id],
-        content=content,
-        correlation_id=thread_id,
-        wake_target=wake_target,
-        metadata=kernel_metadata,
-        source_id=source_id,
-    )
+    # Team workflow stages its ledger and inbox sources under this service's
+    # project root; bind the kernel event to the same root so Native Session
+    # delivery cannot cross into another project (kernel root guard).
+    with kernel_service.scoped_project_root(s.PROJECT_ROOT):
+        kernel_result = submit_agent_message_event(
+            source="team_workflow",
+            sender=sender,
+            recipient_agent_ids=[target_agent_id],
+            content=content,
+            correlation_id=thread_id,
+            wake_target=wake_target,
+            metadata=kernel_metadata,
+            source_id=source_id,
+        )
     kernel_delivery = s._team_workflow_kernel_delivery(kernel_result, target_agent_id)
     if str(kernel_delivery.get("status") or "").strip() != "delivered":
         raise s.agent_directory_service.AgentDirectoryError(str(kernel_delivery.get("reason") or "Kernel delivery failed."))

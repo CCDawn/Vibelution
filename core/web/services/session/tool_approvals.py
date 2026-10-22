@@ -24,7 +24,9 @@ from uuid import uuid4
 ToolApprovalDecision = Literal[
     "accept",
     "acceptForSession",
+    "acceptForSessionTool",
     "acceptAlways",
+    "acceptWithActionWindow",
     "decline",
     "cancel",
 ]
@@ -36,7 +38,9 @@ _VALID_PERMISSION_PRESETS = {"request_approval", "auto_review", "full_access"}
 _VALID_DECISIONS = {
     "accept",
     "acceptForSession",
+    "acceptForSessionTool",
     "acceptAlways",
+    "acceptWithActionWindow",
     "decline",
     "cancel",
 }
@@ -50,6 +54,19 @@ _WORKSPACE_PATH_TOOLS = {"apply_diff_edit_tool", "apply_patch_tool", "write_file
 # research-stage fetch of many pages on one site must not re-prompt (and then
 # fail-closed after the approval timeout) for every new URL path.
 _HOST_SCOPED_URL_TOOLS = {"web_fetch_tool"}
+# Computer-use / CUA desktop-control tools are pinned to per-call approval by
+# product red line: no session, tool-level, or durable grant may widen them,
+# even if a future policy edit relaxed their catalog approval mode.
+_CUA_ALWAYS_APPROVAL_TOOLS = frozenset(
+    {
+        "personal_assistant_desktop_action_tool",
+        "personal_assistant_computer_action_tool",
+    }
+)
+# Irreversible / destructive / external-facing risk classes never receive the
+# tool-level session grant; they keep per-call approval. Network covers
+# outbound publish; destructive covers irreversible cleanup.
+_TOOL_GRANT_BLOCKED_RISKS = frozenset({"destructive", "network"})
 
 
 class ToolApprovalError(ValueError):
@@ -91,7 +108,7 @@ class _ApprovalRequest:
     event: Event = field(default_factory=Event, repr=False)
 
     def public_projection(self) -> dict[str, Any]:
-        return {
+        projection = {
             "requestId": self.request_id,
             "sessionId": self.session_id,
             "turnId": self.turn_id,
@@ -107,18 +124,16 @@ class _ApprovalRequest:
             "configRevision": self.config_revision,
             "configHash": self.config_hash,
             "permissionPreset": self.permission_preset,
-            "availableDecisions": [
-                "accept",
-                "acceptForSession",
-                "acceptAlways",
-                "decline",
-                "cancel",
-            ],
+            "availableDecisions": _available_decisions(self),
             "createdAt": self.created_at,
             "status": self.status,
             "decision": self.decision or None,
             "resolvedAt": self.resolved_at or None,
         }
+        action_window = _assistant_action_window_projection(self)
+        if action_window is not None:
+            projection["assistantActionWindow"] = action_window
+        return projection
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +192,17 @@ def resolve_tool_approval_request(
             raise ToolApprovalConflictError(
                 "always-approval tools cannot receive session or durable grants"
             )
+        if normalized_decision == "acceptForSessionTool":
+            ineligibility = _tool_level_session_grant_ineligibility(request)
+            if ineligibility:
+                raise ToolApprovalConflictError(
+                    f"tool-level session grant is not allowed for this request: {ineligibility}"
+                )
+        if normalized_decision == "acceptWithActionWindow":
+            if _assistant_manage_action_for_request(request) is None:
+                raise ToolApprovalConflictError(
+                    "action-window delegation is only available for low-risk assistant manage actions"
+                )
         _resolve_request_locked(request, normalized_decision)
     return request.public_projection()
 
@@ -235,6 +261,10 @@ def authorize_or_wait(
         _session_grant_key(session_grant_scope),
     )
     with _LOCK:
+        # Assistant manage low-risk actions with an active delegation window
+        # are executed directly; the tier table stays server-owned.
+        if _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
+            return ToolApprovalOutcome(True, "approved_for_action_window")
         if normalized_approval != "always":
             if grant_key in _SESSION_GRANTS:
                 return ToolApprovalOutcome(True, "approved_for_session")
@@ -250,6 +280,15 @@ def authorize_or_wait(
                 )
                 in _SESSION_GRANTS
             ):
+                return ToolApprovalOutcome(True, "approved_for_session")
+            if (
+                normalized_session,
+                normalized_agent,
+                normalized_config_revision,
+                normalized_config_hash,
+                normalized_tool,
+                TOOL_LEVEL_SESSION_GRANT_KEY,
+            ) in _SESSION_GRANTS:
                 return ToolApprovalOutcome(True, "approved_for_session")
             if _has_durable_grant(
                 agent_id=normalized_agent,
@@ -329,6 +368,10 @@ def authorize_or_wait(
         return ToolApprovalOutcome(True, "approved", request_id=request.request_id)
     if request.status == "accepted_for_session":
         return ToolApprovalOutcome(True, "approved_for_session", request_id=request.request_id)
+    if request.status == "accepted_for_session_tool":
+        return ToolApprovalOutcome(True, "approved_for_session", request_id=request.request_id)
+    if request.status == "accepted_with_action_window":
+        return ToolApprovalOutcome(True, "approved", request_id=request.request_id)
     if request.status == "accepted_always":
         return ToolApprovalOutcome(True, "approved_for_agent", request_id=request.request_id)
     if request.status == "declined":
@@ -353,6 +396,10 @@ def reset_tool_approval_state(*, clear_durable: bool = False) -> None:
     only reset in-memory session state do not wipe permanent approvals.
     """
 
+    from core.web.services.session.assistant_manage_policy import (
+        reset_assistant_manage_action_windows,
+    )
+
     with _LOCK:
         for request in _REQUESTS.values():
             if request.status == "pending":
@@ -360,6 +407,7 @@ def reset_tool_approval_state(*, clear_durable: bool = False) -> None:
         _REQUESTS.clear()
         _REQUEST_IDS_BY_CALL.clear()
         _SESSION_GRANTS.clear()
+    reset_assistant_manage_action_windows()
     if clear_durable:
         clear_durable_tool_approval_grants()
 
@@ -517,6 +565,27 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
                 request.session_grant_key,
             )
         )
+    elif decision == "acceptForSessionTool":
+        # One approval, every call of this tool for the rest of the session
+        # (still bound to session + agent + frozen config identity).
+        request.status = "accepted_for_session_tool"
+        _SESSION_GRANTS.add(
+            (
+                request.session_id,
+                request.agent_id,
+                request.config_revision,
+                request.config_hash,
+                request.tool_name,
+                TOOL_LEVEL_SESSION_GRANT_KEY,
+            )
+        )
+    elif decision == "acceptWithActionWindow":
+        # Low-risk assistant manage action: approve this call and open the
+        # time-boxed delegation window for the same action class.
+        request.status = "accepted_with_action_window"
+        action = _assistant_manage_action_for_request(request)
+        if action is not None:
+            grant_assistant_action_window(agent_id=request.agent_id, action=action)
     elif decision == "acceptAlways":
         request.status = "accepted_always"
         # Also warm the current-process session cache for immediate reuse.
@@ -1195,6 +1264,100 @@ def _session_grant_key(scope: Mapping[str, Any]) -> str:
         separators=(",", ":"),
     )
     return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+# Tool-level session grant scope: one approval authorizes every call of the
+# same tool for the remainder of the session. The exact-arguments grant stays
+# the default narrower tier; this is the explicit coarser option.
+_TOOL_LEVEL_SESSION_GRANT_SCOPE = {"kind": "tool_level"}
+TOOL_LEVEL_SESSION_GRANT_KEY = _session_grant_key(_TOOL_LEVEL_SESSION_GRANT_SCOPE)
+
+
+def _tool_level_session_grant_ineligibility(request: _ApprovalRequest) -> str:
+    """Empty string when the tool-level session grant may be offered, else the reason.
+
+    Red lines: always-approval pins (computer-use / CUA) and destructive or
+    network-risk tools keep per-call approval regardless of policy drift.
+    """
+
+    if request.approval == "always":
+        return "always_approval_pin"
+    if request.tool_name in _CUA_ALWAYS_APPROVAL_TOOLS:
+        return "computer_control_tool"
+    if request.risk in _TOOL_GRANT_BLOCKED_RISKS:
+        return f"risk_{request.risk}"
+    return ""
+
+
+def _assistant_manage_action_for_request(request: _ApprovalRequest) -> str | None:
+    """Low-risk manage action frozen on the request, or None when unavailable."""
+
+    from core.web.services.session.assistant_manage_policy import (
+        ASSISTANT_MANAGE_LOW_RISK_ACTIONS,
+        ASSISTANT_MANAGE_TOOL_NAME,
+    )
+
+    if request.tool_name != ASSISTANT_MANAGE_TOOL_NAME:
+        return None
+    action = str((request.argument_summary or {}).get("assistantAction") or "").strip()
+    if action not in ASSISTANT_MANAGE_LOW_RISK_ACTIONS:
+        return None
+    return action
+
+
+def _assistant_action_window_remaining_seconds(
+    agent_id: str,
+    tool_name: str,
+    tool_args: Mapping[str, Any],
+) -> float:
+    from core.web.services.session.assistant_manage_policy import (
+        assistant_action_window_remaining,
+    )
+
+    try:
+        return assistant_action_window_remaining(
+            agent_id=agent_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+        )
+    except Exception:
+        # A projection/store failure never upgrades a call; it asks instead.
+        return 0.0
+
+
+def _assistant_action_window_projection(request: _ApprovalRequest) -> dict[str, Any] | None:
+    from core.web.services.session.assistant_manage_policy import (
+        assistant_action_window_projection,
+    )
+
+    try:
+        return assistant_action_window_projection(
+            agent_id=request.agent_id,
+            tool_name=request.tool_name,
+            argument_summary=request.argument_summary,
+        )
+    except Exception:
+        return None
+
+
+def grant_assistant_action_window(*, agent_id: str, action: str) -> float:
+    """Open the low-risk manage action window; returns remaining seconds."""
+
+    from core.web.services.session.assistant_manage_policy import (
+        grant_assistant_action_window as _grant_assistant_action_window,
+    )
+
+    return _grant_assistant_action_window(agent_id=agent_id, action=action)
+
+
+def _available_decisions(request: _ApprovalRequest) -> list[str]:
+    decisions = ["accept", "acceptForSession"]
+    if not _tool_level_session_grant_ineligibility(request):
+        decisions.append("acceptForSessionTool")
+    if _assistant_manage_action_for_request(request) is not None:
+        decisions.append("acceptWithActionWindow")
+    decisions.extend(["acceptAlways", "decline", "cancel"])
+    return decisions
 
 
 def _prune_requests_locked() -> None:

@@ -84,6 +84,40 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
+describe("completion (good-news) notice cards", () => {
+  const RUN_DONE_PAYLOAD = {
+    id: "run-completed:team-r:run-1",
+    kind: "run_completed",
+    severity: "info",
+    title: "研究运行完成：SCI-001",
+    body: "攻坚一组 · SCI-001",
+    targetUrl: "/teams?teamId=team-r&researchView=workflow&workflowId=challenge-cup-research&runId=run-1&panel=progress",
+  };
+
+  it("renders completion cards as info cards with the kind label and no decision buttons", async () => {
+    await act(async () => root.render(<RouterProvider router={router} />));
+    await deliver(RUN_DONE_PAYLOAD);
+    const card = cards()[0];
+    expect(card).toBeDefined();
+    expect(card.dataset.severity).toBe("info");
+    expect(card.textContent).toContain("研究运行完成：SCI-001");
+    expect(card.textContent).toContain("运行完成");
+    // 完成类是纯信息卡：没有 human_gate 决策按钮区。
+    expect(card.querySelector('[data-testid="notice-gate-actions"]')).toBeNull();
+  });
+
+  it("navigates to the run progress page on the view-result card action", async () => {
+    await act(async () => root.render(<RouterProvider router={router} />));
+    await deliver(RUN_DONE_PAYLOAD);
+    const opener = container.querySelector<HTMLButtonElement>('button[aria-label^="查看该事项"]')!;
+    await act(async () => opener.click());
+    expect(
+      router.state.location.pathname + router.state.location.search,
+    ).toBe(RUN_DONE_PAYLOAD.targetUrl);
+    expect(cards()).toHaveLength(0);
+  });
+});
+
 describe("assistant window human-attention notice stack", () => {
   it("renders delivered payloads as cards with severity styling and copy", async () => {
     await act(async () => root.render(<RouterProvider router={router} />));

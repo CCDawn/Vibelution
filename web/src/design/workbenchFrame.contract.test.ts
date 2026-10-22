@@ -8,7 +8,10 @@ describe("shared workbench chrome ownership", () => {
       const shell = source(file);
       expect(shell).toContain("useMemo(() => <Outlet />, [])");
       expect(shell).toContain("<VWorkbenchFrame");
-      expect(shell).toContain("{routeContent}</VWorkbenchFrame>");
+      const framedRoute = file === "app/AppShell.tsx"
+        ? "<WorkbenchStartupReadyContext.Provider value={reportRouteStartupReady}>{routeContent}</WorkbenchStartupReadyContext.Provider></VWorkbenchFrame>"
+        : "{routeContent}</VWorkbenchFrame>";
+      expect(shell).toContain(framedRoute);
       expect(shell).not.toMatch(/<VWorkbenchFrame[^>]*\bkey=/);
     }
   });

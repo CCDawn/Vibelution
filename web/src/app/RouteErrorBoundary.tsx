@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { isRouteErrorResponse, useRouteError } from "react-router-dom";
 
 import { VButton } from "../components/vui/primitives/VButton";
-import { type BrowserTelemetryEventInput, postBrowserTelemetry } from "./browserTelemetry";
+import { type BrowserTelemetryEventInput, postBrowserTelemetry, setBrowserTelemetryStartupPending } from "./browserTelemetry";
+import { useReportWorkbenchStartupReady } from "./workbenchStartupReady";
 import { allowNextWorkbenchWindowUnload } from "./projectCloseGuard";
 import { isDynamicImportFetchError } from "./routeChunkRecovery";
 import styles from "./RouteErrorBoundary.styles";
@@ -180,6 +181,10 @@ export function reportRouteErrorBoundary(
 }
 
 export function RouteErrorBoundary({ surface = "workbench" }: { surface?: RouteErrorSurface }) {
+  useReportWorkbenchStartupReady(surface === "workbench");
+  useEffect(() => {
+    if (surface === "workbench") setBrowserTelemetryStartupPending(false);
+  }, [surface]);
   const error = useRouteError();
   const viewModel = buildRouteErrorBoundaryViewModel(error, surface);
 

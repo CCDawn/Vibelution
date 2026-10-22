@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -18,6 +19,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 from core.llm.error_classification import classify_error
 from core.llm.types import LLMError
@@ -566,6 +569,7 @@ def _enqueue_direct_session_submit_kernel_trace(
     turn_id_value = str(turn_id or "").strip()
     message_value = str(message or "")
     source_value = str(source or "").strip()
+    project_root = Path(s.PROJECT_ROOT).resolve()
 
     def _run() -> dict[str, Any]:
         return _create_direct_session_submit_kernel_trace(
@@ -574,6 +578,7 @@ def _enqueue_direct_session_submit_kernel_trace(
             turn_id=turn_id_value,
             message=message_value,
             source=source_value,
+            project_root=project_root,
         )
 
     executor = getattr(s, "_SESSION_CYCLE_PROJECTION_EXECUTOR", None)
@@ -613,6 +618,7 @@ def _create_direct_session_submit_kernel_trace(
     turn_id: str,
     message: str,
     source: str,
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_source = str(source or "").strip() or "raw"
@@ -670,9 +676,9 @@ def _create_direct_session_submit_kernel_trace(
     try:
         from core.agent_kernel import service as agent_kernel_service
 
-        if getattr(agent_kernel_service, "s.PROJECT_ROOT", s.PROJECT_ROOT) != Path(__file__).resolve().parents[3]:
-            agent_kernel_service.PROJECT_ROOT = Path(__file__).resolve().parents[3]
-        result = agent_kernel_service.handle_kernel_event(event_payload)
+        root = Path(project_root if project_root is not None else s.PROJECT_ROOT).resolve()
+        with agent_kernel_service.scoped_project_root(root):
+            result = agent_kernel_service.handle_kernel_event(event_payload)
     except Exception as exc:
         trace = {
             "source": "agent_kernel",
@@ -1683,6 +1689,12 @@ def _persist_chat_turn_work_run(
             "failureClass": s.trim_lines(failure_class or ("timeout" if timed_out else ""), max_lines=1),
             "updatedAt": str(last_tool_error.get("updatedAt") or now).strip(),
         }
+    # Cross-process ownership stamp (formal_review_work convention): the
+    # submit-time busy admission reads ownerPid/ownerCreateTime to tell a
+    # live foreign worker from a dead backend's hot-restart residue, and the
+    # create-time equality pins the identity against pid reuse.
+    payload["ownerPid"] = os.getpid()
+    payload["ownerCreateTime"] = psutil.Process().create_time()
     s._WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)
 
 

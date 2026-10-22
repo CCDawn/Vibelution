@@ -149,6 +149,39 @@ export function useChatToolApprovalBridge({
     };
   }, [pendingSessionToolApproval, resolveSessionToolApprovalMutation]);
 
+  /** b1: coarser opt-in tier — every call of this tool for the rest of the session. */
+  const handleApproveToolForSessionTool = useMemo(() => {
+    if (
+      !pendingSessionToolApproval
+      || !pendingSessionToolApproval.availableDecisions.includes("acceptForSessionTool")
+    ) {
+      return undefined;
+    }
+    return () => {
+      resolveSessionToolApprovalMutation.mutate({
+        request: pendingSessionToolApproval,
+        decision: "acceptForSessionTool",
+      });
+    };
+  }, [pendingSessionToolApproval, resolveSessionToolApprovalMutation]);
+
+  /** b3: time-boxed delegation for low-risk assistant manage actions. */
+  const handleApproveWithActionWindow = useMemo(() => {
+    if (
+      !pendingSessionToolApproval
+      || !pendingSessionToolApproval.availableDecisions.includes("acceptWithActionWindow")
+      || pendingSessionToolApproval.assistantActionWindow?.eligible !== true
+    ) {
+      return undefined;
+    }
+    return () => {
+      resolveSessionToolApprovalMutation.mutate({
+        request: pendingSessionToolApproval,
+        decision: "acceptWithActionWindow",
+      });
+    };
+  }, [pendingSessionToolApproval, resolveSessionToolApprovalMutation]);
+
   const handleRejectToolApproval = useCallback(() => {
     if (pendingSessionToolApproval) {
       resolveSessionToolApprovalMutation.mutate({
@@ -179,13 +212,18 @@ export function useChatToolApprovalBridge({
       actionPreview: pendingToolApprovalActionPreview,
       sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
       toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
+      assistantActionWindow: pendingSessionToolApproval?.assistantActionWindow,
       onApprove: handleApproveToolApproval,
       onApproveForSession: handleApproveToolForSession,
+      onApproveForSessionTool: handleApproveToolForSessionTool,
+      onApproveWithActionWindow: handleApproveWithActionWindow,
       onReject: handleRejectToolApproval,
     };
   }, [
     handleApproveToolApproval,
     handleApproveToolForSession,
+    handleApproveToolForSessionTool,
+    handleApproveWithActionWindow,
     handleRejectToolApproval,
     pendingSessionToolApproval,
     pendingToolGovernanceApproval,

@@ -50,6 +50,8 @@ export function isSessionNotFoundError(error: unknown) {
 export type SessionToolApprovalDecision =
   | "accept"
   | "acceptForSession"
+  | "acceptForSessionTool"
+  | "acceptWithActionWindow"
   | "acceptAlways"
   | "decline";
 

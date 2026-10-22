@@ -11,17 +11,27 @@ another session.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from core.infrastructure.process_liveness import is_pid_alive
+
+logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
 _PENDING_LIMIT = 20
 _SAFE_TOKEN = re.compile(r"[^A-Za-z0-9._-]+")
+
+# 启动清扫阈值：spawn 预算被 clamp 在 150s 内，一条 running 记录超过该时长
+# 仍不结算，只可能是父进程崩溃留下的孤儿。
+_STALE_RUNNING_MAX_AGE_SECONDS = 2 * 60 * 60
 
 NO_ACTIVE_AGENT = "NO_ACTIVE_AGENT"
 MISSING_CHILD_SESSION = "MISSING_CHILD_SESSION"
@@ -55,6 +65,7 @@ def open_subagent_address(
     task: str = "",
     task_type: str = "",
     status: str = "running",
+    pid: int | None = None,
 ) -> dict[str, Any]:
     """Register a run once it has actually started. No parent chat session means no record."""
 
@@ -70,6 +81,12 @@ def open_subagent_address(
         task=task,
         task_type=task_type,
     )
+    opened_at = _utc_now_iso()
+    normalized_pid = 0
+    try:
+        normalized_pid = int(pid or 0)
+    except (TypeError, ValueError):
+        normalized_pid = 0
     record = {
         "agentId": normalized_id,
         "subRunId": normalized_id,
@@ -84,6 +101,8 @@ def open_subagent_address(
         "activeMessages": [],
         "taskType": str(task_type or "").strip(),
         "summary": "",
+        "pid": normalized_pid if normalized_pid > 0 else None,
+        "openedAt": opened_at,
     }
     _save_record(record)
     note_subagent_progress(
@@ -244,6 +263,232 @@ def restore_subagent_status(agent_id: str) -> None:
         record["previousStatus"] = ""
         record["resumeClaimed"] = False
         _save_record(record)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def sweep_stale_subagent_addresses(
+    project_root: Path | str | None = None,
+    *,
+    max_age_seconds: int = _STALE_RUNNING_MAX_AGE_SECONDS,
+    pid_probe: Callable[[int], bool] | None = None,
+    now_epoch: float | None = None,
+) -> list[dict[str, Any]]:
+    """启动/恢复清扫：把父进程崩溃遗留的 running 地址记录判 failed。
+
+    子进程刻意脱离父进程组，父死后仍存活；地址记录没有启动清扫就会永久卡
+    running（续聊永远只排队）。判定（只动 ``status == "running"`` 的记录）：
+
+    - 记录的子进程 pid 已死 → ``failed``（reason=process_dead）；
+    - 记录超龄仍 running → ``failed``（reason=stale_running_timeout）。spawn
+      预算被 clamp 在 150s 内，超龄 running 只可能是孤儿。
+
+    对 pid 仍存活、且 cmdline 明确匹配本项目 agent.py 子代理签名的孤儿，
+    保守终止其进程树；cmdline 无法确证的 pid 一律不动。续聊被认领未落地的
+    消息并回 pending，不丢内容。
+    """
+
+    probe = pid_probe or is_pid_alive
+    current = float(now_epoch) if now_epoch is not None else time.time()
+    directory = address_directory(project_root)
+    if not directory.is_dir():
+        return []
+    results: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("status") or "").strip() != "running":
+            continue
+        agent_id = str(payload.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        try:
+            pid = int(payload.get("pid") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        opened_epoch = _record_opened_epoch(payload, path, fallback_now=current)
+        age_seconds = max(0.0, current - opened_epoch)
+        if pid > 0 and not probe(pid):
+            stale_reason = "process_dead"
+        elif age_seconds > max(1, int(max_age_seconds)):
+            stale_reason = "stale_running_timeout"
+        else:
+            continue
+
+        terminated_pid = 0
+        swept = False
+        with _LOCK:
+            # 双读兜底：清扫期间记录可能刚被正常收尾结算或删除。
+            fresh = get_subagent_address(agent_id)
+            if fresh is not None and str(fresh.get("status") or "").strip() == "running":
+                if pid > 0 and probe(pid):
+                    terminated_pid = _terminate_orphan_subagent_pid(pid, fresh)
+                _write_record_at(path, _mark_record_failed(fresh, reason=stale_reason))
+                swept = True
+        if swept:
+            results.append(
+                {
+                    "agentId": agent_id,
+                    "reason": stale_reason,
+                    "pid": pid or None,
+                    "terminatedPid": terminated_pid or None,
+                }
+            )
+    return results
+
+
+def recover_stale_subagent_addresses_on_startup(
+    *, should_stop: Callable[[], bool] | None = None
+) -> dict[str, Any]:
+    """Lifecycle 启动钩子入口：清扫孤儿地址记录。绝不抛出，不阻塞启动。"""
+
+    started = time.monotonic()
+    summary: dict[str, Any] = {
+        "trigger": "backend_startup",
+        "sweptCount": 0,
+        "terminatedPidCount": 0,
+        "errorCount": 0,
+        "durationMs": 0,
+    }
+    if should_stop is not None:
+        try:
+            if bool(should_stop()):
+                summary["stopped"] = True
+                return summary
+        except Exception:  # noqa: BLE001 - 停止判 uncertain 时按停止处理
+            summary["stopped"] = True
+            return summary
+    try:
+        entries = sweep_stale_subagent_addresses()
+        summary["sweptCount"] = len(entries)
+        summary["terminatedPidCount"] = sum(1 for item in entries if item.get("terminatedPid"))
+        for item in entries:
+            logger.warning(
+                "Subagent address swept as failed: agentId=%s reason=%s pid=%s terminatedPid=%s",
+                item.get("agentId"),
+                item.get("reason"),
+                item.get("pid"),
+                item.get("terminatedPid"),
+            )
+    except Exception as exc:  # noqa: BLE001 - 清扫失败不阻塞启动
+        summary["errorCount"] += 1
+        logger.warning("Subagent address startup sweep failed: %s: %s", type(exc).__name__, exc)
+    summary["durationMs"] = int((time.monotonic() - started) * 1000)
+    return summary
+
+
+def _record_opened_epoch(
+    record: Mapping[str, Any], path: Path, *, fallback_now: float
+) -> float:
+    raw = str(record.get("openedAt") or "").strip()
+    if raw:
+        try:
+            return datetime.fromisoformat(raw).timestamp()
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return fallback_now
+
+
+def _mark_record_failed(record: Mapping[str, Any], *, reason: str) -> dict[str, Any]:
+    entry = dict(record)
+    pending = [item for item in list(entry.get("pending") or []) if isinstance(item, dict)]
+    for text in list(entry.get("activeMessages") or []):
+        cleaned = str(text or "").strip()
+        if cleaned:
+            pending.append({"message": cleaned, "summary": ""})
+    entry["pending"] = pending[-_PENDING_LIMIT:]
+    entry["activeMessages"] = []
+    entry["resumeClaimed"] = False
+    entry["status"] = "failed"
+    entry["failReason"] = str(reason)
+    entry["failedAt"] = _utc_now_iso()
+    entry["updatedAt"] = entry["failedAt"]
+    return entry
+
+
+def _write_record_at(path: Path, entry: Mapping[str, Any]) -> None:
+    """把清扫结果写回读取时的原路径（绕开按 projectRoot 推导，防写错目录）。"""
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(dict(entry), ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        logger.warning("Subagent address sweep write failed (%s): %s", path.name, exc)
+
+
+def _psutil_process_for_pid(pid: int):
+    """psutil 进程句柄接缝：测试通过 monkeypatch 本函数注入替身。"""
+
+    import psutil
+
+    return psutil.Process(int(pid))
+
+
+def _terminate_orphan_subagent_pid(pid: int, record: Mapping[str, Any]) -> int:
+    """终止 cmdline 明确匹配本项目 agent.py 子代理签名的孤儿子进程树。"""
+
+    if not _cmdline_matches_project_subagent(pid, str(record.get("projectRoot") or "")):
+        return 0
+    try:
+        proc = _psutil_process_for_pid(int(pid))
+    except Exception:  # noqa: BLE001 - psutil 缺失或进程已退出
+        return 0
+    try:
+        try:
+            from core.runtime_manager.process_inventory import terminate_process_descendants
+
+            terminate_process_descendants(int(pid), timeout_seconds=1.0)
+        except Exception:  # noqa: BLE001 - 后代终止失败不阻断根进程终止
+            pass
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except Exception:  # noqa: BLE001 - 终止未果升级 kill
+            proc.kill()
+        return int(pid)
+    except Exception as exc:  # noqa: BLE001 - 保守清扫绝不抛出
+        logger.warning("Subagent orphan pid terminate failed: pid=%s %s", pid, exc)
+        return 0
+
+
+def _cmdline_matches_project_subagent(pid: int, project_root: str) -> bool:
+    """只认可直接证据：含 --single-turn/--subagent-json，且 agent.py 解析到项目根。"""
+
+    root = str(project_root or "").strip()
+    if not root:
+        return False
+    try:
+        cmdline = [str(item or "") for item in (_psutil_process_for_pid(int(pid)).cmdline() or [])]
+    except Exception:  # noqa: BLE001 - psutil 缺失或进程已退出
+        return False
+    if "--single-turn" not in cmdline or "--subagent-json" not in cmdline:
+        return False
+    try:
+        normalized_root = os.path.normcase(os.path.realpath(root))
+    except (OSError, ValueError):
+        return False
+    for item in cmdline:
+        candidate = item.strip().strip('"')
+        if not candidate.lower().endswith("agent.py"):
+            continue
+        try:
+            resolved = os.path.normcase(os.path.realpath(candidate))
+        except (OSError, ValueError):
+            continue
+        if os.path.dirname(resolved) == normalized_root:
+            return True
+    return False
 
 
 def continue_addressed(
@@ -466,7 +711,10 @@ def _save_record(record: Mapping[str, Any]) -> None:
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(dict(record), ensure_ascii=False, indent=2)
+    payload_dict = dict(record)
+    # 每次落盘刷新 updatedAt，给启动清扫一个不依赖文件 mtime 的统一时钟。
+    payload_dict["updatedAt"] = _utc_now_iso()
+    payload = json.dumps(payload_dict, ensure_ascii=False, indent=2)
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(payload, encoding="utf-8")
     temporary.replace(path)
@@ -529,6 +777,8 @@ __all__ = [
     "note_subagent_progress",
     "open_subagent_address",
     "parent_chat_identity",
+    "recover_stale_subagent_addresses_on_startup",
     "restore_subagent_status",
     "settle_subagent_address",
+    "sweep_stale_subagent_addresses",
 ]

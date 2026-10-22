@@ -67,7 +67,7 @@ export function FlowEditor({ flow, selectedId, mode, run, members, onSelect, onA
       <div ref={viewport} className={styles.control1}>
         {width > 0 && <div className={styles.control2} style={{ height }}>
           <svg className={styles.control3} width={width} height={height} aria-hidden="true">
-            <defs><marker id={arrowId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8b9d91"/></marker></defs>
+            <defs><marker id={arrowId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--vui-workflow-edge)"/></marker></defs>
             {positions.slice(0, -1).map((from, index) => {
                 const to = positions[index + 1];
                 const sameRow = from.row === to.row;
@@ -76,7 +76,7 @@ export function FlowEditor({ flow, selectedId, mode, run, members, onSelect, onA
                 const y1 = from.y + (sameRow ? NODE_HEIGHT / 2 : NODE_HEIGHT);
                 const x2 = sameRow ? to.x + (forward ? 0 : cardWidth) : to.x + cardWidth / 2;
                 const y2 = to.y + (sameRow ? NODE_HEIGHT / 2 : 0);
-                return <path key={flow.steps[index].id} d={`M ${x1} ${y1} L ${x2} ${y2}`} fill="none" stroke="#8b9d91" strokeWidth="1.6" markerEnd={`url(#${arrowId})`}/>;
+                return <path key={flow.steps[index].id} d={`M ${x1} ${y1} L ${x2} ${y2}`} fill="none" stroke="var(--vui-workflow-edge)" strokeWidth="1.6" markerEnd={`url(#${arrowId})`}/>;
             })}
           </svg>
           {flow.steps.map((step, index) => {
