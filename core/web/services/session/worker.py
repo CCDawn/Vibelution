@@ -809,6 +809,21 @@ def _apply_per_turn_model_selection(
         return resolved_agent_llm
     current_ref = str(getattr(resolved_agent_llm, "model_ref", "") or "").strip()
     if current_ref.casefold() == expected_ref.casefold():
+        # The requested model is already this turn's resolved binding: record
+        # the no-op so observability sees every override disposition, then
+        # keep the resolved LLM untouched (no re-resolution, no rebind).
+        s._record_session_turn_lifecycle_event(
+            session_id,
+            "per_turn_model_override_noop",
+            turn_id=turn_id,
+            outcome="skipped",
+            fields={
+                "reason": "already_resolved_to_requested_model",
+                "requestedModelRef": expected_ref,
+                "agentModelRef": current_ref,
+                "llmSlot": str(llm_slot or "").strip(),
+            },
+        )
         return resolved_agent_llm
     normalized_slot = str(llm_slot or s.SESSION_LLM_SLOT_DIALOGUE).strip() or s.SESSION_LLM_SLOT_DIALOGUE
     pinned_agent = dict(agent_instance or {})
