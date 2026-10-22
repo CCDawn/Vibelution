@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import re
 import secrets
 import stat as stat_module
@@ -40,6 +41,65 @@ def _service():
     from core.web.services import agent_directory_service
 
     return agent_directory_service
+
+
+def _save_compression_parameter_update(
+    state: dict[str, Any], agent: dict[str, Any], previous_agent: dict[str, Any],
+) -> bool:
+    """Carry a validated snapshot across a parameter-only canonical write.
+
+    Generic writes still invalidate repair. A warm compression-only update
+    preserves the workspace, role and tool-policy invariants already checked
+    by repair, so its revision publication and subsequent session reads must
+    not repeat all unrelated Agent filesystem probes under the registry lock.
+    The caller owns _STATE_LOCK throughout the CAS, write and cache handoff.
+    """
+    s = _service()
+    warm = (
+        s._REPAIRED_STATE_CACHE is not None
+        and s._REPAIRED_STATE_CACHE_SIGNATURE == s._registry_state_signature()
+    )
+    payload = s.save_state(state)
+    changed_keys = {
+        key for key in previous_agent.keys() | agent.keys()
+        if previous_agent.get(key) != agent.get(key)
+    }
+    parameter_only = changed_keys <= {
+        "contextCompressionPolicy", "configRevision", "configHash",
+        "configSchemaVersion", "updatedAt",
+    }
+    if not warm or not parameter_only:
+        return False
+    # _STATE_LOCK does not serialize external processes. Only publish a
+    # signature proven to describe this payload, never a later external write.
+    try:
+        signature = s._registry_state_signature()
+        persisted = s._load_existing_registry_payload_or_raise(s.registry_path())
+        if signature != s._registry_state_signature() or persisted != payload:
+            return False
+    except (OSError, s.AgentDirectoryError):
+        return False
+    s._REPAIRED_STATE_CACHE = copy.deepcopy(payload)
+    s._REPAIRED_STATE_CACHE_SIGNATURE = signature
+    return True
+
+
+def _record_compression_parameter_update(agent: dict[str, Any], *, refreshed: bool, started: float) -> None:
+    s = _service()
+    try:
+        s.record_runtime_scene_event(
+            "agent_directory", "config_change", "agent.compression_parameters.updated",
+            message="Agent compression parameters were persisted.", outcome="updated",
+            fields={
+                "agentId": str(agent.get("agentId") or ""),
+                "configRevision": int(agent.get("configRevision") or 0),
+                "repairedSnapshotRefreshed": refreshed,
+                "durationMs": round((time.perf_counter() - started) * 1000, 1),
+            }, lifecycle=True,
+        )
+    except Exception:
+        # Match _record_agent_event: telemetry cannot fail a committed write.
+        pass
 
 
 def _agent_dialogue_model_ref(agent: dict[str, Any] | None) -> str:
@@ -102,11 +162,14 @@ def update_agent_instance(
     updated_supervision_policy: dict[str, Any] | None = None
     updated_persona_profile: dict[str, Any] | None = None
     updated_task_profile: dict[str, Any] | None = None
+    parameter_snapshot_refreshed = False
+    update_started = time.perf_counter()
     with s._STATE_LOCK:
         state = s.load_state()
         agent = s._find_agent(state, agent_id)
         if agent is None:
             raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+        previous_agent = copy.deepcopy(agent) if context_compression_policy is not None else {}
         previous_dialogue_model_ref = _agent_dialogue_model_ref(agent)
         try:
             current_config_revision = max(
@@ -359,8 +422,13 @@ def update_agent_instance(
             previous_hash=previous_config_hash,
         )
         agent["updatedAt"] = s.utc_now_iso()
-        s.save_state(state)
+        if context_compression_policy is not None:
+            parameter_snapshot_refreshed = _save_compression_parameter_update(state, agent, previous_agent)
+        else:
+            s.save_state(state)
     s._record_agent_event("agent.updated", agent)
+    if context_compression_policy is not None:
+        _record_compression_parameter_update(agent, refreshed=parameter_snapshot_refreshed, started=update_started)
     if updated_tool_policy is not None:
         s._record_agent_tool_policy_event(agent, updated_tool_policy)
     if updated_memory_policy is not None:
