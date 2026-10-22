@@ -1971,7 +1971,14 @@ def test_per_turn_model_selection_noop_when_model_already_resolved(monkeypatch) 
 
     assert result is resolved
     assert resolve_calls == []
-    assert lifecycle == []
+    noop = [kwargs for phase, kwargs in lifecycle if phase == "per_turn_model_override_noop"]
+    assert len(noop) == 1
+    assert noop[0]["outcome"] == "skipped"
+    assert noop[0]["fields"]["reason"] == "already_resolved_to_requested_model"
+    assert noop[0]["fields"]["requestedModelRef"] == "dashscope_main/qwen3.6-plus"
+    assert noop[0]["fields"]["agentModelRef"] == "dashscope_main/qwen3.6-plus"
+    assert noop[0]["fields"]["llmSlot"] == "dialogue"
+    assert [phase for phase, _kwargs in lifecycle] == ["per_turn_model_override_noop"]
 
 
 def test_per_turn_model_selection_yields_to_challenge_frozen_route(monkeypatch) -> None:
