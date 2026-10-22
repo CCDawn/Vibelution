@@ -36,6 +36,12 @@ def emitters(monkeypatch):
     scene_events: list[dict] = []
     debug_lines: list[tuple[str, str]] = []  # (level, message)
 
+    import core.llm.prompt_cache_observation as pco
+
+    originals = {
+        "record_scene_event": pco._record_scene_event,
+        "log_human_line": pco._log_human_line,
+    }
     monkeypatch.setattr(
         "core.llm.prompt_cache_observation._record_scene_event",
         lambda phase, code, **kwargs: scene_events.append(
@@ -46,7 +52,11 @@ def emitters(monkeypatch):
         "core.llm.prompt_cache_observation._log_human_line",
         lambda message, *, level="info": debug_lines.append((level, message)),
     )
-    return {"scene": scene_events, "debug": debug_lines}
+    return {
+        "scene": scene_events,
+        "debug": debug_lines,
+        "originals": originals,
+    }
 
 
 def _cached_usage(*, input_tokens=1000, cached=800, output=50):
@@ -60,6 +70,28 @@ def _cached_usage(*, input_tokens=1000, cached=800, output=50):
             "prompt_tokens_details": {"cached_tokens": cached},
         },
     )
+
+
+def _real_form_metadata(**overrides):
+    """Metadata exactly as ``LLMInvocationContext.to_metadata`` produces it.
+
+    真实轮次恒带 ``promptPurpose``（默认 main_reply）等目的字段；这是
+    2026-10-22 复盘的断点形态，回归测试必须用这份形状而不是裸 metadata。
+    """
+
+    base = {
+        "sessionId": "session-20261022-133947-431818",
+        "turnId": "session-20261022-133947-431818-20261022053950756188",
+        "invocationId": "inv-1",
+        "agentId": "agent-1",
+        "llmSlot": "dialogue",
+        "llmRunKind": "chat_turn",
+        "promptPurpose": "main_reply",
+        "conversationBound": True,
+        "promptCacheScope": "chat_agent_static",
+    }
+    base.update(overrides)
+    return base
 
 
 def _uncached_usage(*, input_tokens=1000, output=50):
@@ -93,8 +125,8 @@ def test_observed_event_fields_and_human_summary_line(emitters):
     assert fields["profileId"] == "primary"
     assert fields["model"] == "qwen-plus"
     assert fields["provider"] == "aliyun"
-    assert fields["cacheHitTokens"] == 700
-    assert fields["cacheMissTokens"] == 300
+    assert fields["cachedInputTokens"] == 700
+    assert fields["uncachedInputTokens"] == 300
     assert fields["hitRatio"] == 0.7
     assert fields["inputTokens"] == 1000
     assert fields["cacheUsageObserved"] is True
@@ -131,6 +163,192 @@ def test_usage_ledger_finalize_emits_one_observation_per_call(monkeypatch, emitt
     assert observed[0]["fields"]["sessionId"] == "s1"
 
 
+def test_real_form_prompt_purpose_metadata_still_observes(monkeypatch, emitters):
+    """真实轮次恒带 promptPurpose（to_metadata 默认 main_reply）。
+
+    2026-10-22 复盘断点：旧判定把「带 promptPurpose」当探测，真实会话
+    观测全部被跳过（48h 0 条事件）。回归钉死：main_reply 形态必须照常
+    发观测并推进骤降基线。
+    """
+
+    from core.llm.client import _record_usage_ledger_event
+
+    recorded: list[object] = []
+    monkeypatch.setattr("core.llm.client.record_usage_event", lambda event: recorded.append(event))
+
+    _record_usage_ledger_event(
+        usage=_cached_usage(input_tokens=1000, cached=700),
+        metadata=_real_form_metadata(),
+        provider="aliyun",
+        model="qwen3.8-flash",
+        profile_id="primary",
+        transport="chat_completions",
+    )
+
+    assert len(recorded) == 1
+    observed = [e for e in emitters["scene"] if e["code"] == PROMPT_CACHE_OBSERVED_EVENT_CODE]
+    assert len(observed) == 1
+    fields = observed[0]["fields"]
+    assert fields["sessionId"].startswith("session-20261022")
+    assert fields["hitRatio"] == 0.7
+    assert fields["cacheUsageObserved"] is True
+
+
+def test_business_prompt_purposes_other_than_keepalive_still_observe(emitters):
+    """promptPurpose 是调用目的而非探测标记：业务目的照常观测。"""
+
+    observe_prompt_cache_usage(
+        usage=_cached_usage(input_tokens=1000, cached=800),
+        metadata=_real_form_metadata(promptPurpose="commit_message"),
+        provider="relay",
+        model="m",
+        profile_id="primary",
+    )
+    observed = [e for e in emitters["scene"] if e["code"] == PROMPT_CACHE_OBSERVED_EVENT_CODE]
+    assert len(observed) == 1
+
+
+def test_real_form_hit_ratio_drop_warning_fires(emitters):
+    """骤降告警在真实形态 metadata 下照原语义触发。"""
+
+    observe_prompt_cache_usage(
+        usage=_cached_usage(input_tokens=1000, cached=900),
+        metadata=_real_form_metadata(turnId="t1"),
+        provider="aliyun",
+        model="qwen3.8-flash",
+        profile_id="primary",
+    )
+    observe_prompt_cache_usage(
+        usage=_uncached_usage(input_tokens=1100),
+        metadata=_real_form_metadata(turnId="t2"),
+        provider="aliyun",
+        model="qwen3.8-flash",
+        profile_id="primary",
+    )
+    drops = [e for e in emitters["scene"] if e["code"] == PROMPT_CACHE_HIT_DROP_EVENT_CODE]
+    assert len(drops) == 1
+    assert drops[0]["level"] == "warning"
+    assert drops[0]["fields"]["previousTurnId"] == "t1"
+    assert drops[0]["fields"]["hitRatio"] == 0.0
+
+
+def _restore_real_scene_path(monkeypatch, emitters):
+    """让观测走真实 scene 记录函数（undo emitters 的 scene spy，保留人读行 spy）。"""
+
+    import core.llm.prompt_cache_observation as pco
+
+    monkeypatch.setattr(
+        pco, "_record_scene_event", emitters["originals"]["record_scene_event"]
+    )
+
+
+def test_ledger_finalize_lands_scene_event_when_scene_context_present(monkeypatch, emitters):
+    """收口路径（scene 上下文在）：观测事件经 runtime scene 记录器落活跃场景。"""
+
+    from core.llm.client import _record_usage_ledger_event
+
+    _restore_real_scene_path(monkeypatch, emitters)
+    captured: list[dict] = []
+
+    def _spy_record(component, phase, event_code, **kwargs):
+        captured.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True, "runtimeSceneId": "scene-1"}
+
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        _spy_record,
+    )
+    monkeypatch.setattr("core.llm.client.record_usage_event", lambda event: [])
+
+    _record_usage_ledger_event(
+        usage=_cached_usage(input_tokens=1000, cached=700),
+        metadata=_real_form_metadata(),
+        provider="aliyun",
+        model="qwen3.8-flash",
+        profile_id="primary",
+        transport="chat_completions",
+    )
+
+    events = [e for e in captured if e["eventCode"] == PROMPT_CACHE_OBSERVED_EVENT_CODE]
+    assert len(events) == 1
+    assert events[0]["component"] == "llm"
+    assert events[0]["phase"] == "cache"
+    # 观测属于刚收口的轮次：允许落到最近完成场景（sealed 窗口兜底）。
+    assert events[0]["allow_recent_completed"] is True
+    assert events[0]["fields"]["sessionId"].startswith("session-20261022")
+    assert events[0]["lifecycle"] is False
+
+
+def test_ledger_finalize_survives_scene_context_missing(monkeypatch, emitters):
+    """收口路径（scene 上下文缺）：无场景可落时收口照常完成、人读行照发。"""
+
+    from core.llm.client import _record_usage_ledger_event
+
+    _restore_real_scene_path(monkeypatch, emitters)
+    recorded: list[object] = []
+    monkeypatch.setattr("core.llm.client.record_usage_event", lambda event: recorded.append(event))
+
+    def _no_scene(*_args, **_kwargs):
+        # 与 _record_runtime_scene_event_impl 无场景时的返回一致。
+        return {"accepted": False, "reason": "no_runtime_scene"}
+
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        _no_scene,
+    )
+
+    _record_usage_ledger_event(
+        usage=_cached_usage(input_tokens=1000, cached=700),
+        metadata=_real_form_metadata(),
+        provider="aliyun",
+        model="qwen3.8-flash",
+        profile_id="primary",
+        transport="chat_completions",
+    )
+
+    assert len(recorded) == 1
+    # 场景落点缺失不阻断观测的另一半 sink：人读摘要行照常落到 conversation jsonl。
+    assert any(
+        line[1].startswith("LLM prompt cache:") for line in emitters["debug"]
+    )
+
+
+def test_ledger_finalize_survives_scene_recorder_crash(monkeypatch, emitters):
+    """收口路径（scene 记录器抛异常）：best-effort，不影响 ledger 收口。"""
+
+    from core.llm.client import _record_usage_ledger_event
+
+    _restore_real_scene_path(monkeypatch, emitters)
+    recorded: list[object] = []
+    monkeypatch.setattr("core.llm.client.record_usage_event", lambda event: recorded.append(event))
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("scene service down")
+
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        _boom,
+    )
+
+    _record_usage_ledger_event(
+        usage=_cached_usage(input_tokens=1000, cached=700),
+        metadata=_real_form_metadata(),
+        provider="aliyun",
+        model="qwen3.8-flash",
+        profile_id="primary",
+        transport="chat_completions",
+    )
+
+    assert len(recorded) == 1
+
+
 def test_warmup_and_probe_traffic_never_emit_observation(monkeypatch, emitters):
     from core.llm.client import _record_usage_ledger_event
 
@@ -146,7 +364,8 @@ def test_warmup_and_probe_traffic_never_emit_observation(monkeypatch, emitters):
         profile_id="primary",
         transport="chat_completions",
     )
-    # 显式探测（qwen inflight cache keepalive probe 等）：promptPurpose 标记。
+    # 显式 cache keepalive 探测：精确的 qwen_inflight_cache_keepalive 目的值，
+    # 探测命中率恒高，混入会污染相邻轮对比基线。
     observe_prompt_cache_usage(
         usage=_cached_usage(),
         metadata={
@@ -197,7 +416,6 @@ def test_hit_ratio_drop_warning_triggers_only_on_sharp_drop(emitters):
     assert drops[0]["level"] == "warning"
     assert drops[0]["fields"]["previousTurnId"] == "t1"
     assert drops[0]["fields"]["previousHitRatio"] == 0.9
-    assert drops[0]["fields"]["previousCacheHitTokens"] == 900
     assert drops[0]["fields"]["hitRatio"] == 0.0
     warning_lines = [line for line in emitters["debug"] if line[0] == "warning"]
     assert len(warning_lines) == 1
@@ -400,3 +618,16 @@ def test_human_line_lands_in_conversation_debug_jsonl_sink(monkeypatch):
 
 def test_drop_threshold_constant_pinned():
     assert PROMPT_CACHE_DROP_PREVIOUS_RATIO_MIN == 0.5
+
+
+def test_scene_token_counter_fields_survive_redaction_allowlist():
+    """落盘字段名必须在 scene 遥测的安全计数键白名单内。
+
+    SENSITIVE_FIELD_KEYWORDS 含 "token"：不在白名单的 token 计数键落地时
+    会被打成 [redacted]，观测就失去了命中量证据。回归钉死规范名。
+    """
+
+    from core.web.services.runtime_scene.record import _is_safe_usage_counter_key
+
+    for key in ("cachedInputTokens", "uncachedInputTokens", "inputTokens", "outputTokens"):
+        assert _is_safe_usage_counter_key(str(key).strip().lower()), key
